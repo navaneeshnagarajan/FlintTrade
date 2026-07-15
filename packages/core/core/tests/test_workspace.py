@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 
 
+def _clear_storage_overrides(monkeypatch, *extra: str) -> None:
+    for name in ("FLINTTRADE_HOME", "FLINTTRADE_WORKSPACE_DIR", *extra):
+        monkeypatch.delenv(name, raising=False)
+
+
 
 class TestWorkspaceResolution:
     """Test workspace directory resolution across platforms."""
@@ -47,6 +52,225 @@ class TestWorkspaceResolution:
         from flinttrade_core.workspace import _default_home
         result = _default_home()
         assert result == Path("/fake/appdata/flinttrade")
+
+    def test_platform_default_storage_stays_inside_workspace(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        from flinttrade_core import workspace
+
+        platform_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: platform_home)
+
+        ws = workspace.Workspace()
+        ws.initialise()
+
+        assert ws.fast_data_dir == (platform_home / "data").resolve()
+        assert ws.archive_dir == (platform_home / "archive").resolve()
+
+    def test_duckdb_path_uses_workspace_storage(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("DUCKDB_PATH", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
+        from flinttrade_core.workspace import duckdb_path
+
+        assert duckdb_path() == (tmp_path / "workspace" / "data" / "flint.duckdb").resolve()
+
+    def test_duckdb_path_preserves_explicit_override(self, tmp_path, monkeypatch):
+        override = tmp_path / "operator" / "custom.duckdb"
+        monkeypatch.setenv("DUCKDB_PATH", str(override))
+        from flinttrade_core.workspace import duckdb_path
+
+        assert duckdb_path() == override
+
+    def test_duckdb_path_copies_legacy_database_and_wal_once(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("DUCKDB_PATH", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "data" / "flint.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-db")
+        Path(f"{legacy}.wal").write_bytes(b"legacy-wal")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_duckdb_path", lambda: legacy, raising=False)
+
+        target = workspace.duckdb_path()
+
+        assert target == (target_home / "data" / "flint.duckdb").resolve()
+        assert target.read_bytes() == b"legacy-db"
+        assert Path(f"{target}.wal").read_bytes() == b"legacy-wal"
+        assert legacy.read_bytes() == b"legacy-db"
+        assert Path(f"{legacy}.wal").read_bytes() == b"legacy-wal"
+
+    def test_duckdb_path_never_overwrites_existing_workspace_database(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("DUCKDB_PATH", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "data" / "flint.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-db")
+        target_home = tmp_path / "platform-workspace"
+        target = target_home / "data" / "flint.duckdb"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"current-db")
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_duckdb_path", lambda: legacy, raising=False)
+
+        assert workspace.duckdb_path().read_bytes() == b"current-db"
+
+    def test_sandbox_state_path_preserves_explicit_override_precedence(self, tmp_path, monkeypatch):
+        preferred = tmp_path / "preferred" / "state.sqlite"
+        legacy_override = tmp_path / "legacy-override" / "state.sqlite"
+        monkeypatch.setenv("SANDBOX_STATE_PATH", str(preferred))
+        monkeypatch.setenv("SANDBOX_DB_PATH", str(legacy_override))
+        from flinttrade_core.workspace import sandbox_state_path
+
+        assert sandbox_state_path() == preferred
+
+    def test_sandbox_state_path_copies_legacy_sqlite_and_wal_once(self, tmp_path, monkeypatch):
+        for name in (
+            "SANDBOX_STATE_PATH",
+            "SANDBOX_DB_PATH",
+            "FLINTTRADE_HOME",
+            "FLINTTRADE_WORKSPACE_DIR",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "sandbox" / "state.sqlite"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-sqlite")
+        Path(f"{legacy}-wal").write_bytes(b"legacy-wal")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_sandbox_state_path", lambda: legacy, raising=False)
+
+        target = workspace.sandbox_state_path()
+
+        assert target == (target_home / "sandbox" / "state.sqlite").resolve()
+        assert target.read_bytes() == b"legacy-sqlite"
+        assert Path(f"{target}-wal").read_bytes() == b"legacy-wal"
+        assert legacy.read_bytes() == b"legacy-sqlite"
+        assert Path(f"{legacy}-wal").read_bytes() == b"legacy-wal"
+
+    def test_sandbox_state_path_never_overwrites_existing_workspace_database(self, tmp_path, monkeypatch):
+        for name in (
+            "SANDBOX_STATE_PATH",
+            "SANDBOX_DB_PATH",
+            "FLINTTRADE_HOME",
+            "FLINTTRADE_WORKSPACE_DIR",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "sandbox" / "state.sqlite"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-sqlite")
+        target_home = tmp_path / "platform-workspace"
+        target = target_home / "sandbox" / "state.sqlite"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"current-sqlite")
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_sandbox_state_path", lambda: legacy, raising=False)
+
+        assert workspace.sandbox_state_path().read_bytes() == b"current-sqlite"
+
+    def test_historify_queue_path_copies_legacy_sqlite(self, tmp_path, monkeypatch):
+        _clear_storage_overrides(monkeypatch, "HISTORIFY_QUEUE_DB")
+        from flinttrade_core import workspace
+
+        legacy_fast = tmp_path / "legacy" / "data"
+        legacy_fast.mkdir(parents=True)
+        legacy = legacy_fast / "historify_queue.db"
+        legacy.write_bytes(b"historify-queue")
+        Path(f"{legacy}-wal").write_bytes(b"historify-wal")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast, raising=False)
+
+        target = workspace.historify_queue_path()
+
+        assert target.read_bytes() == b"historify-queue"
+        assert Path(f"{target}-wal").read_bytes() == b"historify-wal"
+        assert legacy.exists()
+
+    def test_ditto_accounts_path_copies_metadata_and_vault(self, tmp_path, monkeypatch):
+        _clear_storage_overrides(monkeypatch, "DATA_DIR")
+        from flinttrade_core import workspace
+
+        legacy_fast = tmp_path / "legacy" / "data"
+        legacy_fast.mkdir(parents=True)
+        legacy_accounts = legacy_fast / "ditto_accounts.sqlite"
+        legacy_vault = legacy_fast / "ditto_credentials.db"
+        legacy_accounts.write_bytes(b"ditto-accounts")
+        legacy_vault.write_bytes(b"ditto-vault")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast, raising=False)
+
+        target = workspace.ditto_accounts_path()
+
+        assert target.read_bytes() == b"ditto-accounts"
+        assert (target.parent / "ditto_credentials.db").read_bytes() == b"ditto-vault"
+        assert legacy_accounts.exists()
+        assert legacy_vault.exists()
+
+    def test_audit_log_dir_copies_chain_without_source_lock(self, tmp_path, monkeypatch):
+        _clear_storage_overrides(monkeypatch, "AUDIT_LOG_DIR")
+        from flinttrade_core import workspace
+
+        legacy_archive = tmp_path / "legacy" / "archive"
+        legacy_audit = legacy_archive / "audit"
+        legacy_audit.mkdir(parents=True)
+        (legacy_audit / "audit_2026-07-15.jsonl").write_text("chain-record\n")
+        (legacy_audit / ".audit-chain.lock").write_text("")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_archive_dir", lambda: legacy_archive, raising=False)
+
+        target = workspace.audit_log_dir()
+
+        assert (target / "audit_2026-07-15.jsonl").read_text() == "chain-record\n"
+        assert not (target / ".audit-chain.lock").exists()
+        assert (legacy_audit / "audit_2026-07-15.jsonl").exists()
+
+    def test_bhavcopy_dir_copies_legacy_archives(self, tmp_path, monkeypatch):
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        legacy_fast = tmp_path / "legacy" / "data"
+        legacy_bhavcopy = legacy_fast / "bhavcopy"
+        legacy_bhavcopy.mkdir(parents=True)
+        (legacy_bhavcopy / "sample.csv").write_text("symbol,close\nRELIANCE,2500\n")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_fast_data_dir", lambda: legacy_fast, raising=False)
+
+        target = workspace.bhavcopy_dir()
+
+        assert (target / "sample.csv").read_text() == "symbol,close\nRELIANCE,2500\n"
+        assert (legacy_bhavcopy / "sample.csv").exists()
+
+    def test_legacy_state_copy_failure_is_explicit(self, tmp_path, monkeypatch):
+        _clear_storage_overrides(monkeypatch, "DUCKDB_PATH")
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "data" / "flint.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"operator-state")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_duckdb_path", lambda: legacy)
+        monkeypatch.setattr(workspace.shutil, "copy2", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk")))
+
+        with pytest.raises(workspace.WorkspaceStateMigrationError, match="shared DuckDB"):
+            workspace.duckdb_path()
+
+        assert legacy.read_bytes() == b"operator-state"
+        assert not (target_home / "data" / "flint.duckdb").exists()
 
 
 class TestWorkspaceInit:

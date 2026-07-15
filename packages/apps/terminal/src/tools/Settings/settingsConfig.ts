@@ -27,6 +27,7 @@ import {
   UserCircle,
   Landmark,
   Download,
+  Bug,
   type LucideIcon,
 } from "lucide-react";
 import { isDesktopShell } from "@/lib/desktopShell";
@@ -56,6 +57,7 @@ export type SectionId =
   | "skill"
   | "presets"
   | "updates"
+  | "support"
   | "about";
 
 export interface SectionDef {
@@ -100,6 +102,7 @@ export function buildSections(desktopShell: boolean): SectionDef[] {
   if (desktopShell) {
     sections.push({ id: "updates", label: "Updates", icon: Download });
   }
+  sections.push({ id: "support", label: "Report Bug", icon: Bug });
   sections.push({ id: "about", label: "About", icon: Info });
   return sections;
 }

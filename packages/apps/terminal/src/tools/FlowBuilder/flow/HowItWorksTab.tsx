@@ -23,10 +23,8 @@ export function HowItWorksTab() {
               </span>
             </div>
             <p className="text-xs text-text-secondary leading-relaxed">
-              FlowBuilder is a visual no-code workflow engine for OpenAlgo. Connect nodes on a
-              drag-and-drop canvas to create broker-workflow automations — from simple TradingView webhooks
-              to complex multi-leg options strategies. Flows run on the FlintTrade Python backend
-              against your connected broker via OpenAlgo.
+              FlowBuilder is a local visual draft editor. Saved flows remain in this browser;
+              this screen does not execute workflows or send orders to a connected broker.
             </p>
             <div className="mt-3 grid grid-cols-4 gap-2 text-center">
               {[["4", "Triggers"], ["10", "Orders"], ["5", "Conditions"], ["7", "Logic"]].map(([count, label]) => (
@@ -93,10 +91,8 @@ export function HowItWorksTab() {
           <CardContent className="p-3 flex items-start gap-2">
             <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
             <p className="text-xs text-text-secondary">
-              Execution requires the FlintTrade Python backend (
-              <span className="font-mono text-amber-400">packages/services/automation</span>
-              ). The canvas editor is fully functional — save flows as JSON and load them into the
-              runner when the backend is connected.
+              Backend flow execution is not wired. These local drafts can be connected to the
+              automation runtime only after that execution contract is implemented and safety-gated.
             </p>
           </CardContent>
         </Card>

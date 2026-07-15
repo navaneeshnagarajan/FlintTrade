@@ -136,7 +136,12 @@ class TestCapabilitiesRoute:
         response = client.get("/api/v1/broker/capabilities?broker=indmoney")
         assert response.status_code == 200
         caps = response.get_json()["capabilities"]
-        assert caps["connectable"] is True
+        assert caps["connectable"] is False
+        assert caps["native_connect_blockers"] == [
+            "Authoritative smart-parent cancellation discriminator",
+            "Broker-native atomic reduce-only close primitive",
+            "Live order-safety proof",
+        ]
         assert caps["requires_static_ip"] is True
         assert caps["auth_model"] == "oauth_renewable_24h"
         assert caps["algo_tag_required"] is True
@@ -185,6 +190,7 @@ class TestCapabilitiesRoute:
         assert caps["requires_static_ip"] is True
         assert caps["native_connect_blockers"] == [
             "Maintainer live login/read verification with current TOTP and MPIN",
+            "Live order-safety proof",
         ]
         assert caps["auth_model"] == "mpin_totp_daily"
         assert caps["rate_limit_orders_per_sec"] == 10
@@ -375,10 +381,8 @@ class TestRecommendationsRoute:
         assert data["use_case"] == "low_cost_execution"
         ids = {r["broker_id"] for r in data["recommendations"]}
         assert "kotakneo" not in ids
-        assert ids == {"dhan", "upstox", "indmoney"}
+        assert ids == {"dhan", "upstox"}
         assert all(r["connectable"] is True for r in data["recommendations"])
-        display_names = {r["broker_id"]: r["display_name"] for r in data["recommendations"]}
-        assert display_names["indmoney"] == "INDmoney"
 
     def test_include_coming_soon_keeps_disabled_native_capability_metadata(self, client) -> None:  # type: ignore[no-untyped-def]
         response = client.get(
@@ -387,11 +391,18 @@ class TestRecommendationsRoute:
         assert response.status_code == 200
         data = response.get_json()
         by_id = {r["broker_id"]: r for r in data["recommendations"]}
-        assert {"kotakneo", "groww"} <= set(by_id)
+        assert {"kotakneo", "indmoney", "groww"} <= set(by_id)
         assert by_id["kotakneo"]["connectable"] is False
         assert by_id["kotakneo"]["requires_static_ip"] is True
         assert by_id["kotakneo"]["native_connect_blockers"] == [
             "Maintainer live login/read verification with current TOTP and MPIN",
+            "Live order-safety proof",
+        ]
+        assert by_id["indmoney"]["connectable"] is False
+        assert by_id["indmoney"]["native_connect_blockers"] == [
+            "Authoritative smart-parent cancellation discriminator",
+            "Broker-native atomic reduce-only close primitive",
+            "Live order-safety proof",
         ]
         assert by_id["groww"]["connectable"] is False
         assert by_id["groww"]["requires_static_ip"] is True
@@ -430,15 +441,14 @@ class TestRecommendationsRoute:
         assert "known_brokers" in data
 
     def test_indmoney_broker_subset_accepted(self, client) -> None:  # type: ignore[no-untyped-def]
-        # IndMoney is a full-parity native broker; the ``?brokers=`` filter
-        # validates against NATIVE_BROKER_CAPABILITIES, so it must NOT be rejected
-        # as unknown (regression guard for the registration gap that 400'd it).
+        # INDmoney remains catalogued for capability comparison even while its
+        # live write path is unavailable.
         response = client.get("/api/v1/broker/recommendations?use_case=historical_data&brokers=indmoney")
         assert response.status_code == 200
         recommendations = response.get_json()["recommendations"]
         ids = {r["broker_id"] for r in recommendations}
         assert ids == {"indmoney"}
-        assert recommendations[0]["connectable"] is True
+        assert recommendations[0]["connectable"] is False
         assert recommendations[0]["requires_static_ip"] is True
 
     def test_groww_broker_subset_accepted_but_marked_unavailable(self, client) -> None:  # type: ignore[no-untyped-def]

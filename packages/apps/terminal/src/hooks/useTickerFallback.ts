@@ -157,7 +157,7 @@ export function prioritiseFallbackInstruments(
   return { polled: ordered.slice(0, cap), dropped: ordered.slice(cap) };
 }
 
-export function useTickerFallback(): TickerFallbackStatus {
+export function useTickerFallback(enabled = true): TickerFallbackStatus {
   const wsConnected = useConnectionStore((s) => s.wsConnected);
   const store = useStore();
   const [status, setStatus] = useState<TickerFallbackStatus>(INITIAL_STATUS);
@@ -166,6 +166,11 @@ export function useTickerFallback(): TickerFallbackStatus {
   // without needing to be re-created on every render.
   const wsConnectedRef = useRef(wsConnected);
   useEffect(() => {
+    if (!enabled) {
+      publish(INITIAL_STATUS);
+      return;
+    }
+
     wsConnectedRef.current = wsConnected;
   }, [wsConnected]);
 
@@ -246,7 +251,7 @@ export function useTickerFallback(): TickerFallbackStatus {
   // We intentionally exclude `store` from the deps array because useStore()
   // returns a stable reference for the lifetime of the Provider.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsConnected, publish]);
+  }, [enabled, wsConnected, publish]);
 
   return status;
 }

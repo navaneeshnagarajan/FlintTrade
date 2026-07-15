@@ -5,7 +5,7 @@
  *   - Table of 10 global indices grouped by region: India, US, Europe, Asia
  *   - Columns: name, LTP, change, change%, sparkline
  *   - Positive change highlighted green, negative red
- *   - Auto-refresh every 30s when connected
+ *   - Auto-refresh every 30s for explicitly live responses
  *   - Local sample data in explore mode; REST polling in live mode
  *   - "Sample data" badge derives from the response's is_sample_data flag,
  *     not from connection state — the backend endpoint is currently a stub
@@ -13,14 +13,14 @@
  *     never render as live
  */
 
-import { useEffect, memo } from "react";
+import { useEffect, useState, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Globe, RefreshCw, Loader2, Inbox } from "lucide-react";
+import { AlertCircle, Globe, RefreshCw, Loader2, Inbox } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
-import { SAMPLE_INDICES, SAMPLE_UPDATED_AT } from "./sampleData";
+import { SAMPLE_INDICES } from "./sampleData";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { cn } from "@/lib/utils";
@@ -117,6 +117,7 @@ function RegionHeader({ region }: RegionHeaderProps) {
 function GlobalIndicesWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
     track("trade", "widget_view_global_indices");
@@ -126,12 +127,15 @@ function GlobalIndicesWidget() {
     data: liveData,
     isLoading,
     isFetching,
+    isError,
+    error,
     refetch,
   } = useQuery({
     queryKey: ["globalIndices"],
     queryFn: getGlobalIndices,
     enabled: isConnected,
-    refetchInterval: isConnected ? 30_000 : false,
+    refetchInterval: (query) =>
+      isConnected && query.state.data?.is_sample_data === false ? 30_000 : false,
     staleTime: 25_000,
   });
 
@@ -145,15 +149,24 @@ function GlobalIndicesWidget() {
     ? (liveData?.indices ?? [])
     : SAMPLE_INDICES;
 
-  const isSample = !isConnected || liveData?.is_sample_data === true;
+  // Live affordances fail closed: an omitted flag means unknown provenance.
+  const isExplicitlyLive = isConnected && liveData?.is_sample_data === false;
+  const isSample = !isExplicitlyLive;
 
-  // Sample payloads carry no updated_at (the backend no longer stamps now()
-  // on fabricated prices); render the footer time only when one exists.
-  const updatedAt: string = isConnected
-    ? (liveData?.updated_at ?? "")
-    : SAMPLE_UPDATED_AT;
+  // A timestamp is a live freshness claim, so unknown/sample responses never
+  // render one even if a malformed payload includes it.
+  const updatedAt = isExplicitlyLive ? (liveData?.updated_at ?? "") : "";
 
   const isEmpty = indices.length === 0;
+
+  const retry = async () => {
+    setIsRetrying(true);
+    try {
+      await refetch();
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   const byRegion = REGIONS.reduce<Record<Region, GlobalIndexEntry[]>>(
     (acc, r) => {
@@ -177,14 +190,14 @@ function GlobalIndicesWidget() {
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample data, not live global index prices"
-            title="These index values are illustrative sample data, not a live feed — do not base trading decisions on them."
+            aria-label="Showing sample global indices or data with unknown provenance, not verified live prices"
+            title="These index values are sample data or have unknown provenance, not verified live prices — do not base trading decisions on them."
           >
             Sample data
           </span>
         )}
         <div className="flex-1" />
-        {isConnected && (
+        {isExplicitlyLive && !isLoading && !isError && (
           <Button
             variant="ghost"
             size="sm"
@@ -202,13 +215,38 @@ function GlobalIndicesWidget() {
       {isConnected && isLoading && (
         <div className="flex-1 flex items-center justify-center gap-2 text-text-muted text-sm">
           <Loader2 size={14} className="animate-spin" aria-hidden="true" />
-          Loading indices...
+          {isRetrying ? "Retrying global indices..." : "Loading indices..."}
+        </div>
+      )}
+
+      {/* Request failure is distinct from a successful empty response. */}
+      {isConnected && !isLoading && isError && (
+        <div
+          className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center"
+          role="alert"
+        >
+          <AlertCircle size={18} className="text-loss" aria-hidden="true" />
+          <span className="text-sm font-medium text-text-primary">Could not load global indices</span>
+          <span className="text-xs text-text-muted">
+            {error instanceof Error ? error.message : "The request failed."}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void retry()}
+            disabled={isRetrying}
+            className="mt-1 h-7 px-2 text-xs"
+            aria-label="Retry global indices"
+          >
+            <RefreshCw size={12} className={isRetrying ? "animate-spin" : ""} aria-hidden="true" />
+            {isRetrying ? "Retrying..." : "Retry"}
+          </Button>
         </div>
       )}
 
       {/* Honest empty state — connected but the live response had no indices.
           A connected (live) user must never see fabricated sample rows. */}
-      {!isLoading && isEmpty && (
+      {!isLoading && !isError && isEmpty && (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted text-sm px-4 text-center">
           <Inbox size={18} aria-hidden="true" />
           <span>No global indices available</span>
@@ -216,7 +254,7 @@ function GlobalIndicesWidget() {
       )}
 
       {/* Table */}
-      {!isLoading && !isEmpty && (
+      {!isLoading && !isError && !isEmpty && (
         <div className="flex-1 overflow-auto">
           <table className="w-full border-collapse" aria-label="Global market indices">
             <thead>

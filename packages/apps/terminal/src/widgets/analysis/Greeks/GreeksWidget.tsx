@@ -33,6 +33,9 @@ interface RawPosition extends Position {
 
 /** Raw Greeks object from getOptionGreeks — field names vary across brokers */
 interface RawGreeks {
+  symbol?: string;
+  exchange?: string;
+  instrument_id?: string;
   delta?: number;
   Delta?: number;
   gamma?: number;
@@ -59,10 +62,10 @@ interface GreeksRow {
 }
 
 interface PortfolioTotals {
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
 }
 
 type ColorScheme = "delta" | "theta" | "neutral";
@@ -84,8 +87,14 @@ function parseOptionSymbol(
   exchange: string
 ): { symbol: string; exchange: string; optionType: string } | null {
   const s = (symbol || "").toUpperCase();
-  const optionType = s.endsWith("CE") ? "CE" : s.endsWith("PE") ? "PE" : null;
-  if (!optionType) return null;
+  const suffix = ([
+    ["CALL", "CE"],
+    ["PUT", "PE"],
+    ["CE", "CE"],
+    ["PE", "PE"],
+  ] as const).find(([candidate]) => s.endsWith(candidate));
+  if (!suffix || !/\d/.test(s.slice(0, -suffix[0].length))) return null;
+  const optionType = suffix[1];
   return { symbol: s, exchange: exchange || "NFO", optionType };
 }
 
@@ -115,6 +124,17 @@ function fmtIV(v: number | null | undefined): string {
   const n = Number(v);
   const pct = n > 2 ? n : n * 100;
   return `${pct.toFixed(1)}%`;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (
+    value === null
+    || value === undefined
+    || typeof value === "boolean"
+    || (typeof value === "string" && !value.trim())
+  ) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,24 +236,37 @@ function GreeksWidget() {
       const newGreeksMap: Record<string, RawGreeks> = {};
 
       if (parsed.length > 0) {
-        const symbolRequests = parsed.map((entry) => ({
-          symbol: entry.sym.symbol,
-          exchange: entry.sym.exchange,
-        }));
+        const symbolRequests = Array.from(new Map(parsed.map((entry) => {
+          const request = { symbol: entry.sym.symbol, exchange: entry.sym.exchange.toUpperCase() };
+          return [`${request.exchange}:${request.symbol}`, request] as const;
+        })).values());
 
         try {
           const batchResults = await getMultiOptionGreeks(symbolRequests);
-          // batchResults is Greeks[] — indexed in the same order as symbolRequests.
-          parsed.forEach((entry, idx) => {
-            const data = batchResults[idx];
-            if (data) {
-              const raw = data as unknown as RawGreeks;
-              newGreeksMap[entry.pos.symbol] = raw;
+          const resultsByContract = new Map<string, RawGreeks>();
+          batchResults.forEach((data) => {
+            const symbol = data.symbol?.trim().toUpperCase();
+            const exchange = data.exchange?.trim().toUpperCase();
+            if (!symbol || !exchange) {
+              throw new Error("Option-Greeks response lacks contract identity");
             }
+            const key = `${exchange}:${symbol}`;
+            if (resultsByContract.has(key)) {
+              throw new Error("Option-Greeks response repeats a contract identity");
+            }
+            resultsByContract.set(key, data as RawGreeks);
           });
-        } catch {
-          // Batch call failed — greeksMap stays empty for this refresh cycle.
-          // The UI will display "—" for all greek values rather than crashing.
+          if (resultsByContract.size !== symbolRequests.length) {
+            throw new Error("Option-Greeks response does not match the requested contracts");
+          }
+          parsed.forEach((entry) => {
+            const key = `${entry.sym.exchange.toUpperCase()}:${entry.sym.symbol}`;
+            const data = resultsByContract.get(key);
+            if (!data) throw new Error("Option-Greeks response is incomplete");
+            newGreeksMap[entry.pos.symbol] = data;
+          });
+        } catch (greeksError) {
+          setError(`Option Greeks error: ${(greeksError as Error).message}`);
         }
       }
 
@@ -265,10 +298,14 @@ function GreeksWidget() {
       const rawVega  = g.vega  ?? g.Vega  ?? null;
       const rawIV    = g.iv    ?? g.implied_volatility ?? g.IV ?? g.vix ?? null;
 
-      const delta = rawDelta != null ? Number(rawDelta) * qty : null;
-      const gamma = rawGamma != null ? Number(rawGamma) * qty : null;
-      const theta = rawTheta != null ? Number(rawTheta) * qty : null;
-      const vega  = rawVega  != null ? Number(rawVega)  * qty : null;
+      const perUnitDelta = finiteNumber(rawDelta);
+      const perUnitGamma = finiteNumber(rawGamma);
+      const perUnitTheta = finiteNumber(rawTheta);
+      const perUnitVega = finiteNumber(rawVega);
+      const delta = perUnitDelta == null ? null : perUnitDelta * qty;
+      const gamma = perUnitGamma == null ? null : perUnitGamma * qty;
+      const theta = perUnitTheta == null ? null : perUnitTheta * qty;
+      const vega = perUnitVega == null ? null : perUnitVega * qty;
 
       return {
         symbol: pos.symbol,
@@ -278,15 +315,16 @@ function GreeksWidget() {
         gamma,
         theta,
         vega,
-        iv: rawIV != null ? Number(rawIV) : null,
+        iv: finiteNumber(rawIV),
       };
     });
 
-    function sum(key: keyof GreeksRow): number {
-      return computedRows.reduce((acc, r) => {
-        const v = r[key] as number | null;
-        return v != null ? acc + v : acc;
-      }, 0);
+    function sum(key: keyof GreeksRow): number | null {
+      const values = computedRows.map((row) => row[key] as number | null);
+      if (values.length === 0 || values.some((value) => value == null || !Number.isFinite(value))) {
+        return null;
+      }
+      return values.reduce<number>((total, value) => total + (value as number), 0);
     }
 
     const totals: PortfolioTotals = {
@@ -441,7 +479,7 @@ function GreeksWidget() {
                     Total ({rows.length} legs)
                   </td>
                   <td className={`px-2 py-1 text-right font-mono tabular-nums font-semibold text-xs ${
-                    totals.delta >= 0 ? "text-profit" : "text-loss"
+                    totals.delta == null ? "text-text-muted" : totals.delta >= 0 ? "text-profit" : "text-loss"
                   }`}>
                     {fmt2(totals.delta)}
                   </td>

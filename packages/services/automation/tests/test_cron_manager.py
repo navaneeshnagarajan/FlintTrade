@@ -700,7 +700,14 @@ class TestLoadHolidays:
         assert cron.holidays == {"2026-01-26"}
         assert cron.holiday_payload is first_payload
 
-    def test_failed_refresh_does_not_advance_calendar_generation(self):
+    @pytest.mark.parametrize(
+        "rejected_payload",
+        [
+            {"status": "error", "year": 2026, "data": []},
+            {"status": "success", "year": 2026, "data": {}},
+        ],
+    )
+    def test_failed_refresh_does_not_advance_calendar_generation(self, rejected_payload):
         import asyncio
         from flinttrade_automation.cron_manager import CronManager
 
@@ -710,8 +717,12 @@ class TestLoadHolidays:
             nonlocal calls
             calls += 1
             if calls == 1:
-                return {"status": "success", "year": 2026, "data": []}
-            return {"status": "error", "year": 2026, "data": []}
+                return {
+                    "status": "success",
+                    "year": 2026,
+                    "data": [{"date": "2026-01-26", "holiday_type": "TRADING_HOLIDAY"}],
+                }
+            return rejected_payload
 
         cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
         with patch("flinttrade_automation.cron_manager.datetime") as clock:
@@ -729,7 +740,11 @@ class TestLoadHolidays:
         from flinttrade_automation.cron_manager import CronManager
 
         async def holidays(**_kwargs):
-            return {"status": "success", "year": 2027, "data": []}
+            return {
+                "status": "success",
+                "year": 2027,
+                "data": [{"date": "2027-01-26", "holiday_type": "TRADING_HOLIDAY"}],
+            }
 
         cron = CronManager(openalgo_client=MagicMock(holidays=holidays))
         with patch("flinttrade_automation.cron_manager.datetime") as clock:
@@ -955,6 +970,41 @@ class TestTickRetentionJob:
         names = {job["name"] for job in without_trade_store.list_jobs()}
         assert "db_optimise_job" not in names
         assert "tick_retention_job" in names
+
+
+class TestWebhookNonceGcJob:
+    def test_calls_injected_store_gc(self):
+        from flinttrade_automation.cron_manager import make_webhook_nonce_gc_job
+
+        gc_nonces = MagicMock(return_value=4)
+        make_webhook_nonce_gc_job(gc_nonces)()
+
+        gc_nonces.assert_called_once_with()
+
+    def test_failure_never_raises(self):
+        from flinttrade_automation.cron_manager import make_webhook_nonce_gc_job
+
+        gc_nonces = MagicMock(side_effect=OSError("database unavailable"))
+        make_webhook_nonce_gc_job(gc_nonces)()
+
+        gc_nonces.assert_called_once_with()
+
+    def test_registered_only_when_store_gc_is_injected(self):
+        from flinttrade_automation.cron_manager import CronManager
+
+        without = CronManager()
+        without.register_builtin_jobs()
+        assert "webhook_nonce_gc_job" not in {job["name"] for job in without.list_jobs()}
+
+        with_gc = CronManager(webhook_nonce_gc=MagicMock(return_value=0))
+        with_gc.register_builtin_jobs()
+        assert "webhook_nonce_gc_job" in {job["name"] for job in with_gc.list_jobs()}
+
+    def test_runs_daily_at_0300_ist(self):
+        from flinttrade_automation.cron_manager import DEFAULT_JOBS
+
+        args = DEFAULT_JOBS["webhook_nonce_gc_job"]["trigger_args"]
+        assert args == {"hour": 3, "minute": 0, "timezone": "Asia/Kolkata"}
 
 
 class TestEodSyncJob:

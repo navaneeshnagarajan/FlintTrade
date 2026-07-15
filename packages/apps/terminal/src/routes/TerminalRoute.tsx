@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { DockviewReact } from "dockview-react";
-import type { DockviewReadyEvent, IDockviewPanelProps } from "dockview-react";
+import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import {
   CandlestickChart,
@@ -43,16 +43,15 @@ import {
 import { TradeBottomPanel } from "./trade/TradeBottomPanel";
 
 // ---------------------------------------------------------------------------
-// Kill Switch Pill — floating daily loss monitor
+// Kill Switch Pill — account-MTM warning and explicit Layer 5 control
 // ---------------------------------------------------------------------------
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
 /**
- * Shown in the bottom-left when daily P&L exceeds 50% of the configured
- * MTM stop-loss threshold. Provides a one-click emergency kill switch that
- * calls POST /api/v1/safety/kill-switch to cancel all orders and close all
- * positions via the backend SafetySystem (Layer 5).
+ * Persistent Layer 5 status for Live mode. Account MTM changes its warning
+ * presentation, but cannot hide an active, loading, or unavailable kill switch.
+ * Activation halts routing and asks the backend to attempt emergency actions.
  */
 function KillSwitchPill() {
   const queryClient = useQueryClient();
@@ -60,7 +59,11 @@ function KillSwitchPill() {
   const totalPnl = useTradingStore((s) => s.totalPnl);
   // mtmStoploss is stored as a positive rupee value, e.g. 5000 = ₹5,000 daily loss limit
   const mtmStoploss = useSettingsStore((s) => s.riskLimits.mtmStoploss);
-  const { data: safetyConfig } = useQuery({
+  const {
+    data: safetyConfig,
+    isLoading: safetyLoading,
+    isError: safetyError,
+  } = useQuery({
     queryKey: SAFETY_CONFIG_QUERY_KEY,
     queryFn: getSafetyConfig,
     refetchInterval: 5_000,
@@ -113,17 +116,39 @@ function KillSwitchPill() {
     },
   });
 
-  // Show pill when loss exceeds 50% of configured MTM stop-loss
   const threshold = mtmStoploss > 0 ? mtmStoploss * 0.5 : Infinity;
   const isNearLimit = totalPnl < 0 && Math.abs(totalPnl) >= threshold;
-  const killSwitchActive = safetyConfig?.kill_switch_active ?? false;
-  const flattenComplete = safetyConfig?.flatten_complete ?? false;
+  const killSwitchState = safetyConfig === undefined
+    ? safetyLoading ? "loading" : "unavailable"
+    : safetyConfig.kill_switch_active ? "active" : "inactive";
+  const killSwitchActive = killSwitchState === "active";
+  const flattenComplete = killSwitchActive && safetyConfig?.flatten_complete === true;
   const flattenIncomplete = killSwitchActive && !flattenComplete;
 
   if (mode !== "live") return null;
-  if (!isNearLimit) return null;
 
   const isAtLimit = mtmStoploss > 0 && Math.abs(totalPnl) >= mtmStoploss;
+  const isUnavailable = killSwitchState === "unavailable";
+  const isLoading = killSwitchState === "loading";
+  const statusLabel = isNearLimit && killSwitchState === "inactive"
+    ? `Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}; kill switch status: inactive`
+    : `Kill switch status: ${killSwitchState}`;
+  const baseStatusText = isLoading
+    ? "Checking kill-switch state..."
+    : isUnavailable
+    ? "Authoritative kill-switch state is unavailable"
+    : flattenIncomplete
+    ? "Kill switch active; broker flattening is incomplete"
+    : killSwitchActive
+    ? "Kill switch active; live order routing is halted"
+    : isAtLimit
+    ? "MTM limit reached"
+    : isNearLimit
+    ? `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`
+    : "Kill switch inactive";
+  const statusText = safetyError && safetyConfig !== undefined
+    ? `${baseStatusText} (last known state; latest refresh failed)`
+    : baseStatusText;
 
   function handleKillSwitch() {
     if (safetyConfig === undefined || activationMutation.isPending || (killSwitchActive && flattenComplete)) return;
@@ -132,37 +157,60 @@ function KillSwitchPill() {
 
   return (
     <div
-      role="status"
-      aria-live="assertive"
+      role={isUnavailable ? "alert" : "status"}
+      aria-live={killSwitchActive || isNearLimit || isUnavailable ? "assertive" : "polite"}
       aria-atomic="true"
-      aria-label={`Daily loss alert: ₹${Math.abs(totalPnl).toFixed(0)}`}
-      className="shrink-0 z-40 border-t border-loss/30 bg-loss/10 px-4 py-2 backdrop-blur-sm"
+      aria-label={statusLabel}
+      className={[
+        "shrink-0 z-40 border-t px-4 py-2 backdrop-blur-sm",
+        killSwitchActive || isNearLimit
+          ? "border-loss/30 bg-loss/10"
+          : isUnavailable
+          ? "border-warning/30 bg-warning/10"
+          : "border-border-default bg-surface-elevated/90",
+      ].join(" ")}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex items-center gap-1.5">
-            <ShieldOff size={13} className="text-loss shrink-0" aria-hidden="true" />
-            <span className="text-xs text-loss font-medium font-mono">
-              -₹{Math.abs(totalPnl).toFixed(0)}
+            <ShieldOff
+              size={13}
+              className={killSwitchActive || isNearLimit ? "text-loss shrink-0" : "text-text-muted shrink-0"}
+              aria-hidden="true"
+            />
+            <span
+              className={[
+                "text-xs font-medium font-mono",
+                killSwitchActive || isNearLimit ? "text-loss" : "text-text-muted",
+              ].join(" ")}
+            >
+              {isNearLimit && !killSwitchActive
+                ? `-₹${Math.abs(totalPnl).toFixed(0)}`
+                : killSwitchActive
+                ? "L5 ACTIVE"
+                : "L5"}
             </span>
           </div>
-          <span className="text-xs text-text-secondary">
-            {flattenIncomplete
-              ? "Broker flattening is incomplete"
-              : isAtLimit
-              ? "MTM limit reached"
-              : `${((Math.abs(totalPnl) / mtmStoploss) * 100).toFixed(0)}% of daily limit`}
-          </span>
+          <span className="text-xs text-text-secondary">{statusText}</span>
         </div>
         <Button
           size="sm"
           variant="destructive"
           className="h-7 text-xs gap-1 shrink-0"
           onClick={handleKillSwitch}
-          disabled={safetyConfig === undefined || activationMutation.isPending || (killSwitchActive && flattenComplete)}
+          disabled={
+            isLoading
+            || isUnavailable
+            || safetyError
+            || safetyConfig === undefined
+            || activationMutation.isPending
+            || (killSwitchActive && flattenComplete)
+          }
           aria-label={flattenIncomplete
             ? "Retry emergency broker actions"
-            : "Activate emergency kill switch to cancel all orders and close all positions"}
+            : killSwitchActive
+            ? "Kill switch is active; live order routing is halted"
+            : "Activate emergency kill switch process-wide to halt routing and attempt order cancellation and position flattening"}
         >
           <ShieldOff size={11} aria-hidden="true" />
           {killSwitchActive && flattenComplete
@@ -294,9 +342,26 @@ function TradeCompactWorkspace({
   onOpenPresetPicker: () => void;
 }) {
   const [activeWidgetId, setActiveWidgetId] = useState<CompactTradeWidgetId>("chart");
+  const tabRefs = useRef<Partial<Record<CompactTradeWidgetId, HTMLButtonElement | null>>>({});
   const activeWidget = COMPACT_TRADE_WIDGETS.find((widget) => widget.id === activeWidgetId) ?? COMPACT_TRADE_WIDGETS[0];
   const ActiveWidgetPanel = widgetComponents[activeWidget.id];
   const panelProps = {} as IDockviewPanelProps;
+
+  function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % COMPACT_TRADE_WIDGETS.length;
+    if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + COMPACT_TRADE_WIDGETS.length) % COMPACT_TRADE_WIDGETS.length;
+    }
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = COMPACT_TRADE_WIDGETS.length - 1;
+    if (nextIndex === undefined) return;
+
+    event.preventDefault();
+    const nextId = COMPACT_TRADE_WIDGETS[nextIndex].id;
+    setActiveWidgetId(nextId);
+    tabRefs.current[nextId]?.focus();
+  }
 
   return (
     <section
@@ -311,11 +376,12 @@ function TradeCompactWorkspace({
           aria-label="Trade workspace panels"
           className="flex min-w-0 items-center gap-1 overflow-x-auto px-2 py-2"
         >
-          {COMPACT_TRADE_WIDGETS.map(({ id, label, Icon }) => {
+          {COMPACT_TRADE_WIDGETS.map(({ id, label, Icon }, index) => {
             const isActive = activeWidgetId === id;
             return (
               <button
                 key={id}
+                ref={(element) => { tabRefs.current[id] = element; }}
                 id={`trade-compact-tab-${id}`}
                 type="button"
                 role="tab"
@@ -323,6 +389,7 @@ function TradeCompactWorkspace({
                 aria-controls={`trade-compact-panel-${id}`}
                 tabIndex={isActive ? 0 : -1}
                 onClick={() => setActiveWidgetId(id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
                 className={[
                   "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors",
                   isActive
@@ -393,6 +460,7 @@ export default function TerminalRoute() {
   // d3 — auto-save subscription managed by its own useEffect.
   const saveDisposableRef = useRef<{ dispose(): void } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mountedDockviewApiRef = useRef<DockviewApi | null>(null);
   // rAF handle for coalesced ARIA injection.
   const ariaRafRef = useRef<number | undefined>(undefined);
 
@@ -469,6 +537,7 @@ export default function TerminalRoute() {
 
   const onDockviewReady = useCallback(
     (event: DockviewReadyEvent) => {
+      mountedDockviewApiRef.current = event.api;
       setDockviewApi(event.api);
 
       // Track panel count for the empty-state overlay.
@@ -549,8 +618,13 @@ export default function TerminalRoute() {
       readyDisposablesRef.current.forEach((d) => d.dispose());
       readyDisposablesRef.current = [];
       if (ariaRafRef.current !== undefined) cancelAnimationFrame(ariaRafRef.current);
+      const mountedApi = mountedDockviewApiRef.current;
+      if (mountedApi && useLayoutStore.getState().dockviewApi === mountedApi) {
+        setDockviewApi(null);
+      }
+      mountedDockviewApiRef.current = null;
     };
-  }, []);
+  }, [setDockviewApi]);
 
   // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops).
   // d3 is managed independently of the onReady disposables so its cleanup
@@ -809,7 +883,7 @@ export default function TerminalRoute() {
         />
       )}
 
-      {/* Kill switch bar — reserves layout space when daily loss threshold is reached */}
+      {/* Explicit Layer 5 control, shown once account MTM reaches the warning level */}
       <KillSwitchPill />
 
     </div>

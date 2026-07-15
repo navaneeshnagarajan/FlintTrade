@@ -41,8 +41,8 @@ class OIProfileStrike:
     ce_oi: int = 0
     pe_oi: int = 0
     oi_butterfly: int = 0
-    ce_oi_change: int = 0
-    pe_oi_change: int = 0
+    ce_oi_change: int | None = None
+    pe_oi_change: int | None = None
     ce_volume: int = 0
     pe_volume: int = 0
 
@@ -97,6 +97,7 @@ class OIProfileResult:
         oi_change: Net OI change (CE + PE) per strike vs previous snapshot.
         ce_oi_change: CE OI change per strike.
         pe_oi_change: PE OI change per strike.
+        oi_change_available: Whether a prior snapshot was supplied.
         futures_ohlcv: Futures candles for price overlay.
         profile_strikes: Full per-strike profile data.
         max_ce_strike: Strike with highest CE OI (resistance).
@@ -108,13 +109,14 @@ class OIProfileResult:
     ce_oi: list[int] = field(default_factory=list)
     pe_oi: list[int] = field(default_factory=list)
     oi_butterfly: list[int] = field(default_factory=list)
-    oi_change: list[int] = field(default_factory=list)
-    ce_oi_change: list[int] = field(default_factory=list)
-    pe_oi_change: list[int] = field(default_factory=list)
+    oi_change: list[int | None] = field(default_factory=list)
+    ce_oi_change: list[int | None] = field(default_factory=list)
+    pe_oi_change: list[int | None] = field(default_factory=list)
+    oi_change_available: bool = False
     futures_ohlcv: list[FuturesOHLCV] = field(default_factory=list)
     profile_strikes: list[OIProfileStrike] = field(default_factory=list)
-    max_ce_strike: float = 0.0
-    max_pe_strike: float = 0.0
+    max_ce_strike: float | None = None
+    max_pe_strike: float | None = None
     spot: float = 0.0
 
 
@@ -158,13 +160,16 @@ def calculate_oi_profile(
         snapshot: Current option chain snapshot with OI per strike.
         futures_candles: List of futures OHLCV dicts for price overlay.
         previous_snapshot: Previous option chain snapshot for OI change
-                           calculation. If None, OI change is reported as 0.
+                           calculation. Missing comparisons remain unavailable.
 
     Returns:
         OIProfileResult with butterfly, OI change, and futures overlay.
     """
     if not snapshot.strikes:
-        return OIProfileResult(spot=snapshot.spot_price)
+        return OIProfileResult(
+            spot=snapshot.spot_price,
+            oi_change_available=False,
+        )
 
     # Build previous OI map for change calculation
     prev_map: dict[float, StrikeData] = {}
@@ -177,20 +182,20 @@ def calculate_oi_profile(
     ce_oi: list[int] = []
     pe_oi: list[int] = []
     oi_butterfly: list[int] = []
-    oi_change: list[int] = []
-    ce_oi_change: list[int] = []
-    pe_oi_change: list[int] = []
+    oi_change: list[int | None] = []
+    ce_oi_change: list[int | None] = []
+    pe_oi_change: list[int | None] = []
     profile_strikes: list[OIProfileStrike] = []
+    comparable_strikes = 0
 
     for s in sorted_strikes:
         prev = prev_map.get(s.strike_price)
-        prev_ce = prev.ce_oi if prev else 0
-        prev_pe = prev.pe_oi if prev else 0
-
+        if prev is not None:
+            comparable_strikes += 1
         butterfly = s.ce_oi - s.pe_oi
-        delta_ce = s.ce_oi - prev_ce
-        delta_pe = s.pe_oi - prev_pe
-        net_change = delta_ce + delta_pe
+        delta_ce = s.ce_oi - prev.ce_oi if prev is not None else None
+        delta_pe = s.pe_oi - prev.pe_oi if prev is not None else None
+        net_change = delta_ce + delta_pe if delta_ce is not None and delta_pe is not None else None
 
         strikes.append(s.strike_price)
         ce_oi.append(s.ce_oi)
@@ -212,13 +217,10 @@ def calculate_oi_profile(
         ))
 
     # Key levels
-    max_ce_strike = 0.0
-    max_pe_strike = 0.0
-    if sorted_strikes:
-        max_ce = max(sorted_strikes, key=lambda s: s.ce_oi)
-        max_pe = max(sorted_strikes, key=lambda s: s.pe_oi)
-        max_ce_strike = max_ce.strike_price
-        max_pe_strike = max_pe.strike_price
+    ce_candidates = [strike for strike in sorted_strikes if strike.ce_oi > 0]
+    pe_candidates = [strike for strike in sorted_strikes if strike.pe_oi > 0]
+    max_ce_strike = max(ce_candidates, key=lambda s: s.ce_oi).strike_price if ce_candidates else None
+    max_pe_strike = max(pe_candidates, key=lambda s: s.pe_oi).strike_price if pe_candidates else None
 
     futures_ohlcv = _parse_futures_candles(futures_candles)
 
@@ -230,6 +232,7 @@ def calculate_oi_profile(
         oi_change=oi_change,
         ce_oi_change=ce_oi_change,
         pe_oi_change=pe_oi_change,
+        oi_change_available=comparable_strikes > 0,
         futures_ohlcv=futures_ohlcv,
         profile_strikes=profile_strikes,
         max_ce_strike=max_ce_strike,

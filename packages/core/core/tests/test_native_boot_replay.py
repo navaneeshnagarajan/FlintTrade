@@ -70,21 +70,20 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
         assert native_adapters == {
             "dhan": object_marker["dhan"],
             "upstox": object_marker["upstox"],
-            "indmoney": object_marker["indmoney"],
         }
         assert selectors == ["dhan:D1", "upstox:U1", "indmoney:I1", "kotakneo:K1", "groww:G1"]
         assert verify is True
         # establish_native_sessions skips selectors whose adapters are not
-        # active; Kotak/Groww are still coming-soon, so no status is returned.
-        return {"dhan:D1": "ok", "upstox:U1": "ok", "indmoney:I1": "ok"}
+        # active; INDmoney, Kotak Neo, and Groww retain activation blockers, so
+        # no replay status is returned for their stale selectors.
+        return {"dhan:D1": "ok", "upstox:U1": "ok"}
 
-    object_marker = {"dhan": object(), "upstox": object(), "indmoney": object()}
+    object_marker = {"dhan": object(), "upstox": object()}
     fake_app = SimpleNamespace(
         config={
             "NATIVE_ADAPTERS": {
                 "dhan": object_marker["dhan"],
                 "upstox": object_marker["upstox"],
-                "indmoney": object_marker["indmoney"],
             },
             "REGISTRY": object(),
             "CREDENTIAL_STORE": object(),
@@ -100,11 +99,10 @@ def test_reestablish_native_sessions_runs_inside_existing_event_loop(monkeypatch
     async def run_from_loop():
         return app_module._reestablish_native_sessions(fake_app, verify=True)
 
-    assert asyncio.run(run_from_loop()) == {"dhan:D1": "ok", "upstox:U1": "ok", "indmoney:I1": "ok"}
+    assert asyncio.run(run_from_loop()) == {"dhan:D1": "ok", "upstox:U1": "ok"}
     assert fake_app.config["NATIVE_SESSION_STATUS"] == {
         "dhan:D1": "ok",
         "upstox:U1": "ok",
-        "indmoney:I1": "ok",
     }
 
 

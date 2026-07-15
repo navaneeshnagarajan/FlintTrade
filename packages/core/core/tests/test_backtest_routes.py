@@ -274,6 +274,119 @@ class TestStrategiesRunning:
         assert data["data"]["strategies"] == []
 
 
+class TestStrategyLifecycleRoutes:
+    """Live strategy routes submit work to the scheduler's runtime loop."""
+
+    def test_start_uses_bound_scheduler_loop_instead_of_request_local_loop(
+        self,
+        flask_app,
+        client,
+        monkeypatch,
+    ):
+        import asyncio
+
+        scheduler = MagicMock()
+        scheduler.get_runner.return_value = MagicMock()
+        previous = flask_app.config.get("SCHEDULER")
+        flask_app.config["SCHEDULER"] = scheduler
+        monkeypatch.setattr(
+            asyncio,
+            "new_event_loop",
+            MagicMock(side_effect=AssertionError("request-local loop created")),
+        )
+        try:
+            response = client.post(
+                "/api/v1/backtest/strategies/ema/start",
+                headers=_auth_headers(),
+            )
+        finally:
+            flask_app.config["SCHEDULER"] = previous
+
+        assert response.status_code == 200
+        scheduler.start_one_threadsafe.assert_called_once_with("ema")
+
+    def test_stop_uses_same_bound_scheduler_loop(
+        self,
+        flask_app,
+        client,
+        monkeypatch,
+    ):
+        import asyncio
+
+        scheduler = MagicMock()
+        scheduler.get_runner.return_value = MagicMock()
+        previous = flask_app.config.get("SCHEDULER")
+        flask_app.config["SCHEDULER"] = scheduler
+        monkeypatch.setattr(
+            asyncio,
+            "new_event_loop",
+            MagicMock(side_effect=AssertionError("request-local loop created")),
+        )
+        try:
+            response = client.post(
+                "/api/v1/backtest/strategies/ema/stop",
+                headers=_auth_headers(),
+            )
+        finally:
+            flask_app.config["SCHEDULER"] = previous
+
+        assert response.status_code == 200
+        scheduler.stop_one_threadsafe.assert_called_once_with("ema")
+
+    def test_start_timeout_is_reported_only_as_a_rolled_back_failure(
+        self,
+        flask_app,
+        client,
+    ):
+        from flinttrade_engine.scheduler import StrategyStartTimeoutError
+
+        scheduler = MagicMock()
+        scheduler.get_runner.return_value = MagicMock()
+        scheduler.start_one_threadsafe.side_effect = StrategyStartTimeoutError("rolled back")
+        previous = flask_app.config.get("SCHEDULER")
+        flask_app.config["SCHEDULER"] = scheduler
+        try:
+            response = client.post(
+                "/api/v1/backtest/strategies/ema/start",
+                headers=_auth_headers(),
+            )
+        finally:
+            flask_app.config["SCHEDULER"] = previous
+
+        assert response.status_code == 504
+        assert response.get_json() == {
+            "status": "error",
+            "code": "strategy_start_timeout",
+            "message": "Strategy start timed out and was rolled back",
+        }
+
+    def test_stop_timeout_is_reported_as_cleanup_still_in_progress(
+        self,
+        flask_app,
+        client,
+    ):
+        from flinttrade_engine.scheduler import StrategyStopTimeoutError
+
+        scheduler = MagicMock()
+        scheduler.stop_one_threadsafe.side_effect = StrategyStopTimeoutError("still in progress")
+        previous = flask_app.config.get("SCHEDULER")
+        flask_app.config["SCHEDULER"] = scheduler
+        try:
+            response = client.post(
+                "/api/v1/backtest/strategies/ema/stop",
+                headers=_auth_headers(),
+            )
+        finally:
+            flask_app.config["SCHEDULER"] = previous
+
+        assert response.status_code == 504
+        assert response.get_json() == {
+            "status": "error",
+            "code": "strategy_stop_in_progress",
+            "message": "Strategy stop is still in progress",
+        }
+
+
 class TestStrategyLibrary:
     """The full strategy library (ALL_STRATEGIES) is reachable, not just the 12 builtins."""
 

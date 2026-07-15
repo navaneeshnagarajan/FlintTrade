@@ -22,4 +22,8 @@ describe("nodeRegistry broker data descriptions", () => {
     ];
     expect(descriptions.join("\n")).not.toContain("50-level");
   });
+
+  it("includes the Search Symbol node from the retired static palette", () => {
+    expect(nodeDescription("search")).toBe("Search symbols by name");
+  });
 });

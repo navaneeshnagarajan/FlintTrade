@@ -30,11 +30,13 @@ regular one — no parallel order path.
 
 from __future__ import annotations
 
-import asyncio
+import hashlib
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import BrokerError
+from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
     AuthModel,
     Capabilities,
@@ -45,7 +47,7 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import indmoney_mapping as M
-from ._base import BrokerAdapter, Session
+from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 from ._session_expiry import next_6am_ist_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -119,8 +121,29 @@ INDMONEY_CAPABILITIES = Capabilities(
 
 # Transport signature: (method, url, headers=..., params=..., json_body=...) ->
 # (status_code, decoded_payload). Synchronous — the adapter runs it off the
-# event loop via asyncio.to_thread (same posture as the SDK-backed adapters).
+# event loop via the cancellation-safe blocking-call owner shared by native adapters.
 Transport = Callable[..., tuple[int, Any]]
+
+_EMERGENCY_BATCH_LIMIT = 10
+_EMERGENCY_EXIT_TAG_PREFIX = "fte-indmoney-"
+_EMERGENCY_TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "ABORTED",
+        "SUCCESS",
+        "CANCELLED",
+        "EXPIRED",
+        "FAILED",
+        "PARTIALLY FILLED - CANCELLED",
+        "PARTIALLY FILLED - EXPIRED",
+    }
+)
+_EMERGENCY_SUCCESSFUL_ORDER_STATUSES = frozenset({"SUCCESS"})
+_EMERGENCY_POSITION_SCOPES = (
+    ("derivative", "margin", "NRML"),
+    ("derivative", "intraday", "MIS"),
+    ("equity", "cnc", "CNC"),
+    ("equity", "intraday", "MIS"),
+)
 
 
 def _build_httpx_transport(timeout: float = 10.0) -> Transport:
@@ -247,7 +270,7 @@ class IndMoneyAdapter(BrokerAdapter):
                 unwrapping the ``{status, data}`` envelope.
         """
         transport = self._transport(session)
-        status, payload = await asyncio.to_thread(
+        status, payload = await run_blocking_sdk_call(
             transport,
             method,
             f"{M.BASE_URL}{path}",
@@ -258,6 +281,38 @@ class IndMoneyAdapter(BrokerAdapter):
         if status >= 400 or (isinstance(payload, dict) and str(payload.get("status", "")).lower() == "error"):
             raise M.map_error(status, payload)
         return payload if raw else M.unwrap(payload)
+
+    async def _emergency_request(
+        self,
+        session: Session,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        require_data: bool = True,
+    ) -> Any:
+        """Accept only an explicit successful broker envelope."""
+        status, payload = await run_blocking_sdk_call(
+            self._transport(session),
+            method,
+            f"{M.BASE_URL}{path}",
+            headers=self._headers(session),
+            params=params,
+            json_body=json_body,
+        )
+        if status >= 400:
+            raise M.map_error(status, payload)
+        if not isinstance(payload, dict):
+            raise BrokerError(f"INDmoney emergency {path} response is malformed")
+        response_status = payload.get("status")
+        if not isinstance(response_status, str) or response_status.strip().lower() != "success":
+            if isinstance(response_status, str) and response_status.strip():
+                raise M.map_error(status, payload)
+            raise BrokerError(f"INDmoney emergency {path} response is malformed")
+        if require_data and "data" not in payload:
+            raise BrokerError(f"INDmoney emergency {path} response is malformed")
+        return payload.get("data")
 
     def _resolve_security(self, symbol: str, exchange: str) -> str:
         sym = str(symbol).strip()
@@ -440,12 +495,18 @@ class IndMoneyAdapter(BrokerAdapter):
             payload = M.to_place_order_payload(order, security_id, algo_id=algo_id)
             resp = await self._request(session, "POST", "/order", json_body=payload)
             self.last_child_order_id = None
-            return M.extract_order_id({"data": resp})
+            order_id = M.extract_order_id({"data": resp})
+            session.extra.setdefault("indmoney_order_families", {})[order_id] = "regular"
+            return order_id
         if variety in M.SMART_VARIETIES:
             payload = M.to_smart_order_payload(order, security_id, algo_id=algo_id)
             resp = await self._request(session, "POST", "/smart/order", json_body=payload)
             parent, child = M.extract_smart_order_ids({"data": resp})
             self.last_child_order_id = child
+            families = session.extra.setdefault("indmoney_order_families", {})
+            families[parent] = "smart"
+            if child:
+                families[child] = "smart"
             return parent
         raise BrokerError(f"IndMoney does not support order variety {variety!r}")
 
@@ -464,15 +525,33 @@ class IndMoneyAdapter(BrokerAdapter):
             await self._request(session, "POST", "/order/modify", json_body=payload)
 
     async def cancel_order(
-        self, session: Session, order_id: str, *, _router_token: object | None = None
+        self,
+        session: Session,
+        order_id: str,
+        *,
+        segment: str | None = None,
+        _router_token: object | None = None,
     ) -> None:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        segment = await self._segment_for_order(session, order_id)
-        payload = M.to_cancel_payload(order_id, segment)
-        # GTT-prefixed ids belong to the smart-order family and must travel its
-        # cancel endpoint (smart-orders doc); parents cancel via /order/cancel.
+        resolved_segment = (
+            await self._segment_for_order(session, order_id)
+            if segment is None
+            else self._emergency_identifier(segment, label="order segment").upper()
+        )
+        if resolved_segment not in {"EQUITY", "DERIVATIVE"}:
+            raise BrokerError("INDmoney cancel segment is unsupported")
+        payload = M.to_cancel_payload(order_id, resolved_segment)
+        # GTT-prefixed ids identify the smart-order family. EQ/DRV smart parents
+        # are deliberately routed through cancel_smart_order only when their
+        # family is known; this generic method cannot infer that from the id.
         path = "/smart/order/cancel" if M.is_smart_order_id(order_id) else "/order/cancel"
-        await self._request(session, "POST", path, json_body=payload)
+        await self._emergency_request(
+            session,
+            "POST",
+            path,
+            json_body=payload,
+            require_data=False,
+        )
 
     async def cancel_smart_order(
         self, session: Session, order_id: str, *, segment: str | None = None, _router_token: object | None = None
@@ -483,8 +562,537 @@ class IndMoneyAdapter(BrokerAdapter):
         smart path for ``EQ-``/``DRV-`` parents of smart orders.
         """
         self._require_router_token(_router_token, _ROUTER_TOKEN)
-        seg = segment or await self._segment_for_order(session, order_id)
-        await self._request(session, "POST", "/smart/order/cancel", json_body=M.to_cancel_payload(order_id, seg))
+        seg = (
+            await self._segment_for_order(session, order_id)
+            if segment is None
+            else self._emergency_identifier(segment, label="order segment").upper()
+        )
+        if seg not in {"EQUITY", "DERIVATIVE"}:
+            raise BrokerError("INDmoney smart-cancel segment is unsupported")
+        await self._emergency_request(
+            session,
+            "POST",
+            "/smart/order/cancel",
+            json_body=M.to_cancel_payload(order_id, seg),
+            require_data=False,
+        )
+
+    # ---------- authoritative emergency planning (read, then gated exact writes) ----------
+
+    @staticmethod
+    def _emergency_identifier(value: Any, *, label: str) -> str:
+        identifier = str(value or "")
+        if (
+            not identifier
+            or identifier != identifier.strip()
+            or not identifier.isprintable()
+            or any(character.isspace() for character in identifier)
+        ):
+            raise BrokerError(f"INDmoney emergency {label} is not canonical")
+        return identifier
+
+    @staticmethod
+    def _emergency_label(value: Any, *, label: str) -> str:
+        text = str(value or "")
+        if not text or text != text.strip() or not text.isprintable():
+            raise BrokerError(f"INDmoney emergency {label} is not canonical")
+        return text
+
+    @staticmethod
+    def _emergency_integer(value: Any, *, label: str) -> int:
+        try:
+            number = Decimal(str(value).strip())
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise BrokerError(f"INDmoney emergency {label} is invalid") from exc
+        if not number.is_finite() or number != number.to_integral_value():
+            raise BrokerError(f"INDmoney emergency {label} is invalid")
+        return int(number)
+
+    @staticmethod
+    def _emergency_position_key(position: dict[str, Any]) -> tuple[str, str, str]:
+        return position["security_id"], position["exchange"], position["product"]
+
+    @classmethod
+    def _emergency_exit_tag(cls, position: dict[str, Any], *, quantity: int | None = None) -> str:
+        signed_quantity = (
+            cls._emergency_integer(position.get("quantity"), label="position quantity")
+            if quantity is None
+            else quantity
+        )
+        if signed_quantity == 0:
+            raise BrokerError("INDmoney emergency position is flat")
+        identity = "|".join(
+            (
+                cls._emergency_identifier(position.get("security_id"), label="security id"),
+                cls._emergency_label(position.get("symbol"), label="position symbol"),
+                cls._emergency_identifier(position.get("exchange"), label="position exchange").upper(),
+                cls._emergency_identifier(position.get("product"), label="position product").upper(),
+                str(signed_quantity),
+            )
+        )
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        return f"{_EMERGENCY_EXIT_TAG_PREFIX}{digest}"
+
+    @classmethod
+    def _emergency_is_smart_order(
+        cls,
+        row: dict[str, Any],
+        *,
+        active: bool,
+        known_family: str | None,
+    ) -> bool:
+        if M.is_smart_order_id(str(row.get("orderid") or "")):
+            if known_family == "regular":
+                raise BrokerError("INDmoney order-family evidence conflicts with a GTT order id")
+            return True
+        order_type = str(row.get("pricetype") or "").strip().upper()
+        if order_type in {"GTT", "OCO", "TRIGGER"}:
+            if known_family == "regular":
+                raise BrokerError("INDmoney order-family evidence conflicts with the broker order type")
+            return True
+        has_smart_leg = False
+        for field in ("sl_trigger_price", "tgt_trigger_price"):
+            raw_value = row.get(field, "")
+            if raw_value in (None, ""):
+                continue
+            try:
+                value = Decimal(str(raw_value).strip())
+            except (InvalidOperation, ValueError, TypeError) as exc:
+                raise BrokerError(f"INDmoney emergency {field} is invalid") from exc
+            if not value.is_finite() or value < 0:
+                raise BrokerError(f"INDmoney emergency {field} is invalid")
+            has_smart_leg = has_smart_leg or value > 0
+        if has_smart_leg:
+            if known_family == "regular":
+                raise BrokerError("INDmoney order-family evidence conflicts with smart-order legs")
+            return True
+        if known_family == "smart":
+            return True
+        if known_family == "regular":
+            return False
+        if active and order_type not in {"LIMIT", "MARKET"}:
+            raise BrokerError("INDmoney active order type does not identify its cancellation family")
+        if active:
+            raise BrokerError(
+                "INDmoney active EQ/DRV MARKET/LIMIT order has no authoritative regular/smart family evidence"
+            )
+        return False
+
+    async def _emergency_order_rows(self, session: Session) -> tuple[dict[str, Any], ...]:
+        raw_rows = await self._emergency_request(session, "GET", "/order-book")
+        if not isinstance(raw_rows, list):
+            raise BrokerError("INDmoney emergency order book is not a list")
+        rows: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        known_families = session.extra.get("indmoney_order_families")
+        if not isinstance(known_families, dict):
+            known_families = {}
+        for raw in raw_rows:
+            if not isinstance(raw, dict):
+                raise BrokerError("INDmoney emergency order book contains a non-object row")
+            row = M.from_indmoney_order(raw)
+            order_id = self._emergency_identifier(row.get("orderid"), label="order id")
+            if order_id in seen_ids:
+                raise BrokerError("INDmoney emergency order book contains a duplicate order id")
+            seen_ids.add(order_id)
+            segment = self._emergency_identifier(raw.get("segment"), label="order segment").upper()
+            if segment not in {"EQUITY", "DERIVATIVE"}:
+                raise BrokerError("INDmoney emergency order segment is unsupported")
+            exchange = self._emergency_identifier(row.get("exchange"), label="order exchange").upper()
+            product = self._emergency_identifier(row.get("product"), label="order product").upper()
+            raw_status = raw.get("status")
+            if not isinstance(raw_status, str) or not raw_status.strip():
+                raise BrokerError("INDmoney emergency order status is missing or malformed")
+            status = raw_status.strip().upper()
+            known_family = known_families.get(order_id)
+            if known_family not in {None, "regular", "smart"}:
+                raise BrokerError("INDmoney local order-family evidence is malformed")
+            rows.append(
+                {
+                    **row,
+                    "orderid": order_id,
+                    "status": status,
+                    "segment": segment,
+                    "exchange": exchange,
+                    "product": product,
+                    "_emergency_smart": self._emergency_is_smart_order(
+                        row,
+                        active=status not in _EMERGENCY_TERMINAL_ORDER_STATUSES,
+                        known_family=known_family,
+                    ),
+                }
+            )
+        return tuple(rows)
+
+    async def _emergency_positions(self, session: Session) -> tuple[dict[str, Any], ...]:
+        positions: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for segment, broker_product, canonical_product in _EMERGENCY_POSITION_SCOPES:
+            data = await self._emergency_request(
+                session,
+                "GET",
+                "/portfolio/positions",
+                params={"segment": segment, "product": broker_product},
+            )
+            if not isinstance(data, dict):
+                raise BrokerError("INDmoney emergency position book is not an object")
+            net_rows = data.get("net_positions")
+            day_rows = data.get("day_positions")
+            if not isinstance(net_rows, list) or not isinstance(day_rows, list):
+                raise BrokerError("INDmoney emergency position book is incomplete")
+            if any(not isinstance(row, dict) for row in day_rows):
+                raise BrokerError("INDmoney emergency day-position book contains a non-object row")
+            if day_rows:
+                raise BrokerError(
+                    "INDmoney emergency day-position book cannot be reconciled with net positions"
+                )
+            for raw in net_rows:
+                if not isinstance(raw, dict):
+                    raise BrokerError("INDmoney emergency position book contains a non-object row")
+                quantity = self._emergency_integer(raw.get("net_quantity"), label="position quantity")
+                raw_position_type = raw.get("position_type")
+                if not isinstance(raw_position_type, str) or not raw_position_type.strip():
+                    raise BrokerError("INDmoney emergency position type is missing or malformed")
+                position_type = raw_position_type.strip().lower()
+                if quantity == 0:
+                    continue
+                if position_type != "open":
+                    raise BrokerError("INDmoney reports a non-open position with non-zero quantity")
+                mapped = M.from_indmoney_position(raw, product=canonical_product)
+                security_id = self._emergency_identifier(raw.get("security_id"), label="security id")
+                symbol = self._emergency_label(mapped.get("symbol"), label="position symbol")
+                exchange = self._emergency_identifier(mapped.get("exchange"), label="position exchange").upper()
+                product = self._emergency_identifier(mapped.get("product"), label="position product").upper()
+                expected_exchanges = {"derivative": {"NFO", "BFO"}, "equity": {"NSE", "BSE"}}[segment]
+                if exchange not in expected_exchanges or product != canonical_product:
+                    raise BrokerError("INDmoney emergency position scope is inconsistent")
+                position = {
+                    **mapped,
+                    "security_id": security_id,
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "product": product,
+                    "quantity": str(quantity),
+                }
+                key = self._emergency_position_key(position)
+                if key in positions:
+                    raise BrokerError("INDmoney emergency position book contains a duplicate identity")
+                positions[key] = position
+        ordered = tuple(positions[key] for key in sorted(positions))
+        derivative_positions = tuple(
+            position for position in ordered if position["exchange"] in {"NFO", "BFO"}
+        )
+        if derivative_positions:
+            instruments = await self.instruments(session, "fno")
+            for position in derivative_positions:
+                candidates = [
+                    row
+                    for row in instruments
+                    if self._row_value(row, {"SECURITY_ID", "SECURITYID", "INSTRUMENT_TOKEN", "TOKEN"})
+                    == position["security_id"]
+                    and self._row_matches_exchange(row, position["exchange"])
+                ]
+                if len(candidates) != 1:
+                    raise BrokerError("INDmoney emergency derivative lot identity is unavailable or ambiguous")
+                lot_units = self._emergency_integer(
+                    self._row_value(candidates[0], {"LOT_UNITS", "LOT_SIZE", "LOTSIZE"}),
+                    label="derivative lot units",
+                )
+                quantity = abs(self._emergency_integer(position["quantity"], label="position quantity"))
+                if lot_units <= 0 or quantity % lot_units:
+                    raise BrokerError("INDmoney emergency derivative quantity is not a whole lot")
+        return ordered
+
+    @staticmethod
+    def _emergency_order_matches_position(order: dict[str, Any], position: dict[str, Any]) -> bool:
+        return (
+            str(order.get("security_id") or ""),
+            str(order.get("exchange") or "").upper(),
+            str(order.get("product") or "").upper(),
+        ) == (
+            str(position.get("security_id") or ""),
+            str(position.get("exchange") or "").upper(),
+            str(position.get("product") or "").upper(),
+        )
+
+    @classmethod
+    def _emergency_active_exit_state(
+        cls,
+        order: dict[str, Any],
+        position: dict[str, Any],
+        *,
+        protected_exit_tags: frozenset[str],
+    ) -> str:
+        if not cls._emergency_order_matches_position(order, position):
+            return "unrelated"
+        try:
+            current_quantity = cls._emergency_integer(position.get("quantity"), label="position quantity")
+            requested_quantity = cls._emergency_integer(order.get("quantity"), label="exit requested quantity")
+            filled_quantity = cls._emergency_integer(order.get("filled_quantity"), label="exit filled quantity")
+        except BrokerError:
+            return "conflicting"
+        action = str(order.get("action") or "").strip().upper()
+        expected_action = "SELL" if current_quantity > 0 else "BUY"
+        if action != expected_action or requested_quantity <= 0 or filled_quantity < 0:
+            return "conflicting"
+        pending_quantity = requested_quantity - filled_quantity
+        if pending_quantity <= 0:
+            return "conflicting"
+        original_quantity = (
+            current_quantity + filled_quantity
+            if action == "SELL"
+            else current_quantity - filled_quantity
+        )
+        if original_quantity == 0 or requested_quantity != abs(original_quantity):
+            return "conflicting"
+        tag = cls._emergency_exit_tag(position, quantity=original_quantity)
+        if tag not in protected_exit_tags:
+            return "conflicting"
+        return "exact" if pending_quantity == abs(current_quantity) else "conflicting"
+
+    @classmethod
+    def _emergency_completed_exit_signature(
+        cls,
+        order: dict[str, Any],
+    ) -> tuple[tuple[str, str, str], str, int]:
+        """Return the exact identity of a completed protected exit or fail closed."""
+        key = (
+            cls._emergency_identifier(order.get("security_id"), label="exit security id"),
+            cls._emergency_identifier(order.get("exchange"), label="exit exchange").upper(),
+            cls._emergency_identifier(order.get("product"), label="exit product").upper(),
+        )
+        action = str(order.get("action") or "").strip().upper()
+        if action not in {"BUY", "SELL"}:
+            raise BrokerError("INDmoney completed emergency exit action is malformed")
+        requested_quantity = cls._emergency_integer(
+            order.get("quantity"),
+            label="exit requested quantity",
+        )
+        filled_quantity = cls._emergency_integer(
+            order.get("filled_quantity"),
+            label="exit filled quantity",
+        )
+        if requested_quantity <= 0 or filled_quantity != requested_quantity:
+            raise BrokerError("INDmoney completed emergency exit quantity is malformed")
+        return key, action, requested_quantity
+
+    @staticmethod
+    def _emergency_cancel_write(row: dict[str, Any], *, parent_verb: str) -> EmergencyBrokerWrite:
+        verb = "cancel_smart_order" if row.get("_emergency_smart") is True else "cancel_order"
+        return EmergencyBrokerWrite(
+            parent_verb=parent_verb,
+            verb=verb,
+            payload={
+                "_op": verb,
+                "order_id": str(row["orderid"]),
+                "segment": str(row["segment"]),
+            },
+        )
+
+    async def plan_emergency_reduction(
+        self,
+        session: Session,
+        *,
+        policy: EmergencyWritePolicy,
+        protected_order_ids: frozenset[str],
+        protected_exit_order_ids: frozenset[str] = frozenset(),
+        protected_exit_tags: frozenset[str],
+        unidentified_exit_inflight: bool = False,
+    ) -> EmergencyReductionPlan:
+        """Derive at most ten exact writes from broker-authoritative account state."""
+        requested = frozenset(policy.verbs)
+        orders = await self._emergency_order_rows(session)
+        positions = await self._emergency_positions(session) if "exit_all_positions" in requested else ()
+        active_orders = tuple(
+            row for row in orders if row["status"] not in _EMERGENCY_TERMINAL_ORDER_STATUSES
+        )
+        known_order_ids = frozenset(str(row["orderid"]) for row in orders)
+        protected_cancel_rows = tuple(
+            row for row in active_orders if str(row["orderid"]) in protected_order_ids
+        )
+        protected_exit_rows = tuple(
+            row for row in active_orders if str(row["orderid"]) in protected_exit_order_ids
+        )
+        cancellable = tuple(
+            row
+            for row in active_orders
+            if str(row["orderid"]) not in protected_order_ids | protected_exit_order_ids
+        )
+
+        positions_by_key = {self._emergency_position_key(position): position for position in positions}
+        blocked_position_keys: set[tuple[str, str, str]] = set()
+        conflicting_exit_rows: list[dict[str, Any]] = []
+        unreconciled_completed_exit = False
+        for order in protected_exit_rows:
+            matched = False
+            for key, position in positions_by_key.items():
+                state = self._emergency_active_exit_state(
+                    order,
+                    position,
+                    protected_exit_tags=protected_exit_tags,
+                )
+                if state == "unrelated":
+                    continue
+                matched = True
+                if state == "exact":
+                    blocked_position_keys.add(key)
+                else:
+                    conflicting_exit_rows.append(order)
+                break
+            if not matched:
+                conflicting_exit_rows.append(order)
+
+        for order in orders:
+            if (
+                str(order["orderid"]) not in protected_exit_order_ids
+                or order["status"] not in _EMERGENCY_SUCCESSFUL_ORDER_STATUSES
+            ):
+                continue
+            order_key, action, requested_quantity = self._emergency_completed_exit_signature(order)
+            position = positions_by_key.get(order_key)
+            if position is None:
+                unreconciled_completed_exit = bool(positions)
+                continue
+            current_quantity = self._emergency_integer(position["quantity"], label="position quantity")
+            expected_action = "SELL" if current_quantity > 0 else "BUY"
+            if action != expected_action or requested_quantity != abs(current_quantity):
+                unreconciled_completed_exit = True
+                continue
+            blocked_position_keys.add(order_key)
+
+        missing_protected_exit_ids = protected_exit_order_ids - known_order_ids
+        pending: set[str] = set()
+        if "cancel_all_orders" in requested and (cancellable or protected_cancel_rows):
+            pending.add("cancel_all_orders")
+        if "exit_all_positions" in requested and (
+            positions or protected_exit_rows or (missing_protected_exit_ids and positions)
+        ):
+            pending.add("exit_all_positions")
+        if not pending:
+            return EmergencyReductionPlan(writes=(), pending_verbs=frozenset())
+        if unidentified_exit_inflight:
+            return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+
+        if "cancel_all_orders" in pending:
+            writes = tuple(
+                self._emergency_cancel_write(row, parent_verb="cancel_all_orders")
+                for row in cancellable[:_EMERGENCY_BATCH_LIMIT]
+            )
+            return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
+
+        if "exit_all_positions" in pending:
+            if (missing_protected_exit_ids and positions) or unreconciled_completed_exit:
+                return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+            if conflicting_exit_rows:
+                writes = tuple(
+                    self._emergency_cancel_write(row, parent_verb="exit_all_positions")
+                    for row in conflicting_exit_rows[:_EMERGENCY_BATCH_LIMIT]
+                )
+                return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
+            positions_to_exit = tuple(
+                position
+                for position in positions
+                if self._emergency_position_key(position) not in blocked_position_keys
+            )
+            writes = tuple(
+                EmergencyBrokerWrite(
+                    parent_verb="exit_all_positions",
+                    verb="place_reducing_order",
+                    payload={
+                        "_op": "place_reducing_order",
+                        "security_id": str(position["security_id"]),
+                        "symbol": str(position["symbol"]),
+                        "exchange": str(position["exchange"]),
+                        "product": str(position["product"]),
+                        "quantity": str(abs(self._emergency_integer(position["quantity"], label="position quantity"))),
+                        "expected_position_quantity": str(position["quantity"]),
+                        "action": "SELL"
+                        if self._emergency_integer(position["quantity"], label="position quantity") > 0
+                        else "BUY",
+                        "pricetype": "MARKET",
+                        "price": "0",
+                        "trigger_price": "0",
+                        "variety": "regular",
+                        "emergency_tag": self._emergency_exit_tag(position),
+                    },
+                )
+                for position in positions_to_exit[:_EMERGENCY_BATCH_LIMIT]
+            )
+            return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
+
+        return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+
+    async def place_reducing_order(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+        *,
+        _router_token: object | None = None,
+    ) -> str:
+        """Place one exact opposite-side MARKET order after final position readback."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        security_id = self._emergency_identifier(payload.get("security_id"), label="security id")
+        symbol = self._emergency_label(payload.get("symbol"), label="position symbol")
+        exchange = self._emergency_identifier(payload.get("exchange"), label="position exchange").upper()
+        product = self._emergency_identifier(payload.get("product"), label="position product").upper()
+        expected_quantity = self._emergency_integer(
+            payload.get("expected_position_quantity"), label="expected position quantity"
+        )
+        reducing_quantity = self._emergency_integer(payload.get("quantity"), label="reducing quantity")
+        if expected_quantity == 0 or reducing_quantity <= 0 or reducing_quantity != abs(expected_quantity):
+            raise BrokerError("INDmoney reducing position quantity is inconsistent")
+        expected_action = "SELL" if expected_quantity > 0 else "BUY"
+        if (
+            str(payload.get("action") or "").strip().upper() != expected_action
+            or str(payload.get("pricetype") or "").strip().upper() != "MARKET"
+            or str(payload.get("variety") or "").strip().lower() != "regular"
+            or self._emergency_integer(payload.get("price", "0"), label="reducing price") != 0
+            or self._emergency_integer(payload.get("trigger_price", "0"), label="reducing trigger price") != 0
+        ):
+            raise BrokerError("INDmoney reducing write is not an exact regular MARKET order")
+
+        current_positions = await self._emergency_positions(session)
+        current = next(
+            (
+                position
+                for position in current_positions
+                if self._emergency_position_key(position) == (security_id, exchange, product)
+                and str(position["symbol"]) == symbol
+            ),
+            None,
+        )
+        if current is None:
+            raise BrokerError("INDmoney position disappeared before the reducing write")
+        current_quantity = self._emergency_integer(current["quantity"], label="position quantity")
+        if current_quantity != expected_quantity:
+            raise BrokerError("INDmoney position changed before the reducing write")
+        tag = str(payload.get("emergency_tag") or "")
+        if not tag.startswith(_EMERGENCY_EXIT_TAG_PREFIX) or tag != self._emergency_exit_tag(current):
+            raise BrokerError("INDmoney reducing position episode changed before dispatch")
+
+        from flinttrade_core.models import Order  # noqa: PLC0415
+
+        order = Order(
+            symbol=symbol,
+            action=expected_action,
+            exchange=exchange,
+            pricetype="MARKET",
+            product=product,
+            quantity=str(reducing_quantity),
+            price="0",
+            trigger_price="0",
+            variety="regular",
+            strategy="Emergency",
+        )
+        broker_payload = M.to_place_order_payload(order, security_id, algo_id=session.algo_id or None)
+        response = await self._emergency_request(
+            session,
+            "POST",
+            "/order",
+            json_body=broker_payload,
+        )
+        order_id = M.extract_order_id({"data": response})
+        session.extra.setdefault("indmoney_order_families", {})[order_id] = "regular"
+        return order_id
 
     # ---------- trading: reads (no SafetyContext required) ----------
 
@@ -777,16 +1385,23 @@ class IndMoneyAdapter(BrokerAdapter):
 
         Fetches the order book, positions and holdings through this adapter's
         own reads and diffs them against the injected ``local_state_provider``
-        snapshot (empty until the engine wave wires the journal-backed
-        provider). A broker fetch failure is captured on the report's
+        snapshot (the engine wires a durable selector-scoped provider). A
+        broker fetch failure is captured on the report's
         ``error`` field instead of raised, so the runner retries next cycle.
         """
-        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, build_report  # noqa: PLC0415
+        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
+            EMPTY_LOCAL_STATE,
+            build_report,
+            declare_unavailable_order_fields,
+        )
 
         generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
-            broker_orders = await self.order_book(session)
+            broker_orders = declare_unavailable_order_fields(
+                await self.order_book(session),
+                fields=("variety", "validity", "strategy"),
+            )
             broker_positions = await self.positions(session)
             broker_holdings = await self.holdings(session)
         except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes

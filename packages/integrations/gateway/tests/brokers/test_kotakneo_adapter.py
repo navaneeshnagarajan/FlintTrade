@@ -65,21 +65,60 @@ class MockNeoFull:
 
     def order_history(self, order_id):
         self.calls.append(("history", order_id))
-        return {"data": {"stat": "Ok", "stCode": 200, "data": [
-            {"nOrdNo": order_id, "ordSt": "complete", "trdSym": "IDEA-EQ", "exSeg": "nse_cm",
-             "trnsTp": "B", "prcTp": "L", "prod": "NRML", "qty": 1, "prc": "9.39",
-             "exchTmstp": "22-Jan-2025 14:32:53", "fldQty": 1, "avgPrc": "9.39"},
-            {"nOrdNo": order_id, "ordSt": "open", "trdSym": "IDEA-EQ", "exSeg": "nse_cm",
-             "trnsTp": "B", "prcTp": "L", "prod": "NRML", "qty": 1, "prc": "9.39",
-             "exchTmstp": "22-Jan-2025 14:32:53", "fldQty": 0, "avgPrc": "0.00"},
-        ]}}
+        return {
+            "data": {
+                "stat": "Ok",
+                "stCode": 200,
+                "data": [
+                    {
+                        "nOrdNo": order_id,
+                        "ordSt": "complete",
+                        "trdSym": "IDEA-EQ",
+                        "exSeg": "nse_cm",
+                        "trnsTp": "B",
+                        "prcTp": "L",
+                        "prod": "NRML",
+                        "qty": 1,
+                        "prc": "9.39",
+                        "exchTmstp": "22-Jan-2025 14:32:53",
+                        "fldQty": 1,
+                        "avgPrc": "9.39",
+                    },
+                    {
+                        "nOrdNo": order_id,
+                        "ordSt": "open",
+                        "trdSym": "IDEA-EQ",
+                        "exSeg": "nse_cm",
+                        "trnsTp": "B",
+                        "prcTp": "L",
+                        "prod": "NRML",
+                        "qty": 1,
+                        "prc": "9.39",
+                        "exchTmstp": "22-Jan-2025 14:32:53",
+                        "fldQty": 0,
+                        "avgPrc": "0.00",
+                    },
+                ],
+            }
+        }
 
     def trade_book(self, order_id=None):
         self.calls.append(("trades", order_id))
         if order_id:
-            return {"stat": "ok", "stCode": 200, "data":
-                    {"nOrdNo": order_id, "trdSym": "IDEA-EQ", "exSeg": "nse_cm", "trnsTp": "B",
-                     "fldQty": 1, "avgPrc": "9.39", "prod": "NRML", "flDtTm": "22-Jan-2025 14:33:01"}}
+            return {
+                "stat": "ok",
+                "stCode": 200,
+                "data": {
+                    "nOrdNo": order_id,
+                    "trdSym": "IDEA-EQ",
+                    "exSeg": "nse_cm",
+                    "trnsTp": "B",
+                    "fldQty": 1,
+                    "avgPrc": "9.39",
+                    "prod": "NRML",
+                    "flDtTm": "22-Jan-2025 14:33:01",
+                },
+            }
         return {"stat": "ok", "stCode": 200, "data": []}
 
     def positions(self):
@@ -98,17 +137,33 @@ class MockNeoFull:
     def quotes(self, instrument_tokens, quote_type="all"):
         self.calls.append(("quotes", (instrument_tokens, quote_type)))
         if quote_type == "depth":
-            return {"data": [
-                {"instrument_token": "14366", "trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm",
-                 "depth": {"buy": [{"price": 9.39, "quantity": 100, "orders": 3}],
-                           "sell": [{"price": 9.41, "quantity": 50, "orders": 2}]}},
-            ]}
+            return {
+                "data": [
+                    {
+                        "instrument_token": "14366",
+                        "trading_symbol": "IDEA-EQ",
+                        "exchange_segment": "nse_cm",
+                        "depth": {
+                            "buy": [{"price": 9.39, "quantity": 100, "orders": 3}],
+                            "sell": [{"price": 9.41, "quantity": 50, "orders": 2}],
+                        },
+                    },
+                ]
+            }
         if quote_type == "ltp":
             return {"data": [{"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "ltp": 9.4}]}
-        return {"data": [
-            {"trading_symbol": "IDEA-EQ", "exchange_segment": "nse_cm", "last_traded_price": 9.4,
-             "buy_price": 9.39, "sell_price": 9.41, "volume": 1000},
-        ]}
+        return {
+            "data": [
+                {
+                    "trading_symbol": "IDEA-EQ",
+                    "exchange_segment": "nse_cm",
+                    "last_traded_price": 9.4,
+                    "buy_price": 9.39,
+                    "sell_price": 9.41,
+                    "volume": 1000,
+                },
+            ]
+        }
 
     def margin(self, params):
         self.calls.append(("margin", params))
@@ -120,11 +175,20 @@ class MockNeoFull:
             return f"https://lapi.kotaksecurities.com/prod/2025-01-22/transformed/{exchange_segment}.csv"
         return {"filesPaths": ["https://x/nse_cm.csv", "https://x/nse_fo.csv"], "baseFolder": "https://x"}
 
-    def search_scrip(self, exchange_segment, symbol, expiry=None, option_type=None,
-                     strike_price=None, ignore_50multiple=True):
+    def search_scrip(
+        self, exchange_segment, symbol, expiry=None, option_type=None, strike_price=None, ignore_50multiple=True
+    ):
         self.calls.append(("search", (exchange_segment, symbol, expiry, option_type, strike_price)))
-        return [{"pSymbol": 14366, "pExchSeg": exchange_segment, "pSymbolName": str(symbol).upper(),
-                 "pTrdSymbol": f"{str(symbol).upper()}-EQ", "lLotSize": 1, "dTickSize": 1}]
+        return [
+            {
+                "pSymbol": 14366,
+                "pExchSeg": exchange_segment,
+                "pSymbolName": str(symbol).upper(),
+                "pTrdSymbol": f"{str(symbol).upper()}-EQ",
+                "lLotSize": 1,
+                "dTickSize": 1,
+            }
+        ]
 
     # -- streaming + session -------------------------------------------------
 
@@ -161,6 +225,7 @@ async def _session(adapter: KotakNeoAdapter):
 # Auth lifecycle
 # ---------------------------------------------------------------------------
 
+
 def test_normalise_credentials_accepts_kotak_docs_access_token_alias() -> None:
     original = {"access_token": "TRADE-API-TOKEN", "mobile_number": "9"}
 
@@ -176,9 +241,7 @@ def test_normalise_credentials_accepts_kotak_docs_access_token_alias() -> None:
 @pytest.mark.asyncio
 async def test_login_requires_totp():
     with pytest.raises(BrokerError, match="totp"):
-        await KotakNeoAdapter().login(
-            {"consumer_key": "CK", "mobile_number": "+91...", "ucc": "U1", "mpin": "1234"}
-        )
+        await KotakNeoAdapter().login({"consumer_key": "CK", "mobile_number": "+91...", "ucc": "U1", "mpin": "1234"})
 
 
 @pytest.mark.asyncio
@@ -201,9 +264,7 @@ async def test_login_accepts_access_token_alias_for_kotak_authorization_header()
 @pytest.mark.asyncio
 async def test_login_requires_consumer_key_or_access_token():
     with pytest.raises(BrokerError, match="consumer_key.*access_token"):
-        await KotakNeoAdapter().login(
-            {"mobile_number": "+91...", "ucc": "U1", "mpin": "1234", "totp": "000000"}
-        )
+        await KotakNeoAdapter().login({"mobile_number": "+91...", "ucc": "U1", "mpin": "1234", "totp": "000000"})
 
 
 @pytest.mark.asyncio
@@ -342,13 +403,22 @@ def test_capabilities_record_current_public_websocket_limits_without_runtime_pro
 # Gated writes: AMO + leg-wise cancels + full-surface modify
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_amo_place_sets_flag_through_gate():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4", variety="amo")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="CNC",
+        quantity="10",
+        price="9.4",
+        variety="amo",
+    )
     with pytest.raises(SafetyBypassError):
         await adapter.place_order(session, order)
     assert mock.calls == []
@@ -363,8 +433,9 @@ async def test_place_order_resolves_trading_symbol_via_search_scrip_when_no_reso
     mock = MockNeoFull()
     adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
     session = await _session(adapter)
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="10", price="9.4"
+    )
     await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert ("search", ("nse_cm", "IDEA", None, None, None)) in mock.calls
     _, params = [c for c in mock.calls if c[0] == "place"][0]
@@ -374,16 +445,16 @@ async def test_place_order_resolves_trading_symbol_via_search_scrip_when_no_reso
 @pytest.mark.asyncio
 async def test_place_order_raises_when_search_scrip_has_no_match():
     class NoScripNeo(MockNeoFull):
-        def search_scrip(self, exchange_segment, symbol, expiry=None, option_type=None,
-                         strike_price=None, ignore_50multiple=True):
+        def search_scrip(
+            self, exchange_segment, symbol, expiry=None, option_type=None, strike_price=None, ignore_50multiple=True
+        ):
             self.calls.append(("search", (exchange_segment, symbol, expiry, option_type, strike_price)))
             return []
 
     mock = NoScripNeo()
     adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
     session = await _session(adapter)
-    order = Order(symbol="UNKNOWN", action="BUY", exchange="NSE", pricetype="MARKET",
-                  product="MIS", quantity="1")
+    order = Order(symbol="UNKNOWN", action="BUY", exchange="NSE", pricetype="MARKET", product="MIS", quantity="1")
     with pytest.raises(BrokerError, match="trading_symbol"):
         await adapter.place_order(session, order, _router_token=_ROUTER_TOKEN)
     assert [c for c in mock.calls if c[0] == "place"] == []
@@ -394,8 +465,9 @@ async def test_margin_calculator_resolves_trading_symbol_via_search_scrip_when_n
     mock = MockNeoFull()
     adapter = KotakNeoAdapter(client_factory=lambda _s: mock)
     session = await _session(adapter)
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
     await adapter.margin_calculator(session, order)
     assert [c for c in mock.calls if c[0] == "search"] == [
         ("search", ("nse_cm", "IDEA", None, None, None)),
@@ -443,9 +515,7 @@ async def test_cancel_regular_and_amo_routes():
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.cancel_order(session, "OID3", _router_token=_ROUTER_TOKEN)
-    with pytest.raises(BrokerError, match="trading_symbol"):
-        await adapter.cancel_order(session, "OID4", amo=True, _router_token=_ROUTER_TOKEN)
-    await adapter.cancel_order(session, "OID4", amo=True, trading_symbol="IDEA-EQ", _router_token=_ROUTER_TOKEN)
+    await adapter.cancel_order(session, "OID4", amo=True, _router_token=_ROUTER_TOKEN)
     await adapter.cancel_order(
         session,
         "OID5",
@@ -455,7 +525,7 @@ async def test_cancel_regular_and_amo_routes():
     )
     assert mock.calls == [
         ("cancel", ("OID3", "NO", False, None)),
-        ("cancel", ("OID4", "YES", False, "IDEA-EQ")),
+        ("cancel", ("OID4", "YES", False, None)),
         ("cancel", ("OID5", "YES", False, "IDEA-EQ")),
     ]
 
@@ -478,9 +548,18 @@ async def test_modify_forwards_full_surface_and_checks_envelope():
     await adapter.modify_order(
         session,
         "OID7",
-        {"pricetype": "SL", "price": 9.5, "quantity": 20, "trigger_price": 9.45,
-         "instrument_token": "14366", "exchange_segment": "NSE", "product": "MIS",
-         "trading_symbol": "IDEA-EQ", "transaction_type": "BUY", "amo": True},
+        {
+            "pricetype": "SL",
+            "price": 9.5,
+            "quantity": 20,
+            "trigger_price": 9.45,
+            "instrument_token": "14366",
+            "exchange_segment": "NSE",
+            "product": "MIS",
+            "trading_symbol": "IDEA-EQ",
+            "transaction_type": "BUY",
+            "amo": True,
+        },
         _router_token=_ROUTER_TOKEN,
     )
     _, params = mock.calls[0]
@@ -522,6 +601,7 @@ async def test_write_error_envelopes_raise():
 # Per-order reads
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_order_history_normalises_lifecycle_rows():
     mock = MockNeoFull()
@@ -560,6 +640,7 @@ async def test_order_trades_tolerates_no_trades():
 # Limits / scrip master / search filters
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_limits_filtered_call():
     mock = MockNeoFull()
@@ -597,8 +678,7 @@ async def test_search_scrip_forwards_fo_filters():
     mock = MockNeoFull()
     adapter = _adapter(mock)
     session = await _session(adapter)
-    await adapter.search_scrip(session, "BANKNIFTY", "NFO",
-                               expiry="28JUN2023", option_type="CE", strike_price="45000")
+    await adapter.search_scrip(session, "BANKNIFTY", "NFO", expiry="28JUN2023", option_type="CE", strike_price="45000")
     assert mock.calls == [("search", ("nse_fo", "BANKNIFTY", "28JUN2023", "CE", "45000"))]
 
 
@@ -619,6 +699,7 @@ async def test_search_scrip_minimal_uses_two_arg_call():
 # ---------------------------------------------------------------------------
 # Typed quotes + market depth
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_quote_details_typed_request():
@@ -674,14 +755,14 @@ async def test_market_depth_normalises_book():
 # HSM subscribe / unsubscribe
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_subscribe_with_token_resolver_and_depth_mode():
     mock = MockNeoFull()
     adapter = _adapter(mock, token_resolver=lambda s, e: "14366")
     session = await _session(adapter)
     await adapter.subscribe(session, ["NSE:IDEA"], mode="FULL")
-    assert mock.calls == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}],
-                                         False, True))]
+    assert mock.calls == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, True))]
 
 
 @pytest.mark.asyncio
@@ -691,8 +772,7 @@ async def test_subscribe_resolves_token_via_search_when_no_resolver():
     session = await _session(adapter)
     await adapter.subscribe(session, ["NSE:IDEA"], mode="LTP")
     sub = [c for c in mock.calls if c[0] == "subscribe"]
-    assert sub == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}],
-                                  False, False))]
+    assert sub == [("subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, False))]
 
 
 @pytest.mark.asyncio
@@ -701,9 +781,19 @@ async def test_subscribe_index_mode_passes_name_through():
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.subscribe(session, ["NSE:nifty 50", "BSE:bankex"], mode="INDEX")
-    assert mock.calls == [("subscribe", ([{"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"},
-                                          {"instrument_token": "BANKEX", "exchange_segment": "bse_cm"}],
-                                         True, False))]
+    assert mock.calls == [
+        (
+            "subscribe",
+            (
+                [
+                    {"instrument_token": "Nifty 50", "exchange_segment": "nse_cm"},
+                    {"instrument_token": "BANKEX", "exchange_segment": "bse_cm"},
+                ],
+                True,
+                False,
+            ),
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -714,8 +804,7 @@ async def test_unsubscribe_replays_recorded_subscription_flags():
     await adapter.subscribe(session, ["NSE:IDEA"], mode="DEPTH")
     await adapter.unsubscribe(session, ["NSE:IDEA"])
     unsub = [c for c in mock.calls if c[0] == "un_subscribe"]
-    assert unsub == [("un_subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}],
-                                       False, True))]
+    assert unsub == [("un_subscribe", ([{"instrument_token": "14366", "exchange_segment": "nse_cm"}], False, True))]
 
 
 @pytest.mark.asyncio
@@ -731,14 +820,28 @@ async def test_unsubscribe_unknown_symbol_is_noop():
 # Streams (synthetic frames)
 # ---------------------------------------------------------------------------
 
+
 def _market_frames(_session: Any) -> AsyncIterator[Any]:
     async def gen():
         yield json.dumps([{"type": "cn", "msg": "connected"}])  # ack — skipped
-        yield {"type": "stock_feed", "data": [
-            {"tk": "14366", "ts": "IDEA-EQ", "e": "nse_cm", "ltp": "9.4", "v": "1000",
-             "bp": "9.39", "sp": "9.41", "oi": "0", "ltt": "22/01/2025 14:28:16"},
-        ]}
+        yield {
+            "type": "stock_feed",
+            "data": [
+                {
+                    "tk": "14366",
+                    "ts": "IDEA-EQ",
+                    "e": "nse_cm",
+                    "ltp": "9.4",
+                    "v": "1000",
+                    "bp": "9.39",
+                    "sp": "9.41",
+                    "oi": "0",
+                    "ltt": "22/01/2025 14:28:16",
+                },
+            ],
+        }
         yield [{"tk": "Nifty 50", "e": "nse_cm", "name": "if", "iv": "24050.5", "ic": "23990"}]
+
     return gen()
 
 
@@ -765,10 +868,27 @@ async def test_stream_without_factory_raises():
 def _order_frames(_session: Any) -> AsyncIterator[Any]:
     async def gen():
         yield '{"type": "cn"}'  # connection ack — skipped
-        yield {"type": "order_feed", "data": json.dumps({"data": {
-            "nOrdNo": "250122000624384", "ordSt": "complete", "trdSym": "IDEA-EQ",
-            "exSeg": "nse_cm", "trnsTp": "B", "prcTp": "L", "prod": "NRML",
-            "qty": 1, "prc": "9.39", "fldQty": 1, "avgPrc": "9.39"}})}
+        yield {
+            "type": "order_feed",
+            "data": json.dumps(
+                {
+                    "data": {
+                        "nOrdNo": "250122000624384",
+                        "ordSt": "complete",
+                        "trdSym": "IDEA-EQ",
+                        "exSeg": "nse_cm",
+                        "trnsTp": "B",
+                        "prcTp": "L",
+                        "prod": "NRML",
+                        "qty": 1,
+                        "prc": "9.39",
+                        "fldQty": 1,
+                        "avgPrc": "9.39",
+                    }
+                }
+            ),
+        }
+
     return gen()
 
 

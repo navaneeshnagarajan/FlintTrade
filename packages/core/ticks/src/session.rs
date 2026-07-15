@@ -239,6 +239,10 @@ impl SessionTracker {
     ///     prev_timestamp_ns: Preceding bar's timestamp (optional).
     ///     next_timestamp_ns: Following bar's timestamp (optional, used to
     ///                        detect session end on the last intraday bar).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "preserve the established Rust and Python bar-update API"
+    )]
     #[pyo3(signature = (idx, timestamp_ns, open, high, low, close, prev_timestamp_ns=None, next_timestamp_ns=None))]
     pub fn update(
         &mut self,

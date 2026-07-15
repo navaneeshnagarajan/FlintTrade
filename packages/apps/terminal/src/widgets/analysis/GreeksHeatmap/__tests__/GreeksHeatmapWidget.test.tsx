@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 //
 // When connected, the widget fetches expiries (getExpiry) and the IV smile per
 // expiry (getFtIVSmile), then derives the aligned greek grid. We mock both so
-// we can exercise the live ("Live" badge) and sample ("Sample data") paths.
+// we can exercise live, disconnected sample, and connected unavailable states.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -40,6 +40,7 @@ function liveSmile() {
   return {
     underlying: "NIFTY",
     spot_price: 22000,
+    is_sample_data: false,
     curves: [
       {
         expiry: "17-APR-26",
@@ -59,7 +60,7 @@ function liveSmile() {
 
 /** Empty single-expiry smile (e.g. for a degenerate/zero-dte fixture). */
 function emptySmile() {
-  return { underlying: "NIFTY", spot_price: 0, curves: [] };
+  return { underlying: "NIFTY", spot_price: 0, curves: [], is_sample_data: false };
 }
 
 function renderWidget() {
@@ -120,26 +121,61 @@ describe("GreeksHeatmapWidget", () => {
     expect(mockGetSmile).toHaveBeenCalled();
   });
 
-  it("falls back to Sample data when connected but no expiries are available", async () => {
+  it("rejects a connected IV smile explicitly flagged as sample data", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["17-APR-26"] });
+    mockGetSmile.mockResolvedValue({ ...liveSmile(), is_sample_data: true });
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("gridcell")).toHaveLength(0);
+  });
+
+  it("fails closed when a connected IV smile omits its provenance flag", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockResolvedValue({ expiry: ["17-APR-26"] });
+    const { is_sample_data: _flag, ...unknownProvenance } = liveSmile();
+    mockGetSmile.mockResolvedValue(unknownProvenance);
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("gridcell")).toHaveLength(0);
+  });
+
+  it("shows unavailable instead of sample data when connected but no expiries are available", async () => {
     mockConnected.mockReturnValue(true);
     mockGetExpiry.mockResolvedValue({ expiry: [] });
     renderWidget();
 
-    await waitFor(() => expect(mockGetExpiry).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
     expect(mockGetSmile).not.toHaveBeenCalled();
   });
 
-  it("falls back to Sample data when every expiry is degenerate (dte <= 0)", async () => {
+  it("shows unavailable instead of sample data when every expiry is degenerate", async () => {
     mockConnected.mockReturnValue(true);
     mockGetExpiry.mockResolvedValue({ expiry: ["01-JAN-20"] });
     mockGetSmile.mockResolvedValue({ ...liveSmile(), curves: [{ ...liveSmile().curves[0], days_to_expiry: 0 }] });
     renderWidget();
 
-    await waitFor(() => expect(mockGetSmile).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a connected live-read failure without rendering sample figures", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetExpiry.mockRejectedValue(new Error("broker read failed"));
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("gridcell")).toHaveLength(0);
+    expect(screen.getByText("Live Greeks are unavailable for this symbol.")).toBeInTheDocument();
   });
 
   it("renders Greek toggle buttons", () => {

@@ -18,6 +18,7 @@ const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
 const mockUseOrders = vi.fn();
 const mockUseBrokerConnected = vi.fn();
+const mockUseDataScope = vi.fn();
 const jotaiMocks = vi.hoisted(() => ({
   useAtomValue: vi.fn<() => unknown>(() => null),
 }));
@@ -36,6 +37,10 @@ vi.mock("@/hooks/useOrders", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => mockUseDataScope(),
 }));
 
 // Mock Jotai tickAtomFamily — returns null tick (no WS data in test)
@@ -123,6 +128,7 @@ describe("DashboardWidget", () => {
     jotaiMocks.useAtomValue.mockReset();
     jotaiMocks.useAtomValue.mockReturnValue(null);
     mockUseBrokerConnected.mockReturnValue(true);
+    mockUseDataScope.mockReturnValue("live:openalgo:default");
     setupMocks({});
   });
 
@@ -143,7 +149,7 @@ describe("DashboardWidget", () => {
 
   it("displays fund data when loaded", () => {
     setupMocks({
-      funds: { availablecash: 250000, utiliseddebits: 48500 },
+      funds: { availableCash: 250000, usedMargin: 48500, totalBalance: 298500 },
     });
     render(<DashboardWidget {...defaultProps} />);
 
@@ -155,7 +161,7 @@ describe("DashboardWidget", () => {
 
   it("displays P&L summary from positions", () => {
     setupMocks({
-      funds: { availablecash: 100000, utiliseddebits: 20000 },
+      funds: { availableCash: 100000, usedMargin: 20000, totalBalance: 120000 },
       positions: [
         { symbol: "NIFTY", pnl: 1500, quantity: 50, average_price: 100, ltp: 130 },
         { symbol: "BANKNIFTY", pnl: -500, quantity: 30, average_price: 200, ltp: 183 },
@@ -184,6 +190,7 @@ describe("DashboardWidget", () => {
 
   it("does not fetch account snapshots when no broker is connected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    mockUseDataScope.mockReturnValue("live:unconfigured");
     setupMocks({ fundsPending: true, positionsPending: true, ordersPending: true });
 
     render(<DashboardWidget {...defaultProps} />);
@@ -194,6 +201,19 @@ describe("DashboardWidget", () => {
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load orders")).toBeInTheDocument();
+  });
+
+  it("reads the sandbox account scope in Practice without a live broker", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseDataScope.mockReturnValue("practice:sandbox:default");
+
+    render(<DashboardWidget {...defaultProps} />);
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUseOrders).toHaveBeenCalledWith({ enabled: true });
+    expect(screen.getByText("Practice account data")).toBeInTheDocument();
+    expect(screen.queryByText("Broker required")).not.toBeInTheDocument();
   });
 
   it("renders sparkline and position status through Flint UI primitives", () => {

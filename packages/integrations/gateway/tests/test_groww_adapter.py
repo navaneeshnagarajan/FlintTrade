@@ -17,6 +17,7 @@ from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers._base import Session
 from flinttrade_gateway.brokers._session_expiry import next_6am_ist_timestamp
 from flinttrade_gateway.brokers.groww import GrowwAdapter, _ROUTER_TOKEN
+from flinttrade_gateway.reconciliation import LocalStateSnapshot
 
 pytestmark = pytest.mark.unit
 
@@ -91,7 +92,10 @@ class MockGrowwTransport:
                 "order_type": "LIMIT",
                 "product": "CNC",
                 "quantity": 3,
+                "filled_quantity": 0,
                 "price": 2900,
+                "trigger_price": 0,
+                "average_price": 0,
                 "order_status": "OPEN",
             }]
             commodity_rows = [{
@@ -103,7 +107,10 @@ class MockGrowwTransport:
                 "order_type": "LIMIT",
                 "product": "NRML",
                 "quantity": 1,
+                "filled_quantity": 0,
                 "price": 6200,
+                "trigger_price": 0,
+                "average_price": 0,
                 "order_status": "OPEN",
             }]
             segment = (params or {}).get("segment")
@@ -358,6 +365,7 @@ async def test_reads_map_groww_envelopes() -> None:
     instruments = await adapter.instruments(session)
 
     assert orders[0]["orderid"] == "GROWWOID1"
+    assert orders[0]["average_price"] == 0.0
     assert positions[0]["exchange"] == "NFO"
     assert holdings[0]["isin"] == "INE467B01029"
     assert funds["availablecash"] == 50000.0
@@ -389,6 +397,28 @@ async def test_reads_map_groww_envelopes() -> None:
     assert instruments == [{"trading_symbol": "RELIANCE", "exchange": "NSE", "segment": "CASH"}]
     instrument_call = next(call for call in transport.calls if call["url"] == "https://growwapi-assets.groww.in/instruments/instrument.csv")
     assert instrument_call["headers"] == {"Accept": "text/csv"}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_accepts_complete_groww_order_evidence() -> None:
+    transport = MockGrowwTransport()
+    holder: dict[str, LocalStateSnapshot] = {}
+    adapter = GrowwAdapter(
+        http_factory=lambda: transport,
+        local_state_provider=lambda _session: holder["snapshot"],
+    )
+    session = await _session(adapter)
+    holder["snapshot"] = LocalStateSnapshot(
+        orders=tuple(await adapter.order_book(session)),
+        positions=tuple(await adapter.positions(session)),
+        holdings=tuple(await adapter.holdings(session)),
+    )
+
+    report = await adapter.reconcile(session)
+
+    assert report.error == ""
+    assert report.clean
+    assert all("average_price" in order for order in report.broker_orders)
 
 
 @pytest.mark.asyncio

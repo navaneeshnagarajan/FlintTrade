@@ -64,8 +64,12 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@/services/queryKeys", () => ({
   queryKeys: {
-    positions: { all: ["positions"] },
+    positions: { list: (scope: string) => ["positions", "list", scope] },
   },
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => "live:openalgo:default",
 }));
 
 // ---------------------------------------------------------------------------

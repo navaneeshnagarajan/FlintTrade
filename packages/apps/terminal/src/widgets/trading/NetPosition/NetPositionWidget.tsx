@@ -7,17 +7,15 @@
  *   - Group by underlying: NIFTY CE/PE legs collapsed under NIFTY header
  *   - Total row: aggregate exposure and P&L
  *   - Colour coding: long = profit green, short = loss red, flat = grey
- *   - Sample data when broker disconnected
+ *   - Sample data in Explore; sandbox data in Practice; broker data in Live
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Layers, ChevronDown, ChevronRight, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { getPositionbook } from "@/services/api";
-import { queryKeys } from "@/services/queryKeys";
+import { useDataScope } from "@/hooks/useDataScope";
+import { usePositions } from "@/hooks/usePositions";
 import { isMarketHours } from "@/lib/market";
 import type { Position } from "@/types/api";
 import { cn } from "@/lib/utils";
@@ -278,14 +276,17 @@ function UnderlyingGroup({ underlying, rows }: UnderlyingGroupProps) {
 
 function NetPositionWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
+  const dataScope = useDataScope();
+  const isExplore = dataScope === "explore:mock";
+  const isPractice = dataScope.startsWith("practice:");
+  const hasAccountSource = dataScope !== "live:unconfigured";
+  const shouldReadAccountData = hasAccountSource && !isExplore;
 
   useEffect(() => {
     track("trade", "widget_view_net_position");
   }, [track]);
 
-  // Connected → real broker positionbook (netted, live LTP/P&L); disconnected
-  // → labelled sample data. Never show fabricated positions to a live user.
+  // Explore uses labelled fixtures; Practice and Live read their scoped account books.
   const {
     data: livePositions,
     isError,
@@ -293,13 +294,7 @@ function NetPositionWidget() {
     refetch,
     isFetching,
     dataUpdatedAt,
-  } = useQuery<Position[]>({
-    queryKey: queryKeys.positions.all,
-    queryFn: getPositionbook,
-    enabled: isConnected,
-    staleTime: 3_000,
-    refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
-  });
+  } = usePositions({ enabled: shouldReadAccountData });
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -308,15 +303,19 @@ function NetPositionWidget() {
     return () => clearInterval(timer);
   }, []);
 
-  const hasUpdate = isConnected && dataUpdatedAt > 0;
+  const hasUpdate = shouldReadAccountData && dataUpdatedAt > 0;
   const isStale = hasUpdate && nowMs - dataUpdatedAt > staleThresholdMs();
 
   const netRows = useMemo(
     () =>
       netPositions(
-        isConnected ? (livePositions ?? []).map(positionToRaw) : SAMPLE_RAW_POSITIONS,
+        isExplore
+          ? SAMPLE_RAW_POSITIONS
+          : hasAccountSource
+            ? (livePositions ?? []).map(positionToRaw)
+            : [],
       ),
-    [isConnected, livePositions],
+    [hasAccountSource, isExplore, livePositions],
   );
 
   const underlyings = useMemo(() => {
@@ -377,16 +376,16 @@ function NetPositionWidget() {
           </span>
         )}
 
-        {!isConnected && (
+        {(isExplore || isPractice) && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
+            {isExplore ? "Sample" : "Practice"}
           </span>
         )}
       </div>
 
       {/* Position-feed failure banner — the table keeps the last good data,
           so say so instead of silently freezing the P&L. */}
-      {isConnected && isError && (
+      {shouldReadAccountData && isError && (
         <div
           role="alert"
           className="flex-none flex items-center gap-2 px-3 py-1.5 border-b border-loss/20 bg-loss/10"

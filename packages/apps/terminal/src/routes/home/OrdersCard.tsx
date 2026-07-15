@@ -4,17 +4,17 @@
 
 import { BentoCard } from "@/components/bento/BentoCard";
 import { useOrders } from "@/hooks/useOrders";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoOrders } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { ClipboardList, Loader2 } from "lucide-react";
 
 export function OrdersCard() {
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const isBrokerConnected = useBrokerConnected();
-  const query = useOrders({ enabled: isBrokerConnected && !isExplore });
+  const accountReadsEnabled = useAccountReadsEnabled();
+  const query = useOrders({ enabled: accountReadsEnabled });
   const orders = isExplore ? getDemoOrders() : query.data;
-  const isLoading = isExplore || !isBrokerConnected ? false : query.isLoading;
+  const isLoading = !accountReadsEnabled ? false : query.isLoading;
   const recentOrders = orders?.slice(0, 3) ?? [];
 
   return (
@@ -34,7 +34,7 @@ export function OrdersCard() {
         ) : recentOrders.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-xs text-text-muted">
-              {isExplore || isBrokerConnected ? "No recent orders" : "Connect a broker to load orders"}
+              {isExplore || accountReadsEnabled ? "No recent orders" : "Connect a broker to load orders"}
             </p>
           </div>
         ) : (

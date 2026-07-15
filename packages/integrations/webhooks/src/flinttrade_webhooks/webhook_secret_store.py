@@ -19,7 +19,13 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from flinttrade_core.db import open_sqlite
 
 from .webhook_keys import decrypt_webhook_secret, encrypt_webhook_secret
-from .webhook_replay import check_replay, ensure_nonce_schema, record_nonce
+from .webhook_replay import (
+    GC_RETAIN_SECONDS,
+    check_replay,
+    ensure_nonce_schema,
+    gc_old_nonces,
+    record_nonce,
+)
 
 _KDF_ITERATIONS = 390_000
 _MASTER_DEK_SALT = b"flinttrade-webhook-store-v1"
@@ -71,6 +77,7 @@ class WebhookSecretStore:
         with closing(self._connect()) as conn:
             conn.executescript(_WEBHOOK_SECRET_SCHEMA)
             ensure_nonce_schema(conn)
+            gc_old_nonces(conn)
         try:
             from flinttrade_core.secure_file import harden
 
@@ -150,8 +157,37 @@ class WebhookSecretStore:
                 reason = check_replay(conn, webhook_id, nonce, payload_ts, now=seen_at)
                 if reason is None:
                     record_nonce(conn, webhook_id, nonce, seen_at=seen_at, source_ip_hash=source_ip_hash)
+                # The packaged desktop intentionally does not run the full
+                # automation scheduler. Keep its replay table bounded on every
+                # intake while the server runtime retains the daily cron job.
+                gc_old_nonces(conn, now=seen_at)
                 conn.execute("COMMIT")
                 return reason
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+
+    def release_nonce_reservation(
+        self,
+        path: str,
+        nonce: str,
+        claimed_at: float,
+    ) -> bool:
+        """Release exactly the caller's nonce claim after quota refusal."""
+        webhook_id = canonical_webhook_id(path)
+        with closing(self._connect()) as conn:
+            cursor = conn.execute(
+                "DELETE FROM webhook_nonces WHERE webhook_id = ? AND nonce = ? AND seen_at = ?",
+                (webhook_id, nonce, claimed_at),
+            )
+            return cursor.rowcount == 1
+
+    def gc_nonces(
+        self,
+        *,
+        retain_seconds: int = GC_RETAIN_SECONDS,
+        now: float | None = None,
+    ) -> int:
+        """Delete expired replay evidence while retaining the forensic grace."""
+        with closing(self._connect()) as conn:
+            return gc_old_nonces(conn, retain_seconds=retain_seconds, now=now)

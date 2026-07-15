@@ -49,7 +49,7 @@ describe("ConnectionStep", () => {
     // Item 4: the old handleTest wrote host/apiKey into connectionStore BEFORE
     // the test ran, so a failed test still repointed the app at an unverified
     // host. The test must exercise the candidate values only; the store is
-    // written on explicit Continue (persistSetupChoices).
+    // written only after the explicit Continue save succeeds.
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ status: "error", message: "unreachable" }), {
         status: 200,
@@ -74,6 +74,77 @@ describe("ConnectionStep", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("/ft-api/v1/test-connection");
     // ...but the live connection store was NOT touched.
     expect(useConnectionStore.getState().host).toBe("");
+    expect(useConnectionStore.getState().apiKey).toBe("");
+  });
+
+  it("persists one complete OpenAlgo configuration before advancing", async () => {
+    const onComplete = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ status: "ok", message: "saved" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
+      target: { value: "candidate-api-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/ft-api/v1/config/openalgo",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          api_key: "candidate-api-key",
+          host: "http://localhost:5000",
+          port: "5000",
+          ws_port: "8765",
+        }),
+      }),
+    );
+    expect(useConnectionStore.getState()).toEqual(expect.objectContaining({
+      host: "http://localhost:5000",
+      apiKey: "candidate-api-key",
+      wsUrl: "ws://localhost:8765",
+    }));
+  });
+
+  it("keeps the wizard on the connection step when persistence fails", async () => {
+    const onComplete = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ status: "error", message: "workspace locked" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    )));
+
+    render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
+      target: { value: "candidate-api-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("workspace locked");
+    expect(onComplete).not.toHaveBeenCalled();
+    expect(useConnectionStore.getState().apiKey).toBe("");
+  });
+
+  it("does not advance when the backend reports an incomplete hot reload", async () => {
+    const onComplete = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ status: "partial", message: "tick capture requires a restart" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )));
+
+    render(<ConnectionStep onComplete={onComplete} />);
+    fireEvent.change(screen.getByLabelText(/openalgo-compatible api key/i), {
+      target: { value: "candidate-api-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/requires a restart/i);
+    expect(onComplete).not.toHaveBeenCalled();
     expect(useConnectionStore.getState().apiKey).toBe("");
   });
 

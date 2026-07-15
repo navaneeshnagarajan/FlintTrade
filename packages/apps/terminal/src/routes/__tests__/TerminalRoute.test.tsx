@@ -231,12 +231,19 @@ const inactiveSafetyConfig = {
   emergency_result: null,
 };
 
-function renderTerminalRoute({ seedSafetyConfig = true }: { seedSafetyConfig?: boolean } = {}) {
+function renderTerminalRoute({
+  seedSafetyConfig = true,
+}: {
+  seedSafetyConfig?: boolean | typeof inactiveSafetyConfig;
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   if (seedSafetyConfig) {
-    queryClient.setQueryData(["safetyConfig"], { ...inactiveSafetyConfig });
+    queryClient.setQueryData(
+      ["safetyConfig"],
+      seedSafetyConfig === true ? { ...inactiveSafetyConfig } : seedSafetyConfig,
+    );
   }
 
   const rendered = render(
@@ -282,6 +289,16 @@ describe("TerminalRoute", () => {
     renderTerminalRoute();
 
     expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
+  });
+
+  it("clears the mounted Dockview API when the trade route unmounts", async () => {
+    const { unmount } = renderTerminalRoute();
+
+    await waitFor(() => expect(mockLayoutState.dockviewApi).toBe(mockDockviewState.api));
+    unmount();
+
+    expect(mockLayoutState.setDockviewApi).toHaveBeenLastCalledWith(null);
+    expect(mockLayoutState.dockviewApi).toBeNull();
   });
 
   it("renders resizable panel structure with separators", () => {
@@ -330,6 +347,42 @@ describe("TerminalRoute", () => {
 
     resolveSafetyConfig?.({ ...inactiveSafetyConfig });
     await waitFor(() => expect(button).toBeEnabled());
+  });
+
+  it("keeps an active L5 kill switch visible below the local MTM warning threshold", () => {
+    mockTradingState.totalPnl = 0;
+
+    renderTerminalRoute({
+      seedSafetyConfig: {
+        ...inactiveSafetyConfig,
+        kill_switch_active: true,
+        kill_switch_reason: "operator request",
+        flatten_complete: true,
+      },
+    });
+
+    expect(screen.getByRole("status", { name: /kill switch status: active/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /kill switch is active/i })).toHaveTextContent("Kill Active");
+  });
+
+  it("renders an explicit loading state instead of inactive before L5 loads", () => {
+    mockGetSafetyConfig.mockReturnValueOnce(new Promise(() => undefined));
+
+    renderTerminalRoute({ seedSafetyConfig: false });
+
+    expect(screen.getByRole("status", { name: /kill switch status: loading/i })).toBeInTheDocument();
+    expect(screen.getByText(/checking kill-switch state/i)).toBeInTheDocument();
+    expect(screen.queryByText(/kill switch inactive/i)).not.toBeInTheDocument();
+  });
+
+  it("renders an unavailable state instead of inactive when the L5 read fails", async () => {
+    mockGetSafetyConfig.mockRejectedValueOnce(new Error("backend unavailable"));
+
+    renderTerminalRoute({ seedSafetyConfig: false });
+
+    expect(await screen.findByRole("alert", { name: /kill switch status: unavailable/i }))
+      .toHaveTextContent(/authoritative kill-switch state is unavailable/i);
+    expect(screen.queryByText(/kill switch inactive/i)).not.toBeInTheDocument();
   });
 
   it("keeps a visible retry action after a partial emergency dispatch", async () => {
@@ -440,7 +493,7 @@ describe("TerminalRoute", () => {
     const { queryClient } = renderTerminalRoute();
 
     fireEvent.click(screen.getByRole("button", { name: /activate emergency kill switch/i }));
-    expect(await screen.findByRole("button", { name: /activate emergency kill switch/i }))
+    expect(await screen.findByRole("button", { name: /kill switch is active/i }))
       .toHaveTextContent("Kill Active");
 
     mockGetSafetyConfig.mockResolvedValue({ ...inactiveSafetyConfig });
@@ -474,6 +527,24 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByRole("tab", { name: "Order Pad" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("compact-widget-orderpad")).toBeInTheDocument();
+  });
+
+  it("supports arrow-key navigation across compact workspace tabs", () => {
+    setViewportWidth(390);
+    renderTerminalRoute();
+
+    const chartTab = screen.getByRole("tab", { name: "Chart" });
+    chartTab.focus();
+    fireEvent.keyDown(chartTab, { key: "ArrowRight" });
+
+    const watchlistTab = screen.getByRole("tab", { name: "Watchlist" });
+    expect(watchlistTab).toHaveFocus();
+    expect(watchlistTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("compact-widget-watchlist")).toBeInTheDocument();
+
+    fireEvent.keyDown(watchlistTab, { key: "ArrowLeft" });
+    expect(chartTab).toHaveFocus();
+    expect(chartTab).toHaveAttribute("aria-selected", "true");
   });
 
   it("adds a widget when the command palette dispatches flinttrade:addWidget", async () => {

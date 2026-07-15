@@ -1,74 +1,55 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-
-// ---------------------------------------------------------------------------
-// Mock Switch (shadcn) to avoid Radix portal issues in test environment
-// ---------------------------------------------------------------------------
+import React, { createContext, useContext } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/ui/switch", () => ({
   Switch: ({
     checked,
+    disabled,
     onCheckedChange,
     "aria-label": ariaLabel,
     "data-testid": testId,
   }: {
     checked: boolean;
-    onCheckedChange: (v: boolean) => void;
+    disabled?: boolean;
+    onCheckedChange: (value: boolean) => void;
     "aria-label"?: string;
     "data-testid"?: string;
   }) => (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
       data-testid={testId}
+      disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
     />
   ),
 }));
 
-// Mock Badge to a simple span
-vi.mock("@/components/ui/badge", () => ({
-  Badge: ({ children, ...rest }: React.HTMLAttributes<HTMLSpanElement>) => (
-    <span {...rest}>{children}</span>
-  ),
-}));
-
-// Mock shadcn/ui Input to a native <input>
-vi.mock("@/components/ui/input", () => ({
-  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
-}));
-
-// Mock shadcn/ui Select components to render as a native <select> for testability
-vi.mock("@/components/ui/select", async () => {
-  const { createContext, useContext } = await import("react");
-  type SelectCtx = { value?: string; onValueChange?: (v: string) => void };
-  const Ctx = createContext<SelectCtx>({});
-
+vi.mock("@/components/ui/select", () => {
+  type SelectContext = {
+    value?: string;
+    disabled?: boolean;
+    onValueChange?: (value: string) => void;
+  };
+  const Context = createContext<SelectContext>({});
   return {
     Select: ({
       value,
+      disabled,
       onValueChange,
       children,
-    }: {
-      value?: string;
-      onValueChange?: (v: string) => void;
-      children?: React.ReactNode;
-    }) => <Ctx.Provider value={{ value, onValueChange }}>{children}</Ctx.Provider>,
-
-    SelectTrigger: ({
-      "data-testid": testId,
-      "aria-label": ariaLabel,
-    }: {
-      "data-testid"?: string;
-      "aria-label"?: string;
-      [key: string]: unknown;
-    }) => <span data-testid={testId} aria-label={ariaLabel} />,
-
-    SelectValue: ({ placeholder }: { placeholder?: string }) => (
-      <span>{placeholder}</span>
+    }: SelectContext & { children?: React.ReactNode }) => (
+      <Context.Provider value={{ value, disabled, onValueChange }}>{children}</Context.Provider>
     ),
-
+    SelectTrigger: ({ children, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
+      <span {...props}>{children}</span>
+    ),
+    SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder}</span>,
     SelectContent: ({
       children,
       "data-testid": testId,
@@ -76,248 +57,229 @@ vi.mock("@/components/ui/select", async () => {
       children?: React.ReactNode;
       "data-testid"?: string;
     }) => {
-      const ctx = useContext(Ctx);
+      const context = useContext(Context);
       return (
         <select
           data-testid={testId}
-          value={ctx.value ?? ""}
-          onChange={(e) => ctx.onValueChange?.(e.target.value)}
+          value={context.value ?? ""}
+          disabled={context.disabled}
+          onChange={(event) => context.onValueChange?.(event.target.value)}
         >
           {children}
         </select>
       );
     },
-
-    SelectItem: ({
-      value,
-      children,
-    }: {
-      value: string;
-      children?: React.ReactNode;
-    }) => <option value={value}>{children}</option>,
+    SelectItem: ({ value, children }: { value: string; children?: React.ReactNode }) => (
+      <option value={value}>{children}</option>
+    ),
   };
 });
 
-import React from "react";
+vi.mock("@/services/ftApi", () => ({
+  getDittoAccounts: vi.fn(),
+  getDittoMirrorStatus: vi.fn(),
+  getDittoRisk: vi.fn(),
+  setDittoAccountEnabled: vi.fn(),
+  startDittoMirror: vi.fn(),
+  stopDittoMirror: vi.fn(),
+}));
 
-// ---------------------------------------------------------------------------
-// Clear localStorage before each test so config doesn't bleed between tests
-// ---------------------------------------------------------------------------
-
-beforeEach(() => {
-  localStorage.clear();
-});
-
+import {
+  getDittoAccounts,
+  getDittoMirrorStatus,
+  getDittoRisk,
+  setDittoAccountEnabled,
+  startDittoMirror,
+  stopDittoMirror,
+} from "@/services/ftApi";
 import TradeCopierWidget from "../TradeCopierWidget";
 
-describe("TradeCopierWidget — basic render", () => {
-  it("renders the widget root element", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByTestId("tradecopier-widget")).toBeTruthy();
+const mockGetAccounts = vi.mocked(getDittoAccounts);
+const mockGetStatus = vi.mocked(getDittoMirrorStatus);
+const mockGetRisk = vi.mocked(getDittoRisk);
+const mockSetEnabled = vi.mocked(setDittoAccountEnabled);
+const mockStart = vi.mocked(startDittoMirror);
+const mockStop = vi.mocked(stopDittoMirror);
+
+const accounts = {
+  accounts: [
+    {
+      id: "master",
+      name: "Primary",
+      broker: "OpenAlgo",
+      capital: 0,
+      pnl_today: 0,
+      status: "active" as const,
+      positions: 0,
+      group: "personal",
+      allocation_weight: 1,
+      max_loss_daily: 50_000,
+      is_master: true,
+    },
+    {
+      id: "target",
+      name: "Family",
+      broker: "OpenAlgo",
+      capital: 0,
+      pnl_today: 0,
+      status: "active" as const,
+      positions: 0,
+      group: "family",
+      allocation_weight: 0.5,
+      max_loss_daily: 25_000,
+      is_master: false,
+    },
+    {
+      id: "paused",
+      name: "Paused account",
+      broker: "OpenAlgo",
+      capital: 0,
+      pnl_today: 0,
+      status: "disabled" as const,
+      positions: 0,
+      group: "family",
+      allocation_weight: 1,
+      max_loss_daily: 10_000,
+      is_master: false,
+    },
+  ],
+};
+
+const stoppedStatus = {
+  active: false,
+  source_account: null,
+  target_accounts: [],
+  mode: "weighted" as const,
+  mirrored_positions: 0,
+  last_sync: null,
+  errors: [],
+};
+
+function renderWidget() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <TradeCopierWidget />
+    </QueryClientProvider>,
+  );
+}
+
+describe("TradeCopierWidget", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAccounts.mockResolvedValue(accounts);
+    mockGetStatus.mockResolvedValue(stoppedStatus);
+    mockGetRisk.mockResolvedValue({
+      complete: true,
+      aggregate_capital: 800_000,
+      aggregate_pnl: 2_500,
+      accounts: [],
+    });
+    mockSetEnabled.mockResolvedValue(accounts.accounts[1]);
+    mockStart.mockResolvedValue({
+      active: true,
+      source_account: "master",
+      target_accounts: ["target"],
+      mode: "weighted",
+      started_at: "2026-07-14T10:00:00+05:30",
+    });
+    mockStop.mockResolvedValue({ active: false, stopped_at: "2026-07-14T10:01:00+05:30" });
   });
 
-  it("shows 'Trade Copier' heading", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByText(/trade copier/i)).toBeTruthy();
+  it("renders canonical Ditto state without demo accounts or a simulated copy button", async () => {
+    renderWidget();
+
+    expect(screen.getByTestId("tradecopier-widget")).toBeInTheDocument();
+    expect((await screen.findAllByText("Family")).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("runtime-status")).toHaveTextContent("Stopped");
+    expect(screen.queryByText(/demo accounts/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/test copy/i)).not.toBeInTheDocument();
+    expect(screen.getByText("₹8,00,000")).toBeInTheDocument();
+    expect(screen.getByText("₹2,500")).toBeInTheDocument();
   });
 
-  it("renders the source account selector", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByTestId("source-select")).toBeTruthy();
+  it("prefers the configured master as source and lists real accounts", async () => {
+    renderWidget();
+
+    const select = await screen.findByTestId("source-select") as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("master"));
+    expect([...select.options].map((option) => option.value)).toEqual(["master", "target"]);
+    expect(screen.getByText(/0.5x · daily loss limit ₹25,000/)).toBeInTheDocument();
   });
 
-  it("default source account is Primary", () => {
-    render(<TradeCopierWidget />);
-    const select = screen.getByTestId("source-select") as HTMLSelectElement;
-    expect(select.value).toBe("acc-1");
+  it("starts the backend mirror with the selected target and allocation mode", async () => {
+    renderWidget();
+
+    const target = await screen.findByTestId("select-target-target");
+    fireEvent.click(target);
+    fireEvent.click(screen.getByTestId("mode-equal"));
+    const start = screen.getByTestId("start-mirror");
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+
+    await waitFor(() => {
+      expect(mockStart).toHaveBeenCalledWith("master", ["target"], "equal");
+    });
   });
 
-  it("renders Mirror and Proportional mode buttons", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByTestId("mode-mirror")).toBeTruthy();
-    expect(screen.getByTestId("mode-proportional")).toBeTruthy();
-  });
-});
+  it("uses the backend account lifecycle endpoint instead of changing local state only", async () => {
+    renderWidget();
 
-describe("TradeCopierWidget — source selector", () => {
-  it("changes source account on selection", () => {
-    render(<TradeCopierWidget />);
-    const select = screen.getByTestId("source-select") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "acc-2" } });
-    expect(select.value).toBe("acc-2");
+    fireEvent.click(await screen.findByTestId("enable-paused"));
+    await waitFor(() => expect(mockSetEnabled).toHaveBeenCalledWith("paused", true));
   });
 
-  it("lists all sample accounts in the dropdown", () => {
-    render(<TradeCopierWidget />);
-    const select = screen.getByTestId("source-select") as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toContain("acc-1");
-    expect(options).toContain("acc-2");
-    expect(options).toContain("acc-3");
-  });
-});
+  it("reflects an active backend generation and stops it through the API", async () => {
+    mockGetStatus.mockResolvedValue({
+      active: true,
+      source_account: "master",
+      target_accounts: ["target"],
+      mode: "weighted",
+      mirrored_positions: 3,
+      last_sync: "2026-07-14T10:00:00+05:30",
+      errors: [],
+    });
+    renderWidget();
 
-describe("TradeCopierWidget — copy mode switch", () => {
-  it("Mirror button is active by default", () => {
-    render(<TradeCopierWidget />);
-    const mirrorBtn = screen.getByTestId("mode-mirror");
-    // Active button has accent class
-    expect(mirrorBtn.className).toContain("accent");
-  });
+    const stop = await screen.findByTestId("stop-mirror");
+    expect(screen.getByTestId("runtime-status")).toHaveTextContent("Running");
+    expect(screen.getByTestId("mode-weighted")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("3")).toBeInTheDocument();
+    fireEvent.click(stop);
 
-  it("clicking Proportional switches the mode", () => {
-    render(<TradeCopierWidget />);
-    const propBtn = screen.getByTestId("mode-proportional");
-    fireEvent.click(propBtn);
-    // Proportional button should now be active
-    expect(propBtn.className).toContain("accent");
-    // Mirror button should lose accent
-    const mirrorBtn = screen.getByTestId("mode-mirror");
-    expect(mirrorBtn.className).not.toContain("bg-accent/15 text-accent");
+    await waitFor(() => expect(mockStop).toHaveBeenCalledOnce());
   });
 
-  it("shows 'ratio via multiplier' hint when Proportional is selected", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("mode-proportional"));
-    expect(screen.getByText(/ratio via multiplier/i)).toBeTruthy();
-  });
-});
+  it("fails closed when runtime status cannot be read", async () => {
+    mockGetStatus.mockRejectedValue(new Error("Ditto runtime unavailable"));
+    renderWidget();
 
-describe("TradeCopierWidget — target account toggles", () => {
-  it("renders default target accounts", () => {
-    render(<TradeCopierWidget />);
-    // Default targets: acc-2 and acc-3
-    expect(screen.getByTestId("target-acc-2")).toBeTruthy();
-    expect(screen.getByTestId("target-acc-3")).toBeTruthy();
+    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent("Ditto runtime unavailable");
+    expect(screen.getByTestId("runtime-status")).toHaveTextContent("Unavailable");
+    expect(screen.getByTestId("start-mirror")).toBeDisabled();
   });
 
-  it("toggle switch changes enabled state", () => {
-    render(<TradeCopierWidget />);
-    const toggle = screen.getByTestId("enable-acc-2");
-    const initial = toggle.getAttribute("aria-checked");
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-checked")).not.toBe(initial);
+  it("surfaces backend runtime errors without fabricating an event log", async () => {
+    mockGetStatus.mockResolvedValue({
+      ...stoppedStatus,
+      errors: ["Target account could not be reconciled"],
+    });
+    renderWidget();
+
+    expect(await screen.findByText("Target account could not be reconciled")).toBeInTheDocument();
+    expect(screen.queryByText(/no copy events yet/i)).not.toBeInTheDocument();
   });
 
-  it("pause button changes status indicator for target", () => {
-    render(<TradeCopierWidget />);
-    // acc-2 starts as "active" → clicking pause should change to "paused"
-    const pauseBtn = screen.getByTestId("status-toggle-acc-2");
-    // Should show Pause label initially (active account)
-    expect(pauseBtn.getAttribute("aria-label")).toContain("Pause");
-    fireEvent.click(pauseBtn);
-    // After click should show Resume
-    expect(pauseBtn.getAttribute("aria-label")).toContain("Resume");
-  });
+  it("shows an honest empty state when no accounts are configured", async () => {
+    mockGetAccounts.mockResolvedValue({ accounts: [] });
+    renderWidget();
 
-  it("remove button removes the target account", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByTestId("target-acc-2")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("remove-acc-2"));
-    expect(screen.queryByTestId("target-acc-2")).toBeNull();
-  });
-
-  it("multiplier input accepts new value", () => {
-    render(<TradeCopierWidget />);
-    const input = screen.getByTestId("multiplier-acc-2") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "2" } });
-    expect(input.value).toBe("2");
-  });
-});
-
-describe("TradeCopierWidget — risk filter panel", () => {
-  it("risk panel is hidden by default", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.queryByTestId("risk-panel")).toBeNull();
-  });
-
-  it("clicking risk toggle shows the risk panel", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("risk-toggle"));
-    expect(screen.getByTestId("risk-panel")).toBeTruthy();
-  });
-
-  it("max position input updates config", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("risk-toggle"));
-    const input = screen.getByTestId("max-position-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "10" } });
-    expect(input.value).toBe("10");
-  });
-
-  it("max daily loss input accepts a value", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("risk-toggle"));
-    const input = screen.getByTestId("max-daily-loss-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "5000" } });
-    expect(input.value).toBe("5000");
-  });
-
-  it("symbol whitelist renders badge chips for entered symbols", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("risk-toggle"));
-    const input = screen.getByTestId("symbol-whitelist-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "NIFTY, BANKNIFTY" } });
-    expect(screen.getByText("NIFTY")).toBeTruthy();
-    expect(screen.getByText("BANKNIFTY")).toBeTruthy();
-  });
-});
-
-describe("TradeCopierWidget — copy log", () => {
-  it("copy log is empty by default", () => {
-    render(<TradeCopierWidget />);
-    expect(screen.getByTestId("copy-log")).toBeTruthy();
-    expect(screen.getByText(/no copy events yet/i)).toBeTruthy();
-  });
-
-  it("Test Copy button creates log entries", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("test-copy-btn"));
-    // Should have at least one log entry now
-    expect(screen.queryByText(/no copy events yet/i)).toBeNull();
-  });
-
-  it("Clear button removes all log entries", () => {
-    render(<TradeCopierWidget />);
-    fireEvent.click(screen.getByTestId("test-copy-btn"));
-    // Find and click Clear
-    const clearBtn = screen.getByTestId("clear-log-btn");
-    fireEvent.click(clearBtn);
-    expect(screen.getByText(/no copy events yet/i)).toBeTruthy();
-  });
-});
-
-describe("TradeCopierWidget — add target account", () => {
-  it("shows add-target-select when non-source accounts are available", () => {
-    render(<TradeCopierWidget />);
-    // Remove existing targets first so we can see the add select for all
-    fireEvent.click(screen.getByTestId("remove-acc-2"));
-    fireEvent.click(screen.getByTestId("remove-acc-3"));
-    // Now both acc-2 and acc-3 should appear in the add select
-    const addSelect = screen.getByTestId("add-target-select") as HTMLSelectElement;
-    const options = Array.from(addSelect.options).map((o) => o.value).filter(Boolean);
-    expect(options).toContain("acc-2");
-    expect(options).toContain("acc-3");
-  });
-
-  it("add button is disabled when no target is selected", () => {
-    render(<TradeCopierWidget />);
-    // Remove existing targets
-    fireEvent.click(screen.getByTestId("remove-acc-2"));
-    fireEvent.click(screen.getByTestId("remove-acc-3"));
-    const addBtn = screen.getByTestId("add-target-btn") as HTMLButtonElement;
-    expect(addBtn.disabled).toBe(true);
-  });
-
-  it("adding a target account shows it in the target list", () => {
-    render(<TradeCopierWidget />);
-    // Remove all targets
-    fireEvent.click(screen.getByTestId("remove-acc-2"));
-    fireEvent.click(screen.getByTestId("remove-acc-3"));
-    // Select acc-2 from the add dropdown
-    const addSelect = screen.getByTestId("add-target-select") as HTMLSelectElement;
-    fireEvent.change(addSelect, { target: { value: "acc-2" } });
-    fireEvent.click(screen.getByTestId("add-target-btn"));
-    expect(screen.getByTestId("target-acc-2")).toBeTruthy();
+    expect(await screen.findByText("No Ditto accounts configured")).toBeInTheDocument();
+    expect(screen.getByTestId("start-mirror")).toBeDisabled();
   });
 });

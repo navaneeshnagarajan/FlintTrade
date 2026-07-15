@@ -33,4 +33,27 @@ describe("tradingStore", () => {
     expect(state.availableMargin).toBe(50000);
     expect(state.usedMargin).toBe(10000);
   });
+
+  it("clears every principal-derived aggregate", () => {
+    useTradingStore.getState().updateFromPositions([
+      { symbol: "NIFTY", exchange: "NFO", product: "MIS", quantity: 1, averagePrice: 100, ltp: 115, pnl: 1500, pnlPercent: 15 },
+    ] satisfies Position[]);
+    useTradingStore.getState().updateFromFunds({
+      availableCash: 50000,
+      usedMargin: 10000,
+      totalBalance: 60000,
+    });
+    useTradingStore.getState().setOpenOrderCount(3);
+
+    useTradingStore.getState().resetSessionState();
+
+    expect(useTradingStore.getState()).toMatchObject({
+      totalPnl: 0,
+      totalPnlPercent: 0,
+      positionCount: 0,
+      openOrderCount: 0,
+      usedMargin: 0,
+      availableMargin: 0,
+    });
+  });
 });

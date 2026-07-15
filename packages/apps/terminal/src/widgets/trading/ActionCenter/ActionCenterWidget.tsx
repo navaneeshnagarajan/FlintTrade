@@ -6,7 +6,7 @@
  *
  * Features:
  * - Table: Symbol / Action / Qty / Price / Order type / Strategy / Approve / Reject
- * - "Approve All" button at the top
+ * - Explicit one-at-a-time review for every live intent
  * - Badge count of pending orders (also shown on TOOLS button in TopBar)
  * - Auto-refresh every 5s when the widget is mounted
  *
@@ -14,7 +14,6 @@
  *   GET  /ft-api/api/v1/action-center/pending
  *   POST /ft-api/api/v1/action-center/approve/:id
  *   POST /ft-api/api/v1/action-center/reject/:id
- *   POST /ft-api/api/v1/action-center/approve-all
  */
 
 import { useState, useCallback, memo } from "react";
@@ -22,16 +21,6 @@ import { CheckCircle2, XCircle, CheckCheck, Loader2, ShieldCheck, AlertCircle, X
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -45,7 +34,6 @@ import {
   getPendingOrders,
   approveOrder,
   rejectOrder,
-  approveAllOrders,
   type PendingOrder,
 } from "@/services/ftApi";
 import type { WidgetProps } from "@/types/widgets";
@@ -155,7 +143,6 @@ interface ActionFailure {
 
 function ActionCenterWidget(_props: WidgetProps) {
   const queryClient = useQueryClient();
-  const [approveAllOpen, setApproveAllOpen] = useState(false);
   // A failed approval/rejection must never snap back silently — the operator
   // believes the order was actioned when it is still pending. Surface the
   // server message with a retry affordance instead.
@@ -198,21 +185,7 @@ function ActionCenterWidget(_props: WidgetProps) {
     onSettled: invalidate,
   });
 
-  const approveAllMutation = useMutation({
-    mutationFn: () => approveAllOrders(),
-    onMutate: () => setActionFailure(null),
-    onError: (err) =>
-      setActionFailure({
-        message: failureMessage("Approve-all failed — orders are still pending", err),
-        retry: () => approveAllMutation.mutate(),
-      }),
-    onSettled: invalidate,
-  });
-
-  const anyPending =
-    approveMutation.isPending ||
-    rejectMutation.isPending ||
-    approveAllMutation.isPending;
+  const anyPending = approveMutation.isPending || rejectMutation.isPending;
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-surface-base text-xs">
@@ -233,23 +206,6 @@ function ActionCenterWidget(_props: WidgetProps) {
           )}
         </div>
 
-        {pending.length > 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={anyPending}
-            onClick={() => setApproveAllOpen(true)}
-            className="h-6 px-2 text-xxs gap-1 border-border-default text-profit hover:bg-profit/10 hover:border-profit/40 hover:text-profit transition-colors"
-            aria-label={`Approve all ${pending.length} pending orders`}
-          >
-            {approveAllMutation.isPending ? (
-              <Loader2 size={10} className="animate-spin" />
-            ) : (
-              <CheckCheck size={10} />
-            )}
-            Approve All
-          </Button>
-        )}
       </div>
 
       {/* Mutation failure banner — server message + retry affordance */}
@@ -363,31 +319,6 @@ function ActionCenterWidget(_props: WidgetProps) {
           </p>
         </div>
       )}
-
-      {/* Approve all confirmation */}
-      <AlertDialog open={approveAllOpen} onOpenChange={setApproveAllOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Approve and send all pending orders?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pending.length} order{pending.length !== 1 ? "s" : ""} will be sent to
-              your broker immediately. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setApproveAllOpen(false);
-                approveAllMutation.mutate();
-              }}
-              className="bg-profit hover:bg-profit/90 text-white"
-            >
-              Approve All
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
+from flinttrade_core.workspace import duckdb_path
 
 logger = logging.getLogger("flinttrade.historical.master_contract_status")
 
@@ -44,15 +44,8 @@ CREATE TABLE IF NOT EXISTS master_contract_status (
 
 
 def _default_db_path() -> str:
-    """Resolve DuckDB path: env override > workspace > fallback."""
-    env = os.getenv("DUCKDB_PATH")
-    if env:
-        return env
-    try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
-        return str(Workspace().fast_data_dir / "flint.duckdb")
-    except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "flint.duckdb")
+    """Resolve the shared DuckDB path through the workspace authority."""
+    return str(duckdb_path())
 
 
 class MasterContractStatus:

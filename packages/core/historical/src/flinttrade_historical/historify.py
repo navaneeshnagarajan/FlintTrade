@@ -107,14 +107,9 @@ _STATUS_ERROR = "error"
 
 def _queue_db_path() -> Path:
     """Resolve queue SQLite path from env or workspace."""
-    env = __import__("os").getenv("HISTORIFY_QUEUE_DB")
-    if env:
-        return Path(env)
-    try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
-        return Workspace().fast_data_dir / "historify_queue.db"
-    except Exception:
-        return Path.home() / ".flinttrade" / "data" / "historify_queue.db"
+    from flinttrade_core.workspace import historify_queue_path  # noqa: PLC0415
+
+    return historify_queue_path()
 
 
 class _JobQueue:

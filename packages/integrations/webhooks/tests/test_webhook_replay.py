@@ -75,7 +75,13 @@ def test_is_stale_boundary() -> None:
     assert is_stale(now + 601, now) is True     # future skew beyond window — stale
 
 
-def test_record_nonce_is_idempotent(conn) -> None:
+@pytest.mark.parametrize("payload_ts", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_timestamp_is_always_stale(conn, payload_ts: float) -> None:
+    assert is_stale(payload_ts, 1_000.0) is True
+    assert check_replay(conn, WEBHOOK, "non-finite", payload_ts=payload_ts, now=1_000.0) == REASON_STALE
+
+
+def test_record_nonce_rebinds_the_accepted_timestamp(conn) -> None:
     now = 10_000.0
     record_nonce(conn, WEBHOOK, "n1", seen_at=now)
     record_nonce(conn, WEBHOOK, "n1", seen_at=now + 1)  # no IntegrityError
@@ -83,4 +89,4 @@ def test_record_nonce_is_idempotent(conn) -> None:
         "SELECT seen_at FROM webhook_nonces WHERE webhook_id=? AND nonce=?", (WEBHOOK, "n1")
     ).fetchall()
     assert len(rows) == 1
-    assert rows[0][0] == now  # first writer wins
+    assert rows[0][0] == now + 1

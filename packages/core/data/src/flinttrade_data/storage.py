@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
-import os
 import threading
 import uuid
 from dataclasses import dataclass
@@ -18,13 +18,23 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from flinttrade_core.workspace import duckdb_path
 
 logger = logging.getLogger("flinttrade.data.storage")
 IST = timezone(timedelta(hours=5, minutes=30))
 _SCHEMA_INITIALISE_LOCK = threading.RLock()
 MAX_TICK_REPLAY_QUERY_ROWS = 100_001
 _TICK_STORE_ID_KEY = "tick_store_id"
+_TICK_HIGH_WATER_KEY = "tick_ingest_high_water"
+_TICK_PRUNED_HIGH_WATER_KEY = "tick_pruned_ingest_high_water"
+_TICK_PRUNED_BEFORE_KEY = "tick_pruned_before_utc"
+_TICK_LINEAGE_PREDECESSOR_KEY = "tick_lineage_predecessor_store_id"
+_TICK_LINEAGE_ANCESTORS_KEY = "tick_lineage_ancestor_store_ids"
+_TICK_LINEAGE_RECOVERY_KEY = "tick_lineage_recovery"
+_NO_PRUNE_CUTOFF = "1970-01-01T00:00:00+00:00"
+_UNCERTAIN_PRUNE_CUTOFF = "9999-12-31T23:59:59+00:00"
 _MAX_INGEST_SEQ = 2**63 - 1
+_MAX_LINEAGE_SOURCE_STORE_IDS = 16
 
 
 class TickReplayCursorError(ValueError):
@@ -37,6 +47,10 @@ class TickReplayStoreMismatchError(TickReplayCursorError):
 
 class TickReplayCursorAheadError(TickReplayCursorError):
     """Raised when storage has rolled back behind a persisted cursor."""
+
+
+class TickReplayCursorPrunedError(TickReplayCursorError):
+    """Raised when retention removed a row committed after the cursor."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +77,102 @@ class TickReplayCursor:
             raise ValueError("ingest_seq must be a non-negative BIGINT")
 
 
+@dataclass(frozen=True, slots=True)
+class TickReplayLineageHandoff:
+    """One metadata-proven transition from a checkpoint lineage to storage."""
+
+    from_store_id: str
+    to_store_id: str
+    ancestor_store_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        from_store_id = TickReplayCursor(self.from_store_id, 0).store_id
+        to_store_id = TickReplayCursor(self.to_store_id, 0).store_id
+        if from_store_id == to_store_id:
+            raise ValueError("lineage handoff must change the store identity")
+        if not isinstance(self.ancestor_store_ids, tuple):
+            raise ValueError("lineage handoff ancestors must be a tuple")
+        ancestors = tuple(TickReplayCursor(store_id, 0).store_id for store_id in self.ancestor_store_ids)
+        source_store_ids = (*ancestors, from_store_id)
+        if len(source_store_ids) > _MAX_LINEAGE_SOURCE_STORE_IDS:
+            raise ValueError("lineage handoff exceeds the source-store bound")
+        if len(set(source_store_ids)) != len(source_store_ids) or to_store_id in source_store_ids:
+            raise ValueError("lineage handoff store identities must be distinct")
+
+    @property
+    def source_store_ids(self) -> tuple[str, ...]:
+        """Return every unacknowledged source, ending with the immediate predecessor."""
+        return (*self.ancestor_store_ids, self.from_store_id)
+
+
+@dataclass(frozen=True, slots=True)
+class TickReplayLineageRecovery:
+    """Explicit recovery authority for a store whose prior identity was missing."""
+
+    to_store_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        TickReplayCursor(self.to_store_id, 0)
+        if self.reason not in {"missing_store_identity", "pristine_store_replacement"}:
+            raise ValueError("tick storage lineage recovery reason is invalid")
+
+
+def _encode_store_ids(store_ids: tuple[str, ...]) -> str:
+    return json.dumps(list(store_ids), separators=(",", ":"))
+
+
+def _decode_store_ids(value: str) -> tuple[str, ...]:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        raise ValueError("lineage handoff ancestors are invalid") from None
+    if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+        raise ValueError("lineage handoff ancestors are invalid")
+    return tuple(decoded)
+
+
+def _encode_lineage_recovery(recovery: TickReplayLineageRecovery) -> str:
+    return json.dumps(
+        {"reason": recovery.reason, "to_store_id": recovery.to_store_id},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _decode_lineage_recovery(value: str) -> TickReplayLineageRecovery:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        raise ValueError("tick storage lineage recovery is invalid") from None
+    if not isinstance(decoded, dict) or set(decoded) != {"reason", "to_store_id"}:
+        raise ValueError("tick storage lineage recovery is invalid")
+    return TickReplayLineageRecovery(
+        to_store_id=decoded["to_store_id"],
+        reason=decoded["reason"],
+    )
+
+
+def _metadata_high_water(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if 0 <= parsed <= _MAX_INGEST_SEQ else None
+
+
+def _metadata_prune_cutoff(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 def _normalise_ts(value: Any) -> Any:
     """Store aware timestamps as naive UTC for DuckDB TIMESTAMP columns."""
     if isinstance(value, datetime) and value.tzinfo is not None:
@@ -85,15 +195,8 @@ def _ist_date_window(start_date: str, end_date: str) -> tuple[datetime, datetime
 
 
 def _default_db_path() -> str:
-    """Resolve DuckDB path: env override > workspace > fallback."""
-    env = os.getenv("DUCKDB_PATH")
-    if env:
-        return env
-    try:
-        from flinttrade_core.workspace import Workspace
-        return str(Workspace().fast_data_dir / "flint.duckdb")
-    except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "flint.duckdb")
+    """Resolve the shared DuckDB path through the workspace authority."""
+    return str(duckdb_path())
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +324,10 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit (event_type, ts)",
     "CREATE INDEX IF NOT EXISTS idx_daily_summary_date ON daily_summary (trade_date, strategy)",
 ]
-_DROP_TICKS_INDEX = "DROP INDEX IF EXISTS idx_ticks_sym_ex_ts_seq"
+_DROP_TICKS_INDEXES = (
+    "DROP INDEX IF EXISTS idx_ticks_sym_ex_ts",
+    "DROP INDEX IF EXISTS idx_ticks_sym_ex_ts_seq",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -276,20 +382,21 @@ class StorageManager:
             self.connection.execute(_SCHEMA_TICKS_SEQUENCE)
             for ddl in _ALL_SCHEMAS:
                 self.connection.execute(ddl)
-            self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
-            self.connection.execute(_MIGRATE_TICKS_TIMESTAMP_PROVENANCE)
-            tick_columns = {
-                row[1]: row
-                for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()
-            }
+            tick_columns = {row[1]: row for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()}
+            migrated_legacy_ingest_sequence = "ingest_seq" not in tick_columns
+            if migrated_legacy_ingest_sequence:
+                self.connection.execute(_MIGRATE_TICKS_INGEST_SEQUENCE)
+            if "timestamp_provenance" not in tick_columns:
+                self.connection.execute(_MIGRATE_TICKS_TIMESTAMP_PROVENANCE)
+            tick_columns = {row[1]: row for row in self.connection.execute("PRAGMA table_info('ticks')").fetchall()}
             requires_constraint_migration = not (
-                tick_columns["ingest_seq"][3]
-                and tick_columns["timestamp_provenance"][3]
+                tick_columns["ingest_seq"][3] and tick_columns["timestamp_provenance"][3]
             )
             if requires_constraint_migration:
                 # DuckDB refuses ALTER COLUMN while any index depends on the
                 # table, even when that index does not mention the new column.
-                self.connection.execute(_DROP_TICKS_INDEX)
+                for statement in _DROP_TICKS_INDEXES:
+                    self.connection.execute(statement)
             try:
                 if not tick_columns["ingest_seq"][3]:
                     self.connection.execute(_REQUIRE_TICKS_INGEST_SEQUENCE)
@@ -301,16 +408,144 @@ class StorageManager:
                     self.connection.execute(_INDEXES[0])
             for idx in _INDEXES:
                 self.connection.execute(idx)
-            candidate_store_id = str(uuid.uuid4())
-            self.connection.execute(
-                """INSERT INTO flinttrade_storage_metadata (key, value)
-                   SELECT ?, ?
-                   WHERE NOT EXISTS (
-                       SELECT 1 FROM flinttrade_storage_metadata WHERE key = ?
-                   )""",
-                [_TICK_STORE_ID_KEY, candidate_store_id, _TICK_STORE_ID_KEY],
-            )
-            self._read_tick_store_id()
+
+            conn = self.connection
+            conn.execute("BEGIN TRANSACTION")
+            try:
+                existing_metadata = dict(conn.execute("SELECT key, value FROM flinttrade_storage_metadata").fetchall())
+                had_store_identity = _TICK_STORE_ID_KEY in existing_metadata
+                lineage_metadata_complete = all(
+                    key in existing_metadata
+                    for key in (
+                        _TICK_HIGH_WATER_KEY,
+                        _TICK_PRUNED_HIGH_WATER_KEY,
+                        _TICK_PRUNED_BEFORE_KEY,
+                    )
+                )
+                observed_row = conn.execute("SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks").fetchone()
+                observed_high_water = int(observed_row[0]) if observed_row is not None else 0
+                stored_high_water = _metadata_high_water(existing_metadata.get(_TICK_HIGH_WATER_KEY))
+                stored_pruned_high_water = _metadata_high_water(
+                    existing_metadata.get(_TICK_PRUNED_HIGH_WATER_KEY)
+                )
+                stored_prune_cutoff = _metadata_prune_cutoff(
+                    existing_metadata.get(_TICK_PRUNED_BEFORE_KEY)
+                )
+                recovered_pruned_high_water = (
+                    stored_pruned_high_water
+                    if stored_pruned_high_water is not None
+                    else max(observed_high_water, stored_high_water or 0)
+                )
+                recovered_high_water = max(
+                    observed_high_water,
+                    stored_high_water or 0,
+                    recovered_pruned_high_water,
+                )
+                recovered_prune_cutoff = stored_prune_cutoff
+                if migrated_legacy_ingest_sequence and not existing_metadata:
+                    recovered_pruned_high_water = 0
+                    recovered_prune_cutoff = _NO_PRUNE_CUTOFF
+                if recovered_prune_cutoff is None:
+                    recovered_prune_cutoff = (
+                        _UNCERTAIN_PRUNE_CUTOFF
+                        if existing_metadata or observed_high_water > 0
+                        else _NO_PRUNE_CUTOFF
+                    )
+                if not had_store_identity or not lineage_metadata_complete:
+                    new_store_id = str(uuid.uuid4())
+                    if had_store_identity:
+                        try:
+                            old_store_id = TickReplayCursor(
+                                str(existing_metadata[_TICK_STORE_ID_KEY]),
+                                0,
+                            ).store_id
+                            predecessor = existing_metadata.get(_TICK_LINEAGE_PREDECESSOR_KEY)
+                            ancestor_value = existing_metadata.get(_TICK_LINEAGE_ANCESTORS_KEY)
+                            if predecessor is None:
+                                if ancestor_value is not None:
+                                    raise ValueError("lineage handoff ancestors have no predecessor")
+                                source_store_ids: tuple[str, ...] = ()
+                            else:
+                                ancestors = () if ancestor_value is None else _decode_store_ids(ancestor_value)
+                                existing_handoff = TickReplayLineageHandoff(
+                                    from_store_id=str(predecessor),
+                                    to_store_id=old_store_id,
+                                    ancestor_store_ids=ancestors,
+                                )
+                                source_store_ids = existing_handoff.source_store_ids[
+                                    -(_MAX_LINEAGE_SOURCE_STORE_IDS - 1) :
+                                ]
+                            new_handoff = TickReplayLineageHandoff(
+                                from_store_id=old_store_id,
+                                to_store_id=new_store_id,
+                                ancestor_store_ids=source_store_ids,
+                            )
+                            recovery_value = existing_metadata.get(_TICK_LINEAGE_RECOVERY_KEY)
+                            recovery = None if recovery_value is None else _decode_lineage_recovery(recovery_value)
+                            if recovery is not None and recovery.to_store_id != old_store_id:
+                                raise ValueError("lineage recovery targets a different store")
+                        except (TypeError, ValueError) as exc:
+                            raise RuntimeError("tick storage lineage predecessor is invalid") from exc
+                        self._set_metadata_value(
+                            _TICK_LINEAGE_PREDECESSOR_KEY,
+                            new_handoff.from_store_id,
+                        )
+                        if new_handoff.ancestor_store_ids:
+                            self._set_metadata_value(
+                                _TICK_LINEAGE_ANCESTORS_KEY,
+                                _encode_store_ids(new_handoff.ancestor_store_ids),
+                            )
+                        else:
+                            self._delete_metadata_value(_TICK_LINEAGE_ANCESTORS_KEY)
+                        if recovery is not None:
+                            self._set_metadata_value(
+                                _TICK_LINEAGE_RECOVERY_KEY,
+                                _encode_lineage_recovery(
+                                    TickReplayLineageRecovery(
+                                        to_store_id=new_store_id,
+                                        reason=recovery.reason,
+                                    )
+                                ),
+                            )
+                    else:
+                        self._delete_metadata_value(_TICK_LINEAGE_PREDECESSOR_KEY)
+                        self._delete_metadata_value(_TICK_LINEAGE_ANCESTORS_KEY)
+                        recovery_reason = (
+                            "missing_store_identity"
+                            if existing_metadata or observed_high_water > 0
+                            else "pristine_store_replacement"
+                        )
+                        self._set_metadata_value(
+                            _TICK_LINEAGE_RECOVERY_KEY,
+                            _encode_lineage_recovery(
+                                TickReplayLineageRecovery(
+                                    to_store_id=new_store_id,
+                                    reason=recovery_reason,
+                                )
+                            ),
+                        )
+                    self._set_metadata_value(_TICK_STORE_ID_KEY, new_store_id)
+                    self._set_metadata_value(
+                        _TICK_HIGH_WATER_KEY,
+                        str(recovered_high_water),
+                    )
+                    self._set_metadata_value(
+                        _TICK_PRUNED_HIGH_WATER_KEY,
+                        str(recovered_pruned_high_water),
+                    )
+                    self._set_metadata_value(
+                        _TICK_PRUNED_BEFORE_KEY,
+                        recovered_prune_cutoff,
+                    )
+                    if existing_metadata:
+                        logger.warning("Tick replay lineage rotated because lineage metadata was incomplete")
+                else:
+                    self._advance_tick_replay_high_water(observed_high_water)
+                self._read_tick_store_id()
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         logger.info("DuckDB schema initialised (tables + indexes)")
 
     # ------------------------------------------------------------------
@@ -338,14 +573,41 @@ class StorageManager:
         timestamp_provenance: str = "unknown",
     ) -> None:
         """Insert a single tick row (append-only)."""
-        self.connection.execute(
-            """INSERT INTO ticks
-               (ts, symbol, exchange, mode, ltp, open, high, low, close,
-                volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [_normalise_ts(ts), symbol, exchange, mode, ltp, open_, high, low, close,
-             volume, bid, ask, oi, prev_close, depth_json, _timestamp_provenance(timestamp_provenance)],
-        )
+        conn = self.connection
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            inserted = conn.execute(
+                """INSERT INTO ticks
+                   (ts, symbol, exchange, mode, ltp, open, high, low, close,
+                    volume, bid, ask, oi, prev_close, depth_json, timestamp_provenance)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   RETURNING ingest_seq""",
+                [
+                    _normalise_ts(ts),
+                    symbol,
+                    exchange,
+                    mode,
+                    ltp,
+                    open_,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    bid,
+                    ask,
+                    oi,
+                    prev_close,
+                    depth_json,
+                    _timestamp_provenance(timestamp_provenance),
+                ],
+            ).fetchone()
+            if inserted is None:
+                raise RuntimeError("tick insert did not return its ingest sequence")
+            self._advance_tick_replay_high_water(int(inserted[0]))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     def insert_ticks_batch(self, rows: list[tuple]) -> None:
         """Bulk insert ticks ATOMICALLY. Each tuple matches the ticks column order.
@@ -370,9 +632,7 @@ class StorageManager:
                 row = (*row, "unknown")
             if len(row) != 16:
                 raise ValueError("tick rows must contain 15 legacy or 16 provenance-aware fields")
-            normalised_rows.append(
-                (_normalise_ts(row[0]), *row[1:15], _timestamp_provenance(row[15]))
-            )
+            normalised_rows.append((_normalise_ts(row[0]), *row[1:15], _timestamp_provenance(row[15])))
         conn.execute("BEGIN TRANSACTION")
         try:
             conn.executemany(
@@ -382,6 +642,10 @@ class StorageManager:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 normalised_rows,
             )
+            sequence_row = conn.execute("SELECT currval('ticks_ingest_seq')").fetchone()
+            if sequence_row is None:
+                raise RuntimeError("tick batch did not advance its ingest sequence")
+            self._advance_tick_replay_high_water(int(sequence_row[0]))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -399,10 +663,26 @@ class StorageManager:
             return 0
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_to_keep)
         conn = self.connection
-        before = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
-        conn.execute("DELETE FROM ticks WHERE ts < ?", [cutoff])
-        after = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
-        return int(before - after)
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*), MAX(ingest_seq) FROM ticks WHERE ts < ?",
+                [cutoff],
+            ).fetchone()
+            removed = int(row[0]) if row is not None else 0
+            pruned_high_water = int(row[1]) if row is not None and row[1] is not None else 0
+            conn.execute("DELETE FROM ticks WHERE ts < ?", [cutoff])
+            if removed:
+                self._advance_metadata_high_water(
+                    _TICK_PRUNED_HIGH_WATER_KEY,
+                    pruned_high_water,
+                )
+                self._advance_prune_cutoff(cutoff)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return removed
 
     def get_ticks(
         self,
@@ -444,17 +724,141 @@ class StorageManager:
     def get_tick_replay_cursor(self) -> TickReplayCursor:
         """Return this store's identity and latest committed global tick sequence."""
         store_id = self._read_tick_store_id()
-        row = self.connection.execute(
-            "SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks"
-        ).fetchone()
-        ingest_seq = int(row[0]) if row is not None else 0
+        ingest_seq = self._read_tick_replay_high_water()
         return TickReplayCursor(store_id=store_id, ingest_seq=ingest_seq)
+
+    def get_tick_replay_lineage_handoff(
+        self,
+    ) -> TickReplayLineageHandoff | None:
+        """Return the unacknowledged metadata-proven lineage transition."""
+        metadata = dict(
+            self.connection.execute(
+                "SELECT key, value FROM flinttrade_storage_metadata WHERE key IN (?, ?, ?)",
+                [_TICK_STORE_ID_KEY, _TICK_LINEAGE_PREDECESSOR_KEY, _TICK_LINEAGE_ANCESTORS_KEY],
+            ).fetchall()
+        )
+        predecessor = metadata.get(_TICK_LINEAGE_PREDECESSOR_KEY)
+        ancestor_value = metadata.get(_TICK_LINEAGE_ANCESTORS_KEY)
+        if predecessor is None:
+            if ancestor_value is not None:
+                raise RuntimeError("tick storage lineage handoff is invalid")
+            return None
+        try:
+            ancestors = () if ancestor_value is None else _decode_store_ids(str(ancestor_value))
+            return TickReplayLineageHandoff(
+                from_store_id=str(predecessor),
+                to_store_id=str(metadata[_TICK_STORE_ID_KEY]),
+                ancestor_store_ids=ancestors,
+            )
+        except (KeyError, ValueError) as exc:
+            raise RuntimeError("tick storage lineage handoff is invalid") from exc
+
+    def acknowledge_tick_replay_lineage_handoff(
+        self,
+        handoff: TickReplayLineageHandoff,
+    ) -> bool:
+        """Clear exactly one successfully published lineage transition."""
+        if not isinstance(handoff, TickReplayLineageHandoff):
+            raise TypeError("handoff must be a TickReplayLineageHandoff")
+        current = self.get_tick_replay_lineage_handoff()
+        if current is None:
+            return False
+        if current != handoff:
+            raise RuntimeError("tick storage lineage handoff changed")
+        encoded_ancestors = _encode_store_ids(handoff.ancestor_store_ids)
+        deleted = self.connection.execute(
+            """DELETE FROM flinttrade_storage_metadata
+               WHERE key IN (?, ?)
+                 AND (SELECT value FROM flinttrade_storage_metadata WHERE key = ?) = ?
+                 AND (SELECT value FROM flinttrade_storage_metadata WHERE key = ?) = ?
+                 AND (
+                       (? = '' AND NOT EXISTS (
+                           SELECT 1 FROM flinttrade_storage_metadata WHERE key = ?
+                       ))
+                       OR (SELECT value FROM flinttrade_storage_metadata WHERE key = ?) = ?
+                 )
+               RETURNING key""",
+            [
+                _TICK_LINEAGE_PREDECESSOR_KEY,
+                _TICK_LINEAGE_ANCESTORS_KEY,
+                _TICK_STORE_ID_KEY,
+                handoff.to_store_id,
+                _TICK_LINEAGE_PREDECESSOR_KEY,
+                handoff.from_store_id,
+                encoded_ancestors if handoff.ancestor_store_ids else "",
+                _TICK_LINEAGE_ANCESTORS_KEY,
+                _TICK_LINEAGE_ANCESTORS_KEY,
+                encoded_ancestors,
+            ],
+        ).fetchall()
+        expected_deleted = 1 + int(bool(handoff.ancestor_store_ids))
+        if len(deleted) != expected_deleted:
+            raise RuntimeError("tick storage lineage handoff changed")
+        return True
+
+    def get_tick_replay_lineage_recovery(
+        self,
+    ) -> TickReplayLineageRecovery | None:
+        """Return explicit authority to recover a lineage whose store ID was missing."""
+        metadata = dict(
+            self.connection.execute(
+                "SELECT key, value FROM flinttrade_storage_metadata WHERE key IN (?, ?)",
+                [_TICK_STORE_ID_KEY, _TICK_LINEAGE_RECOVERY_KEY],
+            ).fetchall()
+        )
+        value = metadata.get(_TICK_LINEAGE_RECOVERY_KEY)
+        if value is None:
+            return None
+        try:
+            recovery = _decode_lineage_recovery(str(value))
+        except ValueError as exc:
+            raise RuntimeError("tick storage lineage recovery is invalid") from exc
+        if recovery.to_store_id != metadata.get(_TICK_STORE_ID_KEY):
+            raise RuntimeError("tick storage lineage recovery targets a different store")
+        return recovery
+
+    def acknowledge_tick_replay_lineage_recovery(
+        self,
+        recovery: TickReplayLineageRecovery,
+    ) -> bool:
+        """Clear exactly one successfully published missing-identity recovery."""
+        if not isinstance(recovery, TickReplayLineageRecovery):
+            raise TypeError("recovery must be a TickReplayLineageRecovery")
+        current = self.get_tick_replay_lineage_recovery()
+        if current is None:
+            return False
+        if current != recovery:
+            raise RuntimeError("tick storage lineage recovery changed")
+        deleted = self.connection.execute(
+            """DELETE FROM flinttrade_storage_metadata
+               WHERE key = ? AND value = ?
+                 AND (SELECT value FROM flinttrade_storage_metadata WHERE key = ?) = ?
+               RETURNING key""",
+            [
+                _TICK_LINEAGE_RECOVERY_KEY,
+                _encode_lineage_recovery(recovery),
+                _TICK_STORE_ID_KEY,
+                recovery.to_store_id,
+            ],
+        ).fetchall()
+        if len(deleted) != 1:
+            raise RuntimeError("tick storage lineage recovery changed")
+        return True
 
     def validate_tick_replay_cursor(
         self,
         cursor: TickReplayCursor,
     ) -> TickReplayCursor:
         """Validate cursor lineage and rollback safety; return the current cursor."""
+        return self._validate_tick_replay_cursor_in_transaction(cursor)
+
+    def _validate_tick_replay_cursor_in_transaction(
+        self,
+        cursor: TickReplayCursor,
+        *,
+        session_start: datetime | None = None,
+    ) -> TickReplayCursor:
+        """Validate one cursor inside the caller's current DuckDB snapshot."""
         if not isinstance(cursor, TickReplayCursor):
             raise TypeError("cursor must be a TickReplayCursor")
         current = self.get_tick_replay_cursor()
@@ -462,6 +866,10 @@ class StorageManager:
             raise TickReplayStoreMismatchError("cursor belongs to a different tick store")
         if cursor.ingest_seq > current.ingest_seq:
             raise TickReplayCursorAheadError("cursor is ahead of tick storage")
+        pruned_high_water = self._read_metadata_high_water(_TICK_PRUNED_HIGH_WATER_KEY)
+        requested_session_is_complete = session_start is not None and session_start >= self._read_prune_cutoff()
+        if cursor.ingest_seq < pruned_high_water and not requested_session_is_complete:
+            raise TickReplayCursorPrunedError("tick retention removed rows committed after the replay cursor")
         return current
 
     def get_ticks_after_cursor(
@@ -469,42 +877,58 @@ class StorageManager:
         cursor: TickReplayCursor,
         symbol: str,
         exchange: str,
-        session_date: str,
+        session_date: str | None,
         *,
         limit: int,
     ) -> list[dict[str, Any]]:
-        """Return the earliest current-session rows committed after ``cursor``.
+        """Return the earliest rows committed after ``cursor``.
 
         Callers should request ``max_ticks + 1`` rows. Receiving at most
         ``max_ticks`` proves the cursor-bound tail is complete; receiving the
         extra row proves replay must fail closed or use a newer checkpoint.
         Unlike :meth:`get_ticks`, rows include ``ingest_seq`` so duplicate source
-        timestamps retain a stable persistence order.
+        timestamps retain a stable persistence order. Pass ``session_date`` to
+        build a complete session prefix from a zero cursor; pass ``None`` when a
+        checkpoint already defines the represented history and every later
+        commit must be replayed regardless of its source timestamp.
         """
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 0 < limit <= MAX_TICK_REPLAY_QUERY_ROWS
-        ):
-            raise ValueError(
-                f"limit must be between 1 and {MAX_TICK_REPLAY_QUERY_ROWS}"
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 0 < limit <= MAX_TICK_REPLAY_QUERY_ROWS:
+            raise ValueError(f"limit must be between 1 and {MAX_TICK_REPLAY_QUERY_ROWS}")
+        date_clause = ""
+        params: list[Any] = [cursor.ingest_seq, symbol, exchange]
+        session_start: datetime | None = None
+        if session_date is not None:
+            start, end = _ist_date_window(session_date, session_date)
+            session_start = start
+            date_clause = "AND ts >= ? AND ts < ?"
+            params.extend((start, end))
+        params.append(limit)
+        conn = self.connection
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            self._validate_tick_replay_cursor_in_transaction(
+                cursor,
+                session_start=session_start,
             )
-        self.validate_tick_replay_cursor(cursor)
-        start, end = _ist_date_window(session_date, session_date)
-        result = self.connection.execute(
-            """SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
-                      volume, bid, ask, oi, prev_close, depth_json,
-                      timestamp_provenance, ingest_seq
-               FROM ticks
-               WHERE ingest_seq > ?
-                 AND symbol = ? AND exchange = ?
-                 AND ts >= ? AND ts < ?
-               ORDER BY ingest_seq
-               LIMIT ?""",
-            [cursor.ingest_seq, symbol, exchange, start, end, limit],
-        )
-        columns = [desc[0] for desc in result.description]
-        return [dict(zip(columns, row)) for row in result.fetchall()]
+            result = conn.execute(
+                f"""SELECT ts, symbol, exchange, mode, ltp, open, high, low, close,
+                          volume, bid, ask, oi, prev_close, depth_json,
+                          timestamp_provenance, ingest_seq
+                   FROM ticks
+                   WHERE ingest_seq > ?
+                     AND symbol = ? AND exchange = ?
+                     {date_clause}
+                   ORDER BY ingest_seq
+                   LIMIT ?""",  # noqa: S608 - date_clause is selected from fixed literals above
+                params,
+            )
+            columns = [desc[0] for desc in result.description]
+            rows = result.fetchall()
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        return [dict(zip(columns, row)) for row in rows]
 
     def _read_tick_store_id(self) -> str:
         """Read and validate the durable tick-store identity."""
@@ -521,6 +945,101 @@ class StorageManager:
             return TickReplayCursor(str(row[0]), 0).store_id
         except ValueError as exc:
             raise RuntimeError("tick storage identity is invalid") from exc
+
+    def _advance_tick_replay_high_water(self, observed: int | None = None) -> None:
+        """Persist the greatest committed sequence without per-flush table scans."""
+        if observed is None:
+            row = self.connection.execute("SELECT COALESCE(MAX(ingest_seq), 0) FROM ticks").fetchone()
+            observed = int(row[0]) if row is not None else 0
+        self._advance_metadata_high_water(_TICK_HIGH_WATER_KEY, observed)
+
+    def _advance_metadata_high_water(self, key: str, observed: int) -> None:
+        if not 0 <= observed <= _MAX_INGEST_SEQ:
+            raise RuntimeError("tick storage high-water mark is invalid")
+        existing = self.connection.execute(
+            "SELECT value FROM flinttrade_storage_metadata WHERE key = ?",
+            [key],
+        ).fetchone()
+        if existing is None:
+            self.connection.execute(
+                "INSERT INTO flinttrade_storage_metadata (key, value) VALUES (?, ?)",
+                [key, str(observed)],
+            )
+            return
+        try:
+            high_water = int(existing[0])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("tick storage high-water mark is invalid") from exc
+        if not 0 <= high_water <= _MAX_INGEST_SEQ:
+            raise RuntimeError("tick storage high-water mark is invalid")
+        if observed > high_water:
+            self.connection.execute(
+                "UPDATE flinttrade_storage_metadata SET value = ? WHERE key = ?",
+                [str(observed), key],
+            )
+
+    def _set_metadata_value(self, key: str, value: str) -> None:
+        existing = self.connection.execute(
+            "SELECT 1 FROM flinttrade_storage_metadata WHERE key = ?",
+            [key],
+        ).fetchone()
+        if existing is None:
+            self.connection.execute(
+                "INSERT INTO flinttrade_storage_metadata (key, value) VALUES (?, ?)",
+                [key, value],
+            )
+        else:
+            self.connection.execute(
+                "UPDATE flinttrade_storage_metadata SET value = ? WHERE key = ?",
+                [value, key],
+            )
+
+    def _delete_metadata_value(self, key: str) -> None:
+        self.connection.execute(
+            "DELETE FROM flinttrade_storage_metadata WHERE key = ?",
+            [key],
+        )
+
+    def _advance_prune_cutoff(self, cutoff: datetime) -> None:
+        current = self._read_prune_cutoff()
+        if cutoff > current:
+            self._set_metadata_value(
+                _TICK_PRUNED_BEFORE_KEY,
+                cutoff.replace(tzinfo=timezone.utc).isoformat(),
+            )
+
+    def _read_prune_cutoff(self) -> datetime:
+        row = self.connection.execute(
+            "SELECT value FROM flinttrade_storage_metadata WHERE key = ?",
+            [_TICK_PRUNED_BEFORE_KEY],
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("tick storage prune cutoff is missing")
+        try:
+            cutoff = datetime.fromisoformat(str(row[0]))
+        except ValueError as exc:
+            raise RuntimeError("tick storage prune cutoff is invalid") from exc
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+        return cutoff
+
+    def _read_tick_replay_high_water(self) -> int:
+        return self._read_metadata_high_water(_TICK_HIGH_WATER_KEY)
+
+    def _read_metadata_high_water(self, key: str) -> int:
+        row = self.connection.execute(
+            "SELECT value FROM flinttrade_storage_metadata WHERE key = ?",
+            [key],
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("tick storage high-water mark is missing")
+        try:
+            value = int(row[0])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("tick storage high-water mark is invalid") from exc
+        if not 0 <= value <= _MAX_INGEST_SEQ:
+            raise RuntimeError("tick storage high-water mark is invalid")
+        return value
 
     def get_ticks_by_date(self, trade_date: str) -> list[dict[str, Any]]:
         """Get all ticks for a given date."""
@@ -564,12 +1083,29 @@ class StorageManager:
                (ts, orderid, symbol, exchange, action, quantity, price,
                 product, strategy, entry_price, exit_price, pnl, slippage, fees)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [_normalise_ts(ts), orderid, symbol, exchange, action, quantity, price,
-             product, strategy, entry_price, exit_price, pnl, slippage, fees],
+            [
+                _normalise_ts(ts),
+                orderid,
+                symbol,
+                exchange,
+                action,
+                quantity,
+                price,
+                product,
+                strategy,
+                entry_price,
+                exit_price,
+                pnl,
+                slippage,
+                fees,
+            ],
         )
 
     def get_trades_by_strategy(
-        self, strategy: str, start_date: str, end_date: str,
+        self,
+        strategy: str,
+        start_date: str,
+        end_date: str,
     ) -> list[dict[str, Any]]:
         """Get trades filtered by strategy and date range."""
         start, end = _ist_date_window(start_date, end_date)
@@ -650,12 +1186,14 @@ class StorageManager:
                (trade_date, strategy, total_trades, winning_trades, losing_trades,
                 gross_pnl, fees, net_pnl, max_drawdown)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [trade_date, strategy, total_trades, winning_trades, losing_trades,
-             gross_pnl, fees, net_pnl, max_drawdown],
+            [trade_date, strategy, total_trades, winning_trades, losing_trades, gross_pnl, fees, net_pnl, max_drawdown],
         )
 
     def get_daily_summaries(
-        self, start_date: str, end_date: str, strategy: str | None = None,
+        self,
+        start_date: str,
+        end_date: str,
+        strategy: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get daily summaries for a date range, optionally filtered by strategy."""
         if strategy:
@@ -684,7 +1222,10 @@ class StorageManager:
     # ------------------------------------------------------------------
 
     def export_trades_csv(
-        self, start_date: str, end_date: str, strategy: str | None = None,
+        self,
+        start_date: str,
+        end_date: str,
+        strategy: str | None = None,
     ) -> str:
         """Export trades to CSV string over the inclusive [start_date, end_date] range."""
         trades = (

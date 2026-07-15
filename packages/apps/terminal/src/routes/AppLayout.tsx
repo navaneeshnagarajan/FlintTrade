@@ -20,6 +20,7 @@ import DocsSearch, { type DocSearchResult } from "@/components/DocsSearch/DocsSe
 import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
@@ -139,13 +140,20 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
  * Flow routes (/welcome, /explore, /setup) render outside this layout.
  */
 export default function AppLayout() {
-  useOpenAlgoConfigHydration(); // Workspace config is authoritative; connectionStore is a runtime cache.
-  useWsBridge();         // WebSocket connection (no-ops if no apiKey)
+  const mode = useModeStore((s) => s.mode);
+  const authStatus = useAuthStore((s) => s.status);
+  const openAlgoApiKey = useConnectionStore((s) => s.apiKey);
+  const authenticated = authStatus === "logged-in";
+  const brokerConfigEnabled = authenticated && mode !== "explore";
+  const liveMarketDataEnabled = brokerConfigEnabled && openAlgoApiKey.trim().length > 0;
+
+  useOpenAlgoConfigHydration(brokerConfigEnabled); // Public Explore never reads or retains protected broker config.
+  useWsBridge(liveMarketDataEnabled); // Explore and blank-key sessions never open the broker socket.
   useDemoFeed();         // Simulated-live market feed in Explore mode (no broker)
-  useTickerFallback();   // REST polling fallback when WS is disconnected
+  useTickerFallback(liveMarketDataEnabled); // REST fallback belongs to the same authenticated feed.
   usePrevClose();        // Fetch prev close via REST for change% calculation (LTP mode has no close)
-  useTradingStoreSync(); // Mirror funds/positions REST cache → tradingStore scalars (single write point)
-  useBrokerAccounts();   // Poll gateway + native accounts → brokerStore (drives native write-targeting + AccountSwitcher; the connect UI is no longer the only populator)
+  useTradingStoreSync(authenticated); // Mirror only the current authenticated session's account state.
+  useBrokerAccounts(brokerConfigEnabled); // Never fetch account metadata while locked, logged out, or exploring.
   useNotificationFeed(); // Feed real connection/mode/order events into the Notification Centre
   const location = useLocation();
   const navigate = useNavigate();
@@ -162,8 +170,6 @@ export default function AppLayout() {
   }, [location.pathname]);
   // Practice mode drives the persistent amber indicator bar.
   // Mode is now owned exclusively by modeStore — settingsStore no longer has sandboxMode.
-  const mode = useModeStore((s) => s.mode);
-  const authStatus = useAuthStore((s) => s.status);
 
   const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
 

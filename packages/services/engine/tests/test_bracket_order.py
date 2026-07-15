@@ -14,14 +14,20 @@ OCO honesty is also pinned: a ``stoploss`` + ``target`` pair and
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+from flask import Flask
 
 from flinttrade_core.models import Order, PriceType
 from flinttrade_engine.bracket_order import (
     BracketOrderError,
     BracketOrderService,
     BracketPrincipal,
+    build_gated_leg_dispatchers,
 )
+from flinttrade_engine.safety import SafetyConfig, SafetySystem
 
 pytestmark = pytest.mark.unit
 
@@ -32,6 +38,85 @@ pytestmark = pytest.mark.unit
 
 
 PRINCIPAL = BracketPrincipal(actor_id="operator", jti="jti-001")
+
+
+def test_gated_leg_refuses_unvalidated_safety_runtime_before_broker_reads() -> None:
+    app = Flask("bracket-safety-readiness")
+    app.config.update(
+        BROKER_ROUTER=object(),
+        SAFETY=SafetySystem(),
+        SAFETY_CONFIG_READY=False,
+    )
+    place_leg, _cancel_leg = build_gated_leg_dispatchers(app)
+    order = Order(
+        symbol="RELIANCE",
+        action="BUY",
+        exchange="NSE",
+        quantity="1",
+    )
+
+    with pytest.raises(BracketOrderError, match="safety configuration"):
+        place_leg(order, PRINCIPAL)
+
+
+def test_gated_leg_checks_prospective_greeks_before_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import l2_state
+
+    class _BlockingSafety:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def check_order(self, _order: Order, **kwargs: object) -> list[object]:
+            self.calls.append(kwargs)
+            return [SimpleNamespace(
+                passed=False,
+                layer="L3_PORTFOLIO",
+                reason="prospective delta exceeds limit",
+            )]
+
+    state = SimpleNamespace(
+        positions=[],
+        used_margin=0.0,
+        total_balance=100000.0,
+        daily_pnl=0.0,
+        starting_capital=100000.0,
+        net_delta=0.0,
+        net_vega=0.0,
+        ltp_for=lambda _order: None,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[],
+            used_margin=0.0,
+            net_delta=750.0,
+            net_vega=12000.0,
+        ),
+    )
+
+    async def _prospective_state(*_args: object, **_kwargs: object) -> object:
+        return state
+
+    monkeypatch.setattr(l2_state, "gather_safety_state", _prospective_state)
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
+    recorder = _BlockingSafety()
+    safety = SafetySystem(SafetyConfig(check_market_hours=False))
+    safety.check_order = recorder.check_order
+    app = Flask("bracket-prospective-greeks")
+    app.config.update(
+        BROKER_ROUTER=router,
+        SAFETY=safety,
+        SAFETY_CONFIG_READY=True,
+    )
+    place_leg, _cancel_leg = build_gated_leg_dispatchers(app)
+    order = Order(symbol="NIFTY", action="BUY", exchange="NFO", quantity="1")
+
+    with pytest.raises(BracketOrderError, match="L3_PORTFOLIO"):
+        place_leg(order, PRINCIPAL)
+
+    assert recorder.calls[0]["net_delta"] == 750.0
+    assert recorder.calls[0]["net_vega"] == 12000.0
+    router.place_order.assert_not_called()
 
 
 class RecordingPlaceLeg:

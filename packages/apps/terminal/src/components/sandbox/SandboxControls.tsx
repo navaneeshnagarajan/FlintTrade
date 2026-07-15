@@ -3,6 +3,7 @@
  *
  * Features:
  *   - Current virtual capital display (₹ formatted in Indian locale)
+ *   - Persisted leverage and square-off policy
  *   - Adjust capital (+ / - amount) via react-hook-form
  *   - Reset all sandbox data (with AlertDialog confirmation)
  *   - Export data as JSON download
@@ -19,6 +20,7 @@ import { z } from "zod";
 import { Download, Upload, RotateCcw, IndianRupee, TrendingUp, TrendingDown } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { SandboxStatusSchema } from "@/lib/schemas/ftApi";
+import { buildHeaders } from "@/services/ftApi.helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,6 +46,28 @@ interface SandboxStatus {
   trades_count: number;
 }
 
+const sandboxConfigSchema = z.object({
+  starting_capital: z.number().finite().positive(),
+  equity_leverage: z.number().int().positive(),
+  futures_leverage: z.number().int().positive(),
+  option_buy_leverage: z.number().int().positive(),
+  option_sell_leverage: z.number().int().positive(),
+  squareoff_time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  mcx_squareoff_time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+});
+
+type SandboxConfig = z.infer<typeof sandboxConfigSchema>;
+
+const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
+  starting_capital: 1_000_000,
+  equity_leverage: 1,
+  futures_leverage: 1,
+  option_buy_leverage: 1,
+  option_sell_leverage: 1,
+  squareoff_time: "15:15",
+  mcx_squareoff_time: "23:25",
+};
+
 interface ExportData {
   capital: number;
   trades: unknown[];
@@ -58,7 +82,7 @@ interface ExportData {
 const BASE = "/ft-api/v1/sandbox";
 
 async function fetchSandboxStatus(): Promise<SandboxStatus> {
-  const resp = await fetch(`${BASE}/status`);
+  const resp = await fetch(`${BASE}/status`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error("Failed to fetch sandbox status.");
   const raw: unknown = await resp.json();
   const result = SandboxStatusSchema.safeParse(raw);
@@ -70,12 +94,30 @@ async function fetchSandboxStatus(): Promise<SandboxStatus> {
   return result.data.data as SandboxStatus;
 }
 
+async function fetchSandboxConfig(): Promise<SandboxConfig> {
+  const resp = await fetch(`${BASE}/config`, { headers: buildHeaders(false) });
+  if (!resp.ok) throw new Error("Failed to fetch Practice policy.");
+  const raw = await resp.json() as { data?: { config?: unknown } };
+  return sandboxConfigSchema.parse(raw.data?.config);
+}
+
+async function updateSandboxConfig(config: SandboxConfig): Promise<SandboxConfig> {
+  const resp = await fetch(`${BASE}/config`, {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify(config),
+  });
+  if (!resp.ok) throw new Error("Failed to save Practice policy.");
+  const raw = await resp.json() as { data?: { config?: unknown } };
+  return sandboxConfigSchema.parse(raw.data?.config);
+}
+
 async function adjustCapital(delta: number): Promise<SandboxStatus> {
   // Backend route is POST /capital/adjust {amount} (not /capital {delta}); it
   // returns the capital object, so refetch the combined status afterwards.
   const resp = await fetch(`${BASE}/capital/adjust`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify({ amount: delta }),
   });
   if (!resp.ok) throw new Error("Failed to adjust capital.");
@@ -83,12 +125,15 @@ async function adjustCapital(delta: number): Promise<SandboxStatus> {
 }
 
 async function resetSandbox(): Promise<void> {
-  const resp = await fetch(`${BASE}/reset`, { method: "POST" });
+  const resp = await fetch(`${BASE}/reset`, {
+    method: "POST",
+    headers: buildHeaders(false),
+  });
   if (!resp.ok) throw new Error("Failed to reset sandbox data.");
 }
 
 async function exportSandboxData(): Promise<ExportData> {
-  const resp = await fetch(`${BASE}/export`);
+  const resp = await fetch(`${BASE}/export`, { headers: buildHeaders(false) });
   if (!resp.ok) throw new Error("Failed to export sandbox data.");
   // Backend returns { status, data: "<json string>" } — parse the inner payload.
   const json = await resp.json() as { data: string };
@@ -99,7 +144,7 @@ async function importSandboxData(file: File): Promise<void> {
   const text = await file.text();
   const resp = await fetch(`${BASE}/import`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     // Backend expects { data: "<json string from /export>" }, not raw text.
     body: JSON.stringify({ data: text }),
   });
@@ -108,7 +153,7 @@ async function importSandboxData(file: File): Promise<void> {
 
 interface PlacedOrder {
   order_id: string;
-  status: string; // "COMPLETE" | "REJECTED"
+  status: string; // "PENDING" | "COMPLETE" | "REJECTED"
   message: string;
 }
 
@@ -123,7 +168,7 @@ interface PlaceOrderInput {
 async function placeSandboxOrder(input: PlaceOrderInput): Promise<PlacedOrder> {
   const resp = await fetch(`${BASE}/order`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(true),
     body: JSON.stringify({ ...input, product: "MIS" }),
   });
   const json = (await resp.json().catch(() => null)) as
@@ -202,6 +247,29 @@ export default function SandboxControls() {
     queryKey: ["sandboxStatus"],
     queryFn: fetchSandboxStatus,
     retry: 1,
+  });
+
+  const { data: sandboxConfig, isLoading: configLoading } = useQuery({
+    queryKey: ["sandboxConfig"],
+    queryFn: fetchSandboxConfig,
+    retry: 1,
+  });
+
+  const configForm = useForm<SandboxConfig>({
+    resolver: zodResolver(sandboxConfigSchema),
+    defaultValues: DEFAULT_SANDBOX_CONFIG,
+  });
+
+  useEffect(() => {
+    if (sandboxConfig) configForm.reset(sandboxConfig);
+  }, [configForm, sandboxConfig]);
+
+  const configMutation = useMutation({
+    mutationFn: updateSandboxConfig,
+    onSuccess: (updated) => {
+      configForm.reset(updated);
+      queryClient.setQueryData(["sandboxConfig"], updated);
+    },
   });
 
   // Capital adjustment mutation
@@ -297,6 +365,10 @@ export default function SandboxControls() {
     const amount = Number(values.amount);
     const delta = values.direction === "add" ? amount : -amount;
     adjustMutation.mutate(delta);
+  };
+
+  const onConfigSubmit = (values: SandboxConfig) => {
+    configMutation.mutate(values);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -421,7 +493,113 @@ export default function SandboxControls() {
       {/* Divider */}
       <div className="border-t border-border-default" />
 
-      {/* Place paper order — fills immediately against virtual capital (no broker) */}
+      <form
+        onSubmit={configForm.handleSubmit(onConfigSubmit)}
+        className="space-y-3"
+        aria-label="Practice policy"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-medium text-text-secondary">Practice Policy</p>
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={configLoading || configMutation.isPending}
+          >
+            {configMutation.isPending ? "Saving..." : "Save Policy"}
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <label className="space-y-1 text-xs text-text-muted sm:col-span-2">
+            <span>Starting capital</span>
+            <Input
+              {...configForm.register("starting_capital", { valueAsNumber: true })}
+              type="number"
+              min="1"
+              step="0.01"
+              aria-label="Starting capital"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>Equity leverage</span>
+            <Input
+              {...configForm.register("equity_leverage", { valueAsNumber: true })}
+              type="number"
+              min="1"
+              step="1"
+              aria-label="Equity leverage"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>Futures leverage</span>
+            <Input
+              {...configForm.register("futures_leverage", { valueAsNumber: true })}
+              type="number"
+              min="1"
+              step="1"
+              aria-label="Futures leverage"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>Option buy leverage</span>
+            <Input
+              {...configForm.register("option_buy_leverage", { valueAsNumber: true })}
+              type="number"
+              min="1"
+              step="1"
+              aria-label="Option buy leverage"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>Option sell leverage</span>
+            <Input
+              {...configForm.register("option_sell_leverage", { valueAsNumber: true })}
+              type="number"
+              min="1"
+              step="1"
+              aria-label="Option sell leverage"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>Equity/F&amp;O square-off</span>
+            <Input
+              {...configForm.register("squareoff_time")}
+              type="time"
+              aria-label="Equity and F&O square-off time"
+              className="font-mono"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>MCX square-off</span>
+            <Input
+              {...configForm.register("mcx_squareoff_time")}
+              type="time"
+              aria-label="MCX square-off time"
+              className="font-mono"
+            />
+          </label>
+        </div>
+
+        {Object.keys(configForm.formState.errors).length > 0 && (
+          <p className="text-xs text-loss" role="alert">Review the Practice policy values.</p>
+        )}
+        {configMutation.isError && (
+          <p className="text-xs text-loss" role="alert">{(configMutation.error as Error).message}</p>
+        )}
+        {configMutation.isSuccess && (
+          <p className="text-xs text-profit" role="status">Practice policy saved.</p>
+        )}
+      </form>
+
+      <div className="border-t border-border-default" />
+
+      {/* Place Practice order against virtual capital (no broker). */}
       <form onSubmit={orderForm.handleSubmit(onPlaceOrder)} className="space-y-3" aria-label="Place paper order">
         <p className="text-xs font-medium text-text-secondary">Place Paper Order</p>
 
@@ -514,10 +692,20 @@ export default function SandboxControls() {
         )}
         {orderResult && (
           <p
-            className={`text-xs ${orderResult.status === "COMPLETE" ? "text-profit" : "text-loss"}`}
+            className={`text-xs ${
+              orderResult.status === "COMPLETE"
+                ? "text-profit"
+                : orderResult.status === "PENDING"
+                  ? "text-warning"
+                  : "text-loss"
+            }`}
             role="status"
           >
-            {orderResult.status === "COMPLETE" ? "✓ Order filled" : "Order rejected"} — {orderResult.message}
+            {orderResult.status === "COMPLETE"
+              ? "✓ Order filled"
+              : orderResult.status === "PENDING"
+                ? "Order pending"
+                : "Order rejected"} — {orderResult.message}
           </p>
         )}
       </form>

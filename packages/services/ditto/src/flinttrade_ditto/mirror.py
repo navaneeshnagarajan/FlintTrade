@@ -17,17 +17,19 @@ Uses ThreadPoolExecutor for parallel execution across accounts
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import httpx
 
 from flinttrade_core.models import Order, OrderResponse
+from flinttrade_gateway.log_safety import account_ref
 from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
 
 from .account_manager import BrokerAccount
@@ -43,6 +45,10 @@ class AllocationMode(StrEnum):
     MARGIN_AWARE = "MARGIN_AWARE"
     LOT_BASED = "LOT_BASED"
     MULTIPLIER = "MULTIPLIER"
+
+
+class MirrorRiskError(RuntimeError):
+    """Raised when authoritative target-account risk cannot admit a mirror write."""
 
 
 # Lot sizes for F&O instruments — single source of truth is the screener's
@@ -62,6 +68,7 @@ class MirrorOrderResult:
     order_response: OrderResponse | None = None
     quantity_sent: int = 0
     error: str = ""
+    failure_code: str = ""
 
 
 @dataclass
@@ -382,6 +389,52 @@ def compute_multiplier_allocation(
 #: Callback type: receives ``(account_id, position_snapshot)`` where
 #: ``position_snapshot`` is the raw dict from the OpenAlgo positionbook API.
 PositionChangeCallback = Callable[[str, dict], None]
+PositionErrorCallback = Callable[[str], None]
+PositionIdentity = tuple[str, str, str]
+
+
+def normalise_position_row(row: Any) -> dict[str, Any]:
+    """Validate one canonical OpenAlgo position row used for mirroring."""
+    if not isinstance(row, dict):
+        raise RuntimeError("source positionbook returned a malformed position row")
+
+    symbol = row.get("symbol")
+    exchange = row.get("exchange")
+    product = row.get("product")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise RuntimeError("source positionbook returned a malformed position row")
+    if not isinstance(exchange, str) or not exchange.strip():
+        raise RuntimeError("source positionbook returned a malformed position row")
+    if not isinstance(product, str) or not product.strip():
+        raise RuntimeError("source positionbook returned a malformed position row")
+    if "quantity" not in row:
+        raise RuntimeError("source positionbook returned a malformed position row")
+
+    raw_quantity = row["quantity"]
+    if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, int | str):
+        raise RuntimeError("source positionbook returned a malformed position row")
+    try:
+        quantity = int(raw_quantity)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("source positionbook returned a malformed position row") from exc
+
+    normalised = dict(row)
+    normalised.update(
+        symbol=symbol.strip(),
+        exchange=exchange.strip().upper(),
+        product=product.strip().upper(),
+        quantity=quantity,
+    )
+    return normalised
+
+
+def position_identity(position: dict[str, Any]) -> PositionIdentity:
+    """Return the canonical exchange, symbol, and product position identity."""
+    return (
+        str(position["exchange"]),
+        str(position["symbol"]),
+        str(position["product"]),
+    )
 
 
 class PositionWatcher:
@@ -417,9 +470,11 @@ class PositionWatcher:
         self._account = account
         self._poll_interval = max(0.5, poll_interval)
         self._callbacks: list[PositionChangeCallback] = []
-        self._last_snapshot: dict[str, dict] = {}  # symbol → position dict
+        self._error_callbacks: list[PositionErrorCallback] = []
+        self._last_snapshot: dict[PositionIdentity, dict[str, Any]] = {}
         self._running = False
         self._thread: threading.Thread | None = None
+        self._lifecycle_lock = threading.Lock()
         # Cooperative stop: the poll loop blocks on this event instead of
         # time.sleep() so stop() can wake it instantly. With a plain
         # time.sleep(poll_interval), stop() had to wait the full interval
@@ -441,37 +496,77 @@ class PositionWatcher:
         """
         self._callbacks.append(callback)
 
+    def on_error(self, callback: PositionErrorCallback) -> None:
+        """Register a callback invoked when a source poll cannot be proven."""
+        self._error_callbacks.append(callback)
+
+    def prime(self) -> dict[PositionIdentity, dict[str, Any]]:
+        """Seed the source snapshot without emitting changes.
+
+        A mirroring session must establish an authoritative baseline before its
+        watcher thread starts. Otherwise every position already open at startup
+        looks new and is duplicated on all target accounts.
+        """
+        snapshot = self._fetch_snapshot()
+        self._last_snapshot = snapshot
+        return dict(snapshot)
+
     def start(self) -> None:
         """Start the background polling thread.
 
         Safe to call multiple times — subsequent calls are no-ops if already
         running.
         """
-        if self._running:
-            return
-        self._running = True
-        self._stop_event.clear()  # Reset in case the watcher is restarted.
-        self._thread = threading.Thread(
-            target=self._poll_loop,
-            name=f"pos-watcher-{self._account.account_id}",
-            daemon=True,
-        )
-        self._thread.start()
-        logger.info("PositionWatcher started for %s", self._account.account_id)
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._thread = None
+            self._running = True
+            self._stop_event.clear()  # Reset in case the watcher is restarted.
+            thread = threading.Thread(
+                target=self._poll_loop,
+                name=f"pos-watcher-{account_ref(self._account.account_id)}",
+                daemon=True,
+            )
+            self._thread = thread
+            thread.start()
+        logger.info("PositionWatcher started for %s", account_ref(self._account.account_id))
 
-    def stop(self) -> None:
-        """Signal the polling thread to stop and wait for it to exit."""
-        self._running = False
-        self._stop_event.set()  # Wake the loop immediately.
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self._poll_interval * 2 + 1)
-        self._thread = None
-        logger.info("PositionWatcher stopped for %s", self._account.account_id)
+    def stop(self, *, timeout: float = 5.0) -> bool:
+        """Signal the polling thread to stop and confirm that it exited."""
+        with self._lifecycle_lock:
+            self._running = False
+            self._stop_event.set()  # Wake the loop immediately.
+            thread = self._thread
+
+        if thread is None:
+            return True
+        if thread is threading.current_thread():
+            logger.warning(
+                "PositionWatcher cannot join its own thread for %s",
+                account_ref(self._account.account_id),
+            )
+            return False
+        if thread.is_alive():
+            thread.join(timeout=max(0.0, timeout))
+        if thread.is_alive():
+            logger.warning(
+                "PositionWatcher stop timed out for %s",
+                account_ref(self._account.account_id),
+            )
+            return False
+
+        with self._lifecycle_lock:
+            if self._thread is thread:
+                self._thread = None
+        logger.info("PositionWatcher stopped for %s", account_ref(self._account.account_id))
+        return True
 
     @property
     def is_running(self) -> bool:
         """True if the watcher thread is active."""
-        return self._running and bool(self._thread and self._thread.is_alive())
+        with self._lifecycle_lock:
+            return bool(self._thread and self._thread.is_alive())
 
     # ------------------------------------------------------------------
     # Internal polling
@@ -489,86 +584,107 @@ class PositionWatcher:
         while not self._stop_event.is_set():
             try:
                 self._poll_once()
-            except Exception as exc:
+            except Exception:
                 logger.warning(
-                    "PositionWatcher poll error for %s: %s",
-                    self._account.account_id,
-                    exc,
+                    "PositionWatcher poll failed for %s",
+                    account_ref(self._account.account_id),
                 )
+                for callback in list(self._error_callbacks):
+                    try:
+                        callback(self._account.account_id)
+                    except Exception:
+                        logger.error(
+                            "PositionWatcher error callback failed for %s",
+                            account_ref(self._account.account_id),
+                        )
             # Returns True if event was set (stop requested), False on timeout
             # (continue polling). Either way the next while-check handles it.
             self._stop_event.wait(timeout=self._poll_interval)
 
     def _poll_once(self) -> None:
         """Fetch current positionbook and compare with the last snapshot."""
+        current = self._fetch_snapshot()
+        changed = self._detect_changes(current)
+        self._last_snapshot = current
+
+        for pos in changed.values():
+            for cb in self._callbacks:
+                try:
+                    cb(self._account.account_id, pos)
+                except Exception:
+                    logger.error(
+                        "PositionWatcher callback failed for %s",
+                        account_ref(self._account.account_id),
+                    )
+
+    def _fetch_snapshot(self) -> dict[PositionIdentity, dict[str, Any]]:
+        """Read and validate one authoritative OpenAlgo position snapshot."""
         url = f"{self._account.openalgo_host.rstrip('/')}/api/v1/positionbook"
         payload = {"apikey": self._account.api_key}
 
         with httpx.Client(timeout=10.0) as http:
             resp = http.post(url, json=payload)
             if resp.status_code != 200:
-                logger.debug(
-                    "positionbook HTTP %d for %s",
-                    resp.status_code,
-                    self._account.account_id,
-                )
-                return
+                raise RuntimeError("source positionbook request was not successful")
 
         data = resp.json()
         if not isinstance(data, dict):
-            return
+            raise RuntimeError("source positionbook returned an invalid response")
 
-        positions: list[dict] = data.get("data", []) or []
-        current: dict[str, dict] = {
-            pos["tradingsymbol"]: pos
-            for pos in positions
-            if isinstance(pos, dict) and "tradingsymbol" in pos
-        }
+        if str(data.get("status") or "").strip().lower() != "success" or "data" not in data:
+            raise RuntimeError("source positionbook returned an incomplete response")
+        positions = data["data"]
+        if not isinstance(positions, list):
+            raise RuntimeError("source positionbook returned an invalid data envelope")
 
-        changed = self._detect_changes(current)
-        self._last_snapshot = current
-
-        for symbol, pos in changed.items():
-            for cb in self._callbacks:
-                try:
-                    cb(self._account.account_id, pos)
-                except Exception as exc:
-                    logger.error("PositionWatcher callback error: %s", exc)
+        snapshot: dict[PositionIdentity, dict[str, Any]] = {}
+        for position in positions:
+            normalised = normalise_position_row(position)
+            identity = position_identity(normalised)
+            if identity in snapshot:
+                raise RuntimeError("source positionbook returned duplicate position rows")
+            snapshot[identity] = normalised
+        return snapshot
 
     def _detect_changes(
-        self, current: dict[str, dict]
-    ) -> dict[str, dict]:
-        """Return positions whose net quantity changed since the last poll.
+        self, current: dict[PositionIdentity, dict[str, Any]]
+    ) -> dict[PositionIdentity, dict[str, Any]]:
+        """Return positions whose canonical quantity changed since the last poll.
 
-        A new symbol or a symbol whose ``netqty`` field changed is reported.
+        A new symbol or a symbol whose ``quantity`` field changed is reported.
         Symbols that disappeared (closed positions) are also reported with
         their last known state.
 
         Args:
-            current: Latest positionbook snapshot keyed by tradingsymbol.
+            current: Latest positionbook snapshot keyed by exchange, symbol,
+                and product.
 
         Returns:
-            Dict of changed/new positions keyed by tradingsymbol.
+            Dict of changed/new positions keyed by exchange, symbol, and
+            product. Closures are inserted before additions so a product
+            transition reduces the old leg before opening the new leg.
         """
-        changed: dict[str, dict] = {}
+        changed: dict[PositionIdentity, dict[str, Any]] = {}
+
+        # Close disappeared legs before opening replacement legs. This order
+        # matters when a broker reports a product conversion as one removed
+        # position and one new position for the same symbol.
+        for identity, pos in self._last_snapshot.items():
+            if identity not in current:
+                closed = dict(pos)
+                closed["quantity"] = 0
+                changed[identity] = closed
 
         # New or changed positions
-        for symbol, pos in current.items():
-            prev = self._last_snapshot.get(symbol)
+        for identity, pos in current.items():
+            prev = self._last_snapshot.get(identity)
             if prev is None:
-                changed[symbol] = pos
+                changed[identity] = pos
             else:
-                prev_qty = prev.get("netqty", prev.get("net_qty", 0))
-                curr_qty = pos.get("netqty", pos.get("net_qty", 0))
+                prev_qty = prev["quantity"]
+                curr_qty = pos["quantity"]
                 if prev_qty != curr_qty:
-                    changed[symbol] = pos
-
-        # Positions that were closed (disappeared from current snapshot)
-        for symbol, pos in self._last_snapshot.items():
-            if symbol not in current:
-                closed = dict(pos)
-                closed["netqty"] = 0
-                changed[symbol] = closed
+                    changed[identity] = pos
 
         return changed
 
@@ -602,7 +718,10 @@ class PositionMirror:
         mirror_config: MirrorConfig | None = None,
         broker_router: Any | None = None,
         actor_id: str = "ditto",
+        actor_type: Literal["human", "agent"] = "agent",
         trading_mode: str = "live",
+        run_router_call: Callable[[str, Any], Any] | None = None,
+        admit_order: Callable[[str, Order], Any] | None = None,
     ) -> None:
         self._accounts = accounts or []
         self._mode = mode
@@ -625,6 +744,9 @@ class PositionMirror:
         # the mirror targets.
         self._broker_router = broker_router
         self._actor_id = actor_id
+        self._actor_type = actor_type
+        self._run_router_call = run_router_call or (lambda _account_id, awaitable: asyncio.run(awaitable))
+        self._admit_order = admit_order
 
     @property
     def history(self) -> list[MirrorResult]:
@@ -716,10 +838,11 @@ class PositionMirror:
                         result.successful += 1
                     else:
                         result.failed += 1
-                except Exception as exc:
+                except Exception:
                     result.failed += 1
                     result.results.append(MirrorOrderResult(
-                        account_id=acc_id, error=str(exc),
+                        account_id=acc_id,
+                        error="Mirror dispatch failed; broker outcome is unconfirmed",
                     ))
 
         self._history.append(result)
@@ -755,7 +878,7 @@ class PositionMirror:
             )
             logger.error(
                 "Mirror to %s refused — no broker_router (fails closed, §8.1)",
-                account.account_id,
+                account_ref(account.account_id),
             )
             return result
 
@@ -775,13 +898,11 @@ class PositionMirror:
         ``account_acls`` and verifies the account-bound SafetyContext before the
         OpenAlgo bridge adapter places the order.
         """
-        import asyncio  # noqa: PLC0415
         import uuid  # noqa: PLC0415
 
         from flinttrade_core.exceptions import BrokerError, SafetyBypassError  # noqa: PLC0415
         from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
         from flinttrade_engine.safety import gate_order  # noqa: PLC0415
-        from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
         # Fail closed on a non-live operator mode. This path dispatches straight
         # to a live OpenAlgo account and never routes to the Practice
@@ -794,41 +915,66 @@ class PositionMirror:
             )
             logger.warning(
                 "Mirror to %s refused: non-live operator mode %r",
-                account.account_id,
+                account_ref(account.account_id),
                 self._trading_mode,
             )
             return result
 
         try:
-            mirror_order = order.model_copy(update={"quantity": quantity})
+            mirror_order = order.model_copy(update={"quantity": str(quantity)})
         except AttributeError:
             mirror_order = order
 
+        if self._admit_order is None:
+            result.error = "Complete target-account safety admission is unavailable; no order was sent"
+            logger.error("Mirror refused before gate: complete safety admission is unavailable")
+            return result
         request_ctx = RequestContext(
             jti=f"ditto-{uuid.uuid4().hex}",
-            actor_type="agent",
+            actor_type=self._actor_type,
             actor_id=self._actor_id,
             mode=self._trading_mode,
             selector=f"openalgo:{account.account_id}",
         )
         try:
-            safety_ctx = gate_order(
-                mirror_order, request_ctx, adapter_id="openalgo", account_id=account.account_id
-            )
-            broker_order_id = asyncio.run(
-                self._broker_router.place_order(
+            with self._admit_order(account.account_id, mirror_order) as (lease, positions):
+                safety_ctx = gate_order(
+                    mirror_order,
                     request_ctx,
-                    order=mirror_order,
-                    safety_ctx=safety_ctx,
-                    hint=RoutingHint(adapter_id="openalgo", account_id=account.account_id),
+                    adapter_id="openalgo",
+                    account_id=account.account_id,
                 )
+                reservation = lease.reserve(mirror_order, positions)
+                broker_order_id = self._run_router_call(
+                    account.account_id,
+                    self._broker_router.place_order(
+                        request_ctx,
+                        order=mirror_order,
+                        safety_ctx=safety_ctx,
+                        adapter_id="openalgo",
+                        account_id=account.account_id,
+                    ),
+                )
+                lease.acknowledge(reservation, broker_order_id)
+                result.success = True
+                result.order_response = OrderResponse(status="success", orderid=str(broker_order_id or ""))
+        except MirrorRiskError:
+            result.failure_code = "risk_blocked"
+            result.error = "Target-account risk state or daily loss limit blocked mirroring"
+            logger.warning(
+                "Mirror (gated) to %s was blocked by target-account risk",
+                account_ref(account.account_id),
             )
-            result.success = True
-            result.order_response = OrderResponse(status="success", orderid=str(broker_order_id or ""))
-        except (SafetyBypassError, BrokerError) as exc:
-            result.error = str(exc)
-            logger.warning("Mirror (gated) to %s refused: %s", account.account_id, exc)
-        except Exception as exc:  # pragma: no cover - defensive
-            result.error = str(exc)
-            logger.error("Mirror (gated) to %s failed: %s", account.account_id, exc)
+        except (SafetyBypassError, BrokerError):
+            result.error = "Mirror order was refused by the safety-gated router"
+            logger.warning(
+                "Mirror (gated) to %s was refused",
+                account_ref(account.account_id),
+            )
+        except Exception:  # pragma: no cover - defensive
+            result.error = "Target-account admission or dispatch failed; broker outcome is unconfirmed"
+            logger.error(
+                "Mirror (gated) to %s failed",
+                account_ref(account.account_id),
+            )
         return result

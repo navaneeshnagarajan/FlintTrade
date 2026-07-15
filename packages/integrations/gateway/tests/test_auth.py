@@ -214,12 +214,12 @@ def test_add_account_unknown_broker(client) -> None:
         ("/v1/auth/otp/verify", {"otp": "123456"}),
     ],
 )
-@pytest.mark.parametrize("broker", ["kotakneo", "groww"])
+@pytest.mark.parametrize("broker", ["kotakneo", "indmoney", "groww"])
 def test_native_connect_routes_reject_coming_soon_native(client, route, extra_body, broker) -> None:
     """Every legacy gateway native-connect entrypoint must honour the "coming
-    soon" gate — a native adapter that is built but not yet live-verified
-    (connectable=False, e.g. kotakneo / groww) cannot be connected through any
-    back door (Codex-wave review findings 8 + otp_verify; principle 3).
+    soon" gate — a native adapter with unresolved activation blockers cannot be
+    connected through any back door (Codex-wave review findings 8 + otp_verify;
+    principle 3).
 
     All five connect-completing routes are covered so a future edit that drops
     the guard from any one of them fails a test, not just add_account. The
@@ -241,7 +241,7 @@ def test_native_connect_routes_reject_coming_soon_native(client, route, extra_bo
         ("/v1/auth/otp/verify", {"otp": "123456"}),
     ],
 )
-@pytest.mark.parametrize("broker", ["dhan", "upstox", "indmoney"])
+@pytest.mark.parametrize("broker", ["dhan", "upstox"])
 def test_native_connect_routes_reject_connectable_native_on_legacy_gateway(client, route, extra_body, broker) -> None:
     """Connectable native brokers must still use the transactional native
     account surface, not the legacy OpenAlgo gateway registry."""
@@ -255,7 +255,7 @@ def test_native_connect_routes_reject_connectable_native_on_legacy_gateway(clien
 
 
 @pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
-@pytest.mark.parametrize("broker", ["kotakneo", "groww"])
+@pytest.mark.parametrize("broker", ["kotakneo", "indmoney", "groww"])
 def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client, route_suffix, broker) -> None:
     """Existing stale native rows must not bypass the current connectable gate."""
     account_id = f"STALE_{broker.upper()}"
@@ -272,7 +272,7 @@ def test_legacy_account_id_routes_reject_existing_coming_soon_native(app, client
 
 
 @pytest.mark.parametrize("route_suffix", ["reconnect", "set-primary"])
-@pytest.mark.parametrize("broker", ["dhan", "upstox", "indmoney"])
+@pytest.mark.parametrize("broker", ["dhan", "upstox"])
 def test_legacy_account_id_routes_reject_existing_connectable_native(app, client, route_suffix, broker) -> None:
     """Stale native rows in the legacy registry must not be reactivated there."""
     account_id = f"NATIVE_{broker.upper()}"

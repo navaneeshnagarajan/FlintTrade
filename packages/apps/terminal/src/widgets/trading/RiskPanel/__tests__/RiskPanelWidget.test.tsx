@@ -96,20 +96,33 @@ describe("RiskPanelWidget", () => {
     expect(screen.getByText("Margin Used")).toBeInTheDocument();
   });
 
-  it("shows position lots progress row", () => {
+  it("does not substitute position rows for lot usage", () => {
     render(<RiskPanelWidget {...defaultProps} />);
-    expect(screen.getByText("Position Lots")).toBeInTheDocument();
+
+    expect(screen.getByText("Position lot usage")).toBeInTheDocument();
+    expect(screen.getByText(/instrument lot metadata is not loaded/i)).toBeInTheDocument();
+    expect(screen.queryByText("Position Lots")).not.toBeInTheDocument();
   });
 
-  it("shows configured limits section", () => {
+  it("does not substitute open-order count for orders per minute", () => {
     render(<RiskPanelWidget {...defaultProps} />);
-    expect(screen.getByText("Configured Limits")).toBeInTheDocument();
-    expect(screen.getByText("Max Lots")).toBeInTheDocument();
+
+    expect(screen.getByText("Order rate")).toBeInTheDocument();
+    expect(screen.getByText(/rolling placement events are not tracked/i)).toBeInTheDocument();
+    expect(screen.queryByText("Open Orders")).not.toBeInTheDocument();
   });
 
-  it("displays overall risk badge as Safe when usage is low", () => {
+  it("shows local values as references rather than enforced limits", () => {
     render(<RiskPanelWidget {...defaultProps} />);
-    expect(screen.getByText("Safe")).toBeInTheDocument();
+    expect(screen.getByText("Local Reference Values")).toBeInTheDocument();
+    expect(screen.getByText("Lot reference")).toBeInTheDocument();
+    expect(screen.getByText("Order-rate reference")).toBeInTheDocument();
+    expect(screen.queryByText("Configured Limits")).not.toBeInTheDocument();
+  });
+
+  it("describes only the observed indicators when usage is low", () => {
+    render(<RiskPanelWidget {...defaultProps} />);
+    expect(screen.getByText("Indicators normal")).toBeInTheDocument();
   });
 
   it("gates live risk account data when broker is disconnected", () => {

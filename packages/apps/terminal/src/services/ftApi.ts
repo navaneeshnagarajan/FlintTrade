@@ -17,3 +17,4 @@ export * from "./ftApi.admin";
 export * from "./ftApi.ditto";
 export * from "./ftApi.invest";
 export * from "./ftApi.workspace";
+export * from "./ftApi.localAi";

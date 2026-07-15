@@ -25,7 +25,7 @@ export default function TabTransition({
   className,
 }: TabTransitionProps) {
   if (motionConfig.prefersReducedMotion()) {
-    return <>{children}</>;
+    return <div className={className}>{children}</div>;
   }
 
   return (

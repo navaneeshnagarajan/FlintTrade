@@ -11,6 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import type { Dispatch, SetStateAction } from "react";
+import { ohlcvCacheKey } from "@/lib/chartCache";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before the component import
@@ -82,27 +83,33 @@ const chartInitMocks = vi.hoisted(() => {
     applyOptions: vi.fn(),
     setData: vi.fn(),
   };
+  const containerRef = { current: document.createElement("div") };
+  const chartRef = { current: null as typeof chart | null };
+  const candleRef = { current: null as typeof candleSeries | null };
+  const volumeRef = { current: null as typeof volumeSeries | null };
+  const markersPluginRef = { current: null };
+  const indRef = { current: {} };
+  const refs = { containerRef, chartRef, candleRef, volumeRef, markersPluginRef, indRef };
 
   return {
     candleSeries,
     chart,
     reset: () => {
       ready = false;
+      chartRef.current = null;
+      candleRef.current = null;
+      volumeRef.current = null;
       vi.clearAllMocks();
     },
     setReady: (next: boolean) => {
       ready = next;
+      chartRef.current = ready ? chart : null;
+      candleRef.current = ready ? candleSeries : null;
+      volumeRef.current = ready ? volumeSeries : null;
     },
     timeScale,
     volumeSeries,
-    refs: () => ({
-      containerRef: { current: document.createElement("div") },
-      chartRef: { current: ready ? chart : null },
-      candleRef: { current: ready ? candleSeries : null },
-      volumeRef: { current: ready ? volumeSeries : null },
-      markersPluginRef: { current: null },
-      indRef: { current: {} },
-    }),
+    refs: () => refs,
   };
 });
 
@@ -122,6 +129,16 @@ vi.mock("../useIndicators", () => ({
   useIndicators: vi.fn(() => ({ refresh: indicatorHookMocks.refresh })),
 }));
 
+const replayMocks = vi.hoisted(() => ({
+  exitReplay: vi.fn(),
+  enterReplay: vi.fn(),
+  pause: vi.fn(),
+  play: vi.fn(),
+  reset: vi.fn(),
+  seek: vi.fn(),
+  setSpeed: vi.fn(),
+}));
+
 vi.mock("../useChartReplay", () => ({
   useChartReplay: () => ({
     isReplaying: false,
@@ -129,21 +146,20 @@ vi.mock("../useChartReplay", () => ({
     replayIndex: 0,
     replaySpeed: 1,
     totalBars: 0,
-    play: vi.fn(),
-    pause: vi.fn(),
-    reset: vi.fn(),
-    seek: vi.fn(),
-    exitReplay: vi.fn(),
-    enterReplay: vi.fn(),
-    setSpeed: vi.fn(),
+    ...replayMocks,
   }),
+}));
+
+const apiMocks = vi.hoisted(() => ({
+  getHistory: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(() => Promise.resolve([])),
+  getQuotes: vi.fn(() => Promise.resolve({})),
 }));
 
 // Services — prevent real API calls
 vi.mock("@/services/api", () => ({
   searchSymbol: vi.fn(() => Promise.resolve([])),
-  getHistory: vi.fn(() => Promise.resolve([])),
-  getQuotes: vi.fn(() => Promise.resolve({})),
+  getHistory: apiMocks.getHistory,
+  getQuotes: apiMocks.getQuotes,
   getIntervals: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -153,6 +169,11 @@ vi.mock("@/lib/market", () => ({
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
+}));
+
+const dataScopeState = vi.hoisted(() => ({ value: "explore:mock" }));
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => dataScopeState.value,
 }));
 
 vi.mock("@/hooks/useChartTheme", () => ({
@@ -276,6 +297,11 @@ describe("ChartWidget", () => {
     drawingToolMocks.clearAllDrawings.mockClear();
     drawingToolMocks.undoLastDrawing.mockClear();
     drawingToolMocks.lastOptions = null;
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -291,6 +317,55 @@ describe("ChartWidget", () => {
     render(<ChartWidget />);
     const chartArea = document.querySelector('[data-tour-target="chart"]');
     expect(chartArea).toBeInTheDocument();
+  });
+
+  it("labels Explore OHLCV as sample history", () => {
+    render(<ChartWidget />);
+    expect(screen.getByText("Sample history")).toBeInTheDocument();
+  });
+
+  it("refreshes the quote when the account data scope changes", async () => {
+    const view = render(<ChartWidget />);
+    await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(1));
+
+    dataScopeState.value = "live:openalgo:default";
+    view.rerender(<ChartWidget params={{}} />);
+
+    await waitFor(() => expect(apiMocks.getQuotes).toHaveBeenCalledTimes(2));
+  });
+
+  it("clears stale candles and quotes before loading a new data scope", async () => {
+    chartInitMocks.setReady(true);
+    apiMocks.getHistory
+      .mockResolvedValueOnce([{
+        timestamp: "2026-07-11",
+        open: 100,
+        high: 103,
+        low: 99,
+        close: 102,
+        volume: 10,
+      }])
+      .mockResolvedValueOnce([]);
+    apiMocks.getQuotes
+      .mockResolvedValueOnce({ ltp: 101.25, close: 100 })
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    const view = render(<ChartWidget />);
+
+    await waitFor(() => {
+      expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([
+        expect.objectContaining({ close: 102 }),
+      ]);
+    });
+    expect(await screen.findByText("101.25")).toBeInTheDocument();
+
+    dataScopeState.value = "live:openalgo:new-connection";
+    view.rerender(<ChartWidget params={{ dataScope: dataScopeState.value }} />);
+
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalledTimes(2));
+    expect(chartInitMocks.candleSeries.setData).toHaveBeenLastCalledWith([]);
+    expect(chartInitMocks.volumeSeries.setData).toHaveBeenLastCalledWith([]);
+    await waitFor(() => expect(screen.queryByText("101.25")).not.toBeInTheDocument());
   });
 
   it("switches drawing tools to a horizontal rail when the chart workspace narrows", async () => {
@@ -599,9 +674,10 @@ describe("ChartWidget", () => {
   it("refreshes indicator panes after cached OHLCV bars are applied", async () => {
     chartInitMocks.setReady(true);
     localStorage.setItem(
-      "ft-chart-NIFTY-NSE_INDEX-5m",
+      ohlcvCacheKey("explore:mock", "NIFTY", "NSE_INDEX", "5m"),
       JSON.stringify({
         timestamp: Date.now(),
+        scope: "explore:mock",
         data: [
           { timestamp: 1, open: 100, high: 110, low: 95, close: 108, volume: 1000 },
           { timestamp: 2, open: 108, high: 112, low: 104, close: 106, volume: 1200 },

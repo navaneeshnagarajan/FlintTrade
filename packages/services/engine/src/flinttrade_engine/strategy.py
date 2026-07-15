@@ -19,9 +19,11 @@ import platform
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from flinttrade_core.models import OHLCV, Order, Quote
+
+from .strategy_execution import StrategyExecutionContract, StrategyExecutionMode
 
 logger = logging.getLogger("flinttrade.engine.strategy")
 
@@ -83,18 +85,23 @@ class BaseStrategy(ABC):
                                   ↘ ERROR
     """
 
+    supported_execution_modes: ClassVar[frozenset[StrategyExecutionMode]] = frozenset()
+    uses_managed_order_dispatch: ClassVar[bool] = False
+
     def __init__(
         self,
         name: str,
         exchange: str = "NSE",
         product: str = "MIS",
         strategy_id: str | None = None,
+        execution_contract: StrategyExecutionContract | None = None,
     ) -> None:
         self.name = name
         self.exchange = exchange
         self.product = product
         self._state = StrategyState.STOPPED
         self._error_message: str = ""
+        self._execution_contract = execution_contract
         # State persistence: use strategy_id as the directory name (falls back
         # to slugified name when not provided).
         self._strategy_id: str = strategy_id or name.lower().replace(" ", "_")
@@ -115,6 +122,23 @@ class BaseStrategy(ABC):
     @property
     def is_active(self) -> bool:
         return self._state == StrategyState.ACTIVE
+
+    @property
+    def execution_contract(self) -> StrategyExecutionContract | None:
+        """Explicit runtime contract required by :class:`StrategyRunner`."""
+        return self._execution_contract
+
+    def require_execution_contract(self) -> StrategyExecutionContract:
+        """Return and validate the declared scheduler execution contract."""
+        contract = self._execution_contract
+        if not isinstance(contract, StrategyExecutionContract):
+            raise RuntimeError(f"Strategy {self.name!r} has no explicit execution contract")
+        contract.validate_strategy(self)
+        return contract
+
+    async def dispatch_order(self, order: Order) -> Any:
+        """Submit an order only through the strategy's managed contract."""
+        return await self.require_execution_contract().dispatch_order(order)
 
     # -- State transitions --
 

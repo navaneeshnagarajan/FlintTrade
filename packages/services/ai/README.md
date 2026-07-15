@@ -8,7 +8,7 @@
 
 ## Public surface
 
-- `src/flinttrade_ai/llm_client.py — multi-provider LLM client (LM Studio / Ollama / NVIDIA / OpenAI / Anthropic / Groq)`
+- `src/flinttrade_ai/llm_client.py - multi-provider LLM client (managed Ollama / NVIDIA / OpenAI / Anthropic / Groq)`
 - `src/flinttrade_ai/rag.py — optional ChromaDB-backed retrieval-augmented generation`
 - `src/flinttrade_ai/multi_agent.py — analyst chain + risk debate + ensemble selector`
 - `src/flinttrade_ai/advisor.py — production advisor surface for the AI Centre route`

@@ -348,6 +348,8 @@ class TestCrawl4AIClientLLM:
 
     @pytest.mark.asyncio
     async def test_extract_llm_list_result(self) -> None:
+        from flinttrade_core import ollama_runtime
+
         mock_result = MagicMock()
         mock_result.markdown = ""
         mock_result.success = True
@@ -357,12 +359,25 @@ class TestCrawl4AIClientLLM:
         mock_schema = MagicMock()
         mock_schema.model_json_schema.return_value = {"type": "object"}
 
-        with _fake_crawl4ai(mock_crawler):
-            client = Crawl4AIClient()
-            result = await client.extract_llm("https://news.example.com", mock_schema)
+        admitted_models: list[str] = []
+
+        @contextmanager
+        def admitted(model: str) -> Generator[MagicMock, None, None]:
+            admitted_models.append(model)
+            yield MagicMock(base_url="http://127.0.0.1:49152")
+
+        with patch.object(ollama_runtime, "managed_ollama_session", admitted):
+            with _fake_crawl4ai(mock_crawler) as modules:
+                strategy_factory = MagicMock()
+                modules["crawl4ai.extraction_strategy"].LLMExtractionStrategy = strategy_factory
+                client = Crawl4AIClient(llm_model="qwen3:8b")
+                result = await client.extract_llm("https://news.example.com", mock_schema)
 
         assert result.success
         assert result.extracted["sentiment"] == "bullish"
+        assert strategy_factory.call_args.kwargs["api_token"] == "local-runtime"
+        assert strategy_factory.call_args.kwargs["base_url"] == "http://127.0.0.1:49152/v1"
+        assert admitted_models == ["qwen3:8b"]
 
     @pytest.mark.asyncio
     async def test_extract_llm_dict_result(self) -> None:
@@ -376,7 +391,7 @@ class TestCrawl4AIClientLLM:
         mock_schema.model_json_schema.return_value = {"type": "object"}
 
         with _fake_crawl4ai(mock_crawler):
-            client = Crawl4AIClient()
+            client = Crawl4AIClient(llm_base_url="https://models.example.invalid/v1", llm_model="qwen")
             result = await client.extract_llm("https://news.example.com", mock_schema)
 
         assert result.success
@@ -393,7 +408,7 @@ class TestCrawl4AIClientLLM:
         mock_crawler = _make_mock_crawler(mock_result)
 
         with _fake_crawl4ai(mock_crawler):
-            client = Crawl4AIClient()
+            client = Crawl4AIClient(llm_base_url="https://models.example.invalid/v1", llm_model="qwen")
             result = await client.extract_llm("https://example.com", object())
 
         assert result.success
@@ -405,11 +420,34 @@ class TestCrawl4AIClientLLM:
         mock_crawler.arun = AsyncMock(side_effect=ConnectionError("refused"))
 
         with _fake_crawl4ai(mock_crawler):
-            client = Crawl4AIClient()
+            client = Crawl4AIClient(llm_base_url="https://models.example.invalid/v1", llm_model="qwen")
             result = await client.extract_llm("https://example.com", MagicMock())
 
         assert not result.success
         assert "refused" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_extract_llm_discards_output_when_managed_post_admission_fails(self) -> None:
+        from flinttrade_core import ollama_runtime
+
+        mock_result = MagicMock()
+        mock_result.markdown = ""
+        mock_result.success = True
+        mock_result.extracted_content = '{"must": "not escape"}'
+        mock_crawler = _make_mock_crawler(mock_result)
+
+        @contextmanager
+        def changed(_model: str) -> Generator[MagicMock, None, None]:
+            yield MagicMock(base_url="http://127.0.0.1:49152")
+            raise ollama_runtime.OllamaRuntimeError("loaded model digest changed")
+
+        with patch.object(ollama_runtime, "managed_ollama_session", changed):
+            with _fake_crawl4ai(mock_crawler):
+                client = Crawl4AIClient(llm_model="qwen3:8b")
+                result = await client.extract_llm("https://example.com", MagicMock())
+
+        assert result.success is False
+        assert result.extracted == {}
 
 
 # ---------------------------------------------------------------------------
@@ -427,18 +465,18 @@ class TestClientInit:
         ):
             client = Crawl4AIClient()
 
-        assert client._lm_url == "http://localhost:1234/v1"
-        assert client._lm_model == "local-model"
+        assert client._lm_url == ""
+        assert client._lm_model == ""
         assert client._timeout == 30
 
-    def test_custom_lm_studio_url(self) -> None:
+    def test_custom_openai_compatible_url(self) -> None:
         with patch(
             "flinttrade_ai.crawl4ai_client.Crawl4AIClient._check_availability",
             return_value=True,
         ):
             client = Crawl4AIClient(
-                lm_studio_url="http://custom:5000/v1",
-                lm_studio_model="qwen",
+                llm_base_url="http://custom:5000/v1",
+                llm_model="qwen",
                 timeout=60,
             )
 

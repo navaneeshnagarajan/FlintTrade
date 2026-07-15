@@ -16,6 +16,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useDataScope } from "@/hooks/useDataScope";
+import { useModeStore } from "@/stores/modeStore";
 import { getHistory } from "@/services/api";
 import {
   getPortfolioFrontier,
@@ -92,33 +94,47 @@ function pct(v: number): string {
 
 function PortfolioOptimiserWidget() {
   const isConnected = useBrokerConnected();
+  const mode = useModeStore((state) => state.mode);
+  const dataScope = useDataScope();
   const [method, setMethod] = useState<OptimisationMethod>("markowitz");
+  const readsEnabled = mode === "practice" || (mode === "live" && isConnected);
 
   // Basket returns are fetched ONCE and shared by the optimise + frontier
   // queries (the frontier is method-independent — the chosen portfolio moves,
   // the curve does not).
   const returnsQuery = useQuery({
-    queryKey: ["portfolioBasketReturns"],
+    queryKey: ["portfolioBasketReturns", dataScope],
     queryFn: fetchBasketReturns,
-    enabled: isConnected,
+    enabled: readsEnabled,
   });
   const returns = returnsQuery.data;
 
   const query = useQuery({
-    queryKey: ["portfolioOptimise", method],
+    queryKey: ["portfolioOptimise", dataScope, method],
     queryFn: () => optimisePortfolio(returns as Record<string, number[]>, { method }),
-    enabled: isConnected && !!returns,
+    enabled: readsEnabled && !!returns,
   });
   const frontierQuery = useQuery({
-    queryKey: ["portfolioFrontier"],
+    queryKey: ["portfolioFrontier", dataScope],
     queryFn: () => getPortfolioFrontier(returns as Record<string, number[]>, 25),
-    enabled: isConnected && !!returns,
+    enabled: readsEnabled && !!returns,
   });
 
-  const isLive = isConnected && !!query.data;
-  const result: PortfolioResult = isLive && query.data ? query.data : SAMPLE_RESULT;
-  const frontier: PortfolioResult[] =
-    isLive && frontierQuery.data?.length ? frontierQuery.data : SAMPLE_FRONTIER;
+  const hasApiResult = readsEnabled && query.isSuccess && !!query.data;
+  const hasApiFrontier = readsEnabled
+    && frontierQuery.isSuccess
+    && !!frontierQuery.data?.length;
+  const hasApiData = hasApiResult && hasApiFrontier;
+  const isLive = mode === "live" && hasApiData;
+  const isPractice = mode === "practice" && hasApiData;
+  const result: PortfolioResult = hasApiData ? query.data : SAMPLE_RESULT;
+  const frontier: PortfolioResult[] = hasApiData ? frontierQuery.data : SAMPLE_FRONTIER;
+  const apiUnavailable = readsEnabled && !hasApiData && (
+    returnsQuery.isError
+    || query.isError
+    || frontierQuery.isError
+    || (frontierQuery.isSuccess && frontierQuery.data.length === 0)
+  );
 
   const weightRows = Object.entries(result.weights).sort((a, b) => b[1] - a[1]);
   const maxWeight = Math.max(...weightRows.map(([, w]) => w), 0.0001);
@@ -171,6 +187,15 @@ function PortfolioOptimiserWidget() {
             title="Live — mean-variance weights from ~1y of the basket's real daily history."
           >
             Live
+          </span>
+        ) : isPractice ? (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Practice: weights optimised from sandbox-scoped basket history"
+            title="Practice — read-only weights from the current sandbox data scope."
+          >
+            Practice
           </span>
         ) : (
           <span
@@ -251,9 +276,9 @@ function PortfolioOptimiserWidget() {
             </span>
           </div>
         ))}
-        {query.isError && !isLive && (
+        {apiUnavailable && (
           <p className="text-xxs text-text-muted pt-1">
-            Live optimisation unavailable — showing a sample allocation.
+            {mode === "practice" ? "Practice" : "Live"} optimisation unavailable — showing a sample allocation.
           </p>
         )}
       </div>

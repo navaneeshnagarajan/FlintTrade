@@ -11,6 +11,11 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
 
+const scopeState = vi.hoisted(() => ({ value: "explore:mock" }));
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => scopeState.value,
+}));
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
@@ -47,6 +52,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  scopeState.value = "explore:mock";
   mockConnected.mockReturnValue(false);
   mockPositions.mockReset();
   mockPositions.mockResolvedValue([]);
@@ -71,8 +77,21 @@ describe("NetPositionWidget", () => {
 
   it("does not show Sample badge when connected", () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     renderWidget();
     expect(screen.queryByText("Sample")).toBeNull();
+  });
+
+  it("reads and labels the Practice sandbox without a live broker", async () => {
+    scopeState.value = "practice:sandbox:default";
+    mockPositions.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20, pnlPercent: 1.25 },
+    ]);
+    renderWidget();
+
+    expect(await screen.findAllByText("SBIN")).not.toHaveLength(0);
+    expect(screen.getByText("Practice")).toBeTruthy();
+    expect(mockPositions).toHaveBeenCalled();
   });
 
   it("renders net positions table with aria-label", () => {
@@ -223,6 +242,7 @@ describe("NetPositionWidget (connected)", () => {
 
   it("renders real positions, not sample positions", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockResolvedValue(LIVE);
     renderWidget();
     // Appears in both the underlying group header and the position row.
@@ -237,12 +257,14 @@ describe("NetPositionWidget (connected)", () => {
     expect(mockPositions).not.toHaveBeenCalled();
 
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     renderWidget();
     await waitFor(() => expect(mockPositions).toHaveBeenCalled());
   });
 
   it("shows the empty state when connected with no positions", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockResolvedValue([]);
     renderWidget();
     expect(await screen.findByText("No open positions")).toBeTruthy();
@@ -252,6 +274,7 @@ describe("NetPositionWidget (connected)", () => {
 
   it("shows an error banner with the server message when the position feed fails", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockRejectedValue(new Error("Connection failed. Check OpenAlgo is running."));
     renderWidget();
 
@@ -263,6 +286,7 @@ describe("NetPositionWidget (connected)", () => {
 
   it("retries the positionbook fetch when Retry is clicked", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockRejectedValue(new Error("timeout"));
     renderWidget();
 
@@ -275,6 +299,7 @@ describe("NetPositionWidget (connected)", () => {
 
   it("shows a last-updated indicator once live data arrives", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockResolvedValue(LIVE);
     renderWidget();
 

@@ -147,7 +147,7 @@ export function useCommandRegistry() {
       {
         id:          "tool:flow-builder",
         title:       "Open Flow Builder",
-        description: "Build automated trading flows",
+        description: "Design and save local flow drafts",
         category:    "tool",
         action:      () => {
           window.dispatchEvent(

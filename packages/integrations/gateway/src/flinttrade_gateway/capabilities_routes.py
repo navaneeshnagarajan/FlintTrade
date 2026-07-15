@@ -328,9 +328,9 @@ def _default_recommendation_capabilities(include_coming_soon: bool) -> dict[str,
     """Return the default recommendation scope for user-facing routes.
 
     The ranking engine still knows every native adapter, including built but
-    unverified ones. The route defaults to login/read-verified connectable
-    natives so the terminal does not recommend a broker the connect UI
-    correctly disables.
+    unverified ones. The route defaults to activation-evidence-cleared
+    connectable natives so the terminal does not recommend a broker the connect
+    UI correctly disables.
     """
     if include_coming_soon:
         return None
@@ -369,7 +369,7 @@ def get_recommendations() -> tuple[Any, int]:
             rankings for every use-case are returned.
         brokers (str, optional): Comma-separated broker ids to restrict the
             ranking to (e.g. the operator's connected brokers). When omitted,
-            only login/read-verified connectable native brokers are ranked.
+            only activation-evidence-cleared connectable native brokers are ranked.
         include_coming_soon (bool, optional): When true and ``brokers`` is not
         supplied, include built-but-disabled native brokers such as Kotak Neo
         and Groww in the capability metadata ranking.

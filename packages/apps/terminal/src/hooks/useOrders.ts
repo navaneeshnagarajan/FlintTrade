@@ -4,6 +4,7 @@ import { getOrderbook } from "@/services/api";
 import type { Order } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
 import { queryKeys } from "@/services/queryKeys";
+import { useDataScope } from "@/hooks/useDataScope";
 
 interface BrokerDataQueryOptions {
   enabled?: boolean;
@@ -45,6 +46,7 @@ export function emitOrdersChanged(): void {
 
 export function useOrders(options: BrokerDataQueryOptions = {}) {
   const enabled = options.enabled ?? true;
+  const scope = useDataScope();
   const queryClient = useQueryClient();
 
   // Refetch on order placement events. Two triggers:
@@ -72,7 +74,7 @@ export function useOrders(options: BrokerDataQueryOptions = {}) {
   }, [enabled, queryClient]);
 
   return useQuery<Order[]>({
-    queryKey: queryKeys.orders.all,
+    queryKey: queryKeys.orders.list(scope),
     queryFn: getOrderbook,
     enabled,
     staleTime: 5_000,

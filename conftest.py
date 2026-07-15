@@ -9,8 +9,8 @@ The mechanism:
     `FLINTTRADE_WORKSPACE_DIR` if it is set, otherwise it falls back to
     `~/.flinttrade`.
   * pytest-xdist exposes the worker id (e.g. "gw0", "gw1", "master") via
-    `PYTEST_XDIST_WORKER`. We use that to give each worker a unique tmp
-    directory under the system temp.
+    `PYTEST_XDIST_WORKER`. We use that to give each worker a fresh tmp
+    directory for every pytest process.
   * This module is imported by pytest *before* any test module, so the env
     var is set before `auth_service.py`, `app.py`, etc. resolve their
     module-level DB-path constants.
@@ -112,11 +112,11 @@ def _isolate_workspace() -> None:
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         base = Path(existing)
     else:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
+        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # The operator's machine-local .env may pin DUCKDB_PATH at one real,

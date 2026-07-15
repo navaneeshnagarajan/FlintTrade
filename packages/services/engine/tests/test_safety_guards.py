@@ -25,6 +25,72 @@ def _at(offset_seconds: float) -> datetime:
 
 
 # ===========================================================================
+# Durable safety configuration
+# ===========================================================================
+
+
+class TestSafetyConfigurationTransactions:
+    def test_persistence_failure_leaves_live_thresholds_unchanged(self):
+        from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+        safety = SafetySystem()
+
+        def fail_persist(_config: SafetyConfig) -> None:
+            raise OSError("disk unavailable")
+
+        with pytest.raises(OSError, match="disk unavailable"):
+            safety.update_and_persist_config({"price_deviation_pct": 10.0}, fail_persist)
+
+        assert safety.snapshot_config() == SafetyConfig()
+
+    def test_partial_updates_merge_into_the_latest_persisted_snapshot(self):
+        from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+        safety = SafetySystem()
+        persisted: list[SafetyConfig] = []
+
+        safety.update_and_persist_config({"max_positions": 12}, persisted.append)
+        safety.update_and_persist_config({"pnl_pause_pct": 4.0}, persisted.append)
+
+        snapshot = safety.snapshot_config()
+        assert snapshot.max_positions == 12
+        assert snapshot.pnl_pause_pct == 4.0
+        assert persisted[-1] == snapshot
+
+    def test_readers_wait_until_persistence_and_publication_complete(self):
+        from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+        safety = SafetySystem()
+        persistence_started = threading.Event()
+        release_persistence = threading.Event()
+        reader_completed = threading.Event()
+        observed: list[float] = []
+
+        def persist(_config: SafetyConfig) -> None:
+            persistence_started.set()
+            assert release_persistence.wait(timeout=2.0)
+
+        updater = threading.Thread(
+            target=lambda: safety.update_and_persist_config({"price_deviation_pct": 10.0}, persist),
+        )
+        reader = threading.Thread(
+            target=lambda: (observed.append(safety.snapshot_config().price_deviation_pct), reader_completed.set()),
+        )
+        updater.start()
+        assert persistence_started.wait(timeout=1.0)
+        reader.start()
+        assert not reader_completed.wait(timeout=0.05)
+
+        release_persistence.set()
+        updater.join(timeout=1.0)
+        reader.join(timeout=1.0)
+
+        assert not updater.is_alive()
+        assert not reader.is_alive()
+        assert observed == [10.0]
+
+
+# ===========================================================================
 # OvertradingGuard
 # ===========================================================================
 
@@ -227,15 +293,28 @@ class TestOvertradingGuardHoldDuration:
 class TestMTMCircuitBreaker:
     """Account-level MTM loss auto-exit."""
 
+    @staticmethod
+    def _check(breaker, daily_pnl: float):
+        return breaker.check_and_act(
+            daily_pnl=daily_pnl,
+            adapter_id="dhan",
+            account_id="primary",
+        )
+
     def _breaker(self, limit: float = -50_000.0, emergency_dispatcher=None):
         from flinttrade_engine.safety import MTMCircuitBreaker, MTMCircuitBreakerConfig
         cfg = MTMCircuitBreakerConfig(daily_loss_limit=limit)
         return MTMCircuitBreaker(config=cfg, emergency_dispatcher=emergency_dispatcher)
 
+    def test_mtm_policy_cancels_resting_orders_before_exiting_positions(self):
+        from flinttrade_engine.safety import MTM_EMERGENCY_POLICY
+
+        assert MTM_EMERGENCY_POLICY.verbs == ("cancel_all_orders", "exit_all_positions")
+
     def test_within_limit_does_not_trigger(self):
         breaker = self._breaker(limit=-50_000.0)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-30_000.0)
+            self._check(breaker, -30_000.0)
         )
         assert not result
         assert not breaker.is_triggered
@@ -245,7 +324,7 @@ class TestMTMCircuitBreaker:
         # daily_pnl=-50000 and limit=-50000: -50000 > -50000 is False → triggers
         breaker = self._breaker(limit=-50_000.0)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-50_000.0)
+            self._check(breaker, -50_000.0)
         )
         assert result
         assert breaker.is_triggered
@@ -253,29 +332,111 @@ class TestMTMCircuitBreaker:
     def test_breach_triggers_breaker(self):
         breaker = self._breaker(limit=-50_000.0)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
         assert result
         assert breaker.is_triggered
 
-    def test_breaker_fires_only_once_per_day(self):
-        breaker = self._breaker(limit=-50_000.0)
-        asyncio.run(
-            breaker.check_and_act(daily_pnl=-70_000.0)
+    def test_completed_flatten_is_rechecked_when_a_later_breach_can_reopen_exposure(self):
+        from flinttrade_engine.safety import EmergencyDispatchResult, EmergencyVerbOutcome, MTM_EMERGENCY_POLICY
+
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = EmergencyDispatchResult(
+            policy=MTM_EMERGENCY_POLICY,
+            outcomes=tuple(
+                EmergencyVerbOutcome(verb, succeeded=True, selector="dhan:primary")
+                for verb in MTM_EMERGENCY_POLICY.verbs
+            ),
         )
-        # Second call — already triggered, should return False
-        result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-80_000.0)
+        breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
+        assert asyncio.run(self._check(breaker, -70_000.0))
+        assert asyncio.run(self._check(breaker, -80_000.0))
+        assert dispatcher.dispatch.call_count == 2
+
+    def test_incomplete_flatten_retries_until_a_later_breach_completes(self):
+        from flinttrade_engine.safety import EmergencyDispatchResult, EmergencyVerbOutcome, MTM_EMERGENCY_POLICY
+
+        dispatcher = MagicMock()
+        complete = EmergencyDispatchResult(
+            policy=MTM_EMERGENCY_POLICY,
+            outcomes=tuple(
+                EmergencyVerbOutcome(
+                    verb,
+                    succeeded=True,
+                    selector="dhan:primary",
+                )
+                for verb in MTM_EMERGENCY_POLICY.verbs
+            ),
         )
-        assert not result
+        dispatcher.dispatch.side_effect = (
+            EmergencyDispatchResult.failed(
+                MTM_EMERGENCY_POLICY,
+                "partial_broker_result",
+                attempted=True,
+                selector="dhan:primary",
+            ),
+            complete,
+            complete,
+        )
+        breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
+
+        assert asyncio.run(self._check(breaker, -60_000.0))
+        assert breaker.last_emergency_result is not None
+        assert not breaker.last_emergency_result.complete
+        assert asyncio.run(self._check(breaker, -61_000.0))
+        assert breaker.last_emergency_result is not None
+        assert breaker.last_emergency_result.complete
+        assert asyncio.run(self._check(breaker, -62_000.0))
+        assert dispatcher.dispatch.call_count == 3
 
     def test_reset_daily_clears_trigger(self):
         breaker = self._breaker(limit=-50_000.0)
         asyncio.run(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
         assert breaker.is_triggered
         breaker.reset_daily()
+        assert not breaker.is_triggered
+
+    def test_reset_daily_refuses_to_clear_an_in_flight_flatten(self):
+        from flinttrade_core.exceptions import SafetyBypassError
+        from flinttrade_engine.safety import EmergencyDispatchResult, EmergencyVerbOutcome
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingDispatcher:
+            def dispatch(self, policy, *, reason, adapter_id, account_id):
+                entered.set()
+                release.wait(timeout=2.0)
+                return EmergencyDispatchResult(
+                    policy=policy,
+                    outcomes=tuple(
+                        EmergencyVerbOutcome(
+                            verb,
+                            succeeded=True,
+                            selector=f"{adapter_id}:{account_id}",
+                        )
+                        for verb in policy.verbs
+                    ),
+                )
+
+        breaker = self._breaker(
+            limit=-50_000.0,
+            emergency_dispatcher=BlockingDispatcher(),
+        )
+        worker = threading.Thread(target=lambda: asyncio.run(self._check(breaker, -60_000.0)))
+        worker.start()
+        assert entered.wait(timeout=1.0)
+
+        with pytest.raises(SafetyBypassError, match="still in progress"):
+            breaker.reset_daily(timeout=0)
+        assert breaker.is_triggered
+
+        release.set()
+        worker.join(timeout=1.0)
+        assert not worker.is_alive()
+        breaker.reset_daily(timeout=1.0)
         assert not breaker.is_triggered
 
     def test_explicit_mtm_emergency_policy_dispatched_on_breach(self):
@@ -288,15 +449,20 @@ class TestMTMCircuitBreaker:
         dispatcher = MagicMock()
         dispatcher.dispatch.return_value = EmergencyDispatchResult(
             policy=MTM_EMERGENCY_POLICY,
-            outcomes=(EmergencyVerbOutcome("exit_all_positions", succeeded=True),),
+            outcomes=tuple(
+                EmergencyVerbOutcome(verb, succeeded=True)
+                for verb in MTM_EMERGENCY_POLICY.verbs
+            ),
         )
         breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
         asyncio.run(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
         dispatcher.dispatch.assert_called_once()
         policy = dispatcher.dispatch.call_args.args[0]
         assert policy is MTM_EMERGENCY_POLICY
+        assert dispatcher.dispatch.call_args.kwargs["adapter_id"] == "dhan"
+        assert dispatcher.dispatch.call_args.kwargs["account_id"] == "primary"
 
     @pytest.mark.asyncio
     async def test_mtm_emergency_dispatch_does_not_block_monitor_event_loop(self):
@@ -308,12 +474,17 @@ class TestMTMCircuitBreaker:
         release = threading.Event()
 
         class _BlockingDispatcher:
-            def dispatch(self, policy, *, reason):
+            def dispatch(self, policy, *, reason, adapter_id, account_id):
                 release.wait(timeout=1.0)
                 return EmergencyDispatchResult(
                     policy=policy,
-                    outcomes=(
-                        EmergencyVerbOutcome("exit_all_positions", succeeded=True),
+                    outcomes=tuple(
+                        EmergencyVerbOutcome(
+                            verb,
+                            succeeded=True,
+                            selector=f"{adapter_id}:{account_id}",
+                        )
+                        for verb in policy.verbs
                     ),
                 )
 
@@ -324,7 +495,7 @@ class TestMTMCircuitBreaker:
         threading.Timer(0.2, release.set).start()
         started_at = time.monotonic()
         check_task = asyncio.create_task(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
 
         await asyncio.sleep(0.02)
@@ -337,7 +508,7 @@ class TestMTMCircuitBreaker:
         """Breaker fires even without a client — it just can't close positions."""
         breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=None)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
         assert result
 
@@ -348,7 +519,7 @@ class TestMTMCircuitBreaker:
         breaker = self._breaker(limit=-50_000.0, emergency_dispatcher=dispatcher)
         # Should not raise
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=-60_000.0)
+            self._check(breaker, -60_000.0)
         )
         assert result
         assert breaker.is_triggered
@@ -356,7 +527,7 @@ class TestMTMCircuitBreaker:
     def test_positive_pnl_never_triggers(self):
         breaker = self._breaker(limit=-50_000.0)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=+10_000.0)
+            self._check(breaker, +10_000.0)
         )
         assert not result
         assert not breaker.is_triggered
@@ -366,7 +537,7 @@ class TestMTMCircuitBreaker:
         breaker = self._breaker(limit=-50_000.0)
         with caplog.at_level(logging.CRITICAL):
             asyncio.run(
-                breaker.check_and_act(daily_pnl=-60_000.0)
+                self._check(breaker, -60_000.0)
             )
         assert any("MTMCircuitBreaker" in r.message for r in caplog.records)
 
@@ -379,6 +550,6 @@ class TestMTMCircuitBreaker:
     def test_parametrized_limits(self, limit, pnl, should_trigger):
         breaker = self._breaker(limit=limit)
         result = asyncio.run(
-            breaker.check_and_act(daily_pnl=pnl)
+            self._check(breaker, pnl)
         )
         assert result == should_trigger

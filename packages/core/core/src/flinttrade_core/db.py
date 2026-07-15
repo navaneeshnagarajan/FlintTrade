@@ -21,8 +21,10 @@ _SQLITE_MAGIC = b"SQLite format 3\x00"
 _DUCKDB_MAGIC_OFFSET = 8
 _DUCKDB_MAGIC = b"DUCK"
 
-# Serialises legacy-file recovery so two threads opening the same path
-# cannot race the rename and quarantine each other's freshly created DB.
+# Serialises connection initialisation and legacy-file recovery. SQLite creates
+# and memory-maps WAL sidecars while applying the opening pragmas; allowing a
+# thread stampede against a just-recreated database can SIGBUS the process
+# before Python can report an exception.
 _RECOVERY_LOCK = threading.Lock()
 
 
@@ -104,24 +106,12 @@ def open_sqlite(
     """
     path_str = os.fspath(path)
     sync = "FULL" if durability == "full" else "NORMAL"
-    try:
-        return _connect(path_str, sync, temp_store, cache_size_kb)
-    except sqlite3.DatabaseError:
-        # In-memory databases are never on disk and can't be recovered.
-        if path_str == ":memory:":
-            raise
-        with _RECOVERY_LOCK:
-            # Double-checked: another thread may have already quarantined and
-            # recreated this database while we waited for the lock. Retrying
-            # the connect *inside* the lock also closes the rename race — a
-            # thread that lost the race sees the recreated file here and
-            # succeeds, instead of tripping the missing-file guard below at
-            # the instant the winner has renamed but not yet recreated.
-            try:
-                return _connect(path_str, sync, temp_store, cache_size_kb)
-            except sqlite3.DatabaseError:
-                pass
-            if not os.path.isfile(path_str):
+    with _RECOVERY_LOCK:
+        try:
+            return _connect(path_str, sync, temp_store, cache_size_kb)
+        except sqlite3.DatabaseError:
+            # In-memory databases are never on disk and can't be recovered.
+            if path_str == ":memory:" or not os.path.isfile(path_str):
                 raise
             backup = _quarantine_foreign_db(path_str)
             if backup is None:

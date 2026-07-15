@@ -2,8 +2,8 @@
  * TaxTab.test.tsx — Render tests for the Tax Report tab.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -52,6 +52,12 @@ vi.mock("@/components/ui/GlossaryTooltip", () => ({
 }));
 
 // Mock the tax report hook
+const { exportToCSVMock, useTaxSummaryMock, useTaxReportMock } = vi.hoisted(() => ({
+  exportToCSVMock: vi.fn(),
+  useTaxSummaryMock: vi.fn(),
+  useTaxReportMock: vi.fn(),
+}));
+
 const mockSummary = {
   fy: "2025-26",
   equity_ltcg: 75000,
@@ -64,6 +70,12 @@ const mockSummary = {
   tax_liability_estimated: 12375,
   ltcg_exemption_used: 75000,
   needs_audit: false,
+  audit_assessment: "incomplete",
+  audit_assessment_reason: "Complete taxpayer-specific records are not available.",
+  tax_estimate_methodology: "Indicative estimate from realised P&L using simplified assumptions.",
+  stt_methodology: "STT is calculated using the rate effective on each transaction date.",
+  stt_rate_provenance: "Finance (No. 2) Act, 2024 and Finance Act, 2026.",
+  stt_rate_schedule: [],
   trade_count: 50,
   is_sample_data: true,
   data_source: "sample",
@@ -82,23 +94,20 @@ const mockReport = {
 };
 
 vi.mock("@/hooks/useTaxReport", () => ({
-  useTaxSummary: () => ({
-    data: mockSummary,
-    isLoading: false,
-    isError: false,
-  }),
-  useTaxReport: () => ({
-    data: mockReport,
-    isLoading: false,
-    isError: false,
-  }),
+  useTaxSummary: useTaxSummaryMock,
+  useTaxReport: useTaxReportMock,
+}));
+
+vi.mock("@/lib/exportUtils", () => ({
+  exportToCSV: exportToCSVMock,
+  printCurrentView: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { TaxTab } from "../TaxTab";
+import { getFinancialYearOptions, TaxTab } from "../TaxTab";
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -122,6 +131,20 @@ function renderWithProviders() {
 describe("TaxTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useTaxSummaryMock.mockReturnValue({
+      data: mockSummary,
+      isLoading: false,
+      isError: false,
+    });
+    useTaxReportMock.mockReturnValue({
+      data: mockReport,
+      isLoading: false,
+      isError: false,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders the Tax Report heading", () => {
@@ -129,9 +152,22 @@ describe("TaxTab", () => {
     expect(screen.getByText("Tax Report")).toBeInTheDocument();
   });
 
-  it("displays the FY selector", () => {
+  it("derives current and previous Indian FY options from the current date", () => {
+    expect(getFinancialYearOptions(new Date(2028, 1, 15))).toEqual([
+      { value: "2027-28", label: "FY 2027-28" },
+      { value: "2026-27", label: "FY 2026-27" },
+    ]);
+  });
+
+  it("defaults requests to the dynamically derived current Indian FY", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2028, 6, 15));
+
     renderWithProviders();
-    expect(screen.getByText("FY 2025-26")).toBeInTheDocument();
+
+    expect(useTaxSummaryMock).toHaveBeenCalledWith("2028-29");
+    expect(useTaxReportMock).toHaveBeenCalledWith("2028-29");
+    expect(screen.getByText("FY 2028-29")).toBeInTheDocument();
   });
 
   it("displays trade count", () => {
@@ -140,14 +176,83 @@ describe("TaxTab", () => {
     expect(screen.getAllByText(/50 trades/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows the sample data banner when the tax API marks the payload as sample", () => {
+  it("states that the built-in ledger is illustrative and live tax history is not wired", () => {
     renderWithProviders();
-    expect(screen.getByText(/showing sample data/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the built-in tax ledger is illustrative; live tax-history ingestion is not wired/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/connect a broker for live data/i)).not.toBeInTheDocument();
   });
 
-  it("shows audit status badge", () => {
+  it("renders an incomplete audit assessment without a definitive clearance", () => {
     renderWithProviders();
-    expect(screen.getByText("No Audit Required")).toBeInTheDocument();
+    expect(screen.getAllByText("Audit assessment incomplete").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText("No Audit Required")).not.toBeInTheDocument();
+    expect(screen.queryByText("Below audit threshold")).not.toBeInTheDocument();
+  });
+
+  it("shows trade-date methodology and effective-date provenance", () => {
+    renderWithProviders();
+
+    expect(screen.getByText(/trade-date STT rates/i)).toBeInTheDocument();
+    expect(screen.getByText(/Finance \(No\. 2\) Act, 2024 and Finance Act, 2026/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Budget 2024 rates/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the effective-dated STT schedule visible during local fallback", () => {
+    useTaxSummaryMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+    useTaxReportMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    renderWithProviders();
+
+    expect(screen.getByText(/0\.0625%\/0\.0125% before 1 October 2024/i)).toBeInTheDocument();
+    expect(screen.getByText(/0\.15%\/0\.05% from 1 April 2026/i)).toBeInTheDocument();
+  });
+
+  it("disables CSV export for sample tax data", () => {
+    renderWithProviders();
+
+    const exportButton = screen.getByRole("button", { name: /export csv/i });
+    expect(exportButton).toBeDisabled();
+    fireEvent.click(exportButton);
+    expect(exportToCSVMock).not.toHaveBeenCalled();
+  });
+
+  it("exports backend P&L and only the backend overall estimate and provenance", () => {
+    useTaxSummaryMock.mockReturnValue({
+      data: { ...mockSummary, is_sample_data: false, data_source: "tax_history" },
+      isLoading: false,
+      isError: false,
+    });
+    renderWithProviders();
+
+    fireEvent.click(screen.getByRole("button", { name: /export csv/i }));
+
+    expect(exportToCSVMock).toHaveBeenCalledOnce();
+    const [rows, filename] = exportToCSVMock.mock.calls[0];
+    expect(filename).toMatch(/^tax-summary-\d{4}-\d{2}$/);
+    expect(rows.find((row: Record<string, unknown>) => row.Segment === "Commodity")).toEqual({
+      Segment: "Commodity",
+      "P&L": -7500,
+    });
+    expect(rows.filter((row: Record<string, unknown>) => "Estimated Tax" in row)).toEqual([
+      {
+        Segment: "Overall estimate",
+        "P&L": 104700,
+        "Estimated Tax": 12375,
+        STT: 450.25,
+        Methodology: mockSummary.tax_estimate_methodology,
+        Provenance: mockSummary.stt_rate_provenance,
+      },
+    ]);
   });
 
   it("renders segment breakdown section", () => {

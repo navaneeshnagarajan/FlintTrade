@@ -16,7 +16,7 @@ import { FlintMiniSparkline, FlintSegmentTracker } from "@flinttrade/design-syst
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useOrders } from "@/hooks/useOrders";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useDataScope } from "@/hooks/useDataScope";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import {
   Table,
@@ -28,9 +28,9 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { WsTick } from "@/types/api";
+import type { Funds, WsTick } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
-import type { RawPosition, RawOrder, RawFunds } from "@/types/rawApi";
+import type { RawPosition, RawOrder } from "@/types/rawApi";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
@@ -139,20 +139,23 @@ function IndexCard({ atomKey, name }: IndexCardProps) {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 function DashboardWidget(_props: WidgetProps) {
-  const isBrokerConnected = useBrokerConnected();
-  const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds({ enabled: isBrokerConnected });
-  const { data: positionsData, isPending: positionsPending } = usePositions({ enabled: isBrokerConnected });
-  const { data: ordersData, isPending: ordersPending } = useOrders({ enabled: isBrokerConnected });
-  const showFundsPending = isBrokerConnected && fundsPending;
-  const showPositionsPending = isBrokerConnected && positionsPending;
-  const showOrdersPending = isBrokerConnected && ordersPending;
+  const dataScope = useDataScope();
+  const isExplore = dataScope === "explore:mock";
+  const isPractice = dataScope.startsWith("practice:");
+  const hasAccountSource = dataScope !== "live:unconfigured";
+  const { data: fundsData, dataUpdatedAt, isPending: fundsPending } = useFunds({ enabled: hasAccountSource });
+  const { data: positionsData, isPending: positionsPending } = usePositions({ enabled: hasAccountSource });
+  const { data: ordersData, isPending: ordersPending } = useOrders({ enabled: hasAccountSource });
+  const showFundsPending = hasAccountSource && fundsPending;
+  const showPositionsPending = hasAccountSource && positionsPending;
+  const showOrdersPending = hasAccountSource && ordersPending;
 
-  const funds = fundsData as RawFunds | undefined;
+  const funds = fundsData as Funds | undefined;
   const positions = (positionsData ?? []) as RawPosition[];
   const orders = (ordersData ?? []) as RawOrder[];
 
-  const availableCash = parseFloat(String(funds?.availablecash ?? 0));
-  const usedMargin = parseFloat(String(funds?.utiliseddebits ?? 0));
+  const availableCash = funds?.availableCash ?? 0;
+  const usedMargin = funds?.usedMargin ?? 0;
 
   const totalPnl = useMemo(
     () => positions.reduce((s, p) => s + parseFloat(String(p.pnl ?? 0)), 0),
@@ -165,13 +168,21 @@ function DashboardWidget(_props: WidgetProps) {
     <div className="h-full w-full flex flex-col overflow-hidden bg-surface-base" data-tour-target="dashboard">
       <h2 className="sr-only">Dashboard Overview</h2>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-        {!isBrokerConnected && (
+        {!hasAccountSource && (
           <div
             className="px-3 py-2 text-xs bg-warning/10 text-warning border border-warning/30 rounded"
             role="status"
             aria-label="Broker connection required for live dashboard account data"
           >
             Broker required
+          </div>
+        )}
+        {(isExplore || isPractice) && (
+          <div
+            className="px-3 py-2 text-xs bg-warning/10 text-warning border border-warning/30 rounded"
+            role="status"
+          >
+            {isExplore ? "Sample account data" : "Practice account data"}
           </div>
         )}
         {/* Index strip — responsive: 5 cols on wide panels, fewer on narrow */}
@@ -298,7 +309,7 @@ function DashboardWidget(_props: WidgetProps) {
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
             <p className="text-xs text-text-muted font-sans">
-              {isBrokerConnected ? "No open positions" : "Connect a broker to load positions"}
+              {hasAccountSource ? "No open positions" : "Connect a broker to load positions"}
             </p>
           </div>
         ) : (
@@ -399,7 +410,7 @@ function DashboardWidget(_props: WidgetProps) {
           <div className="px-4 py-8 text-center">
             <Minus size={16} className="mx-auto mb-1 text-text-disabled" aria-hidden="true" />
             <p className="text-xs text-text-muted font-sans">
-              {isBrokerConnected ? "No orders today" : "Connect a broker to load orders"}
+              {hasAccountSource ? "No orders today" : "Connect a broker to load orders"}
             </p>
           </div>
         ) : (

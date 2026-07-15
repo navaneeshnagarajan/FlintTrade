@@ -30,7 +30,7 @@ from datetime import timedelta as _td
 from datetime import timezone as _tz
 from typing import Any, Generator
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Flask, Response, current_app, jsonify, request
 
 from .auth_scopes import require_scope
 
@@ -222,6 +222,24 @@ class LogBuffer:
             except ValueError:
                 pass
 
+    def wake_subscribers(self) -> None:
+        """Wake every stream so it can observe shutdown without a keepalive delay."""
+        with self._sub_lock:
+            for event in self._subscribers:
+                event.set()
+
+
+def shutdown_log_streams(app: Flask) -> None:
+    """Signal every log SSE generator and wake blocked subscribers immediately."""
+    shutdown_event = app.config.get("LOG_STREAM_SHUTDOWN_EVENT")
+    if shutdown_event is None:
+        shutdown_event = threading.Event()
+        app.config["LOG_STREAM_SHUTDOWN_EVENT"] = shutdown_event
+    elif not isinstance(shutdown_event, threading.Event):
+        raise TypeError("LOG_STREAM_SHUTDOWN_EVENT must be a threading.Event")
+    shutdown_event.set()
+    LogBuffer().wake_subscribers()
+
 
 # ---------------------------------------------------------------------------
 # Logging handler — captures log records into the buffer
@@ -302,6 +320,9 @@ def stream_logs() -> Response:
         A streaming ``text/event-stream`` response.
     """
     buf = LogBuffer()
+    shutdown_event = current_app.config.get("LOG_STREAM_SHUTDOWN_EVENT")
+    if not isinstance(shutdown_event, threading.Event):
+        raise TypeError("LOG_STREAM_SHUTDOWN_EVENT must be a threading.Event")
 
     def generate() -> Generator[str, None, None]:
         wake = buf.subscribe()
@@ -311,9 +332,11 @@ def stream_logs() -> Response:
                 yield f"data: {json.dumps(_redacted_operational(entry))}\n\n"
         cursor = buf.latest_seq
         try:
-            while True:
+            while not shutdown_event.is_set():
                 # Wait for new entries (with timeout for keepalive)
                 triggered = wake.wait(timeout=15.0)
+                if shutdown_event.is_set():
+                    break
                 if triggered:
                     wake.clear()
                     # Only send entries newer than our cursor — no duplicates
@@ -324,7 +347,7 @@ def stream_logs() -> Response:
                 else:
                     # Keepalive comment to prevent proxy/browser timeout
                     yield ": keepalive\n\n"
-        except GeneratorExit:
+        finally:
             buf.unsubscribe(wake)
 
     return Response(

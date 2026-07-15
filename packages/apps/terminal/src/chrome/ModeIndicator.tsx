@@ -55,8 +55,9 @@ export default function ModeIndicator() {
       // token place real orders even though the UI says Practice.
       setToggleError("");
       try {
-        const newToken = await downgradeMode("practice", token);
-        updateToken(newToken);
+        const authState = useAuthStore.getState();
+        const newToken = await downgradeMode("practice", authState.token);
+        if (!updateToken(newToken, authState.sessionGeneration)) return;
       } catch {
         setToggleError("Could not downgrade to Practice — try again.");
         return;
@@ -76,13 +77,14 @@ export default function ModeIndicator() {
       return;
     }
     try {
+      const expectedGeneration = useAuthStore.getState().sessionGeneration;
       // Explicit Live arm: unlockWithPin defaults to mode "live", so the
       // backend mints a live_mode_unlocked JWT. Capturing it is essential —
       // otherwise the in-memory token stays at the Explore/Practice JWT from
       // login and the server-side require_live_unlocked guard rejects every
       // order. (Fixed 2026-05-19 per Codex audit; centralised in Phase 1.)
       const { token: newToken } = await unlockWithPin(pin, "live");
-      updateToken(newToken);
+      if (!updateToken(newToken, expectedGeneration)) return;
     } catch (err) {
       // Surface the server's message — the backend distinguishes a wrong PIN
       // from no-PIN-set (code `pin_not_set` points the operator at Settings →
@@ -118,8 +120,9 @@ export default function ModeIndicator() {
     // token (explore is the lowest mode; practice is a broker-free sandbox).
     setToggleError("");
     try {
-      const newToken = await downgradeMode("practice", token);
-      updateToken(newToken);
+      const authState = useAuthStore.getState();
+      const newToken = await downgradeMode("practice", authState.token);
+      if (!updateToken(newToken, authState.sessionGeneration)) return;
     } catch {
       setToggleError("Could not switch to Practice — try again.");
       return;

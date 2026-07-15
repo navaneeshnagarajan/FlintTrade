@@ -3,8 +3,8 @@
  *
  * Features:
  *   - Spread type selector: Bull Call, Bear Put, Bull Put, Bear Call
- *   - Inputs: underlying, expiry, long strike, short strike
- *   - Computed: max profit, max loss, breakeven, net premium, margin required
+ *   - Inputs: underlying, long strike, short strike, net premium, lot size
+ *   - Computed: max profit, max loss, breakeven, net premium, illustrative margin proxy
  *   - Payoff diagram: SVG line showing P&L at expiry vs underlying price
  *   - Deferred quick-execute button until a gated basket order route is wired
  */
@@ -12,32 +12,38 @@
 import { useState, useMemo, memo, useCallback } from "react";
 import { ArrowUpDown, ChevronDown } from "lucide-react";
 import { FlintPayoffChart } from "@flinttrade/design-system";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type SpreadType = "bull-call" | "bear-put" | "bull-put" | "bear-call";
+export type SpreadType = "bull-call" | "bear-put" | "bull-put" | "bear-call";
 
-interface SpreadInputs {
-  underlying: string;
-  expiry: string;
+export interface SpreadInputs {
   longStrike: number;
   shortStrike: number;
-  premium: number;    // net premium paid/received (positive = paid, negative = received)
+  premium: number; // positive = debit paid, negative = credit received
   lotSize: number;
 }
 
-interface SpreadMetrics {
+export interface SpreadMetrics {
   maxProfit: number;
   maxLoss: number;
   breakeven: number;
   netPremium: number;
-  marginRequired: number;
-  isDebit: boolean;    // true = debit spread (pay premium), false = credit
+  illustrativeMarginProxy: number;
+  isDebit: boolean;
 }
+
+export interface PayoffPoint {
+  price: number;
+  pnl: number;
+}
+
+export type SpreadAnalysis =
+  | { valid: true; metrics: SpreadMetrics; payoff: PayoffPoint[] }
+  | { valid: false; error: string };
 
 // ---------------------------------------------------------------------------
 // Spread definitions
@@ -51,7 +57,6 @@ const SPREAD_TYPES: { id: SpreadType; label: string; description: string }[] = [
 ];
 
 const UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
-const EXPIRIES = ["24APR2026", "01MAY2026", "08MAY2026", "29MAY2026"];
 
 // ---------------------------------------------------------------------------
 // Defaults by spread type
@@ -60,17 +65,62 @@ const EXPIRIES = ["24APR2026", "01MAY2026", "08MAY2026", "29MAY2026"];
 const DEFAULTS: Record<SpreadType, Partial<SpreadInputs>> = {
   "bull-call": { longStrike: 24000, shortStrike: 24200, premium: 45, lotSize: 25 },
   "bear-put":  { longStrike: 23800, shortStrike: 23600, premium: 50, lotSize: 25 },
-  "bull-put":  { longStrike: 23800, shortStrike: 23600, premium: -30, lotSize: 25 },
-  "bear-call": { longStrike: 24000, shortStrike: 24200, premium: -35, lotSize: 25 },
+  "bull-put":  { longStrike: 23600, shortStrike: 23800, premium: -30, lotSize: 25 },
+  "bear-call": { longStrike: 24200, shortStrike: 24000, premium: -35, lotSize: 25 },
 };
 
 // ---------------------------------------------------------------------------
 // Metrics computation
 // ---------------------------------------------------------------------------
 
+function spreadWidth(type: SpreadType, inputs: SpreadInputs): number {
+  return type === "bull-call" || type === "bull-put"
+    ? inputs.shortStrike - inputs.longStrike
+    : inputs.longStrike - inputs.shortStrike;
+}
+
+function validateSpreadInputs(type: SpreadType, inputs: SpreadInputs): string | null {
+  const { longStrike, shortStrike, premium, lotSize } = inputs;
+  if (
+    !Number.isFinite(longStrike)
+    || !Number.isFinite(shortStrike)
+    || longStrike <= 0
+    || shortStrike <= 0
+  ) {
+    return "Strikes must be finite positive numbers.";
+  }
+
+  if (!Number.isFinite(lotSize) || !Number.isInteger(lotSize) || lotSize <= 0) {
+    return "Lot size must be a positive whole number.";
+  }
+
+  const longMustBeLower = type === "bull-call" || type === "bull-put";
+  if (longMustBeLower ? longStrike >= shortStrike : longStrike <= shortStrike) {
+    const spreadLabel = SPREAD_TYPES.find((spread) => spread.id === type)?.label ?? "This spread";
+    const requiredOrder = longMustBeLower ? "below" : "above";
+    return `${spreadLabel} requires the long strike ${requiredOrder} the short strike.`;
+  }
+
+  if (!Number.isFinite(premium)) {
+    return "Net premium must be finite.";
+  }
+
+  const width = spreadWidth(type, inputs);
+  const isDebit = type === "bull-call" || type === "bear-put";
+  if (isDebit && (premium <= 0 || premium > width)) {
+    return "Debit must be positive and no greater than the strike width.";
+  }
+
+  if (!isDebit && (premium >= 0 || -premium > width)) {
+    return "Credit must be negative and no greater than the strike width.";
+  }
+
+  return null;
+}
+
 function computeMetrics(type: SpreadType, inputs: SpreadInputs): SpreadMetrics {
   const { longStrike, shortStrike, premium, lotSize } = inputs;
-  const width = Math.abs(shortStrike - longStrike);
+  const width = spreadWidth(type, inputs);
   const isDebit = type === "bull-call" || type === "bear-put";
 
   let maxProfit: number;
@@ -86,43 +136,38 @@ function computeMetrics(type: SpreadType, inputs: SpreadInputs): SpreadMetrics {
     maxLoss = premium * lotSize;
     breakeven = longStrike - premium;
   } else if (type === "bull-put") {
-    const credit = Math.abs(premium);
+    const credit = -premium;
     maxProfit = credit * lotSize;
     maxLoss = (width - credit) * lotSize;
     breakeven = shortStrike - credit;
   } else {
     // bear-call
-    const credit = Math.abs(premium);
+    const credit = -premium;
     maxProfit = credit * lotSize;
     maxLoss = (width - credit) * lotSize;
-    breakeven = longStrike + credit;
+    breakeven = shortStrike + credit;
   }
 
-  // Rough margin: max loss for debit, 1.5x max loss for credit
-  const marginRequired = isDebit ? maxLoss : maxLoss * 1.5;
+  // Heuristic visual proxy only. Broker margin requires live contract and portfolio data.
+  const illustrativeMarginProxy = isDebit ? maxLoss : maxLoss * 1.5;
 
   return {
     maxProfit,
     maxLoss,
     breakeven,
     netPremium: premium * lotSize,
-    marginRequired,
+    illustrativeMarginProxy,
     isDebit,
   };
 }
 
-interface PayoffPoint {
-  price: number;
-  pnl: number;
-}
-
 function buildPayoff(type: SpreadType, inputs: SpreadInputs): PayoffPoint[] {
   const { longStrike, shortStrike, premium, lotSize } = inputs;
-  const width = Math.abs(shortStrike - longStrike);
-  const lo = Math.min(longStrike, shortStrike);
-  const hi = Math.max(longStrike, shortStrike);
+  const longIsLower = type === "bull-call" || type === "bull-put";
+  const lowerStrike = longIsLower ? longStrike : shortStrike;
+  const width = spreadWidth(type, inputs);
   const step = width / 20;
-  const prices = Array.from({ length: 41 }, (_, i) => lo - width * 0.5 + i * step);
+  const prices = Array.from({ length: 41 }, (_, i) => lowerStrike - width * 0.5 + i * step);
 
   return prices.map((price) => {
     let pnl: number;
@@ -135,19 +180,32 @@ function buildPayoff(type: SpreadType, inputs: SpreadInputs): PayoffPoint[] {
       const shortPnl = -Math.max(shortStrike - price, 0);
       pnl = (longPnl + shortPnl - premium) * lotSize;
     } else if (type === "bull-put") {
-      const credit = Math.abs(premium);
-      const shortPnl = -Math.max(hi - price, 0);
-      const longPnl = Math.max(lo - price, 0);
+      const credit = -premium;
+      const shortPnl = -Math.max(shortStrike - price, 0);
+      const longPnl = Math.max(longStrike - price, 0);
       pnl = (credit + shortPnl + longPnl) * lotSize;
     } else {
       // bear-call
-      const credit = Math.abs(premium);
-      const shortPnl = -Math.max(price - lo, 0);
-      const longPnl = Math.max(price - hi, 0);
+      const credit = -premium;
+      const shortPnl = -Math.max(price - shortStrike, 0);
+      const longPnl = Math.max(price - longStrike, 0);
       pnl = (credit + shortPnl + longPnl) * lotSize;
     }
     return { price, pnl };
   });
+}
+
+export function analyseSpread(type: SpreadType, inputs: SpreadInputs): SpreadAnalysis {
+  const error = validateSpreadInputs(type, inputs);
+  if (error) {
+    return { valid: false, error };
+  }
+
+  return {
+    valid: true,
+    metrics: computeMetrics(type, inputs),
+    payoff: buildPayoff(type, inputs),
+  };
 }
 
 function buildPayoffChart(points: PayoffPoint[]) {
@@ -182,7 +240,7 @@ interface MetricTileProps {
 function MetricTile({ label, value, colour = "text-text-primary" }: MetricTileProps) {
   return (
     <div className="flex flex-col gap-0.5 bg-surface-hover rounded px-2 py-1.5 min-w-20">
-      <span className="text-xxs text-text-muted whitespace-nowrap">{label}</span>
+      <span className="text-xxs leading-tight text-text-muted">{label}</span>
       <span className={`text-xs font-semibold font-mono tabular-nums ${colour}`}>{value}</span>
     </div>
   );
@@ -275,12 +333,10 @@ function NumberInput({ label, value, onChange, step = 50 }: NumberInputProps) {
 // ---------------------------------------------------------------------------
 
 function SpreadViewWidget() {
-  const isConnected = useBrokerConnected();
   const track = useTrackBehavior();
 
   const [spreadType, setSpreadType] = useState<SpreadType>("bull-call");
   const [underlying, setUnderlying] = useState("NIFTY");
-  const [expiry, setExpiry] = useState(EXPIRIES[0]);
   const [longStrike, setLongStrike] = useState(DEFAULTS["bull-call"].longStrike ?? 24000);
   const [shortStrike, setShortStrike] = useState(DEFAULTS["bull-call"].shortStrike ?? 24200);
   const [premium, setPremium] = useState(DEFAULTS["bull-call"].premium ?? 45);
@@ -295,12 +351,14 @@ function SpreadViewWidget() {
     track("trade", `spreadview_type_${t}`);
   }, [track]);
 
-  const inputs: SpreadInputs = { underlying, expiry, longStrike, shortStrike, premium, lotSize };
-
-  const metrics = useMemo(() => computeMetrics(spreadType, inputs), [spreadType, inputs]);
-
-  const payoff = useMemo(() => buildPayoff(spreadType, inputs), [spreadType, inputs]);
-  const payoffChart = useMemo(() => buildPayoffChart(payoff), [payoff]);
+  const analysis = useMemo(
+    () => analyseSpread(spreadType, { longStrike, shortStrike, premium, lotSize }),
+    [spreadType, longStrike, shortStrike, premium, lotSize],
+  );
+  const payoffChart = useMemo(
+    () => analysis.valid ? buildPayoffChart(analysis.payoff) : null,
+    [analysis],
+  );
 
   const spreadInfo = SPREAD_TYPES.find((s) => s.id === spreadType);
 
@@ -311,11 +369,13 @@ function SpreadViewWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <ArrowUpDown size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Spread View</span>
-        {!isConnected && (
-          <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
-          </span>
-        )}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          title="The inputs and calculations are illustrative, not live option-chain or broker-margin data."
+        >
+          Illustrative inputs
+        </span>
         <div className="flex-1" />
         {/* Spread type selector */}
         <CompactDropdown
@@ -346,106 +406,108 @@ function SpreadViewWidget() {
             />
           </div>
 
-          {/* Expiry */}
-          <div className="flex flex-col gap-0.5">
-            <label className="text-xxs text-text-muted">Expiry</label>
-            <CompactDropdown
-              value={expiry}
-              options={EXPIRIES.map((e) => ({ id: e, label: e }))}
-              onChange={(v) => setExpiry(v)}
-              ariaLabel="Select expiry"
-            />
-          </div>
-
           <NumberInput label="Long Strike" value={longStrike} onChange={setLongStrike} step={50} />
           <NumberInput label="Short Strike" value={shortStrike} onChange={setShortStrike} step={50} />
           <NumberInput label="Net Premium" value={premium} onChange={setPremium} step={1} />
           <NumberInput label="Lot Size" value={lotSize} onChange={setLotSize} step={1} />
         </div>
 
-        {/* Metrics */}
-        <section aria-labelledby="spread-metrics-label">
-          <p id="spread-metrics-label" className="text-xxs font-medium text-text-muted mb-1 uppercase tracking-wide">
-            Spread Metrics
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            <MetricTile
-              label="Max Profit"
-              value={`₹${metrics.maxProfit.toLocaleString("en-IN")}`}
-              colour="text-profit"
-            />
-            <MetricTile
-              label="Max Loss"
-              value={`₹${metrics.maxLoss.toLocaleString("en-IN")}`}
-              colour="text-loss"
-            />
-            <MetricTile
-              label="Breakeven"
-              value={metrics.breakeven.toLocaleString("en-IN")}
-            />
-            <MetricTile
-              label="Net Premium"
-              value={`₹${Math.abs(metrics.netPremium).toLocaleString("en-IN")} ${metrics.isDebit ? "Dr" : "Cr"}`}
-              colour={metrics.isDebit ? "text-loss" : "text-profit"}
-            />
-            <MetricTile
-              label="Margin Req."
-              value={`₹${metrics.marginRequired.toLocaleString("en-IN")}`}
-              colour="text-warning"
-            />
+        {!analysis.valid && (
+          <div
+            role="alert"
+            className="rounded border border-loss/30 bg-loss/10 px-2 py-1.5 text-xs text-loss"
+          >
+            Invalid inputs: {analysis.error}
           </div>
-        </section>
+        )}
 
-        {/* Payoff diagram */}
-        <section aria-labelledby="payoff-label">
-          <p id="payoff-label" className="text-xxs font-medium text-text-muted mb-1 uppercase tracking-wide">
-            Payoff at Expiry
-          </p>
-          <FlintPayoffChart
-            ariaLabel="Spread payoff diagram"
-            points={payoffChart.points}
-            breakeven={metrics.breakeven}
-            xTicks={payoffChart.xTicks}
-            yTicks={payoffChart.yTicks}
-            xFormatter={(value) => value.toLocaleString("en-IN")}
-            yFormatter={(value) => (
-              value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value >= 0 ? `+${value.toFixed(0)}` : `${value.toFixed(0)}`
-            )}
-            width={500}
-            height={140}
-          />
-          <div className="flex items-center gap-3 mt-1 flex-wrap text-xxs">
-            <div className="flex items-center gap-1">
-              <span className="inline-block w-6 h-px bg-profit/60" />
-              <span className="text-text-muted">Profit zone</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="inline-block w-6 h-px bg-loss/60" />
-              <span className="text-text-muted">Loss zone</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="inline-block w-3 border-t border-dashed border-warning/70" />
-              <span className="text-text-muted">Breakeven: {metrics.breakeven.toLocaleString("en-IN")}</span>
-            </div>
-          </div>
-        </section>
+        {analysis.valid && payoffChart && (
+          <>
+            {/* Metrics */}
+            <section aria-labelledby="spread-metrics-label">
+              <p id="spread-metrics-label" className="text-xxs font-medium text-text-muted mb-1 uppercase tracking-wide">
+                Spread Metrics
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <MetricTile
+                  label="Max Profit"
+                  value={`₹${analysis.metrics.maxProfit.toLocaleString("en-IN")}`}
+                  colour="text-profit"
+                />
+                <MetricTile
+                  label="Max Loss"
+                  value={`₹${analysis.metrics.maxLoss.toLocaleString("en-IN")}`}
+                  colour="text-loss"
+                />
+                <MetricTile
+                  label="Breakeven"
+                  value={analysis.metrics.breakeven.toLocaleString("en-IN")}
+                />
+                <MetricTile
+                  label="Net Premium"
+                  value={`₹${Math.abs(analysis.metrics.netPremium).toLocaleString("en-IN")} ${analysis.metrics.isDebit ? "Dr" : "Cr"}`}
+                  colour={analysis.metrics.isDebit ? "text-loss" : "text-profit"}
+                />
+                <MetricTile
+                  label="Illustrative margin proxy"
+                  value={`₹${analysis.metrics.illustrativeMarginProxy.toLocaleString("en-IN")}`}
+                  colour="text-warning"
+                />
+              </div>
+              <p className="mt-1 text-xxs text-text-muted">Heuristic only; not broker margin.</p>
+            </section>
+
+            {/* Payoff diagram */}
+            <section aria-labelledby="payoff-label">
+              <p id="payoff-label" className="text-xxs font-medium text-text-muted mb-1 uppercase tracking-wide">
+                Payoff at Expiry
+              </p>
+              <FlintPayoffChart
+                ariaLabel="Spread payoff diagram"
+                points={payoffChart.points}
+                breakeven={analysis.metrics.breakeven}
+                xTicks={payoffChart.xTicks}
+                yTicks={payoffChart.yTicks}
+                xFormatter={(value) => value.toLocaleString("en-IN")}
+                yFormatter={(value) => (
+                  value >= 1000 ? `${(value / 1000).toFixed(0)}k` : value >= 0 ? `+${value.toFixed(0)}` : `${value.toFixed(0)}`
+                )}
+                width={500}
+                height={140}
+              />
+              <div className="flex items-center gap-3 mt-1 flex-wrap text-xxs">
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-6 h-px bg-profit/60" />
+                  <span className="text-text-muted">Profit zone</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-6 h-px bg-loss/60" />
+                  <span className="text-text-muted">Loss zone</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-3 border-t border-dashed border-warning/70" />
+                  <span className="text-text-muted">
+                    Breakeven: {analysis.metrics.breakeven.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
 
         {/* Execute button */}
         <div className="flex items-center gap-3 pt-1">
           <button
             disabled
             aria-label={`Execute ${spreadInfo?.label ?? "spread"} spread unavailable`}
-            title="Basket execution is not wired yet."
+            title="This builder is not wired to gated basket execution."
             className="px-3 py-1.5 text-xs font-medium bg-accent/90 hover:bg-accent text-white rounded disabled:opacity-40 transition-colors"
           >
             Execution not wired
           </button>
-          {!isConnected && (
-            <span className="text-xxs text-text-muted">Connect broker to execute</span>
-          )}
-          {isConnected && (
-            <span className="text-xxs text-text-muted">Basket execution not wired yet</span>
-          )}
+          <span className="text-xxs text-text-muted">
+            This builder is not wired to gated basket execution
+          </span>
         </div>
       </div>
     </div>

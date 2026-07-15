@@ -1,252 +1,225 @@
-"""Tests for Action Center Flask endpoints.
-
-Run with:
-    python -m pytest packages/services/engine/tests/test_action_center_routes.py -v --import-mode=importlib
-"""
+"""Tests for the durable, dispatching Action Centre HTTP workflow."""
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import MagicMock
+
 import pytest
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+from flask import Flask
 
 
 @pytest.fixture()
-def action_center():
-    """Fresh ActionCenter for each test."""
-    from flinttrade_engine.action_center import ActionCenter  # noqa: PLC0415
-    return ActionCenter(ttl_seconds=300)
+def queue(tmp_path: Path):
+    from flinttrade_engine.action_center import PendingOrderQueue
+
+    instance = PendingOrderQueue(tmp_path / "action-centre.duckdb")
+    yield instance
+    instance.close()
 
 
 @pytest.fixture()
-def client(action_center):
-    """Flask test client wired to a fresh ActionCenter."""
-    from flask import Flask  # noqa: PLC0415
-    from flinttrade_engine.action_center_routes import action_center_bp  # noqa: PLC0415
+def app(queue):
+    from flinttrade_engine.action_center import ApprovalDispatchResult
+    from flinttrade_engine.action_center_routes import (
+        action_center_bp,
+        admin_action_center_bp,
+    )
 
-    app = Flask(__name__)
-    app.config["ACTION_CENTER"] = action_center
-    app.config["TESTING"] = True
-    app.register_blueprint(action_center_bp)
-    with app.test_client() as c:
-        yield c
-
-
-def _submit(action_center, order_id: str = "ord-1") -> None:
-    action_center.submit(order_id, "acct-1", {"symbol": "NIFTY", "action": "BUY", "quantity": "50"})
-
-
-# ---------------------------------------------------------------------------
-# GET /pending
-# ---------------------------------------------------------------------------
+    flask_app = Flask(__name__)
+    flask_app.config.update(
+        TESTING=True,
+        PENDING_ORDER_QUEUE=queue,
+        ACTION_CENTER_AUTHORISER=lambda require_live_unlock: None,
+        ACTION_CENTER_APPROVAL_DISPATCHER=lambda request: ApprovalDispatchResult.success("BROKER-1"),
+    )
+    flask_app.register_blueprint(action_center_bp)
+    flask_app.register_blueprint(admin_action_center_bp)
+    return flask_app
 
 
-class TestGetPending:
-    def test_empty_queue_returns_empty_list(self, client):
-        resp = client.get("/api/v1/action-center/pending")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["orders"] == []
-
-    def test_pending_orders_appear(self, client, action_center):
-        _submit(action_center)
-        resp = client.get("/api/v1/action-center/pending")
-        data = resp.get_json()
-        assert len(data["data"]["orders"]) == 1
-        assert data["data"]["orders"][0]["order_id"] == "ord-1"
-
-    def test_get_pending_filters_non_pending(self, client, action_center):
-        """Verify that get_pending only returns orders in PENDING status."""
-        _submit(action_center, "pending-ord")
-        _submit(action_center, "approved-ord")
-        _submit(action_center, "rejected-ord")
-
-        action_center.approve("approved-ord")
-        action_center.reject("rejected-ord")
-
-        resp = client.get("/api/v1/action-center/pending")
-        assert resp.status_code == 200
-        data = resp.get_json()
-
-        assert data["status"] == "success"
-        orders = data["data"]["orders"]
-        assert len(orders) == 1
-        assert orders[0]["order_id"] == "pending-ord"
-        assert orders[0]["status"] == "pending"
+@pytest.fixture()
+def client(app):
+    return app.test_client()
 
 
-# ---------------------------------------------------------------------------
-# GET /all
-# ---------------------------------------------------------------------------
+def _enqueue(queue, request_id: str = "intent-1", *, ttl_minutes: int = 5):
+    return queue.enqueue(
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": "2",
+            "price": "0",
+            "pricetype": "MARKET",
+            "product": "MIS",
+            "strategy": "AutonomousAgent",
+        },
+        reason="Autonomous-agent BUY entry requires operator approval",
+        ttl_minutes=ttl_minutes,
+        request_id=request_id,
+        adapter_id="upstox",
+        account_id="primary",
+        source="autonomous-agent",
+        intent_type="entry",
+        producer_ref="agent-session-1",
+        intent_context={"entry_price": 2500.0, "signal": "BUY"},
+    )
 
 
-class TestGetAll:
-    def test_all_returns_empty_list(self, client):
-        resp = client.get("/api/v1/action-center/all")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["orders"] == []
+def test_pending_returns_flattened_durable_intents(client, queue):
+    _enqueue(queue)
 
-    def test_all_includes_approved(self, client, action_center):
-        _submit(action_center)
-        action_center.approve("ord-1")
-        resp = client.get("/api/v1/action-center/all")
-        data = resp.get_json()
-        assert len(data["data"]["orders"]) == 1
-        assert data["data"]["orders"][0]["status"] == "approved"
+    response = client.get("/api/v1/action-center/pending")
 
-    def test_all_includes_all_statuses(self, client, action_center):
-        import time
-        from flinttrade_engine.action_center import OrderApprovalStatus
-
-        # Pending
-        _submit(action_center, "ord-1")
-
-        # Approved
-        _submit(action_center, "ord-2")
-        action_center.approve("ord-2")
-
-        # Rejected
-        _submit(action_center, "ord-3")
-        action_center.reject("ord-3")
-
-        # Expired
-        _submit(action_center, "ord-4")
-        # Manually backdate the created_at timestamp to make it expired when evaluated
-        with action_center._lock:
-            po = action_center._get_or_raise("ord-4")
-            po.created_at = time.time() - action_center.ttl_seconds - 10
-
-        resp = client.get("/api/v1/action-center/all")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        orders = data["data"]["orders"]
-        assert len(orders) == 4
-
-        statuses = {o["order_id"]: o["status"] for o in orders}
-        assert statuses["ord-1"] == OrderApprovalStatus.PENDING
-        assert statuses["ord-2"] == OrderApprovalStatus.APPROVED
-        assert statuses["ord-3"] == OrderApprovalStatus.REJECTED
-        assert statuses["ord-4"] == OrderApprovalStatus.EXPIRED
+    assert response.status_code == 200
+    order = response.get_json()["data"]["orders"][0]
+    assert order == {
+        "id": "intent-1",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 2,
+        "price": 0.0,
+        "order_type": "MARKET",
+        "product": "MIS",
+        "strategy": "AutonomousAgent",
+        "created_at": order["created_at"],
+        "expires_at": order["expires_at"],
+        "reason": "Autonomous-agent BUY entry requires operator approval",
+        "broker": "upstox",
+        "account_id": "primary",
+        "source": "autonomous-agent",
+        "status": "pending",
+    }
 
 
-# ---------------------------------------------------------------------------
-# POST /approve/<order_id>
-# ---------------------------------------------------------------------------
+def test_routes_fail_closed_without_fresh_authoriser(client, app, queue):
+    _enqueue(queue)
+    app.config.pop("ACTION_CENTER_AUTHORISER")
+
+    response = client.post("/api/v1/action-center/approve/intent-1")
+
+    assert response.status_code == 503
+    assert queue.get("intent-1").status == "pending"
 
 
-class TestApproveEndpoint:
-    def test_approve_pending_order_returns_200(self, client, action_center):
-        _submit(action_center)
-        resp = client.post("/api/v1/action-center/approve/ord-1")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["status"] == "success"
-        assert data["data"]["order"]["status"] == "approved"
+def test_approval_requires_live_unlock_and_dispatches_once(client, app, queue):
+    request = _enqueue(queue)
+    authoriser = MagicMock(return_value=None)
+    dispatcher = MagicMock(return_value=app.config["ACTION_CENTER_APPROVAL_DISPATCHER"](request))
+    app.config["ACTION_CENTER_AUTHORISER"] = authoriser
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = dispatcher
 
-    def test_approve_nonexistent_returns_409(self, client):
-        resp = client.post("/api/v1/action-center/approve/no-such-order")
-        assert resp.status_code == 409
-        assert resp.get_json()["status"] == "error"
+    response = client.post("/api/v1/action-center/approve/intent-1")
 
+    assert response.status_code == 200
+    assert response.get_json()["data"]["order"]["status"] == "approved"
+    authoriser.assert_called_once_with(require_live_unlock=True)
+    dispatcher.assert_called_once()
+    resolved = queue.get("intent-1")
+    assert resolved.status == "approved"
+    assert resolved.broker_order_id == "BROKER-1"
+    assert resolved.resolved_at is not None
 
-# ---------------------------------------------------------------------------
-# POST /reject/<order_id>
-# ---------------------------------------------------------------------------
-
-
-class TestRejectEndpoint:
-    def test_reject_pending_order_returns_200(self, client, action_center):
-        _submit(action_center)
-        resp = client.post("/api/v1/action-center/reject/ord-1")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["data"]["order"]["status"] == "rejected"
-
-    def test_reject_already_approved_returns_409(self, client, action_center):
-        _submit(action_center)
-        action_center.approve("ord-1")
-        resp = client.post("/api/v1/action-center/reject/ord-1")
-        assert resp.status_code == 409
+    replay = client.post("/api/v1/action-center/approve/intent-1")
+    assert replay.status_code == 409
+    dispatcher.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# POST /approve-all
-# ---------------------------------------------------------------------------
+def test_rejection_never_dispatches(client, app, queue):
+    _enqueue(queue)
+    dispatcher = MagicMock()
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = dispatcher
+
+    response = client.post(
+        "/api/v1/action-center/reject/intent-1",
+        json={"reason": "Operator rejected the entry"},
+    )
+
+    assert response.status_code == 200
+    assert queue.get("intent-1").status == "rejected"
+    dispatcher.assert_not_called()
 
 
-class TestApproveAllEndpoint:
-    def test_approve_all_returns_count(self, client, action_center):
-        _submit(action_center, "m1")
-        _submit(action_center, "m2")
-        resp = client.post("/api/v1/action-center/approve-all")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["data"]["approved_count"] == 2
+def test_expired_intent_cannot_dispatch(client, app, queue):
+    _enqueue(queue, ttl_minutes=0)
+    dispatcher = MagicMock()
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = dispatcher
+
+    response = client.post("/api/v1/action-center/approve/intent-1")
+
+    assert response.status_code == 409
+    assert queue.get("intent-1").status == "expired"
+    dispatcher.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# GET /config and POST /config
-# ---------------------------------------------------------------------------
+def test_refused_dispatch_is_terminal_and_not_reported_as_pending(client, app, queue):
+    from flinttrade_engine.action_center import ApprovalDispatchResult
+
+    _enqueue(queue)
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = lambda _request: ApprovalDispatchResult.refused(
+        403,
+        "Fresh safety check blocked the order",
+    )
+
+    response = client.post("/api/v1/action-center/approve/intent-1")
+
+    assert response.status_code == 403
+    assert "not dispatched" in response.get_json()["message"].lower()
+    failed = queue.get("intent-1")
+    assert failed.status == "failed"
+    assert failed.outcome_uncertain is False
+    assert queue.list_pending() == []
 
 
-class TestConfigEndpoints:
-    def test_get_config_returns_defaults(self, client):
-        resp = client.get("/api/v1/action-center/config")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert "enabled" in data["data"]
-        assert "ttl_seconds" in data["data"]
+def test_dispatch_exception_is_terminal_and_truthfully_uncertain(client, app, queue):
+    _enqueue(queue)
 
-    def test_post_config_updates_enabled(self, client, action_center):
-        resp = client.post(
-            "/api/v1/action-center/config",
-            json={"enabled": True},
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        assert resp.get_json()["data"]["enabled"] is True
-        assert action_center.enabled is True
+    def fail(_request):
+        raise TimeoutError("private broker detail")
 
-    def test_post_config_updates_ttl(self, client, action_center):
-        resp = client.post(
-            "/api/v1/action-center/config",
-            json={"ttl_seconds": 120},
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        assert action_center.ttl_seconds == 120
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = fail
 
-    def test_post_config_invalid_ttl_returns_400(self, client):
-        resp = client.post(
-            "/api/v1/action-center/config",
-            json={"ttl_seconds": "bad"},
-            content_type="application/json",
-        )
-        assert resp.status_code == 400
+    response = client.post("/api/v1/action-center/approve/intent-1")
 
-    def test_post_config_invalid_ttl_value_returns_400(self, client):
-        resp = client.post(
-            "/api/v1/action-center/config",
-            json={"ttl_seconds": 0},
-            content_type="application/json",
-        )
-        assert resp.status_code == 400
-        assert resp.get_json()["status"] == "error"
-        assert "ttl_seconds must be >= 1" in resp.get_json()["message"]
+    assert response.status_code == 503
+    assert "inspect" in response.get_json()["message"].lower()
+    failed = queue.get("intent-1")
+    assert failed.status == "failed"
+    assert failed.outcome_uncertain is True
+    assert "private broker detail" not in response.get_data(as_text=True)
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
-class TestInternalHelpers:
-    def test_get_ac_outside_app_context(self):
-        from flinttrade_engine.action_center_routes import _get_ac, _default_action_center  # noqa: PLC0415
-        # Since we are outside any Flask test client context, current_app will raise RuntimeError
-        ac = _get_ac()
-        assert ac is _default_action_center
+def test_missing_dispatcher_leaves_request_pending(client, app, queue):
+    _enqueue(queue)
+    app.config.pop("ACTION_CENTER_APPROVAL_DISPATCHER")
+
+    response = client.post("/api/v1/action-center/approve/intent-1")
+
+    assert response.status_code == 503
+    assert queue.get("intent-1").status == "pending"
+
+
+def test_approve_all_is_disabled_and_dispatches_nothing(client, app, queue):
+    _enqueue(queue, "intent-1")
+    _enqueue(queue, "intent-2")
+    dispatcher = MagicMock()
+    app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = dispatcher
+
+    response = client.post("/api/v1/action-center/approve-all")
+
+    assert response.status_code == 405
+    assert dispatcher.call_count == 0
+    assert {request.id for request in queue.list_pending()} == {"intent-1", "intent-2"}
+
+
+def test_admin_history_uses_the_same_queue(client, queue):
+    request = _enqueue(queue)
+    queue.claim_for_dispatch(request.id)
+    queue.mark_approved(request.id, broker_order_id="BROKER-1")
+
+    response = client.get("/admin/action-center/history")
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["requests"][0]["broker_order_id"] == "BROKER-1"

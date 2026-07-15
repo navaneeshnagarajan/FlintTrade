@@ -18,9 +18,9 @@ export const RISK_HINTS = {
   maxPositionLots:
     "Maximum total lots across all positions. Use this to keep local exposure bounded.",
   mtmStoploss:
-    "Auto square-off all positions when day MTM loss exceeds this amount (₹). Set to 0 to disable.",
+    "Local alert and manual kill-switch prompt when day MTM loss exceeds this amount (₹). Set to 0 to disable.",
   mtmTarget:
-    "Auto square-off all positions when day MTM profit reaches this amount (₹). Set to 0 to disable.",
+    "Local monitor target when day MTM profit reaches this amount (₹). Set to 0 to disable.",
   maxOrdersPerMinute:
     "Maximum orders per minute. Keep this well below broker-side limits. Recommended: 50-100.",
 } as const;

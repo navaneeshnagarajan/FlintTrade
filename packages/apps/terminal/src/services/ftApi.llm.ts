@@ -21,12 +21,25 @@ export interface LlmConfigPatch {
   apiKey?: string;
 }
 
-function toLlmConfigPayload(patch: Partial<LlmConfigPatch>): Record<string, string> {
+export interface LlmConnectionTestResponse {
+  status: "success";
+  data: {
+    provider: string;
+    model: string;
+  };
+}
+
+function toLlmConfigPayload(
+  patch: Partial<LlmConfigPatch>,
+  options: { omitEmptyApiKey?: boolean } = {},
+): Record<string, string> {
   const body: Record<string, string> = {};
   if ("provider" in patch) body.provider = patch.provider ?? "";
   if ("host" in patch) body.host = patch.host ?? "";
   if ("model" in patch) body.model = patch.model ?? "";
-  if ("apiKey" in patch) body.api_key = patch.apiKey ?? "";
+  if ("apiKey" in patch && (!options.omitEmptyApiKey || patch.apiKey?.trim())) {
+    body.api_key = patch.apiKey ?? "";
+  }
   return body;
 }
 
@@ -55,4 +68,26 @@ export async function persistLlmConfigPatch(
     throw new Error(payload.message || `HTTP ${response.status}`);
   }
   return payload;
+}
+
+export async function testLlmConnection(
+  config: Partial<LlmConfigPatch>,
+): Promise<LlmConnectionTestResponse> {
+  const response = await fetch("/ft-api/v1/config/llm/test", {
+    method: "POST",
+    headers: buildHeaders(true),
+    body: JSON.stringify(toLlmConfigPayload(config, { omitEmptyApiKey: true })),
+  });
+  const payload = await response.json().catch(() => ({})) as Partial<LlmConnectionTestResponse> & {
+    message?: string;
+  };
+  if (
+    !response.ok
+    || payload.status !== "success"
+    || typeof payload.data?.provider !== "string"
+    || typeof payload.data?.model !== "string"
+  ) {
+    throw new Error(payload.message || `HTTP ${response.status}`);
+  }
+  return payload as LlmConnectionTestResponse;
 }

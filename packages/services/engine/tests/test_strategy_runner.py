@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,6 +25,17 @@ def runner(tmp_path):
     """UserStrategyRunner backed by a temporary directory."""
     import flinttrade_engine.strategy_runner as _mod
     return _mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
+
+
+@pytest.fixture(autouse=True)
+def _stable_mock_process_identity(monkeypatch):
+    """Give mocked POSIX children a stable identity token."""
+    import flinttrade_engine.strategy_runner as _mod
+
+    monkeypatch.setattr(_mod.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(_mod, "_read_process_identity", lambda pid: float(pid), raising=False)
+    monkeypatch.setattr(_mod.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(_mod.os, "killpg", lambda _pgid, _signal: None)
 
 
 SAFE_CODE = """\
@@ -149,6 +161,275 @@ class TestUpload:
 # ---------------------------------------------------------------------------
 
 
+class TestWindowsJobProcessTree:
+    @staticmethod
+    def _active_process_query(module, counts: list[int]):
+        import ctypes
+
+        remaining = iter(counts)
+
+        def query(_handle, info_class, info_ptr, _size, _returned_length):
+            assert info_class == 1  # JobObjectBasicAccountingInformation
+            info = ctypes.cast(
+                info_ptr,
+                ctypes.POINTER(module._WindowsJobBasicAccountingInformation),
+            ).contents
+            info.ActiveProcesses = next(remaining)
+            return True
+
+        return query
+
+    def test_is_alive_queries_active_job_processes(self):
+        import flinttrade_engine.strategy_runner as mod
+
+        kernel32 = MagicMock()
+        kernel32.QueryInformationJobObject.side_effect = self._active_process_query(mod, [1, 0])
+        tree = mod._WindowsJobProcessTree(MagicMock(spec=subprocess.Popen), 42, kernel32)
+
+        assert tree.is_alive() is True
+        assert tree.is_alive() is False
+        kernel32.WaitForSingleObject.assert_not_called()
+
+    def test_wait_gone_polls_active_job_processes_until_zero(self):
+        import flinttrade_engine.strategy_runner as mod
+
+        kernel32 = MagicMock()
+        kernel32.QueryInformationJobObject.side_effect = self._active_process_query(mod, [2, 1, 0])
+        tree = mod._WindowsJobProcessTree(MagicMock(spec=subprocess.Popen), 42, kernel32)
+
+        assert tree.wait_gone(0.1) is True
+        assert kernel32.QueryInformationJobObject.call_count == 3
+        kernel32.WaitForSingleObject.assert_not_called()
+
+    def test_create_configures_job_memory_and_active_process_limits(self, monkeypatch):
+        import ctypes
+
+        import flinttrade_engine.strategy_runner as mod
+
+        process = MagicMock()
+        process.pid = 717
+        process._handle = 99
+        kernel32 = MagicMock()
+        kernel32.CreateJobObjectW.return_value = 42
+        kernel32.AssignProcessToJobObject.return_value = True
+        captured: dict[str, int] = {}
+
+        def set_limits(_handle, info_class, limits_pointer, _size):
+            assert info_class == 9
+            limits = ctypes.cast(
+                limits_pointer,
+                ctypes.POINTER(mod._WindowsJobExtendedLimitInformation),
+            ).contents
+            captured["flags"] = int(limits.BasicLimitInformation.LimitFlags)
+            captured["processes"] = int(limits.BasicLimitInformation.ActiveProcessLimit)
+            captured["memory"] = int(limits.JobMemoryLimit)
+            return True
+
+        kernel32.SetInformationJobObject.side_effect = set_limits
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+        monkeypatch.setattr(mod, "_resume_windows_process", MagicMock())
+
+        tree = mod._WindowsJobProcessTree.create(
+            process,
+            memory_limit_bytes=96 * 1024 * 1024,
+            process_limit=1,
+        )
+
+        assert captured == {
+            "flags": 0x00002000 | 0x00000200 | 0x00000008,
+            "processes": 1,
+            "memory": 96 * 1024 * 1024,
+        }
+        tree.close()
+
+    def test_refuses_to_signal_group_after_leader_identity_changes(self, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        process = TestStartStop()._make_mock_process(pid=515)
+        monkeypatch.setattr(mod, "_read_process_identity", MagicMock(side_effect=[10.0, 11.0]), raising=False)
+        killpg = MagicMock()
+        monkeypatch.setattr(mod.os, "killpg", killpg)
+        monkeypatch.setattr(mod.os, "getpgid", MagicMock(return_value=515))
+        tree = mod._PosixProcessGroup(process)
+
+        with pytest.raises(RuntimeError, match="identity"):
+            tree.terminate()
+
+        killpg.assert_not_called()
+
+    def test_refuses_to_signal_unverifiable_group_after_leader_exit(self, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        process = TestStartStop()._make_mock_process(pid=616, returncode=0)
+        monkeypatch.setattr(mod, "_read_process_identity", MagicMock(return_value=10.0), raising=False)
+        killpg = MagicMock()
+        monkeypatch.setattr(mod.os, "killpg", killpg)
+        tree = mod._PosixProcessGroup(process)
+
+        with pytest.raises(RuntimeError, match="leader exited"):
+            tree.kill()
+
+        killpg.assert_not_called()
+
+    def test_close_retains_job_handle_until_close_succeeds(self, monkeypatch):
+        import ctypes
+
+        import flinttrade_engine.strategy_runner as mod
+
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        monkeypatch.setattr(
+            ctypes,
+            "WinError",
+            lambda code: OSError(code, "CloseHandle failed"),
+            raising=False,
+        )
+        kernel32 = MagicMock()
+        kernel32.CloseHandle.side_effect = [False, True]
+        tree = mod._WindowsJobProcessTree(MagicMock(spec=subprocess.Popen), 42, kernel32)
+
+        with pytest.raises(OSError, match="CloseHandle failed"):
+            tree.close()
+        assert tree._job_handle == 42
+
+        tree.close()
+        assert tree._job_handle is None
+        assert kernel32.CloseHandle.call_args_list == [((42,),), ((42,),)]
+
+    def test_create_job_failure_terminates_and_reaps_suspended_child(self, runner, monkeypatch):
+        import ctypes
+
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("windows_create_job_failure", SAFE_CODE)
+        process = TestStartStop()._make_mock_process(pid=818)
+        process.wait.return_value = 1
+        kernel32 = MagicMock()
+        kernel32.CreateJobObjectW.return_value = 0
+
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        monkeypatch.setattr(
+            ctypes,
+            "WinError",
+            lambda code: OSError(code, "CreateJobObject failed"),
+            raising=False,
+        )
+        monkeypatch.setattr(mod.platform, "system", lambda: "Windows")
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            pytest.raises(OSError, match="CreateJobObject failed"),
+        ):
+            runner.start(strategy_id)
+
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with(timeout=2.0)
+        assert strategy_id not in runner._running
+
+    def test_create_job_failure_retains_unreaped_suspended_child_owner(self, runner, monkeypatch):
+        import ctypes
+
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("windows_create_job_retained", SAFE_CODE)
+        process = TestStartStop()._make_mock_process(pid=828)
+        process.kill.side_effect = OSError("kill denied")
+        kernel32 = MagicMock()
+        kernel32.CreateJobObjectW.return_value = 0
+
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        monkeypatch.setattr(
+            ctypes,
+            "WinError",
+            lambda code: OSError(code, "CreateJobObject failed"),
+            raising=False,
+        )
+        monkeypatch.setattr(mod.platform, "system", lambda: "Windows")
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            pytest.raises(mod._WindowsJobCreationRollbackError) as failed,
+        ):
+            runner.start(strategy_id)
+
+        entry = runner._running[strategy_id]
+        try:
+            assert failed.value.process_tree is entry.tree
+            assert str(failed.value.setup_error) == "[Errno 5] CreateJobObject failed"
+            assert str(failed.value.rollback_error) == "kill denied"
+            assert entry.process is process
+            assert entry.tree._assigned is False
+            assert entry.tree._job_handle is None
+            assert entry.log_file is not None
+            assert entry.temp_dir is not None and entry.temp_dir.exists()
+        finally:
+            runner._release_entry_resources(entry)
+            runner._running.pop(strategy_id, None)
+
+    def test_failed_resume_and_close_retains_assigned_job_for_stop_retry(
+        self,
+        runner,
+        monkeypatch,
+    ):
+        import ctypes
+
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("windows_recovery", SAFE_CODE)
+        process = MagicMock()
+        process.pid = 919
+        process._handle = 99
+        process.wait.return_value = 1
+        kernel32 = MagicMock()
+        kernel32.CreateJobObjectW.return_value = 42
+        kernel32.SetInformationJobObject.return_value = True
+        kernel32.AssignProcessToJobObject.return_value = True
+        kernel32.TerminateJobObject.return_value = True
+        kernel32.QueryInformationJobObject.side_effect = self._active_process_query(mod, [0, 0, 0])
+        kernel32.CloseHandle.side_effect = [False, True]
+
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+        monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+        monkeypatch.setattr(
+            ctypes,
+            "WinError",
+            lambda code: OSError(code, "Windows API failure"),
+            raising=False,
+        )
+        monkeypatch.setattr(mod.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(
+            mod,
+            "_resume_windows_process",
+            MagicMock(side_effect=RuntimeError("resume failed")),
+        )
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            pytest.raises(mod._WindowsJobCreationRollbackError) as failed,
+        ):
+            runner.start(strategy_id)
+
+        entry = runner._running[strategy_id]
+        retained_tree = failed.value.process_tree
+        retained_temp_dir = entry.temp_dir
+        assert entry.tree is retained_tree
+        assert entry.process is process
+        assert str(failed.value.setup_error) == "resume failed"
+        assert retained_tree._job_handle == 42
+        assert entry.log_file is not None
+        assert retained_temp_dir is not None and retained_temp_dir.exists()
+        kernel32.AssignProcessToJobObject.assert_called_once()
+        assert kernel32.CloseHandle.call_count == 1
+
+        runner.stop(strategy_id)
+
+        assert strategy_id not in runner._running
+        assert retained_tree._job_handle is None
+        assert retained_temp_dir.exists() is False
+        assert kernel32.CloseHandle.call_count == 2
+
+
 class TestStartStop:
     def _make_mock_process(self, pid: int = 12345, returncode: int | None = None):
         proc = MagicMock(spec=subprocess.Popen)
@@ -156,6 +437,13 @@ class TestStartStop:
         proc.poll.return_value = returncode
         proc.wait.return_value = returncode
         return proc
+
+    def _attach_tree(self, runner, strategy_id: str, *, alive: bool = True):
+        tree = MagicMock()
+        tree.is_alive.side_effect = [alive, False] if alive else [False]
+        tree.wait_gone.return_value = True
+        runner._running[strategy_id].tree = tree
+        return tree
 
     def test_start_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
@@ -180,6 +468,105 @@ class TestStartStop:
             with pytest.raises(RuntimeError, match="already running"):
                 runner.start(strategy_id)
 
+    def test_concurrent_tree_limit_fails_before_spawning_another_process(self, tmp_path):
+        import flinttrade_engine.strategy_runner as mod
+
+        runner = mod.UserStrategyRunner(
+            strategies_dir=tmp_path / "strategies",
+            max_concurrent_strategies=1,
+        )
+        first_id = runner.upload("first_tree", SAFE_CODE)
+        second_id = runner.upload("second_tree", SAFE_CODE)
+        first = self._make_mock_process(pid=111)
+
+        with patch("subprocess.Popen", return_value=first) as popen:
+            runner.start(first_id)
+            with pytest.raises(RuntimeError, match="concurrent strategy limit"):
+                runner.start(second_id)
+
+        assert popen.call_count == 1
+        assert first_id in runner._running
+        assert second_id not in runner._running
+
+    def test_posix_start_fails_closed_without_hard_memory_enforcement(self, runner, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("unsupported_limits", SAFE_CODE)
+        monkeypatch.setattr(mod.platform, "system", lambda: "Darwin")
+        with (
+            patch("subprocess.Popen") as popen,
+            pytest.raises(RuntimeError, match="unavailable on Darwin"),
+        ):
+            runner.start(strategy_id)
+
+        popen.assert_not_called()
+
+    def test_start_refuses_replacement_while_descendant_tree_survives_leader(self, runner):
+        strategy_id = runner.upload("surviving_tree", SAFE_CODE)
+        first = self._make_mock_process(pid=505, returncode=0)
+        with patch("subprocess.Popen", return_value=first):
+            runner.start(strategy_id)
+        tree = MagicMock()
+        tree.is_alive.return_value = True
+        runner._running[strategy_id].tree = tree
+
+        with (
+            patch("subprocess.Popen") as popen,
+            pytest.raises(RuntimeError, match="already running"),
+        ):
+            runner.start(strategy_id)
+
+        popen.assert_not_called()
+        assert strategy_id in runner._running
+
+    def test_concurrent_starts_spawn_exactly_one_owned_process(self, runner):
+        strategy_id = runner.upload("concurrent_start", SAFE_CODE)
+        first_process = self._make_mock_process(pid=101)
+        second_process = self._make_mock_process(pid=202)
+        first_spawn_entered = threading.Event()
+        release_first_spawn = threading.Event()
+        second_spawn_entered = threading.Event()
+        spawn_count = 0
+        spawn_count_lock = threading.Lock()
+        errors: list[Exception] = []
+
+        def spawn(*_args, **_kwargs):
+            nonlocal spawn_count
+            with spawn_count_lock:
+                call_index = spawn_count
+                spawn_count += 1
+            if call_index == 0:
+                first_spawn_entered.set()
+                assert release_first_spawn.wait(timeout=2)
+                return first_process
+            second_spawn_entered.set()
+            return second_process
+
+        def start() -> None:
+            try:
+                runner.start(strategy_id)
+            except Exception as exc:  # noqa: BLE001 - captures the losing caller
+                errors.append(exc)
+
+        with patch("subprocess.Popen", side_effect=spawn) as popen:
+            first_thread = threading.Thread(target=start)
+            second_thread = threading.Thread(target=start)
+            first_thread.start()
+            assert first_spawn_entered.wait(timeout=1)
+            second_thread.start()
+            second_spawn_entered.wait(timeout=0.25)
+            release_first_spawn.set()
+            first_thread.join(timeout=2)
+            second_thread.join(timeout=2)
+
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert popen.call_count == 1
+        assert len(errors) == 1
+        assert isinstance(errors[0], RuntimeError)
+        assert "already running" in str(errors[0])
+        assert runner._running[strategy_id].process is first_process
+
     def test_stop_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -187,21 +574,99 @@ class TestStartStop:
         with patch("subprocess.Popen", return_value=mock_proc):
             runner.start(strategy_id)
 
+        tree = self._attach_tree(runner, strategy_id)
         runner.stop(strategy_id)
         assert strategy_id not in runner._running
-        mock_proc.terminate.assert_called_once()
+        tree.terminate.assert_called_once_with()
+        tree.wait_gone.assert_called_once_with(5.0)
+        tree.close.assert_called_once_with()
+
+    def test_stop_serialises_with_inflight_start_and_terminates_published_child(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("start_stop_race", SAFE_CODE)
+        process = self._make_mock_process(pid=303)
+        process_tree = MagicMock()
+        process_tree.is_alive.side_effect = [True, False]
+        process_tree.wait_gone.return_value = True
+        spawn_entered = threading.Event()
+        release_spawn = threading.Event()
+        errors: list[Exception] = []
+
+        def spawn(*_args, **_kwargs):
+            spawn_entered.set()
+            assert release_spawn.wait(timeout=2)
+            return process
+
+        def start() -> None:
+            try:
+                runner.start(strategy_id)
+            except Exception as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        def stop() -> None:
+            try:
+                runner.stop(strategy_id)
+            except Exception as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        with (
+            patch("subprocess.Popen", side_effect=spawn),
+            patch.object(mod, "_create_process_tree", return_value=process_tree, create=True),
+        ):
+            start_thread = threading.Thread(target=start)
+            stop_thread = threading.Thread(target=stop)
+            start_thread.start()
+            assert spawn_entered.wait(timeout=1)
+            stop_thread.start()
+            assert stop_thread.is_alive(), "stop raced past an unpublished child"
+            release_spawn.set()
+            start_thread.join(timeout=2)
+            stop_thread.join(timeout=2)
+
+        assert errors == []
+        assert strategy_id not in runner._running
+        process_tree.terminate.assert_called_once_with()
+
+    def test_stop_bounds_reap_after_forced_kill(self, runner):
+        strategy_id = runner.upload("bounded_kill", SAFE_CODE)
+        process = self._make_mock_process(pid=404)
+        with patch("subprocess.Popen", return_value=process):
+            runner.start(strategy_id)
+        tree = self._attach_tree(runner, strategy_id)
+        tree.wait_gone.side_effect = [False, False]
+        entry = runner._running[strategy_id]
+        temp_dir = entry.temp_dir
+        log_file = entry.log_file
+
+        with pytest.raises(RuntimeError, match="(?i)could not confirm"):
+            runner.stop(strategy_id)
+
+        tree.terminate.assert_called_once_with()
+        tree.kill.assert_called_once_with()
+        assert tree.wait_gone.call_args_list[0].args == (5.0,)
+        assert tree.wait_gone.call_args_list[1].args == (2.0,)
+        assert strategy_id in runner._running
+        assert entry.temp_dir == temp_dir
+        assert entry.log_file is log_file
+        assert temp_dir.exists()
 
     def test_stop_not_running_raises(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         with pytest.raises(RuntimeError):
             runner.stop(strategy_id)
 
-    def test_start_detaches_stdin_but_inherits_parent_process_group(self, runner):
+    def test_stop_unknown_strategy_raises_file_not_found(self, runner):
+        with pytest.raises(FileNotFoundError, match="Strategy not found"):
+            runner.stop("unknown-strategy")
+
+    def test_start_detaches_stdin_and_owns_dedicated_posix_process_group(self, runner):
         strategy_id = runner.upload("contained", SAFE_CODE)
         mock_proc = self._make_mock_process()
 
         with (
             patch.dict("os.environ", {"FLINTTRADE_PARENT_PID": "77"}),
+            patch("flinttrade_engine.strategy_runner.platform.system", return_value="Linux"),
             patch("subprocess.Popen", return_value=mock_proc) as popen,
         ):
             runner.start(strategy_id)
@@ -209,8 +674,33 @@ class TestStartStop:
         kwargs = popen.call_args.kwargs
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["close_fds"] is True
-        assert "start_new_session" not in kwargs
+        assert kwargs["start_new_session"] is True
         assert "FLINTTRADE_PARENT_PID" not in kwargs["env"]
+
+    def test_windows_start_assigns_suspended_child_to_complete_tree_job(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("windows_tree", SAFE_CODE)
+        process = self._make_mock_process(pid=909)
+        tree = MagicMock()
+
+        with (
+            patch.object(mod.platform, "system", return_value="Windows"),
+            patch.object(mod, "_create_process_tree", return_value=tree, create=True) as create_tree,
+            patch("subprocess.Popen", return_value=process) as popen,
+        ):
+            runner.start(strategy_id)
+
+        flags = popen.call_args.kwargs["creationflags"]
+        assert flags & mod._WINDOWS_CREATE_NEW_PROCESS_GROUP
+        assert flags & mod._WINDOWS_CREATE_SUSPENDED
+        create_tree.assert_called_once_with(
+            process,
+            "Windows",
+            memory_limit_bytes=256 * 1024 * 1024,
+            process_limit=1,
+        )
+        assert runner._running[strategy_id].tree is tree
 
     def test_frozen_start_uses_child_mode_not_wrapper_script(self, runner):
         import flinttrade_engine.strategy_runner as mod
@@ -249,7 +739,10 @@ class TestStartStop:
                 },
             ),
             patch("subprocess.Popen") as popen,
-            pytest.raises(RuntimeError, match="dispatcher is not installed"),
+            pytest.raises(
+                mod.PackagedChildConfigurationError,
+                match="dispatcher is not installed",
+            ),
         ):
             runner.start(strategy_id)
 
@@ -272,7 +765,7 @@ class TestStartStop:
         with (
             patch.object(mod.sys, "frozen", True, create=True),
             patch.object(mod, "_frozen_dispatch_checked", False),
-            patch.object(mod.platform, "system", return_value="Darwin"),
+            patch.object(mod.platform, "system", return_value="Linux"),
             patch.dict(
                 "os.environ",
                 {
@@ -291,12 +784,41 @@ class TestStartStop:
         assert mod.PACKAGED_CHILD_ARG_ENV not in popen.call_args.kwargs["env"]
         assert boot_id_env not in popen.call_args.kwargs["env"]
 
+    def test_frozen_windows_job_allows_bootloader_plus_one_strategy_process(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("frozen_windows", SAFE_CODE)
+        process = self._make_mock_process(pid=919)
+        tree = MagicMock()
+        with (
+            patch.object(mod.sys, "frozen", True, create=True),
+            patch.object(mod, "_frozen_dispatch_checked", True),
+            patch.object(mod.platform, "system", return_value="Windows"),
+            patch.object(mod, "_create_process_tree", return_value=tree) as create_tree,
+            patch("subprocess.Popen", return_value=process),
+        ):
+            runner.start(strategy_id)
+
+        create_tree.assert_called_once_with(
+            process,
+            "Windows",
+            memory_limit_bytes=256 * 1024 * 1024,
+            process_limit=2,
+        )
+
     def test_frozen_child_dispatch_executes_strategy_without_sidecar_entry(self, tmp_path):
         import flinttrade_engine.strategy_runner as mod
 
         strategy_path = tmp_path / "strategy.py"
         strategy_path.write_text("print('child')\n", encoding="utf-8")
         with (
+            patch.dict(
+                "os.environ",
+                {
+                    mod.STRATEGY_MEMORY_LIMIT_ENV: str(128 * 1024 * 1024),
+                    mod.STRATEGY_PROCESS_LIMIT_ENV: "1",
+                },
+            ),
             patch.object(mod, "_apply_uploaded_strategy_child_limits") as apply_limits,
             patch.object(mod, "_execute_uploaded_strategy_file") as execute,
         ):
@@ -305,7 +827,35 @@ class TestStartStop:
             )
 
         assert dispatched is True
-        apply_limits.assert_called_once_with()
+        apply_limits.assert_called_once_with(
+            memory_limit_bytes=128 * 1024 * 1024,
+            process_limit=1,
+        )
+        execute.assert_called_once_with(strategy_path)
+
+    def test_frozen_windows_child_relies_on_parent_job_limits(self, tmp_path):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_path = tmp_path / "strategy.py"
+        strategy_path.write_text("print('child')\n", encoding="utf-8")
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    mod.STRATEGY_MEMORY_LIMIT_ENV: str(128 * 1024 * 1024),
+                    mod.STRATEGY_PROCESS_LIMIT_ENV: "1",
+                },
+            ),
+            patch.object(mod.platform, "system", return_value="Windows"),
+            patch.object(mod, "_apply_uploaded_strategy_child_limits") as apply_limits,
+            patch.object(mod, "_execute_uploaded_strategy_file") as execute,
+        ):
+            dispatched = mod.dispatch_frozen_strategy_child(
+                [sys.executable, mod.FROZEN_STRATEGY_CHILD_ARG, str(strategy_path)]
+            )
+
+        assert dispatched is True
+        apply_limits.assert_not_called()
         execute.assert_called_once_with(strategy_path)
 
     def test_stop_all_owns_every_uploaded_process(self, runner):
@@ -317,24 +867,29 @@ class TestStartStop:
         with patch("subprocess.Popen", side_effect=[first, second]):
             runner.start(first_id)
             runner.start(second_id)
+        first_tree = self._attach_tree(runner, first_id)
+        second_tree = self._attach_tree(runner, second_id)
 
         stopped = runner.stop_all()
 
         assert set(stopped) == {first_id, second_id}
         assert runner._running == {}
-        first.terminate.assert_called_once()
-        second.terminate.assert_called_once()
+        first_tree.terminate.assert_called_once()
+        second_tree.terminate.assert_called_once()
 
     def test_stop_all_continues_after_one_process_fails(self, runner):
         first_id = runner.upload("first_failure", SAFE_CODE)
         second_id = runner.upload("second_stops", SAFE_CODE)
         first = self._make_mock_process(pid=101)
-        first.terminate.side_effect = OSError("termination denied")
         second = self._make_mock_process(pid=202)
 
         with patch("subprocess.Popen", side_effect=[first, second]):
             runner.start(first_id)
             runner.start(second_id)
+
+        first_tree = self._attach_tree(runner, first_id)
+        first_tree.terminate.side_effect = OSError("termination denied")
+        second_tree = self._attach_tree(runner, second_id)
 
         first_entry = runner._running[first_id]
         first_temp_dir = first_entry.temp_dir
@@ -344,10 +899,10 @@ class TestStartStop:
 
         assert first_id in runner._running
         assert second_id not in runner._running
-        assert first_entry.log_file is None
-        assert first_entry.temp_dir is None
-        assert not first_temp_dir.exists()
-        second.terminate.assert_called_once_with()
+        assert first_entry.log_file is not None
+        assert first_entry.temp_dir == first_temp_dir
+        assert first_temp_dir.exists()
+        second_tree.terminate.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +926,8 @@ class TestDeleteStatusLogs:
         process.terminate.side_effect = OSError("termination denied")
         with patch("subprocess.Popen", return_value=process):
             runner.start(strategy_id)
+        tree = TestStartStop()._attach_tree(runner, strategy_id)
+        tree.terminate.side_effect = OSError("termination denied")
 
         strategy_path = runner._strategies_dir / f"{strategy_id}.py"
         metadata_path = runner._strategies_dir / f"{strategy_id}.meta"
@@ -381,6 +938,39 @@ class TestDeleteStatusLogs:
         assert strategy_id in runner._running
         assert strategy_path.exists()
         assert metadata_path.exists()
+
+    def test_status_retains_owner_when_leader_exits_but_tree_is_alive(self, runner):
+        strategy_id = runner.upload("leader_exit", SAFE_CODE)
+        process = TestStartStop()._make_mock_process(pid=707, returncode=0)
+        with patch("subprocess.Popen", return_value=process):
+            runner.start(strategy_id)
+        tree = TestStartStop()._attach_tree(runner, strategy_id, alive=True)
+
+        status = runner.get_status(strategy_id)
+
+        assert status["state"] == "running"
+        assert status["leader_exited"] is True
+        assert strategy_id in runner._running
+        tree.close.assert_not_called()
+
+    def test_status_retains_owner_when_tree_state_is_uncertain(self, runner):
+        strategy_id = runner.upload("uncertain_tree", SAFE_CODE)
+        process = TestStartStop()._make_mock_process(pid=808)
+        with patch("subprocess.Popen", return_value=process):
+            runner.start(strategy_id)
+        entry = runner._running[strategy_id]
+        tree = MagicMock()
+        tree.is_alive.side_effect = OSError("job query failed")
+        entry.tree = tree
+
+        status = runner.get_status(strategy_id)
+
+        assert status["state"] == "unknown"
+        assert status["ownership_retained"] is True
+        assert strategy_id in runner._running
+        assert entry.log_file is not None
+        assert entry.temp_dir is not None
+        tree.close.assert_not_called()
 
     def test_get_status_stopped(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)

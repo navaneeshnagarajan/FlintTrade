@@ -1603,12 +1603,37 @@ def _run_bounded_candidate_coroutine(
     return attempt.result
 
 
-def _disable_broker_routing() -> None:
-    """Unpublish every routing-generation surface as one fail-closed state."""
-    current_app.config["BROKER_ROUTER"] = None
-    current_app.config["SMART_ROUTING"] = {}
-    current_app.config["NATIVE_ADAPTERS"] = {}
-    current_app.config["RECONCILE_TARGETS"] = None
+def _disable_broker_routing() -> bool:
+    """Retire the exact current generation before unpublishing its companions.
+
+    ``retire_broker_router_generation`` retains an undrained router under
+    ``BROKER_ROUTER_DRAINING``.  That strong reference is deliberate: a timeout
+    or revoke failure must leave the unsafe generation owned and unreachable,
+    rather than let a later rebuild silently forget it.
+    """
+    from .app import _broker_router_drain_timeout, retire_broker_router_generation  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
+
+    app = current_app._get_current_object()  # type: ignore[attr-defined]
+    rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    try:
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_broker_router_drain_timeout(app),
+        ):
+            retired = retire_broker_router_generation(app)
+            app.config["SMART_ROUTING"] = {}
+            app.config["NATIVE_ADAPTERS"] = {}
+            app.config["RECONCILE_TARGETS"] = None
+            if not retired:
+                logger.critical("Broker routing remains disabled until the retained generation drains")
+            return retired
+    except GenerationLeaseUnavailableError:
+        logger.critical("Broker routing disable timed out waiting for the routing-generation lease")
+        return False
 
 
 def _workspace_execution_default_is_disabled() -> bool:
@@ -1634,11 +1659,11 @@ def _configure_broker_router_checked(store: Any, registry: Any) -> Any:
     try:
         result = configure_broker_router(app, registry, store, app.config.get("CLIENT"))
     except Exception:
-        app.config["BROKER_ROUTER"] = None
+        _disable_broker_routing()
         raise _RouterRebuildError("Broker router rebuild raised") from None
     router = app.config.get("BROKER_ROUTER")
     if result is not True or router is None:
-        app.config["BROKER_ROUTER"] = None
+        _disable_broker_routing()
         raise _RouterRebuildError("Broker router rebuild failed")
     return router
 
@@ -3022,6 +3047,33 @@ def _canonical_ltp_rows(value: Any, requested: list[Any]) -> list[dict[str, Any]
     return [{"symbol": fallback_symbol, "exchange": fallback_exchange, "ltp": _canonical_ltp_float(value)}]
 
 
+def _submit_live_positions_mtm(
+    value: Any,
+    *,
+    adapter_id: str,
+    account_id: str,
+) -> None:
+    """Submit one locally computed account MTM snapshot with its exact selector."""
+    from .l2_state import PortfolioSafetyState  # noqa: PLC0415
+
+    if not isinstance(value, PortfolioSafetyState):
+        logger.error("Live position MTM ignored because local portfolio accounting is incomplete")
+        return
+    safety = current_app.config.get("SAFETY")
+    submit = getattr(safety, "submit_daily_mtm", None)
+    if not callable(submit):
+        logger.error("Live position MTM is unavailable because the safety runtime is not configured")
+        return
+    try:
+        submit(
+            value.daily_pnl,
+            adapter_id=adapter_id,
+            account_id=account_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - a live MTM failure must not create a raw exit path
+        logger.error("Live position MTM submission failed closed (%s)", type(exc).__name__)
+
+
 @native_accounts_bp.route("/accounts/<adapter_id>/<account_id>/<kind>", methods=["GET"])
 def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
     """Read a native account's account book or read-only market data via its adapter.
@@ -3118,6 +3170,21 @@ def read_native_account(adapter_id: str, account_id: str, kind: str) -> Any:
         return v
 
     data = _dump(result)
+    if kind == "positions":
+        try:
+            from .l2_state import gather_safety_state  # noqa: PLC0415
+
+            portfolio_state = asyncio.run(
+                gather_safety_state(current_app.config, adapter_id, account_id=account_id)
+            )
+        except Exception as exc:  # noqa: BLE001 - never fall back to broker aggregate P&L
+            logger.error("Local live-position MTM calculation is unavailable: %s", type(exc).__name__)
+        else:
+            _submit_live_positions_mtm(
+                portfolio_state,
+                adapter_id=adapter_id,
+                account_id=account_id,
+            )
     if kind in {"ltp", "quote_details"}:
         requested = list(args[0]) if args and isinstance(args[0], (list, tuple)) else []
         data = _canonical_ltp_rows(data, requested)

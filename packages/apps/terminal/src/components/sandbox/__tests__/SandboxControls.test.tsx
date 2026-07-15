@@ -6,6 +6,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+const buildHeadersMock = vi.hoisted(() => vi.fn((includeJson: boolean) => ({
+  ...(includeJson ? { "Content-Type": "application/json" } : {}),
+  "X-API-Key": "test-key",
+  Authorization: "Bearer practice-jwt",
+})));
+
+vi.mock("@/services/ftApi.helpers", () => ({
+  buildHeaders: buildHeadersMock,
+}));
+
 import SandboxControls from "../SandboxControls";
 
 // ---------------------------------------------------------------------------
@@ -25,10 +35,34 @@ function statusResp(): JsonResp {
   };
 }
 
+function configResp(overrides: Record<string, unknown> = {}): JsonResp {
+  return {
+    ok: true,
+    json: async () => ({
+      status: "success",
+      data: {
+        config: {
+          starting_capital: 1_000_000,
+          equity_leverage: 1,
+          futures_leverage: 1,
+          option_buy_leverage: 1,
+          option_sell_leverage: 1,
+          squareoff_time: "15:15",
+          mcx_squareoff_time: "23:25",
+          ...overrides,
+        },
+      },
+    }),
+  };
+}
+
 const fetchMock = vi.fn(async (url: unknown, opts?: { body?: string }) => {
   const u = String(url);
   if (u.endsWith("/order")) {
     return orderResponder(opts?.body ? JSON.parse(opts.body) : {});
+  }
+  if (u.endsWith("/config")) {
+    return configResp(opts?.body ? JSON.parse(opts.body) : {});
   }
   if (u.endsWith("/status")) return statusResp();
   return { ok: true, json: async () => ({ status: "success", data: {} }) };
@@ -44,6 +78,7 @@ beforeEach(() => {
   });
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockClear();
+  buildHeadersMock.mockClear();
 });
 
 afterEach(() => {
@@ -73,8 +108,23 @@ describe("SandboxControls", () => {
     renderWithProviders();
     expect(screen.getByText("Virtual Capital")).toBeInTheDocument();
     expect(screen.getByText("Place Paper Order")).toBeInTheDocument();
+    expect(screen.getByText("Practice Policy")).toBeInTheDocument();
     expect(screen.getByText("Adjust Capital")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export data/i })).toBeInTheDocument();
+  });
+
+  it("authenticates every direct sandbox request", async () => {
+    renderWithProviders();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    for (const [, init] of fetchMock.mock.calls) {
+      expect((init as RequestInit | undefined)?.headers).toEqual(
+        expect.objectContaining({
+          "X-API-Key": "test-key",
+          Authorization: "Bearer practice-jwt",
+        }),
+      );
+    }
   });
 
   it("places a paper order against virtual capital and shows it filled", async () => {
@@ -104,6 +154,49 @@ describe("SandboxControls", () => {
 
     expect(await screen.findByText(/Order rejected/i)).toBeInTheDocument();
     expect(screen.getByText(/Insufficient capital/i)).toBeInTheDocument();
+  });
+
+  it("shows a resting Practice order as pending rather than rejected", async () => {
+    orderResponder = () => ({
+      ok: true,
+      json: async () => ({
+        status: "success",
+        data: { order: { order_id: "OID2", status: "PENDING", message: "Waiting for a matching tick" } },
+      }),
+    });
+    renderWithProviders();
+    await fillOrder();
+
+    expect(await screen.findByText(/Order pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for a matching tick/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Order rejected/i)).not.toBeInTheDocument();
+  });
+
+  it("persists the complete Practice policy through the canonical config route", async () => {
+    renderWithProviders();
+    const equity = await screen.findByLabelText("Equity leverage");
+    const save = screen.getByRole("button", { name: /save policy/i });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.change(equity, { target: { value: "4" } });
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((candidate) => (
+        String(candidate[0]).endsWith("/config")
+        && (candidate[1] as { method?: string } | undefined)?.method === "POST"
+      ));
+      expect(call).toBeTruthy();
+      const body = JSON.parse((call![1] as { body: string }).body);
+      expect(body).toEqual({
+        starting_capital: 1_000_000,
+        equity_leverage: 4,
+        futures_leverage: 1,
+        option_buy_leverage: 1,
+        option_sell_leverage: 1,
+        squareoff_time: "15:15",
+        mcx_squareoff_time: "23:25",
+      });
+    });
   });
 
   it("validates the order form before posting", async () => {

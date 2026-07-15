@@ -888,7 +888,7 @@ class AgentTeam:
 
         Uses ``asyncio.Semaphore`` to cap simultaneous LLM calls at
         ``max_concurrent`` (default 4), preventing rate-limit errors
-        on local LLM Studio and cloud providers alike.
+        on local Ollama and cloud providers alike.
 
         Each agent wraps the synchronous ``_run_agent`` call in
         ``asyncio.get_event_loop().run_in_executor`` so the actual

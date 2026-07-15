@@ -1,8 +1,7 @@
 """Unified LLM client supporting multiple providers via OpenAI-compatible API.
 
 Providers:
-- LM Studio (local, http://127.0.0.1:1234)
-- Ollama (local, http://127.0.0.1:11434)
+- Managed Ollama (local, backend-owned dynamic loopback endpoint)
 - Anthropic Claude (cloud; both a Console API key and a Claude Code OAuth token —
   the auth scheme is chosen by token shape, see ``is_anthropic_oauth_token``)
 - OpenAI and other OpenAI-compatible clouds (incl. Cerebras)
@@ -16,24 +15,78 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+import secrets
+import unicodedata
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Generator
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 logger = logging.getLogger("flinttrade.ai.llm")
+_LMSTUDIO_RETIRED_ERROR = "LM Studio is retired; use managed Ollama or the Custom provider"
+
+
+def _reject_retired_provider(provider: str) -> None:
+    if (provider or "").strip().lower() == "lmstudio":
+        raise ValueError(_LMSTUDIO_RETIRED_ERROR)
+
+
+class _ProviderHTTPClient:
+    """Keep managed Ollama proxy-free while preserving provider proxy behaviour."""
+
+    def __init__(self, *, timeout: float) -> None:
+        self._timeout = httpx.Timeout(timeout)
+        self._default: httpx.Client | None = None
+        self._managed_ollama = httpx.Client(timeout=self._timeout, trust_env=False)
+
+    @property
+    def timeout(self) -> httpx.Timeout:
+        return self._timeout
+
+    def _default_client(self) -> httpx.Client:
+        if self._default is None:
+            self._default = httpx.Client(timeout=self._timeout)
+        return self._default
+
+    def post(
+        self,
+        url: str | httpx.URL,
+        *,
+        managed_ollama: bool = False,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        client = self._managed_ollama if managed_ollama else self._default_client()
+        return client.post(url, **kwargs)
+
+    def stream(
+        self,
+        method: str,
+        url: str | httpx.URL,
+        *,
+        managed_ollama: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        client = self._managed_ollama if managed_ollama else self._default_client()
+        return client.stream(method, url, **kwargs)
+
+    def close(self) -> None:
+        try:
+            if self._default is not None:
+                self._default.close()
+        finally:
+            self._managed_ollama.close()
 
 
 class LLMProvider(StrEnum):
     """Supported LLM providers.
 
-    Local: LM Studio, Ollama (user's hardware, no internet needed)
+    Local: Ollama (user's hardware, no cloud inference needed)
     Cloud: Any provider with an API (user brings their own key)
     Custom: Any OpenAI-compatible endpoint (user provides host URL)
     """
 
-    LMSTUDIO = "lmstudio"
     OLLAMA = "ollama"
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
@@ -57,62 +110,41 @@ class LLMConfig:
     provider: str = ""
     host: str = ""
     model: str = ""
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)
     context_length: int = 32768
     temperature: float = 0.7
     max_tokens: int = 4096
+    managed_runtime: bool = False
     # Budget used to retry a reasoning model whose chain of thought consumed the
     # whole ``max_tokens`` budget, leaving an empty visible answer. See
     # ``LLMClient._chat_openai_compat``. Set to 0 to disable the retry.
     reasoning_max_tokens: int = 8192
 
+    def __post_init__(self) -> None:
+        self.provider = self.provider.strip().lower()
+        _reject_retired_provider(self.provider)
+        if self.provider:
+            _validate_configurable_api_base_url(self.provider, self.host)
+
     @classmethod
     def from_env(cls) -> LLMConfig:
         """Load LLM config from workspace.json, with env var overrides."""
-        provider = os.getenv("LLM_PROVIDER", "")
-        host = os.getenv("LLM_HOST", "")
-        model = os.getenv("LLM_MODEL", "")
-
-        # Fall back to workspace config if env vars are not set
-        if not provider or not host:
-            try:
-                from flinttrade_core.workspace import Workspace
-                ws = Workspace()
-                provider = provider or ws.get("llm.provider", "") or ""
-                host = host or ws.get("llm.host", "") or "http://127.0.0.1:1234"
-                model = model or ws.get("llm.model", "") or ""
-            except Exception:
-                host = host or "http://127.0.0.1:1234"
-
-        workspace_api_key = ""
         try:
-            from flinttrade_core.llm_config import resolve_llm_api_key
+            from flinttrade_core.llm_config import read_effective_llm_config
+        except ImportError:
+            effective = _environment_only_config()
+        else:
+            effective = read_effective_llm_config()
 
-            workspace_api_key = resolve_llm_api_key()
-        except Exception:
-            workspace_api_key = ""
-
+        provider = str(effective.get("provider") or "")
         return cls(
             provider=provider,
-            host=host,
-            model=model,
-            api_key=(
-                os.getenv("LLM_API_KEY", "")  # Generic — works for any provider
-                or os.getenv("OPENAI_API_KEY", "")
-                or os.getenv("ANTHROPIC_API_KEY", "")
-                or os.getenv("GEMINI_API_KEY", "")
-                or os.getenv("DEEPSEEK_API_KEY", "")
-                or os.getenv("GROQ_API_KEY", "")
-                or os.getenv("GROK_API_KEY", "")
-                or os.getenv("MISTRAL_API_KEY", "")
-                or os.getenv("TOGETHER_API_KEY", "")
-                or os.getenv("NVIDIA_API_KEY", "")
-                or os.getenv("CEREBRAS_API_KEY", "")
-                or os.getenv("OPENROUTER_API_KEY", "")
-                or workspace_api_key
-            ),
+            host=str(effective.get("host") or ""),
+            model=str(effective.get("model") or ""),
+            api_key=str(effective.get("api_key") or ""),
             context_length=int(os.getenv("LLM_CONTEXT_LENGTH", "32768")),
             reasoning_max_tokens=int(os.getenv("LLM_REASONING_MAX_TOKENS", "8192")),
+            managed_runtime=provider.strip().lower() == "ollama",
         )
 
 
@@ -149,7 +181,6 @@ class LLMResponse:
 # "custom" and "openrouter" let users connect ANY endpoint.
 _PROVIDER_URLS: dict[str, str] = {
     # Local (no internet needed)
-    "lmstudio": "{host}/v1/chat/completions",
     "ollama": "{host}/v1/chat/completions",
     # Cloud (user provides API key)
     "openai": "https://api.openai.com/v1/chat/completions",
@@ -172,18 +203,187 @@ _PROVIDER_URLS: dict[str, str] = {
     "custom": "{host}/v1/chat/completions",
 }
 
+_OLLAMA_BASE_URL = ""
+_PROVIDER_API_KEY_ENV = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "grok": "GROK_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "hermes": "HERMES_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "together": "TOGETHER_API_KEY",
+}
+
+
+def _normalise_ollama_host(host: str) -> str:
+    value = (host or "").strip()
+    if not value:
+        return _OLLAMA_BASE_URL
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Ollama requires the managed Ollama endpoint") from exc
+    if (
+        parsed.scheme.lower() != "http"
+        or (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}
+        or port != 11434
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Ollama requires the managed Ollama endpoint")
+    return _OLLAMA_BASE_URL
+
+
+def _validate_configurable_api_base_url(provider: str, host: str) -> str:
+    """Reject URL components that HTTPX may include in request logs."""
+    provider_name = (provider or "").strip().lower()
+    template = _PROVIDER_URLS.get(provider_name, "{host}/v1/chat/completions")
+    value = (host or "").strip()
+    if provider_name == "ollama" or "{host}" not in template:
+        return value
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("LLM API base URL is invalid") from exc
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        raise ValueError(
+            "LLM API base URLs must not contain credentials, query parameters, or fragments"
+        )
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.hostname is None:
+        raise ValueError("LLM API base URL must be an absolute HTTP(S) URL")
+    return value
+
+
+def _normalise_environment_api_key(value: str) -> str:
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise ValueError("LLM API keys must not contain control characters")
+    return value.strip()
+
+
+def _append_url_path(host: str, endpoint_path: str) -> str:
+    """Append a path before any query or fragment in an operator URL."""
+    raw = (host or "").strip()
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return f"{raw.rstrip('/')}/{endpoint_path.lstrip('/')}"
+    original_scheme = raw.partition(":")[0] if parsed.scheme else ""
+    path = f"{parsed.path.rstrip('/')}/{endpoint_path.lstrip('/')}"
+    return urlunsplit((original_scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+
+
+def _environment_only_config() -> dict[str, str]:
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower() or "ollama"
+    host = os.getenv("LLM_HOST", "").strip()
+    if provider == "lmstudio":
+        raise ValueError(_LMSTUDIO_RETIRED_ERROR)
+    if provider == "ollama":
+        host = _normalise_ollama_host(host)
+        api_key = ""
+    else:
+        host = _validate_configurable_api_base_url(provider, host)
+        key_name = _PROVIDER_API_KEY_ENV.get(provider, "")
+        api_key = _normalise_environment_api_key(os.getenv(key_name, "")) if key_name else ""
+    return {
+        "provider": provider,
+        "host": host,
+        "model": os.getenv("LLM_MODEL", "").strip(),
+        "api_key": api_key,
+    }
+
 
 def resolve_endpoint(provider: str, host: str) -> str:
     """Resolve the OpenAI-compatible chat endpoint for a provider.
 
-    Local providers (Ollama → ``:11434``, LM Studio → ``:1234``, Hermes, custom)
-    interpolate the runtime ``host``; cloud providers return their fixed URL. An
+    Hermes and custom endpoints interpolate the operator-supplied ``host``;
+    managed Ollama is resolved only through runtime admission. Cloud providers
+    return their fixed URL. An
     unknown provider falls back to a generic ``{host}/v1/chat/completions`` so any
     OpenAI-compatible endpoint still works. This is the single resolution point
     used by both the blocking and streaming request paths.
     """
-    template = _PROVIDER_URLS.get((provider or "").lower(), "{host}/v1/chat/completions")
-    return template.format(host=(host or "").rstrip("/"))
+    provider_name = (provider or "").lower()
+    _reject_retired_provider(provider_name)
+    if provider_name == "ollama":
+        _normalise_ollama_host(host)
+        raise ValueError("Ollama endpoint requires managed runtime admission")
+    template = _PROVIDER_URLS.get(provider_name, "{host}/v1/chat/completions")
+    if "{host}" not in template:
+        return template
+    safe_host = _validate_configurable_api_base_url(provider_name, host)
+    return _append_url_path(safe_host, template.removeprefix("{host}/"))
+
+
+def _new_correlation_id() -> str:
+    return f"llm_{secrets.token_hex(8)}"
+
+
+def _provider_http_error(response: httpx.Response) -> str:
+    """Return status plus a local correlation, never upstream-controlled content."""
+    status_code = int(response.status_code)
+    correlation_id = _new_correlation_id()
+    logger.warning(
+        "LLM provider HTTP failure (status=%d, correlation_id=%s)",
+        status_code,
+        correlation_id,
+    )
+    return f"HTTP {status_code} (correlation_id={correlation_id})"
+
+
+def _openai_compat_headers(cfg: LLMConfig) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    api_key = (cfg.api_key or "").strip()
+    if cfg.provider.strip().lower() != "ollama" and api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _normalise_managed_ollama_base_url(base_url: str) -> str:
+    value = (base_url or "").strip().rstrip("/")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() != "http"
+        or (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}
+        or port is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    return value
+
+
+def _request_endpoint(cfg: LLMConfig, managed_ollama_base_url: str = "") -> str:
+    if cfg.provider.strip().lower() == "ollama":
+        if not managed_ollama_base_url:
+            raise ValueError("Ollama endpoint requires managed runtime admission")
+        return f"{managed_ollama_base_url}/v1/chat/completions"
+    return resolve_endpoint(cfg.provider, cfg.host)
+
+
+def _bounded_log_label(value: str, *, limit: int = 32) -> str:
+    safe = "".join(character for character in value if character.isascii() and (character.isalnum() or character in "_-"))
+    return (safe or "unknown")[:limit]
+
+
+def _bounded_exception_class(exc: Exception) -> str:
+    return _bounded_log_label(type(exc).__name__, limit=64)
 
 
 # Beta and identity headers Anthropic requires for Claude Code OAuth traffic.
@@ -297,10 +497,24 @@ class LLMClient:
         self,
         config: LLMConfig | None = None,
         fallback_config: LLMConfig | None = None,
+        *,
+        timeout_seconds: float = 120.0,
     ) -> None:
-        self.config = config or LLMConfig.from_env()
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._dynamic_config = config is None
+        self.config = config if config is not None else LLMConfig.from_env()
         self.fallback_config = fallback_config
-        self._http = httpx.Client(timeout=120.0)
+        _reject_retired_provider(self.config.provider)
+        if self.fallback_config is not None:
+            _reject_retired_provider(self.fallback_config.provider)
+        self._http = _ProviderHTTPClient(timeout=timeout_seconds)
+
+    def _current_config(self) -> LLMConfig:
+        if self._dynamic_config:
+            self.config = LLMConfig.from_env()
+        _reject_retired_provider(self.config.provider)
+        return self.config
 
     def close(self) -> None:
         self._http.close()
@@ -335,16 +549,16 @@ class LLMClient:
                 straight to the provider for constrained decoding. Ignored by the
                 Anthropic path.
         """
-        resp = self._chat_with_config(
-            self.config, messages, temperature, max_tokens, model, response_format,
-        )
+        config = self._current_config()
+        resp = self._chat_with_config(config, messages, temperature, max_tokens, model, response_format)
         if resp.success:
             return resp
 
         if self.fallback_config:
             logger.warning(
-                "Primary LLM failed (%s), trying fallback (%s): %s",
-                self.config.provider, self.fallback_config.provider, resp.error,
+                "Primary LLM failed (%s); trying fallback (%s)",
+                _bounded_log_label(config.provider),
+                _bounded_log_label(self.fallback_config.provider),
             )
             return self._chat_with_config(
                 self.fallback_config, messages, temperature, max_tokens, model,
@@ -363,16 +577,50 @@ class LLMClient:
         response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Execute chat completion against a specific provider config."""
+        _reject_retired_provider(cfg.provider)
         provider = cfg.provider.lower()
         use_model = model or cfg.model
         use_temp = temperature if temperature is not None else cfg.temperature
         use_max = max_tokens or cfg.max_tokens
 
+        if provider == "ollama":
+            try:
+                from flinttrade_core.ollama_runtime import managed_ollama_session
+
+                with managed_ollama_session(use_model) as admission:
+                    managed_ollama_base_url = _normalise_managed_ollama_base_url(admission.base_url)
+                    if not managed_ollama_base_url:
+                        raise ValueError("managed Ollama endpoint is invalid")
+                    return self._chat_openai_compat(
+                        cfg,
+                        messages,
+                        admission.model,
+                        use_temp,
+                        use_max,
+                        response_format,
+                        managed_ollama_base_url=managed_ollama_base_url,
+                    )
+            except Exception as exc:  # noqa: BLE001 - admission failures are bounded and fail closed
+                logger.warning(
+                    "Managed Ollama inference refused (exception=%s)",
+                    _bounded_exception_class(exc),
+                )
+                return LLMResponse(
+                    provider=cfg.provider,
+                    model=use_model,
+                    error="Managed Ollama runtime is not ready",
+                )
+
         if provider == "anthropic":
             return self._chat_anthropic(cfg, messages, use_model, use_temp, use_max)
 
         return self._chat_openai_compat(
-            cfg, messages, use_model, use_temp, use_max, response_format,
+            cfg,
+            messages,
+            use_model,
+            use_temp,
+            use_max,
+            response_format,
         )
 
     def _chat_openai_compat(
@@ -384,9 +632,10 @@ class LLMClient:
         max_tokens: int,
         response_format: dict[str, Any] | None = None,
         *,
+        managed_ollama_base_url: str = "",
         allow_reasoning_retry: bool = True,
     ) -> LLMResponse:
-        """OpenAI-compatible endpoint (LM Studio, Ollama, OpenAI).
+        """OpenAI-compatible endpoint (Ollama, custom endpoints, OpenAI).
 
         Reasoning models (Qwen3, DeepSeek-R1, …) emit the chain of thought in
         ``message.reasoning_content``, which counts against ``max_tokens``. With a
@@ -395,12 +644,9 @@ class LLMClient:
         retry once with ``cfg.reasoning_max_tokens`` so callers still receive a
         real answer; non-reasoning models are never retried.
         """
-        url = resolve_endpoint(cfg.provider, cfg.host)
+        url = _request_endpoint(cfg, managed_ollama_base_url)
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        api_key = (cfg.api_key or "").strip()
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        headers = _openai_compat_headers(cfg)
 
         payload: dict[str, Any] = {
             "model": model,
@@ -413,11 +659,16 @@ class LLMClient:
             payload["response_format"] = response_format
 
         try:
-            resp = self._http.post(url, json=payload, headers=headers)
+            resp = self._http.post(
+                url,
+                managed_ollama=cfg.provider.strip().lower() == "ollama",
+                json=payload,
+                headers=headers,
+            )
             if resp.status_code >= 400:
                 return LLMResponse(
                     provider=cfg.provider, model=model,
-                    error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    error=_provider_http_error(resp),
                 )
             data = resp.json()
             choice = data.get("choices", [{}])[0]
@@ -445,7 +696,9 @@ class LLMClient:
                 )
                 return self._chat_openai_compat(
                     cfg, messages, model, temperature, cfg.reasoning_max_tokens,
-                    response_format, allow_reasoning_retry=False,
+                    response_format,
+                    managed_ollama_base_url=managed_ollama_base_url,
+                    allow_reasoning_retry=False,
                 )
 
             return LLMResponse(
@@ -458,8 +711,12 @@ class LLMClient:
                 finish_reason=finish_reason,
                 reasoning=reasoning,
             )
-        except Exception:
-            logger.exception("OpenAI-compatible chat request failed for provider=%s model=%s", cfg.provider, model)
+        except Exception as exc:
+            logger.error(
+                "OpenAI-compatible chat request failed (provider=%s, exception=%s)",
+                _bounded_log_label(cfg.provider),
+                _bounded_exception_class(exc),
+            )
             return LLMResponse(provider=cfg.provider, model=model, error="LLM request failed")
 
     def _chat_anthropic(
@@ -503,7 +760,7 @@ class LLMClient:
             if resp.status_code >= 400:
                 return LLMResponse(
                     provider="anthropic", model=model,
-                    error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    error=_provider_http_error(resp),
                 )
             data = resp.json()
             content_blocks = data.get("content", [])
@@ -518,8 +775,8 @@ class LLMClient:
                 total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
                 finish_reason=data.get("stop_reason", ""),
             )
-        except Exception:
-            logger.exception("Anthropic chat request failed for model=%s", model)
+        except Exception as exc:
+            logger.error("Anthropic chat request failed (exception=%s)", _bounded_exception_class(exc))
             return LLMResponse(provider="anthropic", model=model, error="LLM request failed")
 
     # ------------------------------------------------------------------
@@ -541,26 +798,63 @@ class LLMClient:
         reasoning and answer; if you stream a reasoning model with a very small
         ``max_tokens`` the answer may not fit and the stream can end empty.
         """
-        cfg = self.config
+        cfg = self._current_config()
         provider = cfg.provider.lower()
+
+        if provider == "ollama":
+            try:
+                from flinttrade_core.ollama_runtime import managed_ollama_session
+
+                with managed_ollama_session(cfg.model) as admission:
+                    managed_ollama_base_url = _normalise_managed_ollama_base_url(admission.base_url)
+                    if not managed_ollama_base_url:
+                        raise ValueError("managed Ollama endpoint is invalid")
+                    buffered: list[str] = []
+                    buffered_bytes = 0
+                    byte_limit = min(16 * 1024 * 1024, max(1, max_tokens or cfg.max_tokens) * 32)
+                    for chunk in self._stream_openai_compat(
+                        cfg,
+                        messages,
+                        temperature,
+                        max_tokens,
+                        model=admission.model,
+                        managed_ollama_base_url=managed_ollama_base_url,
+                    ):
+                        buffered_bytes += len(chunk.encode("utf-8"))
+                        if buffered_bytes > byte_limit:
+                            raise ValueError("managed Ollama stream exceeded its response budget")
+                        buffered.append(chunk)
+            except Exception as exc:  # noqa: BLE001 - admission failures are bounded and fail closed
+                logger.warning(
+                    "Managed Ollama stream refused (exception=%s)",
+                    _bounded_exception_class(exc),
+                )
+                return
+            yield from buffered
+            return
 
         if provider == "anthropic":
             yield from self._stream_anthropic(cfg, messages, temperature, max_tokens)
         else:
-            yield from self._stream_openai_compat(cfg, messages, temperature, max_tokens)
+            yield from self._stream_openai_compat(
+                cfg,
+                messages,
+                temperature,
+                max_tokens,
+            )
 
     def _stream_openai_compat(
         self, cfg: LLMConfig, messages: list[LLMMessage],
         temperature: float | None, max_tokens: int | None,
+        *,
+        model: str | None = None,
+        managed_ollama_base_url: str = "",
     ) -> Generator[str, None, None]:
-        url = resolve_endpoint(cfg.provider, cfg.host)
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        api_key = (cfg.api_key or "").strip()
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        url = _request_endpoint(cfg, managed_ollama_base_url)
+        headers = _openai_compat_headers(cfg)
 
         payload = {
-            "model": cfg.model,
+            "model": model or cfg.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature or cfg.temperature,
             "max_tokens": max_tokens or cfg.max_tokens,
@@ -568,7 +862,15 @@ class LLMClient:
         }
 
         try:
-            with self._http.stream("POST", url, json=payload, headers=headers) as resp:
+            with self._http.stream(
+                "POST",
+                url,
+                managed_ollama=cfg.provider.strip().lower() == "ollama",
+                json=payload,
+                headers=headers,
+            ) as resp:
+                if isinstance(resp.status_code, int) and resp.status_code >= 400:
+                    return
                 for line in resp.iter_lines():
                     if not line or line.startswith(":"):
                         continue
@@ -587,7 +889,11 @@ class LLMClient:
         except Exception as exc:
             # Log the exception type only — never the request (which carries the
             # Authorization/x-api-key header) nor the token.
-            logger.error("Streaming request failed (provider=%s): %s", cfg.provider, type(exc).__name__)
+            logger.error(
+                "Streaming request failed (provider=%s, exception=%s)",
+                _bounded_log_label(cfg.provider),
+                _bounded_exception_class(exc),
+            )
 
     def _stream_anthropic(
         self, cfg: LLMConfig, messages: list[LLMMessage],
@@ -630,7 +936,7 @@ class LLMClient:
         except Exception as exc:
             # Log the exception type only — never the request (which carries the
             # Bearer/x-api-key auth header) nor the token itself.
-            logger.error("Anthropic streaming request failed: %s", type(exc).__name__)
+            logger.error("Anthropic streaming request failed (exception=%s)", _bounded_exception_class(exc))
 
     # ------------------------------------------------------------------
     # Token management
@@ -639,19 +945,21 @@ class LLMClient:
     def fits_context(self, messages: list[LLMMessage], reserve: int = 1000) -> bool:
         """Check if messages fit within the context window."""
         total = sum(estimate_tokens(m.content) for m in messages)
-        return total + reserve <= self.config.context_length
+        return total + reserve <= self._current_config().context_length
 
     def trim_to_fit(
         self, messages: list[LLMMessage], reserve: int = 1000,
     ) -> list[LLMMessage]:
         """Trim older messages to fit context window. Keeps system + last N."""
-        if self.fits_context(messages, reserve):
+        config = self._current_config()
+        total = sum(estimate_tokens(message.content) for message in messages)
+        if total + reserve <= config.context_length:
             return messages
 
         system = [m for m in messages if m.role == "system"]
         non_system = [m for m in messages if m.role != "system"]
 
-        budget = self.config.context_length - reserve
+        budget = config.context_length - reserve
         for m in system:
             budget -= estimate_tokens(m.content)
 

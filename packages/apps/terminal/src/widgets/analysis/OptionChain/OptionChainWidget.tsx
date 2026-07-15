@@ -135,6 +135,8 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
     atmStrike,
     maxCallOI,
     maxPutOI,
+    totalCallOI,
+    totalPutOI,
     spotLtp,
     spotChange,
     spotChangePct,
@@ -150,6 +152,11 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
     flashTimersRef.current.clear();
   }, [selectedExpiry, symDef]);
 
+  useEffect(() => {
+    setBasket([]);
+    setBasketOpen(false);
+  }, [symDef.label, exchange, selectedExpiry]);
+
   // "Updated Xs ago" counter — ticks every second, resets when lastRefresh changes
   useEffect(() => {
     if (!lastRefresh) { setSecondsAgo(null); return; }
@@ -162,15 +169,35 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
   }, [lastRefresh]);
 
   // Max Pain — fetched per expiry, 60s refresh
-  const { data: maxPainData } = useQuery({
+  const {
+    data: maxPainData,
+    isSuccess: isMaxPainSuccess,
+    isError: isMaxPainError,
+    isRefetchError: isMaxPainRefetchError,
+    isFetching: isMaxPainFetching,
+  } = useQuery({
     queryKey: ["maxpain", symDef.label, exchange, selectedExpiry],
-    queryFn: () => getMaxPain(symDef.label, exchange, selectedExpiry ?? undefined),
+    queryFn: ({ signal }) => getMaxPain(symDef.label, exchange, selectedExpiry ?? undefined, signal),
     enabled: !!selectedExpiry,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
     retry: 1,
   });
-  const maxPainStrike = maxPainData?.max_pain_strike ?? null;
+  const maxPainStrike = (
+    chain !== null
+    && !loading
+    && !error
+    && isMaxPainSuccess
+    && !isMaxPainError
+    && !isMaxPainRefetchError
+    && !isMaxPainFetching
+    && maxPainData?.is_sample_data === false
+    && typeof maxPainData.max_pain_strike === "number"
+    && Number.isFinite(maxPainData.max_pain_strike)
+    && maxPainData.max_pain_strike > 0
+  ) ? maxPainData.max_pain_strike : null;
 
   // Scroll ATM row into view when chain loads
   useEffect(() => {
@@ -235,30 +262,55 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
 
   // Basket helpers
   const isInBasket = useCallback((strike: number, optionType: "CE" | "PE"): boolean =>
-    basket.some((b) => b.strike === strike && b.optionType === optionType),
-  [basket]);
+    basket.some((b) => (
+      b.symbol === symDef.label
+      && b.exchange === exchange
+      && b.expiry === selectedExpiry
+      && b.strike === strike
+      && b.optionType === optionType
+    )),
+  [basket, exchange, selectedExpiry, symDef.label]);
 
   function addToBasket(strike: number, optionType: "CE" | "PE", ltp: number | null) {
     if (!selectedExpiry) return;
     setBasket((prev) => {
-      if (prev.some((b) => b.strike === strike && b.optionType === optionType)) return prev;
-      return [...prev, { strike, optionType, ltp, expiry: selectedExpiry }];
+      if (prev.some((b) => (
+        b.symbol === symDef.label
+        && b.exchange === exchange
+        && b.expiry === selectedExpiry
+        && b.strike === strike
+        && b.optionType === optionType
+      ))) return prev;
+      return [...prev, {
+        symbol: symDef.label,
+        exchange,
+        strike,
+        optionType,
+        ltp,
+        expiry: selectedExpiry,
+      }];
     });
     setBasketOpen(true);
   }
 
-  function removeFromBasket(strike: number, optionType: "CE" | "PE") {
-    setBasket((prev) => prev.filter((b) => !(b.strike === strike && b.optionType === optionType)));
+  function removeFromBasket(item: BasketItem) {
+    setBasket((prev) => prev.filter((candidate) => !(
+      candidate.symbol === item.symbol
+      && candidate.exchange === item.exchange
+      && candidate.expiry === item.expiry
+      && candidate.strike === item.strike
+      && candidate.optionType === item.optionType
+    )));
   }
 
   // Order placement — resolves canonical trading symbol via getOptionSymbol
-  async function handleOrder({ strike, optionType, expiry, action }: OrderParams) {
+  async function handleOrder({ symbol, exchange: legExchange, strike, optionType, expiry, action }: OrderParams) {
     const typedOptionType = optionType === "PE" ? "PE" : "CE";
-    let orderSymbol   = buildCompactOptionSymbol(symDef.label, expiry, strike, typedOptionType)
-      ?? `${symDef.label}${expiry}${strike}${typedOptionType}`;
-    let orderExchange = exchange;
+    let orderSymbol   = buildCompactOptionSymbol(symbol, expiry, strike, typedOptionType)
+      ?? `${symbol}${expiry}${strike}${typedOptionType}`;
+    let orderExchange = legExchange;
     try {
-      const resolved = await getOptionSymbol(symDef.label, exchange, expiry, typedOptionType, String(strike));
+      const resolved = await getOptionSymbol(symbol, legExchange, expiry, typedOptionType, String(strike));
       orderSymbol   = resolved.symbol;
       orderExchange = resolved.exchange;
     } catch {
@@ -325,12 +377,19 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
     }
 
     if (isInBasket(strike, optionType)) {
-      removeFromBasket(strike, optionType);
+      const existing = basket.find((item) => (
+        item.symbol === symDef.label
+        && item.exchange === exchange
+        && item.expiry === selectedExpiry
+        && item.strike === strike
+        && item.optionType === optionType
+      ));
+      if (existing) removeFromBasket(existing);
     } else {
       addToBasket(strike, optionType, ltp);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glideColumns, strikes, isInBasket, legBuilderOpen]);
+  }, [basket, exchange, glideColumns, isInBasket, legBuilderOpen, selectedExpiry, strikes, symDef.label]);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
@@ -547,8 +606,6 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
       {basketOpen && (
         <BasketPanel
           basket={basket}
-          symLabel={symDef.label}
-          exchange={exchange}
           onRemove={removeFromBasket}
           onClear={() => setBasket([])}
           onOrder={handleOrder}
@@ -649,17 +706,17 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
               <tbody>
                 {strikes.map((s) => (
                   <tr key={s.strike} aria-current={s.strike === atmStrike ? "true" : undefined}>
-                    <td>{s.call?.oi ?? s.call?.open_interest ?? 0}</td>
-                    <td>{s.call?.change ?? 0}</td>
-                    <td>{s.call?.volume ?? 0}</td>
-                    <td>{s.call?.iv ?? ""}</td>
-                    <td>{s.call?.ltp ?? s.call?.last_price ?? 0}</td>
+                    <td>{s.call?.oi ?? s.call?.open_interest ?? "--"}</td>
+                    <td>{s.call?.change_percent ?? s.call?.change_pct ?? "--"}</td>
+                    <td>{s.call?.volume ?? "--"}</td>
+                    <td>{s.call?.iv ?? s.call?.implied_volatility ?? "--"}</td>
+                    <td>{s.call?.ltp ?? s.call?.last_price ?? "--"}</td>
                     <th scope="row">{s.strike}</th>
-                    <td>{s.put?.ltp ?? s.put?.last_price ?? 0}</td>
-                    <td>{s.put?.iv ?? ""}</td>
-                    <td>{s.put?.volume ?? 0}</td>
-                    <td>{s.put?.change ?? 0}</td>
-                    <td>{s.put?.oi ?? s.put?.open_interest ?? 0}</td>
+                    <td>{s.put?.ltp ?? s.put?.last_price ?? "--"}</td>
+                    <td>{s.put?.iv ?? s.put?.implied_volatility ?? "--"}</td>
+                    <td>{s.put?.volume ?? "--"}</td>
+                    <td>{s.put?.change_percent ?? s.put?.change_pct ?? "--"}</td>
+                    <td>{s.put?.oi ?? s.put?.open_interest ?? "--"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -673,10 +730,10 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide font-medium">Total OI</span>
           <span className="text-loss font-mono font-semibold">
-            CE: {fmtOI(strikes.reduce((s, r) => s + Number(r.call?.oi ?? r.call?.open_interest ?? 0), 0))}
+            CE: {totalCallOI === null ? "--" : fmtOI(totalCallOI)}
           </span>
           <span className="text-profit font-mono font-semibold">
-            PE: {fmtOI(strikes.reduce((s, r) => s + Number(r.put?.oi  ?? r.put?.open_interest  ?? 0), 0))}
+            PE: {totalPutOI === null ? "--" : fmtOI(totalPutOI)}
           </span>
           {atmStrike != null && (
             <span className="text-text-muted">

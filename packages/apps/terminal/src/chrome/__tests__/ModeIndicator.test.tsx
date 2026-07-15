@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -20,7 +20,13 @@ function resetStore(mode: "explore" | "practice" | "live" = "explore") {
   useModeStore.setState({ mode });
   // Reset auth state to a known starting token so the mode-switch
   // requests carry an Authorization header.
-  useAuthStore.setState({ token: "initial-jwt-token" });
+  useAuthStore.setState({
+    status: "logged-in",
+    token: "initial-jwt-token",
+    reauthToken: null,
+    username: "testuser",
+    sessionGeneration: 0,
+  });
 }
 
 function jsonResponse(body: object, status = 200): Response {
@@ -199,6 +205,40 @@ describe("ModeIndicator", () => {
       // The authStore token must now be the live-unlocked JWT, NOT the
       // initial Practice JWT that was in place before.
       expect(useAuthStore.getState().token).toBe("live-unlocked-jwt");
+    });
+
+    it("ignores a PIN response that arrives after the session locks", async () => {
+      let finishRequest: ((response: Response) => void) | undefined;
+      vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          finishRequest = resolve;
+        }),
+      );
+
+      resetStore("practice");
+      render(<ModeIndicator />);
+      fireEvent.click(screen.getByRole("button", { name: /practice mode/i }));
+      fireEvent.change(screen.getByPlaceholderText("6-digit PIN"), {
+        target: { value: "123456" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /switch to live/i }));
+      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+
+      act(() => useAuthStore.getState().setPinRequired());
+      await act(async () => {
+        finishRequest?.(jsonResponse({
+          status: "success",
+          data: { token: "late-live-token", mode: "live", live_mode_unlocked: true },
+        }));
+        await Promise.resolve();
+      });
+
+      expect(useAuthStore.getState()).toMatchObject({
+        status: "pin-required",
+        token: null,
+        username: "testuser",
+      });
+      expect(useModeStore.getState().mode).toBe("practice");
     });
 
     it("rejects PIN flow if server returned no token", async () => {
@@ -383,6 +423,37 @@ describe("ModeIndicator", () => {
       const headers = init.headers as Record<string, string>;
       expect(headers["Authorization"]).toBe("Bearer stale-live-jwt");
       expect(JSON.parse(init.body as string)).toEqual({ mode: "practice" });
+    });
+
+    it("ignores a mode response that arrives after logout", async () => {
+      let finishRequest: ((response: Response) => void) | undefined;
+      vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          finishRequest = resolve;
+        }),
+      );
+
+      resetStore("live");
+      useAuthStore.setState({ token: "stale-live-jwt" });
+      render(<ModeIndicator />);
+      fireEvent.click(screen.getByRole("button", { name: /live trading/i }));
+      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+
+      act(() => useAuthStore.getState().setLoggedOut());
+      await act(async () => {
+        finishRequest?.(jsonResponse({
+          status: "success",
+          data: { token: "late-practice-token", mode: "practice" },
+        }));
+        await Promise.resolve();
+      });
+
+      expect(useAuthStore.getState()).toMatchObject({
+        status: "logged-out",
+        token: null,
+        username: null,
+      });
+      expect(useModeStore.getState().mode).toBe("live");
     });
 
     it("does NOT flip to practice if mode-switch endpoint fails", async () => {

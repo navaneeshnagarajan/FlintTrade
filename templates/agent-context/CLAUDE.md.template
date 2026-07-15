@@ -119,7 +119,7 @@ Each route lazy-loads its own module. No cross-route code in the initial bundle.
 | HTTP Client | httpx (async) |
 | Models | pydantic |
 | Storage | DuckDB (analytics), QuestDB (ticks, future) |
-| AI/ML | LM Studio + ChromaDB + LightGBM |
+| AI/ML | Managed Ollama + ChromaDB + LightGBM |
 | Indicators | TA-Lib (batch) + Numba (streaming) — `indicators` package |
 | Backtesting | VectorBT (exploration) + Rust/PyO3 (tick-level, future) |
 | Linting | ruff |
@@ -204,7 +204,7 @@ Two-tier config. No exceptions.
 
 | Package | Description |
 |---|---|
-| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (32 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); the four founder-broker native adapters (Dhan, Upstox, Kotak Neo, IndMoney) are built to full doc-grounded parity (SDKs pinned in `brokers.lock`; remaining work is live-credential testing); OpenAlgo is one optional bridge adapter; `shims/` holds OpenAlgo infra shims only |
+| `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (35 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww), but only Dhan and Upstox are connectable while the other three retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
 | `integrations/webhooks` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
 
 #### `packages/apps/` — front-ends (2)

@@ -21,9 +21,12 @@ without overscoping into those waves.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import asyncio
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from functools import partial
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_gateway.capabilities import Capabilities
 
@@ -49,6 +52,38 @@ if TYPE_CHECKING:  # pragma: no cover - typing only; not evaluated at runtime
 # per-module ``object()`` instead silently breaks the gated path (the router's
 # token would never be identity-equal) — never do that.
 ROUTER_TOKEN = object()
+
+
+async def run_blocking_sdk_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Run blocking broker I/O without releasing ownership on cancellation.
+
+    ``asyncio.to_thread`` cannot stop a worker after it has entered a
+    synchronous broker SDK. If the awaiting router task is cancelled, keep that
+    task alive until the worker really exits so generation and safety write
+    leases remain truthful. The original cancellation is re-raised afterwards.
+    """
+    loop = asyncio.get_running_loop()
+    context = copy_context()
+    worker = loop.run_in_executor(None, context.run, partial(fn, *args, **kwargs))
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            result = await asyncio.shield(worker)
+            break
+        except asyncio.CancelledError as exc:
+            if worker.cancelled():
+                raise
+            cancellation = cancellation or exc
+            current = asyncio.current_task()
+            if current is not None:
+                current.uncancel()
+        except BaseException:
+            if cancellation is not None:
+                raise cancellation from None
+            raise
+    if cancellation is not None:
+        raise cancellation
+    return result
 
 
 @dataclass

@@ -75,48 +75,31 @@ async def gather_portfolio_state(
     account_id: str = "default",
     native_adapters: dict[str, Any] | None = None,
     registry: Any = None,
-) -> tuple[list[Any], float, float]:
-    """Best-effort live ``(positions, used_margin, total_balance)`` for L2.
+    orders: list[Any] | tuple[Any, ...] = (),
+    reservations: list[Any] | tuple[Any, ...] = (),
+) -> Any:
+    """Gather the complete L2/L4 state for a smart-route or agent child.
 
-    Async sibling of ``order_routes._gather_l2_state`` for the gated-executor
-    paths (smart route + agent), which run inside an event loop. Reads from the
-    same selector the child order will use: OpenAlgo for the bridge path, or the
-    active native adapter + registry session for native brokers. Any failure
-    returns empty/zero state so L2 simply enforces nothing rather than blocking.
+    This compatibility wrapper keeps the executor-facing call signature while
+    delegating all selector resolution and local P&L accounting to the one
+    shared safety-state implementation. Failures propagate so the caller can
+    refuse the child before minting a gate.
     """
-    from .l2_state import normalise_l2_state  # noqa: PLC0415
+    from .l2_state import gather_safety_state  # noqa: PLC0415
 
-    if adapter_id == "openalgo":
-        if client is None:
-            return [], 0.0, 0.0
-        try:
-            positions = await client.positionbook()
-            funds = await client.funds()
-        except Exception:
-            logger.debug("L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
-            return [], 0.0, 0.0
-        return normalise_l2_state(positions, funds)
-
-    adapter = (native_adapters or {}).get(adapter_id)
-    if adapter is None or registry is None:
-        return [], 0.0, 0.0
-    try:
-        session = registry.get_session_for(adapter_id, account_id)
-    except Exception:
-        return [], 0.0, 0.0
-
-    positions_reader = getattr(adapter, "positions", None)
-    funds_reader = getattr(adapter, "funds", None)
-    if not callable(positions_reader) or not callable(funds_reader):
-        return [], 0.0, 0.0
-    try:
-        positions = await positions_reader(session)
-        funds = await funds_reader(session)
-    except Exception:
-        logger.debug("Native L2 portfolio-state fetch failed — L2 limits not enforced", exc_info=True)
-        return [], 0.0, 0.0
-
-    return normalise_l2_state(positions, funds)
+    config = {
+        "OPENALGO_CLIENT": client,
+        "NATIVE_ADAPTERS": native_adapters or {},
+        "REGISTRY": registry,
+    }
+    return await gather_safety_state(
+        config,
+        adapter_id,
+        account_id=account_id,
+        orders=orders,
+        reservations=reservations,
+        include_order_margin=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -168,13 +151,12 @@ class GatedChildExecutor:
             outlives its HTTP request, so logout / live→practice downgrade
             (which revoke the jti) and operator cancellation must be
             re-checked per child, not just at submission.
-        portfolio_state_provider: Optional ``async () -> (positions,
-            used_margin, total_balance)`` awaited before each child so
-            SafetySystem L2 enforces max-positions and margin% against live
-            cumulative exposure. Best-effort (a failing provider yields empty
-            state → L2 no-op, never a blocked order). The provider owns its
-            caching policy: smart routes cache once (bounded duration); the
-            agent fetches fresh (low order frequency, freshest state).
+        portfolio_state_provider: ``async (order, reservations) -> PortfolioSafetyState`` awaited
+            before each child so SafetySystem L2 and L4 use selector-scoped
+            positions, margin, locally computed daily P&L, and capital. Missing
+            or failed state blocks the child. The provider owns its caching
+            policy: smart routes cache once (bounded duration); the agent fetches
+            fresh (low order frequency, freshest state).
     """
 
     def __init__(
@@ -222,83 +204,89 @@ class GatedChildExecutor:
         from flinttrade_engine.smart_router import SmartRouteAbort  # noqa: PLC0415
         from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
-        # --- mid-flight session/cancel brake ---------------------------------
         if self._pre_dispatch_check is not None:
             reason = self._pre_dispatch_check()
             if reason:
                 raise SmartRouteAbort(reason)
+        if self._portfolio_state_provider is None:
+            return _GatedDecision(False, error="Portfolio safety state provider is unavailable")
 
-        # --- live L2 state (best-effort — never blocks on a fetch failure) --
-        l2_positions: list[Any] = []
-        l2_used_margin = 0.0
-        l2_total_balance = 0.0
-        if self._portfolio_state_provider is not None:
+        selector = f"{self._adapter_id}:{self._account_id}"
+        async with self._safety.order_admission_async(selector) as lease:
+            if self._pre_dispatch_check is not None:
+                reason = self._pre_dispatch_check()
+                if reason:
+                    raise SmartRouteAbort(reason)
             try:
-                l2_positions, l2_used_margin, l2_total_balance = await self._portfolio_state_provider()
-            except Exception:
-                logger.debug("portfolio-state provider failed — L2 not enforced this child", exc_info=True)
+                portfolio_state = await self._portfolio_state_provider(order, lease.reservations)
+                lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+            except Exception as exc:  # noqa: BLE001 - refuse without leaking broker details
+                logger.error("Portfolio safety state unavailable for smart-route child: %s", type(exc).__name__)
+                return _GatedDecision(False, error="Portfolio safety state is unavailable")
 
-        # The portfolio read is awaited and can be slow. Cancellation or JTI
-        # revocation during that window must remain a hard order barrier.
-        if self._pre_dispatch_check is not None:
-            reason = self._pre_dispatch_check()
-            if reason:
-                raise SmartRouteAbort(reason)
+            if self._pre_dispatch_check is not None:
+                reason = self._pre_dispatch_check()
+                if reason:
+                    raise SmartRouteAbort(reason)
+            try:
+                admission = portfolio_state.admission_for(0)
+                results = self._safety.check_order(
+                    order,
+                    selector=selector,
+                    positions=admission.positions,
+                    used_margin=admission.used_margin,
+                    total_balance=portfolio_state.total_balance,
+                    daily_pnl=portfolio_state.daily_pnl,
+                    starting_capital=portfolio_state.starting_capital,
+                    ltp=portfolio_state.ltp_for(order),
+                    net_delta=admission.net_delta,
+                    net_vega=admission.net_vega,
+                )
+            except Exception as exc:
+                logger.warning("Smart-route child validation failed: %s", exc)
+                return _GatedDecision(False, error="Order validation failed")
+            blocked = next((result for result in results if not result.passed), None)
+            if blocked is not None:
+                return _GatedDecision(
+                    False,
+                    error=f"Blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                )
 
-        # --- L1–L5 per child ------------------------------------------------
-        try:
-            results = self._safety.check_order(
-                order,
-                positions=l2_positions,
-                used_margin=l2_used_margin,
-                total_balance=l2_total_balance,
-            )
-        except Exception as exc:  # malformed child — refuse, never dispatch
-            logger.warning("Smart-route child validation failed: %s", exc)
-            return _GatedDecision(False, error="Order validation failed")
-        blocked = next((r for r in results if not r.passed), None)
-        if blocked is not None:
-            return _GatedDecision(
-                False, error=f"Blocked by safety system [{blocked.layer}]: {blocked.reason}"
-            )
+            if self._pre_dispatch_check is not None:
+                reason = self._pre_dispatch_check()
+                if reason:
+                    raise SmartRouteAbort(reason)
+            try:
+                router = self._router_provider() if self._router_provider is not None else self._router
+                if router is None:
+                    raise SafetyBypassError("current BrokerRouter generation is unavailable")
+                safety_ctx = gate_order(
+                    order,
+                    self._request_ctx,
+                    adapter_id=self._adapter_id,
+                    account_id=self._account_id,
+                )
+                reservation = lease.reserve(order, admission.positions)
+                result = await router.place_order(
+                    self._request_ctx,
+                    order=order,
+                    safety_ctx=safety_ctx,
+                    hint=RoutingHint(adapter_id=self._adapter_id, account_id=self._account_id),
+                )
+                lease.acknowledge(reservation, result)
+            except Exception as exc:
+                logger.warning(
+                    "Smart-route child refused | adapter=%s account=%s symbol=%s: %s",
+                    self._adapter_id,
+                    self._account_id,
+                    getattr(order, "symbol", "?"),
+                    exc,
+                )
+                if exc.__class__.__name__ == "SafetyBypassError":
+                    return _GatedDecision(False, error="verification failed")
+                return _GatedDecision(False, error="dispatch failed")
 
-        # No await occurs between this final brake and gate minting/dispatch.
-        if self._pre_dispatch_check is not None:
-            reason = self._pre_dispatch_check()
-            if reason:
-                raise SmartRouteAbort(reason)
-
-        # --- gate + ACL + one-shot dispatch ---------------------------------
-        try:
-            router = (
-                self._router_provider()
-                if self._router_provider is not None
-                else self._router
-            )
-            if router is None:
-                raise SafetyBypassError("current BrokerRouter generation is unavailable")
-            safety_ctx = gate_order(
-                order,
-                self._request_ctx,
-                adapter_id=self._adapter_id,
-                account_id=self._account_id,
-            )
-            result = await router.place_order(
-                self._request_ctx,
-                order=order,
-                safety_ctx=safety_ctx,
-                hint=RoutingHint(adapter_id=self._adapter_id, account_id=self._account_id),
-            )
-        except Exception as exc:
-            logger.warning(
-                "Smart-route child refused | adapter=%s account=%s symbol=%s: %s",
-                self._adapter_id, self._account_id, getattr(order, "symbol", "?"), exc,
-            )
-            if exc.__class__.__name__ == "SafetyBypassError":
-                return _GatedDecision(False, error="verification failed")
-            return _GatedDecision(False, error="dispatch failed")
-
-        orderid = str(result)
+            orderid = str(result)
 
         # Best-effort audit + journal — never break the child path.
         try:
@@ -530,14 +518,16 @@ def start_smart_route() -> tuple[Any, int]:
     """
     from flinttrade_core.models import Action, Exchange, Order, PriceType  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
     from flinttrade_engine.smart_router import SmartOrderRouter  # noqa: PLC0415
 
     from .order_routes import (  # noqa: PLC0415
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
+        _require_live_safety,
         _record_trade_journal,
+        _run_on_client_loop,
+        _safety_runtime_unavailable_response,
     )
 
     cfg = current_app.config.get("SMART_ROUTING") or {}
@@ -583,6 +573,12 @@ def start_smart_route() -> tuple[Any, int]:
             ),
         }), 503
 
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
+        logger.error("Smart-route safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+
     body: dict[str, Any] = request.get_json(silent=True) or {}
     symbol = str(body.get("symbol") or "").strip()
     exchange = str(body.get("exchange") or "").strip()
@@ -611,12 +607,6 @@ def start_smart_route() -> tuple[Any, int]:
     if max_slippage_bps < 0:
         return jsonify({"status": "error", "message": "max_slippage_bps must be >= 0"}), 400
 
-    # --- parent-level fast-fail: validate the FULL order against L1–L5 -------
-    # Each child is re-checked independently in GatedChildExecutor; this stops
-    # an obviously-refusable parent before a background job spins up.
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
     try:
         parent_order = Order(
             symbol=symbol,
@@ -627,7 +617,43 @@ def start_smart_route() -> tuple[Any, int]:
             strategy="smart-route",
             product=product,  # type: ignore[arg-type]
         )
-        parent_results = safety.check_order(parent_order)
+    except Exception:
+        return jsonify({"status": "error", "message": "Order validation failed"}), 400
+
+    # --- parent-level fast-fail: validate the FULL order against L1–L5 -------
+    # Each child is re-checked independently in GatedChildExecutor; this stops
+    # an obviously-refusable parent before a background job spins up.
+    try:
+        from .l2_state import gather_safety_state  # noqa: PLC0415
+
+        portfolio_state = _run_on_client_loop(
+            gather_safety_state(
+                current_app.config,
+                adapter_id,
+                account_id=account_id,
+                orders=[parent_order],
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - refuse without exposing broker details
+        logger.error("Smart-route portfolio safety state is unavailable: %s", type(exc).__name__)
+        return jsonify({
+            "status": "error",
+            "message": "Order safety state unavailable; no order was sent.",
+        }), 503
+    try:
+        admission = portfolio_state.admission_for(0)
+        parent_results = safety.check_order(
+            parent_order,
+            selector=f"{adapter_id}:{account_id}",
+            positions=admission.positions,
+            used_margin=admission.used_margin,
+            total_balance=portfolio_state.total_balance,
+            daily_pnl=portfolio_state.daily_pnl,
+            starting_capital=portfolio_state.starting_capital,
+            ltp=portfolio_state.ltp_for(parent_order),
+            net_delta=admission.net_delta,
+            net_vega=admission.net_vega,
+        )
     except Exception:
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
     blocked = next((r for r in parent_results if not r.passed), None)
@@ -726,28 +752,19 @@ def start_smart_route() -> tuple[Any, int]:
     app_obj = current_app._get_current_object()  # noqa: SLF001
 
     def _journal_write(order: Any, orderid: str) -> None:
-        if journal_store is None:
-            return
         with app_obj.app_context():
-            _record_trade_journal(order, orderid, strategy="smart-route")
+            if journal_store is not None:
+                _record_trade_journal(order, orderid, strategy="smart-route")
 
-    # L2 portfolio state: gather ONCE for the whole route and cache (a route is
-    # bounded — a single market order or a few-minute TWAP — so a per-child
-    # re-fetch would just add latency for negligible freshness gain).
-    _l2_cache: dict[str, tuple[list[Any], float, float]] = {}
-    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
-    registry = current_app.config.get("REGISTRY")
-
-    async def _route_l2_provider() -> tuple[list[Any], float, float]:
-        if "state" not in _l2_cache:
-            _l2_cache["state"] = await gather_portfolio_state(
-                client,
-                adapter_id,
-                account_id=account_id,
-                native_adapters=native_adapters,
-                registry=registry,
-            )
-        return _l2_cache["state"]
+    async def _route_safety_provider(order: Any, reservations: tuple[Any, ...]) -> Any:
+        return await gather_safety_state(
+            app_obj.config,
+            adapter_id,
+            account_id=account_id,
+            orders=[order],
+            reservations=reservations,
+            include_order_margin=True,
+        )
 
     executor = GatedChildExecutor(
         safety=safety,
@@ -759,7 +776,7 @@ def start_smart_route() -> tuple[Any, int]:
         audit=current_app.config.get("AUDIT"),
         journal_write=_journal_write,
         pre_dispatch_check=_pre_dispatch_check,
-        portfolio_state_provider=_route_l2_provider,
+        portfolio_state_provider=_route_safety_provider,
     )
     depth_provider, volume_provider = _make_providers(client)
     smart_router = SmartOrderRouter(

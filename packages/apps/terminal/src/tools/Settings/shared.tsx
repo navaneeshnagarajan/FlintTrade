@@ -49,6 +49,8 @@ interface TextInputProps {
   type?: string;
   disabled?: boolean;
   "aria-label"?: string;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
 }
 
 export function TextInput({
@@ -58,6 +60,8 @@ export function TextInput({
   type = "text",
   disabled = false,
   "aria-label": ariaLabel,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }: TextInputProps) {
   return (
     <input
@@ -67,6 +71,8 @@ export function TextInput({
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid || undefined}
+      aria-describedby={ariaDescribedBy}
       className="w-full px-3 py-1.5 text-xs font-mono bg-surface-base border border-border-default rounded text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 focus:ring-1 focus:ring-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     />
   );
@@ -163,20 +169,16 @@ interface ToggleProps {
 
 export function Toggle({ checked, onChange, label }: ToggleProps) {
   return (
-    <label className="flex items-center gap-2.5 cursor-pointer w-fit">
-      <div
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        tabIndex={0}
-        onClick={() => onChange(!checked)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onChange(!checked);
-          }
-        }}
-        className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors focus:outline-none focus:ring-1 focus:ring-accent/30 ${
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex w-fit cursor-pointer items-center gap-2.5 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/30"
+    >
+      <span
+        aria-hidden="true"
+        className={`relative inline-flex h-4 w-7 shrink-0 rounded-full border border-transparent transition-colors ${
           checked ? "bg-accent" : "bg-surface-hover border-border-default"
         }`}
       >
@@ -185,9 +187,9 @@ export function Toggle({ checked, onChange, label }: ToggleProps) {
             checked ? "translate-x-3" : "translate-x-0.5"
           }`}
         />
-      </div>
+      </span>
       <span className="text-xs text-text-secondary">{label}</span>
-    </label>
+    </button>
   );
 }
 

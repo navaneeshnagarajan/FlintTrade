@@ -72,7 +72,9 @@ class TestTaxSummaryEndpoint:
             "fy", "equity_ltcg", "equity_stcg", "intraday_pnl",
             "fno_pnl", "commodity_pnl", "stt_paid", "turnover",
             "tax_liability_estimated", "ltcg_exemption_used",
-            "needs_audit", "trade_count", "is_sample_data", "data_source",
+            "needs_audit", "audit_assessment", "audit_assessment_reason",
+            "tax_estimate_methodology", "stt_methodology", "stt_rate_provenance",
+            "stt_rate_schedule", "trade_count", "is_sample_data", "data_source",
         ]
         for field in required_fields:
             assert field in data, f"Missing field: {field}"
@@ -100,10 +102,22 @@ class TestTaxSummaryEndpoint:
         data = json.loads(resp.data)["data"]
         assert data["fy"] == _current_fy()
 
-    def test_trade_count_matches_sample(self, app_client) -> None:
-        resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
-        data = json.loads(resp.data)["data"]
-        assert data["trade_count"] == 50
+    def test_sample_ledger_is_filtered_by_requested_fy(self, app_client) -> None:
+        sample_fy = json.loads(_get(app_client, "/v1/tax/summary?fy=2024-25").data)["data"]
+        following_fy = json.loads(_get(app_client, "/v1/tax/summary?fy=2025-26").data)["data"]
+
+        assert sample_fy["trade_count"] == 50
+        assert following_fy["trade_count"] == 0
+        assert following_fy["turnover"] == 0.0
+
+    def test_summary_marks_audit_assessment_incomplete(self, app_client) -> None:
+        data = json.loads(_get(app_client, "/v1/tax/summary?fy=2024-25").data)["data"]
+
+        assert data["audit_assessment"] == "incomplete"
+        assert "taxpayer-specific" in data["audit_assessment_reason"]
+        assert "transaction date" in data["stt_methodology"]
+        assert data["stt_rate_schedule"][1]["effective_from"] == "2024-10-01"
+        assert data["stt_rate_schedule"][2]["effective_from"] == "2026-04-01"
 
     def test_numeric_fields_are_numbers(self, app_client) -> None:
         resp = _get(app_client, "/v1/tax/summary?fy=2025-26")
@@ -150,14 +164,14 @@ class TestTaxReportEndpoint:
         assert set(segments.keys()) == expected
 
     def test_segment_has_trades(self, app_client) -> None:
-        resp = _get(app_client, "/v1/tax/report?fy=2025-26")
+        resp = _get(app_client, "/v1/tax/report?fy=2024-25")
         segments = json.loads(resp.data)["data"]["segments"]
         # At least one segment should have trades
         has_trades = any(seg["trade_count"] > 0 for seg in segments.values())
         assert has_trades
 
     def test_trade_details_have_required_fields(self, app_client) -> None:
-        resp = _get(app_client, "/v1/tax/report?fy=2025-26")
+        resp = _get(app_client, "/v1/tax/report?fy=2024-25")
         segments = json.loads(resp.data)["data"]["segments"]
         for seg_name, seg_data in segments.items():
             for trade in seg_data["trades"]:

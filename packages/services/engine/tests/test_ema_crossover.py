@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from flinttrade_core.models import Quote
@@ -33,26 +31,20 @@ class TestEMACrossover:
     @pytest.mark.asyncio
     async def test_no_signal_before_warmup(self):
         """Feed fewer ticks than slow_period — no orders should be placed."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(fast=3, slow=5, router=mock_router)
+        strategy = _make_strategy(fast=3, slow=5)
 
         # Feed only 4 ticks (< slow_period of 5)
         for price in [100.0, 101.0, 102.0, 103.0]:
             await strategy.on_tick(_quote(price))
 
-        mock_router.route_order.assert_not_called()
+        assert strategy.generate_orders() == []
         assert strategy.position == 0
         assert strategy.last_signal == "NONE"
 
     @pytest.mark.asyncio
     async def test_buy_signal_on_golden_cross(self):
         """Rising prices after warmup should trigger a BUY (golden cross)."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(fast=3, slow=5, router=mock_router)
+        strategy = _make_strategy(fast=3, slow=5)
 
         # Warmup: 5 flat prices — no cross yet
         for price in [100.0, 100.0, 100.0, 100.0, 100.0]:
@@ -62,9 +54,9 @@ class TestEMACrossover:
         for price in [110.0, 120.0, 130.0]:
             await strategy.on_tick(_quote(price))
 
-        assert mock_router.route_order.call_count >= 1
-        # Check that BUY was called
-        order_arg = mock_router.route_order.call_args_list[0][0][0]
+        orders = strategy.generate_orders()
+        assert len(orders) == 1
+        order_arg = orders[0]
         assert order_arg.action.value == "BUY"
         assert strategy.position == 1
         assert strategy.last_signal == "BUY"
@@ -72,10 +64,7 @@ class TestEMACrossover:
     @pytest.mark.asyncio
     async def test_sell_signal_on_death_cross(self):
         """Dropping prices after warmup should trigger a SELL (death cross)."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(fast=3, slow=5, router=mock_router)
+        strategy = _make_strategy(fast=3, slow=5)
 
         # Warmup with flat prices
         for price in [100.0, 100.0, 100.0, 100.0, 100.0]:
@@ -85,8 +74,9 @@ class TestEMACrossover:
         for price in [90.0, 80.0, 70.0]:
             await strategy.on_tick(_quote(price))
 
-        assert mock_router.route_order.call_count >= 1
-        order_arg = mock_router.route_order.call_args_list[0][0][0]
+        orders = strategy.generate_orders()
+        assert len(orders) == 1
+        order_arg = orders[0]
         assert order_arg.action.value == "SELL"
         assert strategy.position == -1
         assert strategy.last_signal == "SELL"
@@ -94,10 +84,7 @@ class TestEMACrossover:
     @pytest.mark.asyncio
     async def test_no_duplicate_signals(self):
         """Same crossover direction should not fire twice."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(fast=3, slow=5, router=mock_router)
+        strategy = _make_strategy(fast=3, slow=5)
 
         # Warmup
         for price in [100.0, 100.0, 100.0, 100.0, 100.0]:
@@ -107,52 +94,44 @@ class TestEMACrossover:
         for price in [110.0, 120.0, 130.0]:
             await strategy.on_tick(_quote(price))
 
-        buy_count = mock_router.route_order.call_count
-        assert buy_count >= 1
+        buy_orders = strategy.generate_orders()
+        assert len(buy_orders) == 1
 
         # Feed more rising prices — should NOT trigger another BUY
         for price in [135.0, 140.0, 145.0]:
             await strategy.on_tick(_quote(price))
 
-        assert mock_router.route_order.call_count == buy_count
+        assert strategy.generate_orders() == []
 
     @pytest.mark.asyncio
     async def test_square_off_closes_long(self):
         """Square-off with a long position should place a SELL."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(router=mock_router)
+        strategy = _make_strategy()
         strategy.position = 1  # Simulate being long
 
         await strategy.on_square_off()
 
-        mock_router.route_order.assert_called_once()
-        order_arg = mock_router.route_order.call_args[0][0]
+        orders = strategy.generate_orders()
+        assert len(orders) == 1
+        order_arg = orders[0]
         assert order_arg.action.value == "SELL"
         assert strategy.position == 0
 
     @pytest.mark.asyncio
     async def test_square_off_flat(self):
         """Square-off with no position should NOT place any order."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(router=mock_router)
+        strategy = _make_strategy()
         strategy.position = 0
 
         await strategy.on_square_off()
 
-        mock_router.route_order.assert_not_called()
+        assert strategy.generate_orders() == []
         assert strategy.position == 0
 
     @pytest.mark.asyncio
     async def test_reversal_doubles_quantity(self):
         """Reversing from short to long should send 2x quantity."""
-        mock_router = MagicMock()
-        mock_router.route_order = AsyncMock()
-
-        strategy = _make_strategy(fast=3, slow=5, qty=10, router=mock_router)
+        strategy = _make_strategy(fast=3, slow=5, qty=10)
         strategy.position = -1  # Already short
         strategy.last_signal = "SELL"
 
@@ -164,8 +143,9 @@ class TestEMACrossover:
         for price in [100.0, 110.0, 120.0]:
             await strategy.on_tick(_quote(price))
 
-        assert mock_router.route_order.call_count >= 1
-        order_arg = mock_router.route_order.call_args_list[0][0][0]
+        orders = strategy.generate_orders()
+        assert len(orders) == 1
+        order_arg = orders[0]
         assert order_arg.action.value == "BUY"
         assert order_arg.quantity == "20"  # 2x for reversal
         assert strategy.position == 1

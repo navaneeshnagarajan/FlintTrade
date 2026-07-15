@@ -5,6 +5,7 @@ Run with:
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -108,6 +109,27 @@ class TestErrorLogSchema:
         """Opening the same in-memory db twice must not fail."""
         log = ErrorLog(":memory:")
         log._init_schema()  # call again — CREATE TABLE IF NOT EXISTS
+        log.close()
+
+    def test_shared_connection_serialises_concurrent_reads_and_writes(self):
+        log = _make_log()
+
+        def writer(worker: int) -> None:
+            for index in range(75):
+                log.log(f"/v1/concurrent/{worker}/{index}", "GET", 500)
+
+        def reader() -> None:
+            for _ in range(75):
+                rows = log.recent_metadata(limit=25)
+                assert all(set(row) == {"timestamp", "route", "method", "status_code", "error_class"} for row in rows)
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(writer, worker) for worker in range(3)]
+            futures.extend(executor.submit(reader) for _ in range(3))
+            for future in futures:
+                future.result()
+
+        assert log.count() == 225
         log.close()
 
 
@@ -218,6 +240,15 @@ class TestErrorLogWrite:
 class TestErrorLogRecent:
     """Tests for the recent() read path."""
 
+    def test_metadata_restores_the_persisted_ist_offset(self):
+        log = _make_log()
+        log.log("/v1/timestamp", "GET", 500)
+
+        timestamp = datetime.fromisoformat(log.recent_metadata(limit=1)[0]["timestamp"])
+
+        assert timestamp.utcoffset() == timedelta(hours=5, minutes=30)
+        log.close()
+
     def test_recent_returns_most_recent_first(self):
         log = _make_log()
         for i in range(5):
@@ -285,6 +316,37 @@ class TestErrorLogRecent:
         log.log("/v1/x", "GET", 500)
         entries = log.recent(limit=-5)
         assert len(entries) == 1
+        log.close()
+
+
+class TestErrorLogRecentMetadata:
+    """Tests for the privacy-restricted support projection."""
+
+    def test_projection_never_returns_raw_or_identifying_fields(self):
+        log = _make_log()
+        try:
+            raise RuntimeError("private exception message")
+        except RuntimeError as exc:
+            log.log(
+                "/v1/accounts/private-account/orders/private-order",
+                "POST",
+                500,
+                request_body={"token": "private-token", "symbol": "NIFTY"},
+                error=exc,
+                user_id="private-user",
+            )
+
+        entries = log.recent_metadata(limit=1)
+
+        assert len(entries) == 1
+        assert set(entries[0]) == {
+            "timestamp",
+            "route",
+            "method",
+            "status_code",
+            "error_class",
+        }
+        assert entries[0]["error_class"] == "RuntimeError"
         log.close()
 
 
@@ -460,3 +522,42 @@ class TestAdminErrorsCountRoute:
             assert resp.status_code == 503
         finally:
             flask_app.config["ERROR_LOG"] = original
+
+
+class TestSupportDiagnosticsRoute:
+    """Real-app authentication and projection checks for support diagnostics."""
+
+    def test_support_diagnostics_requires_global_auth(self, client):
+        response = client.get("/v1/support/diagnostics")
+        assert response.status_code == 401
+
+    def test_support_diagnostics_accepts_operator_api_key(self, client):
+        response = client.get("/v1/support/diagnostics", headers=_auth())
+        assert response.status_code == 200
+        assert response.get_json()["data"]["schema_version"] == 1
+        assert response.headers["Cache-Control"] == "no-store"
+
+    def test_support_diagnostics_accepts_legacy_bearer_api_key(self, client, monkeypatch):
+        api_key = _auth()["X-API-Key"]
+        monkeypatch.setenv("FLINTTRADE_API_KEY", api_key)
+
+        response = client.get(
+            "/v1/support/diagnostics",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+
+        assert response.status_code == 200
+
+    def test_support_diagnostics_rejects_session_without_error_scope(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "flinttrade_core.auth_routes.decode_token",
+            lambda _token: {"type": "session", "scopes": ["admin.observability.read"]},
+        )
+
+        response = client.get(
+            "/v1/support/diagnostics",
+            headers={"Authorization": "Bearer narrowed-session"},
+        )
+
+        assert response.status_code == 403
+        assert "admin.errors.read" in response.get_json()["message"]

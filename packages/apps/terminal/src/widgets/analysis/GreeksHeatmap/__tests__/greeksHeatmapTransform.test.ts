@@ -35,6 +35,7 @@ function smile(): IVSmileData {
   return {
     underlying: "NIFTY",
     spot_price: 22000,
+    is_sample_data: false,
     curves: [
       {
         expiry: "17-APR-26",
@@ -93,7 +94,12 @@ describe("buildGreeksHeatmap", () => {
   it("returns null when there are no curves", () => {
     expect(buildGreeksHeatmap(null)).toBeNull();
     expect(buildGreeksHeatmap(undefined)).toBeNull();
-    expect(buildGreeksHeatmap({ underlying: "X", spot_price: 0, curves: [] })).toBeNull();
+    expect(buildGreeksHeatmap({
+      underlying: "X",
+      spot_price: 0,
+      curves: [],
+      is_sample_data: false,
+    })).toBeNull();
   });
 
   it("returns null when every expiry is degenerate (dte <= 0)", () => {
@@ -106,6 +112,7 @@ describe("buildGreeksHeatmap", () => {
     const noOverlap: IVSmileData = {
       underlying: "NIFTY",
       spot_price: 22000,
+      is_sample_data: false,
       curves: [
         {
           expiry: "a", days_to_expiry: 8, atm_iv: 0.15, atm_strike: 22000, skew_25delta: 0,
@@ -118,5 +125,16 @@ describe("buildGreeksHeatmap", () => {
       ],
     };
     expect(buildGreeksHeatmap(noOverlap)).toBeNull();
+  });
+
+  it("rejects a strike when either option leg lacks IV", () => {
+    const incomplete = smile();
+    incomplete.curves = [
+      {
+        ...incomplete.curves[0],
+        points: [{ strike: 22000, call_iv: 0.15, put_iv: 0, moneyness: 1 }],
+      },
+    ];
+    expect(buildGreeksHeatmap(incomplete)).toBeNull();
   });
 });

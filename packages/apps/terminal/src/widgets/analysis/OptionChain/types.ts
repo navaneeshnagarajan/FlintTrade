@@ -40,12 +40,12 @@ export interface RawOptionRow {
   oi?: number;
   open_interest?: number;
   oi_change?: number;
-  delta?: number;
-  gamma?: number;
-  theta?: number;
-  vega?: number;
-  iv?: number;
-  implied_volatility?: number;
+  delta?: number | null;
+  gamma?: number | null;
+  theta?: number | null;
+  vega?: number | null;
+  iv?: number | null;
+  implied_volatility?: number | null;
 }
 
 /** OpenAlgo v2 chain entry: { strike, ce: {...}, pe: {...} } */
@@ -61,7 +61,7 @@ export interface RawOptionChain {
   atm_strike?: number;
   underlying_ltp?: number;
   underlying_prev_close?: number;
-  pcr?: number;
+  pcr?: number | null;
   // Legacy v1 format (kept for backwards compat)
   calls?: RawOptionRow[];
   puts?: RawOptionRow[];
@@ -97,6 +97,8 @@ export type OISignal =
   | null;
 
 export interface BasketItem {
+  symbol: string;
+  exchange: string;
   strike: number;
   optionType: "CE" | "PE";
   ltp: number | null;

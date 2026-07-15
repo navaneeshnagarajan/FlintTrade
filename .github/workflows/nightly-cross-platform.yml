@@ -62,3 +62,18 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
+
+  desktop-rust-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/apps/desktop/src-tauri -> target
+      - run: cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml

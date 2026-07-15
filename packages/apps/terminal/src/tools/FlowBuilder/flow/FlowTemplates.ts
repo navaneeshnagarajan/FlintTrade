@@ -83,7 +83,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "simple_market_order",
     name: "Simple Market Order",
-    description: "Start trigger → Time window gate → Place market order. The minimal viable flow for any timed execution.",
+    description: "Draft sequence: Start trigger → Time window gate → Place Order node.",
     category: "Basic",
     nodeCount: 3,
     tags: ["Start", "Time Window", "Place Order"],
@@ -93,7 +93,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "price_alert_order",
     name: "Price Alert → Order",
-    description: "Subscribe LTP stream → Price condition check → CE order on breach, Telegram alert on no-breach.",
+    description: "Draft sequence: LTP source → Price condition → Order and Telegram branches.",
     category: "Triggers",
     nodeCount: 4,
     tags: ["LTP", "Price Condition", "Options Order"],
@@ -103,7 +103,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "intraday_time_strategy",
     name: "Intraday Time Strategy",
-    description: "Start → Market open window → Fund check → Smart order entry → Scheduled 3:15 PM square-off.",
+    description: "Draft sequence: Market window → Fund check → Smart Order node → 3:15 PM exit branch.",
     category: "Intraday",
     nodeCount: 6,
     tags: ["Time Window", "Fund Check", "Smart Order", "Close Positions"],
@@ -113,7 +113,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "ema_crossover_auto",
     name: "EMA Crossover Auto Trader",
-    description: "Subscribe to LTP, compute EMA 9/21 crossover, place smart order on signal. Includes time window gate and Telegram alert.",
+    description: "Planned draft for an LTP source, EMA crossover, time gate, Smart Order node, and Telegram branch.",
     category: "Trend Following",
     nodeCount: 8,
     tags: ["EMA", "Smart Order", "Telegram"],
@@ -123,7 +123,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "tradingview_webhook",
     name: "TradingView Webhook Handler",
-    description: "Receive TradingView Pine alerts via webhook, parse action (BUY/SELL), route to place order with position check.",
+    description: "Planned draft for a signed TradingView relay, action parsing, position check, and Place Order node.",
     category: "Automation",
     nodeCount: 6,
     tags: ["TradingView", "Webhook", "Place Order"],
@@ -133,7 +133,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "morning_square_off",
     name: "Morning Square-Off Guard",
-    description: "At 9:16 AM, check positions. If overnight F&O positions exist, close all before CNC cutoff. Sends Telegram summary.",
+    description: "Planned draft for a 9:16 AM position check, Close Positions node, and Telegram summary.",
     category: "Risk Management",
     nodeCount: 7,
     tags: ["Close Positions", "Telegram", "Scheduled"],
@@ -143,7 +143,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "options_expiry_exit",
     name: "Options Expiry Day Exit",
-    description: "On expiry day at 3:00 PM, fetch option chain, identify short positions near strike, cancel and close.",
+    description: "Planned draft for an expiry-day option-chain check with cancel and close nodes.",
     category: "Options",
     nodeCount: 14,
     tags: ["Expiry", "Option Chain", "Risk"],
@@ -153,7 +153,7 @@ export const FLOW_TEMPLATES: FlowTemplate[] = [
   {
     id: "grid_rebalancer",
     name: "Grid Rebalancer",
-    description: "Deploy arithmetic grid around LTP. Subscribe depth for spread tracking. Auto-reprice grid on breakout.",
+    description: "Planned draft for an LTP-centred grid, depth source, and breakout repricing branch.",
     category: "Algorithmic",
     nodeCount: 18,
     tags: ["Grid", "Depth", "Variable", "Smart Order"],

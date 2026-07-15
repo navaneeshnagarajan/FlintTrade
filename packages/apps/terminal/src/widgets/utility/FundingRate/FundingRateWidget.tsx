@@ -8,7 +8,7 @@
  *   - Positive rates highlighted green (longs pay shorts)
  *   - Negative rates highlighted red (shorts pay longs)
  *   - Sort by rate magnitude (default) or alphabetical
- *   - Auto-refresh every 60s
+ *   - Auto-refresh every 60s for explicitly live responses
  *   - FeatureTeaser over sample data in explore/disconnected mode
  */
 
@@ -71,10 +71,11 @@ function Sparkline({ data }: SparklineProps) {
 
 interface FundingRowProps {
   entry: FundingRateEntry;
+  isLive: boolean;
 }
 
-function FundingRow({ entry }: FundingRowProps) {
-  const countdown = useCountdown(entry.next_funding_ms);
+function FundingRow({ entry, isLive }: FundingRowProps) {
+  const countdown = useCountdown(isLive ? entry.next_funding_ms : null);
 
   const rateClass =
     entry.rate > 0
@@ -123,7 +124,7 @@ function FundingRow({ entry }: FundingRowProps) {
       {/* Next funding countdown */}
       <td className="px-3 py-2 text-right">
         <span className="text-xs font-mono tabular-nums text-text-secondary">
-          {countdown}
+          {isLive ? countdown : "—"}
         </span>
       </td>
 
@@ -209,18 +210,17 @@ function FundingRateWidget() {
     queryKey: ["cryptoFundingRates"],
     queryFn: getCryptoFundingRates,
     enabled: isConnected,
-    refetchInterval: isConnected ? 60_000 : false,
+    refetchInterval: (query) =>
+      isConnected && query.state.data?.is_sample_data === false ? 60_000 : false,
     staleTime: 55_000,
   });
 
   const rawData = isConnected ? liveData : SAMPLE_FUNDING_RATES;
 
-  // The badge keys off the response flag, not connection state alone: the
-  // backend endpoint is currently a hardcoded stub that declares
-  // `is_sample_data: true`, so a connected response can still be fabricated.
-  // Badging on `!isConnected` alone rendered stub rates as live the moment a
-  // broker connected.
-  const isSample = !isConnected || liveData?.is_sample_data === true;
+  // Live affordances fail closed: an omitted provenance flag is unknown, not
+  // evidence that the response came from a live source.
+  const isExplicitlyLive = isConnected && liveData?.is_sample_data === false;
+  const isSample = !isExplicitlyLive;
 
   const sortedEntries = useMemo(() => {
     if (!rawData?.rates?.length) return [];
@@ -257,8 +257,8 @@ function FundingRateWidget() {
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample funding rates, not a live feed"
-            title="These funding rates are illustrative sample data, not a live feed — do not base trading decisions on them."
+            aria-label="Showing sample funding rates or data with unknown provenance, not a verified live feed"
+            title="These funding rates are sample data or have unknown provenance, not a verified live feed — do not base trading decisions on them."
           >
             Sample data
           </span>
@@ -277,7 +277,7 @@ function FundingRateWidget() {
           {sortLabel[sortMode]}
         </Button>
 
-        {isConnected && (
+        {isExplicitlyLive && !isLoading && (
           <Button
             variant="ghost"
             size="sm"
@@ -328,7 +328,7 @@ function FundingRateWidget() {
               </thead>
               <tbody>
                 {sortedEntries.map((entry) => (
-                  <FundingRow key={entry.symbol} entry={entry} />
+                  <FundingRow key={entry.symbol} entry={entry} isLive={isExplicitlyLive} />
                 ))}
               </tbody>
             </table>
@@ -340,7 +340,7 @@ function FundingRateWidget() {
             )}
 
             {/* Last updated */}
-            {rawData.updated_at && (
+            {isExplicitlyLive && rawData.updated_at && (
               <div className="flex-none px-3 py-1.5 text-xxs text-text-muted border-t border-border-subtle">
                 Updated: {new Date(rawData.updated_at).toLocaleTimeString("en-IN", {
                   timeZone: "Asia/Kolkata",

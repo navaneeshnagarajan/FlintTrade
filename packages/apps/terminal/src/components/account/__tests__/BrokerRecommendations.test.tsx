@@ -61,7 +61,7 @@ describe("BrokerRecommendations", () => {
           {
             broker_id: "indmoney",
             display_name: "INDmoney",
-            connectable: true,
+            connectable: false,
             score: 0.7,
             raw_score: 7,
             rationale: "REST token supports account reads.",
@@ -83,17 +83,17 @@ describe("BrokerRecommendations", () => {
     expect(await screen.findByText("Upstox")).toBeInTheDocument();
     expect(screen.queryByText("Kotak Neo")).not.toBeInTheDocument();
     expect(screen.getByText("Dhan")).toBeInTheDocument();
-    expect(screen.getByText("INDmoney")).toBeInTheDocument();
+    expect(screen.queryByText("INDmoney")).not.toBeInTheDocument();
     expect(screen.queryByText("IndMoney")).not.toBeInTheDocument();
     expect(screen.getByText("Lowest cost")).toBeInTheDocument();
     expect(screen.getByText("Free API access.")).toBeInTheDocument();
     expect(screen.getByText("Live streaming")).toBeInTheDocument();
-    expect(screen.getByText("Not ready")).toBeInTheDocument();
+    expect(screen.getAllByText("Not ready")).toHaveLength(2);
     expect(screen.getByText("Feed not wired yet.")).toBeInTheDocument();
     // Honest scope note: the rankings are capability-derived and default to
-    // login/read-verified connectable native brokers.
+    // activation-evidence-cleared connectable native brokers.
     expect(screen.getByText(/capability-based suggestions/i)).toBeInTheDocument();
-    expect(screen.getByText(/coming-soon adapters stay hidden/i)).toBeInTheDocument();
+    expect(screen.getByText(/evidence-gated adapters stay hidden/i)).toBeInTheDocument();
   });
 
   it("shows an unavailable message on error", async () => {

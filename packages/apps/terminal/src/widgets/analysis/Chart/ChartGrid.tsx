@@ -36,7 +36,8 @@ import { ReplayBar } from "./ReplayBar";
 import type { SymbolSearchResult, IntervalOption } from "./types";
 import type { Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
-import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
+import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
+import { useDataScope } from "@/hooks/useDataScope";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -217,7 +218,8 @@ interface ChartCellProps {
   compact?: boolean;
 }
 
-function ChartCell({ config, onConfigChange }: ChartCellProps) {
+export function ChartCell({ config, onConfigChange }: ChartCellProps) {
+  const dataScope = useDataScope();
   const [symbol, setSymbol] = useState(config.symbol);
   const [exchange, setExchange] = useState(config.exchange);
   const [interval, setInterval] = useState(config.interval);
@@ -299,8 +301,22 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
     const volumeSeries = volume;
     let cancelled = false;
 
+    // Never carry candles from one scope or instrument into another. Replay
+    // must also relinquish the series before the new identity is loaded.
+    if (isReplayingRef.current) {
+      exitReplay();
+      isReplayingRef.current = false;
+    }
+    barsRef.current = [];
+    timesRef.current = [];
+    setLegend(null);
+    try {
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+    } catch { /* chart may be disposing */ }
+
     function applyBars(data: OhlcvBar[]) {
-      if (cancelled || isReplayingRef.current) return;
+      if (cancelled) return;
       const times: Time[] = data.map((b) => b.timestamp as unknown as Time);
       barsRef.current = data;
       timesRef.current = times;
@@ -320,9 +336,8 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
     }
 
     (async () => {
-      const cacheKey = `ft-chart-${symbol}-${exchange}-${interval}`;
       const FIVE_MIN = 5 * 60 * 1000;
-      const cached = safeParse(localStorage.getItem(cacheKey), ohlcvCacheSchema);
+      const cached = readOhlcvCache(localStorage, dataScope, symbol, exchange, interval);
       if (cached && cached.data.length > 0) {
         applyBars(cached.data);
         if (Date.now() - cached.timestamp < FIVE_MIN && !isMarketHours()) return;
@@ -333,15 +348,13 @@ function ChartCell({ config, onConfigChange }: ChartCellProps) {
         const startDate = getStartDate(interval);
         const data = await getHistory(symbol, exchange, interval, startDate, endDate);
         if (cancelled || !Array.isArray(data) || data.length === 0) return;
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
-        } catch { /* quota exceeded */ }
+        writeOhlcvCache(localStorage, dataScope, symbol, exchange, interval, data as OhlcvBar[]);
         applyBars(data as OhlcvBar[]);
       } catch { /* API unavailable */ }
     })();
 
     return () => { cancelled = true; };
-  }, [symbol, exchange, interval, candleRef, volumeRef, chartRef]);
+  }, [symbol, exchange, interval, dataScope, candleRef, volumeRef, chartRef, exitReplay]);
 
   // Sync symbol/exchange changes up to parent
   useEffect(() => {

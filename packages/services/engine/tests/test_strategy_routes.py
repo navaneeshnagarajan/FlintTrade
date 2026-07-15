@@ -6,6 +6,7 @@ Subprocess launch is mocked to avoid spawning real processes.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -71,6 +72,34 @@ def _make_mock_process(pid: int = 9999, returncode=None):
     proc.poll.return_value = returncode
     proc.wait.return_value = returncode
     return proc
+
+
+@pytest.fixture(autouse=True)
+def _mock_complete_process_tree(monkeypatch):
+    """Model tree ownership for route tests that replace ``subprocess.Popen``."""
+    import flinttrade_engine.strategy_runner as runner_module
+
+    monkeypatch.setattr(runner_module.platform, "system", lambda: "Linux")
+
+    def create_tree(process, _system, **_limits):
+        tree = MagicMock()
+        alive = True
+
+        def is_alive() -> bool:
+            return alive
+
+        def terminate() -> None:
+            nonlocal alive
+            process.terminate()
+            alive = False
+
+        tree.is_alive.side_effect = is_alive
+        tree.terminate.side_effect = terminate
+        tree.kill.side_effect = terminate
+        tree.wait_gone.side_effect = lambda _timeout: not alive
+        return tree
+
+    monkeypatch.setattr(runner_module, "_create_process_tree", create_tree)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +237,72 @@ class TestStrategyRoutes:
 
         assert resp.status_code == 409
 
+    def test_start_packaged_child_configuration_error_returns_actionable_503(self, client, app):
+        from flinttrade_engine.strategy_runner import PackagedChildConfigurationError
+
+        upload_resp = client.post(
+            "/api/v1/strategies/upload",
+            json={"name": "packaged_unavailable", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+        runner = app.config["STRATEGY_RUNNER"]
+
+        with patch.object(
+            runner,
+            "start",
+            side_effect=PackagedChildConfigurationError(
+                "Frozen strategy child dispatcher is not installed by the parent entrypoint"
+            ),
+        ):
+            resp = client.post(f"/api/v1/strategies/{strategy_id}/start")
+
+        assert resp.status_code == 503
+        assert resp.get_json() == {
+            "status": "error",
+            "code": "packaged_child_unavailable",
+            "message": "Packaged strategy launcher is unavailable. Restart FlintTrade and try again.",
+        }
+
+    def test_cron_start_logs_packaged_child_configuration_error(self, client, app, caplog):
+        from flinttrade_engine.strategy_runner import PackagedChildConfigurationError
+
+        upload_resp = client.post(
+            "/api/v1/strategies/upload",
+            json={"name": "scheduled_packaged_unavailable", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+        scheduled: dict[str, object] = {}
+        cron_scheduler = MagicMock()
+
+        def schedule(**kwargs):
+            scheduled.update(kwargs)
+            return "job-1"
+
+        cron_scheduler.schedule.side_effect = schedule
+        app.config["CRON_SCHEDULER"] = cron_scheduler
+        response = client.post(
+            f"/api/v1/strategies/{strategy_id}/schedule",
+            json={"cron": "30 9 * * 1-5", "exchange": "NSE"},
+        )
+        assert response.status_code == 201
+
+        runner = app.config["STRATEGY_RUNNER"]
+        callback = scheduled["callback"]
+        with (
+            caplog.at_level(logging.ERROR, logger="flinttrade.engine.strategy_routes"),
+            patch.object(
+                runner,
+                "start",
+                side_effect=PackagedChildConfigurationError(
+                    "Frozen strategy child dispatcher is not installed by the parent entrypoint"
+                ),
+            ),
+        ):
+            callback()
+
+        assert "Cron start failed" in caplog.text
+        assert "dispatcher is not installed by the parent entrypoint" in caplog.text
+
     def test_start_strategy_generic_error(self, client, app):
         upload_resp = client.post(
             "/api/v1/strategies/upload",
@@ -237,9 +332,8 @@ class TestStrategyRoutes:
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "success"
 
-    def test_stop_nonexistent_strategy_returns_404(self, client, app):
-        with patch.object(app.config["STRATEGY_RUNNER"], "stop", side_effect=FileNotFoundError("Not found")):
-            resp = client.post("/api/v1/strategies/nonexistent-id/stop")
+    def test_stop_nonexistent_strategy_returns_404(self, client):
+        resp = client.post("/api/v1/strategies/nonexistent-id/stop")
         assert resp.status_code == 404
 
     def test_stop_not_running_returns_success(self, client):
@@ -263,6 +357,23 @@ class TestStrategyRoutes:
             resp = client.post(f"/api/v1/strategies/{strategy_id}/stop")
 
         assert resp.status_code == 500
+
+    def test_stop_termination_failure_is_not_reported_as_already_stopped(self, client, app):
+        upload_resp = client.post(
+            "/api/v1/strategies/upload",
+            json={"name": "stop_timeout", "code": SAFE_CODE},
+        )
+        strategy_id = upload_resp.get_json()["strategy_id"]
+
+        with patch.object(
+            app.config["STRATEGY_RUNNER"],
+            "stop",
+            side_effect=RuntimeError("could not confirm forced process termination"),
+        ):
+            resp = client.post(f"/api/v1/strategies/{strategy_id}/stop")
+
+        assert resp.status_code == 500
+        assert resp.get_json()["status"] == "error"
 
     def test_delete_strategy(self, client):
         upload_resp = client.post(

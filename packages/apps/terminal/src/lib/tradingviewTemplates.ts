@@ -1,15 +1,13 @@
 /**
  * tradingviewTemplates.ts
  *
- * Pre-built TradingView alert webhook message templates for Indian F&O trading.
+ * Preserved TradingView alert-message examples for Indian F&O trading.
  *
- * Usage:
- *  1. In TradingView, open an alert and switch the message field to "JSON".
- *  2. Paste the `webhookMessage` string.
- *  3. Set the webhook URL to your OpenAlgo endpoint:
- *       http://<host>:5000/api/v1/strategy/webhook
- *  4. Add the optional Pine Script snippet to your indicator/strategy to trigger
- *     the alert at the right time.
+ * These examples are intentionally not mounted in the Webhooks screen. The
+ * current receiver requires a signed relay envelope and production broker
+ * execution is unarmed; direct TradingView delivery cannot satisfy that
+ * contract. Keep the catalogue for a future relay-aware integration without
+ * presenting its order-shaped JSON as executable today.
  *
  * TradingView placeholders used across templates:
  *   {{ticker}}                — Exchange symbol (e.g. NIFTY, RELIANCE)

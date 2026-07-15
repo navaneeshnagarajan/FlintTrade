@@ -8,7 +8,11 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Lock } from "lucide-react";
-import { useAuthStore } from "@/stores/authStore";
+import {
+  captureAuthSessionFence,
+  isAuthSessionFenceCurrent,
+  useAuthStore,
+} from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { unlockWithPin } from "@/lib/modeAuth";
 
@@ -65,7 +69,7 @@ function PinDots({ filled }: { filled: number }) {
 export function LockScreen() {
   const username = useAuthStore((s) => s.username);
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
-  const setLoggedIn = useAuthStore((s) => s.setLoggedIn);
+  const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
   const mode = useModeStore((s) => s.mode);
 
   const [pin, setPin] = useState("");
@@ -81,6 +85,7 @@ export function LockScreen() {
 
   const submitPin = useCallback(async (value: string) => {
     if (value.length !== 6) return;
+    const requestFence = captureAuthSessionFence();
     setIsSubmitting(true);
     setError("");
     try {
@@ -90,8 +95,9 @@ export function LockScreen() {
       // /auth/pin with no mode and always received a live-unlocked token,
       // leaving the next "practice" order to dispatch down the live path).
       const result = await unlockWithPin(value, mode);
-      setLoggedIn(result.token, username ?? "", "");
+      setLoggedInIfCurrent(result.token, requestFence.principal ?? "", "", requestFence);
     } catch (err) {
+      if (!isAuthSessionFenceCurrent(requestFence)) return;
       // Surface the server's message — the backend distinguishes a wrong PIN
       // from no-PIN-set (code `pin_not_set` points the operator at Settings →
       // Security to create one). The hardcoded string is a last-resort
@@ -103,7 +109,7 @@ export function LockScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [setLoggedIn, username, mode]);
+  }, [setLoggedInIfCurrent, mode]);
 
   function handlePinChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value.replace(/\D/g, "").slice(0, 6);

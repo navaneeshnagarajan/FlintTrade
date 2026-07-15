@@ -15,9 +15,9 @@ export function useGammaDensity(
 ) {
   return useQuery({
     queryKey: ["gamma-density", symbol, exchange, expiry],
-    queryFn: () => getGammaDensityData(symbol, exchange, expiry || undefined),
-    enabled: isConnected && Boolean(symbol && exchange),
-    refetchInterval: isConnected && isMarketHours() ? 30_000 : false,
+    queryFn: () => getGammaDensityData(symbol, exchange, expiry),
+    enabled: isConnected && Boolean(symbol && exchange && expiry),
+    refetchInterval: isConnected && Boolean(expiry) && isMarketHours() ? 30_000 : false,
     staleTime: 25_000,
   });
 }

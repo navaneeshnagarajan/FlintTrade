@@ -1,11 +1,10 @@
-import { useConnectionStore } from "@/stores/connectionStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSkillStore } from "@/stores/skillStore";
-import { persistOpenAlgoConfigPatch } from "@/services/ftApi.openalgo";
+import { normaliseLlmHost, providerSelection } from "@/lib/llmProviders";
 import type { Domain, SkillLevel } from "@/types/skill";
 
-import { deriveWsUrl, type ConnectionFormValues } from "./connectionForm";
+import type { ConnectionFormValues } from "./connectionForm";
 import type { Persona, ExperienceLevel } from "./PersonaStep";
 import { getPresetName, mapWizardPreset } from "./ReviewStep";
 import type { RiskFormValues } from "./RiskStep";
@@ -17,6 +16,7 @@ export interface SetupChoices {
   connection?: Partial<ConnectionFormValues> | null;
   tradingDefaults?: Partial<TradingDefaultsFormValues> | null;
   riskLimits?: Partial<RiskFormValues> | null;
+  llm?: { provider: string; model: string; host?: string } | null;
   name?: string;
   interests?: string[];
 }
@@ -66,38 +66,10 @@ export function deriveSkillLevels(
   return { globalLevel: "intermediate", overrides: { invest: "advanced" } };
 }
 
-function isOpenAlgoConnection(
-  connection: Partial<ConnectionFormValues> | null | undefined,
-): connection is ConnectionFormValues {
-  return Boolean(connection?.host && connection.port && connection.apiKey && connection.apiKey !== "direct-connect" && connection.wsPort);
-}
-
-function persistOpenAlgoConnection(connection: ConnectionFormValues): void {
-  const wsUrl = deriveWsUrl(connection.host, connection.wsPort);
-  useConnectionStore.getState().setConfig({
-    host: connection.host,
-    apiKey: connection.apiKey,
-    wsUrl,
-  });
-
-  void persistOpenAlgoConfigPatch({
-    apiKey: connection.apiKey,
-    host: connection.host,
-    port: connection.port,
-    wsPort: connection.wsPort,
-  }).catch((err) => {
-    console.warn("[setup] failed to persist connection to backend:", err);
-  });
-}
-
 export function persistSetupChoices(choices: SetupChoices): string {
   const persona = choices.persona;
   const experience = choices.experience ?? defaultExperienceForPersona(persona);
   const interests = choices.interests ?? [];
-
-  if (isOpenAlgoConnection(choices.connection)) {
-    persistOpenAlgoConnection(choices.connection);
-  }
 
   useSettingsStore.getState().setPersona(persona);
   useSettingsStore.getState().setName(choices.name || "Trader");
@@ -120,6 +92,16 @@ export function persistSetupChoices(choices: SetupChoices): string {
 
   if (choices.riskLimits) {
     useSettingsStore.getState().setRiskLimits(choices.riskLimits);
+  }
+
+  if (choices.llm) {
+    const { provider, authMode } = providerSelection(choices.llm.provider);
+    useSettingsStore.getState().setLLMSetupDraft({
+      provider,
+      authMode,
+      model: choices.llm.model.trim(),
+      host: normaliseLlmHost(provider, (choices.llm.host ?? "").trim()),
+    });
   }
 
   const wizardPreset = getPresetName(experience, interests);

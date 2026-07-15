@@ -3,7 +3,7 @@
 Covers POST /api/v1/advisor (chat — both messages[] and legacy message),
 POST /api/v1/advisor/stream (SSE), and GET /api/v1/advisor/status.
 
-All LLM interactions are mocked so no running LM Studio is required.
+All LLM interactions are mocked, so no local inference server is required.
 """
 
 from __future__ import annotations
@@ -152,6 +152,35 @@ class TestAdvisorChat:
             resp = client.post("/api/v1/advisor", json={"message": "Hello"})
         assert resp.status_code == 502
 
+    def test_llm_provider_body_is_never_returned_by_the_advisor(self, client) -> None:
+        """Provider response bodies remain outside the public API error."""
+        from flinttrade_ai.llm_client import LLMClient, LLMConfig
+
+        secret = "provider-response-credential"
+        upstream_request_id = "key-substring-key"
+        correlation_id = "srv_advisor_01234567"
+        llm_client = LLMClient(LLMConfig(provider="openai", model="m", api_key="key"))
+        llm_client._http.post = MagicMock(
+            return_value=MagicMock(
+                status_code=401,
+                text=f"upstream echoed Bearer {secret}",
+                headers={"x-request-id": upstream_request_id},
+            )
+        )
+        with (
+            patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),
+            patch("flinttrade_ai.advisor_routes.LLMClient", return_value=llm_client),
+            patch("flinttrade_ai.llm_client._new_correlation_id", return_value=correlation_id),
+        ):
+            resp = client.post("/api/v1/advisor", json={"message": "Hello"})
+
+        body = resp.get_json()
+        assert resp.status_code == 502
+        assert body["message"] == f"LLM error: HTTP 401 (correlation_id={correlation_id})"
+        assert secret not in str(body)
+        assert upstream_request_id not in str(body)
+        assert "upstream echoed" not in str(body)
+
     def test_context_is_accepted(self, client) -> None:
         """Optional context field is accepted alongside messages.
 
@@ -209,7 +238,7 @@ class TestAdvisorStatus:
             client: Flask test client.
         """
         mock_cfg = MagicMock()
-        mock_cfg.provider = "lmstudio"
+        mock_cfg.provider = "ollama"
         mock_cfg.model = "qwen"
         with (
             patch("flinttrade_ai.advisor_routes._is_llm_configured", return_value=True),

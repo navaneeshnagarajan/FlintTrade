@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -72,15 +71,10 @@ CREATE TABLE IF NOT EXISTS chart_prefs_layout (
 
 
 def _default_db_path() -> str:
-    """Resolve DuckDB path: env override > workspace > fallback."""
-    env = os.getenv("DUCKDB_PATH")
-    if env:
-        return env
-    try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
-        return str(Workspace().fast_data_dir / "flint.duckdb")
-    except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "flint.duckdb")
+    """Resolve the shared DuckDB path through the workspace authority."""
+    from flinttrade_core.workspace import duckdb_path  # noqa: PLC0415
+
+    return str(duckdb_path())
 
 
 # ---------------------------------------------------------------------------

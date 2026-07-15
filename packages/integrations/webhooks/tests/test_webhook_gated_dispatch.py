@@ -21,6 +21,8 @@ only the process-wide safety-gate secret (set in a fixture).
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -67,12 +69,30 @@ class FakeRouter:
         return "BROKER-ORDER-1"
 
 
+class FakeAdmission:
+    """Records the complete portfolio admission that must precede every gate."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, str, str]] = []
+
+    @contextmanager
+    def __call__(self, order: object, adapter_id: str, account_id: str):
+        self.calls.append((order, adapter_id, account_id))
+        lease = SimpleNamespace(
+            reserve=lambda _candidate, _positions: object(),
+            acknowledge=lambda _reservation, _result: None,
+        )
+        yield lease, []
+
+
 def test_chartink_gated_dispatch_routes_through_router_as_external_intent() -> None:
     """A valid ChartInk ingest with a fake router places each order, gated as external_intent."""
     router = FakeRouter()
+    admission = FakeAdmission()
     handler = ChartInkWebhook(
         config=ChartInkConfig(action="BUY", quantity_per_symbol="5", account_id="acc1"),
         broker_router=router,
+        admit_order=admission,
     )
 
     result = handler.handle(_CHARTINK_BODY)
@@ -89,6 +109,10 @@ def test_chartink_gated_dispatch_routes_through_router_as_external_intent() -> N
 
     # The router was actually called once per order.
     assert len(router.calls) == 2
+    assert [(order.symbol, adapter_id, account_id) for order, adapter_id, account_id in admission.calls] == [
+        ("RELIANCE", "openalgo", "acc1"),
+        ("TCS", "openalgo", "acc1"),
+    ]
 
     expected_hash = hashlib.sha256(_WEBHOOK_NONCE.encode("utf-8")).hexdigest()
     for call in router.calls:
@@ -193,6 +217,18 @@ def test_place_orders_requires_router() -> None:
     assert [o.symbol for o in orders] == ["RELIANCE", "TCS"]
 
 
+def test_place_orders_requires_complete_admission_callback() -> None:
+    """A router alone cannot turn ChartInk parsing into a safety-admitted write."""
+    handler = ChartInkWebhook(
+        config=ChartInkConfig(),
+        broker_router=FakeRouter(),
+    )
+    result = handler.handle(_CHARTINK_BODY)
+
+    with pytest.raises(RuntimeError, match="admit_order"):
+        handler.place_orders(result, nonce=_WEBHOOK_NONCE)
+
+
 def test_synthetic_nonce_is_generated_when_absent() -> None:
     """When no webhook nonce is threaded through, a synthetic uuid nonce binds the gate.
 
@@ -200,9 +236,11 @@ def test_synthetic_nonce_is_generated_when_absent() -> None:
     generated nonce), proving the dispatch is never left unbound.
     """
     router = FakeRouter()
+    admission = FakeAdmission()
     handler = ChartInkWebhook(
         config=ChartInkConfig(account_id="default"),
         broker_router=router,
+        admit_order=admission,
     )
     result = handler.handle(_CHARTINK_BODY)
 

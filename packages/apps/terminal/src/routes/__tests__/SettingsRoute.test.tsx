@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -14,6 +14,15 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 const mockNavigate = vi.fn();
+const llmRouteMocks = vi.hoisted(() => ({
+  props: null as null | Record<string, unknown>,
+  saveState: "saved" as "saved" | "pending" | "saving" | "error",
+  hydrationState: "ready" as "loading" | "ready" | "error",
+  setupPending: false,
+  updateLLM: vi.fn(),
+  updateLLMProvider: vi.fn(),
+  removeLLMCredential: vi.fn(),
+}));
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
@@ -68,7 +77,10 @@ vi.mock("@/tools/Settings/KeyboardSection", () => ({
   KeyboardSection: () => <div data-testid="keyboard-section">Keyboard</div>,
 }));
 vi.mock("@/tools/Settings/LLMSection", () => ({
-  LLMSection: () => <div data-testid="llm-section">LLM</div>,
+  LLMSection: (props: Record<string, unknown>) => {
+    llmRouteMocks.props = props;
+    return <div data-testid="llm-section">LLM</div>;
+  },
 }));
 vi.mock("@/tools/Settings/TelegramSection", () => ({
   TelegramSection: () => <div data-testid="telegram-section">Telegram</div>,
@@ -81,6 +93,9 @@ vi.mock("@/tools/Settings/DataSection", () => ({
 }));
 vi.mock("@/tools/Settings/AboutSection", () => ({
   AboutSection: () => <div data-testid="about-section">About</div>,
+}));
+vi.mock("@/tools/Settings/SupportSection", () => ({
+  SupportSection: () => <div data-testid="support-section">Report Bug</div>,
 }));
 vi.mock("@/tools/Settings/LeverageSection", () => ({
   LeverageSection: () => <div data-testid="leverage-section">Leverage</div>,
@@ -107,6 +122,11 @@ vi.mock("@/hooks/useSettingsState", () => ({
     trading: {},
     risk: {},
     llm: {},
+    llmSetupPending: llmRouteMocks.setupPending,
+    llmSaveState: llmRouteMocks.saveState,
+    llmHydrationState: llmRouteMocks.hydrationState,
+    llmCredentialConfigured: true,
+    llmCredentialLast4: "live",
     telegram: {},
     whatsapp: {},
     dataPaths: {},
@@ -115,11 +135,13 @@ vi.mock("@/hooks/useSettingsState", () => ({
     updateGeneral: vi.fn(),
     updateTradingDefaults: vi.fn(),
     updateRiskLimits: vi.fn(),
-    updateLLM: vi.fn(),
+    updateLLM: llmRouteMocks.updateLLM,
+    updateLLMProvider: llmRouteMocks.updateLLMProvider,
+    removeLLMCredential: llmRouteMocks.removeLLMCredential,
     updateTelegram: vi.fn(),
     updateWhatsApp: vi.fn(),
     updateDataPaths: vi.fn(),
-    updateConnection: vi.fn(),
+    acceptConnection: vi.fn(),
     handleRestart: vi.fn(),
   }),
 }));
@@ -131,6 +153,37 @@ vi.mock("@/hooks/useSettingsState", () => ({
 import SettingsRoute from "../SettingsRoute";
 import { SECTIONS } from "@/tools/Settings/settingsConfig";
 
+function mockSettingsBreakpoint(initialDesktop: boolean) {
+  let matches = initialDesktop;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = "(min-width: 768px)";
+  const mediaQueryList = {
+    get matches() {
+      return matches;
+    },
+    media,
+    onchange: null,
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    },
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    },
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  } as unknown as MediaQueryList;
+  vi.spyOn(window, "matchMedia").mockReturnValue(mediaQueryList);
+
+  return {
+    setDesktop(nextDesktop: boolean) {
+      matches = nextDesktop;
+      const event = { matches, media } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -138,6 +191,10 @@ import { SECTIONS } from "@/tools/Settings/settingsConfig";
 describe("SettingsRoute", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    llmRouteMocks.props = null;
+    llmRouteMocks.saveState = "saved";
+    llmRouteMocks.hydrationState = "ready";
+    llmRouteMocks.setupPending = false;
     window.history.replaceState(null, "", "/settings");
   });
 
@@ -180,6 +237,137 @@ describe("SettingsRoute", () => {
     });
 
     expect(screen.getByTestId("monitoring-section")).toBeInTheDocument();
+  });
+
+  it("scrolls the deep-linked mobile tab into view", () => {
+    mockSettingsBreakpoint(false);
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    window.history.replaceState(null, "", "/settings#llm");
+
+    render(<SettingsRoute />);
+
+    const llmTab = document.getElementById("settings-tab-llm");
+    expect(llmTab).toHaveAttribute("aria-selected", "true");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(scrollIntoView.mock.instances).toContain(llmTab);
+  });
+
+  it("re-scrolls the selected tab when the settings navigation becomes horizontal", () => {
+    const breakpoint = mockSettingsBreakpoint(true);
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    window.history.replaceState(null, "", "/settings#llm");
+
+    render(<SettingsRoute />);
+
+    const tablist = screen.getByRole("tablist", { name: /settings sections/i });
+    const llmTab = document.getElementById("settings-tab-llm");
+    expect(tablist).toHaveAttribute("aria-orientation", "vertical");
+    scrollIntoView.mockClear();
+
+    act(() => breakpoint.setDesktop(false));
+
+    expect(tablist).toHaveAttribute("aria-orientation", "horizontal");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(scrollIntoView.mock.instances).toContain(llmTab);
+  });
+
+  it("uses Left and Right Arrow navigation for the horizontal mobile tablist", () => {
+    mockSettingsBreakpoint(false);
+    window.history.replaceState(null, "", "/settings#general");
+
+    render(<SettingsRoute />);
+
+    const tablist = screen.getByRole("tablist", { name: /settings sections/i });
+    const generalTab = document.getElementById("settings-tab-general");
+    const appearanceTab = document.getElementById("settings-tab-appearance");
+    expect(tablist).toHaveAttribute("aria-orientation", "horizontal");
+
+    generalTab?.focus();
+    fireEvent.keyDown(generalTab as HTMLElement, { key: "ArrowRight" });
+    expect(appearanceTab).toHaveAttribute("aria-selected", "true");
+    expect(appearanceTab).toHaveFocus();
+
+    fireEvent.keyDown(appearanceTab as HTMLElement, { key: "ArrowLeft" });
+    expect(generalTab).toHaveAttribute("aria-selected", "true");
+    expect(generalTab).toHaveFocus();
+  });
+
+  it("passes the atomic provider transaction separately from debounced field edits", () => {
+    llmRouteMocks.setupPending = true;
+    window.history.replaceState(null, "", "/settings#llm");
+
+    render(<SettingsRoute />);
+
+    expect(llmRouteMocks.props).toEqual(expect.objectContaining({
+      onChange: llmRouteMocks.updateLLM,
+      onProviderChange: llmRouteMocks.updateLLMProvider,
+      onCredentialRemove: llmRouteMocks.removeLLMCredential,
+      credentialConfigured: true,
+      credentialLast4: "live",
+      hydrationState: "ready",
+      providerActivationRequired: true,
+    }));
+  });
+
+  it("only links the selected tab to the single mounted tab panel", () => {
+    window.history.replaceState(null, "", "/settings#llm");
+    render(<SettingsRoute />);
+
+    const panel = screen.getByRole("tabpanel");
+    const selectedTab = screen.getByRole("tab", { name: "LLM Config" });
+    expect(selectedTab).toHaveAttribute("aria-controls", panel.id);
+    for (const tab of screen.getAllByRole("tab")) {
+      if (tab !== selectedTab) expect(tab).not.toHaveAttribute("aria-controls");
+    }
+  });
+
+  it("keeps the LLM surface mounted while another settings tab is visible", () => {
+    window.history.replaceState(null, "", "/settings#llm");
+    render(<SettingsRoute />);
+    const llmSurface = screen.getByTestId("llm-section");
+
+    fireEvent.click(screen.getByRole("tab", { name: "General" }));
+    expect(llmSurface).toBeInTheDocument();
+    expect(llmSurface).not.toBeVisible();
+
+    fireEvent.click(screen.getByRole("tab", { name: "LLM Config" }));
+    expect(screen.getByTestId("llm-section")).toBe(llmSurface);
+    expect(llmSurface).toBeVisible();
+  });
+
+  it.each([
+    ["saved", "No pending LLM changes"],
+    ["pending", "LLM changes pending"],
+    ["saving", "Saving LLM changes"],
+    ["error", "LLM changes not saved"],
+  ] as const)("reports the truthful %s persistence state", (saveState, copy) => {
+    llmRouteMocks.saveState = saveState;
+    render(<SettingsRoute />);
+
+    expect(screen.getByRole("status", { name: "Settings save status" })).toHaveTextContent(copy);
+  });
+
+  it.each([
+    ["loading", "Loading LLM settings"],
+    ["error", "LLM settings unavailable"],
+  ] as const)("reports the truthful %s hydration state", (hydrationState, copy) => {
+    llmRouteMocks.hydrationState = hydrationState;
+    render(<SettingsRoute />);
+
+    expect(screen.getByRole("status", { name: "Settings save status" })).toHaveTextContent(copy);
+  });
+
+  it("reports an unapplied provider draft instead of claiming it is saved", () => {
+    window.history.replaceState(null, "", "/settings#llm");
+    render(<SettingsRoute />);
+
+    const onDraftStateChange = llmRouteMocks.props?.onDraftStateChange as ((pending: boolean) => void);
+    act(() => onDraftStateChange(true));
+
+    expect(screen.getByRole("status", { name: "Settings save status" }))
+      .toHaveTextContent("LLM provider changes not applied");
   });
 
   // -------------------------------------------------------------------------

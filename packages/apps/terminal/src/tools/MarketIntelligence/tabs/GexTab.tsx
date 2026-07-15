@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Activity, Flame } from "lucide-react";
 import { FlintDivergingBarList } from "@flinttrade/design-system";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,32 +14,49 @@ import { useGex } from "@/hooks/useMarketIntel";
 import { DataNotice, ErrorRetry, LiveSelector, SectionLabel, useLiveSelector } from "../shared";
 import { formatOINum } from "../utils";
 
-export function GexTab() {
+interface GexTabProps {
+  onSampleDataChange?: (isSampleData: boolean | null) => void;
+}
+
+export function GexTab({ onSampleDataChange }: GexTabProps = {}) {
   const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
   const { data, isLoading, isError, error, refetch } = useGex(
     state.symbol,
     state.exchange,
     state.expiry ?? undefined,
   );
+  const rows = data?.rows;
+  const sampleFlag = isError || !data || !rows?.length
+    ? null
+    : data.is_sample_data !== false;
 
-  const maxAbsGamma = useMemo(() => {
-    if (!data?.length) return 1;
-    return Math.max(...data.map((d) => Math.abs(d.net_gamma)), 1);
-  }, [data]);
+  useEffect(() => {
+    onSampleDataChange?.(sampleFlag);
+  }, [onSampleDataChange, sampleFlag]);
+
+  useEffect(() => () => {
+    onSampleDataChange?.(null);
+  }, [onSampleDataChange]);
+
+  const maxAbsExposure = useMemo(() => {
+    if (!rows?.length) return 1;
+    return Math.max(...rows.map((d) => Math.abs(d.net_gex)), 1);
+  }, [rows]);
   const gexEntries = useMemo(() => {
-    if (!data?.length) return [];
-    return data.map((row) => {
-      const isPos = row.net_gamma >= 0;
-      const formatted = `${isPos ? "+" : ""}${row.net_gamma.toFixed(2)}`;
+    if (!rows?.length) return [];
+    return rows.map((row) => {
+      const isLong = row.net_gex > 0;
+      const isShort = row.net_gex < 0;
+      const formatted = `${isLong ? "+" : ""}${row.net_gex.toFixed(2)}`;
       return {
         label: row.strike.toLocaleString("en-IN"),
-        leftValue: isPos ? 0 : Math.abs(row.net_gamma),
-        rightValue: isPos ? row.net_gamma : 0,
-        leftLabel: isPos ? "" : formatted,
-        rightLabel: isPos ? formatted : "",
+        leftValue: isShort ? Math.abs(row.net_gex) : 0,
+        rightValue: isLong ? row.net_gex : 0,
+        leftLabel: isShort ? formatted : "",
+        rightLabel: isLong ? formatted : row.net_gex === 0 ? "Neutral" : "",
       };
     });
-  }, [data]);
+  }, [rows]);
 
   return (
     <ScrollArea className="h-full">
@@ -56,14 +73,14 @@ export function GexTab() {
           </div>
         ) : isError ? (
           <ErrorRetry message={(error as Error)?.message ?? "Failed to load GEX data"} onRetry={() => void refetch()} />
-        ) : data && data.length > 0 ? (
+        ) : rows && rows.length > 0 ? (
           <>
             <div>
               <SectionLabel icon={Flame} label="Net Gamma Exposure by Strike" />
               <FlintDivergingBarList
                 ariaLabel="Net gamma exposure by strike"
                 entries={gexEntries}
-                maxValue={maxAbsGamma}
+                maxValue={maxAbsExposure}
                 leftHeading="Short gamma"
                 rightHeading="Long gamma"
               />
@@ -79,21 +96,26 @@ export function GexTab() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border-default hover:bg-transparent">
-                      {["Strike", "Call Gamma", "Put Gamma", "Net Gamma", "Call OI", "Put OI"].map((h) => (
+                      {["Strike", "Call Exposure", "Put Exposure", "Net Exposure", "Call OI", "Put OI"].map((h) => (
                         <TableHead key={h} className="text-xs text-text-muted h-8 px-2">{h}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.map((row) => (
+                    {rows.map((row) => (
                       <TableRow key={row.strike} className="border-border-default hover:bg-surface-card">
                         <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">
                           {row.strike.toLocaleString("en-IN")}
                         </TableCell>
-                        <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">{row.call_gamma.toFixed(4)}</TableCell>
-                        <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">{row.put_gamma.toFixed(4)}</TableCell>
-                        <TableCell className={`px-2 py-1.5 font-mono text-xs font-semibold ${row.net_gamma >= 0 ? "text-profit" : "text-loss"}`}>
-                          {row.net_gamma >= 0 ? "+" : ""}{row.net_gamma.toFixed(4)}
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">{row.call_gex.toFixed(4)}</TableCell>
+                        <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">{row.put_gex.toFixed(4)}</TableCell>
+                        <TableCell className={`px-2 py-1.5 font-mono text-xs font-semibold ${
+                          row.net_gex > 0
+                            ? "text-profit"
+                            : row.net_gex < 0 ? "text-loss" : "text-text-secondary"
+                        }`}>
+                          {row.net_gex > 0 ? "+" : ""}{row.net_gex.toFixed(4)}
+                          {row.net_gex === 0 ? " Neutral" : ""}
                         </TableCell>
                         <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{formatOINum(row.call_oi)}</TableCell>
                         <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{formatOINum(row.put_oi)}</TableCell>

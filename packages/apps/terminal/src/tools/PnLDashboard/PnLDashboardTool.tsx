@@ -11,11 +11,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
-import { usePositions } from "@/hooks/usePositions";
-import { useFunds } from "@/hooks/useFunds";
-import { useTradebook } from "@/hooks/useTradebook";
+import { useModeData } from "@/hooks/useModeData";
 import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
-import type { Position, Trade } from "@/types/api";
+import { useModeStore } from "@/stores/modeStore";
+import type { Funds, Position, Trade } from "@/types/api";
 import { realisedFromTrades } from "@/lib/pnl";
 import type { Time } from "lightweight-charts";
 
@@ -549,12 +548,16 @@ function DrawdownTab({ trades }: { trades: Trade[] }) {
 // ---- Main component ----
 
 export default function PnLDashboardTool({ onClose }: Props) {
-  const { data: positions = [], isLoading: posLoading, isError: posError } = usePositions();
-  const { data: funds, isLoading: fundsLoading } = useFunds();
-  const { data: trades = [], isLoading: tradesLoading } = useTradebook();
+  const mode = useModeStore((state) => state.mode);
+  const positionsResult = useModeData<Position[]>("positions");
+  const fundsResult = useModeData<Funds>("funds");
+  const tradesResult = useModeData<Trade[]>("tradebook");
+  const positions = positionsResult.data ?? [];
+  const funds = fundsResult.data;
+  const trades = tradesResult.data ?? [];
 
-  const isLoading = posLoading || fundsLoading || tradesLoading;
-  const isError = posError;
+  const isLoading = positionsResult.isLoading || fundsResult.isLoading || tradesResult.isLoading;
+  const isError = positionsResult.error !== null;
 
   const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
 
@@ -565,6 +568,11 @@ export default function PnLDashboardTool({ onClose }: Props) {
         <div className="flex items-center gap-2">
           <PieChart size={16} className="text-primary" />
           <h1 className="font-heading font-bold text-lg text-text-primary">P&L Dashboard</h1>
+          {mode !== "live" && (
+            <Badge variant="outline" className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10">
+              {mode === "explore" ? "Sample data" : "Practice data"}
+            </Badge>
+          )}
           {isLoading && <span className="text-xs text-text-muted">Loading...</span>}
           {isError && <AlertCircle size={12} className="text-loss" />}
           {!isLoading && !isError && (

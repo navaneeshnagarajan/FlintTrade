@@ -25,11 +25,99 @@ side-effect-light.
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 from flask import Blueprint, current_app, request
 
 logger = logging.getLogger("flinttrade.native_rotation")
+
+_NATIVE_ROTATION_ADMISSION_CONFIG = "NATIVE_ROTATION_ADMISSION"
+_ROTATION_ADMISSION_CONFIG_LOCK = threading.Lock()
+
+
+class _RotationAdmissionRevoked(RuntimeError):
+    """Raised when shutdown revokes a refresh before shared publication."""
+
+
+class NativeRotationAdmission:
+    """Generation-fence refresh admission and shared publication during shutdown."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._publication_lock = threading.Lock()
+        self._generation = 0
+        self._accepting = True
+        self._active = 0
+
+    def acquire(self) -> int:
+        """Admit one refresh and return its publication generation."""
+        with self._condition:
+            if not self._accepting:
+                raise RuntimeError("native session rotation is shutting down")
+            generation = self._generation
+            self._active += 1
+            return generation
+
+    def release(self, generation: int) -> None:
+        """Release one admitted refresh, including a generation revoked in flight."""
+        with self._condition:
+            if generation > self._generation or self._active <= 0:
+                raise RuntimeError("native session rotation admission ownership is invalid")
+            self._active -= 1
+            self._condition.notify_all()
+
+    def assert_current(self, generation: int) -> None:
+        """Reject work whose admission generation has been retired."""
+        with self._condition:
+            if not self._accepting or generation != self._generation:
+                raise _RotationAdmissionRevoked("native session rotation ownership was revoked")
+
+    def publish_if_current(
+        self,
+        generation: int,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Run one shared mutation only while the admitted generation is current."""
+        with self._publication_lock:
+            self.assert_current(generation)
+            return operation()
+
+    def close_and_drain(self, timeout: float) -> bool:
+        """Revoke admission and wait boundedly for publication and refresh owners."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            if self._accepting:
+                self._accepting = False
+                self._generation += 1
+                self._condition.notify_all()
+
+        remaining = max(0.0, deadline - time.monotonic())
+        if not self._publication_lock.acquire(timeout=remaining):
+            return False
+        self._publication_lock.release()
+
+        with self._condition:
+            while self._active:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return False
+                self._condition.wait(remaining)
+            return True
+
+
+def _rotation_admission(app: Any) -> NativeRotationAdmission:
+    """Return the process owner shared by manual and scheduled refresh callers."""
+    with _ROTATION_ADMISSION_CONFIG_LOCK:
+        admission = app.config.get(_NATIVE_ROTATION_ADMISSION_CONFIG)
+        if admission is None:
+            admission = NativeRotationAdmission()
+            app.config[_NATIVE_ROTATION_ADMISSION_CONFIG] = admission
+        if not isinstance(admission, NativeRotationAdmission):
+            raise RuntimeError("native session rotation admission owner is invalid")
+        return admission
 
 
 class _RotationAttemptOwner:
@@ -48,8 +136,13 @@ class NativeSessionRefresher:
     this hook is wired).
     """
 
-    def __init__(self, app: Any) -> None:
+    def __init__(
+        self,
+        app: Any,
+        admission: NativeRotationAdmission | None = None,
+    ) -> None:
         self._app = app
+        self._admission = admission or _rotation_admission(app)
 
     def refresh_token(self, broker: str) -> None:
         """Re-establish live sessions for every stored ``broker`` account.
@@ -64,10 +157,14 @@ class NativeSessionRefresher:
         """
         from .native_account_routes import NATIVE_ACCOUNT_MUTATION_LOCK  # noqa: PLC0415
 
-        with NATIVE_ACCOUNT_MUTATION_LOCK:
-            self._refresh_token_locked(broker)
+        generation = self._admission.acquire()
+        try:
+            with NATIVE_ACCOUNT_MUTATION_LOCK:
+                self._refresh_token_locked(broker, generation)
+        finally:
+            self._admission.release(generation)
 
-    def _refresh_token_locked(self, broker: str) -> None:
+    def _refresh_token_locked(self, broker: str, generation: int) -> None:
         """Run one broker refresh while native-account mutations are excluded."""
         from flinttrade_gateway.native_login import (  # noqa: PLC0415
             BROKER_LOGIN_RETRY_MESSAGE,
@@ -91,6 +188,7 @@ class NativeSessionRefresher:
         )
 
         app = self._app
+        self._admission.assert_current(generation)
         adapter = (app.config.get("NATIVE_ADAPTERS") or {}).get(broker)
         registry = app.config.get("REGISTRY")
         store = app.config.get("CREDENTIAL_STORE")
@@ -176,6 +274,7 @@ class NativeSessionRefresher:
                     _RotationAttemptOwner(),
                     timeout=_candidate_login_timeout_seconds(app.config),
                 )
+                self._admission.assert_current(generation)
 
                 replayable_credentials = credentials
                 replay = getattr(adapter, "replay_credentials", None)
@@ -194,13 +293,18 @@ class NativeSessionRefresher:
                 committed_generation = credential_generation
                 if replayable_credentials != stored_credentials:
                     try:
-                        committed_generation = _compare_and_update_selector_credentials(
-                            store,
-                            broker,
-                            account_id,
-                            credential_generation,
-                            replayable_credentials,
+                        committed_generation = self._admission.publish_if_current(
+                            generation,
+                            lambda: _compare_and_update_selector_credentials(
+                                store,
+                                broker,
+                                account_id,
+                                credential_generation,
+                                replayable_credentials,
+                            ),
                         )
+                    except _RotationAdmissionRevoked:
+                        raise
                     except Exception as exc:  # noqa: BLE001 - session can remain live
                         logger.warning(
                             "Refreshed-token persist failed for %s (%s)",
@@ -218,14 +322,19 @@ class NativeSessionRefresher:
                     committed_generation,
                 ):
                     continue
-                if not _compare_and_put_registry_session(
-                    registry,
-                    broker,
-                    account_id,
-                    registry_generation,
-                    candidate_session,
-                ):
+                registry_published = self._admission.publish_if_current(
+                    generation,
+                    lambda: _compare_and_put_registry_session(
+                        registry,
+                        broker,
+                        account_id,
+                        registry_generation,
+                        candidate_session,
+                    ),
+                )
+                if not registry_published:
                     continue
+                self._admission.assert_current(generation)
                 if (
                     not _selector_credential_generation_matches(
                         store,
@@ -240,15 +349,22 @@ class NativeSessionRefresher:
                         candidate_session,
                     )
                 ):
-                    _compare_and_remove_registry_session(
-                        registry,
-                        broker,
-                        account_id,
-                        candidate_session,
+                    self._admission.publish_if_current(
+                        generation,
+                        lambda: _compare_and_remove_registry_session(
+                            registry,
+                            broker,
+                            account_id,
+                            candidate_session,
+                        ),
                     )
                     continue
-                status: dict[str, Any] = app.config.setdefault("NATIVE_SESSION_STATUS", {})
-                status[selector] = "ok"
+                self._admission.publish_if_current(
+                    generation,
+                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(selector, "ok"),
+                )
+            except _RotationAdmissionRevoked:
+                raise
             except Exception as exc:  # noqa: BLE001 - per-selector isolation
                 message = (
                     BROKER_LOGIN_RETRY_MESSAGE
@@ -263,12 +379,16 @@ class NativeSessionRefresher:
                 ):
                     continue
                 if message == SESSION_INVALID_RELOGIN_MESSAGE:
-                    if not _compare_and_remove_registry_session(
-                        registry,
-                        broker,
-                        account_id,
-                        registry_generation,
-                    ):
+                    registry_removed = self._admission.publish_if_current(
+                        generation,
+                        lambda: _compare_and_remove_registry_session(
+                            registry,
+                            broker,
+                            account_id,
+                            registry_generation,
+                        ),
+                    )
+                    if not registry_removed:
                         continue
                 elif not _registry_session_generation_matches(
                     registry,
@@ -277,8 +397,10 @@ class NativeSessionRefresher:
                     registry_generation,
                 ):
                     continue
-                status = app.config.setdefault("NATIVE_SESSION_STATUS", {})
-                status[selector] = message
+                self._admission.publish_if_current(
+                    generation,
+                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(selector, message),
+                )
                 failures.append(f"{broker}: {message}")
         if failures:
             raise RuntimeError("; ".join(failures))
@@ -305,7 +427,8 @@ def configure_session_rotation(app: Any) -> Blueprint | None:
         return None
 
     scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
-    rotator = CredentialsRotator(NativeSessionRefresher(app), scheduler)
+    admission = _rotation_admission(app)
+    rotator = CredentialsRotator(NativeSessionRefresher(app, admission), scheduler)
     app.config["CREDENTIALS_ROTATOR"] = rotator
     app.config["ROTATION_SCHEDULER"] = scheduler
 

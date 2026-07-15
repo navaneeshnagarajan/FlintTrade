@@ -14,7 +14,6 @@ Safety: every write requires the router's shared ``_ROUTER_TOKEN``. A direct
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import uuid
 from datetime import datetime, timezone
@@ -32,7 +31,7 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import groww_mapping as M
-from ._base import BrokerAdapter, Session
+from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 from ._session_expiry import next_6am_ist_timestamp
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -206,7 +205,7 @@ class GrowwAdapter(BrokerAdapter):
         raw: bool = False,
     ) -> Any:
         transport = self._transport(session)
-        status, payload = await asyncio.to_thread(
+        status, payload = await run_blocking_sdk_call(
             transport,
             method,
             f"{M.BASE_URL}{path}",
@@ -241,7 +240,7 @@ class GrowwAdapter(BrokerAdapter):
                 "checksum": checksum,
                 "timestamp": timestamp,
             }
-        status, payload = await asyncio.to_thread(
+        status, payload = await run_blocking_sdk_call(
             transport,
             "POST",
             f"{M.BASE_URL}/v1/token/api/access",
@@ -581,7 +580,7 @@ class GrowwAdapter(BrokerAdapter):
     async def instruments_csv(self, session: Session) -> str:
         # Asset host is outside api.groww.in and does not require the API base.
         transport = self._transport(session)
-        status, payload = await asyncio.to_thread(
+        status, payload = await run_blocking_sdk_call(
             transport,
             "GET",
             "https://growwapi-assets.groww.in/instruments/instrument.csv",
@@ -610,12 +609,21 @@ class GrowwAdapter(BrokerAdapter):
         yield  # pragma: no cover
 
     async def reconcile(self, session: Session) -> ReconciliationReport:
-        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, build_report  # noqa: PLC0415
+        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
+            EMPTY_LOCAL_STATE,
+            build_report,
+            declare_unavailable_order_fields,
+        )
 
         generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
-            broker_orders = await self.order_book(session)
+            broker_orders = list(
+                declare_unavailable_order_fields(
+                    await self.order_book(session),
+                    fields=("variety", "validity", "strategy"),
+                )
+            )
             broker_positions = await self.positions(session)
             broker_holdings = await self.holdings(session)
         except (BrokerError, ValueError) as exc:

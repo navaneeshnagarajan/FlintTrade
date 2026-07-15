@@ -10,21 +10,22 @@ export const BROKER_ACCOUNTS_QUERY_KEY = ["broker", "accounts"] as const;
  * Syncs to brokerStore (Zustand) as a side effect.
  * UI components should read from useBrokerStore, not this hook's data.
  */
-export function useBrokerAccounts() {
+export function useBrokerAccounts(enabled = true) {
   const setAccounts = useBrokerStore((s) => s.setAccounts);
 
   const query = useQuery({
     queryKey: BROKER_ACCOUNTS_QUERY_KEY,
     queryFn: () => listBrokerAccounts(useBrokerStore.getState().accounts),
+    enabled,
     refetchInterval: 10_000,
     staleTime: 5_000,
   });
 
   useEffect(() => {
-    if (query.data) {
+    if (enabled && query.data) {
       setAccounts(query.data);
     }
-  }, [query.data, setAccounts]);
+  }, [enabled, query.data, setAccounts]);
 
   // Return query for loading/error state only — UI reads accounts from store
   return { isLoading: query.isLoading, error: query.error, refetch: query.refetch };

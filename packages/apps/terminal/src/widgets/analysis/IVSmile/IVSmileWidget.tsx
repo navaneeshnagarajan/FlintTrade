@@ -49,14 +49,14 @@ type OptionTypeFilter = "Both" | "CE" | "PE";
 type XAxisMode = "Strike" | "Moneyness";
 
 /**
- * True when the payload carries the backend's `is_sample_data: true` honesty
- * flag (propagated onto object payloads by the ftApi response unwrapper).
+ * Treat anything except an explicit backend `is_sample_data: false` as
+ * untrusted/demo provenance.
  */
 function carriesSampleFlag(payload: unknown): boolean {
-  return (
+  return !(
     typeof payload === "object" &&
     payload !== null &&
-    (payload as { is_sample_data?: unknown }).is_sample_data === true
+    (payload as { is_sample_data?: unknown }).is_sample_data === false
   );
 }
 
@@ -109,21 +109,26 @@ function IVSmileWidget() {
     const traces: Data[] = [];
     let atmIV: number | null = null;
     let skew25d: number | null = null;
+    let firstAtmStrike: number | null = null;
 
     data.curves.forEach((curve, idx) => {
       const color = EXPIRY_COLORS[idx % EXPIRY_COLORS.length];
       const pts = curve.points.filter(
-        (p) => (p.call_iv > 0 || p.put_iv > 0),
+        (p) => Number.isFinite(p.call_iv) && p.call_iv > 0
+          && Number.isFinite(p.put_iv) && p.put_iv > 0
+          && Number.isFinite(p.moneyness) && p.moneyness > 0,
       );
+      if (pts.length === 0) return;
 
       // Pick X axis values
       const xVals = pts.map((p) =>
         xMode === "Moneyness" ? p.moneyness : p.strike,
       );
 
-      if (idx === 0) {
+      if (atmIV === null) {
         atmIV = curve.atm_iv;
         skew25d = curve.skew_25delta;
+        firstAtmStrike = curve.atm_strike;
       }
 
       if (optionType === "CE" || optionType === "Both") {
@@ -153,9 +158,8 @@ function IVSmileWidget() {
       }
     });
 
-    const firstCurve = data.curves[0];
     const atmX =
-      xMode === "Moneyness" ? 1.0 : (firstCurve?.atm_strike ?? null);
+      xMode === "Moneyness" && firstAtmStrike !== null ? 1.0 : firstAtmStrike;
 
     const plotLayout: Partial<Layout> = {
       xaxis: {
@@ -179,13 +183,13 @@ function IVSmileWidget() {
             ]
           : [],
       annotations:
-        atmX != null && firstCurve
+        atmX != null && firstAtmStrike != null
           ? [
               {
                 x: atmX,
                 y: 1,
                 yref: "paper" as const,
-                text: `ATM ${firstCurve.atm_strike}`,
+                text: `ATM ${firstAtmStrike}`,
                 showarrow: false,
                 font: { size: 9, color: "#6366f1" },
                 yanchor: "top",

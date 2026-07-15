@@ -68,6 +68,7 @@ import {
   dittoKillAll,
   type DittoAccount,
   type DittoAccountCreatePayload,
+  type MirrorMode,
   type MirrorStatus,
   type DittoRiskData,
 } from "@/services/ftApi";
@@ -95,7 +96,8 @@ const TABS: TabDef[] = [
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
-function formatCurrency(value: number): string {
+function formatCurrency(value: number | null): string {
+  if (value === null) return "Unavailable";
   const abs = Math.abs(value);
   if (abs >= 10_000_000) return `${(value / 10_000_000).toFixed(2)} Cr`;
   if (abs >= 100_000) return `${(value / 100_000).toFixed(2)} L`;
@@ -106,7 +108,8 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function pnlColor(value: number): string {
+function pnlColor(value: number | null): string {
+  if (value === null) return "text-text-muted";
   if (value > 0) return "text-profit";
   if (value < 0) return "text-loss";
   return "text-text-muted";
@@ -149,6 +152,12 @@ function AccountsTab() {
     queryKey: ["ditto", "accounts"],
     queryFn: getDittoAccounts,
     refetchInterval: 30_000,
+    retry: 1,
+  });
+  const riskQuery = useQuery({
+    queryKey: ["ditto", "risk"],
+    queryFn: getDittoRisk,
+    refetchInterval: 15_000,
     retry: 1,
   });
 
@@ -200,7 +209,19 @@ function AccountsTab() {
     };
   }, [isLoading]);
 
-  const accounts = data?.accounts ?? [];
+  const rawAccounts = data?.accounts ?? [];
+  const riskByAccount = new Map(
+    (riskQuery.data?.accounts ?? []).map((account) => [account.id, account]),
+  );
+  const accounts = rawAccounts.map((account) => {
+    const risk = riskByAccount.get(account.id);
+    return {
+      ...account,
+      capital: risk?.capital ?? null,
+      pnl_today: risk?.pnl_today ?? null,
+      positions: risk?.positions ?? null,
+    };
+  });
   const actionError =
     (addMutation.error instanceof Error ? addMutation.error.message : "") ||
     (toggleMutation.error instanceof Error ? toggleMutation.error.message : "") ||
@@ -425,8 +446,8 @@ function AccountsTab() {
     );
   }
 
-  const totalCapital = accounts.reduce((sum, a) => sum + a.capital, 0);
-  const totalPnl = accounts.reduce((sum, a) => sum + a.pnl_today, 0);
+  const totalCapital = riskQuery.data?.aggregate_capital ?? null;
+  const totalPnl = riskQuery.data?.aggregate_pnl ?? null;
   const activeCount = accounts.filter((a) => a.status === "active").length;
 
   return (
@@ -457,6 +478,11 @@ function AccountsTab() {
       {actionError && (
         <p role="alert" className="rounded border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss">
           {actionError}
+        </p>
+      )}
+      {riskQuery.isError && (
+        <p role="status" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          Live capital, P&amp;L, and position metrics are unavailable. Account configuration remains available.
         </p>
       )}
 
@@ -532,13 +558,13 @@ function AccountRow({
       </TableCell>
       <TableCell className={cn("text-right font-mono text-sm", pnlColor(account.pnl_today))}>
         <span className="inline-flex items-center gap-1">
-          {account.pnl_today > 0 && <TrendingUp className="size-3" />}
-          {account.pnl_today < 0 && <TrendingDown className="size-3" />}
+          {account.pnl_today !== null && account.pnl_today > 0 && <TrendingUp className="size-3" />}
+          {account.pnl_today !== null && account.pnl_today < 0 && <TrendingDown className="size-3" />}
           {formatCurrency(account.pnl_today)}
         </span>
       </TableCell>
       <TableCell className="text-right font-mono text-sm text-text-secondary">
-        {account.positions}
+        {account.positions ?? "Unavailable"}
       </TableCell>
       <TableCell className="text-center">
         <Badge
@@ -625,7 +651,7 @@ function MirrorTab() {
 
   const [sourceAccount, setSourceAccount] = useState<string>("");
   const [targetAccounts, setTargetAccounts] = useState<Set<string>>(new Set());
-  const [mirrorMode, setMirrorMode] = useState<string>("proportional");
+  const [mirrorMode, setMirrorMode] = useState<MirrorMode>("weighted");
 
   const startMutation = useMutation({
     mutationFn: () =>
@@ -647,11 +673,18 @@ function MirrorTab() {
     active: false,
     source_account: null,
     target_accounts: [],
-    mode: "proportional",
+    mode: "weighted",
     mirrored_positions: 0,
     last_sync: null,
     errors: [],
   };
+
+  useEffect(() => {
+    if (!status.active) return;
+    setSourceAccount(status.source_account ?? "");
+    setTargetAccounts(new Set(status.target_accounts));
+    setMirrorMode(status.mode);
+  }, [status.active, status.mode, status.source_account, status.target_accounts]);
 
   const toggleTarget = useCallback(
     (id: string) => {
@@ -716,7 +749,7 @@ function MirrorTab() {
         {/* Source account */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-text-secondary">Source Account (Master)</label>
-          <Select value={sourceAccount} onValueChange={setSourceAccount}>
+          <Select value={sourceAccount} onValueChange={setSourceAccount} disabled={status.active}>
             <SelectTrigger>
               <SelectValue placeholder="Select source account" />
             </SelectTrigger>
@@ -735,14 +768,17 @@ function MirrorTab() {
         {/* Mirror mode */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-text-secondary">Allocation Mode</label>
-          <Select value={mirrorMode} onValueChange={setMirrorMode}>
+          <Select
+            value={mirrorMode}
+            onValueChange={(value) => setMirrorMode(value as MirrorMode)}
+            disabled={status.active}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="proportional">Proportional (by capital)</SelectItem>
-              <SelectItem value="fixed">Fixed (same quantity)</SelectItem>
-              <SelectItem value="equal">Equal (split evenly)</SelectItem>
+              <SelectItem value="equal">Copy 1:1 (full quantity to each target)</SelectItem>
+              <SelectItem value="weighted">By allocation weight (split quantity)</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -761,8 +797,9 @@ function MirrorTab() {
                 key={a.id}
                 type="button"
                 onClick={() => toggleTarget(a.id)}
+                disabled={status.active}
                 className={cn(
-                  "w-full flex items-center justify-between px-4 py-3 text-left transition-colors",
+                  "w-full flex items-center justify-between px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                   targetAccounts.has(a.id)
                     ? "bg-accent/5"
                     : "hover:bg-surface-hover",
@@ -827,7 +864,7 @@ function RiskTab() {
   const [killDialogOpen, setKillDialogOpen] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data: riskData, isLoading } = useQuery({
+  const { data: riskData, isLoading, isError, error } = useQuery({
     queryKey: ["ditto", "risk"],
     queryFn: getDittoRisk,
     refetchInterval: 15_000,
@@ -841,11 +878,7 @@ function RiskTab() {
     },
   });
 
-  const risk: DittoRiskData = riskData ?? {
-    aggregate_pnl: 0,
-    aggregate_capital: 0,
-    accounts: [],
-  };
+  const risk: DittoRiskData | null = riskData ?? null;
 
   if (isLoading) {
     return (
@@ -859,12 +892,23 @@ function RiskTab() {
     <div className="space-y-6">
       {/* Aggregate summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryCard
-          label="Aggregate P&L"
-          value={formatCurrency(risk.aggregate_pnl)}
-          valueClass={pnlColor(risk.aggregate_pnl)}
-        />
-        <SummaryCard label="Total Capital" value={formatCurrency(risk.aggregate_capital)} />
+        {risk ? (
+          <>
+            <SummaryCard
+              label="Aggregate P&L"
+              value={formatCurrency(risk.aggregate_pnl)}
+              valueClass={pnlColor(risk.aggregate_pnl)}
+            />
+            <SummaryCard label="Total Capital" value={formatCurrency(risk.aggregate_capital)} />
+          </>
+        ) : (
+          <div className="sm:col-span-2 rounded-lg border border-loss/30 bg-loss/5 p-4" role="alert">
+            <p className="text-xs font-medium text-loss">Risk snapshot unavailable</p>
+            <p className="mt-1 text-xs text-text-muted">
+              {isError && error instanceof Error ? error.message : "No complete account snapshot was returned."}
+            </p>
+          </div>
+        )}
         <div className="rounded-lg border border-loss/30 bg-loss/5 p-4">
           <p className="text-xs text-loss mb-2">Emergency Action</p>
           <Button
@@ -880,7 +924,7 @@ function RiskTab() {
       </div>
 
       {/* Per-account risk table */}
-      <div className="rounded-lg border border-border-default overflow-hidden">
+      {risk && <div className="rounded-lg border border-border-default overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -932,7 +976,7 @@ function RiskTab() {
             ))}
           </TableBody>
         </Table>
-      </div>
+      </div>}
 
       {/* Kill-all confirmation dialog */}
       <Dialog open={killDialogOpen} onOpenChange={setKillDialogOpen}>
@@ -947,6 +991,13 @@ function RiskTab() {
               This action cannot be undone. Are you sure?
             </DialogDescription>
           </DialogHeader>
+          {killMutation.isError && (
+            <p className="rounded border border-loss/30 bg-loss/10 px-3 py-2 text-sm text-loss" role="alert">
+              {killMutation.error instanceof Error
+                ? killMutation.error.message
+                : "One or more managed accounts could not be fully flattened"}
+            </p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setKillDialogOpen(false)}>
               Cancel

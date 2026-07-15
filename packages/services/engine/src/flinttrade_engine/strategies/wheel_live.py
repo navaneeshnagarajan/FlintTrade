@@ -1,4 +1,4 @@
-"""Wheel Options Strategy — live execution via OpenAlgo.
+"""Wheel Options Strategy — market-data-driven gated order intent generation.
 
 The Wheel is a systematic premium-income strategy that cycles through two phases:
 
@@ -21,8 +21,10 @@ Live execution details:
 - Nearest expiry resolved via OpenAlgo ``expiry`` endpoint.
 - Premium validity: skip the option if LTP < ₹10.
 - SL placed at 30% above entry premium (e.g. sold @ ₹50 → SL BUY @ ₹65).
-- All order placement and quote fetching go through
-  :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`.
+- Quote and expiry reads may use
+  :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`; generated orders are
+  queued for FlintTrade's canonical gated strategy runtime and never written
+  through that raw client.
 - Telegram alerts sent on every state transition via the client's
   ``telegram()`` method.
 
@@ -39,7 +41,7 @@ Usage::
         client=client,
     )
     strategy.start()
-    await strategy.run_cycle()  # call at market open each day
+    await strategy.run_cycle()  # emits intents; the gated runtime submits them
 """
 
 from __future__ import annotations
@@ -101,9 +103,10 @@ class WheelStrategy(BaseStrategy):
         exchange:         Options exchange (default ``"NFO"``).
         product:          Order product type (default ``"MIS"``).
         quantity:         Lot size / quantity per leg.
-        client:           :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`
-                          instance.  Required for live execution; may be
-                          ``None`` in tests (disables all API calls).
+        client:           Read-capable
+                          :class:`~flinttrade_core.openalgo_client.OpenAlgoClient`
+                          instance for quotes, expiries, and notifications. It
+                          is never used for broker mutation.
         put_strike_offset: Distance from ATM to put strike (in points).
                            ``0`` means ATM.  Default ``0``.
         call_strike_offset: Distance above cost-basis to call strike (in points).
@@ -482,28 +485,14 @@ class WheelStrategy(BaseStrategy):
         return 0.0
 
     async def _place_sell(self, symbol: str, qty: int) -> None:
-        """Place a SELL MARKET order for an option.
+        """Queue a SELL MARKET intent for the canonical gated runtime.
 
         Args:
             symbol: Option symbol.
             qty:    Quantity.
         """
-        if self._client is None:
-            self._pending_orders.append(
-                Order(
-                    symbol=symbol,
-                    action="SELL",
-                    exchange=self.exchange,
-                    pricetype="MARKET",
-                    product=self.product,
-                    quantity=str(qty),
-                    strategy=self.strategy_tag,
-                )
-            )
-            return
-
-        try:
-            order = Order(
+        self._pending_orders.append(
+            Order(
                 symbol=symbol,
                 action="SELL",
                 exchange=self.exchange,
@@ -512,13 +501,11 @@ class WheelStrategy(BaseStrategy):
                 quantity=str(qty),
                 strategy=self.strategy_tag,
             )
-            await self._client.place_order(order)
-            logger.info("WheelStrategy: SELL order placed for %s qty=%d", symbol, qty)
-        except Exception as exc:
-            logger.error("WheelStrategy: SELL order failed for %s: %s", symbol, exc)
+        )
+        logger.info("WheelStrategy: queued SELL intent for %s qty=%d", symbol, qty)
 
     async def _place_sl_buy(self, symbol: str, sl_price: float, qty: int) -> None:
-        """Place a protective SL BUY order above the entry premium.
+        """Queue a protective SL BUY intent above the entry premium.
 
         The trigger is set 0.5 points below the SL price to accommodate the
         SL-M / SL order mechanics of Indian brokers.
@@ -530,24 +517,8 @@ class WheelStrategy(BaseStrategy):
         """
         trigger = round(sl_price - 0.5, 1)
 
-        if self._client is None:
-            self._pending_orders.append(
-                Order(
-                    symbol=symbol,
-                    action="BUY",
-                    exchange=self.exchange,
-                    pricetype="SL",
-                    product=self.product,
-                    quantity=str(qty),
-                    price=str(sl_price),
-                    trigger_price=str(trigger),
-                    strategy=self.strategy_tag,
-                )
-            )
-            return
-
-        try:
-            order = Order(
+        self._pending_orders.append(
+            Order(
                 symbol=symbol,
                 action="BUY",
                 exchange=self.exchange,
@@ -558,13 +529,11 @@ class WheelStrategy(BaseStrategy):
                 trigger_price=str(trigger),
                 strategy=self.strategy_tag,
             )
-            await self._client.place_order(order)
-            logger.info(
-                "WheelStrategy: SL BUY placed for %s @ ₹%.1f (trig ₹%.1f)",
-                symbol, sl_price, trigger,
-            )
-        except Exception as exc:
-            logger.error("WheelStrategy: SL BUY failed for %s: %s", symbol, exc)
+        )
+        logger.info(
+            "WheelStrategy: queued SL BUY intent for %s @ ₹%.1f (trig ₹%.1f)",
+            symbol, sl_price, trigger,
+        )
 
     async def _send_telegram(self, message: str) -> None:
         """Send a Telegram alert via the OpenAlgo client.

@@ -278,6 +278,7 @@ export default function WelcomeRoute() {
     // Time-box the probe so a hung backend can't strand the user on
     // "Checking workspace…" forever.
     const controller = new AbortController();
+    let cancelled = false;
     const timeout = setTimeout(() => controller.abort(), 6000);
 
     fetch(`${getBase()}/v1/auth/status`, { headers: buildHeaders(false), signal: controller.signal })
@@ -290,6 +291,10 @@ export default function WelcomeRoute() {
         }
       })
       .catch(() => {
+        // React Strict Mode intentionally mounts, cleans up, and remounts
+        // effects in development. That cleanup abort is not a failed backend
+        // probe and must not overwrite a valid returning-user state.
+        if (cancelled) return;
         // Backend unreachable, errored, or timed out. Degrade gracefully in
         // every build (not just DEV) so the welcome screen always offers a way
         // forward — "Get Started" once the backend is up, and "Explore
@@ -302,6 +307,7 @@ export default function WelcomeRoute() {
       .finally(() => clearTimeout(timeout));
 
     return () => {
+      cancelled = true;
       clearTimeout(timeout);
       controller.abort();
     };

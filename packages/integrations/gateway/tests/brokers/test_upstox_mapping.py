@@ -56,14 +56,13 @@ def _err_body(error_code: str, message: str) -> bytes:
     the raw HTTP data and the SDK ``Problem`` model maps ``error_code ->
     "errorCode"``. A snake_case fixture would not exercise the parser honestly.
     """
-    return json.dumps(
-        {"status": "error", "errors": [{"errorCode": error_code, "message": message}]}
-    ).encode("utf-8")
+    return json.dumps({"status": "error", "errors": [{"errorCode": error_code, "message": message}]}).encode("utf-8")
 
 
 def _order(**kw) -> Order:
-    base = dict(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
-                product="MIS", quantity="10", price="2900")
+    base = dict(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="2900"
+    )
     base.update(kw)
     return Order(**base)
 
@@ -89,19 +88,32 @@ def test_build_login_url_with_state_and_missing_args():
 
 
 def test_to_token_request_params_builds_grant_form():
-    p = m.to_token_request_params({
-        "code": "mk404x", "api_key": "K1", "api_secret": "S1", "redirect_uri": "https://r",
-    })
+    p = m.to_token_request_params(
+        {
+            "code": "mk404x",
+            "api_key": "K1",
+            "api_secret": "S1",
+            "redirect_uri": "https://r",
+        }
+    )
     assert p == {
-        "code": "mk404x", "client_id": "K1", "client_secret": "S1",
-        "redirect_uri": "https://r", "grant_type": "authorization_code",
+        "code": "mk404x",
+        "client_id": "K1",
+        "client_secret": "S1",
+        "redirect_uri": "https://r",
+        "grant_type": "authorization_code",
     }
 
 
 def test_to_token_request_params_accepts_client_id_aliases_and_raises_when_incomplete():
-    p = m.to_token_request_params({
-        "code": "c", "client_id": "K", "client_secret": "S", "redirect_uri": "https://r",
-    })
+    p = m.to_token_request_params(
+        {
+            "code": "c",
+            "client_id": "K",
+            "client_secret": "S",
+            "redirect_uri": "https://r",
+        }
+    )
     assert p["client_id"] == "K" and p["client_secret"] == "S"
     with pytest.raises(m.UpstoxMappingError, match="token exchange"):
         m.to_token_request_params({"code": "c", "api_key": "K"})
@@ -192,28 +204,127 @@ def test_to_multi_order_params_rejects_empty_and_bad_variety():
 
 
 def test_from_upstox_multi_order_collects_ids_errors_and_summary():
-    out = m.from_upstox_multi_order({
-        "status": "partial_success",
-        "data": [{"order_id": "O1", "correlation_id": "1"}],
-        "errors": [{"error_code": "E1", "correlation_id": "2"}],
-        "summary": {"total": 2, "success": 1},
-    })
+    out = m.from_upstox_multi_order(
+        {
+            "status": "partial_success",
+            "data": [{"order_id": "O1", "correlation_id": "1"}],
+            "errors": [{"error_code": "E1", "correlation_id": "2"}],
+            "summary": {"total": 2, "success": 1},
+        }
+    )
     assert out["order_ids"] == ["O1"] and out["total"] == 2 and out["success"] == 1
+    assert out["order_results"] == [{"order_id": "O1", "correlation_id": "1"}]
     assert out["errors"][0]["error_code"] == "E1"
     with pytest.raises(m.UpstoxMappingError):
         m.from_upstox_multi_order(None)  # type: ignore[arg-type]
 
 
 def test_from_upstox_cancel_exit_parses_order_ids():
-    out = m.from_upstox_cancel_exit({
-        "status": "success",
-        "data": {"order_ids": ["C1", "C2"]},
-        "summary": {"total": 2, "success": 2},
-    })
+    out = m.from_upstox_cancel_exit(
+        {
+            "status": "success",
+            "data": {"order_ids": ["C1", "C2"]},
+            "errors": None,
+            "summary": {"total": 2, "success": 2, "error": 0},
+        }
+    )
     assert out["order_ids"] == ["C1", "C2"] and out["success"] == 2
-    # Defaults derive counts from the payload when no summary is present.
-    bare = m.from_upstox_cancel_exit({"data": {"order_ids": ["C1"]}})
-    assert bare["total"] == 1 and bare["success"] == 1 and bare["errors"] == []
+
+
+def test_from_upstox_cancel_exit_accepts_printable_nfc_order_id():
+    out = m.from_upstox_cancel_exit(
+        {
+            "status": "success",
+            "data": {"order_ids": ["\u0106-1"]},
+            "errors": None,
+            "summary": {"total": 1, "success": 1, "error": 0},
+        }
+    )
+
+    assert out["order_ids"] == ["\u0106-1"]
+
+
+def test_from_upstox_cancel_exit_accepts_explicit_empty_success_batch():
+    out = m.from_upstox_cancel_exit(
+        {
+            "status": "success",
+            "data": {"order_ids": []},
+            "errors": None,
+            "summary": {"total": 0, "success": 0, "error": 0},
+        }
+    )
+
+    assert out == {"order_ids": [], "errors": [], "total": 0, "success": 0}
+
+
+def test_from_upstox_cancel_exit_accepts_structurally_valid_partial_success():
+    out = m.from_upstox_cancel_exit(
+        {
+            "status": "partial_success",
+            "data": {"order_ids": ["C1"]},
+            "errors": [{"error_code": "UDAPI1113", "message": "market closed"}],
+            "summary": {"total": 2, "success": 1, "error": 1},
+        }
+    )
+
+    assert out["order_ids"] == ["C1"]
+    assert out["total"] == 2
+    assert out["success"] == 1
+    assert len(out["errors"]) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"status": "error", "message": "sweep refused"},
+        {"status": "success"},
+        {"status": "success", "data": {}, "summary": {"total": 0, "success": 0, "error": 0}},
+        {"status": "success", "data": {"order_ids": []}, "summary": {}},
+        {
+            "status": "success",
+            "data": {"order_ids": []},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["C1"]},
+            "summary": {"total": 1.5, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["   "]},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": [" C1 "]},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["C1", "C1"]},
+            "summary": {"total": 2, "success": 2, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["C1\u200b"]},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["C1\x00"]},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+        {
+            "status": "success",
+            "data": {"order_ids": ["C\u0301"]},
+            "summary": {"total": 1, "success": 1, "error": 0},
+        },
+    ],
+)
+def test_from_upstox_cancel_exit_rejects_error_or_invalid_batch(response):
+    with pytest.raises(m.UpstoxMappingError, match="cancel/exit"):
+        m.from_upstox_cancel_exit(response)
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +368,7 @@ def test_to_gtt_modify_params_rebuilds_rules():
 
 def test_gtt_protective_legs_use_immediate_trigger_type_from_docs():
     buy = m.to_gtt_place_params(
-        _order(variety="gtt", action="BUY", trigger_price="2850",
-               stop_loss_price="2800", target_price="2950"),
+        _order(variety="gtt", action="BUY", trigger_price="2850", stop_loss_price="2800", target_price="2950"),
         "NSE_EQ|X",
     )
     by_strategy = {r["strategy"]: r for r in buy["rules"]}
@@ -267,8 +377,7 @@ def test_gtt_protective_legs_use_immediate_trigger_type_from_docs():
     assert by_strategy["TARGET"]["trigger_type"] == "IMMEDIATE"
 
     sell = m.to_gtt_place_params(
-        _order(variety="gtt", action="SELL", trigger_price="2850",
-               stop_loss_price="2900", target_price="2750"),
+        _order(variety="gtt", action="SELL", trigger_price="2850", stop_loss_price="2900", target_price="2750"),
         "NSE_EQ|X",
     )
     by_strategy = {r["strategy"]: r for r in sell["rules"]}
@@ -312,17 +421,34 @@ def test_extract_gtt_order_id_variants():
 
 
 def test_from_upstox_gtt_order_normalises_rules():
-    out = m.from_upstox_gtt_order({
-        "gtt_order_id": "GTT-CU1", "type": "MULTIPLE", "trading_symbol": "NHPC",
-        "exchange": "NSE", "product": "D", "quantity": 1,
-        "rules": [
-            {"strategy": "ENTRY", "status": "TRIGGERED", "trigger_price": 7.7,
-             "transaction_type": "BUY", "order_id": "250228010168535"},
-            {"strategy": "STOPLOSS", "status": "PENDING", "trigger_price": 7.6,
-             "transaction_type": "SELL", "order_id": None},
-        ],
-        "created_at": 1740641185000000, "expires_at": 1772216999000000,
-    })
+    out = m.from_upstox_gtt_order(
+        {
+            "gtt_order_id": "GTT-CU1",
+            "type": "MULTIPLE",
+            "trading_symbol": "NHPC",
+            "exchange": "NSE",
+            "product": "D",
+            "quantity": 1,
+            "rules": [
+                {
+                    "strategy": "ENTRY",
+                    "status": "TRIGGERED",
+                    "trigger_price": 7.7,
+                    "transaction_type": "BUY",
+                    "order_id": "250228010168535",
+                },
+                {
+                    "strategy": "STOPLOSS",
+                    "status": "PENDING",
+                    "trigger_price": 7.6,
+                    "transaction_type": "SELL",
+                    "order_id": None,
+                },
+            ],
+            "created_at": 1740641185000000,
+            "expires_at": 1772216999000000,
+        }
+    )
     assert out["gtt_order_id"] == "GTT-CU1" and out["product"] == "CNC"  # equity D -> CNC
     assert out["rules"][0]["order_id"] == "250228010168535"
     assert out["rules"][1]["strategy"] == "STOPLOSS" and out["rules"][1]["order_id"] == ""
@@ -332,22 +458,182 @@ def test_from_upstox_trade_and_gtt_disambiguate_fno_product_d():
     # Upstox product "D" is delivery (CNC) for equity but carry-forward (NRML)
     # for F&O. The trade and GTT read paths must disambiguate by segment, not
     # blindly map D->CNC (which would mislabel every F&O record).
-    trade = m.from_upstox_trade({
-        "order_id": "9", "trading_symbol": "BANKNIFTY", "exchange": "NFO",
-        "transaction_type": "SELL", "product": "D", "quantity": 15, "average_price": 1.2,
-    })
+    trade = m.from_upstox_trade(
+        {
+            "order_id": "9",
+            "trading_symbol": "BANKNIFTY",
+            "exchange": "NFO",
+            "transaction_type": "SELL",
+            "product": "D",
+            "quantity": 15,
+            "average_price": 1.2,
+        }
+    )
     assert trade["product"] == "NRML"
-    gtt = m.from_upstox_gtt_order({
-        "gtt_order_id": "GTT-F1", "type": "SINGLE", "trading_symbol": "NIFTY",
-        "exchange": "NFO", "product": "D", "quantity": 50, "rules": [],
-    })
+    gtt = m.from_upstox_gtt_order(
+        {
+            "gtt_order_id": "GTT-F1",
+            "type": "SINGLE",
+            "trading_symbol": "NIFTY",
+            "exchange": "NFO",
+            "product": "D",
+            "quantity": 50,
+            "rules": [],
+        }
+    )
     assert gtt["product"] == "NRML"
     # An equity trade still maps D -> CNC.
-    eq = m.from_upstox_trade({
-        "order_id": "10", "trading_symbol": "TCS", "exchange": "NSE",
-        "transaction_type": "BUY", "product": "D", "quantity": 5, "average_price": 3500,
-    })
+    eq = m.from_upstox_trade(
+        {
+            "order_id": "10",
+            "trading_symbol": "TCS",
+            "exchange": "NSE",
+            "transaction_type": "BUY",
+            "product": "D",
+            "quantity": 5,
+            "average_price": 3500,
+        }
+    )
     assert eq["product"] == "CNC"
+
+
+def test_upstox_cds_position_preserves_multiplier_and_previous_close():
+    position = m.from_upstox_position(
+        {
+            "exchange": "CDS",
+            "multiplier": 1000,
+            "product": "D",
+            "instrument_token": "NCD_FO|USDINR23OCT85.5CE",
+            "average_price": 0.005,
+            "quantity": 1,
+            "overnight_quantity": 1,
+            "day_buy_quantity": 0,
+            "day_sell_quantity": 0,
+            "last_price": 0.0025,
+            "close_price": 0.0025,
+            "trading_symbol": "USDINR23OCT85.5CE",
+        }
+    )
+
+    assert position["exchange"] == "CDS"
+    assert position["product"] == "NRML"
+    assert position["multiplier"] == 1000
+    assert position["close_price"] == 0.0025
+    assert position["instrument_id"] == "NCD_FO|USDINR23OCT85.5CE"
+    assert position["accounting_complete"] is True
+    assert position["cross_currency"] is False
+    assert position["previous_close_trusted"] is True
+
+
+def test_upstox_option_position_preserves_explicit_contract_type() -> None:
+    position = m.from_upstox_position(
+        {
+            "trading_symbol": "NIFTY 30 JUL 26 25000 CE",
+            "instrument_token": "NSE_FO|54452",
+            "exchange": "NFO",
+            "segment": "NSE_FO",
+            "instrument_type": "CE",
+            "product": "D",
+            "quantity": 75,
+            "overnight_quantity": 0,
+            "day_buy_quantity": 75,
+            "day_sell_quantity": 0,
+        }
+    )
+
+    assert position["option_type"] == "CE"
+
+
+def test_upstox_holding_preserves_delivery_ledger_identity_and_close():
+    holding = m.from_upstox_holding(
+        {
+            "exchange": "NSE",
+            "product": "D",
+            "instrument_token": "NSE_EQ|INE528G01035",
+            "trading_symbol": "YESBANK",
+            "quantity": 36,
+            "average_price": 18.75,
+            "last_price": 17.05,
+            "close_price": 17.0,
+            "pnl": -61.2,
+        }
+    )
+
+    assert holding["exchange"] == "NSE"
+    assert holding["product"] == "CNC"
+    assert holding["close_price"] == 17.0
+    assert holding["instrument_id"] == "NSE_EQ|INE528G01035"
+    assert holding["accounting_complete"] is True
+
+
+def test_upstox_rejects_inconsistent_complete_position_accounting() -> None:
+    with pytest.raises(m.UpstoxMappingError, match="position accounting is inconsistent"):
+        m.from_upstox_position({
+            "trading_symbol": "TCS",
+            "exchange": "NSE",
+            "product": "D",
+            "quantity": 5,
+            "overnight_quantity": 4,
+            "day_buy_quantity": 0,
+            "day_sell_quantity": 0,
+        })
+
+
+def test_upstox_trade_prefers_exchange_execution_timestamp() -> None:
+    trade = m.from_upstox_trade({
+        "order_id": "10",
+        "trading_symbol": "TCS",
+        "exchange": "NSE",
+        "transaction_type": "BUY",
+        "product": "D",
+        "quantity": 5,
+        "average_price": 3500,
+        "order_timestamp": "2026-07-13T09:20:00+05:30",
+        "exchange_timestamp": "2026-07-13T09:21:00+05:30",
+    })
+
+    assert trade["timestamp"] == "2026-07-13T09:21:00+05:30"
+
+
+def test_upstox_v3_funds_map_opening_cash_without_margin_inference():
+    funds = m.from_upstox_funds(
+        {
+            "status": "success",
+            "data": {
+                "available_to_trade": {
+                    "total": 5379.03,
+                    "cash_available_to_trade": {
+                        "total": 5117.34,
+                        "cash": {"opening_balance": 5137.34},
+                        "margin_used": {"total": 0.0},
+                    },
+                    "pledge_available_to_trade": {
+                        "total": 261.69,
+                        "margin_used": {"total": 1.8},
+                    },
+                },
+                "unavailable_to_trade": {},
+            },
+        }
+    )
+
+    assert funds["available_balance"] == "5379.03"
+    assert funds["used_margin"] == "1.8"
+    assert funds["total_balance"] == "5380.83"
+    assert funds["opening_risk_capital"] == "5137.34"
+
+
+def test_upstox_v2_funds_do_not_infer_opening_risk_capital():
+    funds = m.from_upstox_funds(
+        {
+            "status": "success",
+            "data": {"equity": {"available_margin": 50000, "used_margin": 12000}},
+        }
+    )
+
+    assert funds["available_balance"] == "50000"
+    assert funds["total_balance"] == "62000.0"
+    assert funds["opening_risk_capital"] == "0"
 
 
 # ---------------------------------------------------------------------------
@@ -357,51 +643,85 @@ def test_from_upstox_trade_and_gtt_disambiguate_fno_product_d():
 
 def test_from_upstox_order_equity_d_is_cnc():
     # An equity-segment "D" position is delivery → CNC.
-    out = m.from_upstox_order({
-        "order_id": "1", "trading_symbol": "RELIANCE",
-        "instrument_token": "NSE_EQ|INE002A01018", "product": "D",
-        "transaction_type": "BUY", "order_type": "LIMIT", "quantity": 1, "price": 2900,
-    })
+    out = m.from_upstox_order(
+        {
+            "order_id": "1",
+            "trading_symbol": "RELIANCE",
+            "instrument_token": "NSE_EQ|INE002A01018",
+            "product": "D",
+            "transaction_type": "BUY",
+            "order_type": "LIMIT",
+            "quantity": 1,
+            "price": 2900,
+        }
+    )
     assert out["exchange"] == "NSE" and out["product"] == "CNC"
 
 
 def test_from_upstox_order_fno_d_is_nrml():
     # An F&O-segment "D" position is carry-forward → NRML, NOT CNC. Reading it
     # back as CNC would feed reconciliation the wrong product.
-    out = m.from_upstox_order({
-        "order_id": "2", "trading_symbol": "NIFTY 24600 CE",
-        "instrument_token": "NSE_FO|54452", "product": "D",
-        "transaction_type": "SELL", "order_type": "MARKET", "quantity": 75,
-    })
+    out = m.from_upstox_order(
+        {
+            "order_id": "2",
+            "trading_symbol": "NIFTY 24600 CE",
+            "instrument_token": "NSE_FO|54452",
+            "product": "D",
+            "transaction_type": "SELL",
+            "order_type": "MARKET",
+            "quantity": 75,
+        }
+    )
     assert out["exchange"] == "NFO" and out["product"] == "NRML"
 
 
 def test_from_upstox_position_d_disambiguated_by_segment():
-    equity = m.from_upstox_position({
-        "trading_symbol": "TCS", "instrument_token": "NSE_EQ|INE467B01029",
-        "product": "D", "quantity": 5, "average_price": 3500,
-    })
-    fno = m.from_upstox_position({
-        "trading_symbol": "BANKNIFTY FUT", "instrument_token": "NSE_FO|99999",
-        "product": "D", "quantity": 15, "average_price": 50000,
-    })
+    equity = m.from_upstox_position(
+        {
+            "trading_symbol": "TCS",
+            "instrument_token": "NSE_EQ|INE467B01029",
+            "product": "D",
+            "quantity": 5,
+            "average_price": 3500,
+        }
+    )
+    fno = m.from_upstox_position(
+        {
+            "trading_symbol": "BANKNIFTY FUT",
+            "instrument_token": "NSE_FO|99999",
+            "product": "D",
+            "quantity": 15,
+            "average_price": 50000,
+        }
+    )
     assert equity["product"] == "CNC"
     assert fno["product"] == "NRML"
     # MTF still maps to NRML regardless of segment (unambiguous code).
-    mtf = m.from_upstox_position({
-        "trading_symbol": "SBIN", "instrument_token": "NSE_EQ|INE062A01020",
-        "product": "MTF", "quantity": 100, "average_price": 600,
-    })
+    mtf = m.from_upstox_position(
+        {
+            "trading_symbol": "SBIN",
+            "instrument_token": "NSE_EQ|INE062A01020",
+            "product": "MTF",
+            "quantity": 100,
+            "average_price": 600,
+        }
+    )
     assert mtf["product"] == "NRML"
 
 
 def test_from_upstox_d_uses_explicit_segment_field_when_present():
     # When the record carries an explicit Upstox segment string, an F&O segment
     # disambiguates "D" to NRML even if the exchange field is generic.
-    out = m.from_upstox_position({
-        "trading_symbol": "GOLD FUT", "exchange": "MCX", "segment": "MCX_FO",
-        "product": "D", "quantity": 1, "average_price": 70000,
-    })
+    out = m.from_upstox_position(
+        {
+            "trading_symbol": "GOLD FUT",
+            "exchange": "MCX",
+            "segment": "MCX_FO",
+            "product": "D",
+            "quantity": 1,
+            "average_price": 70000,
+        }
+    )
     assert out["product"] == "NRML"
 
 
@@ -411,45 +731,83 @@ def test_from_upstox_d_uses_explicit_segment_field_when_present():
 
 
 def test_to_convert_position_params_intraday_to_delivery():
-    p = m.to_convert_position_params({
-        "instrument_token": "NSE_EQ|X", "old_product": "MIS", "new_product": "CNC",
-        "transaction_type": "BUY", "quantity": 10,
-    })
-    assert p == {"instrument_token": "NSE_EQ|X", "new_product": "D", "old_product": "I",
-                 "transaction_type": "BUY", "quantity": 10}
+    p = m.to_convert_position_params(
+        {
+            "instrument_token": "NSE_EQ|X",
+            "old_product": "MIS",
+            "new_product": "CNC",
+            "transaction_type": "BUY",
+            "quantity": 10,
+        }
+    )
+    assert p == {
+        "instrument_token": "NSE_EQ|X",
+        "new_product": "D",
+        "old_product": "I",
+        "transaction_type": "BUY",
+        "quantity": 10,
+    }
 
 
 def test_to_convert_position_params_rejects_noop_and_unknowns():
     # CNC and NRML both map to Upstox D — converting between them is a no-op.
     with pytest.raises(m.UpstoxMappingError, match="no-op"):
-        m.to_convert_position_params({
-            "instrument_token": "T", "old_product": "CNC", "new_product": "NRML",
-            "transaction_type": "BUY", "quantity": 1,
-        })
+        m.to_convert_position_params(
+            {
+                "instrument_token": "T",
+                "old_product": "CNC",
+                "new_product": "NRML",
+                "transaction_type": "BUY",
+                "quantity": 1,
+            }
+        )
     with pytest.raises(m.UpstoxMappingError, match="products"):
-        m.to_convert_position_params({
-            "instrument_token": "T", "old_product": "ZZ", "new_product": "CNC",
-            "transaction_type": "BUY", "quantity": 1,
-        })
+        m.to_convert_position_params(
+            {
+                "instrument_token": "T",
+                "old_product": "ZZ",
+                "new_product": "CNC",
+                "transaction_type": "BUY",
+                "quantity": 1,
+            }
+        )
     with pytest.raises(m.UpstoxMappingError, match="action"):
-        m.to_convert_position_params({
-            "instrument_token": "T", "old_product": "MIS", "new_product": "CNC",
-            "transaction_type": "HOLD", "quantity": 1,
-        })
+        m.to_convert_position_params(
+            {
+                "instrument_token": "T",
+                "old_product": "MIS",
+                "new_product": "CNC",
+                "transaction_type": "HOLD",
+                "quantity": 1,
+            }
+        )
 
 
 def test_to_brokerage_query_uses_validated_core():
     q = m.to_brokerage_query(_order(quantity="7", price="101.5"), "NSE_EQ|X")
-    assert q == {"instrument_token": "NSE_EQ|X", "quantity": 7, "product": "I",
-                 "transaction_type": "BUY", "price": 101.5}
+    assert q == {
+        "instrument_token": "NSE_EQ|X",
+        "quantity": 7,
+        "product": "I",
+        "transaction_type": "BUY",
+        "price": 101.5,
+    }
 
 
 def test_from_upstox_brokerage_unwraps_charges():
-    out = m.from_upstox_brokerage({"status": "success", "data": {"charges": {
-        "total": 104.05, "brokerage": 20.0,
-        "taxes": {"gst": 3.6, "stt": 29.0, "stamp_duty": 4.35},
-        "other_taxes": {"transaction": 1.0},
-    }}})
+    out = m.from_upstox_brokerage(
+        {
+            "status": "success",
+            "data": {
+                "charges": {
+                    "total": 104.05,
+                    "brokerage": 20.0,
+                    "taxes": {"gst": 3.6, "stt": 29.0, "stamp_duty": 4.35},
+                    "other_taxes": {"transaction": 1.0},
+                }
+            },
+        }
+    )
     assert out["total_charges"] == "104.05" and out["brokerage"] == "20.0"
     assert out["taxes"]["stt"] == 29.0 and out["other_taxes"]["transaction"] == 1.0
 
@@ -460,11 +818,22 @@ def test_from_upstox_brokerage_unwraps_charges():
 
 
 def test_from_upstox_profile():
-    out = m.from_upstox_profile({"status": "success", "data": {
-        "user_id": "AB1234", "user_name": "N", "email": "n@x.in", "broker": "UPSTOX",
-        "exchanges": ["NSE", "BSE"], "products": ["D", "I"], "order_types": ["LIMIT"],
-        "is_active": True, "poa": False,
-    }})
+    out = m.from_upstox_profile(
+        {
+            "status": "success",
+            "data": {
+                "user_id": "AB1234",
+                "user_name": "N",
+                "email": "n@x.in",
+                "broker": "UPSTOX",
+                "exchanges": ["NSE", "BSE"],
+                "products": ["D", "I"],
+                "order_types": ["LIMIT"],
+                "is_active": True,
+                "poa": False,
+            },
+        }
+    )
     assert out["user_id"] == "AB1234" and out["is_active"] is True
     assert out["exchanges"] == ["NSE", "BSE"] and out["products"] == ["D", "I"]
 
@@ -475,35 +844,102 @@ def test_from_upstox_profile():
 
 
 def test_from_upstox_ohlc_v3():
-    rows = m.from_upstox_ohlc_v3({"status": "success", "data": {
-        "NSE_EQ:RELIANCE": {
-            "last_price": 2905.5, "instrument_token": "NSE_EQ|INE002A01018",
-            "live_ohlc": {"open": 2900, "high": 2920, "low": 2890, "close": 2905, "volume": 12000},
-            "prev_ohlc": {"open": 2880, "high": 2901, "low": 2870, "close": 2899},
-        },
-    }})
+    rows = m.from_upstox_ohlc_v3(
+        {
+            "status": "success",
+            "data": {
+                "NSE_EQ:RELIANCE": {
+                    "last_price": 2905.5,
+                    "instrument_token": "NSE_EQ|INE002A01018",
+                    "live_ohlc": {"open": 2900, "high": 2920, "low": 2890, "close": 2905, "volume": 12000},
+                    "prev_ohlc": {
+                        "open": 2880,
+                        "high": 2901,
+                        "low": 2870,
+                        "close": 2899,
+                        "ts": 1783881000000,
+                    },
+                },
+            },
+        }
+    )
     assert len(rows) == 1
     r = rows[0]
     assert r["instrument_token"] == "NSE_EQ|INE002A01018" and r["ltp"] == 2905.5
     assert r["open"] == 2900.0 and r["volume"] == 12000 and r["prev_close"] == 2899.0
+    assert r["previous_close_trusted"] is True
+    assert r["previous_close_as_of"] == "1783881000000"
 
 
 def test_from_upstox_ltp_v3():
-    rows = m.from_upstox_ltp_v3({"data": {
-        "NSE_EQ:TCS": {"last_price": 3501.0, "instrument_token": "NSE_EQ|INE467B01029",
-                       "volume": 999, "cp": 3490.0},
-    }})
-    assert rows == [{"instrument_token": "NSE_EQ|INE467B01029", "ltp": 3501.0,
-                     "volume": 999, "prev_close": 3490.0}]
+    rows = m.from_upstox_ltp_v3(
+        {
+            "status": "success",
+            "data": {
+                "NSE_EQ:TCS": {
+                    "last_price": 3501.0,
+                    "instrument_token": "NSE_EQ|INE467B01029",
+                    "volume": 999,
+                    "cp": 3490.0,
+                },
+            }
+        }
+    )
+    assert rows == [{
+        "instrument_token": "NSE_EQ|INE467B01029",
+        "ltp": 3501.0,
+        "volume": 999,
+        "prev_close": 3490.0,
+        "previous_close_trusted": True,
+    }]
 
 
 def test_from_upstox_option_greeks():
-    rows = m.from_upstox_option_greeks({"data": {
-        "NSE_FO|54452": {"last_price": 120.5, "instrument_token": "NSE_FO|54452",
-                         "iv": 13.2, "delta": 0.55, "gamma": 0.002, "theta": -8.1,
-                         "vega": 6.4, "oi": 30000, "volume": 5000},
-    }})
+    rows = m.from_upstox_option_greeks(
+        {
+            "status": "success",
+            "data": {
+                "NSE_FO|54452": {
+                    "last_price": 120.5,
+                    "instrument_token": "NSE_FO|54452",
+                    "iv": 13.2,
+                    "delta": 0.55,
+                    "gamma": 0.002,
+                    "theta": -8.1,
+                    "vega": 6.4,
+                    "oi": 30000,
+                    "volume": 5000,
+                },
+            }
+        }
+    )
     assert rows[0]["delta"] == 0.55 and rows[0]["iv"] == 13.2 and rows[0]["oi"] == 30000
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"data": {}},
+        {
+            "status": "success",
+            "data": {
+                "NSE_FO|54452": {
+                    "last_price": 120.5,
+                    "iv": 13.2,
+                    "delta": 0.55,
+                    "gamma": 0.002,
+                    "theta": -8.1,
+                    "vega": 6.4,
+                    "oi": 30_000,
+                    "volume": 5_000,
+                },
+            },
+        },
+    ],
+)
+def test_from_upstox_option_greeks_requires_success_and_broker_identity(payload) -> None:
+    with pytest.raises(m.UpstoxMappingError):
+        m.from_upstox_option_greeks(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -512,14 +948,27 @@ def test_from_upstox_option_greeks():
 
 
 def test_from_upstox_instrument_rows():
-    rows = m.from_upstox_instrument_rows({"data": [
-        {"instrument_key": "NSE_FO|54452", "trading_symbol": "NIFTY 24600 CE",
-         "name": "NIFTY", "exchange": "NSE", "segment": "NSE_FO",
-         "instrument_type": "CE", "expiry": "2025-06-26", "strike_price": 24600,
-         "lot_size": 75, "tick_size": 5, "freeze_quantity": 1800,
-         "underlying_key": "NSE_INDEX|Nifty 50"},
-        "junk",
-    ]})
+    rows = m.from_upstox_instrument_rows(
+        {
+            "data": [
+                {
+                    "instrument_key": "NSE_FO|54452",
+                    "trading_symbol": "NIFTY 24600 CE",
+                    "name": "NIFTY",
+                    "exchange": "NSE",
+                    "segment": "NSE_FO",
+                    "instrument_type": "CE",
+                    "expiry": "2025-06-26",
+                    "strike_price": 24600,
+                    "lot_size": 75,
+                    "tick_size": 5,
+                    "freeze_quantity": 1800,
+                    "underlying_key": "NSE_INDEX|Nifty 50",
+                },
+                "junk",
+            ]
+        }
+    )
     assert len(rows) == 1
     r = rows[0]
     assert r["instrument_key"] == "NSE_FO|54452" and r["strike_price"] == 24600.0
@@ -537,22 +986,48 @@ def test_from_upstox_expiries():
 
 
 def test_from_upstox_trade_history():
-    rows = m.from_upstox_trade_history({"data": [
-        {"trade_id": "T1", "scrip_name": "RELIANCE", "exchange": "NSE", "segment": "EQ",
-         "transaction_type": "BUY", "quantity": 10, "price": 2900.0, "amount": 29000.0,
-         "trade_date": "2025-04-01", "isin": "INE002A01018",
-         "instrument_token": "NSE_EQ|INE002A01018"},
-    ]})
+    rows = m.from_upstox_trade_history(
+        {
+            "data": [
+                {
+                    "trade_id": "T1",
+                    "scrip_name": "RELIANCE",
+                    "exchange": "NSE",
+                    "segment": "EQ",
+                    "transaction_type": "BUY",
+                    "quantity": 10,
+                    "price": 2900.0,
+                    "amount": 29000.0,
+                    "trade_date": "2025-04-01",
+                    "isin": "INE002A01018",
+                    "instrument_token": "NSE_EQ|INE002A01018",
+                },
+            ]
+        }
+    )
     assert rows[0]["trade_id"] == "T1" and rows[0]["symbol"] == "RELIANCE"
     assert rows[0]["amount"] == "29000.0" and rows[0]["trade_date"] == "2025-04-01"
 
 
 def test_from_upstox_pnl_rows_computes_pnl():
-    rows = m.from_upstox_pnl_rows({"data": [
-        {"scrip_name": "INFY", "isin": "INE009A01021", "trade_type": "EQ", "quantity": 10,
-         "buy_date": "2025-01-02", "buy_average": 1500.0, "sell_date": "2025-02-02",
-         "sell_average": 1550.0, "buy_amount": 15000.0, "sell_amount": 15500.0},
-    ]})
+    rows = m.from_upstox_pnl_rows(
+        {
+            "data": [
+                {
+                    "scrip_name": "INFY",
+                    "isin": "INE009A01021",
+                    "trade_type": "EQ",
+                    "quantity": 10,
+                    "buy_date": "2025-01-02",
+                    "buy_average": 1500.0,
+                    "sell_date": "2025-02-02",
+                    "sell_average": 1550.0,
+                    "buy_amount": 15000.0,
+                    "sell_amount": 15500.0,
+                },
+            ]
+        }
+    )
     assert rows[0]["pnl"] == "500.0" and rows[0]["symbol"] == "INFY"
 
 
@@ -567,35 +1042,52 @@ def test_from_upstox_pnl_charges():
 
 
 def test_from_upstox_timings_holidays_status():
-    timings = m.from_upstox_timings({"data": [
-        {"exchange": "NSE", "start_time": 1718595000000, "end_time": 1718618400000},
-    ]})
+    timings = m.from_upstox_timings(
+        {
+            "data": [
+                {"exchange": "NSE", "start_time": 1718595000000, "end_time": 1718618400000},
+            ]
+        }
+    )
     assert timings[0]["exchange"] == "NSE" and timings[0]["start_time"] == "1718595000000"
 
-    holidays = m.from_upstox_holidays({"data": [
-        {"date": "2025-08-15", "description": "Independence Day",
-         "holiday_type": "TRADING_HOLIDAY", "closed_exchanges": ["NSE", "BSE"]},
-    ]})
+    holidays = m.from_upstox_holidays(
+        {
+            "data": [
+                {
+                    "date": "2025-08-15",
+                    "description": "Independence Day",
+                    "holiday_type": "TRADING_HOLIDAY",
+                    "closed_exchanges": ["NSE", "BSE"],
+                },
+            ]
+        }
+    )
     assert holidays[0]["date"] == "2025-08-15" and "NSE" in holidays[0]["closed_exchanges"]
 
-    status = m.from_upstox_market_status({"data": {"exchange": "NSE", "status": "NORMAL_OPEN",
-                                                   "last_updated": 1718595000000}})
+    status = m.from_upstox_market_status(
+        {"data": {"exchange": "NSE", "status": "NORMAL_OPEN", "last_updated": 1718595000000}}
+    )
     assert status["status"] == "NORMAL_OPEN" and status["exchange"] == "NSE"
 
 
 def test_from_upstox_holidays_preserves_special_session_epochs():
-    holidays = m.from_upstox_holidays({"data": [
+    holidays = m.from_upstox_holidays(
         {
-            "date": "2026-11-08",
-            "description": "Muhurat trading",
-            "holiday_type": "SPECIAL_SESSION",
-            "closed_exchanges": ["NSE", "BSE"],
-            "open_exchanges": [
-                {"exchange": "NSE", "start_time": 1794150000000, "end_time": 1794153600000},
-                {"exchange": "BSE", "start_time": 1794150000000, "end_time": 1794153600000},
-            ],
-        },
-    ]})
+            "data": [
+                {
+                    "date": "2026-11-08",
+                    "description": "Muhurat trading",
+                    "holiday_type": "SPECIAL_SESSION",
+                    "closed_exchanges": ["NSE", "BSE"],
+                    "open_exchanges": [
+                        {"exchange": "NSE", "start_time": 1794150000000, "end_time": 1794153600000},
+                        {"exchange": "BSE", "start_time": 1794150000000, "end_time": 1794153600000},
+                    ],
+                },
+            ]
+        }
+    )
 
     assert holidays[0]["open_exchanges"] == [
         {"exchange": "NSE", "start_time": "1794150000000", "end_time": "1794153600000"},
@@ -609,8 +1101,9 @@ def test_from_upstox_holidays_preserves_special_session_epochs():
 
 
 def test_to_history_params_supports_one_second_unit():
-    p = m.to_history_params({"interval": "1s", "instrument_key": "NSE_EQ|X",
-                             "from_date": "2025-06-01", "to_date": "2025-06-02"})
+    p = m.to_history_params(
+        {"interval": "1s", "instrument_key": "NSE_EQ|X", "from_date": "2025-06-01", "to_date": "2025-06-02"}
+    )
     assert p["unit"] == "seconds" and p["interval"] == "1"
 
 
@@ -627,9 +1120,14 @@ def test_extract_authorized_uri():
 
 
 def test_from_upstox_feed_ticks_ltpc_mode():
-    ticks = m.from_upstox_feed_ticks({"type": "live_feed", "feeds": {
-        "NSE_EQ|INE002A01018": {"ltpc": {"ltp": 2905.5, "ltt": "1718595000123", "ltq": "5", "cp": 2899.0}},
-    }})
+    ticks = m.from_upstox_feed_ticks(
+        {
+            "type": "live_feed",
+            "feeds": {
+                "NSE_EQ|INE002A01018": {"ltpc": {"ltp": 2905.5, "ltt": "1718595000123", "ltq": "5", "cp": 2899.0}},
+            },
+        }
+    )
     assert len(ticks) == 1
     t = ticks[0]
     assert t["instrument_key"] == "NSE_EQ|INE002A01018" and t["ltp"] == 2905.5
@@ -637,17 +1135,30 @@ def test_from_upstox_feed_ticks_ltpc_mode():
 
 
 def test_from_upstox_feed_ticks_full_feed_market_and_index():
-    ticks = m.from_upstox_feed_ticks({"feeds": {
-        "NSE_FO|54452": {"fullFeed": {"marketFF": {
-            "ltpc": {"ltp": 120.5, "ltt": "1", "ltq": "75", "cp": 118.0},
-            "vtt": "123456", "oi": "30000",
-        }}},
-        "NSE_INDEX|Nifty 50": {"fullFeed": {"indexFF": {
-            "ltpc": {"ltp": 24650.0, "ltt": "2", "cp": 24600.0},
-        }}},
-        "BAD|REC": {"fullFeed": {}},
-        "WORSE|REC": "junk",
-    }})
+    ticks = m.from_upstox_feed_ticks(
+        {
+            "feeds": {
+                "NSE_FO|54452": {
+                    "fullFeed": {
+                        "marketFF": {
+                            "ltpc": {"ltp": 120.5, "ltt": "1", "ltq": "75", "cp": 118.0},
+                            "vtt": "123456",
+                            "oi": "30000",
+                        }
+                    }
+                },
+                "NSE_INDEX|Nifty 50": {
+                    "fullFeed": {
+                        "indexFF": {
+                            "ltpc": {"ltp": 24650.0, "ltt": "2", "cp": 24600.0},
+                        }
+                    }
+                },
+                "BAD|REC": {"fullFeed": {}},
+                "WORSE|REC": "junk",
+            }
+        }
+    )
     by_key = {t["instrument_key"]: t for t in ticks}
     assert set(by_key) == {"NSE_FO|54452", "NSE_INDEX|Nifty 50"}
     assert by_key["NSE_FO|54452"]["volume"] == 123456 and by_key["NSE_FO|54452"]["oi"] == 30000
@@ -671,8 +1182,7 @@ def test_is_api_exception_duck_types_by_shape():
 
 
 def test_map_upstox_error_rejected_order_400():
-    exc = _StandInApiException(400, _err_body("UDAPI100038", "Invalid order parameters"),
-                              reason="Bad Request")
+    exc = _StandInApiException(400, _err_body("UDAPI100038", "Invalid order parameters"), reason="Bad Request")
     mapped = m.map_upstox_error(exc)
     assert isinstance(mapped, OrderRejectedByBroker)
     assert "Invalid order parameters" in str(mapped)  # broker message preserved
@@ -682,9 +1192,9 @@ def test_map_upstox_error_rejected_order_400():
 def test_map_upstox_error_reads_camelcase_errorcode_wire_key():
     # The wire key is errorCode (camelCase). A snake_case-only parser would lose
     # the broker code; assert the real envelope's code reaches broker_code.
-    camel = json.dumps(
-        {"status": "error", "errors": [{"errorCode": "UDAPI100038", "message": "Rejected"}]}
-    ).encode("utf-8")
+    camel = json.dumps({"status": "error", "errors": [{"errorCode": "UDAPI100038", "message": "Rejected"}]}).encode(
+        "utf-8"
+    )
     mapped = m.map_upstox_error(_StandInApiException(400, camel, reason="Bad Request"))
     assert mapped.broker_code == "UDAPI100038"
     # The snake_case fallback still works for any endpoint that emits it.

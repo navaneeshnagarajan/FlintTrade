@@ -184,7 +184,6 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
     app.config["NATIVE_ADAPTERS"] = {
         "dhan": object(),
         "upstox": object(),
-        "indmoney": object(),
     }
     monkeypatch.setattr(
         "flinttrade_core.app._read_workspace_brokers",
@@ -203,7 +202,8 @@ def test_rotation_schedules_only_active_native_adapters(monkeypatch) -> None:
     assert configure_session_rotation(app) is not None
 
     job_ids = {job.id for job in app.config["ROTATION_SCHEDULER"].get_jobs()}
-    assert {"cred_refresh_dhan", "cred_refresh_upstox", "cred_refresh_indmoney"} <= job_ids
+    assert {"cred_refresh_dhan", "cred_refresh_upstox"} <= job_ids
+    assert "cred_refresh_indmoney" not in job_ids
     assert "cred_refresh_kotakneo" not in job_ids
     assert "cred_refresh_groww" not in job_ids
     assert "cred_refresh_openalgo" not in job_ids
@@ -533,6 +533,59 @@ def test_refresh_does_not_publish_over_newer_read_only_session() -> None:
     assert thread.is_alive() is False
     assert registry.sessions[("dhan", "111")] is read_only_replacement
     assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "external-status"
+
+
+def test_shutdown_generation_revokes_blocked_refresh_before_shared_publication() -> None:
+    login_started = threading.Event()
+    release_login = threading.Event()
+
+    class _BlockingRenewableAdapter(_Adapter):
+        def __init__(self) -> None:
+            super().__init__(renewable=True)
+
+        async def login(self, credentials: dict[str, Any]) -> _Session:
+            login_started.set()
+            if not release_login.wait(2.0):
+                raise TimeoutError("test did not release refresh login")
+            return await super().login(credentials)
+
+    adapter = _BlockingRenewableAdapter()
+    registry = _Registry()
+    prior_session = _Session("old-token")
+    registry.sessions[("dhan", "111")] = prior_session
+    store = _Store({("dhan", "111"): {"access_token": "old-token"}})
+    app = _app(adapter, registry, store)
+    app.config["NATIVE_SESSION_STATUS"] = {"dhan:111": "old-status"}
+    errors: list[BaseException] = []
+    refresher = NativeSessionRefresher(app)
+
+    def refresh() -> None:
+        try:
+            refresher.refresh_token("dhan")
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            errors.append(exc)
+
+    thread = threading.Thread(target=refresh)
+    thread.start()
+    assert login_started.wait(1.0)
+    admission = app.config["NATIVE_ROTATION_ADMISSION"]
+
+    started = time.monotonic()
+    assert admission.close_and_drain(0.01) is False
+    assert time.monotonic() - started < 0.2
+    with pytest.raises(RuntimeError, match="shutting down"):
+        refresher.refresh_token("dhan")
+
+    release_login.set()
+    thread.join(2.0)
+
+    assert thread.is_alive() is False
+    assert len(errors) == 1
+    assert "revoked" in str(errors[0])
+    assert store.rows[("dhan", "111")] == {"access_token": "old-token"}
+    assert registry.sessions[("dhan", "111")] is prior_session
+    assert app.config["NATIVE_SESSION_STATUS"]["dhan:111"] == "old-status"
+    assert admission.close_and_drain(1.0) is True
 
 
 def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> None:

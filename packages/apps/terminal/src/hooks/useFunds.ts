@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getFunds } from "@/services/api";
 import type { Funds } from "@/types/api";
 import { queryKeys } from "@/services/queryKeys";
+import { useDataScope } from "@/hooks/useDataScope";
 
 interface BrokerDataQueryOptions {
   enabled?: boolean;
@@ -16,8 +17,9 @@ interface BrokerDataQueryOptions {
  */
 export function useFunds(options: BrokerDataQueryOptions = {}) {
   const enabled = options.enabled ?? true;
+  const scope = useDataScope();
   return useQuery<Funds>({
-    queryKey: queryKeys.funds.all,
+    queryKey: queryKeys.funds.detail(scope),
     queryFn: getFunds,
     enabled,
     staleTime: 15_000,

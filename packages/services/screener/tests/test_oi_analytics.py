@@ -69,7 +69,7 @@ def analytics() -> OIAnalytics:
 class TestOISnapshot:
     def test_pcr_zero_ce_oi(self):
         s = OISnapshot(strike=24000.0, ce_oi=0, pe_oi=5000)
-        assert s.pcr == 0.0
+        assert s.pcr is None
 
     def test_pcr_normal(self):
         s = OISnapshot(strike=24000.0, ce_oi=10000, pe_oi=12000)
@@ -83,8 +83,8 @@ class TestOISnapshot:
         s = OISnapshot(strike=25000.0)
         assert s.ce_oi == 0
         assert s.pe_oi == 0
-        assert s.ce_change == 0
-        assert s.pe_change == 0
+        assert s.ce_change is None
+        assert s.pe_change is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,19 @@ class TestOIHeatmap:
 
     def test_overall_pcr_positive(self, analytics: OIAnalytics, chain: list[OISnapshot]):
         result = analytics.oi_heatmap(chain)
+        assert result.overall_pcr is not None
         assert result.overall_pcr >= 0
+
+    def test_zero_call_oi_has_no_pcr_or_call_maximum(self, analytics: OIAnalytics):
+        result = analytics.oi_heatmap([
+            OISnapshot(strike=24000.0, ce_oi=0, pe_oi=300),
+            OISnapshot(strike=24100.0, ce_oi=0, pe_oi=200),
+        ])
+
+        assert result.overall_pcr is None
+        assert result.max_ce_oi_strike is None
+        assert result.max_pe_oi_strike == 24000.0
+        assert all(entry.pcr is None for entry in result.entries)
 
     def test_max_oi_strikes(self, analytics: OIAnalytics):
         chain = [
@@ -295,8 +307,25 @@ class TestSupportResistance:
 
     def test_empty_chain(self, analytics: OIAnalytics):
         result = analytics.support_resistance_from_oi([])
-        assert result.resistance_strike == 0.0
-        assert result.support_strike == 0.0
+        assert result.resistance_strike is None
+        assert result.resistance_oi is None
+        assert result.support_strike is None
+        assert result.support_oi is None
+
+    def test_all_zero_oi_has_no_support_or_resistance(self, analytics: OIAnalytics):
+        chain = [
+            OISnapshot(strike=23900.0, ce_oi=0, pe_oi=0),
+            OISnapshot(strike=24000.0, ce_oi=0, pe_oi=0),
+        ]
+
+        result = analytics.support_resistance_from_oi(chain)
+
+        assert result.resistance_strike is None
+        assert result.resistance_oi is None
+        assert result.support_strike is None
+        assert result.support_oi is None
+        assert result.secondary_resistance is None
+        assert result.secondary_support is None
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +379,18 @@ class TestUnusualOIActivity:
 
     def test_empty_chain(self, analytics: OIAnalytics):
         assert analytics.unusual_oi_activity([]) == []
+
+    def test_zero_changes_are_never_reported_as_unusual_reductions(self, analytics: OIAnalytics):
+        chain = [
+            OISnapshot(strike=100.0, ce_oi=1000, pe_oi=1000, ce_change=0, pe_change=0),
+            OISnapshot(strike=110.0, ce_oi=1000, pe_oi=1000, ce_change=10, pe_change=-10),
+        ]
+
+        result = analytics.unusual_oi_activity(chain, threshold=0.0)
+
+        assert result
+        assert all(entry.oi_change != 0 for entry in result)
+        assert all(entry.direction == ("addition" if entry.oi_change > 0 else "reduction") for entry in result)
 
     def test_uniform_changes_zero_std(self, analytics: OIAnalytics):
         """All same OI change → std = 0, no z-score, nothing flagged at threshold=1."""
@@ -416,6 +457,22 @@ class TestOITrend:
         result = analytics.oi_trend([snap], n_sessions=1)
         session = result["sessions"][0]
         assert abs(session["overall_pcr"] - 1.2) < 0.001
+
+    def test_zero_call_denominator_preserves_unavailable_pcr_and_excludes_it_from_trend(
+        self,
+        analytics: OIAnalytics,
+    ):
+        sessions = [
+            [OISnapshot(strike=24000.0, ce_oi=100, pe_oi=100)],
+            [OISnapshot(strike=24000.0, ce_oi=100, pe_oi=200)],
+            [OISnapshot(strike=24000.0, ce_oi=0, pe_oi=500)],
+            [OISnapshot(strike=24000.0, ce_oi=100, pe_oi=150)],
+        ]
+
+        result = analytics.oi_trend(sessions, n_sessions=4)
+
+        assert result["sessions"][2]["overall_pcr"] is None
+        assert result["pcr_trend"] == "up"
 
     def test_trend_direction_values(self, analytics: OIAnalytics, chain: list[OISnapshot]):
         history = [chain] * 5

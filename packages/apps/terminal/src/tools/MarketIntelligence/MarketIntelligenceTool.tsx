@@ -61,10 +61,29 @@ const TAB_CONTENT: Record<TabId, () => React.ReactNode> = {
 
 export default function MarketIntelligenceTool({ onClose }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("breadth");
+  const [optionTabIsSampleData, setOptionTabIsSampleData] = useState<boolean | null>(null);
   const isExploreMode = useModeStore((s) => s.mode === "explore");
 
   const currentTab = TABS.find((t) => t.id === activeTab);
-  const isSampleData = isExploreMode || SAMPLE_DATA_TABS.includes(activeTab);
+  const hasResponseProvenance = ["gex", "ivsmile", "maxpain", "oiprofile"].includes(activeTab);
+  const isSampleData = (
+    isExploreMode
+    || SAMPLE_DATA_TABS.includes(activeTab)
+    || (hasResponseProvenance && optionTabIsSampleData === true)
+  );
+  const isLiveData = (
+    !isSampleData
+    && (!hasResponseProvenance || optionTabIsSampleData === false)
+  );
+  const activeContent = activeTab === "gex"
+    ? <GexTab onSampleDataChange={setOptionTabIsSampleData} />
+    : activeTab === "ivsmile"
+      ? <IVSmileTab onSampleDataChange={setOptionTabIsSampleData} />
+      : activeTab === "maxpain"
+        ? <MaxPainTab onSampleDataChange={setOptionTabIsSampleData} />
+        : activeTab === "oiprofile"
+          ? <OIProfileTab onSampleDataChange={setOptionTabIsSampleData} />
+          : TAB_CONTENT[activeTab]();
 
   return (
     <div className="h-full flex flex-col bg-surface-base">
@@ -83,11 +102,11 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
             <Badge className="text-xs h-4 px-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/30">
               Sample Data
             </Badge>
-          ) : (
+          ) : isLiveData ? (
             <Badge className="text-xs h-4 px-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
               Live
             </Badge>
-          )}
+          ) : null}
         </div>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6 text-text-muted hover:text-text-primary">
           <X size={15} />
@@ -104,7 +123,10 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setOptionTabIsSampleData(null);
+              }}
                 className={[
                   "w-full flex items-center gap-2 px-3 py-2 font-heading font-medium text-xs transition-colors text-left",
                   isActive
@@ -122,11 +144,11 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
         {/* Content area */}
         {SELF_SCROLLING_TABS.includes(activeTab) ? (
           <div className="flex-1 min-h-0 overflow-hidden">
-            {TAB_CONTENT[activeTab]()}
+            {activeContent}
           </div>
         ) : (
           <ScrollArea className="flex-1">
-            <div>{TAB_CONTENT[activeTab]()}</div>
+            <div>{activeContent}</div>
           </ScrollArea>
         )}
       </div>

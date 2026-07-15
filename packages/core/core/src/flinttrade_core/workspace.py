@@ -13,13 +13,18 @@ All user preferences and UI-owned integration settings live in workspace.json.
 from __future__ import annotations
 
 import copy
+import filecmp
 import json
 import logging
 import os
 import platform
+import shutil
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
+
+from filelock import FileLock, Timeout as FileLockTimeout
 
 from .workspace_migrations import (
     WORKSPACE_VERSION,
@@ -32,6 +37,12 @@ from .workspace_migrations import (
 logger = logging.getLogger("flinttrade.core.workspace")
 
 _DEFAULT_CONFIG: dict[str, Any] = default_workspace_config()
+_LEGACY_FAST_DATA_PATH = "~/.flinttrade/data"
+_LEGACY_ARCHIVE_PATH = "~/.flinttrade/archive"
+
+
+class WorkspaceStateMigrationError(RuntimeError):
+    """Legacy operator state could not be preserved in the platform workspace."""
 
 
 def _default_home() -> Path:
@@ -83,6 +94,298 @@ def workspace_dir() -> Path:
     return p
 
 
+def duckdb_path() -> Path:
+    """Resolve the shared DuckDB file from one cross-platform source of truth.
+
+    ``DUCKDB_PATH`` remains an explicit server/test override. Desktop and normal
+    runtime callers otherwise follow the workspace's configured fast-data
+    directory instead of rebuilding a Linux-only ``~/.flinttrade`` fallback.
+    """
+    override = os.environ.get("DUCKDB_PATH")
+    if override:
+        return Path(override).expanduser()
+    workspace = Workspace()
+    target = workspace.fast_data_dir / "flint.duckdb"
+    if _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
+        _migrate_legacy_duckdb(_legacy_duckdb_path(), target)
+    return target
+
+
+def _legacy_duckdb_path() -> Path:
+    """Return the pre-platform-workspace shared DuckDB location."""
+    return _legacy_fast_data_dir() / "flint.duckdb"
+
+
+def _migrate_legacy_duckdb(legacy: Path, target: Path) -> None:
+    """Copy a legacy shared DuckDB and WAL once, retaining the originals."""
+    _copy_legacy_database_once(
+        legacy,
+        target,
+        sidecar_suffixes=(".wal",),
+        lock_name=".duckdb-migration.lock",
+        label="shared DuckDB",
+    )
+
+
+def sandbox_state_path() -> Path:
+    """Resolve the canonical Practice SQLite database and preserve old state."""
+    override = os.environ.get("SANDBOX_STATE_PATH") or os.environ.get("SANDBOX_DB_PATH")
+    if override:
+        return Path(override).expanduser()
+    target = (Workspace().workspace_dir / "sandbox" / "state.sqlite").resolve()
+    if not os.environ.get("FLINTTRADE_HOME") and not os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
+        _copy_legacy_database_once(
+            _legacy_sandbox_state_path(),
+            target,
+            sidecar_suffixes=("-wal", "-journal"),
+            lock_name=".sandbox-state-migration.lock",
+            label="Practice SQLite database",
+        )
+    return target
+
+
+def _legacy_sandbox_state_path() -> Path:
+    """Return the pre-platform-workspace Practice SQLite location."""
+    return Path.home() / ".flinttrade" / "sandbox" / "state.sqlite"
+
+
+def historify_queue_path() -> Path:
+    """Resolve the durable Historify queue and preserve its SQLite state."""
+    override = os.environ.get("HISTORIFY_QUEUE_DB")
+    if override:
+        return Path(override).expanduser()
+    workspace = Workspace()
+    target = workspace.fast_data_dir / "historify_queue.db"
+    if _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
+        _copy_legacy_database_once(
+            _legacy_fast_data_dir() / "historify_queue.db",
+            target,
+            sidecar_suffixes=("-wal", "-journal"),
+            lock_name=".historify-queue-migration.lock",
+            label="Historify queue",
+        )
+    return target
+
+
+def ditto_accounts_path() -> Path:
+    """Resolve Ditto metadata and migrate its adjacent canonical vault together."""
+    override = os.environ.get("DATA_DIR")
+    if override:
+        return Path(override).expanduser() / "ditto_accounts.sqlite"
+    workspace = Workspace()
+    target = workspace.fast_data_dir / "ditto_accounts.sqlite"
+    if _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
+        _migrate_legacy_ditto_state(_legacy_fast_data_dir(), target.parent)
+    return target
+
+
+def audit_log_dir() -> Path:
+    """Resolve the append-only audit chain directory without forking old state."""
+    override = os.environ.get("AUDIT_LOG_DIR")
+    if override:
+        return Path(override).expanduser()
+    workspace = Workspace()
+    target = workspace.archive_dir / "audit"
+    if _uses_implicit_default_storage(workspace, "storage.archive", _LEGACY_ARCHIVE_PATH):
+        _copy_legacy_directory_once(
+            _legacy_archive_dir() / "audit",
+            target,
+            lock_name=".audit-directory-migration.lock",
+            label="audit chain",
+            excluded_names=frozenset({".audit-chain.lock"}),
+            source_lock_name=".audit-chain.lock",
+            conflict_is_error=True,
+        )
+    return target
+
+
+def bhavcopy_dir() -> Path:
+    """Resolve local bhavcopy archives and copy the legacy cache once."""
+    workspace = Workspace()
+    target = workspace.fast_data_dir / "bhavcopy"
+    if _uses_implicit_default_storage(workspace, "storage.fast", _LEGACY_FAST_DATA_PATH):
+        _copy_legacy_directory_once(
+            _legacy_fast_data_dir() / "bhavcopy",
+            target,
+            lock_name=".bhavcopy-directory-migration.lock",
+            label="bhavcopy archive",
+        )
+    return target
+
+
+def _legacy_fast_data_dir() -> Path:
+    return Path.home() / ".flinttrade" / "data"
+
+
+def _legacy_archive_dir() -> Path:
+    return Path.home() / ".flinttrade" / "archive"
+
+
+def _uses_implicit_default_storage(workspace: Workspace, key: str, default: str) -> bool:
+    return (
+        workspace.get(key, default) == default
+        and not os.environ.get("FLINTTRADE_HOME")
+        and not os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    )
+
+
+def _migrate_legacy_ditto_state(legacy_dir: Path, target_dir: Path) -> None:
+    legacy_accounts = legacy_dir / "ditto_accounts.sqlite"
+    target_accounts = target_dir / "ditto_accounts.sqlite"
+    if target_accounts.exists() or not legacy_accounts.exists():
+        return
+
+    legacy_vault = legacy_dir / "ditto_credentials.db"
+    target_vault = target_dir / "ditto_credentials.db"
+    if target_vault.exists():
+        if not legacy_vault.exists() or not filecmp.cmp(legacy_vault, target_vault, shallow=False):
+            raise WorkspaceStateMigrationError(
+                "Ditto migration found an unmatched target credential vault; both states were preserved"
+            )
+    elif legacy_vault.exists():
+        _copy_legacy_database_once(
+            legacy_vault,
+            target_vault,
+            sidecar_suffixes=("-wal", "-journal"),
+            lock_name=".ditto-state-migration.lock",
+            label="Ditto credential vault",
+        )
+
+    _copy_legacy_database_once(
+        legacy_accounts,
+        target_accounts,
+        sidecar_suffixes=("-wal", "-journal"),
+        lock_name=".ditto-state-migration.lock",
+        label="Ditto account metadata",
+    )
+
+
+def _copy_legacy_database_once(
+    legacy: Path,
+    target: Path,
+    *,
+    sidecar_suffixes: tuple[str, ...],
+    lock_name: str,
+    label: str,
+) -> None:
+    """Copy one legacy database family atomically enough for first-open use."""
+    candidate = target.with_name(f".{target.name}.migrating")
+    sidecars = tuple(
+        (
+            Path(f"{legacy}{suffix}"),
+            Path(f"{target}{suffix}"),
+            Path(f"{candidate}{suffix}"),
+        )
+        for suffix in sidecar_suffixes
+    )
+    try:
+        if target.exists() or not legacy.exists() or legacy.resolve() == target.resolve():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(target.parent.parent / lock_name, timeout=10, mode=0o600)
+        with lock.acquire():
+            if target.exists() or not legacy.exists():
+                return
+            candidate.unlink(missing_ok=True)
+            for _source, _destination, staged in sidecars:
+                staged.unlink(missing_ok=True)
+            shutil.copy2(legacy, candidate)
+            candidate.chmod(0o600)
+            for source, _destination, staged in sidecars:
+                if source.exists():
+                    shutil.copy2(source, staged)
+                    staged.chmod(0o600)
+            if target.exists():
+                return
+            for _source, destination, staged in sidecars:
+                if staged.exists():
+                    staged.replace(destination)
+            candidate.replace(target)
+            logger.info("Migrated legacy %s from %s to %s", label, legacy, target)
+    except (FileLockTimeout, OSError) as exc:
+        logger.error("Could not migrate legacy %s %s -> %s: %s", label, legacy, target, exc)
+        raise WorkspaceStateMigrationError(
+            f"Could not preserve legacy {label}; source retained at {legacy}"
+        ) from exc
+    finally:
+        _remove_staged_file(candidate)
+        for _source, _destination, staged in sidecars:
+            _remove_staged_file(staged)
+
+
+def _copy_legacy_directory_once(
+    legacy: Path,
+    target: Path,
+    *,
+    lock_name: str,
+    label: str,
+    excluded_names: frozenset[str] = frozenset(),
+    source_lock_name: str | None = None,
+    conflict_is_error: bool = False,
+) -> None:
+    """Copy one legacy directory under migration and optional source locks."""
+    if not legacy.is_dir() or legacy.resolve() == target.resolve():
+        return
+    legacy_entries = _meaningful_directory_entries(legacy, excluded_names)
+    if not legacy_entries:
+        return
+    if target.exists() and _meaningful_directory_entries(target, excluded_names):
+        if conflict_is_error:
+            raise WorkspaceStateMigrationError(
+                f"Legacy and workspace {label} directories both contain state; both were preserved"
+            )
+        return
+
+    candidate = target.with_name(f".{target.name}.migrating")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        migration_lock = FileLock(target.parent.parent / lock_name, timeout=10, mode=0o600)
+        with ExitStack() as stack:
+            stack.enter_context(migration_lock.acquire())
+            if source_lock_name is not None:
+                source_lock = FileLock(legacy / source_lock_name, timeout=10, mode=0o600)
+                stack.enter_context(source_lock.acquire())
+            if target.exists() and _meaningful_directory_entries(target, excluded_names):
+                if conflict_is_error:
+                    raise WorkspaceStateMigrationError(
+                        f"Legacy and workspace {label} directories both contain state; both were preserved"
+                    )
+                return
+            shutil.rmtree(candidate, ignore_errors=True)
+            shutil.copytree(
+                legacy,
+                candidate,
+                ignore=lambda _directory, names: [name for name in names if name in excluded_names],
+            )
+            candidate.chmod(0o700)
+            if target.exists():
+                target.rmdir()
+            candidate.replace(target)
+            logger.info("Migrated legacy %s from %s to %s", label, legacy, target)
+    except WorkspaceStateMigrationError:
+        raise
+    except (FileLockTimeout, OSError) as exc:
+        logger.error("Could not migrate legacy %s %s -> %s: %s", label, legacy, target, exc)
+        raise WorkspaceStateMigrationError(
+            f"Could not preserve legacy {label}; source retained at {legacy}"
+        ) from exc
+    finally:
+        shutil.rmtree(candidate, ignore_errors=True)
+
+
+def _meaningful_directory_entries(path: Path, excluded_names: frozenset[str]) -> list[Path]:
+    if not path.is_dir():
+        return []
+    return [entry for entry in path.iterdir() if entry.name not in excluded_names]
+
+
+def _remove_staged_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not remove staged workspace migration file %s", path)
+
+
 def _lock_workspace_perms(p: Path) -> None:
     """Best-effort restrict workspace directory perms to owner-only.
 
@@ -107,11 +410,6 @@ class Workspace:
     """
 
     def __init__(self, home_dir: Path | None = None) -> None:
-        self._uses_explicit_home = bool(
-            home_dir is not None
-            or os.environ.get("FLINTTRADE_HOME")
-            or os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-        )
         if home_dir is not None:
             self._home = home_dir.expanduser().resolve()
         elif os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
@@ -138,16 +436,16 @@ class Workspace:
 
     @property
     def fast_data_dir(self) -> Path:
-        raw = self.get("storage.fast", "~/.flinttrade/data")
-        if self._uses_explicit_home and raw.startswith("~/.flinttrade/"):
-            return (self._home / raw.removeprefix("~/.flinttrade/")).resolve()
+        raw = self.get("storage.fast", _LEGACY_FAST_DATA_PATH)
+        if raw == _LEGACY_FAST_DATA_PATH:
+            return (self._home / "data").resolve()
         return Path(raw).expanduser().resolve()
 
     @property
     def archive_dir(self) -> Path:
-        raw = self.get("storage.archive", "~/.flinttrade/archive")
-        if self._uses_explicit_home and raw.startswith("~/.flinttrade/"):
-            return (self._home / raw.removeprefix("~/.flinttrade/")).resolve()
+        raw = self.get("storage.archive", _LEGACY_ARCHIVE_PATH)
+        if raw == _LEGACY_ARCHIVE_PATH:
+            return (self._home / "archive").resolve()
         return Path(raw).expanduser().resolve()
 
     @property

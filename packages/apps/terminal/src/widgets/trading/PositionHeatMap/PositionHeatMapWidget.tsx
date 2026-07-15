@@ -39,6 +39,7 @@ import {
 import { useModeStore } from "@/stores/modeStore";
 import { usePositions } from "@/hooks/usePositions";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { divergingColourScaleRange } from "@/lib/colourScale";
 import type { Position } from "@/types/api";
@@ -282,9 +283,10 @@ function PositionHeatMapWidget(_props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
   const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = resolveAccountReadsEnabled(mode, isBrokerConnected);
 
   const { data: positionsData, isError, error, refetch, isFetching } = usePositions({
-    enabled: isBrokerConnected && !isExplore,
+    enabled: accountReadsEnabled,
   });
   const trackBehavior = useTrackBehavior();
 
@@ -483,7 +485,7 @@ function PositionHeatMapWidget(_props: WidgetProps) {
               {fmtPnl(totalPnl)}
             </span>
           )}
-          {!isExplore && !isBrokerConnected && (
+          {!isExplore && !accountReadsEnabled && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
@@ -532,10 +534,10 @@ function PositionHeatMapWidget(_props: WidgetProps) {
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
             <SquareStack size={28} className="text-text-disabled" />
             <span className="text-sm">
-              {isExplore || isBrokerConnected ? "No positions" : "Connect a broker to load positions"}
+              {isExplore || accountReadsEnabled ? "No positions" : "Connect a broker to load positions"}
             </span>
             <span className="text-xxs text-text-disabled">
-              {isExplore || isBrokerConnected ? "Open positions will appear here" : "Live positions require a broker session"}
+              {isExplore || accountReadsEnabled ? "Open positions will appear here" : "Live positions require a broker session"}
             </span>
           </div>
         ) : (

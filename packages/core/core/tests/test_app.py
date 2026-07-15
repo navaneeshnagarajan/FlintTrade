@@ -78,6 +78,18 @@ def _make_bars(n: int = 100) -> list[dict[str, float | int]]:
     return bars
 
 
+def test_practice_uses_one_engine_and_one_route_surface(client: Any) -> None:
+    """The retired DuckDB engine and both proxy prefixes stay unregistered."""
+    app = client.application
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+
+    assert "DATA_SANDBOX_ENGINE" in app.config
+    assert "SANDBOX_ENGINE" not in app.config
+    assert "/v1/sandbox/config" in rules
+    assert not any(rule.startswith("/v1/sandbox-config") for rule in rules)
+    assert "/api/v1/sandbox/config" not in rules
+
+
 # ---------------------------------------------------------------------------
 # Input validation tests
 # ---------------------------------------------------------------------------

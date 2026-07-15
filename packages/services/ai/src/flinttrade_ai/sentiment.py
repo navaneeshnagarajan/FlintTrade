@@ -710,7 +710,7 @@ class IndexSignal(StrEnum):
 
 #: JSON schema for AI-generated structured market sentiment.
 #: The ``type: "json_schema"`` envelope follows the OpenAI-compatible
-#: structured-output convention used by LM Studio, Groq, OpenAI, etc.
+#: structured-output convention used by Ollama, Groq, OpenAI, etc.
 MARKET_SUMMARY_SCHEMA: dict[str, Any] = {
     "type": "json_schema",
     "json_schema": {
@@ -1007,7 +1007,7 @@ Return ONLY the JSON object — no prose, no markdown fences.\
 """
 
 # Explicit field skeleton embedded in the prompt. Without response_format (which
-# reasoning models on LM Studio do not honour — they return empty content),
+# some reasoning models do not honour and return empty content),
 # naming the exact keys is the only way to stop the model inventing its own
 # structure (e.g. "flows"/"analyst_summary"). Keep these keys in sync with
 # MARKET_SUMMARY_SCHEMA — a test walks the schema and asserts every required
@@ -1125,8 +1125,8 @@ def generate_market_summary(
     ]
 
     # Prompt-only structured output. We deliberately do NOT pass
-    # ``MARKET_SUMMARY_SCHEMA`` as ``response_format`` here: LM Studio applies a
-    # json_schema grammar to the visible-content channel, and reasoning models
+    # ``MARKET_SUMMARY_SCHEMA`` as ``response_format`` here: some runtimes apply
+    # a json_schema grammar to the visible-content channel, and reasoning models
     # (Qwen3, DeepSeek-R1, …) then emit their think block and stop without
     # producing the constrained JSON — yielding empty content. The system prompt
     # already constrains the model to return JSON, and the reasoning-aware client

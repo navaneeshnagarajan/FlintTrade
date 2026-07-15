@@ -49,7 +49,7 @@ export function GlobalIndicesTab() {
 
   return (
     <div className="p-4">
-      <DataNotice text="Global indices data requires a market data provider. Showing representative values at close. Live data during market hours requires Settings configuration." />
+      <DataNotice text="Static illustrative values only. This tab is not connected to a live market-data feed." />
 
       <div className="rounded-md border border-border-default overflow-hidden">
         <Table>

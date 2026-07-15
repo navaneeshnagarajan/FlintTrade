@@ -9,9 +9,11 @@
  * Step 5: Risk Limits       — MTM caps, position size, order rate
  * Step 6: Choose Mode       — Explore / Practice / Live (selecting a mode FINISHES setup)
  *
- * Progress — `accountCreated`, TOTP URI, backup codes, persona, connection/trading/risk
- * form values, and `currentStep` — is persisted to **localStorage** under the key
- * `flinttrade:setup-progress` so it survives refresh, tab close, and browser restart.
+ * Non-secret progress — `accountCreated`, persona, connection metadata,
+ * trading/risk form values, and `currentStep` — is persisted to **localStorage**
+ * under the key `flinttrade:setup-progress` so it survives refresh, tab close,
+ * and browser restart. TOTP material, backup codes, and broker credentials stay
+ * in memory only.
  *
  * Progress is cleared ONLY by explicit user action:
  *   (a) selecting a mode on step 6 (Finish setup)
@@ -22,7 +24,7 @@
  * account now exists).
  */
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { safeParse } from "@/lib/safeParse";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useNavigate } from "react-router-dom";
@@ -53,7 +55,11 @@ import { RiskStep, type RiskFormValues } from "@/routes/setup/RiskStep";
 import ModeSelectRoute from "@/routes/ModeSelectRoute";
 import { downgradeMode } from "@/lib/modeAuth";
 import { useModeStore, type AppMode } from "@/stores/modeStore";
-import { useAuthStore } from "@/stores/authStore";
+import {
+  captureAuthSessionFence,
+  isAuthSessionFenceCurrent,
+  useAuthStore,
+} from "@/stores/authStore";
 import { AccountSetupError, setupFlintTradeAccount } from "@/lib/setupAccountApi";
 import { persistSetupChoices } from "@/routes/setup/applySetupChoices";
 
@@ -92,16 +98,13 @@ interface SetupProgress {
 const personaEnum = z.enum(["trader", "investor", "beginner"]);
 const appModeEnum = z.enum(["explore", "practice", "live"]);
 
-const setupProgressSchema = z.object({
+const persistedSetupProgressSchema = z.object({
   accountCreated: z.boolean(),
-  totpUri: z.string(),
-  backupCodes: z.array(z.string()),
   persona: personaEnum.nullable(),
   connection: z
     .object({
       host: z.string().optional(),
       port: z.string().optional(),
-      apiKey: z.string().optional(),
       wsPort: z.string().optional(),
     })
     .nullable(),
@@ -123,7 +126,7 @@ const setupProgressSchema = z.object({
   mode: appModeEnum.nullable(),
   displayName: z.string().optional().default(""),
   currentStep: z.number().int().min(0).max(6),
-}) satisfies z.ZodType<SetupProgress>;
+});
 
 const EMPTY_PROGRESS: SetupProgress = {
   accountCreated: false,
@@ -147,7 +150,21 @@ const EMPTY_PROGRESS: SetupProgress = {
 function loadProgress(): SetupProgress | null {
   try {
     const raw = localStorage.getItem(PROGRESS_KEY);
-    return safeParse(raw, setupProgressSchema) ?? null;
+    const persisted = safeParse(raw, persistedSetupProgressSchema);
+    if (!persisted) return null;
+    const progress: SetupProgress = {
+      ...persisted,
+      // Recovery material and broker credentials are deliberately never
+      // restored from browser storage. Older records are rewritten below so
+      // secrets left by previous versions are removed on first load.
+      totpUri: "",
+      backupCodes: [],
+      connection: persisted.connection
+        ? { ...persisted.connection, apiKey: "" }
+        : null,
+    };
+    saveProgress(progress);
+    return progress;
   } catch {
     return null;
   }
@@ -155,7 +172,22 @@ function loadProgress(): SetupProgress | null {
 
 function saveProgress(progress: SetupProgress): void {
   try {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: progress.accountCreated,
+      persona: progress.persona,
+      connection: progress.connection
+        ? {
+            host: progress.connection.host,
+            port: progress.connection.port,
+            wsPort: progress.connection.wsPort,
+          }
+        : null,
+      trading: progress.trading,
+      risk: progress.risk,
+      mode: progress.mode,
+      displayName: progress.displayName,
+      currentStep: progress.currentStep,
+    }));
   } catch {
     // Storage quota or privacy mode — non-critical, continue in-memory.
   }
@@ -233,7 +265,7 @@ interface AccountSecurityStepProps {
 function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
   const navigate = useNavigate();
   const setLoggedOut = useAuthStore((s) => s.setLoggedOut);
-  const setLoggedIn = useAuthStore((s) => s.setLoggedIn);
+  const setLoggedInIfCurrent = useAuthStore((s) => s.setLoggedInIfCurrent);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -251,6 +283,7 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
   const strength = passwordStrength(watchedPassword);
 
   async function onSubmit(values: AccountFormValues) {
+    const requestFence = captureAuthSessionFence();
     setIsLoading(true);
     setServerError("");
     setAccountExists(false);
@@ -266,12 +299,14 @@ function AccountSecurityStep({ onComplete, onBack }: AccountSecurityStepProps) {
       // D6 session-bound PIN) is authenticated. Without it those steps 401.
       // Fall back to logged-out only if an older backend returned no token.
       if (result.token) {
-        setLoggedIn(result.token, values.username, "");
+        if (!setLoggedInIfCurrent(result.token, values.username, "", requestFence)) return;
       } else {
+        if (!isAuthSessionFenceCurrent(requestFence)) return;
         setLoggedOut();
       }
       onComplete(values, result.totpUri, result.backupCodes);
     } catch (error) {
+      if (!isAuthSessionFenceCurrent(requestFence)) return;
       if (error instanceof AccountSetupError && error.kind === "account-exists") {
         // Account already exists — don't wedge. Route the user to login,
         // which is the only sensible next step. Clear any stale progress
@@ -501,6 +536,7 @@ function TotpDisplay({
   onTotpRegenerated,
   onAccountDeleted,
 }: TotpDisplayProps) {
+  const hasRecoveryMaterial = Boolean(totpUri && backupCodes.length > 0);
   const [phase, setPhase] = useState<"warning" | "qr">("warning");
   const [downloaded, setDownloaded] = useState(false);
   const [qrVisible, setQrVisible] = useState(false);
@@ -692,8 +728,19 @@ function TotpDisplay({
           </p>
         </div>
 
+        {!hasRecoveryMaterial && (
+          <div
+            role="alert"
+            className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-text-secondary"
+          >
+            For security, the QR seed and backup codes were not retained after the page was
+            closed or refreshed. Use <strong className="text-text-primary">Reset 2FA</strong>{" "}
+            below and confirm your password to generate fresh recovery material.
+          </div>
+        )}
+
         <div className="flex justify-end items-center mt-6">
-          <Button onClick={() => setPhase("qr")}>
+          <Button onClick={() => setPhase("qr")} disabled={!hasRecoveryMaterial}>
             I&apos;m ready — show QR code
           </Button>
         </div>
@@ -786,7 +833,7 @@ function TotpDisplay({
         <Button variant="ghost" onClick={handleInternalBack} type="button">
           Back
         </Button>
-        <Button onClick={onConfirmed}>
+        <Button onClick={onConfirmed} disabled={!hasRecoveryMaterial}>
           I have saved my codes — Continue
         </Button>
       </div>
@@ -857,6 +904,10 @@ export default function SetupAccountRoute() {
 
   const [currentStep, setCurrentStep] = useState(() =>
     Math.min(initialProgress.currentStep, TOTAL_STEPS - 1),
+  );
+  const modeSelectionFence = useMemo(
+    () => currentStep === TOTAL_STEPS - 1 ? captureAuthSessionFence() : null,
+    [currentStep],
   );
   const [accountCreated, setAccountCreated] = useState(initialProgress.accountCreated);
   const [totpUri, setTotpUri] = useState(initialProgress.totpUri);
@@ -992,11 +1043,15 @@ export default function SetupAccountRoute() {
       // rejected 403 mode_blocked — the setup-wizard half of the Phase 1 G1
       // divergence (LoginRoute already reconciles the login-time half).
       try {
+        const authState = useAuthStore.getState();
         const practiceToken = await downgradeMode(
           "practice",
-          useAuthStore.getState().token,
+          authState.token,
         );
-        useAuthStore.getState().updateToken(practiceToken);
+        if (!useAuthStore.getState().updateToken(
+          practiceToken,
+          authState.sessionGeneration,
+        )) return;
       } catch {
         // Do NOT finish setup with a PRACTICE badge over an Explore JWT —
         // surface the failure and let the user retry Practice or pick
@@ -1008,6 +1063,18 @@ export default function SetupAccountRoute() {
         return;
       }
     }
+    if (mode === "live") {
+      if (
+        !liveSessionToken ||
+        !modeSelectionFence ||
+        !useAuthStore.getState().setLoggedInIfCurrent(
+          liveSessionToken,
+          displayName || "Trader",
+          "",
+          modeSelectionFence,
+        )
+      ) return;
+    }
     setMode(mode);
     const landingRoute = persistSetupChoices({
       persona: persona ?? "trader",
@@ -1017,8 +1084,7 @@ export default function SetupAccountRoute() {
       name: displayName || "Trader",
       interests: [],
     });
-    if (mode === "live" && liveSessionToken) {
-      useAuthStore.getState().setLoggedIn(liveSessionToken, displayName || "Trader", "");
+    if (mode === "live") {
       clearProgress();
       navigate(landingRoute, { replace: true });
       return;

@@ -36,7 +36,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { usePositions } from "@/hooks/usePositions";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useRRGData } from "@/hooks/useRRGData";
+import { useModeStore } from "@/stores/modeStore";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { divergingColourScale } from "@/lib/colourScale";
@@ -110,10 +112,12 @@ function SectorMapWidget(_props: WidgetProps) {
   const [containerSize, setContainerSize] = useState<ContainerSize>({ width: 0, height: 0 });
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [, setSectorData] = useAtom(sectorDataAtom);
+  const mode = useModeStore((state) => state.mode);
   const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = resolveAccountReadsEnabled(mode, isBrokerConnected);
 
-  const { data: positionsData } = usePositions({ enabled: isBrokerConnected });
-  const isSampleSectorData = !positionsData || positionsData.length === 0;
+  const { data: positionsData } = usePositions({ enabled: accountReadsEnabled });
+  const isSampleSectorData = mode === "explore";
 
   // Memoized callback ref for treemap container (adapted from source)
   const setTreemapRef = useCallback((node: HTMLDivElement | null): void => {
@@ -144,7 +148,7 @@ function SectorMapWidget(_props: WidgetProps) {
 
   // Build stock data from positions
   const stockData = useMemo<StockData[]>(() => {
-    if (!positionsData || positionsData.length === 0) {
+    if (isSampleSectorData) {
       return [
         { symbol: "RELIANCE", ltp: 2890, change: 1.2, sector: "Energy" },
         { symbol: "TCS", ltp: 3950, change: -0.4, sector: "IT" },
@@ -165,7 +169,7 @@ function SectorMapWidget(_props: WidgetProps) {
       ];
     }
 
-    return (positionsData as Position[]).map((p) => {
+    return ((positionsData ?? []) as Position[]).map((p) => {
       const ltp = p.ltp ?? 0;
       const avgPrice = p.averagePrice ?? 0;
       const change = avgPrice > 0 ? ((ltp - avgPrice) / avgPrice) * 100 : 0;
@@ -176,7 +180,7 @@ function SectorMapWidget(_props: WidgetProps) {
         sector: getSector(p.symbol),
       };
     });
-  }, [positionsData]);
+  }, [isSampleSectorData, positionsData]);
 
   // Sync atom
   useEffect(() => {

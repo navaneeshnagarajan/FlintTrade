@@ -5,31 +5,63 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks — both stores, so the test can drive the current UI mode
 // ---------------------------------------------------------------------------
 
-// vi.hoisted so the mock factory (hoisted above imports) can build its state
-// object eagerly — the factory now references setLoggedIn at mock time, not
-// lazily inside the selector.
-const { setLoggedIn } = vi.hoisted(() => ({ setLoggedIn: vi.fn() }));
+const { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent } = vi.hoisted(() => {
+  const authState = {
+    status: "pin-required",
+    username: "testuser" as string | null,
+    token: "current-session-jwt" as string | null,
+    reauthToken: "current-session-jwt" as string | null,
+    sessionGeneration: 1,
+  };
+  const captureFence = vi.fn(() => ({
+    status: authState.status,
+    principal: authState.username?.trim() || null,
+    generation: authState.sessionGeneration,
+  }));
+  const fenceIsCurrent = vi.fn((fence: ReturnType<typeof captureFence>) => (
+    fence.status === authState.status &&
+    fence.principal === (authState.username?.trim() || null) &&
+    fence.generation === authState.sessionGeneration
+  ));
+  const setLoggedInIfCurrent = vi.fn(
+    (token: string, username: string, _expiresAt: string, fence: ReturnType<typeof captureFence>) => {
+      if (!fenceIsCurrent(fence)) return false;
+      Object.assign(authState, {
+        status: "logged-in",
+        token,
+        reauthToken: null,
+        username,
+        sessionGeneration: authState.sessionGeneration + 1,
+      });
+      return true;
+    },
+  );
+  return { authState, captureFence, fenceIsCurrent, setLoggedInIfCurrent };
+});
 let currentMode: "explore" | "practice" | "live" = "practice";
 
 vi.mock("@/stores/authStore", () => {
   const state = {
-    username: "testuser",
-    token: "current-session-jwt",
     setLoggedOut: vi.fn(),
-    setLoggedIn,
+    setLoggedInIfCurrent,
   };
   // modeAuth.unlockWithPin reads the session token via getState() — the PIN
   // unlock is session-bound (policy D6), so the mock must expose it.
-  const useAuthStore = (selector: (s: typeof state) => unknown) => selector(state);
-  useAuthStore.getState = () => state;
-  return { useAuthStore };
+  const useAuthStore = (selector: (s: typeof state & typeof authState) => unknown) =>
+    selector({ ...state, ...authState });
+  useAuthStore.getState = () => ({ ...state, ...authState });
+  return {
+    captureAuthSessionFence: captureFence,
+    isAuthSessionFenceCurrent: fenceIsCurrent,
+    useAuthStore,
+  };
 });
 
 vi.mock("@/stores/modeStore", () => ({
@@ -53,7 +85,14 @@ function jsonResponse(body: object, status = 200): Response {
 describe("LockScreen", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    setLoggedIn.mockClear();
+    vi.clearAllMocks();
+    Object.assign(authState, {
+      status: "pin-required",
+      username: "testuser",
+      token: "current-session-jwt",
+      reauthToken: "current-session-jwt",
+      sessionGeneration: 1,
+    });
     currentMode = "practice";
   });
 
@@ -92,7 +131,12 @@ describe("LockScreen", () => {
         body: JSON.stringify({ pin: "123456", mode: "practice" }),
       }),
     );
-    await waitFor(() => expect(setLoggedIn).toHaveBeenCalledWith("practice-jwt", "testuser", ""));
+    await waitFor(() => expect(setLoggedInIfCurrent).toHaveBeenCalledWith(
+      "practice-jwt",
+      "testuser",
+      "",
+      { status: "pin-required", principal: "testuser", generation: 1 },
+    ));
   });
 
   it("sends the live mode when the session was already Live", async () => {
@@ -136,7 +180,7 @@ describe("LockScreen", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(serverMessage);
-    expect(setLoggedIn).not.toHaveBeenCalled();
+    expect(setLoggedInIfCurrent).not.toHaveBeenCalled();
   });
 
   it("falls back to the hardcoded PIN error only when no message is available", async () => {
@@ -151,6 +195,38 @@ describe("LockScreen", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Incorrect PIN. Try again.",
     );
-    expect(setLoggedIn).not.toHaveBeenCalled();
+    expect(setLoggedInIfCurrent).not.toHaveBeenCalled();
+  });
+
+  it("ignores a PIN response after the locked session is terminated", async () => {
+    let finishRequest: ((response: Response) => void) | undefined;
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      }),
+    );
+    render(<LockScreen />);
+    fireEvent.change(screen.getByLabelText(/enter your 6-digit pin/i), {
+      target: { value: "123456" },
+    });
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    Object.assign(authState, {
+      status: "logged-out",
+      username: null,
+      token: null,
+      reauthToken: null,
+      sessionGeneration: 2,
+    });
+
+    await act(async () => {
+      finishRequest?.(jsonResponse({
+        status: "success",
+        data: { token: "late-token", mode: "practice", live_mode_unlocked: false },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(setLoggedInIfCurrent).toHaveReturnedWith(false);
+    expect(authState).toMatchObject({ status: "logged-out", token: null, username: null });
   });
 });

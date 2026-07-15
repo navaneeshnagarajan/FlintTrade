@@ -5,8 +5,8 @@
  *         RiskSection, GeneralSection.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,7 @@ vi.mock("@/hooks/useTestConnection", () => ({
     status: "idle",
     message: "",
     testConnection: vi.fn(),
+    reset: vi.fn(),
   }),
 }));
 
@@ -92,6 +93,9 @@ vi.mock("@/services/ftApi", () => ({
   unbanIP: vi.fn(),
   getSecuritySettings: vi.fn(),
   updateSecuritySettings: vi.fn(),
+  getSafetyConfig: vi.fn(),
+  getSafetyConfigForTarget: vi.fn(),
+  resetDailyPnLState: vi.fn(),
   updateSafetyConfig: vi.fn(),
   getHealth: vi.fn(),
   getTrafficStats: vi.fn(),
@@ -174,7 +178,7 @@ import { ConnectionSection } from "../ConnectionSection";
 import { AppearanceSection } from "../AppearanceSection";
 import { AboutSection } from "../AboutSection";
 import { SecuritySection } from "../SecuritySection";
-import { RiskSection } from "../RiskSection";
+import { RiskSection, buildRiskSafetyConfigUpdate } from "../RiskSection";
 import { GeneralSection } from "../GeneralSection";
 import { TradingSection } from "../TradingSection";
 import { LLMSection } from "../LLMSection";
@@ -187,17 +191,32 @@ import { PracticeSection } from "../PracticeSection";
 import { MonitoringSection } from "../MonitoringSection";
 import { SkillSection } from "../SkillSection";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 // ---------------------------------------------------------------------------
 // 1. ConnectionSection
 // ---------------------------------------------------------------------------
 
 describe("ConnectionSection", () => {
-  function renderConnectionSection() {
+  beforeEach(() => {
+    useConnectionStore.setState(useConnectionStore.getInitialState());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderConnectionSection(onSaved = vi.fn()) {
     return render(
       <ConnectionSection
-        settings={{ host: "http://127.0.0.1:5000", port: "5000", apiKey: "", wsPort: "8765" }}
-        onChange={vi.fn()}
+        settings={{
+          host: "http://127.0.0.1:5000",
+          port: "5000",
+          wsPort: "8765",
+          apiKeyConfigured: true,
+          apiKeyLast4: "-key",
+        }}
+        onSaved={onSaved}
       />,
     );
   }
@@ -206,10 +225,11 @@ describe("ConnectionSection", () => {
     renderConnectionSection();
 
     expect(screen.getByText("Broker Gateway")).toBeInTheDocument();
-    expect(screen.getByLabelText("Broker gateway URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("OpenAlgo-compatible URL")).toBeInTheDocument();
     expect(screen.getByLabelText("REST port")).toBeInTheDocument();
     expect(screen.getByLabelText("WebSocket port")).toBeInTheDocument();
     expect(screen.getByText("Test Connection")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save connection/i })).toBeInTheDocument();
   });
 
   it("suggests OpenAlgo's port 5000 in the gateway URL placeholder, never FlintTrade's 5100", () => {
@@ -217,10 +237,51 @@ describe("ConnectionSection", () => {
     // guarantees a broken connection (item 1).
     renderConnectionSection();
 
-    expect(screen.getByLabelText("Broker gateway URL")).toHaveAttribute(
+    expect(screen.getByLabelText("OpenAlgo-compatible URL")).toHaveAttribute(
       "placeholder",
-      "http://127.0.0.1:5000",
+      "http://localhost:5000",
     );
+  });
+
+  it("keeps edits local and preserves the saved key in one complete save", async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ status: "ok", message: "saved" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    useConnectionStore.setState({ apiKey: "existing-api-key" });
+    const onSaved = vi.fn();
+    renderConnectionSection(onSaved);
+
+    fireEvent.change(screen.getByLabelText("OpenAlgo-compatible URL"), {
+      target: { value: "https://openalgo.local" },
+    });
+    fireEvent.change(screen.getByLabelText("REST port"), {
+      target: { value: "5010" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useConnectionStore.getState().host).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: /save connection/i }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/ft-api/v1/config/openalgo",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          host: "https://openalgo.local",
+          port: "5010",
+          ws_port: "8765",
+        }),
+      }),
+    );
+    expect(useConnectionStore.getState()).toEqual(expect.objectContaining({
+      host: "https://openalgo.local",
+      apiKey: "existing-api-key",
+      wsUrl: "wss://openalgo.local:8765",
+    }));
   });
 
   it("offers a setup wizard entry point that navigates to /setup", () => {
@@ -290,13 +351,33 @@ describe("RiskSection", () => {
     );
 
     expect(screen.getByText("Risk Limits")).toBeInTheDocument();
-    expect(screen.getByLabelText("Maximum position size in lots")).toBeInTheDocument();
-    // Daily-loss thresholds are percentages (L4), not rupee MTM — the backend
-    // safety/config endpoint only enforces pnl_pause_pct / pnl_kill_pct.
-    expect(screen.getByLabelText("Daily loss kill threshold in percent")).toBeInTheDocument();
+    expect(screen.getByLabelText("Position lot reference")).toBeInTheDocument();
+    expect(screen.getByLabelText("MTM stoploss in INR")).toBeInTheDocument();
+    expect(screen.getByLabelText("MTM profit target in INR")).toBeInTheDocument();
+    expect(screen.getByLabelText("Opening risk capital in INR")).toBeInTheDocument();
     expect(screen.getByLabelText("Daily loss pause threshold in percent")).toBeInTheDocument();
-    expect(screen.getByLabelText("Maximum orders per minute")).toBeInTheDocument();
+    expect(screen.getByLabelText("Daily loss hard stop threshold in percent")).toBeInTheDocument();
+    expect(screen.getByLabelText("Order-rate reference per minute")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync Backend Daily-Loss Limits" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Freeze" })).toBeDisabled();
+    expect(screen.getByLabelText("Opening risk capital in INR")).toBeDisabled();
   });
+
+  it("builds only the explicit backend daily-loss fields", () => {
+    expect(buildRiskSafetyConfigUpdate(
+      "3",
+      "15",
+    )).toEqual({
+      daily_loss_pause_pct: 3,
+      daily_loss_kill_pct: 15,
+    });
+  });
+
+  it("rejects non-positive or inverted backend daily-loss thresholds", () => {
+    expect(() => buildRiskSafetyConfigUpdate("0", "15")).toThrow(/pause.*positive/i);
+    expect(() => buildRiskSafetyConfigUpdate("3", "3")).toThrow(/hard stop must be greater/i);
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -354,6 +435,7 @@ describe("Section smoke renders (crash guard)", () => {
       <LLMSection
         settings={{ provider: "openai", host: "", apiKey: "", model: "" } as unknown as React.ComponentProps<typeof LLMSection>["settings"]}
         onChange={vi.fn()}
+        onProviderChange={vi.fn().mockResolvedValue(undefined)}
       />,
     );
     expect(container.firstChild).toBeTruthy();

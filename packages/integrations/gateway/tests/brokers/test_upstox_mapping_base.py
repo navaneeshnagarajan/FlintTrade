@@ -199,6 +199,7 @@ def test_from_upstox_depth_uses_full_quote_ladder():
 def test_to_option_chain_dict_flattens_legs_and_greeks():
     oc = to_option_chain_dict("NIFTY", "NSE_INDEX", {"status": "success", "data": [
         {
+            "expiry": "2025-06-26", "underlying_key": "NSE_INDEX|Nifty 50",
             "strike_price": 24000, "underlying_spot_price": 24050,
             "call_options": {
                 "market_data": {"ltp": 120.5, "oi": 30000, "volume": 5000, "bid_price": 120.0, "ask_price": 121.0},
@@ -209,9 +210,120 @@ def test_to_option_chain_dict_flattens_legs_and_greeks():
                 "option_greeks": {"iv": 12.8, "delta": -0.45, "gamma": 0.002, "theta": -7.5, "vega": 6.1},
             },
         },
-    ]})
+    ]}, requested_expiry="2025-06-26", requested_instrument_key="NSE_INDEX|Nifty 50")
     assert oc["underlying"] == "NIFTY" and len(oc["strikes"]) == 1
+    assert oc["exchange"] == "NSE_INDEX"
+    assert oc["expiry"] == "2025-06-26"
+    assert oc["underlying_key"] == "NSE_INDEX|Nifty 50"
+    assert oc["spot_price"] == 24050.0
     s = oc["strikes"][0]
     assert s["strike_price"] == 24000.0
     assert s["ce_ltp"] == 120.5 and s["ce_oi"] == 30000 and s["ce_iv"] == 13.2 and s["ce_delta"] == 0.55
     assert s["pe_ltp"] == 95.0 and s["pe_delta"] == -0.45 and s["pe_bid"] == 94.5
+
+
+def test_to_option_chain_dict_rejects_boolean_spot_provenance():
+    with pytest.raises(UpstoxMappingError, match="spot"):
+        to_option_chain_dict(
+            "NIFTY",
+            "NSE_INDEX",
+            {
+                "status": "success",
+                "data": [{
+                    "expiry": "2025-06-26",
+                    "underlying_key": "NSE_INDEX|Nifty 50",
+                    "strike_price": 24000,
+                    "underlying_spot_price": True,
+                }],
+            },
+            requested_expiry="2025-06-26",
+            requested_instrument_key="NSE_INDEX|Nifty 50",
+        )
+
+
+@pytest.mark.parametrize("malformed_row", ["bad-row", 7, None, []])
+def test_to_option_chain_dict_rejects_the_whole_payload_on_a_non_object_row(malformed_row):
+    valid_row = {
+        "expiry": "2025-06-26",
+        "underlying_key": "NSE_INDEX|Nifty 50",
+        "strike_price": 24000,
+        "underlying_spot_price": 24050,
+        "call_options": {},
+        "put_options": {},
+    }
+
+    with pytest.raises(UpstoxMappingError, match="option chain source row is not an object"):
+        to_option_chain_dict(
+            "NIFTY",
+            "NSE_INDEX",
+            {"status": "success", "data": [valid_row, malformed_row]},
+            requested_expiry="2025-06-26",
+            requested_instrument_key="NSE_INDEX|Nifty 50",
+        )
+
+
+@pytest.mark.parametrize("status", ["error", "failed", "", None])
+def test_to_option_chain_dict_requires_a_success_envelope(status):
+    with pytest.raises(UpstoxMappingError, match="successful response envelope"):
+        to_option_chain_dict(
+            "NIFTY",
+            "NSE_INDEX",
+            {"status": status, "data": []},
+            requested_expiry="2025-06-26",
+            requested_instrument_key="NSE_INDEX|Nifty 50",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("underlying_key", None, "underlying identity"),
+        ("underlying_key", "BSE_INDEX|SENSEX", "underlying identity"),
+        ("expiry", None, "expiry identity"),
+        ("expiry", "2025-07-03", "expiry identity"),
+        ("underlying_spot_price", None, "spot"),
+        ("underlying_spot_price", float("nan"), "spot"),
+    ],
+)
+def test_to_option_chain_dict_rejects_missing_or_conflicting_row_identity(field, value, message):
+    row = {
+        "expiry": "2025-06-26",
+        "underlying_key": "NSE_INDEX|Nifty 50",
+        "underlying_spot_price": 24050,
+        "strike_price": 24000,
+        "call_options": {},
+        "put_options": {},
+    }
+    if value is None:
+        row.pop(field)
+    else:
+        row[field] = value
+
+    with pytest.raises(UpstoxMappingError, match=message):
+        to_option_chain_dict(
+            "NIFTY",
+            "NSE_INDEX",
+            {"status": "success", "data": [row]},
+            requested_expiry="2025-06-26",
+            requested_instrument_key="NSE_INDEX|Nifty 50",
+        )
+
+
+def test_to_option_chain_dict_rejects_inconsistent_spot_across_rows():
+    row = {
+        "expiry": "2025-06-26",
+        "underlying_key": "NSE_INDEX|Nifty 50",
+        "underlying_spot_price": 24050,
+        "strike_price": 24000,
+        "call_options": {},
+        "put_options": {},
+    }
+
+    with pytest.raises(UpstoxMappingError, match="consistent spot"):
+        to_option_chain_dict(
+            "NIFTY",
+            "NSE_INDEX",
+            {"status": "success", "data": [row, {**row, "strike_price": 24100, "underlying_spot_price": 24051}]},
+            requested_expiry="2025-06-26",
+            requested_instrument_key="NSE_INDEX|Nifty 50",
+        )

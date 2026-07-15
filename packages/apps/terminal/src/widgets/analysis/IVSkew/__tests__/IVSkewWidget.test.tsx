@@ -36,6 +36,7 @@ function liveSmile() {
   return {
     underlying: "NIFTY",
     spot_price: 22400,
+    is_sample_data: false,
     curves: [
       {
         expiry: "10-APR-26",
@@ -73,7 +74,12 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mockConnected.mockReturnValue(false);
-  mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
+  mockGetSmile.mockResolvedValue({
+    underlying: "NIFTY",
+    spot_price: 0,
+    curves: [],
+    is_sample_data: false,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -108,14 +114,31 @@ describe("IVSkewWidget", () => {
     expect(mockGetSmile).toHaveBeenCalled();
   });
 
-  it("falls back to Sample data when connected but the IV smile has no curves", async () => {
+  it("shows unavailable when connected but the IV smile has no curves", async () => {
     mockConnected.mockReturnValue(true);
-    mockGetSmile.mockResolvedValue({ underlying: "NIFTY", spot_price: 0, curves: [] });
+    mockGetSmile.mockResolvedValue({
+      underlying: "NIFTY",
+      spot_price: 0,
+      curves: [],
+      is_sample_data: false,
+    });
     renderWidget();
 
-    await waitFor(() => expect(mockGetSmile).toHaveBeenCalled());
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("IV Skew chart")).not.toBeInTheDocument();
+  });
+
+  it("rejects a connected IV smile explicitly flagged as sample data", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetSmile.mockResolvedValue({ ...liveSmile(), is_sample_data: true });
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("IV Skew chart")).not.toBeInTheDocument();
   });
 
   it("renders ATM IV metric", () => {

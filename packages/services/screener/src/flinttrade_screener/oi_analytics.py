@@ -59,8 +59,8 @@ class OISnapshot(BaseModel):
     strike: float
     ce_oi: int = 0
     pe_oi: int = 0
-    ce_change: int = 0
-    pe_change: int = 0
+    ce_change: int | None = None
+    pe_change: int | None = None
     ce_volume: int = 0
     pe_volume: int = 0
     ce_ltp: float = 0.0
@@ -68,13 +68,13 @@ class OISnapshot(BaseModel):
 
     @computed_field  # type: ignore[misc]
     @property
-    def pcr(self) -> float:
+    def pcr(self) -> float | None:
         """Per-strike Put-Call Ratio (OI-based).
 
         Returns:
-            pe_oi / ce_oi, or 0.0 if ce_oi is zero.
+            pe_oi / ce_oi, or ``None`` when call OI is zero.
         """
-        return self.pe_oi / self.ce_oi if self.ce_oi > 0 else 0.0
+        return self.pe_oi / self.ce_oi if self.ce_oi > 0 else None
 
     @computed_field  # type: ignore[misc]
     @property
@@ -103,9 +103,9 @@ class OIHeatmapEntry(BaseModel):
     pe_oi: int
     ce_oi_pct: float = Field(ge=0.0, le=100.0)
     pe_oi_pct: float = Field(ge=0.0, le=100.0)
-    ce_change: int
-    pe_change: int
-    pcr: float
+    ce_change: int | None
+    pe_change: int | None
+    pcr: float | None
     is_atm: bool = False
 
 
@@ -122,11 +122,11 @@ class OIHeatmapData(BaseModel):
     """
 
     entries: list[OIHeatmapEntry]
-    max_ce_oi_strike: float
-    max_pe_oi_strike: float
+    max_ce_oi_strike: float | None
+    max_pe_oi_strike: float | None
     total_ce_oi: int
     total_pe_oi: int
-    overall_pcr: float
+    overall_pcr: float | None
 
 
 class OIChangeSignal(BaseModel):
@@ -233,10 +233,10 @@ class SupportResistanceLevels(BaseModel):
         secondary_support:   Second-highest PE-OI strike.
     """
 
-    resistance_strike: float
-    resistance_oi: int
-    support_strike: float
-    support_oi: int
+    resistance_strike: float | None
+    resistance_oi: int | None
+    support_strike: float | None
+    support_oi: int | None
     secondary_resistance: float | None = None
     secondary_support: float | None = None
 
@@ -254,7 +254,7 @@ class OITrendEntry(BaseModel):
     session_idx: int
     total_ce_oi: int
     total_pe_oi: int
-    overall_pcr: float
+    overall_pcr: float | None
 
 
 # ---------------------------------------------------------------------------
@@ -296,11 +296,11 @@ class OIAnalytics:
         if not chain:
             return OIHeatmapData(
                 entries=[],
-                max_ce_oi_strike=0.0,
-                max_pe_oi_strike=0.0,
+                max_ce_oi_strike=None,
+                max_pe_oi_strike=None,
                 total_ce_oi=0,
                 total_pe_oi=0,
-                overall_pcr=0.0,
+                overall_pcr=None,
             )
 
         # Select n_strikes centred around spot if given, else top by total OI
@@ -332,14 +332,14 @@ class OIAnalytics:
                 pe_oi_pct=round(s.pe_oi / max_pe * 100.0, 2),
                 ce_change=s.ce_change,
                 pe_change=s.pe_change,
-                pcr=round(s.pcr, 4),
+                pcr=round(s.pcr, 4) if s.pcr is not None else None,
                 is_atm=(atm_strike is not None and s.strike == atm_strike),
             ))
 
         total_ce = sum(s.ce_oi for s in chain)
         total_pe = sum(s.pe_oi for s in chain)
-        max_ce_strike = max(chain, key=lambda s: s.ce_oi).strike
-        max_pe_strike = max(chain, key=lambda s: s.pe_oi).strike
+        max_ce_strike = max(chain, key=lambda s: s.ce_oi).strike if total_ce > 0 else None
+        max_pe_strike = max(chain, key=lambda s: s.pe_oi).strike if total_pe > 0 else None
 
         return OIHeatmapData(
             entries=entries,
@@ -347,7 +347,7 @@ class OIAnalytics:
             max_pe_oi_strike=max_pe_strike,
             total_ce_oi=total_ce,
             total_pe_oi=total_pe,
-            overall_pcr=round(total_pe / total_ce, 4) if total_ce > 0 else 0.0,
+            overall_pcr=round(total_pe / total_ce, 4) if total_ce > 0 else None,
         )
 
     # ------------------------------------------------------------------
@@ -389,6 +389,8 @@ class OIAnalytics:
 
         for s in chain:
             for opt_type, oi_change in (("CE", s.ce_change), ("PE", s.pe_change)):
+                if oi_change is None:
+                    continue
                 label, code = _classify_signal(price_change, oi_change)
                 signals.append(OIChangeSignal(
                     strike=s.strike,
@@ -442,18 +444,20 @@ class OIAnalytics:
         """
         if not chain:
             return SupportResistanceLevels(
-                resistance_strike=0.0, resistance_oi=0,
-                support_strike=0.0, support_oi=0,
+                resistance_strike=None,
+                resistance_oi=None,
+                support_strike=None,
+                support_oi=None,
             )
 
-        ce_sorted = sorted(chain, key=lambda s: s.ce_oi, reverse=True)
-        pe_sorted = sorted(chain, key=lambda s: s.pe_oi, reverse=True)
+        ce_sorted = sorted((snapshot for snapshot in chain if snapshot.ce_oi > 0), key=lambda s: s.ce_oi, reverse=True)
+        pe_sorted = sorted((snapshot for snapshot in chain if snapshot.pe_oi > 0), key=lambda s: s.pe_oi, reverse=True)
 
         return SupportResistanceLevels(
-            resistance_strike=ce_sorted[0].strike,
-            resistance_oi=ce_sorted[0].ce_oi,
-            support_strike=pe_sorted[0].strike,
-            support_oi=pe_sorted[0].pe_oi,
+            resistance_strike=ce_sorted[0].strike if ce_sorted else None,
+            resistance_oi=ce_sorted[0].ce_oi if ce_sorted else None,
+            support_strike=pe_sorted[0].strike if pe_sorted else None,
+            support_oi=pe_sorted[0].pe_oi if pe_sorted else None,
             secondary_resistance=ce_sorted[1].strike if len(ce_sorted) > 1 else None,
             secondary_support=pe_sorted[1].strike if len(pe_sorted) > 1 else None,
         )
@@ -486,8 +490,13 @@ class OIAnalytics:
         # Collect all OI changes
         all_changes: list[tuple[float, str, int, int]] = []
         for s in chain:
-            all_changes.append((s.strike, "CE", s.ce_oi, s.ce_change))
-            all_changes.append((s.strike, "PE", s.pe_oi, s.pe_change))
+            if s.ce_change not in (None, 0):
+                all_changes.append((s.strike, "CE", s.ce_oi, s.ce_change))
+            if s.pe_change not in (None, 0):
+                all_changes.append((s.strike, "PE", s.pe_oi, s.pe_change))
+
+        if not all_changes:
+            return []
 
         change_values = np.array([abs(c[3]) for c in all_changes], dtype=float)
         mean_change = float(np.mean(change_values))
@@ -548,20 +557,20 @@ class OIAnalytics:
         for idx, snap_list in enumerate(recent):
             total_ce = sum(s.ce_oi for s in snap_list)
             total_pe = sum(s.pe_oi for s in snap_list)
-            pcr = total_pe / total_ce if total_ce > 0 else 0.0
+            pcr = total_pe / total_ce if total_ce > 0 else None
             sessions.append(OITrendEntry(
                 session_idx=idx,
                 total_ce_oi=total_ce,
                 total_pe_oi=total_pe,
-                overall_pcr=round(pcr, 4),
+                overall_pcr=round(pcr, 4) if pcr is not None else None,
             ))
 
-        def _trend(values: list[float]) -> str:
-            if len(values) < 2:
+        def _trend(observations: list[tuple[int, float]]) -> str:
+            if len(observations) < 2:
                 return "flat"
-            arr = np.array(values, dtype=float)
+            x = np.array([idx for idx, _value in observations], dtype=float)
+            arr = np.array([value for _idx, value in observations], dtype=float)
             # Simple linear regression slope sign
-            x = np.arange(len(arr), dtype=float)
             slope = float(np.polyfit(x, arr, 1)[0])
             if slope > 0:
                 return "up"
@@ -569,9 +578,13 @@ class OIAnalytics:
                 return "down"
             return "flat"
 
-        ce_values = [float(s.total_ce_oi) for s in sessions]
-        pe_values = [float(s.total_pe_oi) for s in sessions]
-        pcr_values = [s.overall_pcr for s in sessions]
+        ce_values = [(s.session_idx, float(s.total_ce_oi)) for s in sessions]
+        pe_values = [(s.session_idx, float(s.total_pe_oi)) for s in sessions]
+        pcr_values = [
+            (s.session_idx, s.overall_pcr)
+            for s in sessions
+            if s.overall_pcr is not None
+        ]
 
         return {
             "sessions": [s.model_dump() for s in sessions],

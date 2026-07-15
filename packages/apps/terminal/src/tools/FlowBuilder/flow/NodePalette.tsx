@@ -15,7 +15,7 @@ import { NODE_CATEGORIES } from "./nodeRegistry";
 
 export const DRAG_MIME = "application/flinttrade-node";
 
-export function setDragNodeType(e: DragEvent<HTMLDivElement>, type: string): void {
+export function setDragNodeType(e: DragEvent<HTMLElement>, type: string): void {
   e.dataTransfer.setData(DRAG_MIME, type);
   e.dataTransfer.effectAllowed = "copy";
 }
@@ -24,7 +24,11 @@ export function setDragNodeType(e: DragEvent<HTMLDivElement>, type: string): voi
 // Component
 // ---------------------------------------------------------------------------
 
-export function NodePalette() {
+interface NodePaletteProps {
+  onAddNode: (type: string) => void;
+}
+
+export function NodePalette({ onAddNode }: NodePaletteProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["triggers", "actions"]));
   const [search, setSearch] = useState("");
 
@@ -72,6 +76,7 @@ export function NodePalette() {
           Node Palette
         </div>
         <input
+          aria-label="Search nodes"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search nodes…"
@@ -132,10 +137,12 @@ export function NodePalette() {
             {expanded.has(cat.id) && (
               <div style={{ padding: "4px 6px", display: "flex", flexDirection: "column", gap: 2 }}>
                 {cat.nodes.map((node) => (
-                  <div
+                  <button
                     key={node.type}
+                    type="button"
                     draggable
                     onDragStart={(e) => setDragNodeType(e, node.type)}
+                    onClick={() => onAddNode(node.type)}
                     title={node.description}
                     style={{
                       padding: "4px 6px",
@@ -144,15 +151,17 @@ export function NodePalette() {
                       border: "1px solid var(--color-border)",
                       cursor: "grab",
                       display: "flex",
+                      width: "100%",
                       alignItems: "center",
                       gap: 5,
+                      textAlign: "left",
                       transition: "border-color 0.1s",
                     }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.borderColor = cat.color;
+                      e.currentTarget.style.borderColor = cat.color;
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.borderColor = "var(--color-border)";
+                      e.currentTarget.style.borderColor = "var(--color-border)";
                     }}
                   >
                     <div
@@ -175,7 +184,7 @@ export function NodePalette() {
                     >
                       {node.label}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}

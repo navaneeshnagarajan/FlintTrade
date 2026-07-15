@@ -34,4 +34,12 @@ describe("widgetFactory catalogue wiring", () => {
       .filter((icon) => !(icon in ICON_MAP));
     expect(missing).toEqual([]);
   });
+
+  it("describes Spread View as a vertical options spread calculator", () => {
+    const spreadView = widgetCatalog.find((widget) => widget.id === "spreadview");
+
+    expect(spreadView?.description).toBe(
+      "Vertical options spread calculator with illustrative expiry payoff and risk metrics",
+    );
+  });
 });

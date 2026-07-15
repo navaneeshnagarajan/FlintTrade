@@ -90,7 +90,7 @@ def test_historical_chain_ok(client):
     body = resp.get_json()
     assert body["status"] == "success"
     assert body["data"]["symbol"] == "NIFTY"
-    assert body["data"]["expiry"] == "260327"
+    assert body["data"]["expiry"] == "2026-03-27"
     assert isinstance(body["data"]["chain"], list)
     assert body["data"]["chain"][0]["strike"] == 22000
 
@@ -115,7 +115,7 @@ def test_capture_historical_chain_ok(client):
     assert body["status"] == "success"
     assert body["data"] == {
         "symbol": "NIFTY",
-        "expiry": "260327",
+        "expiry": "2026-03-27",
         "exchange": "NFO",
         "rows_inserted": 2,
         "captured": True,

@@ -25,7 +25,8 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import Callable
+from typing import Any, ContextManager
 
 from flinttrade_core.models import Order
 
@@ -201,11 +202,10 @@ class ChartInkWebhook:
     """ChartInk webhook handler.
 
     Parsing/Order-building is always available. When a safety-gated
-    :class:`~flinttrade_gateway.router.BrokerRouter` is injected (S8/T8), the
-    handler can additionally *place* each scan-derived order through
-    ``gate_order`` -> ``BrokerRouter.place_order`` — i.e. account-bound HMAC +
-    actor ACL + one-shot SafetyContext — instead of leaving placement to a
-    caller. ChartInk is an EXTERNAL signal source, so the minted
+    :class:`~flinttrade_gateway.router.BrokerRouter` and a complete portfolio
+    admission callback are injected, the handler can additionally *place* each
+    scan-derived order through ``SafetySystem.check_order`` -> ``gate_order`` ->
+    ``BrokerRouter.place_order``. ChartInk is an EXTERNAL signal source, so the minted
     :class:`RequestContext` carries ``actor_type='external_intent'`` and
     ``intent_source='chartink'``; ``gate_order`` is invoked with the same
     metadata so a mismatch is rejected (Identity-Trust H11).
@@ -219,7 +219,12 @@ class ChartInkWebhook:
 
     Usage (gated placement — additive)::
 
-        ci = ChartInkWebhook(config=cfg, broker_router=router, actor_id="external_intent:chartink")
+        ci = ChartInkWebhook(
+            config=cfg,
+            broker_router=router,
+            admit_order=admit_order,
+            actor_id="external_intent:chartink",
+        )
         result = ci.handle(request_body)
         placements = ci.place_orders(result, nonce=webhook_nonce)
     """
@@ -229,6 +234,7 @@ class ChartInkWebhook:
         config: ChartInkConfig | None = None,
         *,
         broker_router: Any | None = None,
+        admit_order: Callable[[Order, str, str], ContextManager[tuple[Any, list[Any]]]] | None = None,
         actor_id: str | None = None,
     ) -> None:
         self.config = config or ChartInkConfig()
@@ -236,6 +242,10 @@ class ChartInkWebhook:
         # are dispatched through the gate; otherwise placement is left to the
         # caller (existing behaviour — parse + to_orders only).
         self._broker_router = broker_router
+        # The embedding runtime owns portfolio reads and SafetySystem policy.
+        # Keeping admission injected avoids importing a Flask app into this
+        # parser package while making a router-only write impossible.
+        self._admit_order = admit_order
         # ``actor_id`` must be authorised in workspace.json brokers.account_acls
         # for ``openalgo:<account_id>``. Defaults to the canonical external-intent
         # principal for ChartInk.
@@ -276,9 +286,9 @@ class ChartInkWebhook:
     ) -> list[ChartInkPlacementResult]:
         """Place every scan-derived order through the safety-gated router.
 
-        Requires a ``broker_router`` to have been injected at construction; with
-        none, this raises :class:`RuntimeError` (call :meth:`to_orders` instead,
-        the unchanged caller-places path). Each order is bound to the
+        Requires both a ``broker_router`` and a complete ``admit_order`` callback
+        to have been injected at construction. With either absent, this raises
+        :class:`RuntimeError` (call :meth:`to_orders` instead). Each order is bound to the
         ``openalgo:<account_id>`` selector and gated as an EXTERNAL intent.
 
         Args:
@@ -298,6 +308,11 @@ class ChartInkWebhook:
             raise RuntimeError(
                 "ChartInkWebhook.place_orders requires a broker_router; none was "
                 "injected. Use to_orders() for the caller-places path."
+            )
+        if self._admit_order is None:
+            raise RuntimeError(
+                "ChartInkWebhook.place_orders requires an admit_order callback; "
+                "a broker_router alone cannot prove complete portfolio safety."
             )
         if not result.is_valid:
             return []
@@ -359,23 +374,29 @@ class ChartInkWebhook:
         )
 
         try:
-            safety_ctx = gate_order(
-                order,
-                request_ctx,
-                adapter_id="openalgo",
-                account_id=account_id,
-                actor_type="external_intent",
-                intent_source="chartink",
-                external_nonce=nonce,
-            )
-            broker_order_id = asyncio.run(
-                self._broker_router.place_order(
+            # Admission owns the selector lock and exposure reservation through
+            # broker acknowledgement; a callback that merely returns cannot
+            # close the snapshot-to-dispatch race.
+            with self._admit_order(order, "openalgo", account_id) as (lease, positions):
+                safety_ctx = gate_order(
+                    order,
                     request_ctx,
-                    order=order,
-                    safety_ctx=safety_ctx,
-                    hint=RoutingHint(adapter_id="openalgo", account_id=account_id),
+                    adapter_id="openalgo",
+                    account_id=account_id,
+                    actor_type="external_intent",
+                    intent_source="chartink",
+                    external_nonce=nonce,
                 )
-            )
+                reservation = lease.reserve(order, positions)
+                broker_order_id = asyncio.run(
+                    self._broker_router.place_order(
+                        request_ctx,
+                        order=order,
+                        safety_ctx=safety_ctx,
+                        hint=RoutingHint(adapter_id="openalgo", account_id=account_id),
+                    )
+                )
+                lease.acknowledge(reservation, broker_order_id)
             result.success = True
             result.broker_order_id = str(broker_order_id or "")
         except (SafetyBypassError, BrokerError) as exc:

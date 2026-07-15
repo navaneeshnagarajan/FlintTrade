@@ -42,8 +42,8 @@ def test_resolve_backend_port_ignores_non_integer_env(monkeypatch: pytest.Monkey
 @pytest.mark.unit
 def test_flinttrade_app_start_uses_resolved_backend_port() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    start = _find_method(tree, "FlintTradeApp", "start")
-    assert start is not None, "FlintTradeApp.start not found in app.py"
+    start = _find_method(tree, "FlintTradeApp", "_start_owned")
+    assert start is not None, "FlintTradeApp._start_owned not found in app.py"
 
     server_calls = [
         node
@@ -52,7 +52,7 @@ def test_flinttrade_app_start_uses_resolved_backend_port() -> None:
         and isinstance(node.func, ast.Name)
         and node.func.id == "_run_flask_server"
     ]
-    assert server_calls, "FlintTradeApp.start() must call _run_flask_server"
+    assert server_calls, "FlintTradeApp._start_owned() must call _run_flask_server"
     assert any(
         keyword.arg == "port"
         and isinstance(keyword.value, ast.Call)
@@ -61,6 +61,6 @@ def test_flinttrade_app_start_uses_resolved_backend_port() -> None:
         for call in server_calls
         for keyword in call.keywords
     ), (
-        "FlintTradeApp.start() must pass port=_resolve_backend_port() so "
+        "FlintTradeApp._start_owned() must pass port=_resolve_backend_port() so "
         "FLINTTRADE_BACKEND_PORT matches the Makefile runtime contract."
     )

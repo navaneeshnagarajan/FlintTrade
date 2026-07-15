@@ -13,19 +13,17 @@
  *   amber  → approaching limits (usage 70–90%)
  *   red    → breached or critical (usage ≥ 90%)
  *
- * Uses sample data when disconnected; live data from hooks when connected.
+ * Uses labelled sample data in Explore, sandbox data in Practice, and broker data in Live.
  */
 
 import { useMemo, useEffect, memo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { FlintRadialGauge } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { getPositionbook, getFunds } from "@/services/api";
-import { queryKeys } from "@/services/queryKeys";
-import { isMarketHours } from "@/lib/market";
+import { useDataScope } from "@/hooks/useDataScope";
+import { useFunds } from "@/hooks/useFunds";
+import { usePositions } from "@/hooks/usePositions";
 import type { Position, Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -259,32 +257,26 @@ function StatusBanner({ level, timestamp }: { level: TrafficLight; timestamp: st
 
 function RiskDashboardWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
+  const dataScope = useDataScope();
+  const isExplore = dataScope === "explore:mock";
+  const isPractice = dataScope.startsWith("practice:");
+  const hasAccountSource = dataScope !== "live:unconfigured";
+  const shouldReadAccountData = hasAccountSource && !isExplore;
 
   useEffect(() => {
     track("trade", "widget_view_risk_dashboard");
   }, [track]);
 
-  // Connected → real risk from the positionbook + funds; disconnected → labelled
-  // sample data. Never show fabricated risk metrics to a live user.
-  const { data: livePositions } = useQuery<Position[]>({
-    queryKey: queryKeys.positions.all,
-    queryFn: getPositionbook,
-    enabled: isConnected,
-    staleTime: 3_000,
-    refetchInterval: isConnected ? () => (isMarketHours() ? 5_000 : 60_000) : false,
-  });
-  const { data: liveFunds } = useQuery<Funds>({
-    queryKey: queryKeys.funds.all,
-    queryFn: getFunds,
-    enabled: isConnected,
-    staleTime: 15_000,
-    refetchInterval: isConnected ? 30_000 : false,
-  });
+  const { data: livePositions } = usePositions({ enabled: shouldReadAccountData });
+  const { data: liveFunds } = useFunds({ enabled: shouldReadAccountData });
 
-  const data: RiskDashboardData = useMemo(
-    () => (isConnected ? computeLiveRisk(livePositions ?? [], liveFunds) : SAMPLE_RISK_DATA),
-    [isConnected, livePositions, liveFunds],
+  const data: RiskDashboardData | null = useMemo(
+    () => isExplore
+      ? SAMPLE_RISK_DATA
+      : hasAccountSource
+        ? computeLiveRisk(livePositions ?? [], liveFunds)
+        : null,
+    [hasAccountSource, isExplore, livePositions, liveFunds],
   );
 
   return (
@@ -296,15 +288,21 @@ function RiskDashboardWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <ShieldAlert size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Risk Dashboard</span>
-        {!isConnected && (
+        {(isExplore || isPractice) && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded">
-            Sample
+            {isExplore ? "Sample" : "Practice"}
           </span>
         )}
       </div>
 
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2">
+        {!data ? (
+          <div className="flex h-full items-center justify-center text-center text-xs text-text-muted" role="status">
+            Connect a broker to load risk metrics
+          </div>
+        ) : (
+          <>
 
         {/* Overall status */}
         <StatusBanner level={data.overallLevel} timestamp={data.timestamp} />
@@ -332,11 +330,10 @@ function RiskDashboardWidget() {
         )}
 
         {/* Honest note: greeks-derived metrics aren't wired for live data yet. */}
-        {isConnected && (
+        {!isExplore && (
           <p className="text-xxs text-text-muted px-1 leading-snug">
-            Net delta, net theta and max-loss need a connected option-greeks feed
-            and are not shown live yet — only metrics derived from your real
-            positions and funds appear above.
+            Net delta, net theta and max-loss need an option-greeks feed and are
+            not shown here; only metrics derived from the current account scope appear above.
           </p>
         )}
 
@@ -358,6 +355,8 @@ function RiskDashboardWidget() {
             );
           })}
         </div>
+          </>
+        )}
 
       </div>
     </div>

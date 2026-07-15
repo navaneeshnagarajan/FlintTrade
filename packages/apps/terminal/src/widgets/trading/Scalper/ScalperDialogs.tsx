@@ -160,8 +160,8 @@ export function CloseAllDialog({ open, onOpenChange, onConfirm }: CloseAllDialog
         <AlertDialogHeader>
           <AlertDialogTitle>Close all open positions?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will send a close request for all positions under the FlintScalper
-            strategy. This cannot be undone.
+            This will close every open position in the selected execution account at
+            market. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -193,7 +193,8 @@ export function CancelAllDialog({ open, onOpenChange, onConfirm }: CancelAllDial
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel all pending orders?</AlertDialogTitle>
           <AlertDialogDescription>
-            All pending orders under the FlintScalper strategy will be cancelled.
+            All pending orders for the selected broker account will be cancelled, including orders placed outside
+            FlintScalper.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

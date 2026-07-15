@@ -87,7 +87,7 @@ def test_basket_missing_legs():
     assert resp.status_code == 400
 
 
-def test_basket_ok():
+def test_basket_ok(monkeypatch):
     """201 on successful basket execution."""
     result = _basket_result(success=True)
     ex = MagicMock()
@@ -96,6 +96,13 @@ def test_basket_ok():
     legs = [
         {"symbol": "NIFTY25MAYFUT", "exchange": "NFO", "action": "BUY", "quantity": 50},
     ]
+    admitted: list[object] = []
+
+    def admit(candidate_legs, _adapter_id, *, account_id="default"):
+        admitted.extend(candidate_legs)
+        return None, []
+
+    monkeypatch.setattr(mod, "_check_legs_through_safety", admit)
 
     with _make_app(basket_executor=ex).test_client() as c:
         resp = c.post("/api/v1/orders/basket", json={"legs": legs})
@@ -104,6 +111,33 @@ def test_basket_ok():
     assert resp.get_json()["status"] == "success"
     # The route builds the request principal and passes it to the gated executor.
     assert ex.execute.call_count == 1
+    assert [(leg.symbol, leg.quantity) for leg in admitted] == [("NIFTY25MAYFUT", "50")]
+
+
+def test_basket_cumulative_admission_blocks_before_executor(monkeypatch):
+    """The complete basket is checked as one prospective sequence before leg one."""
+    ex = MagicMock()
+    captured: list[object] = []
+
+    def block(candidate_legs, _adapter_id, *, account_id="default"):
+        captured.extend(candidate_legs)
+        return (mod.jsonify({"status": "error", "message": "blocked"}), 403), []
+
+    monkeypatch.setattr(mod, "_check_legs_through_safety", block)
+    with _make_app(basket_executor=ex).test_client() as c:
+        resp = c.post(
+            "/api/v1/orders/basket",
+            json={
+                "legs": [
+                    {"symbol": "NIFTY30JUL2625000CE", "exchange": "NFO", "action": "BUY", "quantity": 50},
+                    {"symbol": "NIFTY30JUL2625100CE", "exchange": "NFO", "action": "BUY", "quantity": 50},
+                ]
+            },
+        )
+
+    assert resp.status_code == 403
+    assert [leg.quantity for leg in captured] == ["50", "50"]
+    ex.execute.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -130,11 +164,18 @@ def test_split_missing_required():
     assert resp.status_code == 400
 
 
-def test_split_ok():
+def test_split_ok(monkeypatch):
     """201 on successful split execution."""
     result = _split_result(success=True)
     ex = MagicMock()
     ex.execute_split = MagicMock(return_value=result)  # executor is synchronous
+    admitted: list[object] = []
+
+    def admit(candidate_legs, _adapter_id, *, account_id="default"):
+        admitted.extend(candidate_legs)
+        return None, []
+
+    monkeypatch.setattr(mod, "_check_legs_through_safety", admit)
 
     with _make_app(split_executor=ex).test_client() as c:
         resp = c.post(
@@ -150,6 +191,7 @@ def test_split_ok():
 
     assert resp.status_code == 201
     assert ex.execute_split.call_count == 1
+    assert [leg.quantity for leg in admitted] == ["75", "75", "75", "75"]
 
 
 # ---------------------------------------------------------------------------

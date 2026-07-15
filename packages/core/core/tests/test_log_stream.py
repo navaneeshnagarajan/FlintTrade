@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 
 import os
 
@@ -117,6 +118,20 @@ class TestLogBuffer:
         # Should be the 5 most recent
         assert entries[0]["message"] == "msg-15"
         assert entries[-1]["message"] == "msg-19"
+
+    def test_shutdown_wakes_subscribers_immediately(self, log_buffer):
+        from flask import Flask
+
+        from flinttrade_core.log_stream import shutdown_log_streams
+
+        app = Flask("log-stream-shutdown")
+        app.config["LOG_STREAM_SHUTDOWN_EVENT"] = threading.Event()
+        subscriber = log_buffer.subscribe()
+
+        shutdown_log_streams(app)
+
+        assert app.config["LOG_STREAM_SHUTDOWN_EVENT"].is_set()
+        assert subscriber.is_set()
 
     def test_since_returns_new_entries(self, log_buffer):
         """since(cursor) only returns entries with seq > cursor."""

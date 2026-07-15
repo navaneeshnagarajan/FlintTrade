@@ -7,9 +7,9 @@
  *
  * Data sources:
  *   - useFunds()     → margin used / available
- *   - usePositions() → active position count
- *   - useSettingsStore() → riskLimits (maxPositionLots, mtmStoploss, mtmTarget, maxOrdersPerMinute)
- *   - useTradingStore()  → totalPnl, openOrderCount
+ *   - usePositions() → active position count (not lots)
+ *   - useSettingsStore() → local risk reference values
+ *   - useTradingStore()  → totalPnl
  *
  * Visual:
  *   - shadcn Card + custom Tailwind progress bars
@@ -30,7 +30,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import type { WidgetProps } from "@/types/widgets";
@@ -117,6 +117,28 @@ function ProgressRow({
   );
 }
 
+function UnavailableRow({
+  label,
+  detail,
+  icon,
+}: {
+  label: string;
+  detail: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center gap-1.5">
+        <span className="text-text-disabled">{icon}</span>
+        <span className="text-xs text-text-secondary">{label}</span>
+      </div>
+      <span className="max-w-[65%] text-right text-xxs leading-relaxed text-text-disabled">
+        Unavailable: {detail}
+      </span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Summary badge row
 // ---------------------------------------------------------------------------
@@ -161,18 +183,18 @@ function formatINR(n: number): string {
 // Widget
 // ---------------------------------------------------------------------------
 function RiskPanelWidget(_props: WidgetProps) {
-  const isBrokerConnected = useBrokerConnected();
-  const { data: fundsData } = useFunds({ enabled: isBrokerConnected });
-  const { data: positions } = usePositions({ enabled: isBrokerConnected });
+  const accountReadsEnabled = useAccountReadsEnabled();
+  const { data: fundsData } = useFunds({ enabled: accountReadsEnabled });
+  const { data: positions } = usePositions({ enabled: accountReadsEnabled });
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
-  const { totalPnl, openOrderCount } = useTradingStore();
+  const { totalPnl } = useTradingStore();
 
   // Derived values
   const usedMargin = fundsData?.usedMargin ?? 0;
   const availableCash = fundsData?.availableCash ?? 0;
   const totalBalance = fundsData?.totalBalance ?? (usedMargin + availableCash);
 
-  // Position count (each row = 1 lot for simplicity; real lot tracking needs instrument metadata)
+  // A position row is not a lot. Keep the observable count separate from lot limits.
   const positionCount = (positions as Position[] | undefined)?.length ?? 0;
 
   // Daily PnL vs target/stoploss
@@ -182,26 +204,23 @@ function RiskPanelWidget(_props: WidgetProps) {
   // Margin utilisation
   const marginUsagePct = pct(usedMargin, totalBalance);
 
-  // Position lots usage
-  const positionUsagePct = pct(positionCount, riskLimits.maxPositionLots);
-
-  // Order rate (live tracking not available without WS; shows open orders vs max/min as proxy)
-  const orderRatePct = pct(openOrderCount, riskLimits.maxOrdersPerMinute);
-
-  // Overall risk status — highest danger level wins
+  // Overall status covers only metrics this widget actually observes.
   const overallLevel = useMemo<RiskLevel>(() => {
     const levels: RiskLevel[] = [
       riskLevel(marginUsagePct),
-      riskLevel(positionUsagePct),
       riskLevel(pnlVsSl),
     ];
     if (levels.includes("danger")) return "danger";
     if (levels.includes("warning")) return "warning";
     return "safe";
-  }, [marginUsagePct, positionUsagePct, pnlVsSl]);
+  }, [marginUsagePct, pnlVsSl]);
 
   const overallColors = LEVEL_COLORS[overallLevel];
-  const overallLabel = overallLevel === "danger" ? "High Risk" : overallLevel === "warning" ? "Caution" : "Safe";
+  const overallLabel = overallLevel === "danger"
+    ? "Observed danger"
+    : overallLevel === "warning"
+    ? "Observed caution"
+    : "Indicators normal";
 
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base" data-tour-target="risk-panel">
@@ -212,7 +231,7 @@ function RiskPanelWidget(_props: WidgetProps) {
           <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Risk Panel</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {!isBrokerConnected && (
+          {!accountReadsEnabled && (
             <Badge
               variant="outline"
               className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
@@ -245,8 +264,8 @@ function RiskPanelWidget(_props: WidgetProps) {
               />
               <SummaryBadge
                 label="Positions"
-                value={`${positionCount} / ${riskLimits.maxPositionLots}`}
-                color={LEVEL_COLORS[riskLevel(positionUsagePct)].text}
+                value={String(positionCount)}
+                color="text-text-primary"
                 icon={<Layers size={9} />}
               />
             </div>
@@ -264,19 +283,15 @@ function RiskPanelWidget(_props: WidgetProps) {
               icon={<Banknote size={9} />}
             />
 
-            <ProgressRow
-              label="Position Lots"
-              usedLabel={String(positionCount)}
-              maxLabel={String(riskLimits.maxPositionLots)}
-              usagePct={positionUsagePct}
+            <UnavailableRow
+              label="Position lot usage"
+              detail="instrument lot metadata is not loaded"
               icon={<Layers size={9} />}
             />
 
-            <ProgressRow
-              label="Open Orders"
-              usedLabel={String(openOrderCount)}
-              maxLabel={`${riskLimits.maxOrdersPerMinute}/min`}
-              usagePct={orderRatePct}
+            <UnavailableRow
+              label="Order rate"
+              detail="rolling placement events are not tracked"
               icon={<Zap size={9} />}
             />
 
@@ -300,16 +315,16 @@ function RiskPanelWidget(_props: WidgetProps) {
           </CardContent>
         </Card>
 
-        {/* Limits reference */}
+        {/* Local references; these values are not backend or broker enforcement. */}
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-2">
-            <p className="text-xxs text-text-disabled uppercase tracking-wider mb-1.5">Configured Limits</p>
+            <p className="text-xxs text-text-disabled uppercase tracking-wider mb-1.5">Local Reference Values</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
               {[
-                ["Max Lots", riskLimits.maxPositionLots],
+                ["Lot reference", riskLimits.maxPositionLots],
                 ["MTM Target", formatINR(riskLimits.mtmTarget)],
                 ["MTM SL", formatINR(riskLimits.mtmStoploss)],
-                ["Orders/Min", riskLimits.maxOrdersPerMinute],
+                ["Order-rate reference", `${riskLimits.maxOrdersPerMinute}/min`],
               ].map(([label, value]) => (
                 <div key={String(label)} className="flex justify-between">
                   <span className="text-xs text-text-muted">{label}</span>

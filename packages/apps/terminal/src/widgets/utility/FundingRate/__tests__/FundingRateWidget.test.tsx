@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---------------------------------------------------------------------------
@@ -115,9 +115,12 @@ describe("FundingRateWidget", () => {
     });
   });
 
-  it("renders live data table when connected with data", async () => {
+  it("renders an explicitly live response when connected", async () => {
     mockUseBrokerConnected.mockReturnValue(true);
-    mockGetCryptoFundingRates.mockResolvedValue(SAMPLE_FUNDING_RATES);
+    mockGetCryptoFundingRates.mockResolvedValue({
+      ...SAMPLE_FUNDING_RATES,
+      is_sample_data: false,
+    });
 
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -148,11 +151,32 @@ describe("FundingRateWidget", () => {
       expect(screen.queryByText("BTCUSD")).toBeTruthy();
     });
     expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
   });
 
-  it("shows no sample badge when a connected response is not flagged", async () => {
+  it("treats missing connected provenance as sample or unknown", async () => {
     mockUseBrokerConnected.mockReturnValue(true);
-    mockGetCryptoFundingRates.mockResolvedValue(SAMPLE_FUNDING_RATES);
+    mockGetCryptoFundingRates.mockResolvedValue({
+      ...SAMPLE_FUNDING_RATES,
+      updated_at: "2026-07-14T09:30:00.000Z",
+    });
+
+    render(<FundingRateWidget />, { wrapper });
+
+    await waitFor(() => {
+      expect(screen.queryByText("BTCUSD")).toBeTruthy();
+    });
+    expect(screen.getByText("Sample data")).toBeTruthy();
+    expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
+    expect(screen.queryByText(/Updated:/)).toBeNull();
+  });
+
+  it("shows no sample badge only for an explicitly live response", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockGetCryptoFundingRates.mockResolvedValue({
+      ...SAMPLE_FUNDING_RATES,
+      is_sample_data: false,
+    });
 
     render(<FundingRateWidget />, { wrapper });
 
@@ -160,6 +184,7 @@ describe("FundingRateWidget", () => {
       expect(screen.queryByText("BTCUSD")).toBeTruthy();
     });
     expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.getByLabelText("Refresh funding rates")).toBeTruthy();
   });
 
   it("shows summary banner with positive/negative counts", () => {
@@ -210,15 +235,63 @@ describe("FundingRateWidget", () => {
     expect(screen.queryByLabelText("Refresh funding rates")).toBeNull();
   });
 
+  it("does not show a live countdown for local sample rows", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+
+    render(<FundingRateWidget />, { wrapper });
+
+    expect(screen.queryAllByText("7h 30m")).toHaveLength(0);
+  });
+
   it("shows refresh when connected to the live funding endpoint", async () => {
     mockUseBrokerConnected.mockReturnValue(true);
-    mockGetCryptoFundingRates.mockResolvedValue(SAMPLE_FUNDING_RATES);
+    mockGetCryptoFundingRates.mockResolvedValue({
+      ...SAMPLE_FUNDING_RATES,
+      is_sample_data: false,
+    });
 
     render(<FundingRateWidget />, { wrapper });
 
     await waitFor(() => {
       expect(screen.getByLabelText("Refresh funding rates")).toBeTruthy();
     });
+  });
+
+  it("stops automatic polling after a response with missing provenance", async () => {
+    vi.useFakeTimers();
+    mockUseBrokerConnected.mockReturnValue(true);
+
+    let resolveRequest: ((value: typeof SAMPLE_FUNDING_RATES) => void) | undefined;
+    mockGetCryptoFundingRates.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={qc}>
+        <FundingRateWidget />
+      </QueryClientProvider>,
+    );
+
+    try {
+      expect(mockGetCryptoFundingRates).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        resolveRequest?.(SAMPLE_FUNDING_RATES);
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText("BTCUSD")).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(mockGetCryptoFundingRates).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      qc.clear();
+      vi.useRealTimers();
+    }
   });
 
   it("renders sparklines for each row", () => {
@@ -270,19 +343,11 @@ describe("SAMPLE_FUNDING_RATES", () => {
     }
   });
 
-  it("next_funding_ms is in the future", () => {
-    const now = Date.now();
+  it("does not mint module-load timestamps for sample data", () => {
+    expect(SAMPLE_FUNDING_RATES.updated_at).toBeUndefined();
     for (const entry of SAMPLE_FUNDING_RATES.rates) {
-      expect(entry.next_funding_ms).toBeGreaterThan(now - 10_000); // allow 10s clock skew
+      expect(entry.next_funding_ms).toBe(0);
     }
-  });
-
-  it("updated_at is a valid ISO timestamp", () => {
-    // Optional on the response type (backend sample payloads omit it), but
-    // the local widget sample always sets one.
-    const updatedAt = SAMPLE_FUNDING_RATES.updated_at;
-    expect(updatedAt).toBeDefined();
-    expect(new Date(updatedAt ?? "").getTime()).toBeGreaterThan(0);
   });
 
   it("has both positive and negative rate entries", () => {

@@ -296,6 +296,52 @@ class TestStorageManager:
         assert ("idx_ticks_sym_ex_ts_seq",) in indexes
         storage.close()
 
+    def test_tick_constraints_migrate_with_the_legacy_pre_sequence_index(self, tmp_path):
+        import duckdb
+
+        from flinttrade_data.storage import StorageManager
+
+        db_path = tmp_path / "legacy-indexed-ticks.duckdb"
+        existing = duckdb.connect(str(db_path))
+        existing.execute(
+            """CREATE TABLE ticks (
+                ts TIMESTAMP NOT NULL,
+                symbol VARCHAR NOT NULL,
+                exchange VARCHAR NOT NULL,
+                mode VARCHAR NOT NULL,
+                ltp DOUBLE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                volume BIGINT,
+                bid DOUBLE,
+                ask DOUBLE,
+                oi BIGINT,
+                prev_close DOUBLE,
+                depth_json VARCHAR
+            )"""
+        )
+        existing.execute("CREATE INDEX idx_ticks_sym_ex_ts ON ticks (symbol, exchange, ts)")
+        existing.close()
+
+        storage = StorageManager(str(db_path))
+        storage.initialise()
+
+        columns = {
+            row[1]: row
+            for row in storage.connection.execute("PRAGMA table_info('ticks')").fetchall()
+        }
+        indexes = storage.connection.execute(
+            "SELECT index_name FROM duckdb_indexes() WHERE table_name = 'ticks'"
+        ).fetchall()
+
+        assert columns["ingest_seq"][3] is True
+        assert columns["timestamp_provenance"][3] is True
+        assert ("idx_ticks_sym_ex_ts",) not in indexes
+        assert ("idx_ticks_sym_ex_ts_seq",) in indexes
+        storage.close()
+
     def test_insert_and_query_trade(self):
         storage = self._make_storage()
         ts = datetime(2026, 3, 16, 10, 30, 0)
@@ -486,6 +532,21 @@ class TestStorageManager:
 class TestAuditLogger:
     """Test audit logger writes correct JSONL files."""
 
+    @staticmethod
+    def _write_old_chained_file(tmp_path):
+        from flinttrade_data.audit_logger import GENESIS_HASH, AuditLogger
+
+        record = {
+            "ts": "2020-01-01T00:00:00+05:30",
+            "event_type": "OLD_EVENT",
+            "seq": 0,
+            "prev_hash": GENESIS_HASH,
+        }
+        record["hash"] = AuditLogger._record_hash(record)
+        old_file = tmp_path / "audit_2020-01-01.jsonl"
+        old_file.write_text(json.dumps(record) + "\n")
+        return old_file
+
     def test_log_order_placed_creates_file(self, tmp_path):
         from flinttrade_data.audit_logger import AuditLogger
 
@@ -660,6 +721,193 @@ class TestAuditLogger:
         assert not old_file.exists()
         assert (tmp_path / "audit_2020-01-01.jsonl.gz").exists()
 
+    def test_compression_recovers_after_crash_before_atomic_replace(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        old_file = self._write_old_chained_file(tmp_path)
+        gz_path = old_file.with_suffix(".jsonl.gz")
+        real_replace = audit_logger.os.replace
+        crashed = False
+
+        def crash_once(src, dst):
+            nonlocal crashed
+            if not crashed:
+                crashed = True
+                raise SimulatedCrash
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(audit_logger.os, "replace", crash_once)
+        audit = audit_logger.AuditLogger(str(tmp_path))
+
+        with pytest.raises(SimulatedCrash):
+            audit.compress_old_files(older_than_days=1)
+
+        assert old_file.exists()
+        assert not gz_path.exists()
+        temp_files = list(tmp_path.glob("audit_*.tmp"))
+        assert len(temp_files) == 1
+        assert temp_files[0].parent == tmp_path
+
+        assert audit.compress_old_files(older_than_days=1) == 1
+        assert not old_file.exists()
+        assert gz_path.exists()
+        assert list(tmp_path.glob("audit_*.tmp")) == []
+        assert audit.read_day("2020-01-01")[0]["event_type"] == "OLD_EVENT"
+        assert audit.verify_chain()["ok"] is True
+
+    def test_compression_reconciles_crash_after_replace_before_source_unlink(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+
+        class SimulatedCrash(BaseException):
+            pass
+
+        old_file = self._write_old_chained_file(tmp_path)
+        gz_path = old_file.with_suffix(".jsonl.gz")
+        real_unlink = audit_logger.Path.unlink
+        crashed = False
+
+        def crash_once(path, *args, **kwargs):
+            nonlocal crashed
+            if path == old_file and not crashed:
+                crashed = True
+                raise SimulatedCrash
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(audit_logger.Path, "unlink", crash_once)
+        audit = audit_logger.AuditLogger(str(tmp_path))
+
+        with pytest.raises(SimulatedCrash):
+            audit.compress_old_files(older_than_days=1)
+
+        assert old_file.exists()
+        assert gz_path.exists()
+        assert audit.verify_chain() == {
+            "ok": True,
+            "checked": 1,
+            "anchored_at_genesis": True,
+            "break": None,
+        }
+        assert audit.list_audit_files() == ["audit_2020-01-01.jsonl"]
+
+        assert audit.compress_old_files(older_than_days=1) == 1
+        assert not old_file.exists()
+        assert gz_path.exists()
+        assert audit.list_audit_files() == ["audit_2020-01-01.jsonl.gz"]
+        assert audit.read_day("2020-01-01")[0]["event_type"] == "OLD_EVENT"
+
+    def test_compression_durability_order_is_file_replace_dir_unlink_dir(self, tmp_path, monkeypatch):
+        import stat
+
+        from flinttrade_data import audit_logger
+
+        old_file = self._write_old_chained_file(tmp_path)
+        operations = []
+        real_fsync = audit_logger.os.fsync
+        real_replace = audit_logger.os.replace
+        real_unlink = audit_logger.Path.unlink
+
+        def tracking_fsync(fd):
+            kind = "fsync_dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "fsync_file"
+            operations.append(kind)
+            return real_fsync(fd)
+
+        def tracking_replace(src, dst):
+            assert audit_logger.Path(src).parent == old_file.parent
+            assert audit_logger.Path(dst).parent == old_file.parent
+            operations.append("replace")
+            return real_replace(src, dst)
+
+        def tracking_unlink(path, *args, **kwargs):
+            if path == old_file:
+                operations.append("unlink_source")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(audit_logger.os, "fsync", tracking_fsync)
+        monkeypatch.setattr(audit_logger.os, "replace", tracking_replace)
+        monkeypatch.setattr(audit_logger.Path, "unlink", tracking_unlink)
+
+        audit = audit_logger.AuditLogger(str(tmp_path))
+        assert audit.compress_old_files(older_than_days=1) == 1
+
+        replace_at = operations.index("replace")
+        unlink_at = operations.index("unlink_source")
+        assert "fsync_file" in operations[:replace_at]
+        assert "fsync_dir" in operations[replace_at + 1 : unlink_at]
+        assert "fsync_dir" in operations[unlink_at + 1 :]
+
+    def test_compression_excludes_cross_process_writers_and_verifiers(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+
+        self._write_old_chained_file(tmp_path)
+        compressor = audit_logger.AuditLogger(str(tmp_path))
+        writer = audit_logger.AuditLogger(str(tmp_path))
+        verifier = audit_logger.AuditLogger(str(tmp_path))
+        copy_started = threading.Event()
+        release_copy = threading.Event()
+        writer_started = threading.Event()
+        verifier_started = threading.Event()
+        writer_done = threading.Event()
+        verifier_done = threading.Event()
+        errors = []
+        real_copyfileobj = audit_logger.shutil.copyfileobj
+
+        def delayed_copyfileobj(src, dst):
+            copy_started.set()
+            release_copy.wait(timeout=2)
+            return real_copyfileobj(src, dst)
+
+        def compress():
+            try:
+                compressor.compress_old_files(older_than_days=1)
+            except BaseException as exc:  # noqa: BLE001 - thread failures reach the assertion
+                errors.append(exc)
+
+        def append():
+            writer_started.set()
+            try:
+                writer.log_event("CONCURRENT_APPEND")
+            except BaseException as exc:  # noqa: BLE001 - thread failures reach the assertion
+                errors.append(exc)
+            finally:
+                writer_done.set()
+
+        def verify():
+            verifier_started.set()
+            try:
+                verifier.verify_chain()
+            except BaseException as exc:  # noqa: BLE001 - thread failures reach the assertion
+                errors.append(exc)
+            finally:
+                verifier_done.set()
+
+        monkeypatch.setattr(audit_logger.shutil, "copyfileobj", delayed_copyfileobj)
+        compression_thread = threading.Thread(target=compress)
+        writer_thread = threading.Thread(target=append)
+        verifier_thread = threading.Thread(target=verify)
+        compression_thread.start()
+        assert copy_started.wait(timeout=1)
+        writer_thread.start()
+        verifier_thread.start()
+        assert writer_started.wait(timeout=1)
+        assert verifier_started.wait(timeout=1)
+        writer_was_blocked = not writer_done.wait(timeout=0.1)
+        verifier_was_blocked = not verifier_done.wait(timeout=0.1)
+        release_copy.set()
+        for thread in (compression_thread, writer_thread, verifier_thread):
+            thread.join(timeout=2)
+
+        compressor.close()
+        writer.close()
+        verifier.close()
+        assert errors == []
+        assert writer_was_blocked is True
+        assert verifier_was_blocked is True
+        assert all(not thread.is_alive() for thread in (compression_thread, writer_thread, verifier_thread))
+        assert audit_logger.AuditLogger(str(tmp_path)).verify_chain()["checked"] == 2
+
     def test_read_compressed_file(self, tmp_path):
         import gzip
         from flinttrade_data.audit_logger import AuditLogger
@@ -728,6 +976,228 @@ class TestAuditHashChain:
         assert result["ok"] is True
         assert result["checked"] == 3
         assert result["break"] is None
+
+    def test_event_receipt_is_durable_and_bound_to_resolution_evidence(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        receipt = audit.log_event(
+            "ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        )
+
+        assert audit.verify_event_receipt(
+            receipt,
+            event_type="ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        ) is True
+        assert audit.verify_event_receipt(
+            receipt,
+            event_type="ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="different-evidence",
+        ) is False
+        audit.close()
+
+    def test_event_receipt_rejects_a_valid_but_detached_record(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        source_dir = tmp_path / "source"
+        source = AuditLogger(str(source_dir))
+        source.log_event("PREDECESSOR")
+        receipt = source.log_event(
+            "ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        )
+        source.close()
+
+        source_path = next(source_dir.glob("audit_*.jsonl"))
+        detached_dir = tmp_path / "detached"
+        detached_dir.mkdir()
+        detached_path = detached_dir / source_path.name
+        detached_path.write_text(source_path.read_text().splitlines()[1] + "\n")
+
+        detached = AuditLogger(str(detached_dir))
+        assert detached.verify_event_receipt(
+            receipt,
+            event_type="ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        ) is False
+
+    def test_event_receipt_rejects_record_from_a_tampered_chain(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        audit.log_event("PREDECESSOR", value="original")
+        receipt = audit.log_event(
+            "ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        )
+        audit.close()
+
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        lines = path.read_text().splitlines()
+        predecessor = json.loads(lines[0])
+        predecessor["value"] = "tampered"
+        lines[0] = json.dumps(predecessor)
+        path.write_text("\n".join(lines) + "\n")
+
+        assert audit.verify_event_receipt(
+            receipt,
+            event_type="ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+            resolution_id="resolution-1",
+            evidence_digest="evidence-1",
+        ) is False
+
+    def test_concurrent_appends_keep_one_contiguous_hash_chain(self, tmp_path, monkeypatch):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        real_record_hash = AuditLogger._record_hash
+        hash_barrier = threading.Barrier(2)
+        hash_calls = 0
+        hash_calls_lock = threading.Lock()
+
+        def overlapping_record_hash(record):
+            nonlocal hash_calls
+            with hash_calls_lock:
+                hash_calls += 1
+                call_number = hash_calls
+            if call_number <= 2:
+                try:
+                    hash_barrier.wait(timeout=0.2)
+                except threading.BrokenBarrierError:
+                    pass
+            return real_record_hash(record)
+
+        monkeypatch.setattr(AuditLogger, "_record_hash", staticmethod(overlapping_record_hash))
+        audit = AuditLogger(str(tmp_path))
+        start = threading.Barrier(3)
+        errors = []
+
+        def append(event_type):
+            start.wait()
+            try:
+                audit.log_event(event_type)
+            except Exception as exc:  # noqa: BLE001 - thread failures must reach the assertion
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=append, args=("ONE",)),
+            threading.Thread(target=append, args=("TWO",)),
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        audit.close()
+        events = audit.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert errors == []
+        assert all(not thread.is_alive() for thread in threads)
+        assert [event["seq"] for event in events] == [0, 1]
+        assert events[1]["prev_hash"] == events[0]["hash"]
+        assert audit.verify_chain()["ok"] is True
+
+    def test_concurrent_logger_instances_share_one_durable_chain_lock(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        first = AuditLogger(str(tmp_path))
+        second = AuditLogger(str(tmp_path))
+        start = threading.Barrier(3)
+        errors = []
+
+        def append(audit, event_type):
+            start.wait()
+            try:
+                audit.log_event(event_type)
+            except Exception as exc:  # noqa: BLE001 - thread failures reach the assertion
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=append, args=(first, "FIRST_INSTANCE")),
+            threading.Thread(target=append, args=(second, "SECOND_INSTANCE")),
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        first.log_event("FIRST_AGAIN")
+        first.close()
+        second.close()
+        events = AuditLogger(str(tmp_path)).read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert errors == []
+        assert all(not thread.is_alive() for thread in threads)
+        assert [event["seq"] for event in events] == [0, 1, 2]
+        assert events[1]["prev_hash"] == events[0]["hash"]
+        assert events[2]["prev_hash"] == events[1]["hash"]
+        assert AuditLogger(str(tmp_path)).verify_chain()["ok"] is True
+
+    def test_concurrent_appends_rotate_the_shared_file_handle_safely(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+
+        class RotatingDateTime(datetime):
+            current = datetime(2026, 7, 14, 23, 59, tzinfo=IST)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
+
+        monkeypatch.setattr(audit_logger, "datetime", RotatingDateTime)
+        audit = audit_logger.AuditLogger(str(tmp_path))
+        audit.log_event("BEFORE_ROTATION")
+
+        real_repair = audit._repair_torn_tail
+        rotation_started = threading.Event()
+        allow_rotation = threading.Event()
+
+        def delayed_repair(path):
+            rotation_started.set()
+            allow_rotation.wait(timeout=1)
+            real_repair(path)
+
+        monkeypatch.setattr(audit, "_repair_torn_tail", delayed_repair)
+        RotatingDateTime.current = datetime(2026, 7, 15, 0, 0, tzinfo=IST)
+        start = threading.Barrier(3)
+        errors = []
+
+        def append(event_type):
+            start.wait()
+            try:
+                audit.log_event(event_type)
+            except Exception as exc:  # noqa: BLE001 - thread failures must reach the assertion
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=append, args=("AFTER_ROTATION_ONE",)),
+            threading.Thread(target=append, args=("AFTER_ROTATION_TWO",)),
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        assert rotation_started.wait(timeout=1)
+        threading.Event().wait(0.05)
+        allow_rotation.set()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        audit.close()
+        assert errors == []
+        assert all(not thread.is_alive() for thread in threads)
+        assert audit.list_audit_files() == ["audit_2026-07-14.jsonl", "audit_2026-07-15.jsonl"]
+        assert audit.verify_chain() == {
+            "ok": True,
+            "checked": 3,
+            "anchored_at_genesis": True,
+            "break": None,
+        }
 
     def test_verify_chain_detects_content_tampering(self, tmp_path):
         self._write_three(tmp_path)
@@ -836,6 +1306,117 @@ class TestAuditHashChain:
         events = second.read_day(datetime.now(IST).strftime("%Y-%m-%d"))
         assert [e["event_type"] for e in events] == ["ONE", "TWO", "THREE"]
         assert [e["seq"] for e in events] == [0, 1, 2]
+
+    def test_next_day_append_repairs_torn_tail_in_newest_prior_day_file(self, tmp_path, monkeypatch):
+        from flinttrade_data import audit_logger
+
+        class MidnightDateTime(datetime):
+            current = datetime(2026, 7, 14, 23, 59, tzinfo=IST)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
+
+        monkeypatch.setattr(audit_logger, "datetime", MidnightDateTime)
+        first = audit_logger.AuditLogger(str(tmp_path))
+        first.log_event("BEFORE_MIDNIGHT")
+        first.close()
+
+        prior_day = tmp_path / "audit_2026-07-14.jsonl"
+        with open(prior_day, "a", encoding="utf-8") as fh:
+            fh.write('{"event_type": "TORN", "seq": 99')
+
+        MidnightDateTime.current = datetime(2026, 7, 15, 0, 0, tzinfo=IST)
+        second = audit_logger.AuditLogger(str(tmp_path))
+        second.log_event("AFTER_MIDNIGHT")
+        second.close()
+
+        assert [event["event_type"] for event in second.read_day("2026-07-14")] == ["BEFORE_MIDNIGHT"]
+        assert [event["event_type"] for event in second.read_day("2026-07-15")] == ["AFTER_MIDNIGHT"]
+        assert second.verify_chain() == {
+            "ok": True,
+            "checked": 2,
+            "anchored_at_genesis": True,
+            "break": None,
+        }
+
+    def test_concurrent_live_appends_repair_a_torn_shared_tail_before_resolving_chain(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        first = AuditLogger(str(tmp_path))
+        second = AuditLogger(str(tmp_path))
+        first.log_event("ONE")
+        second.log_event("TWO")
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write('{"event_type": "TORN", "seq": 99')
+
+        start = threading.Barrier(3)
+        receipts = []
+        errors = []
+
+        def append(audit, event_type):
+            start.wait()
+            try:
+                receipts.append(audit.log_event(event_type))
+            except Exception as exc:  # noqa: BLE001 - thread failures reach the assertion
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=append, args=(first, "THREE")),
+            threading.Thread(target=append, args=(second, "FOUR")),
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait()
+        for thread in threads:
+            thread.join(timeout=2)
+
+        first.close()
+        second.close()
+        events = AuditLogger(str(tmp_path)).read_day(datetime.now(IST).strftime("%Y-%m-%d"))
+        assert errors == []
+        assert all(not thread.is_alive() for thread in threads)
+        assert [event["event_type"] for event in events[:2]] == ["ONE", "TWO"]
+        assert {event["event_type"] for event in events[2:]} == {"THREE", "FOUR"}
+        assert [event["seq"] for event in events] == [0, 1, 2, 3]
+        assert set(receipts) == {events[2]["hash"], events[3]["hash"]}
+        assert AuditLogger(str(tmp_path)).verify_chain()["ok"] is True
+
+    def test_append_refuses_a_newline_terminated_broken_tail(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        audit.log_event("ONE")
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write('{"event_type": "BROKEN"}\n')
+
+        with pytest.raises(RuntimeError, match="audit chain"):
+            audit.log_event("TWO")
+
+        audit.close()
+        assert path.read_text().splitlines()[-1] == '{"event_type": "BROKEN"}'
+
+    def test_append_refuses_to_mint_a_receipt_for_an_interior_chain_break(self, tmp_path):
+        from flinttrade_data.audit_logger import AuditLogger
+
+        audit = AuditLogger(str(tmp_path))
+        audit.log_event("ONE", value="original")
+        audit.log_event("TWO")
+        audit.log_event("THREE")
+        path = next(tmp_path.glob("audit_*.jsonl"))
+        lines = path.read_text().splitlines()
+        first = json.loads(lines[0])
+        first["value"] = "tampered"
+        lines[0] = json.dumps(first)
+        path.write_text("\n".join(lines) + "\n")
+
+        with pytest.raises(RuntimeError, match="audit chain"):
+            audit.log_event("FOUR")
+
+        audit.close()
+        assert len(path.read_text().splitlines()) == 3
 
     def test_verify_chain_skips_legacy_prefix(self, tmp_path):
         from flinttrade_data.audit_logger import GENESIS_HASH, AuditLogger

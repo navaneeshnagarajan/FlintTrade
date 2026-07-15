@@ -12,8 +12,11 @@ method. The base place/modify/cancel + portfolio surface is covered by
 
 from __future__ import annotations
 
+import asyncio
 import json
 import struct
+import threading
+import time
 from typing import Any, AsyncIterator
 
 import pytest
@@ -22,7 +25,11 @@ from flinttrade_core.exceptions import BrokerError
 from flinttrade_core.models import Order
 from flinttrade_engine.safety import SafetyBypassError
 from flinttrade_gateway.brokers.dhan import DhanAdapter, _ROUTER_TOKEN
-from flinttrade_gateway.brokers.dhan_mapping import DhanMappingError
+from flinttrade_gateway.brokers.dhan_mapping import (
+    DhanMappingError,
+    build_security_resolver,
+    from_dhan_super_order,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -69,13 +76,25 @@ class MockDhan:
 
     def get_forever(self):
         self.calls.append(("get_forever",))
-        return {"status": "success", "data": [
-            {"orderId": "GTT1", "orderStatus": "PENDING", "orderFlag": "SINGLE",
-             "tradingSymbol": "HDFCBANK", "exchangeSegment": "NSE_EQ", "transactionType": "BUY",
-             "orderType": "LIMIT", "productType": "CNC", "quantity": 5, "price": 1428,
-             "triggerPrice": 1427},
-            "junk",
-        ]}
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": "GTT1",
+                    "orderStatus": "PENDING",
+                    "orderFlag": "SINGLE",
+                    "tradingSymbol": "HDFCBANK",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "CNC",
+                    "quantity": 5,
+                    "price": 1428,
+                    "triggerPrice": 1427,
+                },
+                "junk",
+            ],
+        }
 
     # super orders
     def modify_super_order(self, **kw):
@@ -88,29 +107,62 @@ class MockDhan:
 
     def get_super_order_list(self):
         self.calls.append(("super_list",))
-        return {"status": "success", "data": [
-            {"orderId": "SUP1", "orderStatus": "PENDING", "tradingSymbol": "RELIANCE",
-             "exchangeSegment": "NSE_EQ", "transactionType": "BUY", "orderType": "LIMIT",
-             "productType": "INTRADAY", "quantity": 5, "price": 2900, "targetPrice": 2950,
-             "stopLossPrice": 2870, "legDetails": [{"legName": "STOP_LOSS_LEG"}]},
-        ]}
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": "SUP1",
+                    "orderStatus": "PENDING",
+                    "tradingSymbol": "RELIANCE",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "INTRADAY",
+                    "quantity": 5,
+                    "price": 2900,
+                    "targetPrice": 2950,
+                    "stopLossPrice": 2870,
+                    "legDetails": [{"legName": "STOP_LOSS_LEG"}],
+                },
+            ],
+        }
 
     # order reads
     def get_order_by_id(self, order_id):
         self.calls.append(("order_by_id", order_id))
-        return {"status": "success", "data": [
-            {"orderId": order_id, "orderStatus": "TRADED", "tradingSymbol": "TCS",
-             "exchangeSegment": "NSE_EQ", "transactionType": "BUY", "orderType": "LIMIT",
-             "productType": "CNC", "quantity": 5, "price": 3500},
-        ]}
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": order_id,
+                    "orderStatus": "TRADED",
+                    "tradingSymbol": "TCS",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "CNC",
+                    "quantity": 5,
+                    "price": 3500,
+                },
+            ],
+        }
 
     def get_order_by_correlationID(self, correlation_id):
         self.calls.append(("order_by_corr", correlation_id))
-        return {"status": "success", "data": {
-            "orderId": "OID9", "orderStatus": "PENDING", "tradingSymbol": "INFY",
-            "exchangeSegment": "NSE_EQ", "transactionType": "SELL", "orderType": "MARKET",
-            "productType": "INTRADAY", "quantity": 10, "price": 0,
-        }}
+        return {
+            "status": "success",
+            "data": {
+                "orderId": "OID9",
+                "orderStatus": "PENDING",
+                "tradingSymbol": "INFY",
+                "exchangeSegment": "NSE_EQ",
+                "transactionType": "SELL",
+                "orderType": "MARKET",
+                "productType": "INTRADAY",
+                "quantity": 10,
+                "price": 0,
+            },
+        }
 
     # portfolio writes
     def convert_position(self, **kw):
@@ -133,15 +185,20 @@ class MockDhan:
 
     def edis_inquiry(self, isin):
         self.calls.append(("edis_inquiry", isin))
-        return {"status": "success", "data": {"isin": isin, "totalQty": 10, "aprvdQty": 4,
-                                              "status": "SUCCESS"}}
+        return {"status": "success", "data": {"isin": isin, "totalQty": 10, "aprvdQty": 4, "status": "SUCCESS"}}
 
     # expired options
     def expired_options_data(self, **kw):
         self.calls.append(("expired_options", kw))
-        return {"status": "success", "data": {"data": {
-            "ce": {"open": [354, 360.3], "timestamp": [1, 2]}, "pe": None,
-        }}}
+        return {
+            "status": "success",
+            "data": {
+                "data": {
+                    "ce": {"open": [354, 360.3], "timestamp": [1, 2]},
+                    "pe": None,
+                }
+            },
+        }
 
 
 class MockLogin:
@@ -157,13 +214,11 @@ class MockLogin:
 
     def generate_token(self, pin, totp):
         self.calls.append(("generate", pin, totp))
-        return {"dhanClientId": self.client_id, "accessToken": "NEWTOK",
-                "expiryTime": "2026-06-13T00:00:00"}
+        return {"dhanClientId": self.client_id, "accessToken": "NEWTOK", "expiryTime": "2026-06-13T00:00:00"}
 
     def consume_token_id(self, token_id, app_id, app_secret):
         self.calls.append(("consume", token_id, app_id, app_secret))
-        return {"dhanClientId": self.client_id, "accessToken": "OAUTH-TOK",
-                "expiryTime": "2026-06-13T00:00:00"}
+        return {"dhanClientId": self.client_id, "accessToken": "OAUTH-TOK", "expiryTime": "2026-06-13T00:00:00"}
 
     def renew_token(self, access_token):
         self.calls.append(("renew", access_token))
@@ -185,7 +240,7 @@ class MockLogin:
 def _adapter(mock: MockDhan, login: MockLogin | None = None, **extra: Any) -> DhanAdapter:
     return DhanAdapter(
         client_factory=lambda _s: mock,
-        security_resolver=lambda s, e: "11536",
+        security_resolver=extra.pop("security_resolver", lambda s, e: "11536"),
         login_factory=(lambda cid: login) if login is not None else None,
         **extra,
     )
@@ -208,8 +263,34 @@ _CONDITION = {
 
 
 def _leg_order() -> Order:
-    return Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
-                 product="CNC", quantity="10", price="250")
+    return Order(
+        symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="10", price="250"
+    )
+
+
+async def test_shared_sdk_transport_is_serialised_across_overlapping_calls() -> None:
+    adapter = _adapter(MockDhan())
+    state_lock = threading.Lock()
+    active = 0
+    maximum = 0
+
+    def blocking_call(value: str) -> str:
+        nonlocal active, maximum
+        with state_lock:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.03)
+        with state_lock:
+            active -= 1
+        return value
+
+    results = await asyncio.gather(
+        adapter._call(blocking_call, "positions"),
+        adapter._call(blocking_call, "orders"),
+    )
+
+    assert results == ["positions", "orders"]
+    assert maximum == 1
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +307,17 @@ async def test_every_new_write_surface_is_gated() -> None:
         adapter.cancel_forever(session, "GTT1"),
         adapter.modify_super_order(session, "SUP1", {"leg_name": "TARGET_LEG", "target_price": 2950}),
         adapter.cancel_super_order(session, "SUP1", "TARGET_LEG"),
-        adapter.convert_position(session, {"symbol": "RELIANCE", "from_product": "MIS",
-                                           "to_product": "CNC", "position_type": "LONG",
-                                           "exchange": "NSE", "quantity": 1}),
+        adapter.convert_position(
+            session,
+            {
+                "symbol": "RELIANCE",
+                "from_product": "MIS",
+                "to_product": "CNC",
+                "position_type": "LONG",
+                "exchange": "NSE",
+                "quantity": 1,
+            },
+        ),
         adapter.place_conditional_trigger(session, _CONDITION, [_leg_order()]),
         adapter.modify_conditional_trigger(session, "12345", _CONDITION, [_leg_order()]),
         adapter.cancel_conditional_trigger(session, "12345"),
@@ -251,7 +340,9 @@ async def test_forever_modify_cancel_and_list() -> None:
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.modify_forever(
-        session, "GTT1", {"pricetype": "LIMIT", "quantity": 10, "price": 1430, "trigger_price": 1429},
+        session,
+        "GTT1",
+        {"pricetype": "LIMIT", "quantity": 10, "price": 1430, "trigger_price": 1429},
         _router_token=_ROUTER_TOKEN,
     )
     kind, kw = mock.calls[0]
@@ -273,7 +364,9 @@ async def test_super_order_modify_cancel_and_list() -> None:
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.modify_super_order(
-        session, "SUP1", {"leg_name": "STOP_LOSS_LEG", "stop_loss_price": 2860, "trailing_jump": 5},
+        session,
+        "SUP1",
+        {"leg_name": "STOP_LOSS_LEG", "stop_loss_price": 2860, "trailing_jump": 5},
         _router_token=_ROUTER_TOKEN,
     )
     kind, kw = mock.calls[0]
@@ -325,8 +418,14 @@ async def test_convert_position_maps_and_calls_sdk() -> None:
     session = await _session(adapter)
     await adapter.convert_position(
         session,
-        {"symbol": "RELIANCE", "exchange": "NSE", "from_product": "MIS", "to_product": "CNC",
-         "position_type": "LONG", "quantity": 40},
+        {
+            "symbol": "RELIANCE",
+            "exchange": "NSE",
+            "from_product": "MIS",
+            "to_product": "CNC",
+            "position_type": "LONG",
+            "quantity": 40,
+        },
         _router_token=_ROUTER_TOKEN,
     )
     kind, kw = mock.calls[0]
@@ -342,8 +441,14 @@ async def test_convert_position_fails_closed_before_broker() -> None:
     with pytest.raises(DhanMappingError, match="positive quantity"):
         await adapter.convert_position(
             session,
-            {"symbol": "RELIANCE", "exchange": "NSE", "from_product": "MIS", "to_product": "CNC",
-             "position_type": "LONG", "quantity": 0},
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "from_product": "MIS",
+                "to_product": "CNC",
+                "position_type": "LONG",
+                "quantity": 0,
+            },
             _router_token=_ROUTER_TOKEN,
         )
     assert mock.calls == []
@@ -357,13 +462,12 @@ async def test_convert_position_fails_closed_before_broker() -> None:
 async def test_place_conditional_trigger_posts_doc_endpoint() -> None:
     mock = MockDhan()
     mock.dhan_http.responses[("POST", "/alerts/orders")] = {
-        "status": "success", "data": {"alertId": "12345", "alertStatus": "ACTIVE"},
+        "status": "success",
+        "data": {"alertId": "12345", "alertStatus": "ACTIVE"},
     }
     adapter = _adapter(mock)
     session = await _session(adapter)
-    alert_id = await adapter.place_conditional_trigger(
-        session, _CONDITION, [_leg_order()], _router_token=_ROUTER_TOKEN
-    )
+    alert_id = await adapter.place_conditional_trigger(session, _CONDITION, [_leg_order()], _router_token=_ROUTER_TOKEN)
     assert alert_id == "12345"
     method, endpoint, payload = mock.dhan_http.calls[0]
     assert (method, endpoint) == ("POST", "/alerts/orders")
@@ -374,16 +478,16 @@ async def test_place_conditional_trigger_posts_doc_endpoint() -> None:
 async def test_modify_and_cancel_conditional_trigger() -> None:
     mock = MockDhan()
     mock.dhan_http.responses[("PUT", "/alerts/orders/12345")] = {
-        "status": "success", "data": {"alertId": "12345", "alertStatus": "ACTIVE"},
+        "status": "success",
+        "data": {"alertId": "12345", "alertStatus": "ACTIVE"},
     }
     mock.dhan_http.responses[("DELETE", "/alerts/orders/12345")] = {
-        "status": "success", "data": {"alertId": "12345", "alertStatus": "CANCELLED"},
+        "status": "success",
+        "data": {"alertId": "12345", "alertStatus": "CANCELLED"},
     }
     adapter = _adapter(mock)
     session = await _session(adapter)
-    await adapter.modify_conditional_trigger(
-        session, "12345", _CONDITION, [_leg_order()], _router_token=_ROUTER_TOKEN
-    )
+    await adapter.modify_conditional_trigger(session, "12345", _CONDITION, [_leg_order()], _router_token=_ROUTER_TOKEN)
     method, endpoint, payload = mock.dhan_http.calls[0]
     assert (method, endpoint) == ("PUT", "/alerts/orders/12345") and payload["alertId"] == "12345"
     await adapter.cancel_conditional_trigger(session, "12345", _router_token=_ROUTER_TOKEN)
@@ -406,13 +510,462 @@ async def test_conditional_trigger_reads() -> None:
 async def test_conditional_trigger_failure_raises() -> None:
     mock = MockDhan()
     mock.dhan_http.responses[("POST", "/alerts/orders")] = {
-        "status": "failure", "remarks": {"error_message": "segment not enabled"}, "data": "",
+        "status": "failure",
+        "remarks": {"error_message": "segment not enabled"},
+        "data": "",
     }
     adapter = _adapter(mock)
     session = await _session(adapter)
     with pytest.raises(DhanMappingError, match="segment not enabled"):
-        await adapter.place_conditional_trigger(session, _CONDITION, [_leg_order()],
-                                                _router_token=_ROUTER_TOKEN)
+        await adapter.place_conditional_trigger(session, _CONDITION, [_leg_order()], _router_token=_ROUTER_TOKEN)
+
+
+# ---------------------------------------------------------------------------
+# Full-order-horizon safety read
+# ---------------------------------------------------------------------------
+
+_SAFETY_SCRIP_ROWS = [
+    {
+        "SEM_EXM_EXCH_ID": "NSE",
+        "SEM_SEGMENT": "E",
+        "SEM_SMST_SECURITY_ID": "11536",
+        "SEM_TRADING_SYMBOL": "TCS",
+    },
+    {
+        "SEM_EXM_EXCH_ID": "NSE",
+        "SEM_SEGMENT": "D",
+        "SEM_SMST_SECURITY_ID": "49081",
+        "SEM_TRADING_SYMBOL": "NIFTY-Jun2026-24000-CE",
+        "SEM_OPTION_TYPE": "CE",
+        "SEM_EXPIRY_DATE": "2026-06-25",
+        "SEM_STRIKE_PRICE": "24000",
+        "UNDERLYING_SYMBOL": "NIFTY",
+    },
+]
+
+
+class SafetyHorizonDhan(MockDhan):
+    def __init__(self) -> None:
+        super().__init__()
+        self.dhan_http.responses[("GET", "/alerts/orders")] = {
+            "status": "success",
+            "data": [
+                {
+                    "alertId": "ALERT-1",
+                    "alertStatus": "ACTIVE",
+                    "orders": [
+                        {
+                            "transactionType": "BUY",
+                            "exchangeSegment": "NSE_FNO",
+                            "productType": "MARGIN",
+                            "orderType": "LIMIT",
+                            "securityId": "49081",
+                            "quantity": 25,
+                            "price": "100",
+                            "triggerPrice": "0",
+                        },
+                        {
+                            "transactionType": "SELL",
+                            "exchangeSegment": "NSE_EQ",
+                            "productType": "CNC",
+                            "orderType": "LIMIT",
+                            "securityId": "11536",
+                            "quantity": 2,
+                            "price": "3500",
+                            "triggerPrice": "0",
+                        },
+                    ],
+                },
+                {"alertId": "ALERT-DONE", "alertStatus": "CANCELLED", "orders": ["malformed"]},
+                {"alertId": "ALERT-FIRED", "alertStatus": "TRIGGERED", "orders": ["malformed"]},
+            ],
+        }
+
+    def get_order_list(self):
+        self.calls.append(("get_order_list",))
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": "REG-1",
+                    "orderStatus": "PENDING",
+                    "tradingSymbol": "TCS",
+                    "securityId": "11536",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "CNC",
+                    "quantity": 2,
+                    "filledQty": 0,
+                    "price": 3400,
+                },
+                {
+                    "orderId": "SUP-1",
+                    "exchangeOrderId": "EX-SUP-ENTRY",
+                    "orderStatus": "PENDING",
+                    "tradingSymbol": "NIFTY-Jun2026-24000-CE",
+                    "securityId": "49081",
+                    "exchangeSegment": "NSE_FNO",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "MARGIN",
+                    "quantity": 25,
+                    "filledQty": 0,
+                    "price": 100,
+                    "legName": "ENTRY_LEG",
+                    "drvOptionType": "CALL",
+                    "drvExpiryDate": "2026-06-25",
+                    "drvStrikePrice": 24000,
+                },
+                {
+                    "orderId": "SUP-TARGET-RAW",
+                    "exchangeOrderId": "EX-SUP-TARGET",
+                    "orderStatus": "PENDING",
+                    "tradingSymbol": "NIFTY-Jun2026-24000-CE",
+                    "securityId": "49081",
+                    "exchangeSegment": "NSE_FNO",
+                    "transactionType": "SELL",
+                    "orderType": "LIMIT",
+                    "productType": "MARGIN",
+                    "quantity": 25,
+                    "filledQty": 0,
+                    "price": 120,
+                    "legName": "TARGET_LEG",
+                    "drvOptionType": "CALL",
+                    "drvExpiryDate": "2026-06-25",
+                    "drvStrikePrice": 24000,
+                },
+                {"orderId": "REG-DONE", "orderStatus": "TRADED"},
+            ],
+        }
+
+    def get_forever(self):
+        self.calls.append(("get_forever",))
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": "GTT-1",
+                    "orderStatus": "PENDING",
+                    "orderFlag": "OCO",
+                    "tradingSymbol": "TCS",
+                    "securityId": "11536",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "SELL",
+                    "orderType": "LIMIT",
+                    "productType": "CNC",
+                    "quantity": 2,
+                    "filledQty": 0,
+                    "price": 3600,
+                    "triggerPrice": 3590,
+                    "quantity1": 2,
+                    "price1": 3300,
+                    "triggerPrice1": 3310,
+                },
+                {"orderId": "GTT-DONE", "orderStatus": "TRADED"},
+            ],
+        }
+
+    def get_super_order_list(self):
+        self.calls.append(("super_list",))
+        return {
+            "status": "success",
+            "data": [
+                {
+                    "orderId": "SUP-1",
+                    "exchangeOrderId": "EX-SUP-ENTRY",
+                    "orderStatus": "PENDING",
+                    "tradingSymbol": "NIFTY-Jun2026-24000-CE",
+                    "securityId": "49081",
+                    "exchangeSegment": "NSE_FNO",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "MARGIN",
+                    "quantity": 25,
+                    "price": 100,
+                    "filledQty": 0,
+                    "drvOptionType": "CALL",
+                    "drvExpiryDate": "2026-06-25",
+                    "drvStrikePrice": 24000,
+                    "legDetails": [
+                        {
+                            "legName": "TARGET_LEG",
+                            "orderStatus": "PENDING",
+                            "orderType": "LIMIT",
+                            "quantity": 25,
+                            "filledQty": 0,
+                            "price": 120,
+                            "exchangeOrderId": "EX-SUP-TARGET",
+                        },
+                        {
+                            "legName": "STOP_LOSS_LEG",
+                            "orderStatus": "PENDING",
+                            "orderType": "STOP_LOSS",
+                            "quantity": 25,
+                            "filledQty": 0,
+                            "price": 85,
+                            "triggerPrice": 90,
+                            "exchangeOrderId": "EX-SUP-STOP",
+                        },
+                    ],
+                },
+                {"orderId": "SUP-DONE", "orderStatus": "REJECTED", "legDetails": "malformed"},
+            ],
+        }
+
+
+async def test_safety_order_book_reads_and_normalises_full_horizon() -> None:
+    mock = SafetyHorizonDhan()
+    adapter = _adapter(mock, security_resolver=build_security_resolver(_SAFETY_SCRIP_ROWS))
+    session = await _session(adapter)
+
+    rows = await adapter.safety_order_book(session)
+
+    assert [call[0] for call in mock.calls] == ["get_order_list", "get_forever", "super_list"]
+    assert mock.dhan_http.calls == [("GET", "/alerts/orders", None)]
+    assert [row["safety_order_id"] for row in rows] == sorted(row["safety_order_id"] for row in rows)
+    assert {row["orderid"] for row in rows} == {
+        "REG-1",
+        "GTT-1",
+        "GTT-1:STOP_LOSS_LEG",
+        "SUP-1",
+        "SUP-TARGET-RAW",
+        "SUP-1:STOP_LOSS_LEG",
+        "ALERT-1:0",
+        "ALERT-1:1",
+        "REG-DONE",
+        "GTT-DONE",
+        "SUP-DONE",
+        "ALERT-DONE",
+        "ALERT-FIRED",
+    }
+    assert len({row["safety_order_id"] for row in rows}) == len(rows)
+    assert {row["order_family"] for row in rows} == {"regular", "forever", "super", "conditional"}
+    assert all(row.get("margin_unfunded") is True for row in rows if row["order_family"] != "regular")
+    regular = next(row for row in rows if row["orderid"] == "REG-1")
+    assert "margin_unfunded" not in regular
+    assert next(row for row in rows if row["orderid"] == "GTT-1:STOP_LOSS_LEG")[
+        "raw_broker_order_id"
+    ] == "GTT-1"
+    assert next(row for row in rows if row["orderid"] == "ALERT-1:0")["raw_broker_order_id"] == "ALERT-1"
+    assert next(row for row in rows if row["orderid"] == "SUP-TARGET-RAW")["raw_broker_order_id"] == (
+        "SUP-TARGET-RAW"
+    )
+    assert all(
+        (row["option_type"], row["expiry"], row["strike_price"], row["underlying"])
+        == ("CE", "2026-06-25", 24000.0, "NIFTY")
+        for row in rows
+        if row["exchange"] == "NFO"
+    )
+    assert {
+        row["orderid"]: row["status"]
+        for row in rows
+        if row["orderid"] in {"REG-DONE", "GTT-DONE", "SUP-DONE", "ALERT-DONE", "ALERT-FIRED"}
+    } == {
+        "REG-DONE": "TRADED",
+        "GTT-DONE": "TRADED",
+        "SUP-DONE": "REJECTED",
+        "ALERT-DONE": "CANCELLED",
+        "ALERT-FIRED": "TRIGGERED",
+    }
+    assert all(
+        row["filled_quantity"] == ""
+        for row in rows
+        if row["orderid"]
+        in {"REG-DONE", "GTT-DONE", "SUP-DONE", "ALERT-DONE", "ALERT-FIRED"}
+    )
+
+
+async def test_safety_order_book_fails_closed_when_active_fill_quantity_is_missing() -> None:
+    class MissingFillDhan(SafetyHorizonDhan):
+        def get_order_list(self):
+            response = super().get_order_list()
+            response["data"][0].pop("filledQty")
+            return response
+
+    adapter = _adapter(
+        MissingFillDhan(),
+        security_resolver=build_security_resolver(_SAFETY_SCRIP_ROWS),
+    )
+    session = await _session(adapter)
+
+    with pytest.raises(DhanMappingError, match="regular filled quantity is invalid"):
+        await adapter.safety_order_book(session)
+
+
+def test_terminal_super_with_complete_legs_preserves_unknown_fills() -> None:
+    adapter = _adapter(MockDhan())
+    row = from_dhan_super_order({
+        "orderId": "SUP-DONE",
+        "orderStatus": "CANCELLED",
+        "tradingSymbol": "TCS",
+        "securityId": "11536",
+        "exchangeSegment": "NSE_EQ",
+        "transactionType": "BUY",
+        "orderType": "LIMIT",
+        "productType": "INTRADAY",
+        "quantity": 2,
+        "price": 3400,
+        "legDetails": [
+            {
+                "legName": "TARGET_LEG",
+                "orderStatus": "CANCELLED",
+                "orderType": "LIMIT",
+                "quantity": 2,
+                "price": 3500,
+            },
+            {
+                "legName": "STOP_LOSS_LEG",
+                "orderStatus": "CANCELLED",
+                "orderType": "STOP_LOSS",
+                "quantity": 2,
+                "price": 3300,
+                "triggerPrice": 3310,
+            },
+        ],
+    })
+
+    rows = adapter._super_safety_rows(row)
+
+    assert len(rows) == 3
+    assert all(safety_row["filled_quantity"] == "" for safety_row in rows)
+
+
+async def test_regular_super_overlap_preserves_terminal_unknown_and_active_exposure() -> None:
+    class TerminalOverlapDhan(MockDhan):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dhan_http.responses[("GET", "/alerts/orders")] = {
+                "status": "success",
+                "data": [],
+            }
+
+        def get_order_list(self):
+            return {
+                "status": "success",
+                "data": [{
+                    "orderId": "SUP-DONE",
+                    "orderStatus": "CANCELLED",
+                    "tradingSymbol": "TCS",
+                    "securityId": "11536",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "INTRADAY",
+                    "quantity": 2,
+                    "price": 3400,
+                }],
+            }
+
+        def get_forever(self):
+            return {"status": "success", "data": []}
+
+        def get_super_order_list(self):
+            return {
+                "status": "success",
+                "data": [{
+                    "orderId": "SUP-DONE",
+                    "orderStatus": "CANCELLED",
+                    "tradingSymbol": "TCS",
+                    "securityId": "11536",
+                    "exchangeSegment": "NSE_EQ",
+                    "transactionType": "BUY",
+                    "orderType": "LIMIT",
+                    "productType": "INTRADAY",
+                    "quantity": 2,
+                    "price": 3400,
+                    "legDetails": [
+                        {
+                            "legName": "TARGET_LEG",
+                            "orderStatus": "CANCELLED",
+                            "orderType": "LIMIT",
+                            "quantity": 2,
+                            "price": 3500,
+                        },
+                        {
+                            "legName": "STOP_LOSS_LEG",
+                            "orderStatus": "CANCELLED",
+                            "orderType": "STOP_LOSS",
+                            "quantity": 2,
+                            "price": 3300,
+                            "triggerPrice": 3310,
+                        },
+                    ],
+                }],
+            }
+
+    adapter = _adapter(TerminalOverlapDhan())
+    session = await _session(adapter)
+
+    rows = await adapter.safety_order_book(session)
+
+    parent = next(row for row in rows if row["orderid"] == "SUP-DONE")
+    assert parent["order_family"] == "super"
+    assert parent["filled_quantity"] == ""
+
+    class ActiveRegularOverlapDhan(TerminalOverlapDhan):
+        def get_order_list(self):
+            response = super().get_order_list()
+            response["data"][0]["orderStatus"] = "PENDING"
+            response["data"][0]["filledQty"] = 0
+            return response
+
+    active_adapter = _adapter(ActiveRegularOverlapDhan())
+    active_session = await _session(active_adapter)
+
+    active_rows = await active_adapter.safety_order_book(active_session)
+
+    active_parent = next(row for row in active_rows if row["orderid"] == "SUP-DONE")
+    assert active_parent["status"] == "PENDING"
+    assert active_parent["filled_quantity"] == "0"
+
+    class ConflictingTerminalOverlapDhan(TerminalOverlapDhan):
+        def get_order_list(self):
+            response = super().get_order_list()
+            response["data"][0]["filledQty"] = 0
+            return response
+
+        def get_super_order_list(self):
+            response = super().get_super_order_list()
+            response["data"][0]["filledQty"] = 1
+            return response
+
+    terminal_adapter = _adapter(ConflictingTerminalOverlapDhan())
+    terminal_session = await _session(terminal_adapter)
+
+    terminal_rows = await terminal_adapter.safety_order_book(terminal_session)
+
+    terminal_parent = next(row for row in terminal_rows if row["orderid"] == "SUP-DONE")
+    assert terminal_parent["status"] == "CANCELLED"
+    assert terminal_parent["filled_quantity"] == "1"
+
+
+async def test_safety_order_book_fails_closed_on_incomplete_active_super_leg() -> None:
+    class IncompleteSuperDhan(SafetyHorizonDhan):
+        def get_super_order_list(self):
+            response = super().get_super_order_list()
+            response["data"][0]["legDetails"][0].pop("quantity")
+            return response
+
+    adapter = _adapter(
+        IncompleteSuperDhan(),
+        security_resolver=build_security_resolver(_SAFETY_SCRIP_ROWS),
+    )
+    session = await _session(adapter)
+
+    with pytest.raises(DhanMappingError, match="super quantity is invalid"):
+        await adapter.safety_order_book(session)
+
+
+async def test_safety_order_book_fails_closed_on_incomplete_active_conditional_leg() -> None:
+    mock = SafetyHorizonDhan()
+    response = mock.dhan_http.responses[("GET", "/alerts/orders")]
+    response["data"][0]["orders"][0].pop("quantity")
+    adapter = _adapter(mock, security_resolver=build_security_resolver(_SAFETY_SCRIP_ROWS))
+    session = await _session(adapter)
+
+    with pytest.raises(DhanMappingError, match="conditional quantity is invalid"):
+        await adapter.safety_order_book(session)
 
 
 # ---------------------------------------------------------------------------
@@ -430,13 +983,16 @@ async def test_kill_switch_status_read() -> None:
 async def test_pnl_exit_set_get_stop() -> None:
     mock = MockDhan()
     mock.dhan_http.responses[("POST", "/pnlExit")] = {
-        "status": "success", "data": {"pnlExitStatus": "ACTIVE", "message": "configured"},
+        "status": "success",
+        "data": {"pnlExitStatus": "ACTIVE", "message": "configured"},
     }
     mock.dhan_http.responses[("GET", "/pnlExit")] = {
-        "status": "success", "data": {"pnlExitStatus": "ACTIVE", "profit": "1500.0", "loss": "500.0"},
+        "status": "success",
+        "data": {"pnlExitStatus": "ACTIVE", "profit": "1500.0", "loss": "500.0"},
     }
     mock.dhan_http.responses[("DELETE", "/pnlExit")] = {
-        "status": "success", "data": {"pnlExitStatus": "DISABLED", "message": "stopped"},
+        "status": "success",
+        "data": {"pnlExitStatus": "DISABLED", "message": "stopped"},
     }
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -444,8 +1000,12 @@ async def test_pnl_exit_set_get_stop() -> None:
     assert set_resp["pnlExitStatus"] == "ACTIVE"
     method, endpoint, payload = mock.dhan_http.calls[0]
     assert (method, endpoint) == ("POST", "/pnlExit")
-    assert payload == {"profitValue": "1500.0", "lossValue": "500.0",
-                       "productType": ["INTRADAY"], "enableKillSwitch": True}
+    assert payload == {
+        "profitValue": "1500.0",
+        "lossValue": "500.0",
+        "productType": ["INTRADAY"],
+        "enableKillSwitch": True,
+    }
     get_resp = await adapter.get_pnl_exit(session)
     assert get_resp["profit"] == "1500.0"
     stop_resp = await adapter.stop_pnl_exit(session)
@@ -463,16 +1023,203 @@ async def test_pnl_exit_validation_fails_closed() -> None:
 
 
 async def test_exit_all_positions_gated_delete() -> None:
+    class ExitHTTP(MockHTTP):
+        def __init__(self, owner):
+            super().__init__()
+            self.owner = owner
+
+        def delete(self, endpoint):
+            self.calls.append(("DELETE", endpoint, None))
+            self.owner.exited = True
+            return {"status": "success", "data": {"status": "SUCCESS"}}
+
+    class ExitDhan(MockDhan):
+        def __init__(self):
+            super().__init__()
+            self.exited = False
+            self.dhan_http = ExitHTTP(self)
+
+        def get_positions(self):
+            rows = (
+                []
+                if self.exited
+                else [
+                    {"tradingSymbol": "TCS", "exchangeSegment": "NSE_EQ", "productType": "INTRADAY", "netQty": 2},
+                ]
+            )
+            return {"status": "success", "data": rows}
+
+    mock = ExitDhan()
+    adapter = _adapter(mock)
+
+    async def no_active_orders(_session):
+        return {}
+
+    adapter._active_order_targets = no_active_orders
+    session = await _session(adapter)
+    resp = await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
+    assert resp == {"errors": [], "total": 1, "success": 1}
+    assert mock.dhan_http.calls == [("DELETE", "/positions", None)]
+
+
+async def test_exit_all_positions_reports_accepted_but_still_open_position_as_partial() -> None:
+    class StickyPositionDhan(MockDhan):
+        def get_positions(self):
+            return {
+                "status": "success",
+                "data": [
+                    {"tradingSymbol": "TCS", "exchangeSegment": "NSE_EQ", "productType": "INTRADAY", "netQty": 2},
+                ],
+            }
+
+    mock = StickyPositionDhan()
+    mock.dhan_http.responses[("DELETE", "/positions")] = {
+        "status": "success",
+        "data": {"status": "SUCCESS"},
+    }
+    adapter = _adapter(mock)
+
+    async def no_active_orders(_session):
+        return {}
+
+    adapter._active_order_targets = no_active_orders
+    session = await _session(adapter)
+
+    resp = await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
+
+    assert resp["total"] == 1
+    assert resp["success"] == 0
+    assert resp["errors"] == [{"position": "NSE:TCS:MIS"}]
+
+
+async def test_exit_all_positions_catches_late_triggered_regular_order(monkeypatch) -> None:
+    import flinttrade_gateway.brokers.dhan as dhan_module
+
+    late_order = {("regular", "LATE-1"): {"orderid": "LATE-1", "status": "PENDING"}}
+
+    class TriggerRaceAdapter(DhanAdapter):
+        def __init__(self, mock):
+            super().__init__(client_factory=lambda _session: mock)
+            self.order_snapshots = iter(({}, {}, late_order, late_order, late_order, late_order))
+
+        async def _active_positions(self, session):
+            return {}
+
+        async def _active_order_targets(self, session):
+            return next(self.order_snapshots)
+
+    monkeypatch.setattr(dhan_module, "_EMERGENCY_READBACK_DELAY_SECONDS", 0)
     mock = MockDhan()
     mock.dhan_http.responses[("DELETE", "/positions")] = {
         "status": "success",
-        "data": {"status": "SUCCESS", "message": "All orders and positions exited successfully"},
+        "data": {"status": "SUCCESS"},
     }
-    adapter = _adapter(mock)
+    adapter = TriggerRaceAdapter(mock)
     session = await _session(adapter)
-    resp = await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
-    assert resp["status"] == "SUCCESS"
-    assert mock.dhan_http.calls == [("DELETE", "/positions", None)]
+
+    result = await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
+
+    assert result["success"] == 0
+    assert result["errors"] == [{"family": "regular", "id": "LATE-1"}]
+
+
+async def test_exit_all_positions_catches_position_reopened_during_order_readback(monkeypatch) -> None:
+    import flinttrade_gateway.brokers.dhan as dhan_module
+
+    open_position = {
+        "NSE:TCS:MIS": {
+            "exchange": "NSE",
+            "symbol": "TCS",
+            "product": "MIS",
+            "quantity": "1",
+        }
+    }
+
+    class ReopeningPositionAdapter(DhanAdapter):
+        def __init__(self, mock):
+            super().__init__(client_factory=lambda _session: mock)
+            self.position_reads = 0
+            self.order_reads = 0
+            self.reopened_during_order_readback = False
+
+        async def _active_positions(self, session):
+            self.position_reads += 1
+            if self.position_reads == 1 or self.reopened_during_order_readback:
+                return open_position
+            return {}
+
+        async def _active_order_targets(self, session):
+            self.order_reads += 1
+            if self.order_reads == 2:
+                self.reopened_during_order_readback = True
+            return {}
+
+    monkeypatch.setattr(dhan_module, "_EMERGENCY_READBACK_DELAY_SECONDS", 0)
+    mock = MockDhan()
+    mock.dhan_http.responses[("DELETE", "/positions")] = {
+        "status": "success",
+        "data": {"status": "SUCCESS"},
+    }
+    adapter = ReopeningPositionAdapter(mock)
+    session = await _session(adapter)
+
+    result = await adapter.exit_all_positions(session, _router_token=_ROUTER_TOKEN)
+
+    assert adapter.reopened_during_order_readback is True
+    assert adapter.position_reads == 6
+    assert adapter.order_reads == 6
+    assert result["success"] == 0
+    assert result["errors"] == [{"position": "NSE:TCS:MIS"}]
+
+
+async def test_position_readback_catches_position_after_third_empty_read(monkeypatch) -> None:
+    import flinttrade_gateway.brokers.dhan as dhan_module
+
+    late_position = {"NSE:TCS:MIS": {"symbol": "TCS", "quantity": "2"}}
+
+    class PositionRaceAdapter(DhanAdapter):
+        def __init__(self):
+            super().__init__(client_factory=lambda _session: MockDhan())
+            self.snapshots = iter(({}, {}, {}, late_position, {}))
+            self.reads = 0
+
+        async def _active_positions(self, session):
+            self.reads += 1
+            return next(self.snapshots)
+
+    monkeypatch.setattr(dhan_module, "_EMERGENCY_READBACK_DELAY_SECONDS", 0)
+    adapter = PositionRaceAdapter()
+    session = await _session(adapter)
+
+    active = await adapter._settled_active_positions(session)
+
+    assert active == late_position
+    assert adapter.reads == 5
+
+
+async def test_position_readback_accepts_only_terminal_three_read_quiet_window(monkeypatch) -> None:
+    import flinttrade_gateway.brokers.dhan as dhan_module
+
+    transient = {"NSE:TCS:MIS": {"symbol": "TCS", "quantity": "2"}}
+
+    class SettlingPositionAdapter(DhanAdapter):
+        def __init__(self):
+            super().__init__(client_factory=lambda _session: MockDhan())
+            self.snapshots = iter((transient, {}, {}, {}, {}))
+            self.reads = 0
+
+        async def _active_positions(self, session):
+            self.reads += 1
+            return next(self.snapshots)
+
+    monkeypatch.setattr(dhan_module, "_EMERGENCY_READBACK_DELAY_SECONDS", 0)
+    adapter = SettlingPositionAdapter()
+    session = await _session(adapter)
+
+    active = await adapter._settled_active_positions(session)
+
+    assert active == {}
+    assert adapter.reads == 5
 
 
 # ---------------------------------------------------------------------------
@@ -497,7 +1244,7 @@ async def test_edis_form_is_headless_and_unescapes() -> None:
     mock = MockDhan()
     mock.dhan_http.responses[("POST", "/edis/form")] = {
         "status": "success",
-        "data": {"dhanClientId": "C1", "edisFormHtml": "<form action=\\\"https://edis.cdslindia.com\\\">"},
+        "data": {"dhanClientId": "C1", "edisFormHtml": '<form action=\\"https://edis.cdslindia.com\\">'},
     }
     adapter = _adapter(mock)
     session = await _session(adapter)
@@ -548,8 +1295,7 @@ async def test_static_ip_management() -> None:
 
 async def test_fetch_security_list_parses_csv_rows() -> None:
     csv_text = (
-        "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_TRADING_SYMBOL\n"
-        "NSE,E,11536,TCS\nBSE,E,532540,TCS\n"
+        "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_TRADING_SYMBOL\nNSE,E,11536,TCS\nBSE,E,532540,TCS\n"
     )
     seen: list[str] = []
 
@@ -583,12 +1329,22 @@ async def test_expired_options_maps_request_and_response() -> None:
     mock = MockDhan()
     adapter = DhanAdapter(client_factory=lambda _s: mock)  # NIFTY resolves via index fast path
     session = await _session(adapter)
-    out = await adapter.expired_options(session, {
-        "symbol": "NIFTY", "exchange": "NFO", "instrument": "OPTIDX", "expiry_flag": "MONTH",
-        "expiry_code": 1, "strike": "ATM", "option_type": "CALL",
-        "required_data": ["open", "close"], "from_date": "2021-08-01", "to_date": "2021-09-01",
-        "interval": 1,
-    })
+    out = await adapter.expired_options(
+        session,
+        {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "instrument": "OPTIDX",
+            "expiry_flag": "MONTH",
+            "expiry_code": 1,
+            "strike": "ATM",
+            "option_type": "CALL",
+            "required_data": ["open", "close"],
+            "from_date": "2021-08-01",
+            "to_date": "2021-09-01",
+            "interval": 1,
+        },
+    )
     kind, kw = mock.calls[0]
     assert kind == "expired_options"
     assert kw["security_id"] == "13" and kw["exchange_segment"] == "NSE_FNO"
@@ -601,8 +1357,9 @@ async def test_expired_options_validates_before_broker() -> None:
     adapter = _adapter(mock)
     session = await _session(adapter)
     with pytest.raises(DhanMappingError, match="interval"):
-        await adapter.expired_options(session, {"symbol": "NIFTY", "interval": 7,
-                                                "from_date": "2025-01-01", "to_date": "2025-01-30"})
+        await adapter.expired_options(
+            session, {"symbol": "NIFTY", "interval": 7, "from_date": "2025-01-01", "to_date": "2025-01-30"}
+        )
     assert mock.calls == []
 
 
@@ -637,9 +1394,19 @@ async def test_subscribe_rejects_unknown_mode() -> None:
 
 _ORDER_ALERT = {
     "Type": "order_alert",
-    "Data": {"OrderNo": "1124091136546", "Status": "Traded", "Symbol": "IDEA", "Exchange": "NSE",
-             "TxnType": "B", "OrderType": "LMT", "Product": "C", "Quantity": 1, "TradedQty": 1,
-             "Price": 13, "AvgTradedPrice": 13},
+    "Data": {
+        "OrderNo": "1124091136546",
+        "Status": "Traded",
+        "Symbol": "IDEA",
+        "Exchange": "NSE",
+        "TxnType": "B",
+        "OrderType": "LMT",
+        "Product": "C",
+        "Quantity": 1,
+        "TradedQty": 1,
+        "Price": 13,
+        "AvgTradedPrice": 13,
+    },
 }
 
 
@@ -721,9 +1488,7 @@ def test_replay_credentials_drops_totp_and_keeps_minted_token() -> None:
 
     adapter = DhanAdapter(client_factory=lambda _s: object())
     session = Session(access_token="minted-24h", expires_at=9e9, account_id="111", adapter_id="dhan")
-    replay = adapter.replay_credentials(
-        {"client_id": "111", "pin": "1234", "totp": "000111"}, session
-    )
+    replay = adapter.replay_credentials({"client_id": "111", "pin": "1234", "totp": "000111"}, session)
     assert replay == {"client_id": "111", "pin": "1234", "access_token": "minted-24h"}
 
 

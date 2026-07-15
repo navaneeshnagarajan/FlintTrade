@@ -32,9 +32,9 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
 @pytest.mark.unit
 def test_flinttrade_app_start_arms_cron_through_calendar_owner() -> None:
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    start = _find_method(tree, "FlintTradeApp", "start")
+    start = _find_method(tree, "FlintTradeApp", "_start_owned")
     calendar_start = _find_method(tree, "FlintTradeApp", "_start_calendar_schedulers")
-    assert start is not None, "FlintTradeApp.start not found in app.py"
+    assert start is not None, "FlintTradeApp._start_owned not found in app.py"
     assert calendar_start is not None, "FlintTradeApp._start_calendar_schedulers not found"
 
     arms_calendar_runtime = [
@@ -47,7 +47,7 @@ def test_flinttrade_app_start_arms_cron_through_calendar_owner() -> None:
         and node.func.value.id == "self"
     ]
     assert arms_calendar_runtime, (
-        "FlintTradeApp.start() must arm market-sensitive schedulers after an "
+        "FlintTradeApp._start_owned() must arm market-sensitive schedulers after an "
         "authoritative calendar is loaded."
     )
 
@@ -81,8 +81,8 @@ def test_flinttrade_app_start_injects_the_overnight_optimiser() -> None:
     halves with an AST check so the wiring can't regress unnoticed.
     """
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
-    start = _find_method(tree, "FlintTradeApp", "start")
-    assert start is not None, "FlintTradeApp.start not found in app.py"
+    start = _find_method(tree, "FlintTradeApp", "_start_owned")
+    assert start is not None, "FlintTradeApp._start_owned not found in app.py"
 
     constructs_optimiser = [
         node
@@ -92,7 +92,7 @@ def test_flinttrade_app_start_injects_the_overnight_optimiser() -> None:
         and node.func.id == "OvernightOptimiser"
     ]
     assert constructs_optimiser, (
-        "FlintTradeApp.start() must construct an OvernightOptimiser so the "
+        "FlintTradeApp._start_owned() must construct an OvernightOptimiser so the "
         "nightly 'optimise overnight' job has an engine to run."
     )
 
@@ -111,7 +111,7 @@ def test_flinttrade_app_start_injects_the_overnight_optimiser() -> None:
         )
     ]
     assert injects_optimiser, (
-        "FlintTradeApp.start() must assign self.cron.overnight_optimiser = "
+        "FlintTradeApp._start_owned() must assign self.cron.overnight_optimiser = "
         "<optimiser>.run — otherwise the nightly optimisation job stays "
         "unregistered and 'optimise overnight' silently never runs."
     )

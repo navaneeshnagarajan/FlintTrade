@@ -57,6 +57,11 @@ vi.mock("@/services/ftApi", () => ({
     max_margin_pct: 80,
     daily_loss_pause_pct: 3,
     daily_loss_kill_pct: 5,
+    daily_loss_selector: "openalgo:default",
+    opening_risk_capital: 100000,
+    daily_loss_accounts: [],
+    daily_loss_pause_active: false,
+    daily_loss_hard_stop_active: false,
     max_net_delta: 500,
     max_net_vega: 200,
     kill_switch_reason: "",
@@ -106,6 +111,7 @@ import {
   activateKillSwitch,
   getSafetyConfig,
   resetKillSwitch,
+  updateSafetyConfig,
   type SafetyConfig,
 } from "@/services/ftApi";
 
@@ -149,6 +155,11 @@ const inactiveSafetyConfig: SafetyConfig = {
   max_margin_pct: 80,
   daily_loss_pause_pct: 3,
   daily_loss_kill_pct: 5,
+  daily_loss_selector: "openalgo:default",
+  opening_risk_capital: 100000,
+  daily_loss_accounts: [],
+  daily_loss_pause_active: false,
+  daily_loss_hard_stop_active: false,
   max_net_delta: 500,
   max_net_vega: 200,
   kill_switch_reason: "",
@@ -163,6 +174,7 @@ describe("SettingsSection", () => {
     vi.mocked(getSafetyConfig).mockReset().mockResolvedValue({ ...inactiveSafetyConfig });
     vi.mocked(activateKillSwitch).mockReset();
     vi.mocked(resetKillSwitch).mockReset();
+    vi.mocked(updateSafetyConfig).mockReset().mockResolvedValue({ status: "success" });
   });
 
   afterEach(() => {
@@ -177,6 +189,76 @@ describe("SettingsSection", () => {
   it("shows the Safety Configuration heading", () => {
     render(<SettingsSection />, { wrapper: createWrapper() });
     expect(screen.getByText("Safety Configuration")).toBeInTheDocument();
+  });
+
+  it("associates every safety field label with its numeric input", async () => {
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    for (const name of [
+      "Max Positions",
+      "Max Margin",
+      "Daily Loss — Pause",
+      "Daily Loss — Hard Stop",
+      "Max Net Delta",
+      "Max Net Vega",
+    ]) {
+      expect(await screen.findByRole("spinbutton", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("omits selector-scoped opening capital when saving a flattened global config", async () => {
+    const user = userEvent.setup();
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const maxPositions = await screen.findByRole("spinbutton", { name: "Max Positions" });
+    await user.clear(maxPositions);
+    await user.type(maxPositions, "12");
+    await user.click(screen.getByRole("button", { name: "Save Config" }));
+
+    await waitFor(() => expect(updateSafetyConfig).toHaveBeenCalledTimes(1));
+    const update = vi.mocked(updateSafetyConfig).mock.calls[0]?.[0];
+    expect(update).toMatchObject({
+      max_positions: 12,
+      daily_loss_pause_pct: 3,
+      daily_loss_kill_pct: 5,
+    });
+    expect(update).not.toHaveProperty("opening_risk_capital");
+    expect(update).not.toHaveProperty("daily_loss_selector");
+    expect(await screen.findByRole("status")).toHaveTextContent("Safety config saved");
+  });
+
+  it("rejects an inverted pause and hard-stop relationship with an assertive error", async () => {
+    const user = userEvent.setup();
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const pause = await screen.findByRole("spinbutton", { name: "Daily Loss — Pause" });
+    const hardStop = screen.getByRole("spinbutton", { name: "Daily Loss — Hard Stop" });
+    await user.clear(pause);
+    await user.type(pause, "5");
+    await user.clear(hardStop);
+    await user.type(hardStop, "4");
+    await user.click(screen.getByRole("button", { name: "Save Config" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Daily-loss hard stop must be greater than the positive pause threshold",
+    );
+    expect(updateSafetyConfig).not.toHaveBeenCalled();
+  });
+
+  it("does not present loading or failed L5 state as inactive", async () => {
+    const pending = new Promise<SafetyConfig>(() => undefined);
+    vi.mocked(getSafetyConfig).mockReturnValueOnce(pending);
+    const { unmount } = render(<SettingsSection />, { wrapper: createWrapper() });
+
+    expect(screen.getByText("LOADING")).toBeInTheDocument();
+    expect(screen.queryByText("INACTIVE")).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(getSafetyConfig).mockRejectedValueOnce(new Error("backend unavailable"));
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("UNKNOWN")).toBeInTheDocument();
+    expect(screen.queryByText("INACTIVE")).not.toBeInTheDocument();
   });
 
   it("shows the Telegram Alerts heading", () => {
@@ -225,6 +307,8 @@ describe("SettingsSection", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry Emergency Actions" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /reset kill switch/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/process-wide emergency stop/i)).toBeInTheDocument();
+    expect(screen.getByText(/may complete only partially/i)).toBeInTheDocument();
   });
 
   it("offers retry, but not reset, when durable flatten state is incomplete", async () => {
@@ -363,5 +447,15 @@ describe("SettingsSection", () => {
       expect(screen.getByRole("button", { name: "Activate Kill Switch" })).toBeDisabled();
     });
     expect(screen.getByText(/available only in Live mode/i)).toBeInTheDocument();
+    for (const input of await screen.findAllByRole("spinbutton")) {
+      expect(input).toBeDisabled();
+    }
+  });
+
+  it("wraps the narrow kill-switch action row", async () => {
+    render(<SettingsSection />, { wrapper: createWrapper() });
+
+    const button = await screen.findByRole("button", { name: "Activate Kill Switch" });
+    expect(button.parentElement).toHaveClass("flex-wrap");
   });
 });

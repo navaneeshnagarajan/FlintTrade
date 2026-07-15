@@ -1,6 +1,18 @@
 ﻿import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 
+export class FtApiError<T = unknown> extends Error {
+  readonly status: number;
+  readonly data: T | undefined;
+
+  constructor(message: string, status: number, data?: T) {
+    super(message);
+    this.name = "FtApiError";
+    this.status = status;
+    this.data = data;
+  }
+}
+
 export function getBase(): string {
   if (import.meta.env.DEV) return "/ft-api";
   return "";
@@ -9,6 +21,10 @@ export function getBase(): string {
 export function isDemoAuthSession(): boolean {
   const token = useAuthStore.getState().token;
   return token === "demo-user" || token === "dev-bypass";
+}
+
+export function isDemoUserSession(): boolean {
+  return useAuthStore.getState().token === "demo-user";
 }
 
 /**
@@ -55,11 +71,13 @@ export function buildHeaders(includeJson: boolean): Record<string, string> {
  */
 async function throwHttpError(resp: Response, endpoint: string): Promise<never> {
   let message: string | null = null;
+  let data: unknown;
   try {
     const body: unknown = await resp.json();
     const record = body !== null && typeof body === "object"
       ? body as Record<string, unknown>
       : null;
+    data = record?.data;
     if (
       record &&
       typeof record.message === "string"
@@ -74,7 +92,7 @@ async function throwHttpError(resp: Response, endpoint: string): Promise<never> 
   } catch {
     // Not a JSON body — fall through to the generic message.
   }
-  throw new Error(message ?? `FT API ${endpoint}: HTTP ${resp.status}`);
+  throw new FtApiError(message ?? `FT API ${endpoint}: HTTP ${resp.status}`, resp.status, data);
 }
 
 export async function parseResponse<T>(res: Response, endpoint: string): Promise<T> {
@@ -89,7 +107,8 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
       "message" in json
         ? String((json as { message: unknown }).message)
         : `FT API ${endpoint} error`;
-    throw new Error(msg);
+    const data = "data" in json ? (json as { data: unknown }).data : undefined;
+    throw new FtApiError(msg, res.status, data);
   }
   const hasEnvelope = json !== null && typeof json === "object" && "data" in json;
   const data = hasEnvelope ? (json as { data: unknown }).data : json;
@@ -99,25 +118,34 @@ export async function parseResponse<T>(res: Response, endpoint: string): Promise
   // used to discard it, so widgets rendered synthetic payloads (spot-24000
   // chains, fabricated earnings dates) as live whenever a broker was
   // connected. Propagate the flag onto object payloads so consumers can badge
-  // fabricated data. Fail-closed: an envelope-level ``true`` wins over any
-  // nested value — if ANY layer declares the payload synthetic, it is.
+  // fabricated data. Preserve both boolean values so consumers that require
+  // explicit live provenance can distinguish ``false`` from an omitted flag.
+  // Fail-closed: ``true`` at either layer wins if the two values disagree.
+  const envelopeSampleFlag = hasEnvelope
+    ? (json as { is_sample_data?: unknown }).is_sample_data
+    : undefined;
   if (
     hasEnvelope &&
-    (json as { is_sample_data?: unknown }).is_sample_data === true &&
+    typeof envelopeSampleFlag === "boolean" &&
     data !== null &&
     typeof data === "object" &&
     !Array.isArray(data)
   ) {
-    return { ...(data as Record<string, unknown>), is_sample_data: true } as T;
+    const nestedSampleFlag = (data as { is_sample_data?: unknown }).is_sample_data;
+    return {
+      ...(data as Record<string, unknown>),
+      is_sample_data: envelopeSampleFlag || nestedSampleFlag === true,
+    } as T;
   }
   return data as T;
 }
 
-export async function post<T>(endpoint: string, body: object = {}): Promise<T> {
+export async function post<T>(endpoint: string, body: object = {}, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);

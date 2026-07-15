@@ -27,6 +27,7 @@ from flinttrade_gateway.brokers.kotakneo_mapping import (
     from_kotak_scrip_master,
     is_index_name,
     order_history_rows,
+    require_write_success,
     subscription_flags,
     to_limits_params,
     to_margin_params,
@@ -42,23 +43,32 @@ pytestmark = pytest.mark.unit
 # Place: AMO variety
 # ---------------------------------------------------------------------------
 
+
 def test_place_order_amo_variety_sets_flag():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4", variety="amo")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="CNC",
+        quantity="10",
+        price="9.4",
+        variety="amo",
+    )
     p = to_place_order_params(order, "IDEA-EQ")
     assert p["amo"] == "YES"
     assert p["product"] == "CNC"  # AMO is a flag, not a product override
 
 
 def test_place_order_regular_defaults_amo_no():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="10", price="9.4"
+    )
     assert to_place_order_params(order, "IDEA-EQ")["amo"] == "NO"
 
 
 def test_place_order_forwards_explicit_market_protection_only():
-    base = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET",
-                 product="CNC", quantity="10")
+    base = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET", product="CNC", quantity="10")
     assert "market_protection" not in to_place_order_params(base, "IDEA-EQ")
     protected = base.model_copy(update={"market_protection": True})
     disabled = base.model_copy(update={"market_protection": False})
@@ -70,30 +80,54 @@ def test_place_order_forwards_explicit_market_protection_only():
 # Place: validity pass-through (Order.validity)
 # ---------------------------------------------------------------------------
 
+
 def test_place_order_validity_defaults_to_day_when_unset():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="CNC", quantity="10", price="9.4"
+    )
     assert to_place_order_params(order, "IDEA-EQ")["validity"] == "DAY"
 
 
 def test_place_order_validity_passes_through_when_set():
-    order = Order(symbol="GOLDPETAL25JUNFUT", action="BUY", exchange="MCX",
-                  pricetype="LIMIT", product="NRML", quantity="1", price="7000",
-                  validity="IOC")
+    order = Order(
+        symbol="GOLDPETAL25JUNFUT",
+        action="BUY",
+        exchange="MCX",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="7000",
+        validity="IOC",
+    )
     assert to_place_order_params(order, "GOLDPETAL25JUNFUT")["validity"] == "IOC"
 
 
 def test_place_order_validity_invalid_raises():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="10", price="9.4", validity="FOREVER")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="CNC",
+        quantity="10",
+        price="9.4",
+        validity="FOREVER",
+    )
     with pytest.raises(KotakNeoMappingError, match="validity"):
         to_place_order_params(order, "IDEA-EQ")
 
 
 def test_place_order_rejects_legacy_validity_before_sdk():
-    order = Order(symbol="GOLDPETAL25JUNFUT", action="BUY", exchange="MCX",
-                  pricetype="LIMIT", product="NRML", quantity="1", price="7000",
-                  validity="GTC")
+    order = Order(
+        symbol="GOLDPETAL25JUNFUT",
+        action="BUY",
+        exchange="MCX",
+        pricetype="LIMIT",
+        product="NRML",
+        quantity="1",
+        price="7000",
+        validity="GTC",
+    )
     with pytest.raises(KotakNeoMappingError, match="validity"):
         to_place_order_params(order, "GOLDPETAL25JUNFUT")
 
@@ -116,29 +150,51 @@ def test_place_order_maps_documented_derivative_segments(exchange, expected):
 # Modify: full documented param surface
 # ---------------------------------------------------------------------------
 
+
 def test_modify_full_surface_quick_method():
-    p = to_modify_order_params("250122000624384", {
-        "pricetype": "SL", "price": 9.5, "quantity": 20, "trigger_price": 9.45,
-        "instrument_token": "14366", "exchange_segment": "NSE", "product": "MIS",
-        "trading_symbol": "IDEA-EQ", "transaction_type": "BUY",
-        "amo": True, "filled_quantity": 5, "market_protection": "0", "dd": "NA",
-    })
+    p = to_modify_order_params(
+        "250122000624384",
+        {
+            "pricetype": "SL",
+            "price": 9.5,
+            "quantity": 20,
+            "trigger_price": 9.45,
+            "instrument_token": "14366",
+            "exchange_segment": "NSE",
+            "product": "MIS",
+            "trading_symbol": "IDEA-EQ",
+            "transaction_type": "BUY",
+            "amo": True,
+            "filled_quantity": 5,
+            "market_protection": "0",
+            "dd": "NA",
+        },
+    )
     assert p["order_id"] == "250122000624384"
     assert p["order_type"] == "SL" and p["trigger_price"] == "9.45"
     assert p["instrument_token"] == "14366"
-    assert p["exchange_segment"] == "nse_cm"   # FlintTrade exchange mapped to NEO segment
+    assert p["exchange_segment"] == "nse_cm"  # FlintTrade exchange mapped to NEO segment
     assert p["product"] == "MIS"
     assert p["trading_symbol"] == "IDEA-EQ"
-    assert p["transaction_type"] == "B"        # BUY mapped to NEO single letter
-    assert p["amo"] == "YES"                    # bool True normalised
+    assert p["transaction_type"] == "B"  # BUY mapped to NEO single letter
+    assert p["amo"] == "YES"  # bool True normalised
     assert p["filled_quantity"] == "5"
     assert p["market_protection"] == "0" and p["dd"] == "NA"
 
 
 def test_modify_minimal_omits_optional_keys():
     p = to_modify_order_params("1", {"quantity": 4, "price": 9.5})
-    for key in ("instrument_token", "exchange_segment", "product", "trading_symbol",
-                "transaction_type", "amo", "filled_quantity", "market_protection", "dd"):
+    for key in (
+        "instrument_token",
+        "exchange_segment",
+        "product",
+        "trading_symbol",
+        "transaction_type",
+        "amo",
+        "filled_quantity",
+        "market_protection",
+        "dd",
+    ):
         assert key not in p
     assert p["validity"] == "DAY"
 
@@ -157,17 +213,36 @@ def test_modify_validity_validated():
 # Margin: trigger + variety legs
 # ---------------------------------------------------------------------------
 
+
 def test_margin_params_carry_trigger_price():
-    order = Order(symbol="IDEA", action="SELL", exchange="NSE", pricetype="SL",
-                  product="MIS", quantity="10", price="9.3", trigger_price="9.35")
+    order = Order(
+        symbol="IDEA",
+        action="SELL",
+        exchange="NSE",
+        pricetype="SL",
+        product="MIS",
+        quantity="10",
+        price="9.3",
+        trigger_price="9.35",
+    )
     p = to_margin_params(order, "14366")
     assert p["trigger_price"] == "9.35"
 
 
 def test_margin_params_bracket_legs_mirror_place():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4", variety="bracket",
-                  target_price="9.8", stop_loss_price="9.1", trailing_jump="0.1")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+        variety="bracket",
+        target_price="9.8",
+        stop_loss_price="9.1",
+        trailing_jump="0.1",
+    )
     p = to_margin_params(order, "14366")
     assert p["product"] == "BO"
     assert p["stop_loss_value"] == "9.1" and p["stop_loss_type"] == "Absolute"
@@ -176,9 +251,17 @@ def test_margin_params_bracket_legs_mirror_place():
 
 
 def test_margin_params_cover_uses_co():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4", variety="cover",
-                  stop_loss_price="9.1")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+        variety="cover",
+        stop_loss_price="9.1",
+    )
     p = to_margin_params(order, "14366")
     assert p["product"] == "CO" and "square_off_value" not in p
 
@@ -188,9 +271,11 @@ def test_margin_params_cover_uses_co():
 # trading symbol rides its own field (Margin_Required.md:35).
 # ---------------------------------------------------------------------------
 
+
 def test_margin_params_use_numeric_instrument_token_and_trading_symbol():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
     p = to_margin_params(order, "IDEA-EQ", instrument_token="14366")
     # instrument_token = numeric pSymbol; trading_symbol = pTrdSymbol — NOT the
     # trading symbol packed into instrument_token (the pre-fix bug).
@@ -199,8 +284,9 @@ def test_margin_params_use_numeric_instrument_token_and_trading_symbol():
 
 
 def test_margin_params_fall_back_to_symbol_when_token_unresolved():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4")
+    order = Order(
+        symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT", product="MIS", quantity="10", price="9.4"
+    )
     p = to_margin_params(order, "IDEA-EQ")  # no numeric token resolvable
     assert p["instrument_token"] == "IDEA-EQ" and p["trading_symbol"] == "IDEA-EQ"
 
@@ -208,6 +294,7 @@ def test_margin_params_fall_back_to_symbol_when_token_unresolved():
 # ---------------------------------------------------------------------------
 # Finding #2 — quote token builder is numeric-token-shaped (indexes by name).
 # ---------------------------------------------------------------------------
+
 
 def test_to_quote_tokens_packs_resolved_token():
     tokens = to_quote_tokens([("14366", "NSE"), ("Nifty 50", "NSE")])
@@ -242,31 +329,62 @@ def test_canonical_index_name_uses_documented_case_when_known():
 # Finding #3 — cover order: stop level → trigger_price, NO bracket-only legs.
 # ---------------------------------------------------------------------------
 
+
 def test_place_cover_maps_stop_to_trigger_and_drops_bracket_fields():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="MIS", quantity="10", price="9.4", variety="cover",
-                  stop_loss_price="9.1")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="LIMIT",
+        product="MIS",
+        quantity="10",
+        price="9.4",
+        variety="cover",
+        stop_loss_price="9.1",
+    )
     p = to_place_order_params(order, "IDEA-EQ")
     assert p["product"] == "CO"
-    assert p["trigger_price"] == "9.1"   # stop level rides trigger_price (CO-required)
+    assert p["trigger_price"] == "9.1"  # stop level rides trigger_price (CO-required)
     # Bracket-only fields MUST NOT be present on a cover order (Place_Order.md:88-93).
-    for field in ("stop_loss_value", "stop_loss_type", "square_off_value",
-                  "square_off_type", "trailing_stop_loss", "trailing_sl_value"):
+    for field in (
+        "stop_loss_value",
+        "stop_loss_type",
+        "square_off_value",
+        "square_off_type",
+        "trailing_stop_loss",
+        "trailing_sl_value",
+    ):
         assert field not in p
 
 
 def test_place_cover_falls_back_to_trigger_price_when_only_trigger_set():
-    order = Order(symbol="IDEA", action="SELL", exchange="NSE", pricetype="SL-M",
-                  product="MIS", quantity="10", price="0", variety="cover",
-                  trigger_price="9.55")
+    order = Order(
+        symbol="IDEA",
+        action="SELL",
+        exchange="NSE",
+        pricetype="SL-M",
+        product="MIS",
+        quantity="10",
+        price="0",
+        variety="cover",
+        trigger_price="9.55",
+    )
     p = to_place_order_params(order, "IDEA-EQ")
     assert p["product"] == "CO" and p["trigger_price"] == "9.55"
     assert "stop_loss_value" not in p
 
 
 def test_place_cover_without_stop_level_raises():
-    order = Order(symbol="IDEA", action="BUY", exchange="NSE", pricetype="MARKET",
-                  product="MIS", quantity="10", price="0", variety="cover")
+    order = Order(
+        symbol="IDEA",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="10",
+        price="0",
+        variety="cover",
+    )
     with pytest.raises(KotakNeoMappingError, match="stop level"):
         to_place_order_params(order, "IDEA-EQ")
 
@@ -275,16 +393,28 @@ def test_place_cover_without_stop_level_raises():
 # Finding #4 — avg price denominator includes multiplier (Positions.md:110-112).
 # ---------------------------------------------------------------------------
 
+
 def test_position_avg_price_includes_multiplier():
     # Currency-derivative style row: multiplier = 1000, buy leg only.
     # Avg = amount / (qty * multiplier) = 105000 / (1 * 1000 * 1 * 1) = 105.00,
     # NOT 105000 (the pre-fix value with multiplier omitted).
     row = {
-        "trdSym": "USDINR-FUT", "sym": "USDINR", "exSeg": "cde_fo", "prod": "NRML",
-        "cfBuyQty": "1", "cfBuyAmt": "105000", "cfSellQty": "0", "cfSellAmt": "0",
-        "flBuyQty": "0", "flSellQty": "0",
-        "genNum": "1", "genDen": "1", "prcNum": "1", "prcDen": "1",
-        "multiplier": "1000", "precision": "2",
+        "trdSym": "USDINR-FUT",
+        "sym": "USDINR",
+        "exSeg": "cde_fo",
+        "prod": "NRML",
+        "cfBuyQty": "1",
+        "cfBuyAmt": "105000",
+        "cfSellQty": "0",
+        "cfSellAmt": "0",
+        "flBuyQty": "0",
+        "flSellQty": "0",
+        "genNum": "1",
+        "genDen": "1",
+        "prcNum": "1",
+        "prcDen": "1",
+        "multiplier": "1000",
+        "precision": "2",
     }
     pos = from_kotak_position(row)
     assert pos["average_price"] == "105.00"
@@ -296,11 +426,22 @@ def test_position_realised_pnl_amount_consistent_with_multiplier():
     # Realised = matched * (sell_avg - buy_avg) * unit_factor = 1 * 1.00 * 1000 = 1000.00
     # = sell amount − buy amount (106000 − 105000), i.e. amount-consistent.
     row = {
-        "trdSym": "USDINR-FUT", "sym": "USDINR", "exSeg": "cde_fo", "prod": "NRML",
-        "cfBuyQty": "1", "cfBuyAmt": "105000", "cfSellQty": "1", "cfSellAmt": "106000",
-        "flBuyQty": "0", "flSellQty": "0",
-        "genNum": "1", "genDen": "1", "prcNum": "1", "prcDen": "1",
-        "multiplier": "1000", "precision": "2",
+        "trdSym": "USDINR-FUT",
+        "sym": "USDINR",
+        "exSeg": "cde_fo",
+        "prod": "NRML",
+        "cfBuyQty": "1",
+        "cfBuyAmt": "105000",
+        "cfSellQty": "1",
+        "cfSellAmt": "106000",
+        "flBuyQty": "0",
+        "flSellQty": "0",
+        "genNum": "1",
+        "genDen": "1",
+        "prcNum": "1",
+        "prcDen": "1",
+        "multiplier": "1000",
+        "precision": "2",
     }
     pos = from_kotak_position(row)
     assert pos["pnl"] == "1000.00"
@@ -309,9 +450,16 @@ def test_position_realised_pnl_amount_consistent_with_multiplier():
 def test_position_avg_price_multiplier_one_unchanged():
     # Equity (multiplier 1) must be unaffected by the fix.
     row = {
-        "trdSym": "IDEA-EQ", "sym": "IDEA", "exSeg": "nse_cm", "prod": "CNC",
-        "cfBuyQty": "100", "cfBuyAmt": "939", "cfSellQty": "0", "cfSellAmt": "0",
-        "multiplier": "1", "precision": "2",
+        "trdSym": "IDEA-EQ",
+        "sym": "IDEA",
+        "exSeg": "nse_cm",
+        "prod": "CNC",
+        "cfBuyQty": "100",
+        "cfBuyAmt": "939",
+        "cfSellQty": "0",
+        "cfSellAmt": "0",
+        "multiplier": "1",
+        "precision": "2",
     }
     pos = from_kotak_position(row)
     assert pos["average_price"] == "9.39"
@@ -320,6 +468,7 @@ def test_position_avg_price_multiplier_one_unchanged():
 # ---------------------------------------------------------------------------
 # Finding #5 — modify quick-method fields are all-or-nothing.
 # ---------------------------------------------------------------------------
+
 
 def test_modify_partial_quick_fields_rejected():
     # instrument_token without the rest of the quick-path discriminators is a
@@ -330,17 +479,28 @@ def test_modify_partial_quick_fields_rejected():
 
 def test_modify_partial_quick_fields_missing_one_rejected():
     with pytest.raises(KotakNeoMappingError, match="trading_symbol"):
-        to_modify_order_params("1", {
-            "instrument_token": "14366", "exchange_segment": "NSE", "product": "MIS",
-            # trading_symbol deliberately omitted
-        })
+        to_modify_order_params(
+            "1",
+            {
+                "instrument_token": "14366",
+                "exchange_segment": "NSE",
+                "product": "MIS",
+                # trading_symbol deliberately omitted
+            },
+        )
 
 
 def test_modify_complete_quick_set_accepted():
-    p = to_modify_order_params("1", {
-        "instrument_token": "14366", "exchange_segment": "NSE", "product": "MIS",
-        "trading_symbol": "IDEA-EQ", "quantity": 5,
-    })
+    p = to_modify_order_params(
+        "1",
+        {
+            "instrument_token": "14366",
+            "exchange_segment": "NSE",
+            "product": "MIS",
+            "trading_symbol": "IDEA-EQ",
+            "quantity": 5,
+        },
+    )
     assert p["instrument_token"] == "14366" and p["trading_symbol"] == "IDEA-EQ"
 
 
@@ -354,11 +514,21 @@ def test_modify_order_id_path_no_quick_fields_accepted():
 # Finding #6 — stock feed sell_quantity is keyed 'sq', not the depth key 'bs'.
 # ---------------------------------------------------------------------------
 
+
 def test_stock_feed_decode_reads_sell_quantity_from_sq():
-    tick = decode_kotak_feed([{
-        "tk": "11536", "ts": "TCS-EQ", "e": "nse_cm", "name": "sf",
-        "ltp": "4000.5", "bq": "10", "sq": "7",
-    }])[0]
+    tick = decode_kotak_feed(
+        [
+            {
+                "tk": "11536",
+                "ts": "TCS-EQ",
+                "e": "nse_cm",
+                "name": "sf",
+                "ltp": "4000.5",
+                "bq": "10",
+                "sq": "7",
+            }
+        ]
+    )[0]
     assert tick["kind"] == "quote"
     assert tick["sell_quantity"] == 7 and tick["buy_quantity"] == 10
 
@@ -366,25 +536,45 @@ def test_stock_feed_decode_reads_sell_quantity_from_sq():
 def test_stock_feed_decode_ignores_depth_bs_key_for_sell_quantity():
     # 'bs' is a depth-frame offer-size key; in a stock frame it must NOT be read
     # as sell_quantity (the pre-fix STOCK_FEED_KEYS bug).
-    tick = decode_kotak_feed([{
-        "tk": "11536", "ts": "TCS-EQ", "e": "nse_cm", "name": "sf",
-        "ltp": "4000.5", "bs": "99",
-    }])[0]
+    tick = decode_kotak_feed(
+        [
+            {
+                "tk": "11536",
+                "ts": "TCS-EQ",
+                "e": "nse_cm",
+                "name": "sf",
+                "ltp": "4000.5",
+                "bs": "99",
+            }
+        ]
+    )[0]
     assert tick["sell_quantity"] == 0
 
 
 def test_stock_feed_decode_reads_long_name_sell_quantity():
     # SDK quote_resp_mapper re-keys 'sq' -> 'sell_quantity'; the long name decodes too.
-    tick = decode_kotak_feed({"type": "quotes", "data": [{
-        "instrument_token": "11536", "trading_symbol": "TCS-EQ", "exchange_segment": "nse_cm",
-        "last_traded_price": 4000.5, "sell_quantity": 5, "buy_quantity": 8,
-    }]})[0]
+    tick = decode_kotak_feed(
+        {
+            "type": "quotes",
+            "data": [
+                {
+                    "instrument_token": "11536",
+                    "trading_symbol": "TCS-EQ",
+                    "exchange_segment": "nse_cm",
+                    "last_traded_price": 4000.5,
+                    "sell_quantity": 5,
+                    "buy_quantity": 8,
+                }
+            ],
+        }
+    )[0]
     assert tick["sell_quantity"] == 5 and tick["buy_quantity"] == 8
 
 
 # ---------------------------------------------------------------------------
 # Error envelopes
 # ---------------------------------------------------------------------------
+
 
 def test_ensure_ok_passes_ok_envelopes():
     assert ensure_ok({"stat": "Ok", "nOrdNo": "1", "stCode": 200})["nOrdNo"] == "1"
@@ -406,15 +596,59 @@ def test_ensure_ok_raises_on_each_error_shape():
         ensure_ok({"status": "error", "message": "Invalid MPIN.", "errorCode": "401"})
 
 
+def test_require_write_success_accepts_explicit_matching_acknowledgement():
+    response = {"stat": "Ok", "nOrdNo": "250720000007242", "stCode": 200}
+
+    assert require_write_success(response, expected_order_id="250720000007242") is response
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        [],
+        {"stat": "Ok", "nOrdNo": "250720000007242"},
+        {"stat": "Ok", "nOrdNo": "250720000007242", "stCode": "200"},
+        {"stat": "Not_Ok", "nOrdNo": "250720000007242", "stCode": 200},
+        {"stat": "Ok", "nOrdNo": "", "stCode": 200},
+        {"stat": "Ok", "nOrdNo": " 250720000007242", "stCode": 200},
+    ],
+)
+def test_require_write_success_rejects_ambiguous_acknowledgement(response):
+    with pytest.raises(KotakNeoMappingError):
+        require_write_success(response)
+
+
+def test_require_write_success_rejects_different_cancelled_order():
+    response = {"stat": "Ok", "nOrdNo": "250720000007588", "stCode": 200}
+
+    with pytest.raises(KotakNeoMappingError, match="different order id"):
+        require_write_success(response, expected_order_id="250720000007242")
+
+
 # ---------------------------------------------------------------------------
 # Order history + order-report enrichment
 # ---------------------------------------------------------------------------
 
 _HISTORY_ROW = {
-    "trdSym": "IDEA-EQ", "prc": "9.39", "qty": 1, "ordSt": "complete", "trnsTp": "B",
-    "prcTp": "L", "exSeg": "nse_cm", "exchTmstp": "22-Jan-2025 14:32:53", "nOrdNo": "250122000624384",
-    "avgPrc": "9.39", "trgPrc": "0.00", "dclQty": "0", "exchOrdId": "1100000060414692",
-    "rejRsn": "--", "ordDur": "DAY", "prod": "NRML", "fldQty": 1, "GuiOrdId": "",
+    "trdSym": "IDEA-EQ",
+    "prc": "9.39",
+    "qty": 1,
+    "ordSt": "complete",
+    "trnsTp": "B",
+    "prcTp": "L",
+    "exSeg": "nse_cm",
+    "exchTmstp": "22-Jan-2025 14:32:53",
+    "nOrdNo": "250122000624384",
+    "avgPrc": "9.39",
+    "trgPrc": "0.00",
+    "dclQty": "0",
+    "exchOrdId": "1100000060414692",
+    "rejRsn": "--",
+    "ordDur": "DAY",
+    "prod": "NRML",
+    "fldQty": 1,
+    "GuiOrdId": "",
 }
 
 
@@ -433,28 +667,42 @@ def test_order_history_rows_tolerates_single_nesting_and_garbage():
 def test_from_kotak_order_history_row_normalises():
     o = from_kotak_order(_HISTORY_ROW)
     assert o["orderid"] == "250122000624384" and o["status"] == "complete"
-    assert o["timestamp"] == "22-Jan-2025 14:32:53"   # history rows use exchTmstp
-    assert o["validity"] == "DAY"                       # falls back to ordDur
-    assert o["rejection_reason"] == ""                  # "--" sentinel scrubbed
+    assert o["timestamp"] == "22-Jan-2025 14:32:53"  # history rows use exchTmstp
+    assert o["validity"] == "DAY"  # falls back to ordDur
+    assert o["rejection_reason"] == ""  # "--" sentinel scrubbed
     assert o["exchange_order_id"] == "1100000060414692"
 
 
 def test_from_kotak_order_report_extras():
-    o = from_kotak_order({
-        "nOrdNo": "1", "ordSt": "rejected", "trdSym": "IDEA-EQ", "exSeg": "nse_cm",
-        "trnsTp": "B", "prcTp": "L", "prod": "NRML", "qty": 1, "prc": "9.39",
-        "ordDtTm": "22-Jan-2025 14:28:01", "vldt": "DAY", "dscQty": 0,
-        "rejRsn": "RMS check failed", "exOrdId": "NA", "GuiOrdId": "FLINT1",
-    })
+    o = from_kotak_order(
+        {
+            "nOrdNo": "1",
+            "ordSt": "rejected",
+            "trdSym": "IDEA-EQ",
+            "exSeg": "nse_cm",
+            "trnsTp": "B",
+            "prcTp": "L",
+            "prod": "NRML",
+            "qty": 1,
+            "prc": "9.39",
+            "ordDtTm": "22-Jan-2025 14:28:01",
+            "vldt": "DAY",
+            "dscQty": 0,
+            "rejRsn": "RMS check failed",
+            "exOrdId": "NA",
+            "GuiOrdId": "FLINT1",
+        }
+    )
     assert o["timestamp"] == "22-Jan-2025 14:28:01" and o["validity"] == "DAY"
     assert o["rejection_reason"] == "RMS check failed"
-    assert o["exchange_order_id"] == ""                 # "NA" sentinel scrubbed
+    assert o["exchange_order_id"] == ""  # "NA" sentinel scrubbed
     assert o["tag"] == "FLINT1"
 
 
 # ---------------------------------------------------------------------------
 # Limits filters
 # ---------------------------------------------------------------------------
+
 
 def test_limits_params_defaults_and_normalisation():
     assert to_limits_params() == {"segment": "ALL", "exchange": "ALL", "product": "ALL"}
@@ -474,14 +722,17 @@ def test_limits_params_validation():
 # Scrip master
 # ---------------------------------------------------------------------------
 
+
 def test_scrip_master_full_response():
-    out = from_kotak_scrip_master({
-        "filesPaths": [
-            "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2025-01-22/transformed/nse_cm.csv",
-            "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2025-01-22/transformed/nse_fo.csv",
-        ],
-        "baseFolder": "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod",
-    })
+    out = from_kotak_scrip_master(
+        {
+            "filesPaths": [
+                "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2025-01-22/transformed/nse_cm.csv",
+                "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod/2025-01-22/transformed/nse_fo.csv",
+            ],
+            "baseFolder": "https://lapi.kotaksecurities.com/wso2-scripmaster/v1/prod",
+        }
+    )
     assert len(out["files"]) == 2 and out["base_folder"].endswith("/prod")
 
 
@@ -495,9 +746,12 @@ def test_scrip_master_filtered_string_and_garbage():
 # Depth
 # ---------------------------------------------------------------------------
 
+
 def test_depth_from_preshaped_sdk_record():
     rec = {
-        "instrument_token": "11536", "trading_symbol": "TCS-EQ", "exchange_segment": "nse_cm",
+        "instrument_token": "11536",
+        "trading_symbol": "TCS-EQ",
+        "exchange_segment": "nse_cm",
         "depth": {
             "buy": [{"price": 4000.0, "quantity": 10, "orders": 2}],
             "sell": [{"price": 4001.0, "quantity": 5, "orders": 1}],
@@ -512,9 +766,22 @@ def test_depth_from_terse_frame_keys():
     # Raw HSM depth frame vocabulary (webSocket.md "For Depth"): bp..bp4 bids,
     # sp..sp4 offers, bq../bs.. sizes, bno/sno order counts.
     rec = {
-        "tk": "11536", "ts": "TCS-EQ", "e": "nse_cm", "name": "dp",
-        "bp": "4000", "bp1": "3999.5", "bq": "10", "bq1": "20", "bno1": "2", "bno2": "3",
-        "sp": "4001", "sp1": "4001.5", "bs": "5", "bs1": "8", "sno1": "1", "sno2": "4",
+        "tk": "11536",
+        "ts": "TCS-EQ",
+        "e": "nse_cm",
+        "name": "dp",
+        "bp": "4000",
+        "bp1": "3999.5",
+        "bq": "10",
+        "bq1": "20",
+        "bno1": "2",
+        "bno2": "3",
+        "sp": "4001",
+        "sp1": "4001.5",
+        "bs": "5",
+        "bs1": "8",
+        "sno1": "1",
+        "sno2": "4",
     }
     d = from_kotak_depth(rec)
     assert len(d["bids"]) == 5 and len(d["asks"]) == 5
@@ -528,6 +795,7 @@ def test_depth_from_terse_frame_keys():
 # ---------------------------------------------------------------------------
 # Subscription flags
 # ---------------------------------------------------------------------------
+
 
 def test_subscription_flags_modes():
     assert subscription_flags("LTP") == (False, False)
@@ -544,8 +812,16 @@ def test_subscription_flags_modes():
 # ---------------------------------------------------------------------------
 
 _STOCK_TICK = {
-    "tk": "11536", "ts": "TCS-EQ", "e": "nse_cm", "ltp": "4000.5", "v": "120000",
-    "bp": "4000.0", "sp": "4001.0", "oi": "0", "ltt": "22/01/2025 14:28:16", "name": "sf",
+    "tk": "11536",
+    "ts": "TCS-EQ",
+    "e": "nse_cm",
+    "ltp": "4000.5",
+    "v": "120000",
+    "bp": "4000.0",
+    "sp": "4001.0",
+    "oi": "0",
+    "ltt": "22/01/2025 14:28:16",
+    "name": "sf",
 }
 
 
@@ -569,11 +845,24 @@ def test_decode_feed_json_string_frame():
 def test_decode_feed_sdk_long_key_record():
     # The SDK's quote_resp_mapper re-keys records to the long names from
     # settings.stock_key_mapping — both vocabularies must decode.
-    ticks = decode_kotak_feed({"type": "quotes", "data": [{
-        "instrument_token": "11536", "trading_symbol": "TCS-EQ", "exchange_segment": "nse_cm",
-        "last_traded_price": 4000.5, "volume": 120000, "buy_price": 4000.0, "sell_price": 4001.0,
-        "open_interest": 0, "last_traded_time": "22/01/2025 14:28:16",
-    }]})
+    ticks = decode_kotak_feed(
+        {
+            "type": "quotes",
+            "data": [
+                {
+                    "instrument_token": "11536",
+                    "trading_symbol": "TCS-EQ",
+                    "exchange_segment": "nse_cm",
+                    "last_traded_price": 4000.5,
+                    "volume": 120000,
+                    "buy_price": 4000.0,
+                    "sell_price": 4001.0,
+                    "open_interest": 0,
+                    "last_traded_time": "22/01/2025 14:28:16",
+                }
+            ],
+        }
+    )
     assert len(ticks) == 1
     t = ticks[0]
     assert t["kind"] == "quote" and t["symbol"] == "TCS-EQ" and t["ltp"] == 4000.5
@@ -581,10 +870,21 @@ def test_decode_feed_sdk_long_key_record():
 
 
 def test_decode_feed_index_frame():
-    ticks = decode_kotak_feed([{
-        "tk": "Nifty 50", "e": "nse_cm", "name": "if", "iv": "24050.5", "ic": "23990.0",
-        "openingPrice": "24000", "highPrice": "24100", "lowPrice": "23950", "tvalue": "1737536296",
-    }])
+    ticks = decode_kotak_feed(
+        [
+            {
+                "tk": "Nifty 50",
+                "e": "nse_cm",
+                "name": "if",
+                "iv": "24050.5",
+                "ic": "23990.0",
+                "openingPrice": "24000",
+                "highPrice": "24100",
+                "lowPrice": "23950",
+                "tvalue": "1737536296",
+            }
+        ]
+    )
     assert len(ticks) == 1
     t = ticks[0]
     assert t["kind"] == "index" and t["ltp"] == 24050.5 and t["prev_close"] == 23990.0
@@ -592,10 +892,22 @@ def test_decode_feed_index_frame():
 
 
 def test_decode_feed_depth_frame_carries_book():
-    ticks = decode_kotak_feed([{
-        "tk": "11536", "ts": "TCS-EQ", "e": "nse_cm", "name": "dp",
-        "bp": "4000", "bq": "10", "bno1": "2", "sp": "4001", "bs": "5", "sno1": "1",
-    }])
+    ticks = decode_kotak_feed(
+        [
+            {
+                "tk": "11536",
+                "ts": "TCS-EQ",
+                "e": "nse_cm",
+                "name": "dp",
+                "bp": "4000",
+                "bq": "10",
+                "bno1": "2",
+                "sp": "4001",
+                "bs": "5",
+                "sno1": "1",
+            }
+        ]
+    )
     assert len(ticks) == 1
     t = ticks[0]
     assert t["kind"] == "depth" and t["bid"] == 4000.0 and t["ask"] == 4001.0
@@ -615,9 +927,17 @@ def test_decode_feed_acks_and_garbage_are_empty():
 # ---------------------------------------------------------------------------
 
 _ORDER_UPDATE = {
-    "nOrdNo": "250122000624384", "ordSt": "complete", "trdSym": "IDEA-EQ", "exSeg": "nse_cm",
-    "trnsTp": "B", "prcTp": "L", "prod": "NRML", "qty": 1, "prc": "9.39",
-    "fldQty": 1, "avgPrc": "9.39",
+    "nOrdNo": "250122000624384",
+    "ordSt": "complete",
+    "trdSym": "IDEA-EQ",
+    "exSeg": "nse_cm",
+    "trnsTp": "B",
+    "prcTp": "L",
+    "prod": "NRML",
+    "qty": 1,
+    "prc": "9.39",
+    "fldQty": 1,
+    "avgPrc": "9.39",
 }
 
 

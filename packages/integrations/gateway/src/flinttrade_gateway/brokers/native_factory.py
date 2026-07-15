@@ -1,12 +1,14 @@
 """Native-adapter activation factory (the dormant -> live bridge).
 
 The native adapters (Dhan / Upstox / Kotak Neo / INDmoney / Groww) are written,
-gated and mock-tested, but stay dormant until two prerequisites hold for a
-broker:
+gated and mock-tested, but stay dormant until every activation requirement holds
+for a broker:
 
-1. the catalogue marks it ``connectable=True`` after live login/read evidence,
-2. its non-placeholder SDK pin is installed and attested (``broker_sdk_attest``), and
-3. the operator has stored credentials for it (the encrypted vault).
+1. the catalogue marks it ``connectable=True`` only after every declared
+   ``native_connect_blocker`` has been cleared,
+2. its non-placeholder SDK pin is installed and attested (``broker_sdk_attest``),
+3. the operator has stored credentials for it (the encrypted vault), and
+4. the adapter exposes authoritative emergency reduction planning.
 
 This module owns the decision of *which* natives to construct and register, so
 ``build_broker_router`` can activate them the moment those prerequisites are met
@@ -67,9 +69,10 @@ def build_native_adapters(
     """Construct the native adapters whose prerequisites are met.
 
     For each requested ``broker_id`` that names a native adapter, the adapter is
-    constructed only when the public catalogue says it is live-verified
-    connectable, ``attest_ok(broker_id)`` says its SDK is installed and
-    pinned-match, and ``has_credentials(broker_id)`` says the vault holds creds.
+    constructed only when the public catalogue says every activation blocker is
+    cleared and it is connectable, ``attest_ok(broker_id)`` says its SDK is
+    installed and pinned-match, and ``has_credentials(broker_id)`` says the vault
+    holds creds.
     Non-native ids (e.g. ``openalgo``) and brokers failing any gate are skipped
     — reported via ``on_skip(broker_id, reason)`` — so the result holds exactly
     the natives that are safe to register.
@@ -86,8 +89,9 @@ def build_native_adapters(
         on_skip: optional ``(broker_id, reason)`` sink for observability.
 
     Returns:
-        ``{broker_id: adapter}`` for every native that passed both gates. Empty
-        when nothing is attested + credentialled — the correct dormant state.
+        ``{broker_id: adapter}`` for every native that passed all gates. Empty
+        when nothing is activation-cleared, attested, and credentialled — the
+        correct dormant state.
     """
     out: dict[str, BrokerAdapter] = {}
     seen: set[str] = set()
@@ -101,7 +105,7 @@ def build_native_adapters(
         info = BROKER_CATALOG.get(broker_id)
         if info is not None and not info.connectable:
             if on_skip is not None:
-                on_skip(broker_id, "coming-soon-not-live-verified")
+                on_skip(broker_id, "coming-soon-activation-blocked")
             continue
         if not attest_ok(broker_id):
             if on_skip is not None:
@@ -112,5 +116,10 @@ def build_native_adapters(
                 on_skip(broker_id, "no-credentials")
             continue
         kwargs = adapter_kwargs(broker_id) if adapter_kwargs is not None else {}
-        out[broker_id] = cls(**kwargs)
+        adapter = cls(**kwargs)
+        if not callable(getattr(adapter, "plan_emergency_reduction", None)):
+            if on_skip is not None:
+                on_skip(broker_id, "authoritative-emergency-planner-unavailable")
+            continue
+        out[broker_id] = adapter
     return out

@@ -120,6 +120,38 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("useBrokerAccounts — loading state", () => {
+  it("does not start account reads while the auth session is inactive", async () => {
+    renderHook(() => useBrokerAccounts(false), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => Promise.resolve());
+
+    expect(mockListAccounts).not.toHaveBeenCalled();
+    expect(mockListNativeAccounts).not.toHaveBeenCalled();
+    expect(mockSetAccounts).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a late account poll after the auth session is disabled", async () => {
+    let resolveAccounts!: (accounts: BrokerAccount[]) => void;
+    mockListAccounts.mockReturnValue(new Promise((resolve) => {
+      resolveAccounts = resolve;
+    }));
+    const { rerender } = renderHook(
+      ({ enabled }) => useBrokerAccounts(enabled),
+      { initialProps: { enabled: true }, wrapper: makeWrapper(queryClient) },
+    );
+    await waitFor(() => expect(mockListAccounts).toHaveBeenCalledOnce());
+
+    rerender({ enabled: false });
+    await act(async () => {
+      resolveAccounts([makeAccount()]);
+      await Promise.resolve();
+    });
+
+    expect(mockSetAccounts).not.toHaveBeenCalled();
+  });
+
   it("is in loading state before the query resolves", () => {
     // Arrange — a promise we never resolve so the query stays in-flight
     let _resolve!: (v: BrokerAccount[]) => void;

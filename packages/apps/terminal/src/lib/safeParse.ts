@@ -71,6 +71,7 @@ export const ohlcvBarSchema = z.object({
 export const ohlcvCacheSchema = z.object({
   data: z.array(ohlcvBarSchema),
   timestamp: z.number(),
+  scope: z.string().min(1),
 });
 
 /** Raw WebSocket envelope from OpenAlgo port 8765 */

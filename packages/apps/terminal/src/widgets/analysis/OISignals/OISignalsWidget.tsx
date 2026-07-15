@@ -89,9 +89,17 @@ function OISignalsWidget() {
     enabled: isConnected,
   });
 
-  const isLive = isConnected && !!analysisQuery.data;
-  const analysis = isLive && analysisQuery.data ? analysisQuery.data : SAMPLE_ANALYSIS;
-  const unusual = isLive && unusualQuery.data ? unusualQuery.data : SAMPLE_UNUSUAL;
+  const analysisIsLive = isConnected
+    && analysisQuery.isSuccess
+    && analysisQuery.data?.is_sample_data === false;
+  const unusualIsLive = isConnected
+    && unusualQuery.isSuccess
+    && unusualQuery.data?.is_sample_data === false;
+  const isLive = analysisIsLive && unusualIsLive;
+  const hasLiveHalf = analysisIsLive || unusualIsLive;
+  const provenance = isLive ? "live" : hasLiveHalf ? "mixed" : "sample";
+  const analysis = analysisQuery.data ?? SAMPLE_ANALYSIS;
+  const unusual = unusualQuery.data ?? SAMPLE_UNUSUAL;
   const isFetching = analysisQuery.isFetching || unusualQuery.isFetching;
 
   // Order signals by strike for a stable, readable table.
@@ -106,7 +114,7 @@ function OISignalsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Activity size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">OI Signals</span>
-        {isLive ? (
+        {provenance === "live" ? (
           <span
             className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
             role="status"
@@ -114,6 +122,15 @@ function OISignalsWidget() {
             title="Live — OI-action classification + unusual-OI from the connected broker's chain."
           >
             Live
+          </span>
+        ) : provenance === "mixed" ? (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing mixed live and sample OI data"
+            title="Only one OI response is explicitly live; the other section is sample or unavailable."
+          >
+            Mixed data
           </span>
         ) : (
           <span

@@ -672,6 +672,7 @@ export function AITutorPill() {
 
   // Only render when the preference is enabled
   if (!aiTutorEnabled) return null;
+  if (location.pathname === "/settings") return null;
 
   const routeName = routeLabel(location.pathname);
   const reduced = motionConfig.prefersReducedMotion();

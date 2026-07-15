@@ -14,6 +14,7 @@ from datetime import date, datetime, time as wall_time
 import threading
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from flask import Flask
@@ -77,6 +78,11 @@ def _reset(monkeypatch):
     # Stop any session the test left running so threads do not leak.
     for trader in _FakeTrader.instances:
         trader._running = False  # noqa: SLF001
+    with mod._RUNNER_LOCK:  # noqa: SLF001
+        thread = mod._RUNNER.get("thread")  # noqa: SLF001
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+    mod._reset_runner_for_tests()  # noqa: SLF001
 
 
 @pytest.fixture()
@@ -95,6 +101,8 @@ def _make_app(broker_router: object | None = None) -> Flask:
     app.config["BROKER_ROUTER"] = broker_router if broker_router is not None else object()
     app.config["OPENALGO_CLIENT"] = object()
     app.config["SAFETY"] = SafetySystem(SafetyConfig(check_market_hours=False))
+    app.config["SAFETY_CONFIG_READY"] = True
+    app.config["PENDING_ORDER_QUEUE"] = MagicMock()
     app.config["TIME_SCHEDULER"] = type(
         "_TimeScheduler",
         (),
@@ -185,6 +193,16 @@ def test_router_unavailable_503(live_auth):
     assert resp.status_code == 503
 
 
+def test_unvalidated_safety_runtime_503(live_auth):
+    app = _make_app()
+    app.config["SAFETY_CONFIG_READY"] = False
+
+    response = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+
+    assert response.status_code == 503
+    assert mod._RUNNER == {}
+
+
 def test_start_refuses_while_runtime_is_shutting_down(live_auth):
     app = _make_app()
     app.config["AUTONOMOUS_AGENT_SHUTDOWN_EVENT"] = __import__("threading").Event()
@@ -218,6 +236,7 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     # The mid-flight revocation brake is wired.
     assert executor._pre_dispatch_check is not None  # noqa: SLF001
     assert callable(executor._router_provider)  # noqa: SLF001
+    assert callable(trader.kwargs["entry_intent_sink"])
     assert trader.kwargs["clock"]() == datetime.fromisoformat(
         "2026-07-13T10:00:00+05:30"
     )
@@ -230,6 +249,47 @@ def test_start_wires_gated_executor_with_agent_principal(live_auth):
     snap = resp.get_json()["data"]
     assert snap["running"] is True
     assert snap["actor_id"] == "autonomous-trader"
+
+
+@pytest.mark.asyncio
+async def test_agent_entry_sink_persists_only_order_target_and_session_metadata(live_auth):
+    app = _make_app()
+    queue = app.config["PENDING_ORDER_QUEUE"]
+    queue.enqueue.return_value = type("_Request", (), {"id": "intent-1", "status": "pending"})()
+    response = app.test_client().post("/api/v1/ai/agent/start", json=_start_body())
+    assert response.status_code == 202
+    trader = _FakeTrader.instances[-1]
+
+    from flinttrade_core.models import Action, Exchange, Order, PriceType, Product
+
+    order = Order(
+        symbol="RELIANCE",
+        exchange=Exchange.NSE,
+        action=Action.BUY,
+        pricetype=PriceType.MARKET,
+        product=Product.MIS,
+        quantity="1",
+        strategy="AutonomousAgent",
+    )
+    result = await trader.kwargs["entry_intent_sink"](
+        order,
+        {
+            "entry_price": 2500.0,
+            "stop_loss": 2450.0,
+            "take_profit": 2600.0,
+            "signal": "BUY",
+        },
+    )
+
+    assert result == {"id": "intent-1", "status": "pending"}
+    _, kwargs = queue.enqueue.call_args
+    assert kwargs["adapter_id"] == "openalgo"
+    assert kwargs["account_id"] == "default"
+    assert kwargs["source"] == "autonomous-agent"
+    assert kwargs["intent_type"] == "entry"
+    assert kwargs["producer_ref"]
+    assert "jti" not in kwargs["order_params"]
+    assert "token" not in kwargs["order_params"]
 
 
 def test_start_uses_configured_execution_default_when_target_omitted(live_auth):

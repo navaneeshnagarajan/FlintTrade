@@ -122,16 +122,51 @@ class TestOIButterfly:
 class TestOIChange:
     """Verify OI change calculation when previous snapshot provided."""
 
-    def test_oi_change_equals_current_oi_without_previous(self):
-        """Without a previous snapshot, OI change = current OI (prev assumed 0)."""
+    def test_oi_change_is_unavailable_without_previous_snapshot(self):
+        """A current-only snapshot must not invent change from a zero baseline."""
         from flinttrade_screener.oi_profile import calculate_oi_profile
         snap = _make_snapshot()
         result = calculate_oi_profile(snap, futures_candles=[], previous_snapshot=None)
-        # Without previous snapshot, prev OI is 0, so change = current OI
-        for ce_change, ce_oi in zip(result.ce_oi_change, result.ce_oi):
-            assert ce_change == ce_oi
-        for pe_change, pe_oi in zip(result.pe_oi_change, result.pe_oi):
-            assert pe_change == pe_oi
+
+        assert result.oi_change_available is False
+        assert result.oi_change == [None] * len(result.strikes)
+        assert result.ce_oi_change == [None] * len(result.strikes)
+        assert result.pe_oi_change == [None] * len(result.strikes)
+        assert all(strike.ce_oi_change is None for strike in result.profile_strikes)
+        assert all(strike.pe_oi_change is None for strike in result.profile_strikes)
+
+    def test_new_strike_does_not_infer_change_from_zero(self):
+        """A strike absent from the prior snapshot has no comparable OI delta."""
+        from flinttrade_screener.oi_profile import calculate_oi_profile
+
+        prev = _make_snapshot()
+        curr = _make_snapshot()
+        curr.strikes.append(StrikeData(strike_price=24600, ce_oi=12345, pe_oi=23456))
+
+        result = calculate_oi_profile(curr, futures_candles=[], previous_snapshot=prev)
+        new_idx = result.strikes.index(24600.0)
+
+        assert result.oi_change_available is True
+        assert result.ce_oi_change[new_idx] is None
+        assert result.pe_oi_change[new_idx] is None
+        assert result.oi_change[new_idx] is None
+
+    def test_previous_snapshot_without_matching_strikes_does_not_claim_change_availability(self):
+        from flinttrade_screener.oi_profile import calculate_oi_profile
+
+        curr = _make_snapshot()
+        prev = OptionChainSnapshot(
+            underlying="NIFTY",
+            exchange="NFO",
+            spot_price=25000.0,
+            atm_strike=25000.0,
+            strikes=[StrikeData(strike_price=26000.0, ce_oi=100, pe_oi=200)],
+        )
+
+        result = calculate_oi_profile(curr, futures_candles=[], previous_snapshot=prev)
+
+        assert result.oi_change_available is False
+        assert all(change is None for change in result.oi_change)
 
     def test_oi_change_detects_increase(self):
         from flinttrade_screener.oi_profile import calculate_oi_profile
@@ -229,6 +264,19 @@ class TestKeyLevels:
         )
         for ps in result.profile_strikes:
             assert ce_at_max >= ps.ce_oi
+
+    def test_all_zero_oi_has_no_max_strikes(self):
+        from flinttrade_screener.oi_profile import calculate_oi_profile
+
+        snap = _make_snapshot()
+        for strike in snap.strikes:
+            strike.ce_oi = 0
+            strike.pe_oi = 0
+
+        result = calculate_oi_profile(snap, futures_candles=[])
+
+        assert result.max_ce_strike is None
+        assert result.max_pe_strike is None
 
 
 # ---------------------------------------------------------------------------

@@ -41,10 +41,17 @@ is not tracked or pulled.
 FlintTrade supports two broker paths: the recommended OpenAlgo-compatible bridge
 and the native FlintTrade gateway. OpenAlgo is the primary/community-tested
 broker path; the native path is beta and connectability is gated per broker by
-live evidence. Dhan, Upstox, and INDmoney are currently enabled in the app after
-login/read verification against real accounts; Kotak Neo and Groww remain
-catalogued but disabled as "coming soon" until their broker-specific blockers
-clear. Dhan and Upstox use native SDK/API clients, Groww has the official
+live evidence. Dhan and Upstox are currently enabled in the app after
+login/read verification against real accounts and emergency-planner coverage.
+INDmoney is read-verified and its fail-closed emergency planner is locally
+verified, but it remains disabled because INDstocks does not expose an authoritative
+restart-time discriminator for active regular MARKET/LIMIT rows versus smart parents;
+it also lacks a broker-atomic reduce-only close primitive, and a funded/live-market
+order-safety proof is pending. Kotak Neo's fail-closed emergency planner is
+locally verified, but the broker remains disabled pending its live TOTP/MPIN
+login/read probe and funded/market-hours order-safety proof;
+Groww remains disabled until its broker-specific blockers clear. Dhan and
+Upstox use native SDK/API clients, Groww has the official
 `growwapi` SDK pinned for attestation/reference parity while production calls use
 FlintTrade's tested REST transport, and its approved-key probe now proves native
 login/account reads while market-data/API permission, static IP, and order-safety
@@ -54,8 +61,8 @@ Analytics Access Tokens are treated as read-only native sessions; trading still
 needs the OAuth/trading-capable token path. INDstocks' FAQ advertises an
 `indstocks-sdk`, but no matching PyPI or npm
 package exists yet, so there is deliberately no SDK pin for it. Kotak Neo has
-adapter/mapping coverage plus portal evidence but no promoted native connect
-yet. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
+adapter/mapping coverage plus a pinned-SDK-grounded emergency planner, but no
+promoted native connect or live order proof yet. `uv run python scripts/sync_broker_sdk_refs.py --fail-on-drift` refreshes local SDK
 source mirrors and PyPI artifacts under the gitignored `.local/sdk-audit/` cache
 and fails if a locked SDK is behind upstream metadata; `uv.lock` and
 `brokers.lock` remain the only tracked install/attestation sources. The

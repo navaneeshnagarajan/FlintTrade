@@ -67,7 +67,7 @@ export interface BrokerSdkAttestation {
 export interface NativeBroker {
   adapter_id: string;
   display_name: string;
-  /** Tried-and-tested against a live account (Dhan, Upstox, INDmoney today). When false
+  /** Tried-and-tested against a live account and the emergency-write contract (Dhan and Upstox today). When false
    * the broker is catalogued but "coming soon" — the connect UI must not offer
    * it, and the backend rejects a connect for it. */
   connectable: boolean;

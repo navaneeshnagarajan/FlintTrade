@@ -3,6 +3,7 @@
 Receives, authenticates, parses, and dispatches webhooks from:
 - TradingView alert webhooks
 - ChartInk scanner webhooks
+- GoCharting alert webhooks
 - Custom / generic JSON webhooks
 
 Security: HMAC-SHA256 signature verification via ``X-Signature`` header
@@ -35,9 +36,11 @@ Example::
 from __future__ import annotations
 
 import logging
+import math
+import threading
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from inspect import isawaitable
 from typing import Any
@@ -47,6 +50,123 @@ from pydantic import BaseModel, Field, field_validator
 from .webhook_hmac import verify_hmac_sha256_signature
 
 logger = logging.getLogger("flinttrade.integration.webhook_receiver")
+
+_VALID_EXCHANGES = frozenset({
+    "NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX", "NCDEX", "NCO", "DELTA",
+})
+_VALID_PRICETYPES = frozenset({"MARKET", "LIMIT", "SL", "SL-M"})
+_VALID_PRODUCTS = frozenset({"MIS", "CNC", "NRML"})
+_CHARTINK_SUFFIXES = ("-EQ", "-BE", "-SM", "-ST", "-BZ")
+_ORDER_SIDE_KEYS = ("side", "tv_action", "gc_action", "order_action", "transaction_type")
+
+
+def _normalise_order_choice(
+    raw: Mapping[str, Any],
+    field: str,
+    *,
+    default: str,
+    allowed: frozenset[str],
+    source: str,
+) -> str:
+    """Return a canonical order enum, rejecting unsafe supplied values."""
+    if field not in raw:
+        return default
+    value = str(raw[field]).strip().upper()
+    if value not in allowed:
+        raise ValueError(f"{source} payload has invalid {field}")
+    return value
+
+
+def _normalise_order_prices(data: dict[str, Any], *, source: str) -> None:
+    """Canonicalise price fields and reject values unsafe for live routing."""
+    parsed: dict[str, float] = {}
+    for field in ("price", "trigger_price"):
+        value = str(data.get(field, "0")).strip() or "0"
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{source} payload has an invalid {field}") from None
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"{source} payload has an invalid {field}")
+        data[field] = value
+        parsed[field] = number
+
+    pricetype = str(data.get("pricetype", "MARKET")).upper()
+    if pricetype in {"LIMIT", "SL"} and parsed["price"] <= 0:
+        raise ValueError(f"{source} {pricetype} order requires a positive price")
+    if pricetype in {"SL", "SL-M"} and parsed["trigger_price"] <= 0:
+        raise ValueError(f"{source} {pricetype} order requires a positive trigger_price")
+
+
+def _normalise_chartink_symbol(raw_symbol: object) -> str:
+    symbol = str(raw_symbol).strip().upper()
+    for suffix in _CHARTINK_SUFFIXES:
+        if symbol.endswith(suffix):
+            symbol = symbol[: -len(suffix)]
+            break
+    if ":" in symbol:
+        symbol = symbol.rsplit(":", 1)[-1]
+    return symbol
+
+
+def _parse_order_text(
+    raw: str,
+    *,
+    source: str,
+    action_key: str,
+    strategy: str,
+) -> WebhookPayload:
+    """Parse the shared signed-relay text order shape for alert providers."""
+    parts = raw.strip().upper().split()
+    if len(parts) < 2 or parts[0] not in {"BUY", "SELL"}:
+        raise ValueError(f"{source} text payload requires ACTION SYMBOL")
+    action_raw = parts[0]
+    symbol = parts[1]
+    exchange = "NSE"
+    quantity = "1"
+    pricetype = "MARKET"
+    price = "0"
+    index = 2
+    if index < len(parts) and parts[index] in _VALID_EXCHANGES:
+        exchange = parts[index]
+        index += 1
+    if index < len(parts) and parts[index].isdigit():
+        quantity = parts[index]
+        index += 1
+    if index < len(parts):
+        if parts[index] not in _VALID_PRICETYPES:
+            raise ValueError(f"{source} text payload has an invalid order token")
+        pricetype = parts[index]
+        index += 1
+    if index < len(parts):
+        try:
+            parsed_price = float(parts[index])
+        except ValueError:
+            raise ValueError(f"{source} text payload has an invalid price") from None
+        if not 0 <= parsed_price < float("inf"):
+            raise ValueError(f"{source} text payload has an invalid price")
+        price = parts[index]
+        index += 1
+    if index != len(parts):
+        raise ValueError(f"{source} text payload has trailing order tokens")
+    data = {
+        action_key: action_raw,
+        "side": action_raw,
+        "quantity": quantity,
+        "price": price,
+        "trigger_price": "0",
+        "pricetype": pricetype,
+        "product": "MIS",
+        "strategy": strategy,
+    }
+    _normalise_order_prices(data, source=source)
+    return WebhookPayload(
+        source=source,
+        action="place_order",
+        symbol=symbol,
+        exchange=exchange,
+        data=data,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +190,7 @@ class WebhookConfig(BaseModel):
 
     secret: str = ""
     allowed_sources: list[str] = Field(
-        default_factory=lambda: ["tradingview", "chartink", "custom"]
+        default_factory=lambda: ["tradingview", "chartink", "gocharting", "custom"]
     )
     rate_limit: int = Field(default=60, ge=1, le=10_000)
     log_payloads: bool = True
@@ -164,6 +284,7 @@ class _SlidingWindowLimiter:
         self._max = max_requests
         self._window = window_seconds
         self._timestamps: deque[float] = deque()
+        self._lock = threading.Lock()
 
     def allow(self) -> bool:
         """Check whether a new request fits within the rate limit.
@@ -171,15 +292,15 @@ class _SlidingWindowLimiter:
         Returns:
             ``True`` if allowed, ``False`` if limit exceeded.
         """
-        now = time.monotonic()
-        cutoff = now - self._window
-        # Prune expired entries
-        while self._timestamps and self._timestamps[0] <= cutoff:
-            self._timestamps.popleft()
-        if len(self._timestamps) >= self._max:
-            return False
-        self._timestamps.append(now)
-        return True
+        with self._lock:
+            now = time.monotonic()
+            cutoff = now - self._window
+            while self._timestamps and self._timestamps[0] <= cutoff:
+                self._timestamps.popleft()
+            if len(self._timestamps) >= self._max:
+                return False
+            self._timestamps.append(now)
+            return True
 
     @property
     def remaining(self) -> int:
@@ -188,10 +309,12 @@ class _SlidingWindowLimiter:
         Returns:
             Non-negative integer count.
         """
-        now = time.monotonic()
-        cutoff = now - self._window
-        active = sum(1 for t in self._timestamps if t > cutoff)
-        return max(0, self._max - active)
+        with self._lock:
+            now = time.monotonic()
+            cutoff = now - self._window
+            while self._timestamps and self._timestamps[0] <= cutoff:
+                self._timestamps.popleft()
+            return max(0, self._max - len(self._timestamps))
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +413,7 @@ class WebhookReceiver:
     # Parsers
     # ------------------------------------------------------------------
 
-    def parse_tradingview(self, raw: dict[str, Any]) -> WebhookPayload:
+    def parse_tradingview(self, raw: Mapping[str, Any] | str) -> WebhookPayload:
         """Parse a TradingView alert webhook payload.
 
         TradingView sends JSON with ``action``, ``symbol``, ``exchange``,
@@ -303,13 +426,39 @@ class WebhookReceiver:
         Returns:
             Populated :class:`WebhookPayload`.
         """
+        if isinstance(raw, str):
+            return _parse_order_text(
+                raw,
+                source="tradingview",
+                action_key="tv_action",
+                strategy="Flint",
+            )
+
         action_raw = str(raw.get("action", "")).upper()
         # Map TradingView BUY/SELL to FlintTrade action vocabulary
         action = "place_order" if action_raw in ("BUY", "SELL") else action_raw.lower() or "signal"
 
         extra = {k: v for k, v in raw.items() if k not in {"action", "symbol", "exchange"}}
-        # Include the original TV action so downstream handlers can use it
-        extra.setdefault("tv_action", action_raw)
+        for key in _ORDER_SIDE_KEYS:
+            extra.pop(key, None)
+        extra["tv_action"] = action_raw
+        if action_raw in {"BUY", "SELL"}:
+            extra["side"] = action_raw
+        extra["pricetype"] = _normalise_order_choice(
+            extra,
+            "pricetype",
+            default="MARKET",
+            allowed=_VALID_PRICETYPES,
+            source="TradingView",
+        )
+        extra["product"] = _normalise_order_choice(
+            extra,
+            "product",
+            default="MIS",
+            allowed=_VALID_PRODUCTS,
+            source="TradingView",
+        )
+        _normalise_order_prices(extra, source="TradingView")
 
         return WebhookPayload(
             source="tradingview",
@@ -319,12 +468,12 @@ class WebhookReceiver:
             data={k: v for k, v in extra.items()},
         )
 
-    def parse_gocharting(self, raw: dict[str, Any]) -> WebhookPayload:
+    def parse_gocharting(self, raw: Mapping[str, Any] | str) -> WebhookPayload:
         """Parse a GoCharting alert webhook payload.
 
-        GoCharting sends JSON with explicit ``symbol``, ``exchange``,
-        ``product``, ``action`` (BUY/SELL) and ``quantity`` fields — the same
-        single-order shape as a TradingView alert — so it maps to the same
+        Signed relays may send JSON with explicit ``symbol``, ``exchange``,
+        ``product``, ``action`` (BUY/SELL) and ``quantity`` fields, or the
+        shared plain-text order shape. Both map to the same
         gated ``place_order`` action and flows through the identical
         ``_handle_place_order`` → gated-dispatcher path. No separate order path
         is introduced (one-core rule; ``test_no_legacy_order_path`` guard).
@@ -333,11 +482,19 @@ class WebhookReceiver:
         ``signal`` so it is logged rather than routed to placement.
 
         Args:
-            raw: Decoded JSON dict from the GoCharting webhook request.
+            raw: Decoded JSON mapping or signed-relay text payload.
 
         Returns:
             Populated :class:`WebhookPayload`.
         """
+        if isinstance(raw, str):
+            return _parse_order_text(
+                raw,
+                source="gocharting",
+                action_key="gc_action",
+                strategy="GoCharting",
+            )
+
         action_raw = str(raw.get("action", "")).upper()
         action = "place_order" if action_raw in ("BUY", "SELL") else action_raw.lower() or "signal"
 
@@ -345,8 +502,26 @@ class WebhookReceiver:
         # Preserve the original side and stamp the strategy, mirroring the
         # ``tv_action`` convention so the gated dispatcher reads the side and a
         # MARKET default when GoCharting omits ``pricetype``.
-        extra.setdefault("gc_action", action_raw)
-        extra.setdefault("pricetype", "MARKET")
+        for key in _ORDER_SIDE_KEYS:
+            extra.pop(key, None)
+        extra["gc_action"] = action_raw
+        if action_raw in {"BUY", "SELL"}:
+            extra["side"] = action_raw
+        extra["pricetype"] = _normalise_order_choice(
+            extra,
+            "pricetype",
+            default="MARKET",
+            allowed=_VALID_PRICETYPES,
+            source="GoCharting",
+        )
+        extra["product"] = _normalise_order_choice(
+            extra,
+            "product",
+            default="MIS",
+            allowed=_VALID_PRODUCTS,
+            source="GoCharting",
+        )
+        _normalise_order_prices(extra, source="GoCharting")
         extra.setdefault("strategy", "GoCharting")
 
         return WebhookPayload(
@@ -357,7 +532,7 @@ class WebhookReceiver:
             data={k: v for k, v in extra.items()},
         )
 
-    def parse_chartink(self, raw: dict[str, Any]) -> WebhookPayload:
+    def parse_chartink(self, raw: Mapping[str, Any] | str) -> WebhookPayload:
         """Parse a ChartInk scanner webhook payload.
 
         ChartInk sends ``scan_name``, ``stocks``/``alert_list``, and
@@ -371,16 +546,25 @@ class WebhookReceiver:
             Populated :class:`WebhookPayload`.
         """
         # Extract symbol list
-        symbols_raw: str | list[str] = (
-            raw.get("stocks")
-            or raw.get("alert_list")
-            or raw.get("symbols")
-            or ""
-        )
+        if isinstance(raw, str):
+            symbols_raw: str | list[str] = raw
+            scan_name = ""
+            triggered_at = ""
+            exchange = "NSE"
+        else:
+            symbols_raw = (
+                raw.get("stocks")
+                or raw.get("alert_list")
+                or raw.get("symbols")
+                or ""
+            )
+            scan_name = str(raw.get("scan_name", ""))
+            triggered_at = str(raw.get("triggered_at", ""))
+            exchange = str(raw.get("exchange", "NSE")).upper() or None
         if isinstance(symbols_raw, str):
-            symbols = [s.strip().upper() for s in symbols_raw.split(",") if s.strip()]
+            symbols = [_normalise_chartink_symbol(s) for s in symbols_raw.split(",") if s.strip()]
         elif isinstance(symbols_raw, list):
-            symbols = [str(s).strip().upper() for s in symbols_raw if s]
+            symbols = [_normalise_chartink_symbol(s) for s in symbols_raw if s]
         else:
             symbols = []
 
@@ -390,11 +574,11 @@ class WebhookReceiver:
             source="chartink",
             action="signal",
             symbol=first_symbol,
-            exchange=str(raw.get("exchange", "NSE")).upper() or None,
+            exchange=exchange,
             data={
-                "scan_name": str(raw.get("scan_name", "")),
+                "scan_name": scan_name,
                 "symbols": symbols,
-                "triggered_at": str(raw.get("triggered_at", "")),
+                "triggered_at": triggered_at,
             },
         )
 

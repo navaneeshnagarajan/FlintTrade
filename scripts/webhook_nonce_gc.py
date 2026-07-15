@@ -11,25 +11,15 @@ would collapse the 10–70-minute grace bucket and discard that evidence.
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 
 from flinttrade_core.db import open_sqlite
+from flinttrade_webhooks import webhook_replay
 
-# Database H8 + Identity M5 (data-layer §7.4):
-REPLAY_WINDOW_SECONDS = 600        # 10 min — TradingView/ChartInk freshness norm
-GC_GRACE_SECONDS = 3600            # 60 min audit-log grace
-GC_RETAIN_SECONDS = REPLAY_WINDOW_SECONDS + GC_GRACE_SECONDS    # 4200s = 70 min
-
-
-def gc_old_nonces(conn, retain_seconds: int = GC_RETAIN_SECONDS, now: float | None = None) -> int:
-    """Delete nonces older than ``retain_seconds``. Returns rows deleted.
-
-    ``now`` is injectable for testing; production passes ``None`` (wall clock).
-    """
-    cutoff = (time.time() if now is None else now) - retain_seconds
-    cur = conn.execute("DELETE FROM webhook_nonces WHERE seen_at < ?", (cutoff,))
-    return cur.rowcount
+REPLAY_WINDOW_SECONDS = webhook_replay.REPLAY_WINDOW_SECONDS
+GC_GRACE_SECONDS = webhook_replay.GC_GRACE_SECONDS
+GC_RETAIN_SECONDS = webhook_replay.GC_RETAIN_SECONDS
+gc_old_nonces = webhook_replay.gc_old_nonces
 
 
 def main() -> int:

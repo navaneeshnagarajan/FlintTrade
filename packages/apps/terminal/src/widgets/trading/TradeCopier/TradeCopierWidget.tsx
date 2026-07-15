@@ -1,55 +1,22 @@
 /**
- * TradeCopierWidget — Multi-account trade copying for the /ditto route.
- *
- * Manages trade copying from one source account to multiple target accounts.
- *
- * Features:
- *   - Source account selector (dropdown)
- *   - Target accounts with checkbox + lot multiplier per account
- *   - Copy mode: "Mirror" (same qty) or "Proportional" (ratio-based)
- *   - Active / paused toggle per target account
- *   - Copy log: recent events with status (success / failed / skipped)
- *   - Risk filter panel: max position size, max daily loss, symbol whitelist
- *
- * Data persistence:
- *   - All config stored in localStorage under "flinttrade:tradecopier"
- *   - Copy log kept in component state (session only; cleared on unmount)
- *   - Actual execution is handled by the Ditto backend — this widget only
- *     manages the configuration that the backend reads.
- *
- * Status indicators:
- *   - Green dot  = active (copying enabled)
- *   - Amber dot  = paused (target manually paused)
- *   - Red dot    = disconnected (account not connected)
+ * Compact operational surface for the gated Ditto multi-account runtime.
+ * Account credentials and risk configuration remain owned by the full /ditto route.
  */
 
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  useState,
-  useEffect,
-  useCallback,
-  useId,
-  memo,
-} from "react";
-import {
-  Copy,
-  Play,
-  Pause,
-  Trash2,
-  Plus,
-  CheckCircle2,
-  XCircle,
-  MinusCircle,
   AlertCircle,
-  Settings2,
-  ChevronDown,
-  ChevronUp,
+  Check,
+  Copy,
+  ExternalLink,
+  Play,
+  RefreshCw,
+  Square,
 } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
-import { z } from "zod";
-import { safeParse } from "@/lib/safeParse";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -57,622 +24,378 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import {
+  getDittoAccounts,
+  getDittoMirrorStatus,
+  getDittoRisk,
+  type MirrorMode,
+  type MirrorStatus,
+  setDittoAccountEnabled,
+  startDittoMirror,
+  stopDittoMirror,
+} from "@/services/ftApi";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type CopyMode = "mirror" | "proportional";
-type AccountStatus = "active" | "paused" | "disconnected";
-type CopyEventStatus = "success" | "failed" | "skipped";
-
-interface TargetAccount {
-  id: string;
-  name: string;
-  status: AccountStatus;
-  enabled: boolean;
-  multiplier: number; // lot multiplier (1 = same, 2 = double, etc.)
-}
-
-interface CopyEvent {
-  id: string;
-  timestamp: string; // ISO string
-  symbol: string;
-  action: "BUY" | "SELL";
-  qty: number;
-  targetAccountId: string;
-  targetAccountName: string;
-  status: CopyEventStatus;
-  reason?: string; // for failed/skipped
-}
-
-interface RiskFilter {
-  maxPositionSize: number | null; // max lots per position
-  maxDailyLoss: number | null;    // INR
-  symbolWhitelist: string;        // comma-separated symbols, empty = all
-}
-
-interface CopierConfig {
-  sourceAccountId: string;
-  copyMode: CopyMode;
-  targets: TargetAccount[];
-  riskFilter: RiskFilter;
-}
-
-// ---------------------------------------------------------------------------
-// Sample accounts (before real Ditto backend is wired up)
-// ---------------------------------------------------------------------------
-
-const SAMPLE_ACCOUNTS: Array<{ id: string; name: string }> = [
-  { id: "acc-1", name: "Primary (Zerodha)" },
-  { id: "acc-2", name: "Family (Angel One)" },
-  { id: "acc-3", name: "HUF (Upstox)" },
-];
-
-const DEFAULT_TARGETS: TargetAccount[] = [
-  { id: "acc-2", name: "Family (Angel One)", status: "active", enabled: true, multiplier: 1 },
-  { id: "acc-3", name: "HUF (Upstox)", status: "paused", enabled: false, multiplier: 0.5 },
-];
-
-const STORAGE_KEY = "flinttrade:tradecopier";
-
-const copierConfigSchema = z.object({
-  sourceAccountId: z.string(),
-  copyMode: z.enum(["mirror", "proportional"]),
-  targets: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    status: z.enum(["active", "paused", "disconnected"]),
-    enabled: z.boolean(),
-    multiplier: z.number(),
-  })),
-  riskFilter: z.object({
-    maxPositionSize: z.number().nullable(),
-    maxDailyLoss: z.number().nullable(),
-    symbolWhitelist: z.string(),
-  }),
-}) satisfies z.ZodType<CopierConfig>;
-
-const DEFAULT_COPIER_CONFIG: CopierConfig = {
-  sourceAccountId: SAMPLE_ACCOUNTS[0].id,
-  copyMode: "mirror",
-  targets: DEFAULT_TARGETS,
-  riskFilter: { maxPositionSize: null, maxDailyLoss: null, symbolWhitelist: "" },
+const EMPTY_STATUS: MirrorStatus = {
+  active: false,
+  source_account: null,
+  target_accounts: [],
+  mode: "weighted",
+  mirrored_positions: 0,
+  last_sync: null,
+  errors: [],
 };
 
-function loadConfig(): CopierConfig {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  return safeParse(raw, copierConfigSchema) ?? DEFAULT_COPIER_CONFIG;
+const MODE_LABELS: Record<MirrorMode, string> = {
+  equal: "Copy 1:1",
+  weighted: "By weight",
+};
+
+const MODE_DESCRIPTIONS: Record<MirrorMode, string> = {
+  equal: "Copy the full source quantity to every target account",
+  weighted: "Split the source quantity using each target's allocation weight",
+};
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
-function saveConfig(config: CopierConfig): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  } catch {
-    // localStorage quota exceeded — ignore
-  }
+function mutationError(error: unknown): string {
+  return error instanceof Error ? error.message : "Ditto operation failed";
 }
-
-// ---------------------------------------------------------------------------
-// Status dot
-// ---------------------------------------------------------------------------
-
-function StatusDot({ status }: { status: AccountStatus }) {
-  const colour =
-    status === "active"
-      ? "bg-profit"
-      : status === "paused"
-        ? "bg-warning"
-        : "bg-loss";
-  return (
-    <span
-      className={`inline-block w-2 h-2 rounded-full flex-none ${colour}`}
-      title={status}
-      aria-label={`Status: ${status}`}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Copy event status icon
-// ---------------------------------------------------------------------------
-
-function EventStatusIcon({ status }: { status: CopyEventStatus }) {
-  if (status === "success") return <CheckCircle2 size={12} className="text-profit flex-none" />;
-  if (status === "failed")  return <XCircle size={12} className="text-loss flex-none" />;
-  return <MinusCircle size={12} className="text-warning flex-none" />;
-}
-
-// ---------------------------------------------------------------------------
-// Main widget
-// ---------------------------------------------------------------------------
 
 function TradeCopierWidget() {
-  const [config, setConfig] = useState<CopierConfig>(loadConfig);
-  const [log, setLog] = useState<CopyEvent[]>([]);
-  const [showRisk, setShowRisk] = useState(false);
-  const [newTargetId, setNewTargetId] = useState<string>("");
+  const queryClient = useQueryClient();
+  const accountsQuery = useQuery({
+    queryKey: ["ditto", "accounts"],
+    queryFn: getDittoAccounts,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+  const statusQuery = useQuery({
+    queryKey: ["ditto", "mirror", "status"],
+    queryFn: getDittoMirrorStatus,
+    refetchInterval: 10_000,
+    retry: 1,
+  });
+  const riskQuery = useQuery({
+    queryKey: ["ditto", "risk"],
+    queryFn: getDittoRisk,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
 
-  const formId = useId();
+  const [sourceAccount, setSourceAccount] = useState("");
+  const [targetAccounts, setTargetAccounts] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState<MirrorMode>("weighted");
 
-  // Persist config whenever it changes
+  const accounts = useMemo(() => accountsQuery.data?.accounts ?? [], [accountsQuery.data]);
+  const activeAccounts = useMemo(
+    () => accounts.filter((account) => account.status === "active"),
+    [accounts],
+  );
+  const status = statusQuery.data ?? EMPTY_STATUS;
+
   useEffect(() => {
-    saveConfig(config);
-  }, [config]);
+    if (!status.active) return;
+    setSourceAccount(status.source_account ?? "");
+    setTargetAccounts(new Set(status.target_accounts));
+    setMode(status.mode);
+  }, [status.active, status.mode, status.source_account, status.target_accounts]);
 
-  // ---------------------------------------------------------------------------
-  // Source account
-  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (status.active || activeAccounts.length === 0) return;
+    const sourceIsUsable = activeAccounts.some((account) => account.id === sourceAccount);
+    if (!sourceIsUsable) {
+      const preferred = activeAccounts.find((account) => account.is_master) ?? activeAccounts[0];
+      setSourceAccount(preferred.id);
+    }
+  }, [activeAccounts, sourceAccount, status.active]);
 
-  const handleSourceChange = useCallback((id: string) => {
-    setConfig((c) => ({ ...c, sourceAccountId: id }));
-  }, []);
+  useEffect(() => {
+    if (status.active) return;
+    const activeIds = new Set(activeAccounts.map((account) => account.id));
+    setTargetAccounts((current) => {
+      const valid = new Set([...current].filter((id) => id !== sourceAccount && activeIds.has(id)));
+      if (valid.size === current.size && [...valid].every((id) => current.has(id))) return current;
+      return valid;
+    });
+  }, [activeAccounts, sourceAccount, status.active]);
 
-  // ---------------------------------------------------------------------------
-  // Copy mode
-  // ---------------------------------------------------------------------------
+  const refreshDitto = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["ditto"] });
+  }, [queryClient]);
 
-  const handleModeChange = useCallback((mode: CopyMode) => {
-    setConfig((c) => ({ ...c, copyMode: mode }));
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Target account management
-  // ---------------------------------------------------------------------------
-
-  const handleToggleTarget = useCallback((targetId: string, enabled: boolean) => {
-    setConfig((c) => ({
-      ...c,
-      targets: c.targets.map((t) =>
-        t.id === targetId ? { ...t, enabled } : t,
-      ),
-    }));
-  }, []);
-
-  const handleSetStatus = useCallback((targetId: string, status: AccountStatus) => {
-    setConfig((c) => ({
-      ...c,
-      targets: c.targets.map((t) =>
-        t.id === targetId ? { ...t, status } : t,
-      ),
-    }));
-  }, []);
-
-  const handleMultiplierChange = useCallback((targetId: string, value: string) => {
-    const num = parseFloat(value);
-    if (!isFinite(num) || num <= 0) return;
-    setConfig((c) => ({
-      ...c,
-      targets: c.targets.map((t) =>
-        t.id === targetId ? { ...t, multiplier: num } : t,
-      ),
-    }));
-  }, []);
-
-  const handleRemoveTarget = useCallback((targetId: string) => {
-    setConfig((c) => ({
-      ...c,
-      targets: c.targets.filter((t) => t.id !== targetId),
-    }));
-  }, []);
-
-  const handleAddTarget = useCallback(() => {
-    if (!newTargetId) return;
-    const acct = SAMPLE_ACCOUNTS.find((a) => a.id === newTargetId);
-    if (!acct) return;
-    if (config.targets.some((t) => t.id === newTargetId)) return;
-    setConfig((c) => ({
-      ...c,
-      targets: [
-        ...c.targets,
-        { id: acct.id, name: acct.name, status: "active", enabled: true, multiplier: 1 },
-      ],
-    }));
-    setNewTargetId("");
-  }, [newTargetId, config.targets]);
-
-  // ---------------------------------------------------------------------------
-  // Risk filter
-  // ---------------------------------------------------------------------------
-
-  const handleRiskChange = useCallback(
-    (field: keyof RiskFilter, value: string) => {
-      setConfig((c) => ({
-        ...c,
-        riskFilter: {
-          ...c.riskFilter,
-          [field]: field === "symbolWhitelist"
-            ? value
-            : value === "" ? null : parseFloat(value),
-        },
-      }));
+  const startMutation = useMutation({
+    mutationFn: () => startDittoMirror(sourceAccount, [...targetAccounts], mode),
+    onSuccess: refreshDitto,
+  });
+  const stopMutation = useMutation({
+    mutationFn: stopDittoMirror,
+    onSuccess: refreshDitto,
+  });
+  const accountMutation = useMutation({
+    mutationFn: ({ accountId, enabled }: { accountId: string; enabled: boolean }) =>
+      setDittoAccountEnabled(accountId, enabled),
+    onSuccess: (_account, variables) => {
+      if (!variables.enabled) {
+        setTargetAccounts((current) => {
+          const next = new Set(current);
+          next.delete(variables.accountId);
+          return next;
+        });
+      }
+      refreshDitto();
     },
-    [],
+  });
+
+  const setSource = useCallback((accountId: string) => {
+    setSourceAccount(accountId);
+    setTargetAccounts((current) => {
+      const next = new Set(current);
+      next.delete(accountId);
+      return next;
+    });
+  }, []);
+
+  const toggleTarget = useCallback((accountId: string) => {
+    setTargetAccounts((current) => {
+      const next = new Set(current);
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
+      return next;
+    });
+  }, []);
+
+  const actionError = startMutation.isError
+    ? mutationError(startMutation.error)
+    : stopMutation.isError
+      ? mutationError(stopMutation.error)
+      : accountMutation.isError
+        ? mutationError(accountMutation.error)
+        : "";
+  const isMutating = startMutation.isPending || stopMutation.isPending || accountMutation.isPending;
+  const canStart = Boolean(
+    !status.active
+    && !statusQuery.isError
+    && sourceAccount
+    && targetAccounts.size > 0
+    && !isMutating,
   );
-
-  // ---------------------------------------------------------------------------
-  // Mock "copy" action for demo — adds a log entry
-  // ---------------------------------------------------------------------------
-
-  const handleTestCopy = useCallback(() => {
-    const symbols = ["NIFTY24APR25000CE", "BANKNIFTY24APR50000PE", "NIFTY24APR24800CE"];
-    const actions: Array<"BUY" | "SELL"> = ["BUY", "SELL"];
-    const statuses: CopyEventStatus[] = ["success", "failed", "skipped"];
-    const activeTargets = config.targets.filter((t) => t.enabled && t.status === "active");
-
-    if (activeTargets.length === 0) return;
-
-    const newEvents: CopyEvent[] = activeTargets.map((t) => ({
-      id: `${Date.now()}-${t.id}`,
-      timestamp: new Date().toISOString(),
-      symbol: symbols[Math.floor(Math.random() * symbols.length)],
-      action: actions[Math.floor(Math.random() * actions.length)],
-      qty: Math.floor(Math.random() * 5 + 1) * 50,
-      targetAccountId: t.id,
-      targetAccountName: t.name,
-      status: statuses[Math.floor(Math.random() * statuses.length)],
-      reason: Math.random() < 0.3 ? "Exceeded max daily loss limit" : undefined,
-    }));
-
-    setLog((prev) => [...newEvents, ...prev].slice(0, 50));
-  }, [config.targets]);
-
-  // ---------------------------------------------------------------------------
-  // Derived
-  // ---------------------------------------------------------------------------
-
-  const availableToAdd = SAMPLE_ACCOUNTS.filter(
-    (a) => a.id !== config.sourceAccountId && !config.targets.some((t) => t.id === a.id),
-  );
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
 
   return (
-    <div className="h-full flex flex-col bg-surface-base overflow-hidden" data-testid="tradecopier-widget">
-
-      {/* Header */}
-      <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
-        <Copy size={13} className="text-accent flex-none" />
+    <div className="flex h-full flex-col overflow-hidden bg-surface-base" data-testid="tradecopier-widget">
+      <div className="flex flex-none items-center gap-2 border-b border-border-default bg-surface-card px-3 py-2">
+        <Copy size={13} className="flex-none text-accent" aria-hidden="true" />
         <span className="text-sm font-medium text-text-primary">Trade Copier</span>
-        {/* Honest disclosure — the source/target accounts are hardcoded
-            SAMPLE_ACCOUNTS (the real Ditto account backend is not wired here
-            yet), so they are NOT the operator's connected brokers. Keep this
-            badge visible until the list loads from getDittoAccounts(). */}
-        <span
-          className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
-          role="status"
-          aria-label="Demo accounts — not your connected brokers; the account list is sample data"
-          title="Sample accounts — not connected. The real account list will load from the Ditto backend once wired."
-        >
-          Demo accounts
-        </span>
-        <div className="flex-1" />
-        {/* Test button for demo */}
-        <Button
+        <Badge
           variant="outline"
-          size="sm"
-          onClick={handleTestCopy}
-          className="h-auto px-2 py-0.5 text-xxs bg-accent/15 text-accent border-accent/30 hover:bg-accent/25 transition-colors"
-          title="Simulate a copy event"
-          data-testid="test-copy-btn"
+          className={statusQuery.isError
+            ? "border-loss/40 text-loss"
+            : status.active
+              ? "border-profit/40 text-profit"
+              : "border-border-default text-text-muted"}
+          data-testid="runtime-status"
         >
-          Test Copy
+          {statusQuery.isError ? "Unavailable" : status.active ? "Running" : "Stopped"}
+        </Badge>
+        <div className="flex-1" />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-6"
+          onClick={refreshDitto}
+          title="Refresh Ditto state"
+          aria-label="Refresh Ditto state"
+          data-testid="refresh-ditto"
+        >
+          <RefreshCw size={12} aria-hidden="true" />
         </Button>
+        <a
+          href="/ditto"
+          className="inline-flex items-center gap-1 text-xxs text-accent hover:underline"
+        >
+          Manage <ExternalLink size={10} aria-hidden="true" />
+        </a>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {(accountsQuery.isError || statusQuery.isError) && (
+          <div className="m-3 flex items-start gap-2 rounded border border-loss/30 bg-loss/10 px-2 py-1.5 text-xs text-loss" role="alert">
+            <AlertCircle size={13} className="mt-0.5 flex-none" aria-hidden="true" />
+            <span>
+              {accountsQuery.isError
+                ? mutationError(accountsQuery.error)
+                : mutationError(statusQuery.error)}
+            </span>
+          </div>
+        )}
 
-        {/* Source + Mode row */}
-        <div className="px-3 py-2 border-b border-border-default flex flex-col gap-2">
-          {/* Source account */}
+        <section className="space-y-2 border-b border-border-default px-3 py-2" aria-label="Mirror configuration">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted w-14 flex-none" id="source-label">Source</span>
-            <Select
-              value={config.sourceAccountId}
-              onValueChange={handleSourceChange}
-            >
-              <SelectTrigger
-                className="flex-1 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"
-                aria-label="Source account"
-                aria-labelledby="source-label"
-              >
-                <SelectValue />
+            <label htmlFor="trade-copier-source" className="w-14 flex-none text-xs text-text-muted">
+              Source
+            </label>
+            <Select value={sourceAccount} onValueChange={setSource} disabled={status.active || accountsQuery.isLoading}>
+              <SelectTrigger id="trade-copier-source" className="h-7 flex-1 text-xs" aria-label="Source account">
+                <SelectValue placeholder={accountsQuery.isLoading ? "Loading..." : "Select account"} />
               </SelectTrigger>
-              <SelectContent className="bg-surface-card border-border-default" data-testid="source-select">
-                {SAMPLE_ACCOUNTS.map((a) => (
-                  <SelectItem key={a.id} value={a.id} className="text-xs text-text-primary focus:bg-surface-hover">
-                    {a.name}
+              <SelectContent data-testid="source-select">
+                {activeAccounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}{account.is_master ? " (Master)" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <StatusDot status="active" />
           </div>
 
-          {/* Copy mode */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted w-14 flex-none">Mode</span>
-            <div
-              className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden"
-              role="group"
-              aria-label="Copy mode"
-            >
-              {(["mirror", "proportional"] as CopyMode[]).map((m) => (
+            <span className="w-14 flex-none text-xs text-text-muted">Mode</span>
+            <div className="flex overflow-hidden rounded border border-border-default" role="group" aria-label="Allocation mode">
+              {(Object.keys(MODE_LABELS) as MirrorMode[]).map((candidate) => (
                 <button
-                  key={m}
-                  onClick={() => handleModeChange(m)}
-                  aria-label={m === "mirror" ? "Mirror mode" : "Proportional mode"}
-                  aria-pressed={m === config.copyMode}
-                  className={`px-2 py-0.5 text-xxs font-medium capitalize transition-colors ${
-                    m === config.copyMode
-                      ? "bg-accent/15 text-accent"
-                      : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                  key={candidate}
+                  type="button"
+                  onClick={() => setMode(candidate)}
+                  disabled={status.active}
+                  title={MODE_DESCRIPTIONS[candidate]}
+                  aria-pressed={mode === candidate}
+                  className={`px-2 py-1 text-xxs transition-colors disabled:cursor-not-allowed ${
+                    mode === candidate ? "bg-accent/15 text-accent" : "text-text-muted hover:bg-surface-hover"
                   }`}
-                  data-testid={`mode-${m}`}
+                  data-testid={`mode-${candidate}`}
                 >
-                  {m === "mirror" ? "Mirror" : "Proportional"}
+                  {MODE_LABELS[candidate]}
                 </button>
               ))}
             </div>
-            {config.copyMode === "proportional" && (
-              <span className="text-xxs text-text-muted italic">ratio via multiplier</span>
-            )}
           </div>
-        </div>
+        </section>
 
-        {/* Target accounts */}
-        <div className="px-3 py-2 flex flex-col gap-1.5">
-          <div className="flex items-center gap-1 mb-1">
+        <section className="space-y-1.5 border-b border-border-default px-3 py-2" aria-label="Target accounts">
+          <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-text-primary">Target Accounts</span>
-            <Badge variant="outline" className="text-xxs px-1 py-0">{config.targets.length}</Badge>
+            <Badge variant="outline" className="text-xxs">{targetAccounts.size} selected</Badge>
           </div>
 
-          {config.targets.length === 0 && (
-            <div className="text-xxs text-text-muted italic py-2 text-center">
-              No target accounts configured
+          {!accountsQuery.isLoading && accounts.length === 0 && (
+            <div className="py-4 text-center text-xs text-text-muted">
+              No Ditto accounts configured
             </div>
           )}
 
-          {config.targets.map((target) => (
-            <div
-              key={target.id}
-              className="flex items-center gap-2 px-2 py-1.5 bg-surface-card rounded border border-border-default"
-              data-testid={`target-${target.id}`}
-            >
-              <StatusDot status={target.status} />
-
-              <span className="flex-1 text-xs text-text-primary truncate">{target.name}</span>
-
-              {/* Multiplier */}
-              <div className="flex items-center gap-1">
-                <span className="text-xxs text-text-muted" aria-hidden="true">×</span>
-                <Input
-                  type="number"
-                  min={0.1}
-                  step={0.5}
-                  value={target.multiplier}
-                  onChange={(e) => handleMultiplierChange(target.id, e.target.value)}
-                  className="w-12 h-6 px-1 py-0.5 text-xs text-center font-mono tabular-nums"
-                  aria-label={`Lot multiplier for ${target.name}`}
-                  data-testid={`multiplier-${target.id}`}
+          {accounts.filter((account) => account.id !== sourceAccount).map((account) => {
+            const enabled = account.status === "active";
+            const selected = targetAccounts.has(account.id);
+            return (
+              <div
+                key={account.id}
+                className="flex items-center gap-2 rounded border border-border-default bg-surface-card px-2 py-1.5"
+                data-testid={`target-${account.id}`}
+              >
+                <button
+                  type="button"
+                  className={`flex size-4 items-center justify-center rounded border ${
+                    selected ? "border-accent bg-accent text-white" : "border-border-default text-transparent"
+                  } disabled:cursor-not-allowed disabled:opacity-40`}
+                  onClick={() => toggleTarget(account.id)}
+                  disabled={!enabled || status.active}
+                  aria-label={`${selected ? "Remove" : "Add"} ${account.name} ${selected ? "from" : "to"} targets`}
+                  aria-pressed={selected}
+                  data-testid={`select-target-${account.id}`}
+                >
+                  <Check size={11} aria-hidden="true" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs text-text-primary">{account.name}</div>
+                  <div className="truncate text-xxs text-text-muted">
+                    {account.group} · {account.allocation_weight}x · daily loss limit {formatCurrency(account.max_loss_daily)}
+                  </div>
+                </div>
+                <Switch
+                  checked={enabled}
+                  onCheckedChange={(next) => accountMutation.mutate({ accountId: account.id, enabled: next })}
+                  disabled={status.active || accountMutation.isPending}
+                  aria-label={`${enabled ? "Disable" : "Enable"} ${account.name}`}
+                  data-testid={`enable-${account.id}`}
                 />
               </div>
+            );
+          })}
+        </section>
 
-              {/* Pause / Resume */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() =>
-                  handleSetStatus(
-                    target.id,
-                    target.status === "paused" ? "active" : "paused",
-                  )
-                }
-                className="h-auto w-auto p-0.5 text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
-                aria-label={target.status === "paused" ? `Resume copying to ${target.name}` : `Pause copying to ${target.name}`}
-                data-testid={`status-toggle-${target.id}`}
-              >
-                {target.status === "paused" ? <Play size={11} aria-hidden="true" /> : <Pause size={11} aria-hidden="true" />}
-              </Button>
+        <section className="grid grid-cols-2 gap-2 border-b border-border-default px-3 py-2" aria-label="Ditto risk snapshot">
+          <div>
+            <div className="text-xxs text-text-muted">Aggregate capital</div>
+            <div className="text-xs font-mono text-text-primary">
+              {riskQuery.data ? formatCurrency(riskQuery.data.aggregate_capital) : "Unavailable"}
+            </div>
+          </div>
+          <div>
+            <div className="text-xxs text-text-muted">Today P&amp;L</div>
+            <div className="text-xs font-mono text-text-primary">
+              {riskQuery.data ? formatCurrency(riskQuery.data.aggregate_pnl) : "Unavailable"}
+            </div>
+          </div>
+        </section>
 
-              {/* Enable/Disable switch */}
-              <Switch
-                checked={target.enabled}
-                onCheckedChange={(v) => handleToggleTarget(target.id, v)}
-                aria-label={`Enable copying to ${target.name}`}
-                data-testid={`enable-${target.id}`}
-              />
-
-              {/* Remove */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleRemoveTarget(target.id)}
-                className="h-auto w-auto p-0.5 text-text-muted hover:text-loss hover:bg-loss/10 transition-colors"
-                aria-label={`Remove ${target.name} from targets`}
-                data-testid={`remove-${target.id}`}
-              >
-                <Trash2 size={11} aria-hidden="true" />
-              </Button>
+        <section className="space-y-1 px-3 py-2" aria-label="Mirror activity">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-text-muted">Mirrored positions</span>
+            <span className="font-mono text-text-primary">{status.mirrored_positions}</span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-text-muted">Last sync</span>
+            <span className="truncate font-mono text-text-primary">{status.last_sync ?? "Not yet"}</span>
+          </div>
+          {status.errors.map((error) => (
+            <div key={error} className="flex items-start gap-1 text-xxs text-loss">
+              <AlertCircle size={10} className="mt-0.5 flex-none" aria-hidden="true" />
+              <span>{error}</span>
             </div>
           ))}
+        </section>
 
-          {/* Add target */}
-          {availableToAdd.length > 0 && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <Select
-                value={newTargetId || "__placeholder__"}
-                onValueChange={(v) => setNewTargetId(v === "__placeholder__" ? "" : v)}
-              >
-                <SelectTrigger
-                  className="flex-1 h-7 text-xs bg-surface-hover border-border-default text-text-primary focus:ring-accent/40"
-                  aria-label="Add target account"
-                >
-                  <SelectValue placeholder="Add account..." />
-                </SelectTrigger>
-                <SelectContent className="bg-surface-card border-border-default" data-testid="add-target-select">
-                  {availableToAdd.map((a) => (
-                    <SelectItem key={a.id} value={a.id} className="text-xs text-text-primary focus:bg-surface-hover">
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={handleAddTarget}
-                disabled={!newTargetId}
-                className="h-7 w-7 bg-accent/15 text-accent border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40"
-                aria-label="Add selected account as target"
-                data-testid="add-target-btn"
-              >
-                <Plus size={12} aria-hidden="true" />
-              </Button>
-            </div>
-          )}
-        </div>
+        {actionError && (
+          <p className="mx-3 mb-2 rounded border border-loss/30 bg-loss/10 px-2 py-1.5 text-xs text-loss" role="alert">
+            {actionError}
+          </p>
+        )}
+      </div>
 
-        {/* Risk filter (collapsible) */}
-        <div className="px-3 py-1.5 border-t border-border-default">
+      <div className="flex-none border-t border-border-default p-2">
+        {status.active ? (
           <Button
-            variant="ghost"
+            type="button"
+            variant="destructive"
             size="sm"
-            onClick={() => setShowRisk((v) => !v)}
-            className="flex items-center gap-1.5 w-full h-auto p-0 text-xs text-text-secondary hover:text-text-primary transition-colors justify-start"
-            data-testid="risk-toggle"
+            className="w-full"
+            onClick={() => stopMutation.mutate()}
+            disabled={isMutating}
+            data-testid="stop-mirror"
           >
-            <Settings2 size={11} />
-            <span className="font-medium">Risk Filters</span>
-            <div className="flex-1" />
-            {showRisk ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            <Square size={12} aria-hidden="true" />
+            Stop Mirror
           </Button>
-
-          {showRisk && (
-            <div className="mt-2 flex flex-col gap-2" data-testid="risk-panel">
-              <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-xxs text-text-muted" id={`${formId}-maxpos-label`}>Max Position (lots)</span>
-                  <Input
-                    id={`${formId}-maxpos`}
-                    type="number"
-                    min={1}
-                    value={config.riskFilter.maxPositionSize ?? ""}
-                    onChange={(e) => handleRiskChange("maxPositionSize", e.target.value)}
-                    placeholder="No limit"
-                    className="h-7 text-xs font-mono"
-                    aria-label="Maximum position size in lots"
-                    aria-labelledby={`${formId}-maxpos-label`}
-                    data-testid="max-position-input"
-                  />
-                </label>
-                <label className="flex flex-col gap-0.5">
-                  <span className="text-xxs text-text-muted" id={`${formId}-maxloss-label`}>Max Daily Loss (₹)</span>
-                  <Input
-                    id={`${formId}-maxloss`}
-                    type="number"
-                    min={0}
-                    value={config.riskFilter.maxDailyLoss ?? ""}
-                    onChange={(e) => handleRiskChange("maxDailyLoss", e.target.value)}
-                    placeholder="No limit"
-                    className="h-7 text-xs font-mono"
-                    aria-label="Maximum daily loss in rupees"
-                    aria-labelledby={`${formId}-maxloss-label`}
-                    data-testid="max-daily-loss-input"
-                  />
-                </label>
-              </div>
-              <label className="flex flex-col gap-0.5">
-                <span className="text-xxs text-text-muted" id={`${formId}-whitelist-label`}>Symbol Whitelist (comma-separated, empty = all)</span>
-                <Input
-                  id={`${formId}-whitelist`}
-                  type="text"
-                  value={config.riskFilter.symbolWhitelist}
-                  onChange={(e) => handleRiskChange("symbolWhitelist", e.target.value)}
-                  placeholder="NIFTY, BANKNIFTY, ..."
-                  className="h-7 text-xs"
-                  aria-label="Symbol whitelist, comma-separated"
-                  aria-labelledby={`${formId}-whitelist-label`}
-                  data-testid="symbol-whitelist-input"
-                />
-              </label>
-              {config.riskFilter.symbolWhitelist.trim() && (
-                <div className="flex flex-wrap gap-1">
-                  {config.riskFilter.symbolWhitelist
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                    .map((s) => (
-                      <Badge key={s} variant="outline" className="text-xxs px-1.5 py-0">
-                        {s}
-                      </Badge>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Copy log */}
-        <div className="flex-1 min-h-0 border-t border-border-default flex flex-col">
-          <div className="flex items-center gap-1.5 px-3 py-1.5">
-            <span className="text-xs font-medium text-text-primary">Copy Log</span>
-            <Badge variant="outline" className="text-xxs px-1 py-0">{log.length}</Badge>
-            {log.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setLog([])}
-                className="ml-auto h-auto p-0 text-xxs text-text-muted hover:text-loss transition-colors"
-                data-testid="clear-log-btn"
-              >
-                Clear
-              </Button>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto" data-testid="copy-log">
-            {log.length === 0 ? (
-              <div className="flex items-center justify-center h-16 text-xxs text-text-muted italic">
-                No copy events yet
-              </div>
-            ) : (
-              <div className="flex flex-col divide-y divide-border-default">
-                {log.map((event) => (
-                  <div key={event.id} className="flex items-start gap-2 px-3 py-1.5">
-                    <EventStatusIcon status={event.status} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-xxs font-mono font-semibold ${
-                          event.action === "BUY" ? "text-profit" : "text-loss"
-                        }`}>
-                          {event.action}
-                        </span>
-                        <span className="text-xxs text-text-primary truncate">{event.symbol}</span>
-                        <span className="text-xxs text-text-muted font-mono">{event.qty}</span>
-                        <span className="text-xxs text-text-muted">→ {event.targetAccountName}</span>
-                      </div>
-                      {event.reason && (
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <AlertCircle size={9} className="text-warning flex-none" />
-                          <span className="text-xxs text-warning truncate">{event.reason}</span>
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-xxs text-text-muted flex-none font-mono tabular-nums">
-                      {new Date(event.timestamp).toLocaleTimeString("en-IN", {
-                        hour: "2-digit", minute: "2-digit", second: "2-digit",
-                        hour12: false,
-                      })}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            onClick={() => startMutation.mutate()}
+            disabled={!canStart}
+            data-testid="start-mirror"
+          >
+            <Play size={12} aria-hidden="true" />
+            Start Mirror
+          </Button>
+        )}
       </div>
     </div>
   );

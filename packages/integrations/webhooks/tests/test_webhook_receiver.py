@@ -194,6 +194,18 @@ class TestParseTradingview:
         payload = r.parse_tradingview({"action": "BUY", "symbol": "RELIANCE"})
         assert payload.data.get("tv_action") == "BUY"
 
+    def test_conflicting_side_aliases_are_replaced_by_signed_action(self):
+        r = _make_receiver()
+        payload = r.parse_tradingview({
+            "action": "BUY",
+            "side": "SELL",
+            "tv_action": "SELL",
+            "symbol": "RELIANCE",
+        })
+
+        assert payload.data["side"] == "BUY"
+        assert payload.data["tv_action"] == "BUY"
+
     def test_extra_fields_in_data(self):
         r = _make_receiver()
         payload = r.parse_tradingview({
@@ -211,6 +223,57 @@ class TestParseTradingview:
         r = _make_receiver()
         payload = r.parse_tradingview({"action": "BUY", "symbol": "NIFTY"})
         assert payload.exchange == "NSE"
+
+    def test_simple_text_payload_preserves_order_fields(self):
+        r = _make_receiver()
+        payload = r.parse_tradingview("BUY BANKNIFTY NFO 30 LIMIT 51000")
+
+        assert payload.action == "place_order"
+        assert payload.symbol == "BANKNIFTY"
+        assert payload.exchange == "NFO"
+        assert payload.data["tv_action"] == "BUY"
+        assert payload.data["quantity"] == "30"
+        assert payload.data["pricetype"] == "LIMIT"
+        assert payload.data["price"] == "51000"
+
+    def test_json_payload_rejects_invalid_price_type(self):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="invalid pricetype"):
+            r.parse_tradingview({
+                "action": "BUY",
+                "symbol": "NIFTY",
+                "pricetype": "GARBAGE",
+            })
+
+    def test_json_payload_rejects_invalid_product(self):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="invalid product"):
+            r.parse_tradingview({
+                "action": "BUY",
+                "symbol": "NIFTY",
+                "product": "JUNK",
+            })
+
+    def test_text_payload_rejects_unknown_order_token_instead_of_falling_back_to_market(self):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="invalid order token"):
+            r.parse_tradingview("BUY NIFTY NFO 1 LIMT 24000")
+
+    @pytest.mark.parametrize("price", ["-1", "nan", "inf"])
+    def test_json_limit_order_rejects_unsafe_price(self, price):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="price"):
+            r.parse_tradingview({
+                "action": "BUY",
+                "symbol": "NIFTY",
+                "pricetype": "LIMIT",
+                "price": price,
+            })
+
+    def test_text_limit_order_requires_positive_price(self):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="positive price"):
+            r.parse_tradingview("BUY NIFTY NFO 1 LIMIT")
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +315,20 @@ class TestParseChartink:
         payload = r.parse_chartink({"symbols": ["BAJAJ", "TITAN"]})
         assert payload.data["symbols"] == ["BAJAJ", "TITAN"]
 
+    def test_symbols_are_normalised(self):
+        r = _make_receiver()
+        payload = r.parse_chartink({"stocks": "NSE:RELIANCE-EQ,BSE:TCS-BE"})
+
+        assert payload.symbol == "RELIANCE"
+        assert payload.data["symbols"] == ["RELIANCE", "TCS"]
+
+    def test_csv_payload_is_supported(self):
+        r = _make_receiver()
+        payload = r.parse_chartink("NSE:RELIANCE-EQ,TCS,INFY-BE")
+
+        assert payload.symbol == "RELIANCE"
+        assert payload.data["symbols"] == ["RELIANCE", "TCS", "INFY"]
+
 
 # ---------------------------------------------------------------------------
 # parse_gocharting (B2)
@@ -279,11 +356,24 @@ class TestParseGoCharting:
         r = _make_receiver()
         payload = r.parse_gocharting({"symbol": "INFY", "action": "BUY", "quantity": 1, "product": "CNC"})
         assert payload.data["gc_action"] == "BUY"
+        assert payload.data["side"] == "BUY"
         assert payload.data["pricetype"] == "MARKET"
         assert payload.data["strategy"] == "GoCharting"
         # Explicit order fields survive into data for the gated dispatcher.
         assert payload.data["quantity"] == 1
         assert payload.data["product"] == "CNC"
+
+    def test_conflicting_side_aliases_are_replaced_by_signed_action(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting({
+            "symbol": "INFY",
+            "action": "SELL",
+            "side": "BUY",
+            "gc_action": "BUY",
+        })
+
+        assert payload.data["side"] == "SELL"
+        assert payload.data["gc_action"] == "SELL"
 
     def test_non_actionable_downgraded_to_signal(self):
         r = _make_receiver()
@@ -294,6 +384,27 @@ class TestParseGoCharting:
         r = _make_receiver()
         payload = r.parse_gocharting({"symbol": "NIFTY", "action": "BUY", "quantity": 1})
         assert payload.exchange == "NSE"
+
+    def test_plain_text_order_uses_shared_provider_shape(self):
+        r = _make_receiver()
+        payload = r.parse_gocharting("SELL BANKNIFTY NFO 30 LIMIT 51000")
+
+        assert payload.source == "gocharting"
+        assert payload.action == "place_order"
+        assert payload.symbol == "BANKNIFTY"
+        assert payload.data["gc_action"] == "SELL"
+        assert payload.data["quantity"] == "30"
+        assert payload.data["pricetype"] == "LIMIT"
+
+    def test_invalid_order_fields_are_rejected(self):
+        r = _make_receiver()
+        with pytest.raises(ValueError, match="invalid pricetype"):
+            r.parse_gocharting({
+                "symbol": "NIFTY",
+                "action": "BUY",
+                "product": "INVALID",
+                "pricetype": "INVALID",
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -587,9 +698,10 @@ class TestWebhookRoutes:
             {"action": "BUY", "symbol": "NIFTY", "exchange": "NFO"},
             secret="testsecret",
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 422
         data = resp.get_json()
-        assert data["status"] == "success"
+        assert data["status"] == "error"
+        assert data["data"]["action"] == "place_order"
 
     def test_chartink_signal(self, flask_client):
         resp = self._post(

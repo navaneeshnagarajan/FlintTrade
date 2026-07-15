@@ -4,7 +4,7 @@ The generator is bounded by patching ``LLMClient.chat_stream`` to yield a
 finite sequence of tokens then return naturally, which causes the Flask
 response generator to reach its ``done`` sentinel and terminate.
 
-All LLM interactions are mocked — no running LM Studio is required.
+All LLM interactions are mocked, so no local inference server is required.
 """
 
 from __future__ import annotations

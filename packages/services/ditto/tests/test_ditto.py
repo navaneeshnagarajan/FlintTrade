@@ -655,38 +655,23 @@ class TestDefaultDB:
         from flinttrade_ditto.account_manager import _default_db
         monkeypatch.delenv("DATA_DIR", raising=False)
 
-        # Mock workspace module
-        mock_core = MagicMock()
         mock_workspace = MagicMock()
-        mock_workspace_instance = MagicMock()
-        mock_workspace_instance.fast_data_dir = Path("/workspace/data")
-        mock_workspace.Workspace.return_value = mock_workspace_instance
-        mock_core.src.workspace = mock_workspace
-        monkeypatch.setitem(sys.modules, 'flinttrade_core.workspace', mock_core.src.workspace)
+        mock_workspace.ditto_accounts_path.return_value = Path("/workspace/data/ditto_accounts.sqlite")
+        monkeypatch.setitem(sys.modules, "flinttrade_core.workspace", mock_workspace)
 
-        # Production code does str(Path(workspace.fast_data_dir) / "ditto_accounts.sqlite"),
-        # so on Windows the separator is \, on POSIX it is /. Compose the expected
-        # value through Path() the same way to keep the test cross-platform.
         expected = str(Path("/workspace/data") / "ditto_accounts.sqlite")
         assert _default_db() == expected
+        mock_workspace.ditto_accounts_path.assert_called_once_with()
 
-    def test_default_db_fallback(self, monkeypatch):
+    def test_default_db_fails_closed_without_workspace_helper(self, monkeypatch):
         import sys
-        from pathlib import Path
         from flinttrade_ditto.account_manager import _default_db
         monkeypatch.delenv("DATA_DIR", raising=False)
 
-        # Ensure importing workspace fails
-        monkeypatch.setitem(sys.modules, 'flinttrade_core.workspace', None)
+        monkeypatch.setitem(sys.modules, "flinttrade_core.workspace", None)
 
-        # Mock Path.home()
-        mock_home = Path("/home/mockuser")
-        monkeypatch.setattr(Path, "home", lambda: mock_home)
-
-        # As above, compose through Path() so the assertion uses the OS-native
-        # separator and matches production output on Windows + POSIX alike.
-        expected = str(mock_home / ".flinttrade" / "data" / "ditto_accounts.sqlite")
-        assert _default_db() == expected
+        with pytest.raises(ModuleNotFoundError, match="flinttrade_core.workspace"):
+            _default_db()
 
 
 class TestAccountManagerExtra:

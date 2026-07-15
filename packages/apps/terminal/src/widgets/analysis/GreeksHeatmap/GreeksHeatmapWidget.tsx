@@ -13,10 +13,9 @@
  * broker is connected the widget fetches the live IV smile (`getFtIVSmile` —
  * the same screener source GreeksSurface uses) and derives the aligned greek
  * grid client-side via the shared Black–Scholes approximation
- * (`greeksHeatmapTransform`), showing a "Live" badge. When disconnected — or no
- * IV-bearing strike is shared across expiries — it falls back to deterministic
- * sample data with an amber "Sample data" badge so the figures are never
- * mistaken for live market data.
+ * (`greeksHeatmapTransform`), showing a "Live" badge. Deterministic sample data
+ * is restricted to disconnected Explore state; connected empty/error reads are
+ * surfaced as unavailable and never replaced with sample figures.
  */
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
@@ -319,7 +318,7 @@ function GreeksHeatmapWidget() {
   // every per-expiry request reads the SAME (nearest) IV snapshot. The rows
   // therefore share one IV surface and differ only by time-decay (dte) — this
   // is a greeks-by-time view, not a true per-expiry IV term structure.
-  const { data: liveRows } = useQuery({
+  const { data: liveRows, isError, isPending } = useQuery({
     queryKey: ["greeks-heatmap", symbol, symDef.exchange],
     queryFn: async () => {
       const expResp = await getExpiry(symDef.label, symDef.exchange, "options");
@@ -328,11 +327,13 @@ function GreeksHeatmapWidget() {
       const smiles = await Promise.all(
         expiries.map((expiry) => getFtIVSmile(symDef.label, symDef.exchange, [expiry])),
       );
+      if (smiles.some((smile) => smile?.is_sample_data !== false)) return null;
       const curves = smiles.flatMap((s) => s?.curves ?? []);
       const merged: IVSmileData = {
         underlying: symbol,
         spot_price: smiles.find((s) => s?.spot_price)?.spot_price ?? 0,
         curves,
+        is_sample_data: false,
       };
       return buildGreeksHeatmap(merged);
     },
@@ -342,8 +343,13 @@ function GreeksHeatmapWidget() {
     retry: false,
   });
 
-  const isLive = isConnected && liveRows != null && liveRows.length > 0;
-  const data: ExpiryRow[] = isLive && liveRows ? liveRows : SAMPLE_GREEKS_HEATMAP_DATA;
+  const isLive = isConnected && !isError && liveRows != null && liveRows.length > 0;
+  const isSample = !isConnected;
+  const data: ExpiryRow[] = isLive && liveRows
+    ? liveRows
+    : isSample
+      ? SAMPLE_GREEKS_HEATMAP_DATA
+      : [];
 
   const { minVal, maxVal } = useMemo(() => {
     let min = Infinity;
@@ -365,10 +371,7 @@ function GreeksHeatmapWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Grid3x3 size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Greeks Heatmap</span>
-        {/* Data-source badge — flips to "Live" only when a broker is connected
-            AND the chain yielded an aligned greek grid. Otherwise it stays on
-            the honest amber "Sample data" affordance so the figures are never
-            mistaken for live market data. */}
+        {/* Data-source badge never labels a connected failed/empty read as sample. */}
         {isLive ? (
           <span
             className="px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
@@ -378,14 +381,29 @@ function GreeksHeatmapWidget() {
           >
             Live
           </span>
-        ) : (
+        ) : isSample ? (
           <span
             className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
             role="status"
-            aria-label="Showing sample data; no live backend endpoint yet"
-            title="No live data wired yet — showing a sample Greeks heatmap so the widget is usable in explore mode."
+            aria-label="Showing sample Greeks while disconnected"
+            title="Disconnected Explore state; values are deterministic sample data."
           >
             Sample data
+          </span>
+        ) : isPending ? (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-surface-hover text-text-muted border border-border-default rounded"
+            role="status"
+          >
+            Loading
+          </span>
+        ) : (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-loss/10 text-loss border border-loss/30 rounded"
+            role="status"
+            aria-label="Live Greeks unavailable"
+          >
+            Unavailable
           </span>
         )}
         <div className="flex-1" />
@@ -429,19 +447,29 @@ function GreeksHeatmapWidget() {
         </div>
       </div>
 
-      {/* Legend */}
-      <ColourBar greek={greek} minVal={minVal} maxVal={maxVal} />
+      {data.length > 0 ? (
+        <>
+          {/* Legend */}
+          <ColourBar greek={greek} minVal={minVal} maxVal={maxVal} />
 
-      {/* ATM indicator legend */}
-      <div className="flex-none flex items-center gap-2 px-2 pb-1">
-        <span className="text-xxs text-text-muted">▲ = ATM strike</span>
-        <span className="text-xxs text-text-muted">· Rows: near → far expiry · Cols: low → high strike · CE greeks</span>
-      </div>
+          {/* ATM indicator legend */}
+          <div className="flex-none flex items-center gap-2 px-2 pb-1">
+            <span className="text-xxs text-text-muted">▲ = ATM strike</span>
+            <span className="text-xxs text-text-muted">· Rows: near → far expiry · Cols: low → high strike · CE greeks</span>
+          </div>
 
-      {/* Grid */}
-      <div className="flex-1 min-h-0 overflow-auto">
-        <HeatGrid rows={data} greek={greek} />
-      </div>
+          {/* Grid */}
+          <div className="flex-1 min-h-0 overflow-auto">
+            <HeatGrid rows={data} greek={greek} />
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 min-h-0 grid place-items-center px-4 text-center" role="status">
+          <span className="text-xs text-text-muted">
+            {isPending ? "Loading live Greeks…" : "Live Greeks are unavailable for this symbol."}
+          </span>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex-none px-2 py-1 bg-surface-card border-t border-border-subtle">

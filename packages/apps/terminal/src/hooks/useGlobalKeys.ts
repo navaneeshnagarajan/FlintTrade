@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { cancelAllOrders, closePosition } from "@/services/api";
+import { cancelAllOrders, exitAllPositions } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 
 interface GlobalKeyHandlers {
@@ -87,15 +87,17 @@ export default function useGlobalKeys({
         if (handledTradingKeyEvents.has(e)) return;
         handledTradingKeyEvents.add(e);
         if (window.confirm("Close ALL open positions? This cannot be undone.")) {
-          closePosition("Flint")
-            .then(() =>
+          try {
+            void exitAllPositions().then(() =>
               emitNotification({
                 category: "order",
                 title: "Exit all positions requested",
                 body: "Close request sent for all open positions.",
               }),
-            )
-            .catch((err) => reportTradingActionFailure("Exit all positions failed", err));
+            ).catch((err) => reportTradingActionFailure("Exit all positions failed", err));
+          } catch (err) {
+            reportTradingActionFailure("Exit all positions failed", err);
+          }
         }
         return;
       }
@@ -106,15 +108,17 @@ export default function useGlobalKeys({
           if (handledTradingKeyEvents.has(e)) return;
           handledTradingKeyEvents.add(e);
           if (window.confirm("Cancel ALL open orders? This cannot be undone.")) {
-            cancelAllOrders()
-              .then(() =>
+            try {
+              void cancelAllOrders().then(() =>
                 emitNotification({
                   category: "order",
                   title: "Cancel all orders requested",
                   body: "Cancel request sent for all open orders.",
                 }),
-              )
-              .catch((err) => reportTradingActionFailure("Cancel all orders failed", err));
+              ).catch((err) => reportTradingActionFailure("Cancel all orders failed", err));
+            } catch (err) {
+              reportTradingActionFailure("Cancel all orders failed", err);
+            }
           }
           return;
         }

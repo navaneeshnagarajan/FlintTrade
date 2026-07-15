@@ -6,10 +6,16 @@ import importlib.util
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
+import duckdb
 import pytest
 
+from flinttrade_data.sandbox_migration import (
+    LegacySandboxConflict,
+    migrate_legacy_sandbox,
+)
 from flinttrade_data.state_store import StateStore, reset
 
 
@@ -19,6 +25,76 @@ def _load_sandbox_migrator():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _seed_legacy_duckdb(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime(2026, 7, 14, 9, 30, tzinfo=timezone.utc)
+    with duckdb.connect(str(path)) as conn:
+        conn.execute(
+            """CREATE TABLE sandbox_orders (
+                order_id VARCHAR PRIMARY KEY, account_id VARCHAR, symbol VARCHAR,
+                exchange VARCHAR, action VARCHAR, quantity INTEGER, price DOUBLE,
+                trigger_price DOUBLE, pricetype VARCHAR, product VARCHAR,
+                strategy VARCHAR, status VARCHAR, fill_price DOUBLE,
+                fill_time TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE sandbox_trades (
+                trade_id VARCHAR PRIMARY KEY, order_id VARCHAR, account_id VARCHAR,
+                symbol VARCHAR, exchange VARCHAR, action VARCHAR, quantity INTEGER,
+                price DOUBLE, product VARCHAR, strategy VARCHAR, traded_at TIMESTAMP
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE sandbox_positions (
+                position_id VARCHAR PRIMARY KEY, account_id VARCHAR, symbol VARCHAR,
+                exchange VARCHAR, product VARCHAR, net_qty INTEGER, avg_price DOUBLE,
+                buy_qty INTEGER, buy_value DOUBLE, sell_qty INTEGER, sell_value DOUBLE,
+                unrealized_pnl DOUBLE, realized_pnl DOUBLE, updated_at TIMESTAMP
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE sandbox_funds (
+                account_id VARCHAR PRIMARY KEY, starting_capital DOUBLE,
+                used_margin DOUBLE, realized_pnl DOUBLE, updated_at TIMESTAMP
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE sandbox_daily_pnl (
+                record_id VARCHAR PRIMARY KEY, account_id VARCHAR, date DATE,
+                realized_pnl DOUBLE, unrealized_pnl DOUBLE, total_trades INTEGER,
+                recorded_at TIMESTAMP
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO sandbox_funds VALUES ('default', 250000, 1500, 100, ?)",
+            [now],
+        )
+        conn.execute(
+            """INSERT INTO sandbox_orders VALUES
+               ('old-order', 'default', 'ITC', 'NSE', 'BUY', 2, 100, 0,
+                'MARKET', 'MIS', 'legacy', 'COMPLETE', 101, ?, ?, ?)""",
+            [now, now, now],
+        )
+        conn.execute(
+            """INSERT INTO sandbox_trades VALUES
+               ('old-trade', 'old-order', 'default', 'ITC', 'NSE', 'BUY', 2,
+                101, 'MIS', 'legacy', ?)""",
+            [now],
+        )
+        conn.execute(
+            """INSERT INTO sandbox_positions VALUES
+               ('old-position', 'default', 'ITC', 'NSE', 'MIS', 2, 101,
+                2, 202, 0, 0, 2, 10, ?)""",
+            [now],
+        )
+        conn.execute(
+            """INSERT INTO sandbox_daily_pnl VALUES
+               ('old-pnl', 'default', DATE '2026-07-14', 10, 2, 1, ?)""",
+            [now],
+        )
 
 
 @pytest.fixture
@@ -117,8 +193,21 @@ def _seed(tmp_path: Path) -> None:
     try:
         s.record_order("o1", "NIFTY", "NSE", "BUY", 50, 22_500.0, status="COMPLETE")
         s.record_order("oP", "TCS", "NSE", "BUY", 1, 3000.0, status="PENDING")
+        s._conn.execute(
+            """INSERT INTO trades
+               (trade_id, order_id, symbol, exchange, action, quantity, price,
+                product, strategy, traded_at)
+               VALUES ('t1', 'o1', 'NIFTY', 'NSE', 'BUY', 50, 22500, 'MIS', '', 1)"""
+        )
         s.upsert_position("p1", "NIFTY", "NSE", net_qty=50, realised_pnl=1200.0)
         s.record_mtm("p1", 1.0, 22_510.0, 50, 500.0)
+        s._conn.execute(
+            """INSERT INTO sandbox_config
+               (id, starting_capital, equity_leverage, futures_leverage,
+                option_buy_leverage, option_sell_leverage, squareoff_time,
+                mcx_squareoff_time, updated_at)
+               VALUES ('default', 750000, 1, 1, 1, 1, '15:15', '23:25', 1)"""
+        )
         s._conn.execute("UPDATE capital SET current = 950000.0, used_margin = 50000.0 WHERE id='default'")
     finally:
         s.close()
@@ -130,19 +219,24 @@ def test_reset_archives_and_clears(tmp_path: Path) -> None:
     archive = Path(out["archived_to"])
     assert archive.exists()
     lines = [json.loads(line) for line in archive.read_text().splitlines()]
-    assert any(r.get("order_id") == "o1" for r in lines)   # COMPLETE order archived
+    assert any(r.get("_table") == "orders" and r.get("order_id") == "o1" for r in lines)
+    assert any(r.get("_table") == "orders" and r.get("order_id") == "oP" for r in lines)
+    assert any(r.get("_table") == "trades" and r.get("trade_id") == "t1" for r in lines)
+    assert any(r.get("_table") == "positions" and r.get("position_id") == "p1" for r in lines)
+    assert any(r.get("_table") == "mtm" and r.get("id") for r in lines)
 
     s = StateStore(tmp_path / "sandbox" / "state.sqlite")
     try:
         assert s.get_positions(open_only=False) == []       # positions cleared
         assert s._conn.execute("SELECT COUNT(*) FROM mtm").fetchone()[0] == 0
-        # PENDING order survives, COMPLETE one removed
-        ids = {o["order_id"] for o in s.get_orders()}
-        assert ids == {"oP"}
+        assert s.get_orders() == []
+        assert s._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
         cap = s.get_capital()
-        assert cap["current"] == 1_000_000.0 and cap["used_margin"] == 0.0
-        pnl = s._conn.execute("SELECT net_pnl FROM pnl").fetchone()
+        assert cap["initial"] == 750_000.0
+        assert cap["current"] == 750_000.0 and cap["used_margin"] == 0.0
+        pnl = s._conn.execute("SELECT net_pnl, total_trades FROM pnl").fetchone()
         assert pnl is not None and pnl[0] == pytest.approx(1200.0)
+        assert pnl[1] == 1
     finally:
         s.close()
 
@@ -173,11 +267,14 @@ def test_reset_atomic_rollback_on_fsync_failure(tmp_path: Path, monkeypatch) -> 
 def test_reset_idempotent_same_day(tmp_path: Path) -> None:
     _seed(tmp_path)
     first = reset(tmp_path)
+    first_archive = Path(first["archived_to"]).read_text()
     second = reset(tmp_path)
     assert first["session_date"] == second["session_date"]
+    assert Path(second["archived_to"]).read_text() == first_archive
     s = StateStore(tmp_path / "sandbox" / "state.sqlite")
     try:
         assert s.get_positions(open_only=False) == []   # still clear, no error
+        assert s._conn.execute("SELECT net_pnl, total_trades FROM pnl").fetchone() == (1200.0, 1)
     finally:
         s.close()
 
@@ -206,3 +303,119 @@ def test_sandbox_migrate_idempotent(tmp_path: Path) -> None:
     mig = _load_sandbox_migrator()
     assert mig.migrate(tmp_path) == 0
     assert mig.migrate(tmp_path) == 0  # second run is a no-op
+
+
+def test_legacy_engine_sandbox_migrates_into_existing_pristine_sqlite(
+    tmp_path: Path,
+) -> None:
+    legacy = tmp_path / "data" / "engine-sandbox" / "default.duckdb"
+    target = tmp_path / "sandbox" / "state.sqlite"
+    archive_dir = tmp_path / "archive" / "migrations"
+    _seed_legacy_duckdb(legacy)
+    StateStore(target).close()  # Existing target must not suppress migration.
+
+    result = migrate_legacy_sandbox(legacy, target, archive_dir)
+
+    assert result["status"] == "migrated"
+    assert not legacy.exists()
+    assert Path(result["archive_path"]).exists()
+    with sqlite3.connect(target) as conn:
+        capital = conn.execute(
+            "SELECT initial, current, used_margin FROM capital WHERE id = 'default'"
+        ).fetchone()
+        assert capital == (250_000.0, 250_100.0, 1_500.0)
+        assert conn.execute(
+            "SELECT starting_capital FROM sandbox_config WHERE id = 'default'"
+        ).fetchone() == (250_000.0,)
+        assert conn.execute(
+            "SELECT filled_qty, avg_fill_px, strategy FROM orders WHERE order_id = 'old-order'"
+        ).fetchone() == (2, 101.0, "legacy")
+        assert conn.execute(
+            "SELECT price FROM trades WHERE trade_id = 'old-trade'"
+        ).fetchone() == (101.0,)
+        assert conn.execute(
+            "SELECT realised_pnl, unrealised_pnl FROM positions"
+        ).fetchone() == (10.0, 2.0)
+        assert conn.execute(
+            "SELECT net_pnl, total_trades FROM pnl WHERE session_date = '2026-07-14'"
+        ).fetchone() == (12.0, 1)
+
+
+def test_legacy_engine_sandbox_conflict_keeps_both_databases(tmp_path: Path) -> None:
+    legacy = tmp_path / "data" / "engine-sandbox" / "default.duckdb"
+    target = tmp_path / "sandbox" / "state.sqlite"
+    archive_dir = tmp_path / "archive" / "migrations"
+    _seed_legacy_duckdb(legacy)
+    with StateStore(target) as store:
+        store.record_order("current-order", "TCS", "NSE", "BUY", 1, 3_000.0)
+
+    with pytest.raises(LegacySandboxConflict, match="both contain session state"):
+        migrate_legacy_sandbox(legacy, target, archive_dir)
+
+    assert legacy.exists()
+    with sqlite3.connect(target) as conn:
+        assert conn.execute("SELECT order_id FROM orders").fetchall() == [
+            ("current-order",)
+        ]
+
+
+def test_legacy_funds_only_customisation_is_migrated(tmp_path: Path) -> None:
+    legacy = tmp_path / "data" / "engine-sandbox" / "default.duckdb"
+    target = tmp_path / "sandbox" / "state.sqlite"
+    archive_dir = tmp_path / "archive" / "migrations"
+    _seed_legacy_duckdb(legacy)
+    with duckdb.connect(str(legacy)) as conn:
+        for table in (
+            "sandbox_daily_pnl",
+            "sandbox_positions",
+            "sandbox_trades",
+            "sandbox_orders",
+        ):
+            conn.execute(f"DELETE FROM {table}")
+
+    result = migrate_legacy_sandbox(legacy, target, archive_dir)
+
+    assert result["status"] == "migrated"
+    with sqlite3.connect(target) as conn:
+        assert conn.execute(
+            "SELECT initial, current, used_margin FROM capital"
+        ).fetchone() == (250_000.0, 250_100.0, 1_500.0)
+
+
+def test_legacy_negative_position_is_preserved_for_manual_recovery(
+    tmp_path: Path,
+) -> None:
+    legacy = tmp_path / "data" / "engine-sandbox" / "default.duckdb"
+    target = tmp_path / "sandbox" / "state.sqlite"
+    archive_dir = tmp_path / "archive" / "migrations"
+    _seed_legacy_duckdb(legacy)
+    with duckdb.connect(str(legacy)) as conn:
+        conn.execute("UPDATE sandbox_positions SET net_qty = -2")
+
+    with pytest.raises(LegacySandboxConflict, match="short position"):
+        migrate_legacy_sandbox(legacy, target, archive_dir)
+
+    assert legacy.exists()
+    assert not archive_dir.exists()
+
+
+def test_migration_marker_does_not_match_a_replacement_database(
+    tmp_path: Path,
+) -> None:
+    legacy = tmp_path / "data" / "engine-sandbox" / "default.duckdb"
+    target = tmp_path / "sandbox" / "state.sqlite"
+    archive_dir = tmp_path / "archive" / "migrations"
+    _seed_legacy_duckdb(legacy)
+    migrate_legacy_sandbox(legacy, target, archive_dir)
+    _seed_legacy_duckdb(legacy)
+    with duckdb.connect(str(legacy)) as conn:
+        conn.execute("UPDATE sandbox_orders SET order_id = 'replacement-order'")
+        conn.execute(
+            "UPDATE sandbox_trades SET trade_id = 'replacement-trade', "
+            "order_id = 'replacement-order'"
+        )
+
+    with pytest.raises(LegacySandboxConflict, match="both contain session state"):
+        migrate_legacy_sandbox(legacy, target, archive_dir)
+
+    assert legacy.exists()

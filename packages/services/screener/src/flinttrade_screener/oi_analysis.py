@@ -18,8 +18,8 @@ logger = logging.getLogger("flinttrade.screener.oi_analysis")
 class PCRResult:
     """Put-Call Ratio result."""
 
-    pcr_oi: float = 0.0         # Total Put OI / Total Call OI
-    pcr_volume: float = 0.0     # Total Put Volume / Total Call Volume
+    pcr_oi: float | None = None         # Total Put OI / Total Call OI
+    pcr_volume: float | None = None     # Total Put Volume / Total Call Volume
     total_ce_oi: int = 0
     total_pe_oi: int = 0
     total_ce_volume: int = 0
@@ -32,7 +32,10 @@ class PCRResult:
         PCR > 1.0 → Bullish (more puts = hedging/support)
         PCR < 0.7 → Bearish (more calls = resistance)
         0.7-1.0   → Neutral
+        Missing call OI denominator → Unavailable
         """
+        if self.pcr_oi is None:
+            return "UNAVAILABLE"
         if self.pcr_oi > 1.0:
             return "BULLISH"
         if self.pcr_oi < 0.7:
@@ -56,41 +59,41 @@ class OIChangeEntry:
 
     strike_price: float = 0.0
     ce_oi: int = 0
-    ce_oi_prev: int = 0
-    ce_oi_change: int = 0
+    ce_oi_prev: int | None = None
+    ce_oi_change: int | None = None
     pe_oi: int = 0
-    pe_oi_prev: int = 0
-    pe_oi_change: int = 0
+    pe_oi_prev: int | None = None
+    pe_oi_change: int | None = None
 
     @property
     def ce_writing(self) -> bool:
         """Fresh call writing (OI increase)."""
-        return self.ce_oi_change > 0
+        return self.ce_oi_change is not None and self.ce_oi_change > 0
 
     @property
     def pe_writing(self) -> bool:
         """Fresh put writing (OI increase)."""
-        return self.pe_oi_change > 0
+        return self.pe_oi_change is not None and self.pe_oi_change > 0
 
     @property
     def ce_unwinding(self) -> bool:
         """Call unwinding (OI decrease)."""
-        return self.ce_oi_change < 0
+        return self.ce_oi_change is not None and self.ce_oi_change < 0
 
     @property
     def pe_unwinding(self) -> bool:
         """Put unwinding (OI decrease)."""
-        return self.pe_oi_change < 0
+        return self.pe_oi_change is not None and self.pe_oi_change < 0
 
 
 @dataclass
 class SupportResistance:
     """Support and resistance levels derived from OI."""
 
-    resistance_strike: float = 0.0  # Highest call OI
-    resistance_oi: int = 0
-    support_strike: float = 0.0     # Highest put OI
-    support_oi: int = 0
+    resistance_strike: float | None = None  # Highest positive call OI
+    resistance_oi: int | None = None
+    support_strike: float | None = None     # Highest positive put OI
+    support_oi: int | None = None
 
 
 @dataclass
@@ -127,8 +130,8 @@ class OIAnalysis:
         total_ce_vol = snapshot.total_ce_volume
         total_pe_vol = snapshot.total_pe_volume
 
-        pcr_oi = total_pe_oi / total_ce_oi if total_ce_oi > 0 else 0.0
-        pcr_vol = total_pe_vol / total_ce_vol if total_ce_vol > 0 else 0.0
+        pcr_oi = total_pe_oi / total_ce_oi if total_ce_oi > 0 else None
+        pcr_vol = total_pe_vol / total_ce_vol if total_ce_vol > 0 else None
 
         return PCRResult(
             pcr_oi=pcr_oi,
@@ -156,7 +159,7 @@ class OIAnalysis:
         value payout by writers is minimized.
         """
         strikes = snapshot.strikes
-        if not strikes:
+        if not strikes or sum(s.ce_oi + s.pe_oi for s in strikes) <= 0:
             return MaxPainResult()
 
         strike_losses: list[dict[str, float]] = []
@@ -208,17 +211,19 @@ class OIAnalysis:
 
         for s in current.strikes:
             prev = prev_map.get(s.strike_price)
-            prev_ce_oi = prev.ce_oi if prev else 0
-            prev_pe_oi = prev.pe_oi if prev else 0
+            prev_ce_oi = prev.ce_oi if prev else None
+            prev_pe_oi = prev.pe_oi if prev else None
+            ce_oi_change = s.ce_oi - prev.ce_oi if prev else None
+            pe_oi_change = s.pe_oi - prev.pe_oi if prev else None
 
             changes.append(OIChangeEntry(
                 strike_price=s.strike_price,
                 ce_oi=s.ce_oi,
                 ce_oi_prev=prev_ce_oi,
-                ce_oi_change=s.ce_oi - prev_ce_oi,
+                ce_oi_change=ce_oi_change,
                 pe_oi=s.pe_oi,
                 pe_oi_prev=prev_pe_oi,
-                pe_oi_change=s.pe_oi - prev_pe_oi,
+                pe_oi_change=pe_oi_change,
             ))
 
         return changes
@@ -237,14 +242,16 @@ class OIAnalysis:
         if not snapshot.strikes:
             return SupportResistance()
 
-        max_ce = max(snapshot.strikes, key=lambda s: s.ce_oi)
-        max_pe = max(snapshot.strikes, key=lambda s: s.pe_oi)
+        ce_candidates = [strike for strike in snapshot.strikes if strike.ce_oi > 0]
+        pe_candidates = [strike for strike in snapshot.strikes if strike.pe_oi > 0]
+        max_ce = max(ce_candidates, key=lambda s: s.ce_oi) if ce_candidates else None
+        max_pe = max(pe_candidates, key=lambda s: s.pe_oi) if pe_candidates else None
 
         return SupportResistance(
-            resistance_strike=max_ce.strike_price,
-            resistance_oi=max_ce.ce_oi,
-            support_strike=max_pe.strike_price,
-            support_oi=max_pe.pe_oi,
+            resistance_strike=max_ce.strike_price if max_ce else None,
+            resistance_oi=max_ce.ce_oi if max_ce else None,
+            support_strike=max_pe.strike_price if max_pe else None,
+            support_oi=max_pe.pe_oi if max_pe else None,
         )
 
     # ------------------------------------------------------------------

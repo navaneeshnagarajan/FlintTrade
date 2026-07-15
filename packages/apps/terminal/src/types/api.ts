@@ -125,6 +125,9 @@ export interface OptionChainData {
 }
 
 export interface Greeks {
+  symbol?: string;
+  exchange?: string;
+  instrument_id?: string;
   delta: number;
   gamma: number;
   theta: number;
@@ -286,24 +289,42 @@ export interface OptionGreeksParams {
 // --- GEX (Gamma Exposure) ---
 export interface GexEntry {
   strike: number;
-  call_gamma: number;
-  put_gamma: number;
-  net_gamma: number;
+  call_gex: number;
+  put_gex: number;
+  net_gex: number;
   call_oi: number;
   put_oi: number;
+}
+
+export interface ProvenancedRows<T> {
+  rows: T[];
+  /** Missing provenance is treated as sample/untrusted by the API normaliser. */
+  is_sample_data: boolean;
 }
 
 // --- IV Smile ---
 export interface IVSmileEntry {
   strike: number;
+  /** Decimal IV, e.g. 0.14 = 14%. */
   call_iv: number;
+  /** Decimal IV, e.g. 0.14 = 14%. */
   put_iv: number;
+  /** Strike/spot ratio; ATM is 1.0. */
   moneyness: number;
+}
+
+export interface IVSmileSeriesData {
+  points: IVSmileEntry[];
+  /** Missing provenance is treated as sample/untrusted by the API normaliser. */
+  is_sample_data: boolean;
 }
 
 // --- Max Pain ---
 export interface MaxPainData {
-  max_pain_strike: number;
+  /** Missing provenance is treated as sample/untrusted by the API normaliser. */
+  is_sample_data: boolean;
+  /** Null when the backend did not provide a valid positive strike. */
+  max_pain_strike: number | null;
   total_loss_at_max_pain?: number;
   strike_losses?: Array<{
     strike: number;
@@ -311,10 +332,10 @@ export interface MaxPainData {
   }>;
   strikes: Array<{
     strike: number;
-    call_oi: number;
-    put_oi: number;
-    call_pain: number;
-    put_pain: number;
+    call_oi?: number;
+    put_oi?: number;
+    call_pain?: number;
+    put_pain?: number;
     total_pain: number;
   }>;
 }
@@ -324,8 +345,12 @@ export interface OIProfileEntry {
   strike: number;
   type: "CE" | "PE";
   oi: number;
-  oi_delta_d: number;
-  ltp: number;
+  /** Omitted until the backend has a trustworthy prior OI snapshot. */
+  oi_delta_d?: number;
+  /** Omitted when the backend response has no option-leg price. */
+  ltp?: number;
+  /** Omitted until a trustworthy prior-price snapshot is available. */
+  price_change?: number;
 }
 
 // --- GEX (new FlintTrade backend shape) ---
@@ -460,9 +485,11 @@ export interface VolSurfaceData {
 export interface IVSmileCurveData {
   expiry: string;
   days_to_expiry: number;
+  /** Decimal IV, e.g. 0.14 = 14%. */
   atm_iv: number;
   atm_strike: number;
   points: IVSmileEntry[];
+  /** Decimal IV difference, e.g. 0.02 = two volatility points. */
   skew_25delta: number;
 }
 
@@ -470,6 +497,8 @@ export interface IVSmileData {
   underlying: string;
   spot_price: number;
   curves: IVSmileCurveData[];
+  /** True when the backend fabricated the curves instead of using a complete live chain. */
+  is_sample_data: boolean;
 }
 
 // --- Straddle P&L ---

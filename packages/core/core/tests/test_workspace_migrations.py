@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -13,14 +15,18 @@ from pathlib import Path
 import pytest
 from filelock import FileLock
 
+from flinttrade_core import secure_file
 from flinttrade_core.workspace_migrations import (
     MIGRATIONS,
     WORKSPACE_VERSION,
     MigrationLockError,
+    _atomic_write,
     _migration_lock,
     _merge_defaults,
     run_migrations,
 )
+
+_LMSTUDIO_RETIREMENT_JOURNAL = ".lmstudio-retirement.transaction.json"
 
 
 def _seed(workspace_dir: Path, cfg: dict) -> Path:
@@ -29,6 +35,29 @@ def _seed(workspace_dir: Path, cfg: dict) -> Path:
     path = workspace_dir / "workspace.json"
     path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     return path
+
+
+def _write_retirement_journal(
+    workspace_dir: Path,
+    staged_path: Path,
+    *,
+    phase: str,
+) -> Path:
+    staged_stat = staged_path.stat()
+    journal = {
+        "version": 1,
+        "phase": phase,
+        "secret_name": "llm_api_key",
+        "staged_name": staged_path.name,
+        "sha256": hashlib.sha256(staged_path.read_bytes()).hexdigest(),
+        "st_dev": staged_stat.st_dev,
+        "st_ino": staged_stat.st_ino,
+        "st_uid": staged_stat.st_uid,
+        "size": staged_stat.st_size,
+    }
+    journal_path = workspace_dir / _LMSTUDIO_RETIREMENT_JOURNAL
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    return journal_path
 
 
 _HOLD_WORKSPACE_LOCK = """
@@ -112,6 +141,510 @@ def test_052_to_100_preserves_manual_edits(tmp_path):
     assert "ticks" in result["brokers"]["data"]
 
 
+def test_100_to_110_adds_complete_safety_config_and_preserves_edits(tmp_path):
+    _seed(
+        tmp_path,
+        {
+            "version": "1.0.0",
+            "safety": {"max_positions": 12},
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["version"] == WORKSPACE_VERSION
+    assert result["safety"]["max_positions"] == 12
+    assert result["safety"]["pnl_pause_pct"] == 3.0
+    assert result["safety"]["qty_limits"]["NSE"] == 50_000
+
+
+def test_110_to_current_retires_default_lmstudio_and_deletes_only_its_bound_secret(tmp_path):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-local-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://127.0.0.1:1234",
+                "model": "local-model",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "lmstudio",
+                "api_key_destination": "http://127.0.0.1:1234",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["version"] == WORKSPACE_VERSION
+    assert result["llm"] == {
+        "provider": "ollama",
+        "host": "",
+        "model": "local-model",
+        "api_key_ref": "",
+        "api_key_provider": "",
+        "api_key_destination": "",
+    }
+    assert not secret_path.exists()
+    backup = json.loads((tmp_path / "workspace.1.1.0.bak.json").read_text(encoding="utf-8"))
+    assert backup["llm"]["provider"] == "lmstudio"
+
+
+def test_110_to_current_retires_a_default_lmstudio_secret_with_only_the_legacy_ref(
+    tmp_path,
+):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-local-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://127.0.0.1:1234",
+                "model": "local-model",
+                "api_key_ref": "secret://llm/api_key",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"] == {
+        "provider": "ollama",
+        "host": "",
+        "model": "local-model",
+        "api_key_ref": "",
+        "api_key_provider": "",
+        "api_key_destination": "",
+    }
+    assert not secret_path.exists()
+
+
+def test_110_to_current_retires_a_remote_lmstudio_secret_with_only_the_legacy_ref(
+    tmp_path,
+):
+    host = "https://models.example.invalid:443/API?Token=X"
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-remote-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": host,
+                "model": "remote-model",
+                "api_key_ref": "secret://llm/api_key",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"] == {
+        "provider": "ollama",
+        "host": "",
+        "model": "remote-model",
+        "api_key_ref": "",
+        "api_key_provider": "",
+        "api_key_destination": "",
+    }
+    assert not secret_path.exists()
+
+
+@pytest.mark.parametrize("phase", ["prepared", "committed"])
+def test_default_lmstudio_migration_recovers_a_precommit_staged_secret(tmp_path, phase):
+    staged_path = tmp_path / "secrets" / ".llm_api_key.lmstudio-retirement.crash"
+    staged_path.parent.mkdir(parents=True)
+    staged_path.write_text("legacy-local-secret", encoding="utf-8")
+    journal_path = _write_retirement_journal(tmp_path, staged_path, phase=phase)
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://127.0.0.1:1234",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "lmstudio",
+                "api_key_destination": "http://127.0.0.1:1234",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert not (tmp_path / "secrets" / "llm_api_key").exists()
+    assert list((tmp_path / "secrets").glob(".llm_api_key.lmstudio-retirement.*")) == []
+    assert not journal_path.exists()
+
+
+@pytest.mark.parametrize("backup_version", ["1.0.0", "1.1.0"])
+@pytest.mark.parametrize("phase", ["prepared", "committed"])
+def test_default_lmstudio_migration_finishes_a_postcommit_staged_secret(
+    tmp_path,
+    backup_version,
+    phase,
+):
+    old = {
+        "version": backup_version,
+        "llm": {
+            "provider": "lmstudio",
+            "host": "http://localhost:1234",
+            "api_key_ref": "secret://llm/api_key",
+            "api_key_provider": "lmstudio",
+            "api_key_destination": "http://localhost:1234",
+        },
+    }
+    current = {
+        "version": WORKSPACE_VERSION,
+        "llm": {
+            "provider": "ollama",
+            "host": "",
+            "api_key_ref": "",
+            "api_key_provider": "",
+            "api_key_destination": "",
+        },
+    }
+    _seed(tmp_path, current)
+    (tmp_path / f"workspace.{backup_version}.bak.json").write_text(json.dumps(old), encoding="utf-8")
+    staged_path = tmp_path / "secrets" / ".llm_api_key.lmstudio-retirement.crash"
+    staged_path.parent.mkdir(parents=True)
+    staged_path.write_text("legacy-local-secret", encoding="utf-8")
+    journal_path = _write_retirement_journal(tmp_path, staged_path, phase=phase)
+
+    result = run_migrations(tmp_path)
+
+    assert result == current
+    assert not staged_path.exists()
+    assert not journal_path.exists()
+
+
+def test_current_workspace_never_deletes_an_unjournalled_prefixed_file(tmp_path):
+    old = {
+        "version": "1.1.0",
+        "llm": {
+            "provider": "lmstudio",
+            "host": "http://localhost:1234",
+            "api_key_ref": "secret://llm/api_key",
+        },
+    }
+    current = {
+        "version": WORKSPACE_VERSION,
+        "llm": {
+            "provider": "ollama",
+            "host": "",
+            "api_key_ref": "",
+            "api_key_provider": "",
+            "api_key_destination": "",
+        },
+    }
+    _seed(tmp_path, current)
+    (tmp_path / "workspace.1.1.0.bak.json").write_text(json.dumps(old), encoding="utf-8")
+    unrelated_path = tmp_path / "secrets" / ".llm_api_key.lmstudio-retirement.unrelated"
+    unrelated_path.parent.mkdir(parents=True)
+    unrelated_path.write_text("operator-owned-data", encoding="utf-8")
+
+    assert run_migrations(tmp_path) == current
+    assert unrelated_path.read_text(encoding="utf-8") == "operator-owned-data"
+
+
+def test_staged_lmstudio_recovery_rejects_a_file_that_no_longer_matches_its_journal(
+    tmp_path,
+):
+    old = {
+        "version": "1.1.0",
+        "llm": {
+            "provider": "lmstudio",
+            "host": "http://localhost:1234",
+            "api_key_ref": "secret://llm/api_key",
+        },
+    }
+    current = {
+        "version": WORKSPACE_VERSION,
+        "llm": {
+            "provider": "ollama",
+            "host": "",
+            "api_key_ref": "",
+            "api_key_provider": "",
+            "api_key_destination": "",
+        },
+    }
+    _seed(tmp_path, current)
+    (tmp_path / "workspace.1.1.0.bak.json").write_text(json.dumps(old), encoding="utf-8")
+    staged_path = tmp_path / "secrets" / ".llm_api_key.lmstudio-retirement.crash"
+    staged_path.parent.mkdir(parents=True)
+    staged_path.write_text("journalled-secret", encoding="utf-8")
+    _write_retirement_journal(tmp_path, staged_path, phase="committed")
+    staged_path.write_text("replaced-after-journalling", encoding="utf-8")
+
+    with pytest.raises(MigrationLockError, match="identity"):
+        run_migrations(tmp_path)
+
+    assert staged_path.read_text(encoding="utf-8") == "replaced-after-journalling"
+
+
+def test_lmstudio_staging_does_not_depend_on_unlinking_an_empty_placeholder(
+    tmp_path,
+    monkeypatch,
+):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-local-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://localhost:1234",
+                "api_key_ref": "secret://llm/api_key",
+            },
+        },
+    )
+    original_unlink = Path.unlink
+
+    def reject_empty_stage_placeholder(self, *args, **kwargs):
+        if (
+            self.name.startswith(".llm_api_key.lmstudio-retirement.")
+            and self.exists()
+            and self.stat().st_size == 0
+        ):
+            raise PermissionError("empty stage placeholder cannot be removed")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_empty_stage_placeholder)
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert not secret_path.exists()
+    assert list((tmp_path / "secrets").glob(".llm_api_key.lmstudio-retirement.*")) == []
+    assert not (tmp_path / _LMSTUDIO_RETIREMENT_JOURNAL).exists()
+
+
+def test_lmstudio_stage_rename_failure_cleans_the_journal_and_preserves_the_secret(
+    tmp_path,
+    monkeypatch,
+):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-local-secret", encoding="utf-8")
+    workspace_path = _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://localhost:1234",
+                "api_key_ref": "secret://llm/api_key",
+            },
+        },
+    )
+    real_replace = os.replace
+    native_replace_calls: list[tuple[Path, Path]] = []
+
+    def reject_secret_staging(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        native_replace_calls.append((source_path, destination_path))
+        if source_path == secret_path and destination_path.name.startswith(
+            ".llm_api_key.lmstudio-retirement."
+        ):
+            raise PermissionError("secret staging rename failed")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
+    monkeypatch.setattr(secure_file, "_assert_current_user_owns", lambda *_args: None)
+    monkeypatch.setattr(secure_file, "_windows_replace_write_through", reject_secret_staging)
+    monkeypatch.setattr(secure_file, "_windows_delete_file", lambda path: path.unlink())
+
+    with pytest.raises(PermissionError, match="staging rename failed"):
+        run_migrations(tmp_path)
+
+    assert any(
+        source == secret_path
+        and destination.name.startswith(".llm_api_key.lmstudio-retirement.")
+        for source, destination in native_replace_calls
+    )
+    assert json.loads(workspace_path.read_text(encoding="utf-8"))["llm"]["provider"] == "lmstudio"
+    assert secret_path.read_text(encoding="utf-8") == "legacy-local-secret"
+    assert list((tmp_path / "secrets").glob(".llm_api_key.lmstudio-retirement.*")) == []
+    assert not (tmp_path / _LMSTUDIO_RETIREMENT_JOURNAL).exists()
+
+
+def test_110_to_current_retires_remote_lmstudio_and_its_bound_secret(tmp_path):
+    host = "http://10.0.0.8:9000"
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("custom-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": host,
+                "model": "remote-model",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "lmstudio",
+                "api_key_destination": host,
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert result["llm"]["host"] == ""
+    assert result["llm"]["api_key_ref"] == ""
+    assert result["llm"]["api_key_provider"] == ""
+    assert result["llm"]["api_key_destination"] == ""
+    assert not secret_path.exists()
+
+
+def test_remote_lmstudio_migration_does_not_preserve_the_legacy_endpoint(
+    tmp_path: Path,
+) -> None:
+    host = "HTTPS://Models.Example.INVALID:443/API/?Token=X/"
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "initialized": True,
+            "llm": {
+                "provider": "lmstudio",
+                "host": host,
+                "model": "remote-model",
+                "api_key_ref": "secret://llm/api_key",
+            },
+        },
+    )
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("remote-secret", encoding="utf-8")
+    secret_path.chmod(0o600)
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert result["llm"]["host"] == ""
+    assert result["llm"]["api_key_destination"] == ""
+    assert not secret_path.exists()
+
+
+def test_110_to_current_retires_bound_secret_when_scheme_and_hostname_case_differ(tmp_path):
+    host = "HTTP://Models.Example.INVALID:9000/api"
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("custom-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": host,
+                "model": "remote-model",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "lmstudio",
+                "api_key_destination": "http://models.example.invalid:9000/api/",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert result["llm"]["host"] == ""
+    assert result["llm"]["api_key_provider"] == ""
+    assert result["llm"]["api_key_destination"] == ""
+    assert not secret_path.exists()
+
+
+def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfully(
+    tmp_path,
+    monkeypatch,
+):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("legacy-local-secret", encoding="utf-8")
+    workspace_path = _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://127.0.0.1:1234",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "lmstudio",
+                "api_key_destination": "http://127.0.0.1:1234",
+            },
+        },
+    )
+    original_unlink = Path.unlink
+    refused_stage_deletion = False
+
+    def fail_final_staged_secret_deletion(self, *args, **kwargs):
+        nonlocal refused_stage_deletion
+        if (
+            self.name.startswith(".llm_api_key.lmstudio-retirement.")
+            and self.exists()
+            and self.stat().st_size > 0
+            and not refused_stage_deletion
+        ):
+            refused_stage_deletion = True
+            raise PermissionError("simulated LM Studio credential deletion failure")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_final_staged_secret_deletion)
+
+    with pytest.raises(PermissionError, match="credential deletion failure"):
+        run_migrations(tmp_path)
+
+    assert json.loads(workspace_path.read_text(encoding="utf-8"))["llm"]["provider"] == "lmstudio"
+    assert secret_path.read_text(encoding="utf-8") == "legacy-local-secret"
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    recovered = run_migrations(tmp_path)
+
+    assert recovered["llm"]["provider"] == "ollama"
+    assert not secret_path.exists()
+    assert list((tmp_path / "secrets").glob(".llm_api_key.lmstudio-retirement.*")) == []
+
+
+def test_110_to_current_preserves_a_secret_bound_to_an_unrelated_destination(tmp_path):
+    secret_path = tmp_path / "secrets" / "llm_api_key"
+    secret_path.parent.mkdir(parents=True)
+    secret_path.write_text("unrelated-secret", encoding="utf-8")
+    _seed(
+        tmp_path,
+        {
+            "version": "1.1.0",
+            "llm": {
+                "provider": "lmstudio",
+                "host": "http://localhost:1234",
+                "api_key_ref": "secret://llm/api_key",
+                "api_key_provider": "openai",
+                "api_key_destination": "https://api.openai.com",
+            },
+        },
+    )
+
+    result = run_migrations(tmp_path)
+
+    assert result["llm"]["provider"] == "ollama"
+    assert result["llm"]["api_key_ref"] == ""
+    assert secret_path.read_text(encoding="utf-8") == "unrelated-secret"
+
+
 def test_reject_future_version_no_mutation(tmp_path):
     """Unknown future versions are treated as downgrade attempts."""
     original = {"version": "9.9.9", "weird_field": "value"}
@@ -121,6 +654,34 @@ def test_reject_future_version_no_mutation(tmp_path):
         run_migrations(tmp_path)
 
     assert json.loads(path.read_text(encoding="utf-8")) == original
+
+
+def test_reject_future_version_before_lmstudio_journal_recovery_mutates_any_file(tmp_path):
+    staged_path = tmp_path / "secrets" / ".llm_api_key.lmstudio-retirement.future"
+    staged_path.parent.mkdir(parents=True)
+    staged_path.write_text("future-workspace-secret", encoding="utf-8")
+    journal_path = _write_retirement_journal(tmp_path, staged_path, phase="prepared")
+    original = {
+        "version": "9.9.9",
+        "llm": {
+            "provider": "lmstudio",
+            "host": "http://localhost:1234",
+            "api_key_ref": "secret://llm/api_key",
+        },
+        "future_field": {"must": "survive"},
+    }
+    workspace_path = _seed(tmp_path, original)
+    before = {
+        workspace_path: workspace_path.read_bytes(),
+        journal_path: journal_path.read_bytes(),
+        staged_path: staged_path.read_bytes(),
+    }
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        run_migrations(tmp_path)
+
+    assert not (tmp_path / "secrets" / "llm_api_key").exists()
+    assert {path: path.read_bytes() for path in before} == before
 
 
 def test_partial_failure_restores_on_disk(tmp_path, monkeypatch):
@@ -252,6 +813,46 @@ def test_atomic_write_leaves_no_tmp(tmp_path):
 
     assert list(tmp_path.glob(".workspace.*.tmp")) == []
     assert list(tmp_path.glob(".workspace.*.tmp.*")) == []
+
+
+def test_atomic_write_retries_until_every_byte_is_written(tmp_path, monkeypatch):
+    target = tmp_path / "workspace.json"
+    payload = b'{"version":"1.2.0","model":"complete"}'
+    real_write = os.write
+    write_sizes: list[int] = []
+
+    def short_write(descriptor: int, data: bytes | memoryview) -> int:
+        chunk = bytes(data)
+        write_size = max(1, len(chunk) // 2)
+        write_sizes.append(write_size)
+        return real_write(descriptor, chunk[:write_size])
+
+    monkeypatch.setattr(os, "write", short_write)
+
+    _atomic_write(target, payload)
+
+    assert target.read_bytes() == payload
+    assert len(write_sizes) > 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="directory fsync is POSIX-only")
+def test_atomic_write_fsyncs_the_parent_directory_after_replace(tmp_path, monkeypatch):
+    target = tmp_path / "workspace.json"
+    real_fsync = os.fsync
+    directory_fsyncs = 0
+
+    def record_fsync(descriptor: int) -> None:
+        nonlocal directory_fsyncs
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            directory_fsyncs += 1
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+
+    _atomic_write(target, "durable")
+
+    assert target.read_text(encoding="utf-8") == "durable"
+    assert directory_fsyncs == 1
 
 
 def test_merge_defaults_recursive():

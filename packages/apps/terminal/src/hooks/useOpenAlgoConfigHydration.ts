@@ -51,8 +51,15 @@ export function applyOpenAlgoConfigToConnectionCache(data: OpenAlgoConfigData): 
 /** Attempts before the hydration gate is left latched-closed (fail-closed). */
 const MAX_HYDRATION_ATTEMPTS = 5;
 
-export function useOpenAlgoConfigHydration(): void {
+export function useOpenAlgoConfigHydration(enabled = true): void {
   useEffect(() => {
+    if (!enabled) {
+      const connection = useConnectionStore.getState();
+      connection.setConfig({ host: "", apiKey: "", wsUrl: "" });
+      connection.setOpenAlgoHydrated(false);
+      return;
+    }
+
     let cancelled = false;
     let attempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -94,5 +101,5 @@ export function useOpenAlgoConfigHydration(): void {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, []);
+  }, [enabled]);
 }

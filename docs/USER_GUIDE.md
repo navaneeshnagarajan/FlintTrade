@@ -74,7 +74,7 @@ currently verified first-party adapters.
 
 1. **Choose a path.** Use OpenAlgo for the recommended community-tested broker
    path, or use the native gateway only for currently verified native brokers
-   (Dhan, Upstox, and INDmoney today). Brokers shown as "coming soon" are
+   (Dhan and Upstox today). Brokers shown as "coming soon" are
    catalogued but not yet enabled for native connect.
 2. **Configure your broker in OpenAlgo when using the bridge.** Open `http://localhost:5000`,
    choose your broker from the dropdown, paste your API key and secret, and
@@ -94,12 +94,14 @@ currently verified first-party adapters.
    contributors can open `http://localhost:5173/setup`; desktop users use the
    in-app setup window.
 
-For native connect, use Setup → Brokers or Settings → Brokers. Dhan and Upstox
-offer OAuth-style flows, Upstox Developer Apps analytics tokens connect as
-read-only sessions, INDmoney uses a dashboard-generated token that resets at the
-daily 06:00 IST dashboard cycle, and Kotak Neo plus Groww stay disabled until
-their live checks pass. Groww may also require approving the API-key session in
-Groww Cloud before FlintTrade can mint a token.
+For native connect, use Setup → Brokers or Settings → Brokers. Only Dhan and
+Upstox are currently enabled. Upstox Developer Apps analytics tokens connect as
+read-only sessions. INDmoney uses a dashboard-generated token that resets at the
+daily 06:00 IST dashboard cycle, but remains disabled until its smart-parent,
+atomic reduce-only, and live order-safety blockers clear. Kotak Neo and Groww
+retain their displayed activation blockers; Kotak Neo still needs live
+login/read and order-safety proof, and Groww may also require approving the
+API-key session in Groww Cloud before FlintTrade can mint a token.
 Localhost postback URLs are for diagnostics unless you expose FlintTrade through
 a broker-reachable tunnel or public URL.
 
@@ -169,7 +171,7 @@ software safeguards, prompts, and recovery controls in a local setup.
 - [ ] Your FlintTrade JWT is fresh — it expires daily at 8 AM IST.
 - [ ] The 5-layer safety system is active (see
       [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#safety-layers)).
-- [ ] Daily P&L kill switch is configured in Settings → Risk.
+- [ ] Daily P&L pause and hard-stop percentages are configured in Settings → Risk.
 - [ ] You have read the risk and user-responsibility notes in
       [disclaimer.md](../disclaimer.md).
 
@@ -186,8 +188,10 @@ software safeguards, prompts, and recovery controls in a local setup.
 
 If anything looks wrong during live-capable testing, hit the **Kill Switch** in
 the top bar. It cancels open orders and asks the configured broker path to close
-positions via the supported close-position endpoint. The kill switch also fires
-automatically when the configured daily P&L breach threshold is hit.
+positions via the supported close-position endpoint. The kill switch fires only
+when you explicitly activate it from the UI, API, or configured Telegram
+command. Layer 4 daily-loss thresholds block subsequent new orders but do not
+cancel orders or flatten positions.
 
 ---
 
@@ -369,9 +373,17 @@ Open `/ai`. Four sub-tools backed by `packages/services/ai`:
 
 ### Chat
 
-Local AI analysis and debugging tools. The default local provider is LM Studio
-(`http://127.0.0.1:1234`), with optional providers configurable from
-Settings → AI.
+Local AI analysis and debugging tools. The default local provider is FlintTrade's
+managed Ollama sidecar on a backend-only dynamic loopback endpoint. Settings -> AI
+requires separate confirmation before downloading the pinned runtime or any model;
+cloud and custom providers remain optional. Runtime update, rollback and uninstall
+are offered only while Ollama is stopped. Uninstall preserves models and accepted
+digests. The model inventory can delete one unselected model name or prune only
+unused digest-locked aliases created by FlintTrade; configured models are protected.
+If a timed-out mutation has an outcome FlintTrade cannot prove, Settings blocks
+later runtime changes and shows the exact operation and admission IDs. Explicit
+acknowledgement records that the unknown result was reviewed; it does not retry
+the action or label it successful.
 
 ### Signals
 
@@ -442,10 +454,19 @@ sections:
 |---|---|---|
 | **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
-| **AI** | `llm.provider`, `llm.host`, `llm.model` | LLM client (LM Studio, OpenAI, Anthropic, Ollama, Groq). |
+| **AI** | `llm.provider`, `llm.host`, `llm.model` | Managed Ollama runtime plus OpenAI, Anthropic, Groq, Hermes, and custom endpoints. |
 | **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
-| **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L thresholds for auto-pause and auto-kill. |
+| **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
 | **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
+
+Settings → **Report Bug** prepares a GitHub issue without background telemetry.
+The form keeps runtime/error diagnostics out of the public draft by default;
+enable the diagnostic-summary switch only after reviewing the displayed
+metadata. **Download diagnostics** writes a local JSON bundle that excludes raw
+request bodies, messages, tracebacks, account/user identifiers, entry ids and
+URL queries. Opening GitHub sends the displayed draft in the URL. Oversized
+drafts are copied for manual pasting, and security reports open the private
+GitHub Security Advisory form instead of a public issue.
 
 ### Layer 2: `.env` (advanced dev/server fallback)
 
@@ -530,6 +551,8 @@ ensure the running user has write access.
 
 ### Where to get help
 
+- **Settings → Report Bug** — prepare a bounded issue draft and optional local
+  diagnostic bundle from inside FlintTrade.
 - **Question issue template** — for focused usage questions and setup help.
 - **GitHub Issues** — for bugs and feature requests (use the templates in
   `.github/ISSUE_TEMPLATE/`).

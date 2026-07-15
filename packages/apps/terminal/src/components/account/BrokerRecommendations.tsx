@@ -2,7 +2,7 @@
  * BrokerRecommendations — broker capability metadata for routing setup.
  *
  * Surfaces the backend recommendation engine
- * (GET /api/v1/broker/recommendations) which ranks login/read verified native
+ * (GET /api/v1/broker/recommendations) which ranks currently connectable native
  * broker metadata per operator-selected job from declared capabilities (lowest
  * cost, market depth, historical data, options analytics, throughput,
  * runtime-ready streaming, advanced orders).
@@ -136,11 +136,10 @@ export function BrokerRecommendations() {
       {rows.length > 0 && (
         // Honest scope note: these rankings are derived from each broker's
         // advertised API capabilities and default to connectable native brokers.
-        // Built-but-disabled adapters such as Kotak Neo stay out until their
-        // live checks pass.
+        // Evidence-gated adapters stay out until every activation blocker clears.
         <p className="text-xxs text-text-muted leading-snug border-t border-border-default pt-2">
-          Capability-based suggestions for login/read verified native brokers. Coming-soon
-          adapters stay hidden here until their live checks pass.
+          Capability-based suggestions for currently connectable native brokers. Evidence-gated
+          adapters stay hidden until every activation blocker clears.
         </p>
       )}
     </section>

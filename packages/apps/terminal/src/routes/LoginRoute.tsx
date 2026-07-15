@@ -17,8 +17,20 @@ import { QRCodeSVG } from "qrcode.react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogoIcon } from "@/components/brand/Logo";
-import { KeyRound, ShieldCheck, AlertTriangle, RotateCcw, Download } from "lucide-react";
-import { useAuthStore } from "@/stores/authStore";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  KeyRound,
+  Mail,
+  RotateCcw,
+  ShieldCheck,
+} from "lucide-react";
+import {
+  captureAuthSessionFence,
+  isAuthSessionFenceCurrent,
+  useAuthStore,
+} from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { downgradeMode } from "@/lib/modeAuth";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
@@ -41,8 +53,10 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   async function handlePasswordLogin() {
+    const requestFence = captureAuthSessionFence();
     setIsLoading(true);
     setError("");
     try {
@@ -53,11 +67,13 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
-        useAuthStore.getState().setLoggedIn(
+        if (!useAuthStore.getState().setLoggedInIfCurrent(
           data.data.token,
           data.data.username,
           data.data.expires_at,
-        );
+          requestFence,
+        )) return;
+        const loginFence = captureAuthSessionFence();
         // Reconcile the persisted UI mode with the freshly-minted JWT.
         // Password login always mints an `explore` JWT. If the UI was last
         // in Live, drop to Explore (never silently re-arm real money — Live
@@ -70,25 +86,27 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
         } else if (uiMode === "practice") {
           try {
             const practiceToken = await downgradeMode("practice", data.data.token);
-            useAuthStore.getState().updateToken(practiceToken);
+            if (!useAuthStore.getState().updateToken(practiceToken, loginFence.generation)) return;
           } catch {
+            if (!isAuthSessionFenceCurrent(loginFence)) return;
             // Couldn't sync — fall back to Explore rather than leave the UI
             // in a Practice state the JWT doesn't back.
             useModeStore.getState().setMode("explore");
           }
         }
         onSuccess();
-      } else {
+      } else if (isAuthSessionFenceCurrent(requestFence)) {
         setError(data.message || "Invalid credentials.");
       }
     } catch {
-      setError("Cannot reach server.");
+      if (isAuthSessionFenceCurrent(requestFence)) setError("Cannot reach server.");
     } finally {
       setIsLoading(false);
     }
   }
 
   async function handlePinLogin() {
+    const requestFence = captureAuthSessionFence();
     setIsLoading(true);
     setError("");
     try {
@@ -107,18 +125,19 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
       });
       const data = await resp.json();
       if (resp.ok && data.data?.token) {
-        useAuthStore.getState().setLoggedIn(
+        if (!useAuthStore.getState().setLoggedInIfCurrent(
           data.data.token,
-          useAuthStore.getState().username || "user",
+          requestFence.principal || "user",
           "",
-        );
+          requestFence,
+        )) return;
         useModeStore.getState().setMode("live");
         onSuccess();
-      } else {
+      } else if (isAuthSessionFenceCurrent(requestFence)) {
         setError(data.message || "Invalid PIN.");
       }
     } catch {
-      setError("Cannot reach server.");
+      if (isAuthSessionFenceCurrent(requestFence)) setError("Cannot reach server.");
     } finally {
       setIsLoading(false);
     }
@@ -134,6 +153,19 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
             <LogoIcon size={40} className="text-accent" />
           </div>
           <TwoFactorRecovery onBack={() => setRecovering(false)} />
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "full" && resettingPassword) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-surface-base p-6">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="flex justify-center">
+            <LogoIcon size={40} className="text-accent" />
+          </div>
+          <PasswordReset onBack={() => setResettingPassword(false)} />
         </div>
       </div>
     );
@@ -247,6 +279,13 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
             </Button>
             <button
               type="button"
+              onClick={() => { setError(""); setResettingPassword(true); }}
+              className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+            >
+              Forgot your password?
+            </button>
+            <button
+              type="button"
               onClick={() => { setError(""); setRecovering(true); }}
               className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
             >
@@ -255,6 +294,215 @@ export default function LoginRoute({ onSuccess, mode }: LoginRouteProps) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Password reset — email -> OTP -> new password (no session needed)
+// ---------------------------------------------------------------------------
+
+function PasswordReset({ onBack }: { onBack: () => void }) {
+  const [step, setStep] = useState<"request" | "verify" | "success">("request");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function requestOtp() {
+    if (!email.trim() || loading) return;
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/forgot-password-otp`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError(data?.message ?? `Reset request failed (HTTP ${resp.status}).`);
+        return;
+      }
+      setEmail(email.trim());
+      setStep("verify");
+    } catch {
+      setError("Cannot reach server.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function resetPassword() {
+    if (loading) return;
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const resp = await fetch(`${getBase()}/v1/auth/reset-password-otp`, {
+        method: "POST",
+        headers: buildHeaders(true),
+        body: JSON.stringify({ email, otp, new_password: newPassword }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError(data?.message ?? `Password reset failed (HTTP ${resp.status}).`);
+        return;
+      }
+      setOtp("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setStep("success");
+    } catch {
+      setError("Cannot reach server.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (step === "success") {
+    return (
+      <div className="space-y-5 text-center">
+        <CheckCircle2 className="mx-auto size-10 text-profit" aria-hidden="true" />
+        <div className="space-y-1">
+          <h1 className="font-heading font-bold text-xl text-text-primary">Password reset</h1>
+          <p className="text-sm text-text-muted">Your new password is ready. Sign in with it to continue.</p>
+        </div>
+        <Button type="button" onClick={onBack} className="w-full">
+          Back to sign in
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="text-center space-y-1">
+        <h1 className="font-heading font-bold text-xl text-text-primary">
+          {step === "request" ? "Reset your password" : "Enter reset code"}
+        </h1>
+        <p className="text-sm text-text-muted">
+          {step === "request"
+            ? "Use the email registered to this FlintTrade account."
+            : `Enter the 6-digit code sent to ${email}.`}
+        </p>
+      </div>
+
+      {error && (
+        <div role="alert" className="flex items-center gap-2 p-3 rounded-lg bg-loss/10 border border-loss/30 text-sm text-loss">
+          <AlertTriangle className="size-4 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {step === "request" ? (
+        <>
+          <div>
+            <label htmlFor="reset-email" className="text-xs text-text-secondary font-medium block mb-1.5">
+              Email
+            </label>
+            <Input
+              id="reset-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              aria-label="Password reset email"
+              onKeyDown={(event) => event.key === "Enter" && requestOtp()}
+              autoFocus
+            />
+          </div>
+          <Button type="button" onClick={requestOtp} disabled={!email.trim() || loading} className="w-full">
+            <Mail className="size-4" />
+            {loading ? "Sending..." : "Send reset code"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <div>
+            <label htmlFor="reset-otp" className="text-xs text-text-secondary font-medium block mb-1.5">
+              Reset code
+            </label>
+            <Input
+              id="reset-otp"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="6-digit code"
+              aria-label="Password reset code"
+              className="text-center font-mono text-lg tracking-widest"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label htmlFor="reset-new-password" className="text-xs text-text-secondary font-medium block mb-1.5">
+              New password
+            </label>
+            <Input
+              id="reset-new-password"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="At least 8 characters"
+              aria-label="New password"
+            />
+          </div>
+          <div>
+            <label htmlFor="reset-confirm-password" className="text-xs text-text-secondary font-medium block mb-1.5">
+              Confirm password
+            </label>
+            <Input
+              id="reset-confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Repeat new password"
+              aria-label="Confirm new password"
+              onKeyDown={(event) => event.key === "Enter" && resetPassword()}
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={resetPassword}
+            disabled={otp.length !== 6 || !newPassword || !confirmPassword || loading}
+            className="w-full"
+          >
+            <KeyRound className="size-4" />
+            {loading ? "Resetting..." : "Reset password"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => { setStep("request"); setOtp(""); setError(""); }}
+            className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+          >
+            Use a different email
+          </button>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+      >
+        Back to sign in
+      </button>
     </div>
   );
 }

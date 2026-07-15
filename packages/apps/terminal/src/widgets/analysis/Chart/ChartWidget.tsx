@@ -62,9 +62,10 @@ import {
 } from "@flinttrade/design-system";
 import { useAtomValue } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
-import { safeParse, ohlcvCacheSchema } from "@/lib/safeParse";
+import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
 import { isMarketHours } from "@/lib/market";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useDataScope } from "@/hooks/useDataScope";
 import type { LogicalRange, Time } from "lightweight-charts";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import {
@@ -383,6 +384,7 @@ interface ChartPanelParams {
 
 function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   const track = useTrackBehavior();
+  const dataScope = useDataScope();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
@@ -852,6 +854,22 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     const volumeSeries = volume;
     let cancelled = false;
 
+    // A symbol, interval, mode, account, host, or API-key change creates a new
+    // data identity. Remove the previous identity synchronously so an empty or
+    // failed response cannot leave stale candles displayed under the new one.
+    if (isReplayingRef.current) {
+      exitReplay();
+      isReplayingRef.current = false;
+    }
+    barsRef.current = [];
+    timesRef.current = [];
+    setLegend(null);
+    try {
+      candleSeries.setData([]);
+      volumeSeries.setData([]);
+    } catch { /* chart may be disposing */ }
+    refreshIndicatorsRef.current?.();
+
     function applyBars(data: OhlcvBar[]) {
       if (cancelled) return;
       const times: Time[] = data.map((b) => b.timestamp as unknown as Time);
@@ -881,11 +899,10 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     }
 
     (async () => {
-      const cacheKey = `ft-chart-${symbol}-${exchange}-${interval}`;
       const FIVE_MIN = 5 * 60 * 1000;
 
       // Show cached data immediately while fetching
-      const cached = safeParse(localStorage.getItem(cacheKey), ohlcvCacheSchema);
+      const cached = readOhlcvCache(localStorage, dataScope, symbol, exchange, interval);
       if (cached && cached.data.length > 0) {
         applyBars(cached.data);
         // Skip network request if cache is fresh and market is closed
@@ -900,20 +917,21 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         const data = await getHistory(symbol, exchange, interval, startDate, endDate);
         if (cancelled || !Array.isArray(data) || data.length === 0) return;
 
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
-        } catch { /* localStorage quota exceeded — ignore */ }
+        writeOhlcvCache(localStorage, dataScope, symbol, exchange, interval, data as OhlcvBar[]);
 
         applyBars(data as OhlcvBar[]);
       } catch { /* API unavailable — cached data already shown */ }
     })();
 
     return () => { cancelled = true; };
-  }, [symbol, exchange, interval, candleRef, volumeRef, chartRef]);
+  }, [symbol, exchange, interval, dataScope, candleRef, volumeRef, chartRef, exitReplay]);
 
   // Fetch quote (LTP / change)
   useEffect(() => {
     let cancelled = false;
+    setLtp(null);
+    setChange(null);
+    setChangePct(null);
     (async () => {
       try {
         const q = await getQuotes(symbol, exchange);
@@ -926,7 +944,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
       } catch { /* quote unavailable */ }
     })();
     return () => { cancelled = true; };
-  }, [symbol, exchange]);
+  }, [symbol, exchange, dataScope]);
 
   // Event handlers
   const handleSymbolSelect = useCallback((item: SymbolSearchResult) => {
@@ -1099,6 +1117,11 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-sm font-heading font-semibold text-text-primary leading-none whitespace-nowrap">{symbol}</span>
             <span className="text-xs text-text-muted whitespace-nowrap">{exchange}</span>
+            {dataScope === "explore:mock" && (
+              <span className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs text-warning" role="status">
+                Sample history
+              </span>
+            )}
             {ltp != null && <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">{formatPrice(ltp)}</span>}
             {change != null && (
               <span className={`flex items-center gap-0.5 text-xs font-mono whitespace-nowrap ${changeColor}`}>

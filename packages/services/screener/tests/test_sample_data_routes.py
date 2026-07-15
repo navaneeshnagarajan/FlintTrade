@@ -69,7 +69,8 @@ def _client_with_instruments(instruments):
     if isinstance(instruments, Exception):
         openalgo.instruments.side_effect = instruments
     else:
-        openalgo.instruments.return_value = instruments
+        rows = [{"exchange": "NFO", **instrument} for instrument in instruments]
+        openalgo.instruments.return_value = {"status": "success", "data": rows}
     return _make_app(openalgo).test_client()
 
 

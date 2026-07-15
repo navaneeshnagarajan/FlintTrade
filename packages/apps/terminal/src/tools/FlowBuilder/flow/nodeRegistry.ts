@@ -1,7 +1,7 @@
 /**
  * nodeRegistry.ts — Node category definitions, metadata descriptors, and lookup maps.
  *
- * Single source of truth for all 54 flow builder nodes.
+ * Single source of truth for the flow-builder node catalogue.
  * Adapted from openalgo-flow node registry.
  *
  * Pattern: metadata-driven node rendering (inspired by n8n).
@@ -558,6 +558,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
       { type: "positionBook", label: "Position Book", description: "All current positions", configFields: [] },
       { type: "syntheticFuture", label: "Synthetic Future", description: "Construct synthetic F&O", configFields: ["symbol", "exchange", "expiry"] },
       { type: "optionChain", label: "Option Chain", description: "Full chain with Greeks", configFields: ["symbol", "exchange", "expiry"] },
+      { type: "search", label: "Search Symbol", description: "Search symbols by name", configFields: ["symbol"] },
       { type: "holidays", label: "Holidays", description: "Market holiday calendar", configFields: [] },
       { type: "timings", label: "Timings", description: "Exchange trading hours", configFields: [] },
     ],

@@ -39,7 +39,6 @@ class EMACrossover(BaseStrategy):
             symbol="RELIANCE", exchange="NSE",
             fast_period=9, slow_period=21,
             quantity=1, product="MIS",
-            router=router,
         )
         strategy.start()
         # Feed ticks via on_tick(quote)
@@ -63,7 +62,11 @@ class EMACrossover(BaseStrategy):
         self.fast_period = fast_period
         self.slow_period = slow_period
         self.quantity = quantity
-        self.router = router
+        if router is not None:
+            logger.warning(
+                "EMACrossover ignores the legacy router argument; generated orders "
+                "must be consumed by FlintTrade's canonical gated runtime"
+            )
 
         # State
         self.price_buffer: deque[float] = deque(maxlen=slow_period)
@@ -143,7 +146,7 @@ class EMACrossover(BaseStrategy):
     # ------------------------------------------------------------------
 
     async def _place_order(self, action: str, qty: int) -> None:
-        """Build an Order and route it. Falls back to pending list if no router."""
+        """Build an order intent for the canonical gated strategy runtime."""
         order = Order(
             symbol=self.symbol,
             action=action,
@@ -154,7 +157,4 @@ class EMACrossover(BaseStrategy):
             strategy=self.name,
         )
 
-        if self.router is not None:
-            await self.router.route_order(order)
-        else:
-            self._pending_orders.append(order)
+        self._pending_orders.append(order)

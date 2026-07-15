@@ -22,6 +22,7 @@ import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import type { AppMode } from "@/stores/modeStore";
 import type { Position, Order, Holding, Funds } from "@/types/api";
 
@@ -227,7 +228,10 @@ export function useModeData<T = unknown>(key: ModeDataKey): ModeDataResult<T> {
   // We must call both branches unconditionally (rules of hooks).
   // The unused API branch is disabled, so explore mode remains broker-free.
   const exploreResult = useExploreModeData<T>(key);
-  const apiResult = useApiModeData<T>(key, mode !== "explore" && isBrokerConnected);
+  const apiResult = useApiModeData<T>(
+    key,
+    resolveAccountReadsEnabled(mode, isBrokerConnected),
+  );
 
   return mode === "explore" ? exploreResult : apiResult;
 }

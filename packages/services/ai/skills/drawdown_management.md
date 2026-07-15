@@ -17,7 +17,7 @@ Example: Account peak = ₹10L. Current value = ₹8.5L. Drawdown = 15%.
 
 ## Loss Limit Framework
 
-A three-tier daily loss limit prevents single-session catastrophes.
+The following is an illustrative strategy-level exit policy, not FlintTrade Layer 4 or Layer 5.
 
 ### Daily Loss Limits
 
@@ -25,7 +25,7 @@ A three-tier daily loss limit prevents single-session catastrophes.
 |------|-----------|--------|
 | Yellow | −1.5% of capital | Warning — review open positions, no new entries for 30 minutes |
 | Orange | −2.5% of capital | Reduce all open positions by 50%, no new entries for rest of day |
-| Red (kill switch) | −3% of capital | Close all positions, stop trading for the day. No exceptions. |
+| Red (strategy exit policy) | −3% of capital | Close all positions under the strategy's reviewed exit procedure; stop trading for the day. |
 
 ### Weekly Loss Limits
 
@@ -86,18 +86,12 @@ Switching to paper trading is not defeat — it is a diagnostic tool.
 
 ## Building in Automatic Recovery Rules
 
-Code the following into FlintTrade's automation layer:
-
-```python
-# Daily kill switch example
-if daily_pnl_pct < -0.03:  # 3% daily loss
-    cancelallorder()
-    closeposition(strategy="all")
-    stop_strategy()
-    send_telegram("Daily loss limit hit. All positions closed.")
-```
-
-The kill switch must be tested in paper mode before go-live (see `algo_deployment_checklist`).
+Use FlintTrade's existing controls. Layer 4 percentage thresholds block
+subsequent new orders; explicit Layer 5 performs operator-triggered global
+cancel/flatten; automatic account-scoped cancel/flatten belongs to the separate
+MTM circuit breaker. Automation must not call broker cancellation or position
+closure methods directly. Exercise the intended control in Practice mode and
+verify broker exposure before relying on it (see `algo_deployment_checklist`).
 
 ## Psychological Aspect of Drawdown
 

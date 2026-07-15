@@ -67,10 +67,71 @@ describe("settingsStore", () => {
 
   it("initializes llm with host and apiKey fields", () => {
     const { llm } = useSettingsStore.getState();
+    expect(llm.authMode).toBe("api-key");
     expect(llm).toHaveProperty("host");
     expect(llm).toHaveProperty("apiKey");
     expect(llm.host).toBe("");
     expect(llm.apiKey).toBe("");
+  });
+
+  it("does not retain a managed Ollama endpoint or API key in frontend state", () => {
+    useSettingsStore.getState().setLLM({
+      provider: "ollama",
+      host: "http://127.0.0.1:49157",
+      apiKey: "backend-only-secret",
+    });
+
+    expect(useSettingsStore.getState().llm.host).toBe("");
+    expect(useSettingsStore.getState().llm.apiKey).toBe("");
+  });
+
+  it("never retains a cloud-provider API key in shared frontend state", () => {
+    useSettingsStore.getState().setLLM({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      apiKey: "backend-only-secret",
+    });
+
+    expect(useSettingsStore.getState().llm.apiKey).toBe("");
+  });
+
+  it("stores a non-secret LLM setup draft until authenticated settings applies it", () => {
+    expect(useSettingsStore.getState().llmSetupPending).toBe(false);
+
+    useSettingsStore.getState().setLLMSetupDraft({
+      provider: "grok",
+      model: "grok-3-mini",
+      host: "",
+    });
+
+    expect(useSettingsStore.getState().llm).toEqual({
+      provider: "grok",
+      authMode: "api-key",
+      model: "grok-3-mini",
+      host: "",
+      apiKey: "",
+    });
+    expect(useSettingsStore.getState().llmSetupPending).toBe(true);
+
+    useSettingsStore.getState().clearLLMSetupDraft();
+    expect(useSettingsStore.getState().llmSetupPending).toBe(false);
+  });
+
+  it("stores the Claude Code OAuth marker separately from the backend provider", () => {
+    useSettingsStore.getState().setLLMSetupDraft({
+      provider: "anthropic",
+      authMode: "claude-code-oauth",
+      model: "claude-3-5-haiku-20241022",
+      host: "",
+    });
+
+    expect(useSettingsStore.getState().llm).toEqual({
+      provider: "anthropic",
+      authMode: "claude-code-oauth",
+      model: "claude-3-5-haiku-20241022",
+      host: "",
+      apiKey: "",
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -351,5 +412,94 @@ describe("settingsStore", () => {
     expect(migrated.tickerMode).toBe("marquee");
     expect(migrated.tickerSpeed).toBe(30);
     expect(Array.isArray(migrated.tickerSymbols)).toBe(true);
+  });
+
+  it("migration: retires the default local LM Studio endpoint in favour of managed Ollama", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const migrated = migrate({
+      llm: {
+        provider: "lmstudio",
+        host: "http://127.0.0.1:1234",
+        model: "local-model",
+        apiKey: "legacy-browser-secret",
+      },
+    }, 7) as Record<string, unknown>;
+    const llm = migrated.llm as Record<string, unknown>;
+
+    expect(llm.provider).toBe("ollama");
+    expect(llm.host).toBe("");
+    expect(llm.model).toBe("local-model");
+    expect(llm.apiKey).toBe("");
+  });
+
+  it("migration: clears the legacy managed Ollama host from v8 state", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const migrated = migrate({
+      llm: {
+        provider: "ollama",
+        host: "http://localhost:11434/",
+        model: "qwen3:8b",
+        apiKey: "",
+      },
+    }, 8) as Record<string, unknown>;
+    const llm = migrated.llm as Record<string, unknown>;
+
+    expect(llm.provider).toBe("ollama");
+    expect(llm.host).toBe("");
+    expect(llm.model).toBe("qwen3:8b");
+  });
+
+  it("migration: retires a non-default legacy endpoint in favour of managed Ollama", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const migrated = migrate({
+      llm: {
+        provider: "lmstudio",
+        host: "http://10.0.0.8:9000",
+        model: "remote-model",
+        apiKey: "legacy-browser-secret",
+      },
+    }, 7) as Record<string, unknown>;
+    const llm = migrated.llm as Record<string, unknown>;
+
+    expect(llm.provider).toBe("ollama");
+    expect(llm.host).toBe("");
+    expect(llm.model).toBe("remote-model");
+    expect(llm.apiKey).toBe("");
+  });
+
+  it("migration: gives v9 LLM settings an explicit API-key auth mode", () => {
+    const store = useSettingsStore as unknown as {
+      persist: { getOptions: () => { migrate?: (s: unknown, v: number) => unknown } };
+    };
+    const migrate = store.persist.getOptions().migrate;
+    if (!migrate) throw new Error("migrate not configured");
+
+    const migrated = migrate({
+      llm: {
+        provider: "anthropic",
+        model: "claude-3-5-haiku-20241022",
+        host: "",
+        apiKey: "",
+      },
+    }, 9) as Record<string, unknown>;
+    const llm = migrated.llm as Record<string, unknown>;
+
+    expect(llm.authMode).toBe("api-key");
+    expect(llm.apiKey).toBe("");
   });
 });

@@ -8,7 +8,7 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: "" }) },
 }));
 
-import { getOrderFlow } from "../ftApi.data";
+import { captureHistoricalChain, getOrderFlow } from "../ftApi.data";
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify({ status: "success", data }), {
@@ -232,5 +232,38 @@ describe("getOrderFlow runtime validation", () => {
     await expect(
       getOrderFlow("NIFTY", "NSE_INDEX", 20, 300, 0.05),
     ).rejects.toThrow(/invalid order-flow response/i);
+  });
+});
+
+describe("captureHistoricalChain", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the requested symbol, expiry, and exchange to the capture route", async () => {
+    const result = {
+      symbol: "NIFTY",
+      expiry: "2026-03-26",
+      exchange: "NFO",
+      rows_inserted: 2,
+      captured: true,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(result));
+
+    await expect(
+      captureHistoricalChain("NIFTY 50", "2026-03-26", "NFO"),
+    ).resolves.toEqual(result);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/ft-api/api/v1/historical/chain/NIFTY%2050/2026-03-26/capture",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ exchange: "NFO" }),
+      }),
+    );
   });
 });

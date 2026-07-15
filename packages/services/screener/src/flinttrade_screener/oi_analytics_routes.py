@@ -21,9 +21,29 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify
 
 from . import broker_registry_reads as broker_reads
+from .analysis_routes import (
+    _MAX_CHAIN_ROWS,
+    _MAX_MARKET_VALUE,
+    _MAX_OI_CHANGE,
+    _authoritative_chain_spot,
+    _body_expiry,
+    _chain_identity_matches,
+    _finite_number,
+    _live_option_days_to_expiry,
+    _option_chain_underlying_exchange,
+    _optional_row_count,
+    _optional_row_float,
+    _request_identity_string,
+    _request_integer,
+    _request_json_object,
+    _request_number,
+    _row_open_interest,
+    _row_strike,
+    _sample_strike_step,
+)
 from .oi_analytics import OIAnalytics, OISnapshot
 from .option_chain import LOT_SIZES  # noqa: F401 — imported for symmetry with analysis_routes
 
@@ -54,9 +74,14 @@ def _make_sample_oi_chain(
     Returns:
         List of :class:`OISnapshot` objects.
     """
+    safe_spot = _finite_number(spot)
+    if safe_spot is None or not 0 < safe_spot <= _MAX_MARKET_VALUE:
+        safe_spot = 1.0
+    safe_count = max(0, min(int(count), 1000))
+    safe_step = _sample_strike_step(safe_spot, step, safe_count)
     snapshots: list[OISnapshot] = []
-    for i in range(-count, count + 1):
-        k = spot + i * step
+    for i in range(-safe_count, safe_count + 1):
+        k = safe_spot + i * safe_step
         dist = abs(i)
         ce_oi = max(1000, 50000 - dist * 4000)
         pe_oi = max(1000, 40000 - dist * 3500)
@@ -87,6 +112,8 @@ def _chain_from_registry(
     symbol: str,
     exchange: str,
     expiry: str,
+    *,
+    require_oi_change: bool = False,
 ) -> tuple[list[OISnapshot], float]:
     """Fetch live option chain from registry and convert to OISnapshot list.
 
@@ -95,6 +122,7 @@ def _chain_from_registry(
         symbol:   Underlying symbol.
         exchange: Exchange code.
         expiry:   Expiry label.
+        require_oi_change: Exclude rows without explicit finite OI changes.
 
     Returns:
         Tuple of (snapshots, spot_price).
@@ -102,34 +130,85 @@ def _chain_from_registry(
     Raises:
         Exception: If the registry call fails.
     """
+    dte = _live_option_days_to_expiry(expiry)
+    if dte is None:
+        raise ValueError("Live OI chain requires a valid future expiry")
+    underlying_exchange = _option_chain_underlying_exchange(symbol, exchange)
     chain_data = broker_reads.get_option_chain(
         registry,
         symbol=symbol,
-        exchange=exchange,
+        exchange=underlying_exchange,
         expiry=expiry,
     )
-    spot = float(chain_data.get("spot", 24000.0))
+    if not isinstance(chain_data, dict):
+        raise ValueError("Live OI chain is not an object")
+    if not _chain_identity_matches(chain_data, symbol, exchange, expiry):
+        raise ValueError("Live OI chain identity does not match the request")
+    spot = _authoritative_chain_spot(chain_data)
+    if spot is None:
+        raise ValueError("Live OI chain has no authoritative spot price")
+    raw_strikes = chain_data.get("strikes")
+    if not isinstance(raw_strikes, list) or not raw_strikes or len(raw_strikes) > _MAX_CHAIN_ROWS:
+        raise ValueError("Live OI chain has no source rows")
     snapshots: list[OISnapshot] = []
-    for row in chain_data.get("strikes", []):
-        k = float(row.get("strike_price", row.get("strike", 0)))
-        if k <= 0:
-            continue
+    seen_strikes: set[float] = set()
+    for row in raw_strikes:
+        if not isinstance(row, dict):
+            raise ValueError("Live OI chain source row is not an object")
+        strike = _row_strike(row)
+        ce_oi = _row_open_interest(row, "ce")
+        pe_oi = _row_open_interest(row, "pe")
+        if strike is None or strike in seen_strikes or ce_oi is None or pe_oi is None:
+            raise ValueError("Live OI chain source row has invalid strike or OI")
+        seen_strikes.add(strike)
+        ce_change = _row_oi_change(row, "ce")
+        pe_change = _row_oi_change(row, "pe")
+        if require_oi_change and (ce_change is None or pe_change is None):
+            raise ValueError("Live OI chain source row has no authoritative OI change")
+        ce_volume = _optional_row_count(row, "ce_volume")
+        pe_volume = _optional_row_count(row, "pe_volume")
+        ce_ltp = _optional_row_float(row, "ce_ltp")
+        pe_ltp = _optional_row_float(row, "pe_ltp")
+        if None in (ce_volume, pe_volume, ce_ltp, pe_ltp):
+            raise ValueError("Live OI chain source row has invalid optional observations")
         snapshots.append(OISnapshot(
-            strike=k,
-            ce_oi=int(row.get("ce_oi", 0)),
-            pe_oi=int(row.get("pe_oi", 0)),
-            ce_change=int(row.get("ce_oi_change", row.get("ce_change", 0))),
-            pe_change=int(row.get("pe_oi_change", row.get("pe_change", 0))),
-            ce_volume=int(row.get("ce_volume", 0)),
-            pe_volume=int(row.get("pe_volume", 0)),
-            ce_ltp=float(row.get("ce_ltp", 0)),
-            pe_ltp=float(row.get("pe_ltp", 0)),
+            strike=strike,
+            ce_oi=ce_oi,
+            pe_oi=pe_oi,
+            ce_change=ce_change,
+            pe_change=pe_change,
+            ce_volume=ce_volume,
+            pe_volume=pe_volume,
+            ce_ltp=ce_ltp,
+            pe_ltp=pe_ltp,
         ))
+    if not snapshots:
+        raise ValueError("Live OI chain has no usable rows")
     return snapshots, spot
+
+
+def _row_oi_change(row: dict[str, Any], prefix: str) -> int | None:
+    for key in (f"{prefix}_oi_change", f"{prefix}_change"):
+        if key not in row:
+            continue
+        change = _finite_number(row[key])
+        if change is None or abs(change) > _MAX_OI_CHANGE or not change.is_integer():
+            return None
+        return int(change)
+    return None
 
 
 def _get_registry() -> Any:
     return current_app.config.get("REGISTRY")
+
+
+def _oi_request() -> tuple[dict[str, Any], str, str, str]:
+    body = _request_json_object()
+    symbol = _request_identity_string(body, "symbol", "NIFTY")
+    exchange = _request_identity_string(body, "exchange", "NFO")
+    _option_chain_underlying_exchange(symbol, exchange)
+    expiry = _body_expiry(body, "")
+    return body, symbol, exchange, expiry
 
 
 # ---------------------------------------------------------------------------
@@ -162,25 +241,35 @@ def oi_heatmap_endpoint() -> tuple[Any, int]:
                 "max_pe_oi_strike": float,
                 "total_ce_oi": int,
                 "total_pe_oi": int,
-                "overall_pcr": float
+                "overall_pcr": float | null
               }
             }
     """
-    body = request.get_json(silent=True) or {}
-    symbol = str(body.get("symbol", "NIFTY"))
-    exchange = str(body.get("exchange", "NFO"))
-    expiry = str(body.get("expiry", ""))
-    n_strikes = int(body.get("n_strikes", 20))
-    spot = float(body.get("spot", 24000.0))
+    try:
+        body, symbol, exchange, expiry = _oi_request()
+        n_strikes = _request_integer(body, "n_strikes", 20, minimum=1)
+        spot = _request_number(
+            body,
+            "spot",
+            24000.0,
+            minimum=0.0,
+            maximum=_MAX_MARKET_VALUE,
+            minimum_inclusive=False,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     chain: list[OISnapshot] | None = None
     is_sample_data = True
 
     registry = _get_registry()
-    if registry and registry.is_connected():
+    dte = _live_option_days_to_expiry(expiry)
+    if registry and registry.is_connected() and dte is not None:
         try:
-            chain, spot = _chain_from_registry(registry, symbol, exchange, expiry)
-            is_sample_data = False
+            candidate, candidate_spot = _chain_from_registry(registry, symbol, exchange, expiry)
+            if candidate:
+                chain, spot = candidate, candidate_spot
+                is_sample_data = False
         except Exception as exc:
             logger.warning("OI heatmap: live data unavailable, using sample: %s", exc)
 
@@ -232,23 +321,39 @@ def oi_analysis_endpoint() -> tuple[Any, int]:
               }
             }
     """
-    body = request.get_json(silent=True) or {}
-    symbol = str(body.get("symbol", "NIFTY"))
-    exchange = str(body.get("exchange", "NFO"))
-    expiry = str(body.get("expiry", ""))
-    price_change = str(body.get("price_change", "flat")).lower()
-    if price_change not in ("up", "down", "flat"):
-        price_change = "flat"
-    spot = float(body.get("spot", 24000.0))
+    try:
+        body, symbol, exchange, expiry = _oi_request()
+        price_change = _request_identity_string(body, "price_change", "flat").lower()
+        if price_change not in ("up", "down", "flat"):
+            raise ValueError("price_change must be one of: up, down, flat")
+        spot = _request_number(
+            body,
+            "spot",
+            24000.0,
+            minimum=0.0,
+            maximum=_MAX_MARKET_VALUE,
+            minimum_inclusive=False,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     chain: list[OISnapshot] | None = None
     is_sample_data = True
 
     registry = _get_registry()
-    if registry and registry.is_connected():
+    dte = _live_option_days_to_expiry(expiry)
+    if registry and registry.is_connected() and dte is not None:
         try:
-            chain, spot = _chain_from_registry(registry, symbol, exchange, expiry)
-            is_sample_data = False
+            candidate, candidate_spot = _chain_from_registry(
+                registry,
+                symbol,
+                exchange,
+                expiry,
+                require_oi_change=True,
+            )
+            if candidate:
+                chain, spot = candidate, candidate_spot
+                is_sample_data = False
         except Exception as exc:
             logger.warning("OI analysis: live data unavailable, using sample: %s", exc)
 
@@ -308,21 +413,37 @@ def oi_unusual_endpoint() -> tuple[Any, int]:
               }
             }
     """
-    body = request.get_json(silent=True) or {}
-    symbol = str(body.get("symbol", "NIFTY"))
-    exchange = str(body.get("exchange", "NFO"))
-    expiry = str(body.get("expiry", ""))
-    threshold = float(body.get("threshold", 2.0))
-    spot = float(body.get("spot", 24000.0))
+    try:
+        body, symbol, exchange, expiry = _oi_request()
+        threshold = _request_number(body, "threshold", 2.0, minimum=0.0, maximum=100.0)
+        spot = _request_number(
+            body,
+            "spot",
+            24000.0,
+            minimum=0.0,
+            maximum=_MAX_MARKET_VALUE,
+            minimum_inclusive=False,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     chain: list[OISnapshot] | None = None
     is_sample_data = True
 
     registry = _get_registry()
-    if registry and registry.is_connected():
+    dte = _live_option_days_to_expiry(expiry)
+    if registry and registry.is_connected() and dte is not None:
         try:
-            chain, spot = _chain_from_registry(registry, symbol, exchange, expiry)
-            is_sample_data = False
+            candidate, candidate_spot = _chain_from_registry(
+                registry,
+                symbol,
+                exchange,
+                expiry,
+                require_oi_change=True,
+            )
+            if candidate:
+                chain, spot = candidate, candidate_spot
+                is_sample_data = False
         except Exception as exc:
             logger.warning("Unusual OI: live data unavailable, using sample: %s", exc)
 

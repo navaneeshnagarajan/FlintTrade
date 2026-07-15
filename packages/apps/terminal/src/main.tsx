@@ -10,7 +10,7 @@ import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { renderReactRoot } from "./lib/reactRoot";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
-import { useAuthGuard } from "./hooks/useAuthGuard";
+import ProtectedRoute from "./routes/ProtectedRoute";
 import "./index.css";
 
 // ---------------------------------------------------------------------------
@@ -60,13 +60,6 @@ function Loading() {
   );
 }
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuthGuard();
-  if (isLoading) return <Loading />;
-  if (!isAuthenticated) return null;
-  return <>{children}</>;
-}
-
 /**
  * Determine the initial route based on persisted settings.
  * First-time users (no settings) go to /welcome.
@@ -104,7 +97,7 @@ const router = createBrowserRouter([
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {
-        element: <AppLayout />,
+        element: <ProtectedRoute><AppLayout /></ProtectedRoute>,
         children: [
           { path: "home", element: <ProtectedRoute><RouteErrorBoundary routeName="Home"><Suspense fallback={<Loading />}><HomeRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },
           { path: "trade", element: <ProtectedRoute><RouteErrorBoundary routeName="Trade"><Suspense fallback={<Loading />}><TerminalRoute /></Suspense></RouteErrorBoundary></ProtectedRoute> },

@@ -10,6 +10,7 @@ import asyncio
 import builtins
 import logging
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
@@ -17,6 +18,7 @@ import pytest
 from flask import Flask
 
 from flinttrade_core import desktop
+from flinttrade_data.storage import TickReplayCursor
 
 
 _CAPTURE_CONFIG_KEYS = {
@@ -27,6 +29,14 @@ _CAPTURE_CONFIG_KEYS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _isolate_backend_instance_lock(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model each serve test as a fresh process with its own workspace lock."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+
+
 class _FakeStorage:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
@@ -35,6 +45,10 @@ class _FakeStorage:
         self.pruned_days: list[int] = []
         self.tick_queries: list[tuple[object, ...]] = []
         self.tick_rows: list[dict[str, object]] = []
+        self.replay_cursor = TickReplayCursor(
+            store_id="12345678-1234-5678-1234-567812345678",
+            ingest_seq=0,
+        )
 
     def initialise(self) -> None:
         self.initialised = True
@@ -50,6 +64,63 @@ class _FakeStorage:
         self.tick_queries.append((*args, kwargs))
         return list(self.tick_rows)
 
+    def get_tick_replay_cursor(self) -> TickReplayCursor:
+        return self.replay_cursor
+
+    def get_ticks_after_cursor(
+        self,
+        cursor: TickReplayCursor,
+        symbol: str,
+        exchange: str,
+        session: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        self.tick_queries.append((cursor, symbol, exchange, session, {"limit": limit}))
+        return list(self.tick_rows)
+
+
+class _RetentionStorage(_FakeStorage):
+    def __init__(self, db_path: str) -> None:
+        super().__init__(db_path)
+        self.retention_ran = threading.Event()
+
+    def prune_ticks(self, days: int) -> int:
+        result = super().prune_ticks(days)
+        self.retention_ran.set()
+        return result
+
+
+class _BlockingRetentionStorage(_FakeStorage):
+    def __init__(self, db_path: str) -> None:
+        super().__init__(db_path)
+        self.prune_started = threading.Event()
+        self.release_prune = threading.Event()
+        self.prune_finished = threading.Event()
+        self.close_calls = 0
+        self.closed_while_pruning = False
+        self._pruning_lock = threading.Lock()
+        self._pruning = False
+
+    def prune_ticks(self, days: int) -> int:
+        self.pruned_days.append(days)
+        with self._pruning_lock:
+            self._pruning = True
+        self.prune_started.set()
+        try:
+            self.release_prune.wait()
+            return 0
+        finally:
+            with self._pruning_lock:
+                self._pruning = False
+            self.prune_finished.set()
+
+    def close(self) -> None:
+        self.close_calls += 1
+        with self._pruning_lock:
+            self.closed_while_pruning = self.closed_while_pruning or self._pruning
+        super().close()
+
 
 class _RetryingCloseStorage(_FakeStorage):
     def __init__(self, db_path: str, failures: int) -> None:
@@ -64,11 +135,24 @@ class _RetryingCloseStorage(_FakeStorage):
         super().close()
 
 
+class _BlockingCloseStorage(_FakeStorage):
+    def __init__(self, db_path: str) -> None:
+        super().__init__(db_path)
+        self.close_started = threading.Event()
+        self.release_close = threading.Event()
+
+    def close(self) -> None:
+        self.close_started.set()
+        self.release_close.wait(timeout=1)
+        super().close()
+
+
 class _FakeRecorder:
     def __init__(self) -> None:
         self.run_started = threading.Event()
         self.run_finished = threading.Event()
         self.stop_calls = 0
+        self.pending_tick_count = 0
 
     async def run(self) -> None:
         self.run_started.set()
@@ -165,6 +249,20 @@ class _RetainedFlushFailureRecorder(_TransientFlushFailureRecorder):
         return True
 
 
+class _BoundedRetryFlushRecorder(_TransientFlushFailureRecorder):
+    def __init__(self, events: list[str], *, failures: int) -> None:
+        super().__init__(events)
+        self.failures = failures
+
+    def flush_pending(self) -> bool:
+        self.flush_calls += 1
+        self.events.append("flush-retry")
+        if self.flush_calls <= self.failures:
+            raise RuntimeError("transient retained flush failure")
+        self.pending_tick_count = 0
+        return True
+
+
 @pytest.mark.unit
 def test_runtime_redacts_original_and_hot_reloaded_api_keys() -> None:
     runtime = desktop._DesktopTickCaptureRuntime(
@@ -180,21 +278,212 @@ def test_runtime_redacts_original_and_hot_reloaded_api_keys() -> None:
 
 
 @pytest.mark.unit
+def test_runtime_prunes_retained_ticks_periodically_during_long_uptime() -> None:
+    recorder = _FakeRecorder()
+    storage = _RetentionStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(
+        recorder,
+        storage,
+        "",
+        retention_days=90,
+        retention_interval_seconds=0.01,
+    )
+
+    runtime.start()
+    try:
+        assert storage.retention_ran.wait(timeout=1)
+        assert storage.pruned_days
+        assert set(storage.pruned_days) == {90}
+    finally:
+        runtime.stop(timeout=1)
+
+
+@pytest.mark.unit
+def test_blocking_retention_prune_does_not_pin_recorder_loop_or_close_storage() -> None:
+    recorder = _FakeRecorder()
+    storage = _BlockingRetentionStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(
+        recorder,
+        storage,
+        "",
+        retention_days=90,
+        retention_interval_seconds=0.01,
+    )
+
+    runtime.start()
+    try:
+        assert storage.prune_started.wait(timeout=1)
+        with pytest.raises(RuntimeError, match="shutdown timed out"):
+            runtime.stop(timeout=0.01)
+
+        assert recorder.run_finished.wait(timeout=1)
+        assert not runtime._thread.is_alive()
+        assert storage.closed is False
+        assert storage.closed_while_pruning is False
+    finally:
+        storage.release_prune.set()
+        runtime.stop(timeout=1)
+
+
+@pytest.mark.unit
+def test_blocking_retention_prune_remains_owned_until_retry_can_clean_up() -> None:
+    recorder = _FakeRecorder()
+    storage = _BlockingRetentionStorage("unused")
+    released_owners: list[str] = []
+    runtime = desktop._DesktopTickCaptureRuntime(
+        recorder,
+        storage,
+        "",
+        retention_days=90,
+        retention_interval_seconds=0.01,
+        on_storage_closed=lambda: released_owners.append("released"),
+    )
+
+    runtime.start()
+    try:
+        assert storage.prune_started.wait(timeout=1)
+        owner = getattr(runtime, "_retention_thread", None)
+        assert owner is not None
+        assert owner.daemon is True
+
+        with pytest.raises(RuntimeError, match="shutdown timed out"):
+            runtime.stop(timeout=0.01)
+        assert runtime._retention_thread is owner
+        assert owner.is_alive()
+
+        with pytest.raises(RuntimeError, match="shutdown timed out"):
+            runtime.stop(timeout=0.01)
+        assert runtime._retention_thread is owner
+        assert owner.is_alive()
+        assert storage.close_calls == 0
+        assert released_owners == []
+
+        storage.release_prune.set()
+        owner.join(timeout=1)
+        assert not owner.is_alive()
+        assert storage.prune_finished.is_set()
+        assert storage.closed is False
+        assert released_owners == []
+
+        runtime.stop(timeout=1)
+
+        assert storage.close_calls == 1
+        assert storage.closed is True
+        assert storage.closed_while_pruning is False
+        assert released_owners == ["released"]
+    finally:
+        storage.release_prune.set()
+        if runtime._thread.is_alive() or not storage.closed:
+            runtime.stop(timeout=1)
+
+
+@pytest.mark.unit
+def test_deferred_storage_close_obeys_its_timeout_and_remains_retryable() -> None:
+    recorder = _FakeRecorder()
+    storage = _BlockingCloseStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    runtime.start()
+    assert recorder.run_started.wait(timeout=1)
+    runtime.stop(timeout=1, close_storage=False)
+
+    started = time.monotonic()
+    try:
+        with pytest.raises(RuntimeError, match="storage shutdown timed out"):
+            runtime.close_storage(timeout=0.01)
+        assert time.monotonic() - started < 0.2
+        assert storage.close_started.wait(timeout=1)
+        assert storage.closed is False
+    finally:
+        storage.release_close.set()
+
+    runtime.close_storage(timeout=1)
+    assert storage.closed is True
+
+
+@pytest.mark.unit
+def test_desktop_finalisation_timeout_rejoins_the_same_flush_worker_without_duplicate_dispatch() -> None:
+    flush_started = threading.Event()
+    release_flush = threading.Event()
+
+    class Recorder:
+        pending_tick_count = 3
+        flush_calls = 0
+
+        async def run(self) -> None:
+            return None
+
+        def flush_pending(self) -> None:
+            self.flush_calls += 1
+            flush_started.set()
+            assert release_flush.wait(2)
+            self.pending_tick_count = 0
+
+    recorder = Recorder()
+    storage = MagicMock()
+    checkpoint_owner = MagicMock()
+    runtime = desktop._DesktopTickCaptureRuntime(
+        recorder,
+        storage,
+        "",
+        storage_lock=threading.Lock(),
+        checkpoint_owner=checkpoint_owner,
+        retention_days=0,
+    )
+
+    with pytest.raises(RuntimeError, match="storage shutdown timed out"):
+        runtime.close_storage(timeout=0.02)
+
+    assert flush_started.wait(1)
+    retained_worker = runtime._storage_close_worker
+    with pytest.raises(RuntimeError, match="storage shutdown timed out"):
+        runtime.close_storage(timeout=0.0)
+    assert runtime._storage_close_worker is retained_worker
+    assert recorder.flush_calls == 1
+    checkpoint_owner.persist.assert_not_called()
+    storage.close.assert_not_called()
+
+    release_flush.set()
+    runtime.close_storage(timeout=1.0)
+
+    assert recorder.flush_calls == 1
+    checkpoint_owner.persist.assert_called_once_with(force=True)
+    storage.close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_deferred_storage_close_retries_one_transient_close_failure_in_one_call() -> None:
+    recorder = _FakeRecorder()
+    storage = _RetryingCloseStorage("unused", failures=1)
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    runtime.start()
+    assert recorder.run_started.wait(timeout=1)
+    runtime.stop(timeout=1, close_storage=False)
+
+    runtime.close_storage(timeout=1)
+
+    assert storage.close_calls == 2
+    assert storage.closed is True
+
+
+@pytest.mark.unit
 def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     flask_app = Flask("desktop-capture")
     signal_hub = object()
     flask_app.config["SIGNAL_HUB"] = signal_hub
+    sandbox_engine = object()
+    flask_app.config["DATA_SANDBOX_ENGINE"] = sandbox_engine
     settings = SimpleNamespace(openalgo_api_key="workspace-key")
     storage = _FakeStorage("unused")
     storage_paths: list[str] = []
     recorder = _FakeRecorder()
     orderflow = MagicMock()
-    orderflow.restore_current_session.return_value = {
+    orderflow.replay_current_session_tail.return_value = {
         "restored_ticks": 0,
         "skipped_ticks": 0,
     }
+    orderflow.export_state.return_value = {"version": 1, "identities": []}
     watchlist = [{"exchange": "NSE_INDEX", "symbol": "NIFTY"}]
     build_calls: list[dict[str, object]] = []
 
@@ -221,6 +510,7 @@ def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     assert len(build_calls) == 1
     call = build_calls[0]
     assert call["signal_hub"] is signal_hub
+    assert call["sandbox_engine"] is sandbox_engine
     assert call["settings"] is settings
     assert call["storage"] is storage
     assert call["storage_lock"] is flask_app.config["TICK_STORAGE_LOCK"]
@@ -232,7 +522,8 @@ def test_enabled_desktop_builds_one_runtime_with_existing_hub_and_settings(
     assert storage.initialised is True
     assert storage.pruned_days == [90]
     assert len(storage.tick_queries) == 1
-    orderflow.restore_current_session.assert_called_once()
+    orderflow.replay_current_session_tail.assert_called_once()
+    orderflow.restore_current_session.assert_not_called()
     assert flask_app.config["TICK_CAPTURE_ENABLED"] is True
     assert flask_app.config["TICK_CAPTURE_ERROR"] == ""
     assert flask_app.config["TICK_RECORDER"] is recorder
@@ -285,7 +576,7 @@ def test_failed_storage_close_remains_retryable_and_unpublished(
 
 
 @pytest.mark.unit
-def test_failed_final_checkpoint_keeps_desktop_storage_open_for_stop_retry() -> None:
+def test_deferred_storage_close_retries_one_transient_checkpoint_failure_in_one_call() -> None:
     recorder = MagicMock(pending_tick_count=0)
     storage = MagicMock()
     checkpoint_owner = MagicMock()
@@ -297,13 +588,8 @@ def test_failed_final_checkpoint_keeps_desktop_storage_open_for_stop_retry() -> 
         checkpoint_owner=checkpoint_owner,
     )
 
-    with pytest.raises(RuntimeError, match="tick storage shutdown failed"):
-        runtime.stop(timeout=1)
-
-    storage.close.assert_not_called()
-    assert runtime._storage_closed is False
-
-    runtime.stop(timeout=1)
+    runtime.stop(timeout=1, close_storage=False)
+    runtime.close_storage(timeout=1)
 
     assert checkpoint_owner.persist.call_args_list == [
         call(force=True),
@@ -338,15 +624,17 @@ def test_disabled_desktop_capture_opens_no_runtime_resource(monkeypatch: pytest.
 
 @pytest.mark.unit
 def test_configured_capture_failure_is_redacted_and_leaves_no_partial_config(
+    caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     flask_app = Flask("desktop-capture-failure")
     api_key = "top-secret-workspace-key"
+    external_secret = "provider-auth-payload"
     storage = _FakeStorage("unused")
     monkeypatch.setattr(desktop, "_tick_capture_enabled", lambda: True)
 
     def fail_build(**_kwargs):
-        raise RuntimeError(f"OpenAlgo rejected {api_key}")
+        raise RuntimeError(f"OpenAlgo rejected {api_key} using {external_secret}")
 
     runtime = desktop._configure_tick_capture(
         flask_app,
@@ -359,11 +647,123 @@ def test_configured_capture_failure_is_redacted_and_leaves_no_partial_config(
 
     assert runtime is None
     assert flask_app.config["TICK_CAPTURE_ENABLED"] is True
-    assert flask_app.config["TICK_CAPTURE_ERROR"] == "OpenAlgo rejected [redacted]"
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "RuntimeError"
     assert api_key not in flask_app.config["TICK_CAPTURE_ERROR"]
+    assert external_secret not in flask_app.config["TICK_CAPTURE_ERROR"]
+    assert api_key not in caplog.text
+    assert external_secret not in caplog.text
     assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
     assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
     assert storage.closed is True
+
+
+@pytest.mark.unit
+def test_pre_runtime_rollback_retains_exact_storage_owner_after_close_failure(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api_key = "pre-runtime-rollback-secret"
+    flask_app = Flask("desktop-pre-runtime-storage-rollback")
+    storage = _RetryingCloseStorage("unused", failures=1)
+    monkeypatch.setattr(desktop, "_tick_capture_enabled", lambda: True)
+    caplog.set_level(logging.WARNING, logger="flinttrade.desktop")
+
+    def fail_build(**_kwargs) -> None:
+        raise RuntimeError(f"recorder construction rejected {api_key}")
+
+    configured = desktop._configure_tick_capture(
+        flask_app,
+        SimpleNamespace(openalgo_api_key=api_key),
+        storage_factory=lambda _path: storage,
+        recorder_factory=object(),
+        orderflow_factory=object,
+        build_recorder=fail_build,
+    )
+
+    assert configured is None
+    owner = flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"]
+    assert owner.storage is storage
+    assert storage.close_calls == 1
+    assert storage.closed is False
+    assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "RuntimeError"
+    assert api_key not in caplog.text
+    assert "transient close failure" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+    owner.stop(timeout=1.0)
+
+    assert storage.close_calls == 2
+    assert storage.closed is True
+    assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
+
+
+@pytest.mark.unit
+def test_failed_startup_rollback_retains_runtime_owner_for_process_teardown(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api_key = "startup-rollback-secret"
+    flask_app = Flask("desktop-capture-startup-rollback")
+    storage = _FakeStorage("unused")
+    recorder = _FakeRecorder()
+
+    class FailingRollbackRuntime:
+        def __init__(self, _recorder, owned_storage, _api_key, **kwargs) -> None:
+            self.storage = owned_storage
+            self.on_storage_closed = kwargs.get("on_storage_closed")
+            self.stop_calls = 0
+
+        def start(self) -> None:
+            raise RuntimeError(f"startup failed for {api_key}")
+
+        def stop(self, **_kwargs) -> None:
+            self.stop_calls += 1
+            if self.stop_calls == 1:
+                raise RuntimeError(f"rollback stop failed for {api_key}")
+
+        def close_storage(self, **_kwargs) -> None:
+            self.storage.close()
+            if self.on_storage_closed is not None:
+                self.on_storage_closed()
+
+        def sanitise_error(self, error: object) -> str:
+            return str(error).replace(api_key, "[redacted]")
+
+    monkeypatch.setattr(desktop, "_tick_capture_enabled", lambda: True)
+    monkeypatch.setattr(desktop, "_DesktopTickCaptureRuntime", FailingRollbackRuntime)
+    caplog.set_level(logging.WARNING, logger="flinttrade.desktop")
+
+    configured = desktop._configure_tick_capture(
+        flask_app,
+        SimpleNamespace(openalgo_api_key=api_key),
+        storage_factory=lambda _path: storage,
+        recorder_factory=object(),
+        orderflow_factory=object,
+        build_recorder=lambda **_kwargs: recorder,
+    )
+
+    assert configured is None
+    runtime = flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"]
+    assert isinstance(runtime, FailingRollbackRuntime)
+    assert runtime.stop_calls == 1
+    assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "RuntimeError"
+    assert api_key not in caplog.text
+    assert "rollback stop failed" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    desktop._serve_owned(5100, ready_writer=lambda _message: None)
+
+    assert runtime.stop_calls == 2
+    assert storage.closed is True
+    assert "DESKTOP_TICK_CAPTURE_RUNTIME" not in flask_app.config
 
 
 @pytest.mark.unit
@@ -397,6 +797,7 @@ def test_stop_never_closes_storage_while_recorder_thread_is_still_flushing(
     runtime._thread.join(timeout=1)
     assert not runtime._thread.is_alive()
     assert recorder.run_finished.is_set()
+    runtime.close_storage(timeout=1)
     assert storage.closed is True
 
 
@@ -467,6 +868,7 @@ def test_failed_retained_flush_keeps_storage_open_for_later_stop_retry() -> None
         runtime.stop(timeout=1)
 
     assert recorder.pending_tick_count == 1
+    assert recorder.flush_calls == 3
     assert storage.closed is False
     assert "storage-close" not in events
 
@@ -503,11 +905,65 @@ def test_unexpected_recorder_death_is_redacted_and_removes_closed_resources(
     runtime._thread.join(timeout=1)
 
     assert not runtime._thread.is_alive()
+    runtime.close_storage(timeout=1)
     assert storage.closed is True
     assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
     assert flask_app.config["TICK_CAPTURE_ENABLED"] is True
     assert flask_app.config["TICK_CAPTURE_ERROR"] == "recorder stopped with [redacted]"
     assert api_key not in flask_app.config["TICK_CAPTURE_ERROR"]
+
+
+@pytest.mark.unit
+def test_unexpected_recorder_close_never_blocks_the_recorder_owner_thread() -> None:
+    recorder = _UnexpectedFailureRecorder("runtime-secret")
+    storage = _BlockingCloseStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "runtime-secret")
+    runtime.start()
+    assert recorder.run_started.wait(1)
+
+    started = time.monotonic()
+    recorder.release_failure.set()
+    runtime._thread.join(timeout=0.2)
+
+    assert time.monotonic() - started < 0.3
+    assert runtime._thread.is_alive() is False
+    assert storage.close_started.wait(1)
+    assert storage.closed is False
+
+    stop_started = time.monotonic()
+    runtime.stop(timeout=0.05, close_storage=False)
+    assert time.monotonic() - stop_started < 0.2
+    assert storage.closed is False
+
+    storage.release_close.set()
+    runtime.close_storage(timeout=1)
+    assert storage.closed is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pending_value", [None, "unknown", object()])
+def test_unexpected_recorder_unknown_pending_count_retains_storage_for_retry(
+    pending_value: object,
+) -> None:
+    recorder = _UnexpectedFailureRecorder("runtime-secret")
+    if pending_value is None:
+        del recorder.pending_tick_count
+    else:
+        recorder.pending_tick_count = pending_value
+    storage = _FakeStorage("unused")
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "runtime-secret")
+    runtime.start()
+    recorder.release_failure.set()
+    runtime._thread.join(timeout=1)
+
+    assert runtime._thread.is_alive() is False
+    assert storage.closed is False
+    with pytest.raises(RuntimeError, match="tick capture shutdown failed"):
+        runtime.stop(timeout=0.1)
+
+    recorder.pending_tick_count = 0
+    runtime.stop(timeout=1)
+    assert storage.closed is True
 
 
 @pytest.mark.unit
@@ -530,7 +986,7 @@ def test_missing_frozen_capture_dependency_records_failure(monkeypatch: pytest.M
 
     assert runtime is None
     assert flask_app.config["TICK_CAPTURE_ENABLED"] is True
-    assert flask_app.config["TICK_CAPTURE_ERROR"] == "tick storage was not bundled"
+    assert flask_app.config["TICK_CAPTURE_ERROR"] == "ImportError"
     assert _CAPTURE_CONFIG_KEYS.isdisjoint(flask_app.config)
 
 
@@ -659,8 +1115,8 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
             "smart-stop",
             "agent-stop",
             "uploaded-stop",
-            "router-retire",
             "rotation-stop",
+            "router-retire",
             "capture-stop",
         ]
         events.append("requests-drained")
@@ -710,8 +1166,8 @@ def test_serve_quiesces_background_owners_and_flushes_capture_before_drain(
         "smart-stop",
         "agent-stop",
         "uploaded-stop",
-        "router-retire",
         "rotation-stop",
+        "router-retire",
         "capture-stop",
         "requests-drained",
         "uploaded-stop",
@@ -755,6 +1211,45 @@ def test_serve_defers_real_capture_storage_close_until_requests_drain(
 
 
 @pytest.mark.unit
+def test_one_serve_shutdown_retries_retained_flushes_before_storage_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    recorder = _BoundedRetryFlushRecorder(events, failures=2)
+    storage = _FakeStorage("unused")
+    original_close = storage.close
+
+    def close_storage() -> None:
+        events.append("storage-close")
+        original_close()
+
+    storage.close = close_storage  # type: ignore[method-assign]
+    runtime = desktop._DesktopTickCaptureRuntime(recorder, storage, "")
+    runtime.start()
+    assert recorder.run_started.wait(timeout=1)
+    flask_app = Flask("desktop-retained-flush-retry")
+    flask_app.config["DESKTOP_TICK_CAPTURE_RUNTIME"] = runtime
+    monkeypatch.setattr(desktop, "_build_app", lambda: flask_app)
+    monkeypatch.setattr(
+        "waitress.server.create_server",
+        lambda *_args, **_kwargs: SimpleNamespace(effective_port=5100, run=lambda: None),
+    )
+
+    desktop._serve_owned(5100, ready_writer=lambda _message: None)
+
+    assert recorder.flush_calls == 3
+    assert recorder.pending_tick_count == 0
+    assert storage.closed is True
+    assert events == [
+        "final-flush-failed",
+        "flush-retry",
+        "flush-retry",
+        "flush-retry",
+        "storage-close",
+    ]
+
+
+@pytest.mark.unit
 def test_serve_drain_timeout_does_not_close_request_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -795,9 +1290,13 @@ def test_serve_stops_capture_when_waitress_bind_fails(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("waitress.server.create_server", fail_bind)
 
-    with pytest.raises(OSError, match="port unavailable"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"Desktop backend startup failed \(OSError\)",
+    ) as raised:
         desktop.serve(5100)
 
+    assert raised.value.__cause__ is None
     runtime.stop.assert_called_once_with()
 
 

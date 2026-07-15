@@ -14,9 +14,9 @@ import { PieChart } from "lucide-react";
 import { FlintDonutBreakdown } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { useQuery } from "@tanstack/react-query";
-import { getPositionbook, getHoldings } from "@/services/api";
+import { useDataScope } from "@/hooks/useDataScope";
+import { useHoldings } from "@/hooks/useHoldings";
+import { usePositions } from "@/hooks/usePositions";
 import {
   SAMPLE_ASSET_ALLOCATION,
   SAMPLE_SECTOR_ALLOCATION,
@@ -90,7 +90,11 @@ function buildSlices(
 
 function PortfolioAllocationWidget() {
   const track = useTrackBehavior();
-  const isConnected = useBrokerConnected();
+  const dataScope = useDataScope();
+  const isExplore = dataScope === "explore:mock";
+  const isPractice = dataScope.startsWith("practice:");
+  const hasAccountSource = dataScope !== "live:unconfigured";
+  const shouldReadAccountData = hasAccountSource && !isExplore;
 
   const [view, setView] = useState<ViewMode>("asset");
   const [hovered, setHovered] = useState<string | null>(null);
@@ -99,22 +103,12 @@ function PortfolioAllocationWidget() {
     track("trade", "widget_view_portfolio_allocation");
   }, [track]);
 
-  const { data: positions } = useQuery({
-    queryKey: ["positionbook"],
-    queryFn: getPositionbook,
-    enabled: isConnected,
-    staleTime: 30_000,
-  });
-
-  const { data: holdings } = useQuery({
-    queryKey: ["holdings"],
-    queryFn: getHoldings,
-    enabled: isConnected,
-    staleTime: 5 * 60_000,
-  });
+  const { data: positions, isLoading: positionsLoading } = usePositions({ enabled: shouldReadAccountData });
+  const { data: holdings, isLoading: holdingsLoading } = useHoldings({ enabled: shouldReadAccountData });
 
   const liveAssetSlices = useMemo<AllocationSlice[]>(() => {
-    if (!isConnected) return SAMPLE_ASSET_ALLOCATION;
+    if (isExplore) return SAMPLE_ASSET_ALLOCATION;
+    if (!hasAccountSource) return [];
     const map = new Map<string, number>();
     for (const p of (positions ?? []) as Position[]) {
       if (p.quantity === 0) continue;
@@ -125,34 +119,36 @@ function PortfolioAllocationWidget() {
       if (h.quantity === 0) continue;
       map.set("Equity", (map.get("Equity") ?? 0) + h.quantity * h.ltp);
     }
-    if (map.size === 0) return SAMPLE_ASSET_ALLOCATION;
     return [...map.entries()].map(([label, value], i) => ({
       label,
       value,
       colour: ASSET_COLOURS[label] ?? SECTOR_COLOURS[i % SECTOR_COLOURS.length],
     }));
-  }, [positions, holdings, isConnected]);
+  }, [positions, holdings, hasAccountSource, isExplore]);
 
   const liveSectorSlices = useMemo<AllocationSlice[]>(() => {
-    if (!isConnected) return SAMPLE_SECTOR_ALLOCATION;
+    if (isExplore) return SAMPLE_SECTOR_ALLOCATION;
+    if (!hasAccountSource) return [];
     const map = new Map<string, number>();
     for (const h of (holdings ?? []) as Holding[]) {
       if (h.quantity === 0) continue;
       const sector = getSector(h.symbol);
       map.set(sector, (map.get(sector) ?? 0) + h.quantity * h.ltp);
     }
-    if (map.size === 0) return SAMPLE_SECTOR_ALLOCATION;
     return [...map.entries()].map(([label, value], i) => ({
       label,
       value,
       colour: SECTOR_COLOURS[i % SECTOR_COLOURS.length],
     }));
-  }, [holdings, isConnected]);
+  }, [holdings, hasAccountSource, isExplore]);
 
   const rawSlices = view === "asset" ? liveAssetSlices : liveSectorSlices;
   const total = rawSlices.reduce((s, d) => s + d.value, 0);
   const slices = buildSlices(rawSlices, total);
   const hoveredSlice = slices.find((s) => s.label === hovered);
+  const isLoadingAllocation = shouldReadAccountData && (
+    view === "asset" ? positionsLoading || holdingsLoading : holdingsLoading
+  );
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
@@ -162,9 +158,9 @@ function PortfolioAllocationWidget() {
         <PieChart size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Portfolio Allocation</span>
         <div className="flex-1" />
-        {!isConnected && (
+        {(isExplore || isPractice) && (
           <span className="text-xxs text-text-muted border border-border-subtle rounded px-1.5 py-0.5">
-            sample data
+            {isExplore ? "Sample" : "Practice"}
           </span>
         )}
       </div>
@@ -195,48 +191,58 @@ function PortfolioAllocationWidget() {
 
       {/* Chart + legend */}
       <div className="flex-1 overflow-auto flex flex-col items-center py-3 gap-4">
-        {/* Donut */}
-        <FlintDonutBreakdown
-          ariaLabel="Portfolio allocation donut chart"
-          slices={slices.map((s) => ({
-            label: s.label,
-            value: s.value,
-            color: s.colour,
-          }))}
-          centerValue={fmt(hoveredSlice?.value ?? total)}
-          centerLabel={hoveredSlice?.label ?? "Total"}
-          className="size-[164px]"
-        />
+        {isLoadingAllocation ? (
+          <div className="flex flex-1 items-center justify-center text-xs text-text-muted" role="status">
+            Loading allocation…
+          </div>
+        ) : slices.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center text-xs text-text-muted" role="status">
+            No portfolio allocation data
+          </div>
+        ) : (
+          <>
+            <FlintDonutBreakdown
+              ariaLabel="Portfolio allocation donut chart"
+              slices={slices.map((s) => ({
+                label: s.label,
+                value: s.value,
+                color: s.colour,
+              }))}
+              centerValue={fmt(hoveredSlice?.value ?? total)}
+              centerLabel={hoveredSlice?.label ?? "Total"}
+              className="size-[164px]"
+            />
 
-        {/* Legend */}
-        <div className="w-full px-4 space-y-1.5" role="list" aria-label="Allocation breakdown">
-          {slices.map((s) => (
-            <div
-              key={s.label}
-              role="listitem"
-              className={cn(
-                "flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors",
-                hovered === s.label ? "bg-surface-hover" : "hover:bg-surface-hover",
-              )}
-              onMouseEnter={() => setHovered(s.label)}
-              onMouseLeave={() => setHovered(null)}
-              aria-label={`${s.label}: ${fmt(s.value)}, ${(s.pct * 100).toFixed(1)}%`}
-            >
-              <span
-                className="w-2.5 h-2.5 rounded-sm shrink-0"
-                style={{ backgroundColor: s.colour }}
-                aria-hidden="true"
-              />
-              <span className="flex-1 text-xs text-text-primary truncate">{s.label}</span>
-              <span className="text-xs font-mono tabular-nums text-text-secondary shrink-0">
-                {fmt(s.value)}
-              </span>
-              <span className="w-10 text-right text-xs font-mono tabular-nums text-text-muted shrink-0">
-                {(s.pct * 100).toFixed(1)}%
-              </span>
+            <div className="w-full px-4 space-y-1.5" role="list" aria-label="Allocation breakdown">
+              {slices.map((s) => (
+                <div
+                  key={s.label}
+                  role="listitem"
+                  className={cn(
+                    "flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors",
+                    hovered === s.label ? "bg-surface-hover" : "hover:bg-surface-hover",
+                  )}
+                  onMouseEnter={() => setHovered(s.label)}
+                  onMouseLeave={() => setHovered(null)}
+                  aria-label={`${s.label}: ${fmt(s.value)}, ${(s.pct * 100).toFixed(1)}%`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-sm shrink-0"
+                    style={{ backgroundColor: s.colour }}
+                    aria-hidden="true"
+                  />
+                  <span className="flex-1 text-xs text-text-primary truncate">{s.label}</span>
+                  <span className="text-xs font-mono tabular-nums text-text-secondary shrink-0">
+                    {fmt(s.value)}
+                  </span>
+                  <span className="w-10 text-right text-xs font-mono tabular-nums text-text-muted shrink-0">
+                    {(s.pct * 100).toFixed(1)}%
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

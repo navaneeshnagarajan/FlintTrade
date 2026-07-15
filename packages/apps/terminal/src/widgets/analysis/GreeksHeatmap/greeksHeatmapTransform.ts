@@ -109,8 +109,11 @@ export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRo
   const perCurve = curves.map((curve) => {
     const ivByStrike = new Map<number, number>();
     for (const p of curve.points ?? []) {
-      const mid = (normaliseIv(p.call_iv) + normaliseIv(p.put_iv)) / 2;
-      if (mid > 0) ivByStrike.set(p.strike, mid);
+      const callIv = normaliseIv(p.call_iv);
+      const putIv = normaliseIv(p.put_iv);
+      if (callIv > 0 && putIv > 0) {
+        ivByStrike.set(p.strike, (callIv + putIv) / 2);
+      }
     }
     return { curve, ivByStrike };
   });

@@ -12,6 +12,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,6 +21,7 @@ from flask import Flask
 import flinttrade_core.order_routes as order_routes_mod
 import flinttrade_core.smart_order_routes as mod
 from flinttrade_core.exceptions import SafetyBypassError
+from flinttrade_core.l2_state import PortfolioSafetyStateError, ProspectiveSafetyInputs
 from flinttrade_core.models import Action, Exchange, Order, PriceType
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
@@ -52,6 +54,31 @@ class _NoIoAdapter:
         self.orders.append(order)
         return f"OID-{len(self.orders)}"
 
+    async def positions(self, _session: object) -> list[object]:
+        return []
+
+    async def funds(self, _session: object) -> dict[str, str]:
+        return {
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+        }
+
+    async def trade_book(self, _session: object) -> list[object]:
+        return []
+
+    async def order_book(self, _session: object) -> list[object]:
+        return []
+
+    async def holdings(self, _session: object) -> list[object]:
+        return []
+
+    async def quotes(self, _session: object, _symbols: list[str]) -> list[object]:
+        return []
+
+    async def margin_calculator(self, _session: object, _order: object) -> dict[str, str]:
+        return {"required_margin": "100"}
+
 
 def _session(_ctx: object, adapter_id: str, account_id: str) -> Session:
     return Session(
@@ -79,6 +106,31 @@ class _FakeClient:
 
     async def quotes(self, symbol: str, exchange: str = "NSE"):
         return self._quote
+
+    async def positionbook(self) -> list[object]:
+        return []
+
+    async def funds(self) -> dict[str, str]:
+        return {
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+        }
+
+    async def tradebook(self) -> list[object]:
+        return []
+
+    async def orderbook(self) -> list[object]:
+        return []
+
+    async def holdings(self) -> list[object]:
+        return []
+
+    async def multi_quotes(self, _symbols: list[dict[str, str]]) -> list[object]:
+        return []
+
+    async def margin(self, _orders: list[dict[str, object]]) -> dict[str, str]:
+        return {"required_margin": "100"}
 
 
 def _safety() -> SafetySystem:
@@ -120,7 +172,15 @@ def _make_app(
     if openalgo_client is _DEFAULT_OPENALGO_CLIENT:
         openalgo_client = _FakeClient(asks=[(100.0, 500)], bids=[(99.5, 500)])
     app.config["OPENALGO_CLIENT"] = openalgo_client
+    if adapter_id != "openalgo":
+        app.config["NATIVE_ADAPTERS"] = {adapter_id: adapter}
+        registry = MagicMock()
+        registry.get_session_for.side_effect = (
+            lambda requested_adapter, account_id: _session(None, requested_adapter, account_id)
+        )
+        app.config["REGISTRY"] = registry
     app.config["SAFETY"] = _safety()
+    app.config["SAFETY_CONFIG_READY"] = True
     app.register_blueprint(mod.smart_order_bp)
     return app, adapter
 
@@ -213,6 +273,70 @@ def test_router_unavailable_503(live_auth):
         json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
     )
     assert resp.status_code == 503
+
+
+def test_unvalidated_safety_runtime_503(live_auth):
+    app, adapter = _make_app()
+    app.config["SAFETY_CONFIG_READY"] = False
+
+    response = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
+    )
+
+    assert response.status_code == 503
+    assert adapter.orders == []
+
+
+def test_parent_checks_prospective_greeks_before_starting_job(live_auth, monkeypatch):
+    from flinttrade_core import l2_state
+
+    state = SimpleNamespace(
+        positions=[],
+        used_margin=0.0,
+        total_balance=100000.0,
+        daily_pnl=0.0,
+        starting_capital=100000.0,
+        net_delta=0.0,
+        net_vega=0.0,
+        ltp_for=lambda _order: None,
+        admission_for=lambda _index: SimpleNamespace(
+            positions=[],
+            used_margin=0.0,
+            net_delta=750.0,
+            net_vega=12000.0,
+        ),
+    )
+
+    async def _prospective_state(*_args, **_kwargs):
+        return state
+
+    class _BlockingSafety:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def check_order(self, _order, **kwargs):
+            self.calls.append(kwargs)
+            return [SimpleNamespace(
+                passed=False,
+                layer="L3_PORTFOLIO",
+                reason="prospective delta exceeds limit",
+            )]
+
+    monkeypatch.setattr(l2_state, "gather_safety_state", _prospective_state)
+    safety = _BlockingSafety()
+    app, adapter = _make_app()
+    app.config["SAFETY"] = safety
+
+    response = app.test_client().post(
+        "/api/v1/orders/smart-route",
+        json={"symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 10},
+    )
+
+    assert response.status_code == 403
+    assert safety.calls[0]["net_delta"] == 750.0
+    assert safety.calls[0]["net_vega"] == 12000.0
+    assert adapter.orders == []
 
 
 def test_unknown_job_404(live_auth):
@@ -489,6 +613,34 @@ async def _async_value(value):
     return value
 
 
+def _portfolio_state(
+    positions: list[object] | None = None,
+    *,
+    prospective_net_delta: float = 0.0,
+    prospective_net_vega: float = 0.0,
+):
+    from flinttrade_core.l2_state import PortfolioSafetyState
+
+    current_positions = positions or []
+    return PortfolioSafetyState(
+        positions=current_positions,
+        used_margin=0.0,
+        total_balance=100000.0,
+        daily_pnl=0.0,
+        starting_capital=100000.0,
+        prospective=(ProspectiveSafetyInputs(
+            positions=current_positions,
+            used_margin=0.0,
+            net_delta=prospective_net_delta,
+            net_vega=prospective_net_vega,
+        ),),
+    )
+
+
+async def _passing_portfolio_provider(_order, _reservations=()):
+    return _portfolio_state()
+
+
 async def test_executor_blocks_child_on_safety_layer():
     """A child failing L1–L5 returns a failed decision and never dispatches."""
 
@@ -501,16 +653,55 @@ async def test_executor_blocks_child_on_safety_layer():
             return [_R()]
 
     adapter = _NoIoAdapter()
+    safety = _safety()
+    safety.check_order = _BlockingSafety().check_order
     executor = mod.GatedChildExecutor(
-        safety=_BlockingSafety(),
+        safety=safety,
         router=BrokerRouter({"openalgo": adapter}, _session),
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
     )
     decision = await executor.route_order(_child_order())
     assert decision.passed is False
     assert "L2" in decision.error
+    assert adapter.orders == []
+
+
+async def test_executor_checks_prospective_greeks_before_dispatch():
+    class _ProspectiveBlockingSafety:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def check_order(self, _order, **kwargs):
+            self.calls.append(kwargs)
+            return [SimpleNamespace(
+                passed=False,
+                layer="L3_PORTFOLIO",
+                reason="prospective delta exceeds limit",
+            )]
+
+    adapter = _NoIoAdapter()
+    recorder = _ProspectiveBlockingSafety()
+    safety = _safety()
+    safety.check_order = recorder.check_order
+    executor = mod.GatedChildExecutor(
+        safety=safety,
+        router=BrokerRouter({"openalgo": adapter}, _session),
+        request_ctx=_ctx(),
+        adapter_id="openalgo",
+        account_id="default",
+        portfolio_state_provider=lambda _order, _reservations: _async_value(
+            _portfolio_state(prospective_net_delta=750.0, prospective_net_vega=12000.0)
+        ),
+    )
+
+    decision = await executor.route_order(_child_order())
+
+    assert decision.passed is False
+    assert recorder.calls[0]["net_delta"] == 750.0
+    assert recorder.calls[0]["net_vega"] == 12000.0
     assert adapter.orders == []
 
 
@@ -527,6 +718,7 @@ async def test_executor_fails_closed_on_router_refusal():
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
     )
     decision = await executor.route_order(_child_order())
     assert decision.passed is False
@@ -541,6 +733,7 @@ async def test_executor_passes_real_gate_and_returns_orderid():
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
     )
     decision = await executor.route_order(_child_order())
     assert decision.passed is True
@@ -560,6 +753,7 @@ async def test_executor_resolves_the_current_router_for_each_child():
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
     )
 
     first = await executor.route_order(_child_order(1))
@@ -583,6 +777,7 @@ async def test_executor_fails_closed_when_current_router_was_removed():
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
+        portfolio_state_provider=_passing_portfolio_provider,
     )
 
     decision = await executor.route_order(_child_order())
@@ -604,8 +799,8 @@ async def test_executor_enforces_l2_from_portfolio_provider():
         request_ctx=_ctx(),
         adapter_id="openalgo",
         account_id="default",
-        portfolio_state_provider=lambda: _async_value(
-            ([Position(symbol="INFY", exchange="NSE", quantity="50")], 0.0, 0.0)
+        portfolio_state_provider=lambda _order, _reservations: _async_value(
+            _portfolio_state([Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")])
         ),
     )
     decision = await executor.route_order(_child_order())
@@ -614,11 +809,11 @@ async def test_executor_enforces_l2_from_portfolio_provider():
     assert adapter.orders == []  # blocked before any dispatch
 
 
-async def test_executor_l2_provider_failure_does_not_block():
-    """A failing provider yields empty L2 state → the child still dispatches."""
+async def test_executor_portfolio_provider_failure_blocks_child():
+    """A failed local L4 snapshot must stop the child before gate minting."""
     adapter = _NoIoAdapter()
 
-    async def _boom() -> tuple:
+    async def _boom(_order, _reservations) -> tuple:
         raise RuntimeError("broker down")
 
     executor = mod.GatedChildExecutor(
@@ -630,27 +825,54 @@ async def test_executor_l2_provider_failure_does_not_block():
         portfolio_state_provider=_boom,
     )
     decision = await executor.route_order(_child_order())
-    assert decision.passed is True
-    assert len(adapter.orders) == 1
+    assert decision.passed is False
+    assert "safety state" in decision.error.lower()
+    assert adapter.orders == []
 
 
 async def test_gather_portfolio_state_scoped_to_selector():
     """The async gatherer reads OpenAlgo only for OpenAlgo selectors."""
-    from types import SimpleNamespace
-
     from flinttrade_core.models import Position
 
     class _Client:
         async def positionbook(self):
-            return [Position(symbol="INFY", exchange="NSE", quantity="10")]
+            return [Position(symbol="INFY", exchange="NSE", product="MIS", quantity="10")]
 
         async def funds(self):
-            return SimpleNamespace(used_margin="5", total_balance="10")
+            return SimpleNamespace(
+                used_margin="5",
+                total_balance="10",
+                opening_risk_capital="10",
+            )
 
-    pos, used, total = await mod.gather_portfolio_state(_Client(), "openalgo")
-    assert len(pos) == 1 and used == 5.0 and total == 10.0
-    assert await mod.gather_portfolio_state(_Client(), "dhan") == ([], 0.0, 0.0)
-    assert await mod.gather_portfolio_state(None, "openalgo") == ([], 0.0, 0.0)
+        async def tradebook(self):
+            return []
+
+        async def orderbook(self):
+            return []
+
+        async def holdings(self):
+            return []
+
+        async def multi_quotes(self, _symbols):
+            return [
+                SimpleNamespace(
+                    symbol="INFY",
+                    exchange="NSE",
+                    ltp=100,
+                    prev_close=100,
+                    previous_close_trusted=True,
+                )
+            ]
+
+    state = await mod.gather_portfolio_state(_Client(), "openalgo")
+    assert len(state.positions) == 1
+    assert state.used_margin == 5.0
+    assert state.total_balance == 10.0
+    with pytest.raises(PortfolioSafetyStateError, match="reader"):
+        await mod.gather_portfolio_state(_Client(), "dhan")
+    with pytest.raises(PortfolioSafetyStateError, match="reader"):
+        await mod.gather_portfolio_state(None, "openalgo")
 
 
 async def test_gather_portfolio_state_uses_native_adapter_and_account():
@@ -665,10 +887,32 @@ async def test_gather_portfolio_state_uses_native_adapter_and_account():
     registry = MagicMock()
     registry.get_session_for.return_value = session
     adapter = MagicMock()
-    adapter.positions = AsyncMock(return_value=[Position(symbol="TCS", exchange="NSE", quantity="25")])
-    adapter.funds = AsyncMock(return_value={"used_margin": "9", "total_balance": "10"})
+    adapter.positions = AsyncMock(
+        return_value=[Position(symbol="TCS", exchange="NSE", product="MIS", quantity="25")]
+    )
+    adapter.funds = AsyncMock(
+        return_value={
+            "used_margin": "9",
+            "total_balance": "10",
+            "opening_risk_capital": "10",
+        }
+    )
+    adapter.trade_book = AsyncMock(return_value=[])
+    adapter.order_book = AsyncMock(return_value=[])
+    adapter.holdings = AsyncMock(return_value=[])
+    adapter.quotes = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                symbol="TCS",
+                exchange="NSE",
+                ltp=100,
+                prev_close=100,
+                previous_close_trusted=True,
+            )
+        ]
+    )
 
-    pos, used, total = await mod.gather_portfolio_state(
+    state = await mod.gather_portfolio_state(
         client,
         "dhan",
         account_id="D1",
@@ -676,11 +920,12 @@ async def test_gather_portfolio_state_uses_native_adapter_and_account():
         registry=registry,
     )
 
-    assert pos[0].quantity == "25"
-    assert used == 9.0
-    assert total == 10.0
+    assert state.positions[0].quantity == "25"
+    assert state.used_margin == 9.0
+    assert state.total_balance == 10.0
     registry.get_session_for.assert_called_once_with("dhan", "D1")
-    adapter.positions.assert_awaited_once_with(session)
+    assert adapter.positions.await_count == 2
+    assert all(awaited.args == (session,) for awaited in adapter.positions.await_args_list)
     adapter.funds.assert_awaited_once_with(session)
     client.positionbook.assert_not_awaited()
     client.funds.assert_not_awaited()
@@ -714,10 +959,10 @@ async def test_executor_rechecks_cancel_after_awaited_portfolio_read():
     release_provider = asyncio.Event()
     cancel_reason: list[str] = []
 
-    async def _blocked_portfolio_state():
+    async def _blocked_portfolio_state(_order, _reservations):
         provider_started.set()
         await release_provider.wait()
-        return [], 0.0, 0.0
+        return _portfolio_state()
 
     executor = mod.GatedChildExecutor(
         safety=_safety(),

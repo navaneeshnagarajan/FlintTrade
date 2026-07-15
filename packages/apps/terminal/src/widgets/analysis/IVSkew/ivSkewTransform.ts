@@ -18,8 +18,8 @@ import type { IVSkewCurve, IVSkewData, IVSkewPoint } from "./IVSkewWidget";
 /**
  * Normalise a single implied-volatility figure to a 0–1 decimal.
  *
- * The screener reports IV in PERCENT (e.g. `14.8` = 14.8 %), so a value above
- * 1.5 is divided by 100; a value already in decimal form (≤ 1.5) is left as-is.
+ * The current endpoint reports decimal IV. Percentage-point normalisation is
+ * retained only for one-way compatibility with older saved/mock payloads.
  */
 export function normaliseIv(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -29,15 +29,15 @@ export function normaliseIv(value: number): number {
 /**
  * Map one IV-smile curve to a skew curve, or null when it has no points.
  *
- * IV figures from the screener are in PERCENT (call_iv/put_iv/atm_iv ≈ 14.8) and
- * the 25Δ skew is in percentage POINTS (≈ 2.0). The widget renders all of these
- * by multiplying the stored value by 100, so a single ÷100 scale (detected from
- * the curve's IV magnitude) is applied UNIFORMLY to the IVs AND the skew — a
- * per-value `>1.5` test would correctly scale a 2.0 skew but wrongly leave a
- * small 0.5 percentage-point skew, so the curve-level scale keeps them coherent.
+ * The widget renders decimal IV by multiplying by 100. A single legacy scale,
+ * detected from the curve's IV magnitude, is applied uniformly to IV and skew.
  */
 function mapCurve(curve: IVSmileData["curves"][number]): IVSkewCurve | null {
-  const raw = (curve.points ?? []).filter((p) => p.call_iv > 0 || p.put_iv > 0);
+  const raw = (curve.points ?? []).filter(
+    (p) => Number.isFinite(p.call_iv) && p.call_iv > 0
+      && Number.isFinite(p.put_iv) && p.put_iv > 0
+      && Number.isFinite(p.moneyness) && p.moneyness > 0,
+  );
   if (raw.length === 0) return null;
 
   // Detect percent vs decimal from the largest IV the curve carries.
@@ -54,7 +54,7 @@ function mapCurve(curve: IVSmileData["curves"][number]): IVSkewCurve | null {
       call_iv: Math.max(0, p.call_iv) * scale,
       put_iv: Math.max(0, p.put_iv) * scale,
     }))
-    .filter((p) => p.call_iv > 0 || p.put_iv > 0);
+    .filter((p) => p.call_iv > 0 && p.put_iv > 0);
 
   if (points.length === 0) return null;
 

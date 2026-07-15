@@ -42,6 +42,7 @@ type FailureCb = (failure: WsFailure | null) => void;
 
 interface FakeWsService {
   connect: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
   subscribe: ReturnType<typeof vi.fn>;
   unsubscribe: ReturnType<typeof vi.fn>;
   onTick: ReturnType<typeof vi.fn>;
@@ -68,6 +69,7 @@ function makeFakeWsService(): FakeWsService {
 
   return {
     connect: vi.fn(),
+    disconnect: vi.fn(),
     subscribe: vi.fn(),
     unsubscribe: vi.fn(),
     onTick: vi.fn((cb: TickCb) => {
@@ -245,6 +247,35 @@ describe("useWsBridge — connection lifecycle", () => {
 
     // Assert — guard clause: empty wsUrl must short-circuit the effect
     expect(fakeWs!.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not connect when live market data is disabled", () => {
+    renderHook(() => useWsBridge(false), { wrapper: makeWrapper(_jotaiStore) });
+
+    expect(fakeWs!.connect).not.toHaveBeenCalled();
+    expect(fakeWs!.onTick).not.toHaveBeenCalled();
+    expect(fakeWs!.onStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not connect without a browser-held OpenAlgo API key", () => {
+    _apiKey = "";
+
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+
+    expect(fakeWs!.connect).not.toHaveBeenCalled();
+    expect(fakeWs!.onTick).not.toHaveBeenCalled();
+    expect(fakeWs!.onStatus).not.toHaveBeenCalled();
+  });
+
+  it("disconnects its owned socket when the bridge is disabled", () => {
+    const { rerender } = renderHook(
+      ({ enabled }) => useWsBridge(enabled),
+      { initialProps: { enabled: true }, wrapper: makeWrapper(_jotaiStore) },
+    );
+
+    rerender({ enabled: false });
+
+    expect(fakeWs!.disconnect).toHaveBeenCalledOnce();
   });
 
   it("registers onTick and onStatus handlers on mount", () => {

@@ -82,4 +82,5 @@ export const SAMPLE_IV_SMILE_DATA: IVSmileData = {
   underlying: "NIFTY",
   spot_price: SPOT,
   curves: CURVE_CONFIGS.map(buildCurve),
+  is_sample_data: true,
 };

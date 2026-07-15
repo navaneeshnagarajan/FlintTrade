@@ -282,7 +282,7 @@ class AutonomousTrader:
     6. Monitor open positions and trigger stop-loss / take-profit
 
     The agent is deliberately single-symbol-per-cycle to keep prompt size
-    small and LLM latency predictable (< 3s with local LM Studio).
+    small and LLM latency predictable with a local Ollama model.
 
     Adapted from Agentic-Trader v3.1 (marketcalls/Agentic-Trader).
 
@@ -316,6 +316,7 @@ class AutonomousTrader:
         config: AgentConfig | None = None,
         vault: Any | None = None,
         order_executor: Any | None = None,
+        entry_intent_sink: Any | None = None,
         market_session_provider: MarketSessionProvider | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -339,6 +340,10 @@ class AutonomousTrader:
                 e.g. :class:`flinttrade_core.smart_order_routes.GatedChildExecutor`.
                 When None (the default), order placement FAILS CLOSED — the
                 agent can analyse and signal but never reach a broker.
+            entry_intent_sink: Optional async callable receiving ``(order,
+                intent_context)``. When supplied, new entry orders are persisted
+                for human approval instead of being dispatched immediately.
+                Protective exits continue to use ``order_executor`` directly.
             market_session_provider: Canonical effective-session lookup called
                 with ``(exchange, symbol, session_date)``. Missing or failed
                 lookups fail closed, so hard-coded exchange hours are never used.
@@ -350,6 +355,7 @@ class AutonomousTrader:
         self.config = config or AgentConfig()
         self.vault = vault
         self.order_executor = order_executor
+        self.entry_intent_sink = entry_intent_sink
         self._market_session_provider = market_session_provider
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.state = AgentState(
@@ -379,6 +385,11 @@ class AutonomousTrader:
     def stop_failure(self) -> str:
         """Return the last incomplete square-off detail for parent shutdown."""
         return self._stop_failure
+
+    @property
+    def stop_requested(self) -> bool:
+        """Whether session shutdown has begun (used to invalidate entry intents)."""
+        return self._stop_requested
 
     # ------------------------------------------------------------------
     # Market hours (IST)
@@ -832,7 +843,7 @@ class AutonomousTrader:
             logger.info("Execution blocked for %s: %s", symbol, risk.reason)
             return {"status": "blocked", "reason": risk.reason}
 
-        if self.order_executor is None:
+        if self.entry_intent_sink is None and self.order_executor is None:
             logger.warning(
                 "Execution blocked for %s: no gated order executor wired — "
                 "the agent cannot place live orders without the "
@@ -853,6 +864,30 @@ class AutonomousTrader:
             if self._stop_requested:
                 logger.info("Execution blocked for %s: stop requested", symbol)
                 return {"status": "blocked", "reason": "stop_requested"}
+
+            if self.entry_intent_sink is not None:
+                queued = await self.entry_intent_sink(
+                    order,
+                    {
+                        "entry_price": entry_price,
+                        "stop_loss": risk.stop_loss,
+                        "take_profit": risk.take_profit,
+                        "signal": str(signal),
+                    },
+                )
+                request_id = (
+                    str(queued.get("id") or "")
+                    if isinstance(queued, dict)
+                    else str(getattr(queued, "id", "") or "")
+                )
+                if not request_id:
+                    raise RuntimeError("approval queue did not return a request id")
+                logger.info("Entry intent queued for approval: %s %s", action, symbol)
+                return {
+                    "status": "pending_approval",
+                    "data": {"request_id": request_id},
+                }
+
             decision = await self.order_executor.route_order(order)
 
             if getattr(decision, "passed", False):
@@ -878,6 +913,37 @@ class AutonomousTrader:
         except Exception as exc:
             logger.error("Execution error for %s: %s", symbol, exc)
             return {"status": "error", "error": str(exc)}
+
+    async def record_approved_entry(
+        self,
+        *,
+        symbol: str,
+        action: str,
+        quantity: int,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+    ) -> None:
+        """Record one broker-acknowledged entry for monitoring.
+
+        Approval dispatch runs on the agent's event loop and calls this only
+        after the gated executor confirms a broker acknowledgement. Repeated
+        calls for the same symbol are idempotent so an HTTP retry cannot invent
+        an additional position or trade count.
+        """
+        async with self._state_lock:
+            if symbol in self.state.active_positions:
+                return
+            self.state.active_positions[symbol] = float(entry_price)
+            self.state.position_details[symbol] = {
+                "entry_price": float(entry_price),
+                "stop_loss": float(stop_loss),
+                "take_profit": float(take_profit),
+                "action": str(action).upper(),
+                "quantity": int(quantity),
+            }
+            self.state.trade_counts[symbol] = self.state.trade_counts.get(symbol, 0) + 1
+            self.state.last_signals[symbol] = str(action).upper()
 
     # ------------------------------------------------------------------
     # Step 6: Monitor open positions

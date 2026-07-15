@@ -17,6 +17,8 @@ Run with::
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import importlib.util
 import io
 import os
@@ -29,12 +31,13 @@ import time
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 ENTRY_SCRIPT = Path(__file__).resolve().parents[4] / "packaging" / "desktop_backend.py"
 TEST_BOOT_ID = "c" * 64
+POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS = 30
 
 
 def _load_entry_module() -> ModuleType:
@@ -49,6 +52,52 @@ def _load_entry_module() -> ModuleType:
 @pytest.fixture(name="entry")
 def entry_fixture() -> ModuleType:
     return _load_entry_module()
+
+
+@pytest.fixture
+def serial_posix_guardian(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Serialise drills that inspect the machine-wide POSIX process table."""
+    if os.name == "nt":
+        yield
+        return
+
+    import fcntl  # noqa: PLC0415 - POSIX-only test fixture
+
+    lock_path = tmp_path_factory.getbasetemp().parent / "flinttrade-posix-guardian.lock"
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _macos_permission_fallback_api_type(
+    entry: ModuleType,
+    unique_ids: tuple[int, ...],
+    *,
+    pids: tuple[int, ...] = (56290,),
+) -> type[object]:
+    class PermissionFallbackApi(entry._MacosPipeLeaseApi):
+        def __init__(self) -> None:
+            self._proc_bsd_info = object
+            self._unique_ids = iter(unique_ids)
+
+        def list_pids(self) -> list[int]:
+            return list(pids)
+
+        def _read_unique_info(self, _pid: int) -> object:
+            return SimpleNamespace(
+                unique_id=next(self._unique_ids),
+                parent_unique_id=42,
+                id_version=7,
+                original_parent_id_version=6,
+            )
+
+        def _read_process_info(self, _pid: int, _flavour: int, _info: object) -> object:
+            raise PermissionError(errno.EPERM, "PROC_PIDTBSDINFO denied")
+
+    return PermissionFallbackApi
 
 
 @pytest.mark.unit
@@ -94,7 +143,7 @@ def test_application_promotes_exact_pending_record_before_handshake(
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    record.write_text(f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -103,7 +152,7 @@ def test_application_promotes_exact_pending_record_before_handshake(
     }
 
     assert entry.promote_application_pid_record(environ=environ, pid=5678) is True
-    assert record.read_text(encoding="utf-8") == f"v3\n1234\n5678\n77\n{TEST_BOOT_ID}\n{token}\n"
+    assert record.read_text(encoding="utf-8") == f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{token}\n"
 
 
 @pytest.mark.unit
@@ -114,7 +163,7 @@ def test_application_pid_promotion_requires_the_exact_boot_bound_record(
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
     boot_id = "c" * 64
-    pending = f"v3\n1234\npending\n77\n{boot_id}\n{token}\n"
+    pending = f"v4\n1234\npending\n77\n{boot_id}\n{token}\n"
     record.write_text(pending, encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
@@ -124,7 +173,7 @@ def test_application_pid_promotion_requires_the_exact_boot_bound_record(
     }
 
     assert entry.promote_application_pid_record(environ=environ, pid=5678) is True
-    assert record.read_text(encoding="utf-8") == f"v3\n1234\n5678\n77\n{boot_id}\n{token}\n"
+    assert record.read_text(encoding="utf-8") == f"v4\n1234\n5678\n77\n{boot_id}\n{token}\n"
 
 
 @pytest.mark.unit
@@ -135,7 +184,7 @@ def test_application_pid_promotion_keeps_pending_record_when_atomic_replace_fail
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    pending = f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
     record.write_text(pending, encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
@@ -158,7 +207,7 @@ def test_application_pid_promotion_is_valid_after_post_replace_sync_failure(
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    record.write_text(f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -172,7 +221,7 @@ def test_application_pid_promotion_is_valid_after_post_replace_sync_failure(
     )
 
     assert entry.promote_application_pid_record(environ=environ, pid=5678) is False
-    assert record.read_text(encoding="utf-8") == f"v3\n1234\n5678\n77\n{TEST_BOOT_ID}\n{token}\n"
+    assert record.read_text(encoding="utf-8") == f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{token}\n"
     assert list(tmp_path.glob("*.tmp")) == []
 
 
@@ -192,7 +241,7 @@ def test_application_pid_promotion_crash_boundary_keeps_a_complete_record(
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    pending = f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
     record.write_text(pending, encoding="utf-8")
     script = textwrap.dedent(
         f"""
@@ -218,9 +267,7 @@ def test_application_pid_promotion_crash_boundary_keeps_a_complete_record(
     completed = subprocess.run([sys.executable, "-c", script], timeout=10, check=False)
 
     assert completed.returncode == exit_code
-    assert record.read_text(encoding="utf-8") == (
-        f"v3\n1234\n{application_field}\n77\n{TEST_BOOT_ID}\n{token}\n"
-    )
+    assert record.read_text(encoding="utf-8") == (f"v4\n1234\n{application_field}\n77\n{TEST_BOOT_ID}\n{token}\n")
 
 
 @pytest.mark.unit
@@ -239,7 +286,7 @@ def test_application_refuses_to_promote_another_launch_record(
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     record.write_text(
-        f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n",
+        f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n",
         encoding="utf-8",
     )
     environ = {
@@ -250,9 +297,7 @@ def test_application_refuses_to_promote_another_launch_record(
     }
 
     assert entry.promote_application_pid_record(environ=environ, pid=5678) is False
-    assert record.read_text(encoding="utf-8") == (
-        f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n"
-    )
+    assert record.read_text(encoding="utf-8") == (f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n")
 
 
 @pytest.mark.unit
@@ -261,7 +306,7 @@ def test_application_token_comparisons_do_not_normalise_whitespace(
     tmp_path: Path,
 ) -> None:
     token = "a" * 64
-    pending = f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
     record = tmp_path / "desktop_backend.pid"
     record.write_text(pending, encoding="utf-8")
     environ = {
@@ -295,7 +340,7 @@ def test_promotion_failure_clears_exact_pending_record_before_refusing_boot(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -342,7 +387,7 @@ def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    pending = f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -365,6 +410,124 @@ def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
     record.write_text(pending, encoding="utf-8")
     assert entry.clear_pending_application_pid_record(environ=environ) is True
     assert guarded == [record, record]
+
+
+@pytest.mark.unit
+def test_guardian_publishes_durable_exact_token_cleanup_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    application_pid = 5678
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(
+        f"v4\n1234\n{application_pid}\n77\n{TEST_BOOT_ID}\n{token}\n",
+        encoding="utf-8",
+    )
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+    stream = io.StringIO()
+
+    assert entry.publish_cleanup_complete_proof(application_pid, environ=environ, stream=stream) is True
+
+    proof = entry._cleanup_complete_proof_path(record)
+    expected = f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={token}\n"
+    assert proof.read_text(encoding="ascii") == expected
+    if os.name != "nt":
+        assert proof.stat().st_mode & 0o077 == 0
+    assert stream.getvalue() == expected
+
+
+@pytest.mark.unit
+def test_guardian_refuses_cleanup_proof_for_another_record(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text(
+        f"v4\n1234\n9999\n77\n{TEST_BOOT_ID}\n{token}\n",
+        encoding="utf-8",
+    )
+    environ = {
+        "FLINTTRADE_PARENT_PID": "77",
+        "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
+        "FLINTTRADE_LAUNCH_TOKEN": token,
+        "FLINTTRADE_SIDECAR_RECORD_PATH": str(record),
+    }
+
+    assert entry.publish_cleanup_complete_proof(5678, environ=environ, stream=io.StringIO()) is False
+    assert entry._cleanup_complete_proof_path(record).exists() is False
+
+
+@pytest.mark.unit
+def test_guardian_needs_no_cleanup_proof_after_pending_record_was_cleared(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    environ = {"FLINTTRADE_SIDECAR_RECORD_PATH": str(tmp_path / "desktop_backend.pid")}
+
+    assert entry._cleanup_complete_proof_required(environ) is False
+
+    Path(environ["FLINTTRADE_SIDECAR_RECORD_PATH"]).write_text("pending", encoding="ascii")
+    assert entry._cleanup_complete_proof_required(environ) is True
+
+
+@pytest.mark.unit
+def test_guardian_cleanup_proof_retry_is_bounded(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+    attempts: list[int] = []
+    monkeypatch.setattr(entry, "_cleanup_complete_proof_required", lambda: True)
+    monkeypatch.setattr(
+        entry,
+        "publish_cleanup_complete_proof",
+        lambda application_pid: attempts.append(application_pid) or False,
+    )
+
+    result = entry._publish_cleanup_complete_proof_with_retry(
+        5678,
+        timeout=2.0,
+        should_stop=lambda: False,
+        clock=lambda: now[0],
+        sleep=lambda duration: now.__setitem__(0, now[0] + duration),
+    )
+
+    assert result is False
+    assert attempts == [5678, 5678, 5678]
+    assert now[0] == pytest.approx(2.0)
+
+
+@pytest.mark.unit
+def test_guardian_cleanup_proof_retry_honours_force_request(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[int] = []
+    sleeps: list[float] = []
+    monkeypatch.setattr(entry, "_cleanup_complete_proof_required", lambda: True)
+    monkeypatch.setattr(
+        entry,
+        "publish_cleanup_complete_proof",
+        lambda application_pid: attempts.append(application_pid) or False,
+    )
+
+    result = entry._publish_cleanup_complete_proof_with_retry(
+        5678,
+        timeout=30.0,
+        should_stop=lambda: True,
+        sleep=sleeps.append,
+    )
+
+    assert result is False
+    assert attempts == [5678]
+    assert sleeps == []
 
 
 @pytest.mark.unit
@@ -575,9 +738,8 @@ def test_posix_owned_tree_discovery_tracks_same_group_and_new_session_descendant
 
     owned = entry._discover_posix_owned_processes(
         processes,
-        application_pid=100,
-        application_group=100,
         tracked={100: "root"},
+        tracked_groups={100: "root"},
     )
 
     assert owned == {
@@ -592,11 +754,895 @@ def test_posix_owned_tree_discovery_tracks_same_group_and_new_session_descendant
     }
     assert entry._discover_posix_owned_processes(
         after_session_leader_exit,
-        application_pid=100,
-        application_group=100,
-        tracked={},
-        tracked_groups={102},
+        tracked={103: "reparented-session-child"},
+        tracked_groups={102: "new-session"},
     ) == {103: "reparented-session-child"}
+
+
+@pytest.mark.unit
+def test_macos_unique_parent_identity_recovers_descendant_after_intermediary_exit(entry: ModuleType) -> None:
+    processes = {
+        103: entry._PosixProcess(
+            pid=103,
+            ppid=1,
+            pgid=103,
+            sid=103,
+            start_token="detached-child",
+            unique_id=3003,
+            parent_unique_id=2002,
+        ),
+    }
+    owned_unique_ids = {1001, 2002}
+
+    owned = entry._discover_posix_owned_processes(
+        processes,
+        tracked={},
+        tracked_groups={},
+        owned_unique_ids=owned_unique_ids,
+    )
+
+    assert owned == {103: "detached-child"}
+    assert owned_unique_ids == {1001, 2002, 3003}
+
+
+@pytest.mark.unit
+def test_macos_discovery_rejects_numeric_parent_from_another_generation(entry: ModuleType) -> None:
+    processes = {
+        100: entry._PosixProcess(
+            pid=100,
+            ppid=50,
+            pgid=100,
+            sid=100,
+            start_token="owned-generation",
+            unique_id=9001,
+            parent_unique_id=42,
+            id_version=7,
+        ),
+        200: entry._PosixProcess(
+            pid=200,
+            ppid=100,
+            pgid=200,
+            sid=200,
+            start_token="unrelated-generation",
+            unique_id=9100,
+            parent_unique_id=9099,
+            id_version=8,
+        ),
+    }
+    owned_unique_ids = {9001}
+
+    owned = entry._discover_posix_owned_processes(
+        processes,
+        tracked={100: "owned-generation"},
+        tracked_groups={},
+        owned_unique_ids=owned_unique_ids,
+    )
+
+    assert owned == {100: "owned-generation"}
+    assert owned_unique_ids == {9001}
+
+
+@pytest.mark.unit
+def test_posix_guardian_rejects_reused_root_and_group_identities(entry: ModuleType) -> None:
+    processes = {
+        100: entry._PosixProcess(pid=100, ppid=1, pgid=100, sid=100, start_token="reused-root"),
+        101: entry._PosixProcess(pid=101, ppid=100, pgid=100, sid=100, start_token="foreign-child"),
+    }
+
+    assert (
+        entry._discover_posix_owned_processes(
+            processes,
+            tracked={100: "owned-root"},
+            tracked_groups={100: "owned-root"},
+        )
+        == {}
+    )
+
+
+@pytest.mark.unit
+def test_posix_spawn_is_registered_before_popen_returns(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registrations: list[tuple[int, str]] = []
+
+    class FakePopen:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.pid = 4321
+
+    monkeypatch.setattr(entry.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        entry,
+        "_required_posix_process_start_token",
+        lambda pid, *, exited: f"start:{pid}",
+    )
+
+    restore = entry._install_posix_spawn_registration(lambda pid, start_token: registrations.append((pid, start_token)))
+    try:
+        process = entry.subprocess.Popen(["worker"])
+        assert process.pid == 4321
+        assert registrations == [(4321, "start:4321")]
+    finally:
+        restore()
+
+
+@pytest.mark.unit
+def test_posix_spawn_inherits_application_pipe_lease_with_close_fds(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    popen_kwargs: list[dict[str, object]] = []
+
+    class FakePopen:
+        def __init__(self, *_args: object, **kwargs: object) -> None:
+            self.pid = 4321
+            popen_kwargs.append(kwargs)
+
+    monkeypatch.setattr(entry.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(entry, "_required_posix_process_start_token", lambda _pid, *, exited: "start:4321")
+
+    restore = entry._install_posix_spawn_registration(
+        lambda _pid, _start_token: None,
+        inherited_fds=(71,),
+    )
+    try:
+        entry.subprocess.Popen(["worker"], close_fds=False, pass_fds=(63,))
+    finally:
+        restore()
+
+    assert popen_kwargs == [{"close_fds": True, "pass_fds": (63, 71)}]
+
+
+@pytest.mark.unit
+def test_posix_spawn_merges_pipe_lease_with_positional_popen_options(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[tuple[bool, tuple[int, ...]]] = []
+
+    class FakePopen:
+        def __init__(  # noqa: PLR0913 - mirrors subprocess.Popen's positional API
+            self,
+            _args: object,
+            _bufsize: int = -1,
+            _executable: object = None,
+            _stdin: object = None,
+            _stdout: object = None,
+            _stderr: object = None,
+            _preexec_fn: object = None,
+            close_fds: bool = True,
+            _shell: bool = False,
+            _cwd: object = None,
+            _env: object = None,
+            _universal_newlines: object = None,
+            _startupinfo: object = None,
+            _creationflags: int = 0,
+            _restore_signals: bool = True,
+            _start_new_session: bool = False,
+            pass_fds: tuple[int, ...] = (),
+        ) -> None:
+            self.pid = 4321
+            received.append((close_fds, pass_fds))
+
+    monkeypatch.setattr(entry.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(entry, "_required_posix_process_start_token", lambda _pid, *, exited: "start:4321")
+
+    restore = entry._install_posix_spawn_registration(
+        lambda _pid, _start_token: None,
+        inherited_fds=(71,),
+    )
+    try:
+        entry.subprocess.Popen(
+            ["worker"],
+            -1,
+            None,
+            None,
+            None,
+            None,
+            None,
+            False,
+            False,
+            None,
+            None,
+            None,
+            None,
+            0,
+            True,
+            False,
+            (63,),
+        )
+    finally:
+        restore()
+
+    assert received == [(True, (63, 71))]
+
+
+@pytest.mark.unit
+def test_posix_spawn_that_exits_before_identity_sampling_needs_no_registration(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registrations: list[tuple[int, str]] = []
+
+    class ExitedPopen:
+        pid = 4321
+
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def poll(self) -> int:
+            return 0
+
+    monkeypatch.setattr(entry.subprocess, "Popen", ExitedPopen)
+    monkeypatch.setattr(
+        entry,
+        "_required_posix_process_start_token",
+        lambda _pid, *, exited: None if exited() else pytest.fail("child should be exited"),
+    )
+
+    restore = entry._install_posix_spawn_registration(lambda pid, start_token: registrations.append((pid, start_token)))
+    try:
+        assert entry.subprocess.Popen(["true"]).poll() == 0
+        assert registrations == []
+    finally:
+        restore()
+
+
+@pytest.mark.unit
+def test_macos_pipe_lease_scanner_binds_generation_and_revalidates_endpoint(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakePipeApi:
+        def __init__(self) -> None:
+            self.holder_pipe_reads = 0
+
+        def list_pids(self) -> list[int]:
+            return [100, 200, 300]
+
+        def list_pipe_fds(self, pid: int) -> list[int]:
+            return {100: [7], 200: [8], 300: [9]}[pid]
+
+        def pipe_info(self, pid: int, fd: int) -> tuple[int, int] | None:
+            if (pid, fd) == (200, 8):
+                self.holder_pipe_reads += 1
+            return {
+                (100, 7): (11, 22),
+                (200, 8): (22, 11),
+                (300, 9): (22, 99),
+            }[(pid, fd)]
+
+        def unique_identity(self, pid: int) -> tuple[int, int]:
+            return {
+                200: (9001, 42),
+                300: (9003, 43),
+            }[pid]
+
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda pid: f"start:{pid}")
+
+    api = FakePipeApi()
+    assert entry._macos_pipe_lease_holders(7, api=api, guardian_pid=100) == {
+        200: ("start:200", 9001),
+    }
+    assert api.holder_pipe_reads == 2
+
+
+@pytest.mark.unit
+def test_macos_pipe_lease_scanner_rejects_generation_change_around_matching_endpoints(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ChangedGenerationPipeApi:
+        def __init__(self) -> None:
+            self.identities = iter(
+                [
+                    (9001, 42),
+                    (9001, 42),
+                    (9001, 42),
+                    (9002, 99),
+                ]
+            )
+            self.holder_pipe_reads = 0
+
+        def list_pids(self) -> list[int]:
+            return [100, 200]
+
+        def list_pipe_fds(self, pid: int) -> list[int]:
+            return {100: [7], 200: [8]}[pid]
+
+        def pipe_info(self, pid: int, fd: int) -> tuple[int, int]:
+            if (pid, fd) == (100, 7):
+                return 11, 22
+            self.holder_pipe_reads += 1
+            return 22, 11
+
+        def unique_identity(self, pid: int) -> tuple[int, int]:
+            assert pid == 200
+            return next(self.identities)
+
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "start:200")
+
+    api = ChangedGenerationPipeApi()
+    with pytest.raises(OSError, match="generation changed around endpoint attribution"):
+        entry._macos_pipe_lease_holders(7, api=api, guardian_pid=100)
+    assert api.holder_pipe_reads == 2
+
+
+@pytest.mark.unit
+def test_macos_pipe_lease_scanner_requires_sampled_generation_to_match_endpoint_bracket(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakePipeApi:
+        def list_pids(self) -> list[int]:
+            return [100, 200]
+
+        def list_pipe_fds(self, pid: int) -> list[int]:
+            return {100: [7], 200: [8]}[pid]
+
+        def pipe_info(self, pid: int, fd: int) -> tuple[int, int]:
+            return (11, 22) if (pid, fd) == (100, 7) else (22, 11)
+
+        def unique_identity(self, pid: int) -> tuple[int, int]:
+            assert pid == 200
+            return 9001, 42
+
+    monkeypatch.setattr(
+        entry,
+        "_macos_generation_identity",
+        lambda _pid, *, api: ("start:200", 9002),
+    )
+
+    with pytest.raises(OSError, match="sampled generation does not match endpoint bracket"):
+        entry._macos_pipe_lease_holders(7, api=FakePipeApi(), guardian_pid=100)
+
+
+@pytest.mark.unit
+def test_macos_pipe_lease_scanner_rejects_pid_reuse_before_endpoint_revalidation(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReusedPidPipeApi:
+        def __init__(self) -> None:
+            self.holder_pipe_reads = 0
+
+        def list_pids(self) -> list[int]:
+            return [100, 200]
+
+        def list_pipe_fds(self, pid: int) -> list[int]:
+            return {100: [7], 200: [8]}[pid]
+
+        def pipe_info(self, pid: int, fd: int) -> tuple[int, int] | None:
+            if (pid, fd) == (100, 7):
+                return 11, 22
+            self.holder_pipe_reads += 1
+            return (22, 11) if self.holder_pipe_reads == 1 else None
+
+        def unique_identity(self, pid: int) -> tuple[int, int]:
+            assert pid == 200
+            return 9002, 99
+
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "reused-generation")
+
+    with pytest.raises(OSError, match="changed before endpoint revalidation"):
+        entry._macos_pipe_lease_holders(7, api=ReusedPidPipeApi(), guardian_pid=100)
+
+
+@pytest.mark.unit
+def test_macos_pipe_lease_scanner_fails_closed_without_guardian_pipe_identity(entry: ModuleType) -> None:
+    class FakePipeApi:
+        def list_pids(self) -> list[int]:
+            return []
+
+        def list_pipe_fds(self, _pid: int) -> list[int]:
+            return []
+
+        def pipe_info(self, _pid: int, _fd: int) -> None:
+            return None
+
+    with pytest.raises(OSError, match="guardian pipe identity"):
+        entry._macos_pipe_lease_holders(7, api=FakePipeApi(), guardian_pid=100)
+
+
+@pytest.mark.unit
+def test_macos_process_metadata_rejects_a_pid_generation_change(entry: ModuleType) -> None:
+    before = (101, 99, 3, 2)
+
+    assert entry._macos_unique_identity_is_stable(before, before) is True
+    assert entry._macos_unique_identity_is_stable(before, (102, 99, 3, 2)) is False
+    assert entry._macos_unique_identity_is_stable(before, (101, 100, 3, 2)) is False
+
+
+@pytest.mark.unit
+def test_macos_process_metadata_resolves_eperm_inside_stable_unique_id_bracket(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        assert kwargs == {
+            "capture_output": True,
+            "text": True,
+            "check": False,
+            "timeout": entry.POSIX_PROCESS_QUERY_TIMEOUT_SECONDS,
+        }
+        return subprocess.CompletedProcess(command, 0, "56290 1 56290\n", "")
+
+    monkeypatch.setattr(entry.subprocess, "run", run)
+    api_type = _macos_permission_fallback_api_type(entry, (9001, 9001))
+
+    process = api_type().process_info(56290)
+
+    assert process is not None
+    assert (process.pid, process.ppid, process.pgid) == (56290, 1, 56290)
+    assert process.start_token == "macos-unique-id:9001:7"
+    assert (process.unique_id, process.parent_unique_id, process.id_version) == (9001, 42, 7)
+    assert commands == [["ps", "-p", "56290", "-o", "pid=,ppid=,pgid="]]
+
+
+@pytest.mark.unit
+def test_macos_process_metadata_rejects_unique_id_change_around_permission_fallback(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        entry.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "56290 1 56290\n", ""),
+    )
+    api_type = _macos_permission_fallback_api_type(entry, (9001, 9002))
+
+    with pytest.raises(OSError, match="changed during permission fallback"):
+        api_type().process_info(56290)
+
+
+@pytest.mark.unit
+def test_macos_guardian_retains_recovery_when_permission_fallback_fails(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_attempts: list[list[str]] = []
+    reaped: list[bool] = []
+    clock = 0.0
+
+    def monotonic() -> float:
+        nonlocal clock
+        clock += 0.05
+        return clock
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        fallback_attempts.append(command)
+        return subprocess.CompletedProcess(command, 1, "", "ps API failure")
+
+    api_type = _macos_permission_fallback_api_type(entry, (9001,))
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "_MacosPipeLeaseApi", api_type)
+    monkeypatch.setattr(entry.subprocess, "run", run)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 0.25)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry.time, "monotonic", monotonic)
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry, "_reap_guardian_children", lambda: reaped.append(True))
+
+    assert entry._terminate_posix_owned_processes({}, {}) is False
+    assert fallback_attempts
+    assert reaped == []
+
+
+@pytest.mark.unit
+def test_macos_guardian_completes_with_stably_resolved_unrelated_system_process(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_attempts: list[list[str]] = []
+    reaped: list[bool] = []
+    clock = 0.0
+
+    def monotonic() -> float:
+        nonlocal clock
+        clock += 0.05
+        return clock
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        fallback_attempts.append(command)
+        return subprocess.CompletedProcess(command, 0, "56290 1 56290\n", "")
+
+    api_type = _macos_permission_fallback_api_type(entry, (9001, 9001))
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "_MacosPipeLeaseApi", api_type)
+    monkeypatch.setattr(entry.subprocess, "run", run)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 1.0)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_EMPTY_CONFIRM_SECONDS", 0.01)
+    monkeypatch.setattr(entry.time, "monotonic", monotonic)
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry, "_reap_guardian_children", lambda: reaped.append(True))
+
+    assert entry._terminate_posix_owned_processes({}, {}) is True
+    assert len(fallback_attempts) >= 2
+    assert len(reaped) >= 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("libproc_errno", [errno.EPERM, errno.EACCES])
+def test_macos_guardian_retains_recovery_for_unconfirmed_permission_failure(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    libproc_errno: int,
+) -> None:
+    class ProcessInfo(ctypes.Structure):
+        _fields_ = [("pid", ctypes.c_int)]
+
+    api = object.__new__(entry._MacosPipeLeaseApi)
+    api._ctypes = ctypes
+
+    def fail_process_info(*_args: object) -> int:
+        ctypes.set_errno(libproc_errno)
+        return 0
+
+    api._proc_pidinfo = fail_process_info
+    observed_errors: list[OSError] = []
+    reaped: list[bool] = []
+    clock = 0.0
+
+    def monotonic() -> float:
+        nonlocal clock
+        clock += 0.05
+        return clock
+
+    def refresh(
+        _tracked: dict[int, str],
+        _groups: dict[int, str],
+        **_kwargs: object,
+    ) -> tuple[dict[int, object], dict[int, str]]:
+        try:
+            info = api._read_process_info(200, api.PROC_PIDTBSDINFO, ProcessInfo())
+        except OSError as exc:
+            observed_errors.append(exc)
+            raise
+        assert info is None
+        return {}, {}
+
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 0.25)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_EMPTY_CONFIRM_SECONDS", 0.01)
+    monkeypatch.setattr(entry.time, "monotonic", monotonic)
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry, "_refresh_posix_owned_processes", refresh)
+    monkeypatch.setattr(entry, "_reap_guardian_children", lambda: reaped.append(True))
+
+    assert entry._terminate_posix_owned_processes({}, {}) is False
+    assert observed_errors
+    assert all(error.errno == libproc_errno for error in observed_errors)
+    assert reaped == []
+
+
+@pytest.mark.unit
+def test_macos_process_metadata_resolves_zero_errno_inside_stable_unique_id_bracket(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "56290 1 56290\n", "")
+
+    base_api_type = _macos_permission_fallback_api_type(entry, (9001, 9001))
+
+    class ZeroErrnoFallbackApi(base_api_type):
+        def _read_process_info(self, pid: int, flavour: int, _info: object) -> object:
+            class ProcessInfo(ctypes.Structure):
+                _fields_ = [("pid", ctypes.c_int)]
+
+            self._ctypes = ctypes
+
+            def zero_byte_read(*_args: object) -> int:
+                ctypes.set_errno(0)
+                return 0
+
+            self._proc_pidinfo = zero_byte_read
+            return entry._MacosPipeLeaseApi._read_process_info(self, pid, flavour, ProcessInfo())
+
+    monkeypatch.setattr(entry.subprocess, "run", run)
+
+    process = ZeroErrnoFallbackApi().process_info(56290)
+
+    assert process is not None
+    assert (process.pid, process.ppid, process.pgid) == (56290, 1, 56290)
+    assert process.start_token == "macos-unique-id:9001:7"
+    assert commands == [["ps", "-p", "56290", "-o", "pid=,ppid=,pgid="]]
+
+
+@pytest.mark.unit
+def test_macos_process_info_treats_confirmed_esrch_as_disappeared(entry: ModuleType) -> None:
+    class ProcessInfo(ctypes.Structure):
+        _fields_ = [("pid", ctypes.c_int)]
+
+    api = object.__new__(entry._MacosPipeLeaseApi)
+    api._ctypes = ctypes
+
+    def missing_process(*_args: object) -> int:
+        ctypes.set_errno(errno.ESRCH)
+        return 0
+
+    api._proc_pidinfo = missing_process
+
+    assert api._read_process_info(200, api.PROC_PIDTBSDINFO, ProcessInfo()) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("after_start_sample", "expected_error"),
+    [
+        ("changed", "inconsistent process metadata"),
+        ("error", "libproc failed after start-token sampling"),
+    ],
+)
+def test_macos_refresh_binds_start_token_inside_the_libproc_generation_bracket(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    after_start_sample: str,
+    expected_error: str,
+) -> None:
+    start_sampled = False
+
+    class GenerationChangingMacosApi(entry._MacosPipeLeaseApi):
+        def __init__(self) -> None:
+            self._proc_bsd_info = object
+
+        def list_pids(self) -> list[int]:
+            return [200]
+
+        def _read_unique_info(self, _pid: int) -> object:
+            if start_sampled:
+                if after_start_sample == "error":
+                    raise OSError("libproc failed after start-token sampling")
+                unique_id = 9002
+            else:
+                unique_id = 9001
+            return SimpleNamespace(
+                unique_id=unique_id,
+                parent_unique_id=42,
+                id_version=7,
+                original_parent_id_version=6,
+            )
+
+        def _read_process_info(self, _pid: int, _flavour: int, _info: object) -> object:
+            nonlocal start_sampled
+            start_sampled = True
+            return SimpleNamespace(
+                pbi_pid=200,
+                pbi_ppid=50,
+                pbi_pgid=200,
+                pbi_start_tvsec=123,
+                pbi_start_tvusec=456,
+            )
+
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "_MacosPipeLeaseApi", GenerationChangingMacosApi)
+
+    with pytest.raises(OSError, match=expected_error):
+        entry._refresh_posix_owned_processes({}, {}, guardian_pid=50, owned_unique_ids=set())
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX pipe lease")
+def test_pipe_lease_observes_eof_only_after_every_writer_closes(entry: ModuleType) -> None:
+    read_fd, write_fd = os.pipe()
+    try:
+        assert entry._pipe_lease_eof(read_fd) is False
+        os.close(write_fd)
+        write_fd = -1
+        assert entry._pipe_lease_eof(read_fd) is True
+    finally:
+        os.close(read_fd)
+        if write_fd >= 0:
+            os.close(write_fd)
+
+
+@pytest.mark.unit
+def test_macos_guardian_retains_recovery_for_live_unattributed_lease(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 0.001)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry, "_refresh_posix_owned_processes", lambda tracked, groups, **_kwargs: ({}, {}))
+    monkeypatch.setattr(entry, "_pipe_lease_eof", lambda _fd: False)
+    monkeypatch.setattr(entry, "_macos_pipe_lease_holders", lambda _fd, **_kwargs: {})
+
+    assert entry._terminate_posix_owned_processes({}, {}, lease_read_fd=71) is False
+
+
+@pytest.mark.unit
+def test_macos_guardian_retains_recovery_when_libproc_scan_fails(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 0.001)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry, "_refresh_posix_owned_processes", lambda tracked, groups, **_kwargs: ({}, {}))
+    monkeypatch.setattr(entry, "_pipe_lease_eof", lambda _fd: False)
+    monkeypatch.setattr(
+        entry,
+        "_macos_pipe_lease_holders",
+        lambda _fd, **_kwargs: (_ for _ in ()).throw(OSError("libproc unavailable")),
+    )
+
+    assert entry._terminate_posix_owned_processes({}, {}, lease_read_fd=71) is False
+
+
+@pytest.mark.unit
+def test_macos_guardian_refuses_generation_change_before_the_signal_sink(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = entry._PosixProcess(
+        pid=200,
+        ppid=50,
+        pgid=200,
+        sid=200,
+        start_token="start:200",
+        unique_id=9001,
+        parent_unique_id=42,
+        id_version=7,
+    )
+    reused = entry._PosixProcess(
+        pid=200,
+        ppid=1,
+        pgid=200,
+        sid=200,
+        start_token="start:reused",
+        unique_id=9002,
+        parent_unique_id=99,
+        id_version=8,
+    )
+    clock = iter([0.0, 0.0, 2.0])
+    signals: list[tuple[int, signal.Signals]] = []
+    exact_signal_attempts: list[tuple[int, int, signal.Signals, int]] = []
+
+    class ReusedGenerationApi:
+        def signal_process(self, pid: int, id_version: int, signum: signal.Signals) -> bool:
+            assert pid == 200
+            exact_signal_attempts.append((pid, id_version, signum, reused.id_version))
+            return id_version == reused.id_version
+
+    monkeypatch.setattr(entry.sys, "platform", "darwin")
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 1.0)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_POLL_SECONDS", 0.0)
+    monkeypatch.setattr(entry.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry.os, "getpid", lambda: 50)
+    monkeypatch.setattr(entry.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(entry, "_reap_guardian_children", lambda: None)
+    monkeypatch.setattr(entry, "_MacosPipeLeaseApi", ReusedGenerationApi)
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "start:200")
+    monkeypatch.setattr(
+        entry,
+        "_refresh_posix_owned_processes",
+        lambda _tracked, _groups, **_kwargs: ({200: original}, {200: "start:200"}),
+    )
+
+    assert entry._terminate_posix_owned_processes({200: "start:200"}, {}) is False
+    assert signals == []
+    assert exact_signal_attempts == [(200, 7, signal.SIGKILL, 8)]
+
+
+@pytest.mark.unit
+def test_guardian_consumes_every_queued_registration_after_application_exit(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracked: dict[int, str] = {}
+    owned_unique_ids: set[int] = set()
+    reads = iter(
+        [
+            b"register\t321\tstart:321\t9001\nregister\t654\tstart:654\t9002\n",
+            BlockingIOError(),
+        ]
+    )
+
+    def read(_fd: int, _size: int) -> bytes:
+        result = next(reads)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(entry.os, "read", read)
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda pid: f"start:{pid}")
+
+    remaining, force_requested, eof, registered, error = entry._drain_posix_guardian_control(
+        71,
+        b"",
+        tracked,
+        owned_unique_ids,
+    )
+
+    assert remaining == b""
+    assert force_requested is False
+    assert eof is False
+    assert registered is True
+    assert error is None
+    assert tracked == {321: "start:321", 654: "start:654"}
+    assert owned_unique_ids == {9001, 9002}
+
+
+@pytest.mark.unit
+def test_guardian_control_drain_reports_unexpected_read_errors(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(entry.os, "read", lambda _fd, _size: (_ for _ in ()).throw(OSError("I/O failed")))
+
+    remaining, force_requested, eof, registered, error = entry._drain_posix_guardian_control(71, b"", {}, set())
+
+    assert remaining == b""
+    assert force_requested is False
+    assert eof is False
+    assert registered is False
+    assert isinstance(error, OSError)
+
+
+@pytest.mark.unit
+def test_macos_registration_identity_rejects_mixed_pid_generations(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeIdentityApi:
+        def __init__(self, identities: list[tuple[int, int] | None]) -> None:
+            self.identities = iter(identities)
+
+        def unique_identity(self, _pid: int) -> tuple[int, int] | None:
+            return next(self.identities)
+
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "start:321")
+
+    assert entry._macos_generation_identity(321, api=FakeIdentityApi([(9001, 42), (9001, 42)])) == (
+        "start:321",
+        9001,
+    )
+    with pytest.raises(OSError, match="generation changed"):
+        entry._macos_generation_identity(321, api=FakeIdentityApi([(9001, 42), (9002, 42)]))
+    with pytest.raises(OSError, match="start token changed"):
+        entry._macos_generation_identity(
+            321,
+            expected_start="start:other",
+            api=FakeIdentityApi([(9001, 42), (9001, 42)]),
+        )
+
+
+@pytest.mark.unit
+def test_guardian_requires_a_quiet_second_empty_snapshot(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refresh_calls = 0
+    clock = 0.0
+
+    def monotonic() -> float:
+        nonlocal clock
+        clock += 0.05
+        return clock
+
+    def refresh(tracked, groups, **_kwargs):  # noqa: ANN001
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return {}, {}
+
+    monkeypatch.setattr(entry.time, "monotonic", monotonic)
+    monkeypatch.setattr(entry.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_KILL_SECONDS", 1.0)
+    monkeypatch.setattr(entry, "POSIX_GUARDIAN_EMPTY_CONFIRM_SECONDS", 0.05)
+    monkeypatch.setattr(entry, "_refresh_posix_owned_processes", refresh)
+
+    assert entry._terminate_posix_owned_processes({}, {}) is True
+    assert refresh_calls >= 2
 
 
 @pytest.mark.unit
@@ -614,9 +1660,145 @@ def test_posix_guardian_retains_tracked_identity_when_kernel_probe_is_transient(
         lambda _pid: (_ for _ in ()).throw(OSError("transient")),
     )
 
-    _, tracked = entry._refresh_posix_owned_processes(100, 100, {100: "kernel-start:1"})
+    _, tracked = entry._refresh_posix_owned_processes({100: "kernel-start:1"})
 
     assert tracked == {100: "kernel-start:1"}
+
+
+@pytest.mark.unit
+def test_linux_refresh_never_attributes_reused_pid_from_stale_discovery(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    proc_root = tmp_path / "proc"
+
+    def write_stat(pid: int, *, ppid: int, pgid: int, sid: int, start_ticks: int) -> None:
+        process_dir = proc_root / str(pid)
+        process_dir.mkdir(parents=True)
+        fields = ["S", str(ppid), str(pgid), str(sid), *(["0"] * 15), str(start_ticks)]
+        (process_dir / "stat").write_text(f"{pid} (worker with ) paren) {' '.join(fields)}\n", encoding="ascii")
+
+    write_stat(100, ppid=50, pgid=100, sid=100, start_ticks=111)
+    # PID 200 belonged to the owned tree when ps ran, but was reused by an
+    # unrelated process before the old implementation sampled its start token.
+    write_stat(200, ppid=1, pgid=200, sid=200, start_ticks=222)
+    stale_ps = subprocess.CompletedProcess(
+        args=["ps"],
+        returncode=0,
+        stdout="100 50 100\n200 100 100\n",
+        stderr="",
+    )
+    starts = {
+        100: "linux-start-ticks:111",
+        200: "linux-start-ticks:222",
+    }
+    monkeypatch.setattr(entry.sys, "platform", "linux")
+    monkeypatch.setattr(entry, "LINUX_PROC_ROOT", proc_root, raising=False)
+    monkeypatch.setattr(entry.subprocess, "run", lambda *_args, **_kwargs: stale_ps)
+    monkeypatch.setattr(entry, "_posix_process_start_token", starts.get)
+    tracked_groups = {100: "linux-start-ticks:111"}
+
+    processes, tracked = entry._refresh_posix_owned_processes(
+        {100: "linux-start-ticks:111"},
+        tracked_groups,
+    )
+
+    assert processes[200].ppid == 1
+    assert processes[200].start_token == "linux-start-ticks:222"
+    assert tracked == {100: "linux-start-ticks:111"}
+    assert tracked_groups == {100: "linux-start-ticks:111"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relationship", ["parent", "group"])
+def test_linux_refresh_revalidates_relative_generation_before_discovery(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relationship: str,
+) -> None:
+    proc_root = tmp_path / "proc"
+    parent_stat = proc_root / "100" / "stat"
+    candidate_stat = proc_root / "200" / "stat"
+    parent_stat.parent.mkdir(parents=True)
+    candidate_stat.parent.mkdir(parents=True)
+
+    def stat_line(pid: int, *, ppid: int, pgid: int, sid: int, start_ticks: int) -> str:
+        fields = ["S", str(ppid), str(pgid), str(sid), *(["0"] * 15), str(start_ticks)]
+        return f"{pid} (worker) {' '.join(fields)}\n"
+
+    owned_parent = stat_line(100, ppid=50, pgid=100, sid=100, start_ticks=111)
+    reused_parent = stat_line(100, ppid=1, pgid=100, sid=100, start_ticks=999)
+    candidate = stat_line(
+        200,
+        ppid=100 if relationship == "parent" else 1,
+        pgid=200 if relationship == "parent" else 100,
+        sid=100,
+        start_ticks=222,
+    )
+    parent_stat.write_text(owned_parent, encoding="ascii")
+    candidate_stat.write_text(candidate, encoding="ascii")
+    original_read_text = Path.read_text
+    parent_reads = 0
+
+    def changing_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        nonlocal parent_reads
+        if path == parent_stat:
+            parent_reads += 1
+            return owned_parent if parent_reads == 1 else reused_parent
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(entry.sys, "platform", "linux")
+    monkeypatch.setattr(entry, "LINUX_PROC_ROOT", proc_root)
+    monkeypatch.setattr(Path, "read_text", changing_read_text)
+    monkeypatch.setattr(entry.os, "pidfd_open", lambda _pid, _flags: 71, raising=False)
+    monkeypatch.setattr(entry.os, "close", lambda _fd: None)
+    monkeypatch.setattr(entry.select, "select", lambda _reads, _writes, _errors, _timeout: ([], [], []))
+    tracked = {100: "linux-start-ticks:111"} if relationship == "parent" else {}
+    tracked_groups = {100: "linux-start-ticks:111"} if relationship == "group" else {}
+
+    _processes, refreshed = entry._refresh_posix_owned_processes(tracked, tracked_groups)
+
+    assert 200 not in refreshed
+    assert parent_reads >= 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relationship", ["parent", "group"])
+def test_linux_refresh_accepts_only_stably_bracketed_relationships(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    relationship: str,
+) -> None:
+    proc_root = tmp_path / "proc"
+
+    def write_stat(pid: int, *, ppid: int, pgid: int, sid: int, start_ticks: int) -> None:
+        process_dir = proc_root / str(pid)
+        process_dir.mkdir(parents=True)
+        fields = ["S", str(ppid), str(pgid), str(sid), *(["0"] * 15), str(start_ticks)]
+        (process_dir / "stat").write_text(f"{pid} (worker) {' '.join(fields)}\n", encoding="ascii")
+
+    write_stat(100, ppid=50, pgid=100, sid=100, start_ticks=111)
+    write_stat(
+        200,
+        ppid=100 if relationship == "parent" else 1,
+        pgid=200 if relationship == "parent" else 100,
+        sid=100,
+        start_ticks=222,
+    )
+    monkeypatch.setattr(entry.sys, "platform", "linux")
+    monkeypatch.setattr(entry, "LINUX_PROC_ROOT", proc_root)
+    monkeypatch.setattr(entry.os, "pidfd_open", lambda _pid, _flags: 71, raising=False)
+    monkeypatch.setattr(entry.os, "close", lambda _fd: None)
+    monkeypatch.setattr(entry.select, "select", lambda _reads, _writes, _errors, _timeout: ([], [], []))
+    tracked = {100: "linux-start-ticks:111"} if relationship == "parent" else {}
+    tracked_groups = {100: "linux-start-ticks:111"} if relationship == "group" else {}
+
+    _processes, refreshed = entry._refresh_posix_owned_processes(tracked, tracked_groups)
+
+    assert refreshed[200] == "linux-start-ticks:222"
 
 
 @pytest.mark.unit
@@ -640,24 +1822,21 @@ def test_posix_guardian_does_not_retain_the_pre_isolation_parent_group(
             start_token="",
         ),
     }
-    tracked_groups = {100}
+    tracked_groups = {100: "start:100"}
     monkeypatch.setattr(entry, "_read_posix_process_table", lambda: processes)
     monkeypatch.setattr(entry.os, "getpid", lambda: 50)
     monkeypatch.setattr(entry, "_posix_process_start_token", lambda pid: f"start:{pid}")
 
     _, tracked = entry._refresh_posix_owned_processes(
-        100,
-        100,
         {},
         tracked_groups,
+        guardian_pid=50,
     )
 
     assert tracked == {100: "start:100"}
-    assert tracked_groups == {100}
+    assert tracked_groups == {}
     assert entry._discover_posix_owned_processes(
         processes,
-        application_pid=100,
-        application_group=100,
         tracked=tracked,
         guardian_pid=50,
         tracked_groups=tracked_groups,
@@ -717,6 +1896,26 @@ def test_windows_job_setup_fails_closed_and_releases_unassigned_handle(entry: Mo
 
 
 @pytest.mark.unit
+def test_windows_liveness_uses_a_non_destructive_process_handle(entry: ModuleType) -> None:
+    calls: list[object] = []
+
+    class FakeProcessApi:
+        def open_process_for_wait(self, pid: int) -> int:
+            calls.append(("open", pid))
+            return 99
+
+        def wait_for_exit(self, handle: int) -> bool:
+            calls.append(("wait", handle))
+            return False
+
+        def close_handle(self, handle: int) -> None:
+            calls.append(("close", handle))
+
+    assert entry._windows_pid_alive(4321, api=FakeProcessApi()) is True
+    assert calls == [("open", 4321), ("wait", 99), ("close", 99)]
+
+
+@pytest.mark.unit
 def test_stdin_force_exit_targets_the_complete_owned_process_tree(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -745,7 +1944,7 @@ def test_pending_force_exit_clears_exact_record_and_acknowledges_before_exit(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(f"v3\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -902,6 +2101,24 @@ def test_posix_parent_identity_parser_matches_rust_process_identity(entry: Modul
 
 
 @pytest.mark.unit
+def test_posix_parent_identity_uses_rust_native_command_contract(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    starts = iter(("macos-start-time:100:1", "macos-start-time:100:1"))
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: next(starts))
+    monkeypatch.setattr(
+        entry,
+        "_posix_process_command",
+        lambda pid: "/Applications/FlintTrade.app/Contents/MacOS/flinttrade" if pid == 77 else None,
+    )
+
+    assert entry._posix_process_identity(77) == (
+        "/Applications/FlintTrade.app/Contents/MacOS/flinttrade\t77\tmacos-start-time:100:1"
+    )
+
+
+@pytest.mark.unit
 def test_posix_identity_distinguishes_reuse_within_the_same_wall_clock_second(entry: ModuleType) -> None:
     output = "77 /Applications/FlintTrade.app/Contents/MacOS/FlintTrade"
 
@@ -909,6 +2126,33 @@ def test_posix_identity_distinguishes_reuse_within_the_same_wall_clock_second(en
     reused = entry._parse_posix_process_identity(output, 77, "kernel-start:1000002")
 
     assert first != reused
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process probes")
+def test_posix_process_table_fails_closed_on_ps_timeout(entry: ModuleType) -> None:
+    def timeout(command, **kwargs):  # noqa: ANN001
+        assert kwargs["timeout"] == entry.POSIX_PROCESS_QUERY_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    with pytest.raises(OSError, match="process-tree query timed out"):
+        entry._read_posix_process_table(run=timeout)
+
+
+@pytest.mark.unit
+def test_posix_process_identity_fails_closed_on_native_command_error(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "start:1")
+    monkeypatch.setattr(
+        entry,
+        "_posix_process_command",
+        lambda _pid: (_ for _ in ()).throw(OSError("native lookup failed")),
+    )
+
+    with pytest.raises(OSError, match="native lookup failed"):
+        entry._posix_process_identity(77)
 
 
 @pytest.mark.integration
@@ -983,7 +2227,7 @@ def test_posix_watcher_polls_the_spawn_time_shell_identity_for_pyinstaller_child
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="POSIX orphan scenario")
-def test_sidecar_exits_when_parent_dies(tmp_path: Path) -> None:
+def test_sidecar_exits_when_parent_dies(tmp_path: Path, serial_posix_guardian: None) -> None:
     """End-to-end orphan drill: shell dies -> watchdog exits the sidecar.
 
     A throwaway "shell" process spawns a "sidecar" (this entry script's
@@ -1043,8 +2287,44 @@ def test_sidecar_exits_when_parent_dies(tmp_path: Path) -> None:
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-tree containment")
+def test_posix_application_identity_is_published_before_group_escape(serial_posix_guardian: None) -> None:
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        def publish_identity():
+            print(f"PUBLISH {{os.getpid()}} {{os.getpgrp()}}", flush=True)
+
+        terminate_owned_tree = mod._prepare_owned_process_tree(publish_identity)
+        assert terminate_owned_tree is not None
+        print(f"ISOLATED {{os.getpid()}} {{os.getpgrp()}}", flush=True)
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    publish_line, isolated_line = completed.stdout.strip().splitlines()[-2:]
+    _, publish_pid, publish_group = publish_line.split()
+    _, isolated_pid, isolated_group = isolated_line.split()
+
+    assert publish_pid == isolated_pid
+    assert publish_pid != publish_group
+    assert isolated_pid == isolated_group
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-tree containment")
 def test_posix_guardian_outlives_leader_and_reaps_same_group_and_new_session_descendants(
     entry: ModuleType,
+    serial_posix_guardian: None,
 ) -> None:
     """Crash the Python leader after spawning descendants in two POSIX sessions."""
     script = textwrap.dedent(
@@ -1070,7 +2350,6 @@ def test_posix_guardian_outlives_leader_and_reaps_same_group_and_new_session_des
             start_new_session=True,
         )
         print(os.getpid(), same_group.pid, new_session.pid, flush=True)
-        time.sleep(0.25)
         os._exit(23)
         """
     )
@@ -1083,11 +2362,9 @@ def test_posix_guardian_outlives_leader_and_reaps_same_group_and_new_session_des
     )
     descendant_pids: list[int] = []
     try:
-        stdout, stderr = guardian.communicate(timeout=10)
+        stdout, stderr = guardian.communicate(timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS)
         assert guardian.returncode == 23, stderr
-        leader_pid, same_group_pid, new_session_pid = (
-            int(value) for value in stdout.strip().splitlines()[-1].split()
-        )
+        leader_pid, same_group_pid, new_session_pid = (int(value) for value in stdout.strip().splitlines()[-1].split())
         descendant_pids = [same_group_pid, new_session_pid]
         assert leader_pid != guardian.pid
 
@@ -1104,6 +2381,199 @@ def test_posix_guardian_outlives_leader_and_reaps_same_group_and_new_session_des
         for pid in descendant_pids:
             if entry._posix_pid_alive(pid):
                 os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS daemon containment")
+def test_macos_guardian_reaps_rapid_daemon_after_intermediary_exits(
+    entry: ModuleType,
+    tmp_path: Path,
+    serial_posix_guardian: None,
+) -> None:
+    daemon_pid_path = tmp_path / "daemon.pid"
+    daemon_code = textwrap.dedent(
+        f"""
+        import os, pathlib, time
+        child_pid = os.fork()
+        if child_pid:
+            os._exit(0)
+        os.setsid()
+        pathlib.Path({str(daemon_pid_path)!r}).write_text(str(os.getpid()), encoding="utf-8")
+        time.sleep(60)
+        """
+    )
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os, pathlib, subprocess, sys, time
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.POSIX_GUARDIAN_POLL_SECONDS = 0.01
+        terminate_owned_tree = mod._prepare_owned_process_tree()
+        assert terminate_owned_tree is not None
+        intermediary = subprocess.Popen(
+            [sys.executable, "-c", {daemon_code!r}],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        intermediary.wait(timeout=2)
+        marker = pathlib.Path({str(daemon_pid_path)!r})
+        deadline = time.monotonic() + 2
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists()
+        print(marker.read_text(encoding="utf-8"), flush=True)
+        os._exit(24)
+        """
+    )
+    guardian = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    daemon_pid = 0
+    try:
+        stdout, stderr = guardian.communicate(timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS)
+        assert guardian.returncode == 24, stderr
+        daemon_pid = int(stdout.strip().splitlines()[-1])
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and entry._posix_pid_alive(daemon_pid):
+            time.sleep(0.05)
+        assert not entry._posix_pid_alive(daemon_pid)
+    finally:
+        if guardian.poll() is None:
+            guardian.kill()
+            guardian.wait(timeout=5)
+        if daemon_pid and entry._posix_pid_alive(daemon_pid):
+            os.kill(daemon_pid, signal.SIGKILL)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS unique-parent containment")
+def test_macos_guardian_reaps_detached_close_fds_grandchild(
+    entry: ModuleType,
+    tmp_path: Path,
+    serial_posix_guardian: None,
+) -> None:
+    daemon_pid_path = tmp_path / "close-fds-daemon.pid"
+    daemon_code = textwrap.dedent(
+        f"""
+        import pathlib, subprocess, sys
+        sys.stdin.buffer.read(1)
+        daemon = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+        pathlib.Path({str(daemon_pid_path)!r}).write_text(str(daemon.pid), encoding="utf-8")
+        """
+    )
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os, pathlib, subprocess, sys, time
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.POSIX_GUARDIAN_POLL_SECONDS = 0.01
+        terminate_owned_tree = mod._prepare_owned_process_tree()
+        assert terminate_owned_tree is not None
+        intermediary = subprocess.Popen(
+            [sys.executable, "-c", {daemon_code!r}],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        assert intermediary.stdin is not None
+        intermediary.stdin.write(b"x")
+        intermediary.stdin.close()
+        intermediary.wait(timeout=2)
+        marker = pathlib.Path({str(daemon_pid_path)!r})
+        deadline = time.monotonic() + 2
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists()
+        print(marker.read_text(encoding="utf-8"), flush=True)
+        os._exit(25)
+        """
+    )
+    guardian = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    daemon_pid = 0
+    try:
+        stdout, stderr = guardian.communicate(timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS)
+        assert guardian.returncode == 25, stderr
+        daemon_pid = int(stdout.strip().splitlines()[-1])
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and entry._posix_pid_alive(daemon_pid):
+            time.sleep(0.05)
+        assert not entry._posix_pid_alive(daemon_pid)
+    finally:
+        if guardian.poll() is None:
+            guardian.kill()
+            guardian.wait(timeout=5)
+        if daemon_pid and entry._posix_pid_alive(daemon_pid):
+            os.kill(daemon_pid, signal.SIGKILL)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS guardian polling")
+def test_macos_idle_guardian_uses_adaptive_process_reconciliation(
+    tmp_path: Path,
+    serial_posix_guardian: None,
+) -> None:
+    scan_path = tmp_path / "guardian-scans.log"
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os, pathlib, time
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        original_refresh = mod._refresh_posix_owned_processes
+        marker = pathlib.Path({str(scan_path)!r})
+        def counted_refresh(*args, **kwargs):
+            descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(descriptor, b"scan\\n")
+            finally:
+                os.close(descriptor)
+            return original_refresh(*args, **kwargs)
+        mod._refresh_posix_owned_processes = counted_refresh
+        mod.POSIX_GUARDIAN_POLL_SECONDS = 0.01
+        terminate_owned_tree = mod._prepare_owned_process_tree()
+        assert terminate_owned_tree is not None
+        time.sleep(0.3)
+        active_scans = marker.read_text(encoding="utf-8").count("scan")
+        print(f"ACTIVE_SCANS {{active_scans}}", flush=True)
+        os._exit(0)
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+
+    assert completed.returncode == 0
+    active_scans = int(completed.stdout.strip().split()[-1])
+    total_scans = len(scan_path.read_text(encoding="utf-8").splitlines())
+    assert active_scans <= 2
+    assert active_scans <= total_scans <= active_scans + 20
 
 
 @pytest.mark.integration
@@ -1137,6 +2607,6 @@ def test_windows_job_kills_descendant_when_python_leader_exits(entry: ModuleType
     descendant_pid = int(completed.stdout.strip().splitlines()[-1])
 
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and entry._posix_pid_alive(descendant_pid):
+    while time.monotonic() < deadline and entry._windows_pid_alive(descendant_pid):
         time.sleep(0.05)
-    assert entry._posix_pid_alive(descendant_pid) is False
+    assert entry._windows_pid_alive(descendant_pid) is False

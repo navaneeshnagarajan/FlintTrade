@@ -60,6 +60,7 @@ def make_agent(
     exchange: str = "NSE",
     market_session_provider: Any | None = None,
     clock: Any | None = None,
+    entry_intent_sink: Any | None = None,
 ) -> AutonomousTrader:
     """Build an AutonomousTrader with fully mocked LLM, broker, and executor."""
     symbols = symbols or ["RELIANCE"]
@@ -117,6 +118,7 @@ def make_agent(
         openalgo_client=mock_broker,
         config=config,
         order_executor=executor,
+        entry_intent_sink=entry_intent_sink,
         market_session_provider=market_session_provider,
         clock=clock,
     )
@@ -298,6 +300,81 @@ async def test_execute_refused_decision_is_an_error_not_a_position() -> None:
     assert result["status"] == "error"
     assert "L2" in result["error"]
     assert "RELIANCE" not in agent.state.active_positions
+
+
+@pytest.mark.asyncio
+async def test_execute_queues_entry_intent_without_dispatching_or_inventing_position() -> None:
+    sink = AsyncMock(return_value={"id": "intent-1", "status": "pending"})
+    agent = make_agent(entry_intent_sink=sink)
+    risk = RiskAssessment(
+        allowed=True,
+        position_qty=2,
+        stop_loss=2450.0,
+        take_profit=2600.0,
+    )
+
+    result = await agent.execute(TradeSignal.BUY, "RELIANCE", risk, entry_price=2500.0)
+
+    assert result == {"status": "pending_approval", "data": {"request_id": "intent-1"}}
+    sink.assert_awaited_once()
+    queued_order, queued_context = sink.await_args.args
+    assert queued_order.symbol == "RELIANCE"
+    assert queued_order.action.value == "BUY"
+    assert queued_context == {
+        "entry_price": 2500.0,
+        "stop_loss": 2450.0,
+        "take_profit": 2600.0,
+        "signal": "BUY",
+    }
+    agent.order_executor.route_order.assert_not_awaited()
+    assert "RELIANCE" not in agent.state.active_positions
+    assert agent.state.trade_counts["RELIANCE"] == 0
+
+
+@pytest.mark.asyncio
+async def test_protective_exit_never_enters_approval_queue() -> None:
+    sink = AsyncMock()
+    agent = make_agent(quotes_ltp=90.0, entry_intent_sink=sink)
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 95.0,
+        "take_profit": 110.0,
+        "action": "BUY",
+        "quantity": 1,
+    }
+
+    await agent.monitor(position)
+
+    sink.assert_not_awaited()
+    agent.order_executor.route_order.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_record_approved_entry_updates_monitoring_state_once() -> None:
+    agent = make_agent(entry_intent_sink=AsyncMock())
+
+    await agent.record_approved_entry(
+        symbol="RELIANCE",
+        action="BUY",
+        quantity=2,
+        entry_price=2500.0,
+        stop_loss=2450.0,
+        take_profit=2600.0,
+    )
+    await agent.record_approved_entry(
+        symbol="RELIANCE",
+        action="BUY",
+        quantity=2,
+        entry_price=2500.0,
+        stop_loss=2450.0,
+        take_profit=2600.0,
+    )
+
+    assert agent.state.active_positions == {"RELIANCE": 2500.0}
+    assert agent.state.trade_counts["RELIANCE"] == 1
+    assert agent.state.position_details["RELIANCE"]["quantity"] == 2
 
 
 # ---------------------------------------------------------------------------

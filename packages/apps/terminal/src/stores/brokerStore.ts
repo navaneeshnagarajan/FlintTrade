@@ -67,6 +67,7 @@ interface BrokerState {
   removeAccount: (accountId: string) => void;
   updateAccount: (accountId: string, updates: Partial<BrokerAccount>) => void;
   setActiveAccount: (accountId: string) => void;
+  resetSessionState: () => void;
   getPrimaryAccount: () => BrokerAccount | undefined;
   getActiveAccount: () => BrokerAccount | undefined;
 }
@@ -108,6 +109,8 @@ export const useBrokerStore = create<BrokerState>()(
           })),
 
         setActiveAccount: (accountId) => set({ activeAccountId: accountId }),
+
+        resetSessionState: () => set({ accounts: [], activeAccountId: null }),
 
         getPrimaryAccount: () => get().accounts.find((a) => a.is_primary),
 

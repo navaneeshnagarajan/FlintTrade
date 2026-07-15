@@ -16,7 +16,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .expiry_tracker import ExpiryTracker
+from .expiry_tracker import ExpiryTracker, normalise_expiry
 
 logger = logging.getLogger("flinttrade.historical.expiry_tracker_routes")
 
@@ -101,12 +101,13 @@ def get_historical_chain(symbol: str, expiry: str) -> tuple[Any, int]:
     exchange = request.args.get("exchange", "NFO")
     tracker = _get_tracker()
     chain = tracker.get_historical_chain(symbol.upper(), expiry, exchange)
+    canonical_expiry = normalise_expiry(expiry)
 
     return jsonify({
         "status": "success",
         "data": {
             "symbol": symbol.upper(),
-            "expiry": expiry,
+            "expiry": canonical_expiry,
             "exchange": exchange,
             "chain": chain,
         },
@@ -131,6 +132,7 @@ def capture_historical_chain(symbol: str, expiry: str) -> tuple[Any, int]:
     exchange_raw = body.get("exchange") if isinstance(body, dict) else None
     exchange = str(exchange_raw or request.args.get("exchange", "NFO")).upper()
     symbol_value = symbol.upper()
+    canonical_expiry = normalise_expiry(expiry)
     tracker = _get_tracker()
     rows_inserted = tracker.capture_snapshot(symbol_value, expiry, exchange)
     capture_error = getattr(tracker, "last_capture_error", None)
@@ -147,7 +149,7 @@ def capture_historical_chain(symbol: str, expiry: str) -> tuple[Any, int]:
             "message": message,
             "data": {
                 "symbol": symbol_value,
-                "expiry": expiry,
+                "expiry": canonical_expiry,
                 "exchange": exchange,
                 "rows_inserted": rows_inserted,
                 "captured": False,
@@ -158,7 +160,7 @@ def capture_historical_chain(symbol: str, expiry: str) -> tuple[Any, int]:
         "status": "success",
         "data": {
             "symbol": symbol_value,
-            "expiry": expiry,
+            "expiry": canonical_expiry,
             "exchange": exchange,
             "rows_inserted": rows_inserted,
             "captured": rows_inserted > 0,

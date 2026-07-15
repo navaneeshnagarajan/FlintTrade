@@ -31,8 +31,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import nullcontext
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -361,20 +364,34 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
     )
 
 
-def _live_kill_switch_block() -> Any | None:
-    """Return the failing L5 kill-switch result, or ``None`` if trading is allowed.
+def _safety_runtime_unavailable_response() -> tuple[Any, int]:
+    return jsonify({
+        "status": "error",
+        "message": "Validated order safety configuration is unavailable; no broker write was sent.",
+    }), 503
+
+
+def _require_live_safety() -> Any:
+    from .safety_config import require_ready_safety  # noqa: PLC0415
+
+    return require_ready_safety(current_app.config)
+
+
+def _live_kill_switch_block() -> tuple[Any | None, tuple[Any, int] | None]:
+    """Return the L5 block and any safety-runtime availability response.
 
     The minimum guard applied to every NON-place live action (modify/cancel/etc.)
     that cannot yet route through the gated :class:`BrokerRouter` — a halted
     account must not be able to push any live order even on the direct-forward path.
     """
-    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+    from .safety_config import SafetyRuntimeUnavailable  # noqa: PLC0415
 
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
+    try:
+        safety = _require_live_safety()
+    except SafetyRuntimeUnavailable:
+        return None, _safety_runtime_unavailable_response()
     result = safety.l5_kill.validate()
-    return None if result.passed else result
+    return (None if result.passed else result), None
 
 
 def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[list[Any], float, float]:
@@ -389,6 +406,525 @@ def _gather_l2_state(adapter_id: str, *, account_id: str = "default") -> tuple[l
     from .l2_state import gather_l2_state  # noqa: PLC0415
 
     return _run_on_client_loop(gather_l2_state(current_app.config, adapter_id, account_id=account_id))
+
+
+def _gather_safety_state(
+    adapter_id: str,
+    *,
+    account_id: str = "default",
+    orders: list[Any] | tuple[Any, ...] = (),
+    reservations: list[Any] | tuple[Any, ...] = (),
+    include_order_margin: bool = False,
+) -> Any:
+    """Return the complete selector-scoped L2/L4 portfolio snapshot.
+
+    Unlike :func:`_gather_l2_state`, this path is intentionally fail-closed:
+    live admission cannot interpret an unavailable local daily-P&L calculation
+    as zero loss.
+    """
+    from .l2_state import gather_safety_state  # noqa: PLC0415
+
+    return _run_on_client_loop(
+        gather_safety_state(
+            current_app.config,
+            adapter_id,
+            account_id=account_id,
+            orders=orders,
+            reservations=reservations,
+            include_order_margin=include_order_margin,
+        )
+    )
+
+
+def _safety_state_unavailable_response() -> tuple[Any, int]:
+    return jsonify({
+        "status": "error",
+        "message": "Order safety state unavailable; no order was sent.",
+    }), 503
+
+
+def _check_order_with_state(
+    safety: Any,
+    order: Any,
+    portfolio_state: Any,
+    *,
+    adapter_id: str,
+    account_id: str,
+    admission: Any,
+    label: str,
+    margin_delta: float = 0.0,
+) -> tuple[Any, int] | None:
+    """Run the canonical SafetySystem and map its first refusal to HTTP 403."""
+    results = safety.check_order(
+        order,
+        selector=f"{adapter_id}:{account_id}",
+        positions=admission.positions,
+        used_margin=admission.used_margin + margin_delta,
+        total_balance=portfolio_state.total_balance,
+        daily_pnl=portfolio_state.daily_pnl,
+        starting_capital=portfolio_state.starting_capital,
+        ltp=portfolio_state.ltp_for(order),
+        net_delta=admission.net_delta,
+        net_vega=admission.net_vega,
+    )
+    blocked = next((result for result in results if not result.passed), None)
+    if blocked is None:
+        return None
+    logger.warning(
+        "%s blocked by safety layer %s | symbol=%s: %s",
+        label,
+        blocked.layer,
+        getattr(order, "symbol", "?"),
+        blocked.reason,
+    )
+    return jsonify({
+        "status": "error",
+        "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+    }), 403
+
+
+def _check_order_through_safety(
+    order: Any,
+    adapter_id: str,
+    *,
+    account_id: str,
+    margin_delta: float = 0.0,
+    label: str,
+) -> tuple[Any, int] | None:
+    """Gather canonical state and run complete L1-L4 admission for one order."""
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("%s safety runtime unavailable: %s", label, type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    try:
+        portfolio_state = _gather_safety_state(
+            adapter_id,
+            account_id=account_id,
+            orders=[order],
+        )
+        admission = portfolio_state.admission_for(0)
+    except Exception as exc:  # noqa: BLE001 - broker state must fail closed
+        logger.error("%s safety state unavailable | adapter=%s: %s", label, adapter_id, type(exc).__name__)
+        return _safety_state_unavailable_response()
+    return _check_order_with_state(
+        safety,
+        order,
+        portfolio_state,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        admission=admission,
+        label=label,
+        margin_delta=margin_delta,
+    )
+
+
+def _admit_modify_intent(
+    order_id: str,
+    changes: dict[str, Any],
+    adapter_id: str,
+    *,
+    account_id: str,
+    family: str = "regular",
+    lease: Any,
+) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
+    """Prove no-increase intent or run complete admission for a live modify."""
+    from .l2_state import classify_modify_intent  # noqa: PLC0415
+
+    try:
+        intent = _run_on_client_loop(
+            classify_modify_intent(
+                current_app.config,
+                adapter_id,
+                order_id,
+                changes,
+                account_id=account_id,
+                family=family,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - an unprovable modify must fail closed
+        logger.error(
+            "Modify intent unavailable | family=%s adapter=%s: %s",
+            family,
+            adapter_id,
+            type(exc).__name__,
+        )
+        return _safety_state_unavailable_response(), None, []
+    if not intent.risk_increasing:
+        return None, None, []
+    try:
+        safety = _require_live_safety()
+        portfolio_state = _gather_safety_state(
+            adapter_id,
+            account_id=account_id,
+            orders=[intent.proposed_order],
+            reservations=lease.reservations,
+            include_order_margin=True,
+        )
+        lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+        admission = portfolio_state.admission_for(0)
+    except Exception as exc:  # noqa: BLE001 - broker state must fail closed
+        logger.error(
+            "%s order modify safety state unavailable | adapter=%s: %s",
+            family.title(),
+            adapter_id,
+            type(exc).__name__,
+        )
+        return _safety_state_unavailable_response(), None, []
+    blocked = _check_order_with_state(
+        safety,
+        intent.proposed_order,
+        portfolio_state,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        admission=admission,
+        label=f"{family.title()} order modify",
+    )
+    return blocked, intent.proposed_order, admission.positions
+
+
+_CONVERSION_PRODUCT_ALIASES = {
+    "CNC": "CNC",
+    "D": "CNC",
+    "DELIVERY": "CNC",
+    "I": "MIS",
+    "INTRADAY": "MIS",
+    "MARGIN": "NRML",
+    "MIS": "MIS",
+    "NRML": "NRML",
+}
+
+
+def _conversion_product(value: Any) -> str:
+    product = _CONVERSION_PRODUCT_ALIASES.get(str(value or "").strip().upper())
+    if product is None:
+        raise ValueError("unsupported conversion product")
+    return product
+
+
+def _conversion_side(req: dict[str, Any]) -> str:
+    position_type = str(req.get("position_type") or "").strip().upper()
+    transaction_type = str(req.get("transaction_type") or req.get("action") or "").strip().upper()
+    from_position = {"LONG": "BUY", "SHORT": "SELL"}.get(position_type)
+    from_transaction = transaction_type if transaction_type in {"BUY", "SELL"} else None
+    if position_type and from_position is None:
+        raise ValueError("unsupported position type")
+    if transaction_type and from_transaction is None:
+        raise ValueError("unsupported transaction type")
+    if from_position and from_transaction and from_position != from_transaction:
+        raise ValueError("conflicting conversion side")
+    side = from_position or from_transaction
+    if side is None:
+        raise ValueError("conversion side is unavailable")
+    return side
+
+
+def _conversion_quantity(value: Any) -> int:
+    try:
+        quantity = float(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid conversion quantity") from exc
+    if not math.isfinite(quantity) or quantity <= 0 or not quantity.is_integer():
+        raise ValueError("invalid conversion quantity")
+    return int(quantity)
+
+
+def _normalised_position_key(position: Any) -> tuple[str, str, str]:
+    symbol = str(getattr(position, "symbol", "") or "").strip().upper()
+    exchange = str(getattr(position, "exchange", "") or "").strip().upper()
+    product = _conversion_product(getattr(position, "product", ""))
+    return symbol, exchange, product
+
+
+def _position_quantity_value(position: Any) -> float:
+    try:
+        quantity = float(str(getattr(position, "quantity", "")).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid authoritative position quantity") from exc
+    if not math.isfinite(quantity) or not quantity.is_integer():
+        raise ValueError("invalid authoritative position quantity")
+    return quantity
+
+
+def _project_conversion_positions(
+    positions: list[Any],
+    key: tuple[str, str, str],
+    quantity: int,
+    side: str,
+) -> list[Any]:
+    matched = [position for position in positions if _normalised_position_key(position) == key]
+    if not matched:
+        raise ValueError("conversion position is unavailable")
+    current_quantity = sum(_position_quantity_value(position) for position in matched)
+    signed_quantity = float(quantity if side == "BUY" else -quantity)
+    if current_quantity == 0 or math.copysign(1.0, current_quantity) != math.copysign(1.0, signed_quantity):
+        raise ValueError("conversion side does not match the open position")
+    if abs(signed_quantity) > abs(current_quantity):
+        raise ValueError("conversion quantity exceeds the open position")
+    residual = current_quantity - signed_quantity
+    projected = [position for position in positions if _normalised_position_key(position) != key]
+    if residual:
+        symbol, exchange, product = key
+        projected.append(
+            SimpleNamespace(
+                symbol=symbol,
+                exchange=exchange,
+                product=product,
+                quantity=str(int(residual)),
+            )
+        )
+    return projected
+
+
+def _admit_position_conversion(
+    req: dict[str, Any],
+    adapter_id: str,
+    *,
+    account_id: str,
+) -> tuple[Any, int] | None:
+    """Classify a conversion and admit every risk-increasing transition."""
+    from flinttrade_core.models import Order  # noqa: PLC0415
+
+    from .l2_state import (  # noqa: PLC0415
+        ProspectiveSafetyInputs,
+        gather_authoritative_positions,
+        gather_required_order_margin,
+    )
+
+    try:
+        symbol = str(req.get("symbol") or req.get("trading_symbol") or "").strip().upper()
+        exchange = str(req.get("exchange") or "").strip().upper()
+        from_product = _conversion_product(
+            req.get("from_product", req.get("from_product_type", req.get("old_product")))
+        )
+        to_product = _conversion_product(
+            req.get("to_product", req.get("to_product_type", req.get("new_product")))
+        )
+        quantity = _conversion_quantity(req.get("quantity", req.get("convert_qty")))
+        side = _conversion_side(req)
+        if not symbol or not exchange or from_product == to_product:
+            raise ValueError("incomplete or no-op conversion")
+        old_order = Order(
+            symbol=symbol,
+            exchange=exchange,
+            action=side,
+            product=from_product,
+            quantity=str(quantity),
+            pricetype="MARKET",
+        )
+        new_order = Order(
+            symbol=symbol,
+            exchange=exchange,
+            action=side,
+            product=to_product,
+            quantity=str(quantity),
+            pricetype="MARKET",
+        )
+    except Exception:
+        return jsonify({
+            "status": "error",
+            "message": "Position conversion intent could not be verified.",
+        }), 400
+
+    try:
+        authoritative_positions = _run_on_client_loop(
+            gather_authoritative_positions(
+                current_app.config,
+                adapter_id,
+                account_id=account_id,
+            )
+        )
+        key = (symbol, exchange, from_product)
+        _project_conversion_positions(
+            authoritative_positions,
+            key,
+            quantity,
+            side,
+        )
+        old_margin = _run_on_client_loop(
+            gather_required_order_margin(
+                current_app.config,
+                adapter_id,
+                old_order,
+                account_id=account_id,
+                allow_zero=True,
+            )
+        )
+        new_margin = _run_on_client_loop(
+            gather_required_order_margin(
+                current_app.config,
+                adapter_id,
+                new_order,
+                account_id=account_id,
+                allow_zero=True,
+            )
+        )
+    except ValueError:
+        return jsonify({
+            "status": "error",
+            "message": "Position conversion does not match an authoritative open position.",
+        }), 400
+    except Exception as exc:  # noqa: BLE001 - state and margin reads must fail closed
+        logger.error("Position conversion safety state unavailable | adapter=%s: %s", adapter_id, type(exc).__name__)
+        return _safety_state_unavailable_response()
+
+    proven_no_increase = (
+        from_product in {"CNC", "NRML"}
+        and to_product == "MIS"
+        and new_margin <= old_margin + 1e-9
+    )
+    if proven_no_increase:
+        return None
+    try:
+        portfolio_state = _gather_safety_state(adapter_id, account_id=account_id)
+        projected_positions = _project_conversion_positions(
+            portfolio_state.positions,
+            key,
+            quantity,
+            side,
+        )
+    except ValueError:
+        return jsonify({
+            "status": "error",
+            "message": "Position conversion does not match an authoritative open position.",
+        }), 400
+    except Exception as exc:  # noqa: BLE001 - complete safety state must fail closed
+        logger.error("Position conversion safety state unavailable | adapter=%s: %s", adapter_id, type(exc).__name__)
+        return _safety_state_unavailable_response()
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Position conversion safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    projected_margin = max(portfolio_state.used_margin + new_margin - old_margin, 0.0)
+    conversion_admission = ProspectiveSafetyInputs(
+        positions=projected_positions,
+        used_margin=projected_margin,
+        net_delta=portfolio_state.net_delta,
+        net_vega=portfolio_state.net_vega,
+    )
+    return _check_order_with_state(
+        safety,
+        new_order,
+        portfolio_state,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        admission=conversion_admission,
+        label="Position conversion",
+    )
+
+
+def _admit_and_route_live_order(
+    *,
+    safety: Any,
+    router: Any,
+    typed_order: Any,
+    request_ctx: Any,
+    adapter_id: str,
+    account_id: str,
+    ft_action: str,
+    body: dict[str, Any],
+    lease: Any = None,
+) -> tuple[bool, Any]:
+    """Atomically snapshot, check, gate, reserve, and dispatch one live order."""
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
+    from flinttrade_engine.safety import gate_order  # noqa: PLC0415
+    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
+
+    selector = f"{adapter_id}:{account_id}"
+    admission_scope = nullcontext(lease) if lease is not None else safety.order_admission(selector)
+    with admission_scope as active_lease:
+        if active_lease.selector != selector:
+            raise SafetyBypassError("order admission lease selector mismatch")
+        try:
+            portfolio_state = _gather_safety_state(
+                adapter_id,
+                account_id=account_id,
+                orders=[typed_order],
+                reservations=active_lease.reservations,
+                include_order_margin=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed without leaking broker details
+            logger.error(
+                "Live order rejected because portfolio safety state is unavailable | action=%s adapter=%s: %s",
+                ft_action,
+                adapter_id,
+                type(exc).__name__,
+            )
+            return False, _safety_state_unavailable_response()
+        active_lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+        admission = portfolio_state.admission_for(0)
+        try:
+            safety_results = safety.check_order(
+                typed_order,
+                selector=selector,
+                positions=admission.positions,
+                used_margin=admission.used_margin,
+                total_balance=portfolio_state.total_balance,
+                daily_pnl=portfolio_state.daily_pnl,
+                starting_capital=portfolio_state.starting_capital,
+                ltp=portfolio_state.ltp_for(typed_order),
+                net_delta=admission.net_delta,
+                net_vega=admission.net_vega,
+            )
+        except (ValueError, ValidationError) as exc:
+            logger.warning(
+                "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
+                ft_action,
+                adapter_id,
+                exc,
+            )
+            message = "Order validation failed"
+            raw_quantity = body.get("quantity")
+            if raw_quantity is not None:
+                try:
+                    if not float(raw_quantity).is_integer():
+                        message = "Invalid order quantity"
+                except (TypeError, ValueError):
+                    message = "Invalid order quantity"
+            return False, (jsonify({"status": "error", "message": message}), 400)
+
+        blocked = next((result for result in safety_results if not result.passed), None)
+        if blocked is not None:
+            logger.warning(
+                "Live order blocked by safety layer %s | action=%s adapter=%s symbol=%s: %s",
+                blocked.layer,
+                ft_action,
+                adapter_id,
+                body.get("symbol", "?"),
+                blocked.reason,
+            )
+            _desktop_notify(
+                f"Order blocked by safety [{blocked.layer}]",
+                f"{ft_action} {body.get('symbol', '?')}: {blocked.reason}",
+            )
+            return False, (
+                jsonify({
+                    "status": "error",
+                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                }),
+                403,
+            )
+
+        safety_ctx = gate_order(
+            typed_order,
+            request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
+        )
+        reservation = active_lease.reserve(typed_order, admission.positions)
+        result = _run_on_client_loop(
+            router.place_order(
+                request_ctx,
+                order=typed_order,
+                safety_ctx=safety_ctx,
+                hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
+            )
+        )
+        active_lease.acknowledge(reservation, result)
+        return True, result
 
 
 def _dispatch_live_order(
@@ -417,13 +953,7 @@ def _dispatch_live_order(
     from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
     from flinttrade_engine.algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
     from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
-    from flinttrade_engine.safety import (  # noqa: PLC0415
-        SafetyConfig,
-        SafetySystem,
-        gate_order,
-    )
     from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
-    from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
     account_id = account_id or str(body.get("account_id") or "default")
 
@@ -449,32 +979,17 @@ def _dispatch_live_order(
         selector=f"{adapter_id}:{account_id}",
     )
 
-    # --- 5-layer SafetySystem (L1 order, L2 positions, L3 greeks, L4 P&L, L5 kill) ---
-    # Gather live position + margin state so L2 enforces max-positions and
-    # margin% against REAL cumulative exposure (was always empty/zero → L2
-    # was a no-op). Best-effort: a fetch hiccup yields empty state (L2 enforces
-    # nothing this order) rather than blocking — availability is never degraded
-    # by a state read; L1/L4/L5 still apply. (L3 greeks + L4 daily-P&L are not
-    # fed from the hot path: greeks need option-chain data the bridge lacks,
-    # and L4 latches its kill switch, so a noisy broker PNL must not drive it —
-    # tracked in PLAN §3b.)
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
+        logger.error("Live order rejected because safety runtime is unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+
     try:
         typed_order = _body_to_order(body, variety=variety)
-        # check_order coerces quantity via int(...); a non-integer quantity must
-        # surface as a clean 400, not an uncaught ValueError -> 500.
-        safety_results = safety.check_order(
-            typed_order,
-            positions=l2_positions,
-            used_margin=l2_used_margin,
-            total_balance=l2_total_balance,
-        )
     except ValueError as exc:
         logger.warning(
-            "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
+            "Live order rejected by order-model validation | action=%s adapter=%s: %s",
             ft_action, adapter_id, exc,
         )
         message = "Order validation failed"
@@ -488,47 +1003,27 @@ def _dispatch_live_order(
         return jsonify({"status": "error", "message": message}), 400
     except ValidationError as exc:
         logger.warning(
-            "Live order rejected by order-model/safety validation | action=%s adapter=%s: %s",
+            "Live order rejected by order-model validation | action=%s adapter=%s: %s",
             ft_action, adapter_id, exc,
         )
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
 
-    blocked = next((r for r in safety_results if not r.passed), None)
-    if blocked is not None:
-        logger.warning(
-            "Live order blocked by safety layer %s | action=%s adapter=%s symbol=%s: %s",
-            blocked.layer, ft_action, adapter_id, body.get("symbol", "?"), blocked.reason,
-        )
-        # Native desktop notification (best-effort, desktop-shell only): a safety
-        # block is exactly the kind of event the operator must see even with the
-        # window hidden while the agent runs in the background.
-        _desktop_notify(
-            f"Order blocked by safety [{blocked.layer}]",
-            f"{ft_action} {body.get('symbol', '?')}: {blocked.reason}",
-        )
-        return jsonify({
-            "status": "error",
-            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-        }), 403
-
-    # --- gate + ACL + one-shot dispatch through the BrokerRouter ---
-    # Dispatch the TYPED Order (not the raw dict): the broker adapters and the
-    # OpenAlgoClient read typed attributes (order.symbol, order.action.value, …),
-    # so a dict would AttributeError at the broker boundary. gate_order mints and
-    # the router re-verifies over the SAME typed_order object, keeping the
-    # order-binding fingerprint consistent end-to-end.
     _t0 = time.perf_counter()
     safe_account = account_ref(account_id)
     try:
-        safety_ctx = gate_order(typed_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
-        result = _run_on_client_loop(
-            router.place_order(
-                request_ctx,
-                order=typed_order,
-                safety_ctx=safety_ctx,
-                hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
-            )
+        admitted, outcome = _admit_and_route_live_order(
+            safety=safety,
+            router=router,
+            typed_order=typed_order,
+            request_ctx=request_ctx,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            ft_action=ft_action,
+            body=body,
         )
+        if not admitted:
+            return outcome
+        result = outcome
         # Feed the latency monitor (audit H5) — without this producer the order
         # latency stats were empty forever. Best-effort: never let monitoring
         # affect the order result.
@@ -611,7 +1106,6 @@ def _dispatch_live_order(
         _record_trade_journal(typed_order, str(result))
     except Exception:  # pragma: no cover — journalling must never break orders
         logger.debug("trade journal stamp failed for live order", exc_info=True)
-
     logger.info(
         "Live order dispatched | action=%s adapter=%s account=%s symbol=%s",
         ft_action, adapter_id, safe_account, body.get("symbol", "?"),
@@ -722,6 +1216,10 @@ def _gated_write_dispatch(
     dispatch: Callable[[Any, Any, Any], Any],
     audit_event: str,
     fail_message: str,
+    admission_lease: Any = None,
+    exposure_order: Any = None,
+    exposure_positions: list[Any] | tuple[Any, ...] = (),
+    reservation_order_id: str = "",
 ) -> tuple[Any, int]:
     """Shared gate -> ACL -> one-shot dispatch + fail-closed mapping for modify/cancel.
 
@@ -760,7 +1258,15 @@ def _gated_write_dispatch(
 
     try:
         safety_ctx = gate_order(canonical_order, request_ctx, adapter_id=adapter_id, account_id=account_id)
-        _run_on_client_loop(dispatch(router, request_ctx, safety_ctx))
+        reservation = None
+        if exposure_order is not None:
+            if admission_lease is None:
+                raise SafetyBypassError("risk-increasing broker write lacks an order admission lease")
+            reservation = admission_lease.reserve(exposure_order, exposure_positions)
+        result = _run_on_client_loop(dispatch(router, request_ctx, safety_ctx))
+        if reservation is not None:
+            acknowledgement = {"orderid": reservation_order_id} if reservation_order_id else result
+            admission_lease.acknowledge(reservation, acknowledgement)
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | order=%s: %s", op, safe_order, exc)
         return jsonify({"status": "error", "message": "Order refused"}), 403
@@ -825,6 +1331,24 @@ def _modify_changes(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _requested_modify_fields(body: Mapping[str, Any]) -> list[str]:
+    """Preserve which full-replacement fields came from the operator request."""
+    aliases = {
+        "symbol": ("symbol",),
+        "exchange": ("exchange",),
+        "action": ("action",),
+        "product": ("product",),
+        "quantity": ("quantity",),
+        "price": ("price",),
+        "price_type": ("pricetype", "order_type"),
+    }
+    return sorted(
+        field
+        for field, request_keys in aliases.items()
+        if any(request_key in body for request_key in request_keys)
+    )
+
+
 def _dispatch_live_modify(
     body: dict[str, Any],
     payload: dict[str, Any],
@@ -849,7 +1373,9 @@ def _dispatch_live_modify(
         return jsonify({"status": "error", "message": "Modify requires an 'orderid'"}), 400
     safe_order = log_ref(order_id, kind="order")
 
-    blocked = _live_kill_switch_block()
+    blocked, unavailable = _live_kill_switch_block()
+    if unavailable is not None:
+        return unavailable
     if blocked is not None:
         logger.warning("Live modify blocked by kill switch | order=%s: %s", safe_order, blocked.reason)
         return jsonify({
@@ -864,21 +1390,46 @@ def _dispatch_live_modify(
         logger.warning("Live modify rejected by order-model validation | order=%s: %s", safe_order, exc)
         return jsonify({"status": "error", "message": "Modify validation failed"}), 400
 
-    canonical = {"_op": "modify", "order_id": order_id, **changes}
-    hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
-    return _gated_write_dispatch(
-        "modify",
-        canonical,
-        payload,
-        adapter_id=adapter_id,
-        account_id=account_id,
-        order_id=order_id,
-        dispatch=lambda router, ctx, sctx: router.modify_order(
-            ctx, order=canonical, order_id=order_id, changes=changes, safety_ctx=sctx, hint=hint
-        ),
-        audit_event="ORDER_MODIFIED",
-        fail_message="Order modify failed",
-    )
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Live modify safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
+        admission_block, exposure_order, exposure_positions = _admit_modify_intent(
+            order_id,
+            changes,
+            adapter_id,
+            account_id=account_id,
+            lease=lease,
+        )
+        if admission_block is not None:
+            return admission_block
+
+        canonical = {
+            "_op": "modify",
+            "order_id": order_id,
+            "_requested_change_fields": _requested_modify_fields(body),
+            **changes,
+        }
+        hint = RoutingHint(adapter_id=adapter_id, account_id=account_id)
+        return _gated_write_dispatch(
+            "modify",
+            canonical,
+            payload,
+            adapter_id=adapter_id,
+            account_id=account_id,
+            order_id=order_id,
+            dispatch=lambda router, ctx, sctx: router.modify_order(
+                ctx, order=canonical, order_id=order_id, changes=changes, safety_ctx=sctx, hint=hint
+            ),
+            audit_event="ORDER_MODIFIED",
+            fail_message="Order modify failed",
+            admission_lease=lease,
+            exposure_order=exposure_order,
+            exposure_positions=exposure_positions,
+            reservation_order_id=order_id,
+        )
 
 
 def _dispatch_live_cancel(
@@ -890,9 +1441,10 @@ def _dispatch_live_cancel(
 ) -> tuple[Any, int]:
     """Gate a live order CANCEL through the BrokerRouter (one-shot gate + ACL).
 
-    Cancel reduces exposure, so it is intentionally NOT blocked by the kill
-    switch — a halted account must still be able to cancel a working order. It is
-    gated by the one-shot SafetyContext + per-account ACL.
+    A cancellation can also remove a protective exit, so ordinary cancel calls
+    are blocked once L5 is latched. Operators retry the selector-bound emergency
+    policy instead; that path carries signed emergency intent through the same
+    one-shot SafetyContext + per-account ACL.
 
     Optional ``variety`` / ``amo`` / ``trading_symbol`` body fields (Kotak Neo
     bracket/cover/AMO exits) and Groww-only ``segment`` (regular order cancel)
@@ -907,6 +1459,14 @@ def _dispatch_live_cancel(
     order_id = str(body.get("orderid") or "").strip()
     if not order_id:
         return jsonify({"status": "error", "message": "Cancel requires an 'orderid'"}), 400
+    blocked, unavailable = _live_kill_switch_block()
+    if unavailable is not None:
+        return unavailable
+    if blocked is not None:
+        return jsonify({
+            "status": "error",
+            "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+        }), 403
 
     extras: dict[str, Any] = {}
     if body.get("variety") is not None:
@@ -1012,10 +1572,38 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
                 "message": "Practice trading engine not available",
             }), 500
 
+        practice_order_type = str(
+            body.get("order_type") or body.get("pricetype") or "MARKET"
+        ).strip().upper()
+        if (
+            ft_action in {"place", "place-smart", "open-position", "close-position", "modify"}
+            and practice_order_type not in {"MARKET"}
+            and current_app.config.get("TICK_RECORDER") is None
+        ):
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "Practice LIMIT and stop orders require tick capture to be running"
+                ),
+            }), 503
+
         # Only placeorder-style actions are meaningful in sandbox;
         # modify/cancel/close/open are also supported for UI parity.
         try:
             result = _sandbox_dispatch(sandbox, ft_action, body)
+            if (
+                ft_action in {"place", "place-smart", "open-position", "close-position"}
+                and not _subscribe_pending_practice_order(result, body)
+            ):
+                order_id = str(result.get("order_id") or "")
+                if order_id:
+                    sandbox.cancel_order(order_id)
+                return jsonify({
+                    "status": "error",
+                    "message": (
+                        "Practice order was cancelled because its tick subscription failed"
+                    ),
+                }), 503
         except Exception as exc:
             logger.exception(
                 "SandboxEngine error for action=%s symbol=%s: %s",
@@ -1034,6 +1622,11 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
             body.get("quantity", "?"),
             result.get("status", "?"),
         )
+        if str(result.get("status", "")).upper() == "REJECTED":
+            return jsonify({
+                "status": "error",
+                "message": str(result.get("message") or "Practice order rejected"),
+            }), 400
         return jsonify(result), 200
 
     # ------------------------------------------------------------------
@@ -1041,7 +1634,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     #
     # ``place`` runs the full SafetySystem (L1-L5) + one-shot HMAC gate +
     # per-account ACL via the BrokerRouter. ``modify`` and ``cancel`` run the
-    # same one-shot gate + ACL (modify also behind the L5 kill switch), and
+    # same one-shot gate + ACL and remain behind the L5 kill switch, and
     # ``cancel-all`` for an explicitly-named native broker routes through the
     # gated ``cancel_all_orders`` verb.
     #
@@ -1075,11 +1668,12 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         return _dispatch_live_modify(body, live_payload, adapter_id=adapter_id, account_id=account_id)
     if ft_action == "cancel":
         return _dispatch_live_cancel(body, live_payload, adapter_id=adapter_id, account_id=account_id)
-    if ft_action == "cancel-all" and adapter_id != "openalgo":
-        # Native adapters sweep through the gated cancel_all_orders verb
+    if ft_action == "cancel-all":
+        # Every adapter, including the OpenAlgo bridge, sweeps through the
+        # gated cancel_all_orders verb
         # (one-shot SafetyContext + ACL), forwarding only tag/segment. A
         # STRATEGY-scoped cancel-all cannot be honoured — the native verb has no
-        # per-strategy narrowing — so silently forwarding it would ESCALATE a
+        # per-request strategy narrowing — so silently forwarding it would ESCALATE a
         # scoped cancel into a full-account sweep, wiping manual orders and other
         # strategies' protective resting exits. Fail closed on any strategy scope
         # (restoring the pre-consolidation behaviour, where such requests hit the
@@ -1126,8 +1720,8 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
     """Route a practice order to the appropriate SandboxEngine method.
 
     The SandboxEngine's primary method is ``place_order`` which handles both
-    BUY and SELL.  Modify/cancel operations return simulated responses because
-    the sandbox executes instantly at fill — there is no open order to cancel.
+    BUY and SELL. Pending LIMIT/SL orders use the engine's real modify and
+    cancel lifecycle rather than simulated acknowledgements.
 
     Args:
         sandbox: SandboxEngine instance from ``app.config["DATA_SANDBOX_ENGINE"]``.
@@ -1141,6 +1735,9 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
     exchange: str = str(body.get("exchange", "")).strip().upper()
     action: str = str(body.get("action", "BUY")).strip().upper()
     product: str = str(body.get("product", "MIS")).strip().upper()
+    order_type = str(body.get("order_type") or body.get("pricetype") or "MARKET").strip().upper()
+    trigger_price_raw = body.get("trigger_price", 0.0)
+    strategy = str(body.get("strategy") or "").strip()
 
     try:
         quantity = int(body.get("quantity", 0))
@@ -1151,6 +1748,10 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
         price = float(body.get("price", 0.0))
     except (TypeError, ValueError):
         price = 0.0
+    try:
+        trigger_price = float(trigger_price_raw)
+    except (TypeError, ValueError):
+        trigger_price = 0.0
 
     if ft_action in ("place", "place-smart", "open-position"):
         return sandbox.place_order(
@@ -1160,6 +1761,9 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
             quantity=quantity,
             price=price,
             product=product,
+            order_type=order_type,
+            trigger_price=trigger_price,
+            strategy=strategy,
         )
 
     if ft_action == "close-position":
@@ -1188,19 +1792,29 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
             quantity=abs(net_qty),
             price=price,
             product=product,
+            order_type=order_type,
+            trigger_price=trigger_price,
+            strategy=strategy,
         )
 
-    if ft_action in ("cancel", "cancel-all", "modify"):
-        # Sandbox fills instantly — no pending orders to cancel or modify.
-        # Return a simulated success so the UI does not display an error.
-        return {
-            "order_id": str(body.get("order_id", "")),
-            "status": "success",
-            "message": (
-                f"Practice mode: {ft_action} acknowledged "
-                "(sandbox orders are filled immediately)"
-            ),
-        }
+    order_id = str(body.get("order_id") or body.get("orderid") or "").strip()
+    if ft_action == "cancel":
+        return sandbox.cancel_order(order_id)
+
+    if ft_action == "cancel-all":
+        return sandbox.cancel_pending_orders()
+
+    if ft_action == "modify":
+        changes: dict[str, Any] = {}
+        if "quantity" in body:
+            changes["quantity"] = quantity
+        if "price" in body:
+            changes["price"] = price
+        if "trigger_price" in body:
+            changes["trigger_price"] = trigger_price
+        if "order_type" in body or "pricetype" in body:
+            changes["order_type"] = order_type
+        return sandbox.modify_order(order_id, **changes)
 
     if ft_action in ("gtt-place", "gtt-modify", "gtt-cancel"):
         # GTT triggers are inherently multi-day live broker constructs.
@@ -1221,6 +1835,36 @@ def _sandbox_dispatch(sandbox: Any, ft_action: str, body: dict[str, Any]) -> dic
         "status": "REJECTED",
         "message": f"Unsupported action in practice mode: {ft_action}",
     }
+
+
+def _subscribe_pending_practice_order(
+    result: dict[str, Any],
+    body: dict[str, Any],
+) -> bool:
+    """Subscribe one resting Practice order, returning whether it is executable."""
+    if str(result.get("status", "")).upper() != "PENDING":
+        return True
+    recorder = current_app.config.get("TICK_RECORDER")
+    if recorder is None:
+        return False
+    exchange = str(body.get("exchange") or "").strip().upper()
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not exchange or not symbol:
+        return False
+    try:
+        recorder.add_symbols([{"exchange": exchange, "symbol": symbol}], mode="ltp")
+        request_reconnect = getattr(recorder, "request_reconnect", None)
+        if callable(request_reconnect):
+            request_reconnect()
+        return True
+    except Exception as exc:  # noqa: BLE001 - caller cancels the stranded order
+        logger.warning(
+            "Practice tick subscription failed for %s:%s (%s)",
+            exchange,
+            symbol,
+            type(exc).__name__,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1642,7 +2286,11 @@ def _gated_verb_write(
     audit_event: str,
     fail_message: str,
     ref: str = "",
-    kill_switch_gated: bool = False,
+    kill_switch_gated: bool = True,
+    admission_lease: Any = None,
+    exposure_orders: list[Any] | tuple[Any, ...] = (),
+    exposure_positions: list[list[Any]] | tuple[list[Any], ...] = (),
+    reservation_id_factory: Callable[[Any, int], str] | None = None,
 ) -> tuple[Any, int]:
     """Mint + dispatch one extended gated broker write (contract §8.1).
 
@@ -1662,10 +2310,9 @@ def _gated_verb_write(
         audit_event: Audit-log event type stamped on success (best-effort).
         fail_message: Operator-facing message for an unexpected dispatch fault.
         ref: Order/alert id echoed back as ``orderid`` (and logged) when set.
-        kill_switch_gated: ``True`` for risk-increasing writes (modify/place
-            shapes) — blocked while the L5 kill switch is latched. Exposure-
-            reducing writes (cancels, exit-all) keep ``False`` so a halted
-            account can still flatten itself.
+        kill_switch_gated: Keep ``True`` for every ordinary operator write. A
+            cancellation can remove a protective exit; only the dedicated
+            emergency dispatcher carries intent that may bypass L5.
 
     Returns:
         A ``(flask.Response, http_status_code)`` tuple.
@@ -1684,7 +2331,9 @@ def _gated_verb_write(
 
     safe_ref = log_ref(ref or "none", kind="ref")
     if kill_switch_gated:
-        blocked = _live_kill_switch_block()
+        blocked, unavailable = _live_kill_switch_block()
+        if unavailable is not None:
+            return unavailable
         if blocked is not None:
             logger.warning("Live %s blocked by kill switch | ref=%s: %s", verb, safe_ref, blocked.reason)
             return jsonify({
@@ -1715,6 +2364,14 @@ def _gated_verb_write(
     canonical: dict[str, Any] = {"_op": verb, **fields}
     try:
         safety_ctx = gate_broker_write(verb, canonical, request_ctx, adapter_id, account_id=account_id)
+        reservations = []
+        if exposure_orders:
+            if admission_lease is None or len(exposure_orders) != len(exposure_positions):
+                raise SafetyBypassError("risk-increasing broker write lacks complete order admission state")
+            reservations = [
+                admission_lease.reserve(order, positions)
+                for order, positions in zip(exposure_orders, exposure_positions, strict=True)
+            ]
         result = _run_on_client_loop(
             router.execute_gated(
                 request_ctx,
@@ -1724,6 +2381,9 @@ def _gated_verb_write(
                 hint=RoutingHint(adapter_id=adapter_id, account_id=account_id),
             )
         )
+        for index, reservation in enumerate(reservations):
+            broker_order_id = reservation_id_factory(result, index) if reservation_id_factory else ""
+            admission_lease.acknowledge(reservation, {"orderid": broker_order_id})
     except SafetyBypassError as exc:
         logger.warning("Live %s refused by safety gate | ref=%s: %s", verb, safe_ref, exc)
         return jsonify({"status": "error", "message": "Request refused"}), 403
@@ -1912,15 +2572,21 @@ def _trigger_legs_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], list[
     return condition, legs
 
 
-def _check_legs_through_safety(legs: list[Any], adapter_id: str, *, account_id: str = "default") -> tuple[Any, int] | None:
+def _check_legs_through_safety(
+    legs: list[Any],
+    adapter_id: str,
+    *,
+    account_id: str = "default",
+    lease: Any = None,
+) -> tuple[tuple[Any, int] | None, list[list[Any]]]:
     """Run the full SafetySystem (L1–L5) over each typed placement leg.
 
     Conditional-trigger PLACEMENT and MODIFY arm real orders the instant the
     condition fires, so — like :func:`multi_order_place` — every leg MUST clear
     the risk pipeline before the gate is minted (the route-level
     ``kill_switch_gated`` flag only runs L5). Without this, an over-limit leg
-    (e.g. NFO qty 9999999) bypassed L1–L4. L2 reads live exposure best-effort,
-    exactly as the place path does.
+    (e.g. NFO qty 9999999) bypassed L1–L4. L2/L4 use the same complete,
+    selector-scoped snapshot as the place path; unavailable local P&L fails closed.
 
     Args:
         legs: Typed :class:`~flinttrade_core.models.Order` legs (already coerced
@@ -1933,18 +2599,50 @@ def _check_legs_through_safety(legs: list[Any], adapter_id: str, *, account_id: 
         http_status)`` 403 carrying the first blocking layer's reason — ready to
         be returned from the route handler before any gate is minted.
     """
-    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
-
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
-    for leg in legs:
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
+        logger.error("Conditional-trigger safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response(), []
+    if lease is None:
+        with safety.order_admission(f"{adapter_id}:{account_id}") as active_lease:
+            return _check_legs_through_safety(
+                legs,
+                adapter_id,
+                account_id=account_id,
+                lease=active_lease,
+            )
+    try:
+        portfolio_state = _gather_safety_state(
+            adapter_id,
+            account_id=account_id,
+            orders=legs,
+            reservations=lease.reservations,
+            include_order_margin=True,
+        )
+        lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+    except Exception as exc:  # noqa: BLE001 - fail closed without leaking broker details
+        logger.error(
+            "Conditional-trigger safety state unavailable | adapter=%s: %s",
+            adapter_id,
+            type(exc).__name__,
+        )
+        return _safety_state_unavailable_response(), []
+    exposure_positions: list[list[Any]] = []
+    for index, leg in enumerate(legs):
+        admission = portfolio_state.admission_for(index)
+        exposure_positions.append(admission.positions)
         results = safety.check_order(
             leg,
-            positions=l2_positions,
-            used_margin=l2_used_margin,
-            total_balance=l2_total_balance,
+            selector=f"{adapter_id}:{account_id}",
+            positions=admission.positions,
+            used_margin=admission.used_margin,
+            total_balance=portfolio_state.total_balance,
+            daily_pnl=portfolio_state.daily_pnl,
+            starting_capital=portfolio_state.starting_capital,
+            ltp=portfolio_state.ltp_for(leg),
+            net_delta=admission.net_delta,
+            net_vega=admission.net_vega,
         )
         blocked = next((r for r in results if not r.passed), None)
         if blocked is not None:
@@ -1952,11 +2650,14 @@ def _check_legs_through_safety(legs: list[Any], adapter_id: str, *, account_id: 
                 "Conditional-trigger leg blocked by safety layer %s | symbol=%s: %s",
                 blocked.layer, getattr(leg, "symbol", "?"), blocked.reason,
             )
-            return jsonify({
-                "status": "error",
-                "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-            }), 403
-    return None
+            return (
+                jsonify({
+                    "status": "error",
+                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
+                }),
+                403,
+            ), []
+    return None, exposure_positions
 
 
 # --- Forever (GTT) orders — Dhan-native; placed via the gated trio path ----
@@ -2006,12 +2707,32 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
     adapter_id, account_id = _gated_target(body)
-    return _gated_verb_write(
-        "modify_forever", {"order_id": order_id, "changes": changes}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="FOREVER_MODIFIED", fail_message="Forever order modify failed",
-        ref=order_id, kill_switch_gated=True,
-    )
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Forever modify safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
+        admission_block, exposure_order, positions = _admit_modify_intent(
+            order_id,
+            changes,
+            adapter_id,
+            account_id=account_id,
+            family="forever",
+            lease=lease,
+        )
+        if admission_block is not None:
+            return admission_block
+        return _gated_verb_write(
+            "modify_forever", {"order_id": order_id, "changes": changes}, payload,
+            adapter_id=adapter_id, account_id=account_id,
+            audit_event="FOREVER_MODIFIED", fail_message="Forever order modify failed",
+            ref=order_id, kill_switch_gated=True,
+            admission_lease=lease,
+            exposure_orders=([exposure_order] if exposure_order is not None else []),
+            exposure_positions=([positions] if exposure_order is not None else []),
+            reservation_id_factory=lambda _result, _index: order_id,
+        )
 
 
 @orders_bp.route("/forever/<order_id>", methods=["DELETE"])
@@ -2020,8 +2741,8 @@ def forever_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a resting forever (GTT) order — gated ``cancel_forever`` verb.
 
     Target via ``?broker=`` / ``?account_id=`` query parameters (a JSON body
-    with the same fields also works). Cancels reduce exposure, so the kill
-    switch does not block them.
+    with the same fields also works). L5 blocks ordinary cancellation because
+    the resting order may be a protective exit; retry the emergency sweep.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
@@ -2080,12 +2801,32 @@ def super_order_modify(order_id: str) -> tuple[Any, int]:
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
     adapter_id, account_id = _gated_target(body)
-    return _gated_verb_write(
-        "modify_super_order", {"order_id": order_id, "changes": changes}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="SUPER_ORDER_MODIFIED", fail_message="Super order modify failed",
-        ref=order_id, kill_switch_gated=True,
-    )
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Super-order modify safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
+        admission_block, exposure_order, positions = _admit_modify_intent(
+            order_id,
+            changes,
+            adapter_id,
+            account_id=account_id,
+            family="super",
+            lease=lease,
+        )
+        if admission_block is not None:
+            return admission_block
+        return _gated_verb_write(
+            "modify_super_order", {"order_id": order_id, "changes": changes}, payload,
+            adapter_id=adapter_id, account_id=account_id,
+            audit_event="SUPER_ORDER_MODIFIED", fail_message="Super order modify failed",
+            ref=order_id, kill_switch_gated=True,
+            admission_lease=lease,
+            exposure_orders=([exposure_order] if exposure_order is not None else []),
+            exposure_positions=([positions] if exposure_order is not None else []),
+            reservation_id_factory=lambda _result, _index: order_id,
+        )
 
 
 @orders_bp.route("/super/<order_id>", methods=["DELETE"])
@@ -2141,17 +2882,30 @@ def trigger_place() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
     adapter_id, account_id = _gated_target(body)
-    # Run the FULL SafetySystem (L1–L5) over every leg — a placement path must
-    # never skip the risk layers (the kill-switch flag below only runs L5).
-    blocked = _check_legs_through_safety(legs, adapter_id, account_id=account_id)
-    if blocked is not None:
-        return blocked
-    return _gated_verb_write(
-        "place_conditional_trigger", {"condition": condition, "orders": legs}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="TRIGGER_PLACED", fail_message="Conditional trigger placement failed",
-        kill_switch_gated=True,
-    )
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Conditional-trigger safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
+        blocked, exposure_positions = _check_legs_through_safety(
+            legs,
+            adapter_id,
+            account_id=account_id,
+            lease=lease,
+        )
+        if blocked is not None:
+            return blocked
+        return _gated_verb_write(
+            "place_conditional_trigger", {"condition": condition, "orders": legs}, payload,
+            adapter_id=adapter_id, account_id=account_id,
+            audit_event="TRIGGER_PLACED", fail_message="Conditional trigger placement failed",
+            kill_switch_gated=True,
+            admission_lease=lease,
+            exposure_orders=legs,
+            exposure_positions=exposure_positions,
+            reservation_id_factory=lambda result, index: f"{result}:{index}",
+        )
 
 
 @orders_bp.route("/triggers", methods=["GET"])
@@ -2181,19 +2935,32 @@ def trigger_modify(alert_id: str) -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "Trigger validation failed"}), 400
     adapter_id, account_id = _gated_target(body)
-    # A modify replaces the armed legs, so re-run the FULL SafetySystem (L1–L5)
-    # over the new legs before re-gating — same brake as placement.
-    blocked = _check_legs_through_safety(legs, adapter_id, account_id=account_id)
-    if blocked is not None:
-        return blocked
-    return _gated_verb_write(
-        "modify_conditional_trigger",
-        {"alert_id": alert_id, "condition": condition, "orders": legs},
-        payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="TRIGGER_MODIFIED", fail_message="Conditional trigger modify failed",
-        ref=alert_id, kill_switch_gated=True,
-    )
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals
+        logger.error("Conditional-trigger modify safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
+    with safety.order_admission(f"{adapter_id}:{account_id}") as lease:
+        blocked, exposure_positions = _check_legs_through_safety(
+            legs,
+            adapter_id,
+            account_id=account_id,
+            lease=lease,
+        )
+        if blocked is not None:
+            return blocked
+        return _gated_verb_write(
+            "modify_conditional_trigger",
+            {"alert_id": alert_id, "condition": condition, "orders": legs},
+            payload,
+            adapter_id=adapter_id, account_id=account_id,
+            audit_event="TRIGGER_MODIFIED", fail_message="Conditional trigger modify failed",
+            ref=alert_id, kill_switch_gated=True,
+            admission_lease=lease,
+            exposure_orders=legs,
+            exposure_positions=exposure_positions,
+            reservation_id_factory=lambda _result, index: f"{alert_id}:{index}",
+        )
 
 
 @orders_bp.route("/triggers/<alert_id>", methods=["DELETE"])
@@ -2219,17 +2986,19 @@ def trigger_cancel(alert_id: str) -> tuple[Any, int]:
 @orders_bp.route("/multi", methods=["POST"])
 @rate_limit("orders", user_rate=10, global_rate=100)
 def multi_order_place() -> tuple[Any, int]:
-    """Place a batch of orders — gated ``place_multi_order`` verb (Upstox-native).
+    """Place multiple orders sequentially through individually gated writes.
 
     Request JSON: ``orders`` (non-empty list of order objects), optional
     ``broker`` / ``account_id``. EVERY leg is coerced to a typed ``Order`` and
-    run through the full SafetySystem (L1–L5) before the batch is gated — a
-    placement path must never skip the risk layers. The signed payload carries
-    the typed legs, so post-mint tampering with any leg invalidates the gate.
+    admitted through the full SafetySystem (L1-L5) against the state and
+    unresolved exposure left by earlier legs. Processing stops at the first
+    refusal or broker failure; ``placed_order_ids`` reports any prior success.
     """
     from pydantic import ValidationError  # noqa: PLC0415
 
-    from flinttrade_engine.safety import SafetyConfig, SafetySystem  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError  # noqa: PLC0415
+    from flinttrade_engine.request_context import RequestContext  # noqa: PLC0415
+    from flinttrade_gateway.exceptions import BrokerNotFoundError  # noqa: PLC0415
 
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
@@ -2240,41 +3009,73 @@ def multi_order_place() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "'orders' must be a non-empty list of order objects"}), 400
     adapter_id, account_id = _gated_target(body)
 
-    safety = current_app.config.get("SAFETY")
-    if safety is None:
-        safety = SafetySystem(SafetyConfig())
-    l2_positions, l2_used_margin, l2_total_balance = _gather_l2_state(adapter_id, account_id=account_id)
+    try:
+        safety = _require_live_safety()
+    except Exception as exc:  # noqa: BLE001 - readiness failures are an admission refusal
+        logger.error("Multi-order safety runtime unavailable: %s", type(exc).__name__)
+        return _safety_runtime_unavailable_response()
     legs: list[Any] = []
     try:
         for index, leg in enumerate(raw_orders):
             if not isinstance(leg, dict):
                 raise ValueError(f"orders[{index}] must be an object")
-            typed = _body_to_order(leg)
-            results = safety.check_order(
-                typed,
-                positions=l2_positions,
-                used_margin=l2_used_margin,
-                total_balance=l2_total_balance,
-            )
-            blocked = next((r for r in results if not r.passed), None)
-            if blocked is not None:
-                logger.warning(
-                    "Multi-order leg blocked by safety layer %s | symbol=%s: %s",
-                    blocked.layer, typed.symbol, blocked.reason,
-                )
-                return jsonify({
-                    "status": "error",
-                    "message": f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}",
-                }), 403
-            legs.append(typed)
+            legs.append(_body_to_order(leg))
     except (ValueError, ValidationError):
         return jsonify({"status": "error", "message": "Order validation failed"}), 400
-
-    return _gated_verb_write(
-        "place_multi_order", {"orders": legs}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="MULTI_ORDER_PLACED", fail_message="Multi-order placement failed",
+    router = current_app.config.get("BROKER_ROUTER")
+    if router is None:
+        return jsonify({"status": "error", "message": "Order routing unavailable"}), 503
+    request_ctx = RequestContext(
+        jti=str(payload.get("jti") or ""),
+        actor_type="human",
+        actor_id=str(payload.get("sub") or payload.get("actor_id") or "unknown"),
+        mode=_MODE_LIVE,
+        selector=f"{adapter_id}:{account_id}",
     )
+    order_ids: list[str] = []
+    for index, (typed, raw_leg) in enumerate(zip(legs, raw_orders, strict=True)):
+        try:
+            admitted, outcome = _admit_and_route_live_order(
+                safety=safety,
+                router=router,
+                typed_order=typed,
+                request_ctx=request_ctx,
+                adapter_id=adapter_id,
+                account_id=account_id,
+                ft_action=f"multi-order-{index}",
+                body=raw_leg,
+            )
+        except SafetyBypassError:
+            return jsonify({
+                "status": "error",
+                "message": "Multi-order placement was refused; no later leg was sent.",
+                "placed_order_ids": order_ids,
+            }), 403
+        except (BrokerNotFoundError, KeyError):
+            return jsonify({
+                "status": "error",
+                "message": "Broker is not connected; no later leg was sent.",
+                "placed_order_ids": order_ids,
+            }), 503
+        except (NotImplementedError, UnsupportedCapabilityError):
+            return jsonify({
+                "status": "error",
+                "message": "Multi-order placement is not available for this broker; no later leg was sent.",
+                "placed_order_ids": order_ids,
+            }), 501
+        except Exception:
+            logger.exception("Sequential multi-order leg failed | adapter=%s index=%s", adapter_id, index)
+            return jsonify({
+                "status": "error",
+                "message": "Multi-order placement failed; no later leg was sent.",
+                "placed_order_ids": order_ids,
+            }), 502
+        if not admitted:
+            return outcome
+        order_ids.append(str(outcome))
+
+    _audit_write_event("MULTI_ORDER_PLACED", adapter_id, account_id, request_ctx.actor_id, "")
+    return jsonify({"status": "success", "data": {"order_ids": order_ids}}), 200
 
 
 @orders_bp.route("/smart/<order_id>", methods=["DELETE"])
@@ -2283,7 +3084,8 @@ def smart_order_cancel(order_id: str) -> tuple[Any, int]:
     """Cancel a smart order — gated ``cancel_smart_order`` verb (IndMoney-native).
 
     Optional ``?segment=`` narrows the cancel (e.g. ``DERIVATIVE``); it travels
-    inside the signed payload. Cancels reduce exposure → not kill-switch gated.
+    inside the signed payload. L5 blocks ordinary cancellation because the
+    smart order may be a protective exit.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
@@ -2399,7 +3201,7 @@ def place_basket() -> tuple[Any, int]:
 
     strategy: str = str(body.get("strategy", "basket"))
 
-    from flinttrade_engine.basket_orders import BasketLeg  # noqa: PLC0415
+    from flinttrade_engine.basket_orders import BasketLeg, _leg_to_order  # noqa: PLC0415
     from flinttrade_engine.bracket_routes import _request_principal  # noqa: PLC0415
 
     legs: list[Any] = []
@@ -2423,7 +3225,20 @@ def place_basket() -> tuple[Any, int]:
             logger.warning("Basket leg %s parse error: %s", i, exc)
             return jsonify({"status": "error", "message": f"Leg {i} parse error"}), 400
 
-    result = executor.execute(legs, _request_principal(body), strategy=strategy)
+    principal = _request_principal(body)
+    try:
+        typed_legs = [_leg_to_order(leg, strategy) for leg in legs]
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Basket validation failed"}), 400
+    blocked, _exposure_positions = _check_legs_through_safety(
+        typed_legs,
+        principal.adapter_id,
+        account_id=principal.account_id,
+    )
+    if blocked is not None:
+        return blocked
+
+    result = executor.execute(legs, principal, strategy=strategy)
 
     response_data: dict[str, Any] = {
         "status": "success" if result.success else "error",
@@ -2495,6 +3310,51 @@ def place_split() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Parameter parse error"}), 400
 
     from flinttrade_engine.bracket_routes import _request_principal  # noqa: PLC0415
+    from flinttrade_engine.split_orders import (  # noqa: PLC0415
+        SplitValidationError,
+        _build_chunk_order,
+        _validate_split_params,
+    )
+
+    try:
+        _validate_split_params(
+            symbol,
+            exchange,
+            total_qty,
+            chunk_size,
+            action,
+            order_type,
+            price,
+            trigger_price,
+        )
+    except SplitValidationError:
+        return jsonify({"status": "error", "message": "Split validation failed"}), 400
+
+    chunk_quantities = [chunk_size] * (total_qty // chunk_size)
+    if remainder := total_qty % chunk_size:
+        chunk_quantities.append(remainder)
+    typed_chunks = [
+        _build_chunk_order(
+            symbol=symbol,
+            exchange=exchange,
+            action=action,
+            quantity=quantity,
+            order_type=order_type,
+            price=price,
+            trigger_price=trigger_price,
+            product=product,
+            strategy=strategy,
+        )
+        for quantity in chunk_quantities
+    ]
+    principal = _request_principal(body)
+    blocked, _exposure_positions = _check_legs_through_safety(
+        typed_chunks,
+        principal.adapter_id,
+        account_id=principal.account_id,
+    )
+    if blocked is not None:
+        return blocked
 
     result = executor.execute_split(
         symbol=symbol,
@@ -2502,7 +3362,7 @@ def place_split() -> tuple[Any, int]:
         total_quantity=total_qty,
         chunk_size=chunk_size,
         action=action,  # type: ignore[arg-type]
-        principal=_request_principal(body),
+        principal=principal,
         delay_seconds=delay_seconds,
         order_type=order_type,
         price=price,
@@ -2588,6 +3448,7 @@ def place_options_strategy() -> tuple[Any, int]:
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "Parameter parse error"}), 400
 
+    from flinttrade_engine.basket_orders import _leg_to_order  # noqa: PLC0415
     from flinttrade_engine.bracket_routes import _request_principal  # noqa: PLC0415
     from flinttrade_engine.options_multi_order import OptionsStrategyBuilder  # noqa: PLC0415
 
@@ -2606,7 +3467,20 @@ def place_options_strategy() -> tuple[Any, int]:
     except (KeyError, ValueError, TypeError):
         return jsonify({"status": "error", "message": "Strategy build error"}), 400
 
-    result = executor.execute(legs, _request_principal(body), strategy=basket_strategy)
+    principal = _request_principal(body)
+    try:
+        typed_legs = [_leg_to_order(leg, basket_strategy) for leg in legs]
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Strategy validation failed"}), 400
+    blocked, _exposure_positions = _check_legs_through_safety(
+        typed_legs,
+        principal.adapter_id,
+        account_id=principal.account_id,
+    )
+    if blocked is not None:
+        return blocked
+
+    result = executor.execute(legs, principal, strategy=basket_strategy)
 
     response_data: dict[str, Any] = {
         "status": "success" if result.success else "error",

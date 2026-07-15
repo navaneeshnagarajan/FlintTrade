@@ -61,7 +61,26 @@ _CREDENTIAL_STORE_FILENAMES: frozenset[str] = frozenset(
     }
 )
 
+_RUNTIME_STATE_FILENAMES: frozenset[str] = frozenset(
+    {
+        "order-lifecycle.sqlite3",
+        "order-lifecycle.sqlite3-journal",
+        "order-lifecycle.sqlite3-shm",
+        "order-lifecycle.sqlite3-wal",
+        "order_exposure_reservations.sqlite",
+        "order_exposure_reservations.sqlite-journal",
+        "order_exposure_reservations.sqlite-shm",
+        "order_exposure_reservations.sqlite-wal",
+    }
+)
+
 _MANIFEST_FILENAME = "manifest.json"
+
+
+def _is_runtime_state_filename(name: str) -> bool:
+    return Path(name).name.casefold() in {
+        filename.casefold() for filename in _RUNTIME_STATE_FILENAMES
+    }
 
 
 class BackupError(Exception):
@@ -234,9 +253,14 @@ class WorkspaceBackup:
         try:
             with tarfile.open(backup_path, "r:gz") as tar:
                 members = tar.getmembers()
+                restorable_members = [
+                    member
+                    for member in members
+                    if not _is_runtime_state_filename(member.name)
+                ]
 
                 if not force:
-                    for member in members:
+                    for member in restorable_members:
                         if member.name == _MANIFEST_FILENAME:
                             continue
                         dest = target_dir / member.name
@@ -253,19 +277,23 @@ class WorkspaceBackup:
                 # DeprecationWarning today and will default to rejecting
                 # unfiltered extracts. We're extracting our own backups so
                 # the conservative "data" profile is the right fit.
-                tar.extractall(path=target_dir, filter="data")  # noqa: S202
+                tar.extractall(
+                    path=target_dir,
+                    members=restorable_members,
+                    filter="data",
+                )  # noqa: S202
 
         except tarfile.TarError as exc:
             raise BackupError(f"Archive is corrupt or invalid: {exc}") from exc
 
         # Count results.
         files_restored = sum(
-            1 for m in members if m.isfile() and m.name != _MANIFEST_FILENAME
+            1 for m in restorable_members if m.isfile() and m.name != _MANIFEST_FILENAME
         )
         dbs_restored = sum(
-            1 for m in members if m.isfile() and m.name.endswith(".duckdb")
+            1 for m in restorable_members if m.isfile() and m.name.endswith(".duckdb")
         )
-        total_size_bytes = sum(m.size for m in members if m.isfile())
+        total_size_bytes = sum(m.size for m in restorable_members if m.isfile())
         total_size_mb = round(total_size_bytes / (1024 * 1024), 3)
 
         logger.info(
@@ -414,6 +442,8 @@ class WorkspaceBackup:
             if item.suffix in (".pyc", ".pyo"):
                 continue
             if item.name in _PLAINTEXT_SECRET_FILENAMES:
+                continue
+            if _is_runtime_state_filename(item.name):
                 continue
             if not include_credentials and item.name in _CREDENTIAL_STORE_FILENAMES:
                 continue

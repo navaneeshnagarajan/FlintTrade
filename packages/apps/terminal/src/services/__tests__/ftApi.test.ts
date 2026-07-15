@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 const authState = vi.hoisted(() => ({
   token: "",
 }));
+const modeState = vi.hoisted(() => ({
+  mode: "practice",
+}));
 
 // Mock connectionStore — ftApi reads ftApiKey/apiKey for X-API-Key header
 vi.mock("@/stores/connectionStore", () => ({
@@ -15,6 +18,13 @@ vi.mock("@/stores/authStore", () => ({
     getState: () => authState,
   },
 }));
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: Object.assign(
+    (selector?: (state: typeof modeState) => unknown) =>
+      typeof selector === "function" ? selector(modeState) : modeState,
+    { getState: () => modeState },
+  ),
+}));
 import {
   getStrategies,
   getRunningStrategies,
@@ -22,6 +32,8 @@ import {
   uploadStrategy,
   runBacktest,
   getSafetyConfig,
+  resetDailyPnLState,
+  updateSafetyConfig,
   getSecuritySettings,
   analyzeSentiment,
   getCronJobs,
@@ -54,6 +66,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
 
   beforeEach(() => {
     authState.token = "";
+    modeState.mode = "practice";
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
@@ -329,6 +342,7 @@ describe("FlintTrade API client (ftApi.ts)", () => {
   // ---- getSafetyConfig flattens nested response ----
 
   it("getSafetyConfig() flattens nested 5-layer safety config", async () => {
+    modeState.mode = "live";
     const emergencyResult = {
       policy: "l5_emergency_flatten",
       complete: false,
@@ -362,7 +376,21 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       l1_order: { price_deviation_pct: 5, check_market_hours: true, qty_limits: { NSE: 900, NFO: 1200, MCX: 50 } },
       l2_position: { max_positions: 8, max_margin_pct: 70 },
       l3_portfolio: { max_net_delta: 800, max_net_vega: 400 },
-      l4_pnl: { pause_pct: 3, kill_pct: 6, is_paused: false, is_killed: false },
+      l4_pnl: {
+        pause_pct: 3,
+        kill_pct: 6,
+        selector: "openalgo:default",
+        opening_risk_capital: 100000,
+        is_paused: false,
+        is_killed: false,
+        accounts: [{
+          selector: "openalgo:default",
+          session_key: "2026-07-13",
+          opening_risk_capital: 100000,
+          is_paused: false,
+          is_killed: false,
+        }],
+      },
       l5_kill: {
         is_active: true,
         reason: "operator request",
@@ -388,11 +416,25 @@ describe("FlintTrade API client (ftApi.ts)", () => {
       max_net_vega: 400,
       daily_loss_pause_pct: 3,
       daily_loss_kill_pct: 6,
+      daily_loss_selector: "openalgo:default",
+      opening_risk_capital: 100000,
+      daily_loss_accounts: [{
+        selector: "openalgo:default",
+        session_key: "2026-07-13",
+        opening_risk_capital: 100000,
+        is_paused: false,
+        is_killed: false,
+      }],
+      daily_loss_pause_active: false,
+      daily_loss_hard_stop_active: false,
       kill_switch_active: true,
       kill_switch_reason: "operator request",
       flatten_complete: false,
       emergency_result: emergencyResult,
     });
+    expect(fetchSpy.mock.calls[0]![0]).toContain(
+      "/api/v1/safety/config?broker=openalgo&account_id=default",
+    );
   });
 
   it("getSafetyConfig() applies defaults for missing nested fields", async () => {
@@ -421,10 +463,61 @@ describe("FlintTrade API client (ftApi.ts)", () => {
     expect(result.max_net_vega).toBe(500);
     expect(result.daily_loss_pause_pct).toBe(2);
     expect(result.daily_loss_kill_pct).toBe(5);
+    expect(result.daily_loss_selector).toBeNull();
+    expect(result.opening_risk_capital).toBe(0);
+    expect(result.daily_loss_accounts).toEqual([]);
+    expect(result.daily_loss_pause_active).toBe(false);
+    expect(result.daily_loss_hard_stop_active).toBe(false);
     expect(result.kill_switch_active).toBe(false);
     expect(result.kill_switch_reason).toBe("");
     expect(result.flatten_complete).toBe(true);
     expect(result.emergency_result).toBeNull();
+    expect(fetchSpy.mock.calls[0]![0]).not.toContain("broker=openalgo");
+  });
+
+  it("updateSafetyConfig() binds explicit opening capital to the selected account", async () => {
+    modeState.mode = "live";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: { status: "success" } }));
+
+    await updateSafetyConfig({ opening_risk_capital: 100000 });
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/safety/config");
+    expect(JSON.parse(String(init.body))).toEqual({
+      opening_risk_capital: 100000,
+      broker: "openalgo",
+      account_id: "default",
+    });
+  });
+
+  it("updateSafetyConfig() refuses a cross-store mixed update", () => {
+    modeState.mode = "live";
+
+    expect(() => updateSafetyConfig({
+      opening_risk_capital: 100000,
+      daily_loss_pause_pct: 3,
+    })).toThrow("configured separately");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("resetDailyPnLState() targets the selected account", async () => {
+    modeState.mode = "live";
+    fetchSpy.mockResolvedValueOnce(jsonResponse({
+      status: "success",
+      data: {
+        selector: "openalgo:default",
+        session_key: "2026-07-13",
+        opening_risk_capital: 100000,
+        is_paused: false,
+        is_killed: false,
+      },
+    }));
+
+    await resetDailyPnLState();
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/safety/l4?broker=openalgo&account_id=default");
+    expect(init.method).toBe("DELETE");
   });
 
   // ---- getSecuritySettings fields ----

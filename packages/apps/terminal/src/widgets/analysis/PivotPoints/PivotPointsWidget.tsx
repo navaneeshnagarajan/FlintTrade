@@ -11,6 +11,7 @@ import { GitFork, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import { getHistory, getQuotes } from "@/services/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -102,6 +103,7 @@ function PriceBar({ price, levels }: PriceBarProps) {
 function PivotPointsWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
+  const mode = useModeStore((state) => state.mode);
 
   const [symbol, setSymbol] = useState("NIFTY");
   const [high, setHigh] = useState(String(SAMPLE_PREV_DAY.high));
@@ -112,6 +114,8 @@ function PivotPointsWidget() {
   const [activeMethod, setActiveMethod] = useState<PivotMethod>("standard");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [historyIsLive, setHistoryIsLive] = useState(false);
+  const [quoteIsLive, setQuoteIsLive] = useState(false);
 
   useEffect(() => {
     track("trade", "widget_view_pivot_points");
@@ -119,10 +123,24 @@ function PivotPointsWidget() {
 
   // Auto-load previous day data when connected and symbol changes
   useEffect(() => {
-    if (!isConnected) return;
+    setHigh(String(SAMPLE_PREV_DAY.high));
+    setLow(String(SAMPLE_PREV_DAY.low));
+    setClose(String(SAMPLE_PREV_DAY.close));
+    setOpen(String(SAMPLE_PREV_DAY.open ?? SAMPLE_PREV_DAY.close));
+    setCurrentPrice(SAMPLE_CURRENT_PRICE);
+    setHistoryIsLive(false);
+    setQuoteIsLive(false);
+    setLoadError(null);
+
+    const shouldLoadApiData = mode === "practice" || (mode === "live" && isConnected);
+    if (!shouldLoadApiData) {
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     const exchange = EXCHANGES[symbol] ?? "NSE_INDEX";
     setIsLoading(true);
-    setLoadError(null);
 
     const today = new Date();
     const endDate = today.toISOString().slice(0, 10);
@@ -132,23 +150,43 @@ function PivotPointsWidget() {
 
     getHistory(symbol, exchange, "D", startDate, endDate)
       .then((bars) => {
-        if (!Array.isArray(bars) || bars.length < 2) return;
+        if (cancelled || !Array.isArray(bars) || bars.length < 2) return;
         const prev = bars[bars.length - 2];
-        setHigh(String(prev.high));
-        setLow(String(prev.low));
-        setClose(String(prev.close));
-        setOpen(String(prev.open));
+        const nextOhlc = [prev.high, prev.low, prev.close, prev.open].map(Number);
+        if (!nextOhlc.every((value) => Number.isFinite(value) && value > 0)) return;
+        setHigh(String(nextOhlc[0]));
+        setLow(String(nextOhlc[1]));
+        setClose(String(nextOhlc[2]));
+        setOpen(String(nextOhlc[3]));
+        setHistoryIsLive(true);
       })
       .catch((err: unknown) => {
+        if (cancelled) return;
         setLoadError(err instanceof Error ? err.message : "Failed to load history");
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
 
     // Also pull current price
     getQuotes(symbol, exchange)
-      .then((q) => setCurrentPrice(q.ltp))
+      .then((q) => {
+        if (cancelled) return;
+        const nextPrice = Number(q.ltp);
+        if (!Number.isFinite(nextPrice) || nextPrice <= 0) return;
+        setCurrentPrice(nextPrice);
+        setQuoteIsLive(true);
+      })
       .catch(() => { /* price stays as last known */ });
-  }, [symbol, isConnected]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, isConnected, mode]);
+
+  const hasApiInputs = historyIsLive && quoteIsLive;
+  const isLive = mode === "live" && isConnected && hasApiInputs;
+  const isPractice = mode === "practice" && hasApiInputs;
 
   const h = parseFloat(high) || 0;
   const l = parseFloat(low) || 0;
@@ -181,7 +219,23 @@ function PivotPointsWidget() {
         <GitFork size={13} className="text-text-muted" aria-hidden="true" />
         <span className="text-xs font-medium text-text-primary">Pivot Points</span>
         <div className="flex-1" />
-        {!isConnected && (
+        {isLive ? (
+          <span
+            className="text-xxs text-profit border border-profit/30 bg-profit/10 rounded px-1.5 py-0.5"
+            role="status"
+            aria-label="Live pivot inputs from successful history and quote responses"
+          >
+            Live
+          </span>
+        ) : isPractice ? (
+          <span
+            className="text-xxs text-warning border border-warning/30 bg-warning/10 rounded px-1.5 py-0.5"
+            role="status"
+            aria-label="Practice pivot inputs from successful sandbox history and quote responses"
+          >
+            Practice
+          </span>
+        ) : (
           <span className="text-xxs text-text-muted border border-border-subtle rounded px-1.5 py-0.5">
             sample data
           </span>
@@ -227,7 +281,10 @@ function PivotPointsWidget() {
               id={id}
               type="number"
               value={value}
-              onChange={(e) => set(e.target.value)}
+              onChange={(e) => {
+                set(e.target.value);
+                setHistoryIsLive(false);
+              }}
               className={inputClass}
               aria-label={`Previous day ${label}`}
             />

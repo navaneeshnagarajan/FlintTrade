@@ -8,7 +8,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { riskSchema, RISK_HINTS } from "@/lib/schemas/riskSchema";
+import { riskSchema } from "@/lib/schemas/riskSchema";
 import type { RiskFormValues } from "@/lib/schemas/riskSchema";
 
 export type { RiskFormValues };
@@ -42,15 +42,15 @@ export function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label htmlFor="maxPositionLots" className="text-text-secondary text-xs uppercase tracking-wider">
-            Max Position Lots
+            Position Lot Reference
           </Label>
           <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
             <Input
               id="maxPositionLots"
               type="number"
               min={0}
-              title={RISK_HINTS.maxPositionLots}
-              aria-label="Maximum position lots"
+              title="Stored locally as a reference; current position rows are not converted to lots."
+              aria-label="Position lot reference"
               className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
               {...register("maxPositionLots", { valueAsNumber: true })}
             />
@@ -62,15 +62,15 @@ export function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
 
         <div className="space-y-1.5">
           <Label htmlFor="maxOrdersPerMinute" className="text-text-secondary text-xs uppercase tracking-wider">
-            Max Orders / Min
+            Order-Rate Reference / Min
           </Label>
           <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
             <Input
               id="maxOrdersPerMinute"
               type="number"
               min={1}
-              title={RISK_HINTS.maxOrdersPerMinute}
-              aria-label="Maximum orders per minute"
+              title="Stored locally as a reference; rolling order placement rate is not currently measured."
+              aria-label="Order-rate reference per minute"
               className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
               {...register("maxOrdersPerMinute", { valueAsNumber: true })}
             />
@@ -89,7 +89,7 @@ export function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
               id="mtmStoploss"
               type="number"
               min={0}
-              title={RISK_HINTS.mtmStoploss}
+              title="Local MTM warning threshold; it does not automatically flatten positions."
               aria-label="MTM stoploss in INR"
               className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
               {...register("mtmStoploss", { valueAsNumber: true })}
@@ -109,7 +109,7 @@ export function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
               id="mtmTarget"
               type="number"
               min={0}
-              title={RISK_HINTS.mtmTarget}
+              title="Local MTM profit target used by terminal monitoring."
               aria-label="MTM profit target in INR"
               className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
               {...register("mtmTarget", { valueAsNumber: true })}
@@ -122,7 +122,8 @@ export function RiskStep({ onComplete, defaultValues }: RiskStepProps) {
       </div>
 
       <p className="text-text-muted text-xs">
-        Risk limits are enforced by the safety engine. You can change them later in Settings.
+        These values are stored locally for terminal reference and MTM monitoring; they are not
+        backend or broker enforcement. Configure backend daily-loss stops later in Settings.
       </p>
 
       <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">

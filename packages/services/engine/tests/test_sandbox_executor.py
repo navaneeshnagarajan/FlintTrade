@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
@@ -441,6 +442,50 @@ class TestSubprocessIsolation:
         second_child.kill.assert_called_once_with()
         fake_psutil.wait_procs.assert_called_once_with([first_child, second_child], timeout=1)
         proc.kill.assert_called_once_with()
+
+    def test_timeout_uses_captured_group_after_session_leader_exits(self):
+        """A vanished leader cannot hide descendants in its private group."""
+        proc = MagicMock()
+        proc.pid = 321
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="sandbox", timeout=1),
+            (b"", b""),
+        ]
+
+        with (
+            patch.object(mod.sys, "platform", "darwin"),
+            patch.object(mod.subprocess, "Popen", return_value=proc),
+            patch.object(mod.os, "getpgid", side_effect=ProcessLookupError),
+            patch.object(mod.os, "killpg") as killpg,
+            patch.object(mod, "_psutil", None),
+        ):
+            result = SandboxExecutor(timeout_seconds=1).run("")
+
+        assert result.timed_out is True
+        killpg.assert_called_once_with(321, mod.signal.SIGKILL)
+        proc.kill.assert_not_called()
+
+    def test_timeout_reports_unconfirmed_child_reap(self):
+        """Containment is not reported as complete when reap times out."""
+        proc = MagicMock()
+        proc.pid = 321
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="sandbox", timeout=1),
+            subprocess.TimeoutExpired(cmd="sandbox", timeout=2),
+        ]
+
+        with (
+            patch.object(mod.sys, "platform", "darwin"),
+            patch.object(mod.subprocess, "Popen", return_value=proc),
+            patch.object(mod.os, "getpgid", return_value=321),
+            patch.object(mod.os, "killpg"),
+        ):
+            result = SandboxExecutor(timeout_seconds=1).run("")
+
+        assert result.success is False
+        assert result.timed_out is True
+        assert result.error_type == "SandboxContainmentError"
+        assert "could not confirm" in result.error.lower()
 
     def test_subprocess_signal_capture_round_trips(self):
         """A signal emitted in the child reaches the parent unchanged."""

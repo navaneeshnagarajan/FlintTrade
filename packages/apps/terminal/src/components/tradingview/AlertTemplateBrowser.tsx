@@ -1,7 +1,7 @@
 /**
  * AlertTemplateBrowser.tsx
  *
- * A browsable card grid of pre-built TradingView alert webhook templates.
+ * A preserved browser for TradingView alert-message examples.
  *
  * Features:
  *  - Category filter tabs (All / Trend / Momentum / Volatility / Options / Custom)

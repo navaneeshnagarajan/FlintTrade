@@ -50,6 +50,7 @@ function useTickBatcher(): [
 export default function useWebSocket(
   instruments: WsInstrument[] = [],
   mode: WsMode = "ltp",
+  enabled = true,
 ): { ticks: TickMap; connected: boolean } {
   const wsUrl                         = useConnectionStore((s) => s.wsUrl);
   const apiKey                        = useConnectionStore((s) => s.apiKey);
@@ -66,7 +67,10 @@ export default function useWebSocket(
 
   // Subscribe to tick and status callbacks
   useEffect(() => {
-    if (!wsUrl) return;
+    if (!enabled || !wsUrl || !apiKey) {
+      setConnected(false);
+      return;
+    }
     const ws = getWsService(wsUrl, apiKey);
     if (!ws) return;
     if (!ws.isConnected) ws.connect();
@@ -82,11 +86,11 @@ export default function useWebSocket(
       unsubTick();
       unsubStatus();
     };
-  }, [wsUrl, apiKey]);
+  }, [enabled, wsUrl, apiKey]);
 
   // Manage instrument subscriptions
   useEffect(() => {
-    if (!wsUrl || instruments.length === 0) return;
+    if (!enabled || !wsUrl || !apiKey || instruments.length === 0) return;
     const ws = getWsService(wsUrl);
     if (!ws) return;
 
@@ -108,7 +112,7 @@ export default function useWebSocket(
       prevRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl, instrumentsKey, mode]);
+  }, [enabled, wsUrl, apiKey, instrumentsKey, mode]);
 
   return { ticks, connected };
 }

@@ -1,23 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storeMocks = vi.hoisted(() => ({
-  setConfig: vi.fn(),
   setPersona: vi.fn(),
   setName: vi.fn(),
   setInterests: vi.fn(),
   setExperience: vi.fn(),
   setTradingDefaults: vi.fn(),
   setRiskLimits: vi.fn(),
+  setLLMSetupDraft: vi.fn(),
   setGlobalLevel: vi.fn(),
   setRouteOverride: vi.fn(),
   applyPreset: vi.fn(),
   saveTabLayout: vi.fn(),
-}));
-
-vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: {
-    getState: () => ({ setConfig: storeMocks.setConfig }),
-  },
 }));
 
 vi.mock("@/stores/settingsStore", () => ({
@@ -29,6 +23,7 @@ vi.mock("@/stores/settingsStore", () => ({
       setExperience: storeMocks.setExperience,
       setTradingDefaults: storeMocks.setTradingDefaults,
       setRiskLimits: storeMocks.setRiskLimits,
+      setLLMSetupDraft: storeMocks.setLLMSetupDraft,
     }),
   },
 }));
@@ -61,7 +56,7 @@ describe("persistSetupChoices", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
   });
 
-  it("persists OpenAlgo bridge, profile, skill, trading, risk, and pending layout choices", () => {
+  it("persists profile, skill, trading, risk, LLM, and pending layout choices", () => {
     const destination = persistSetupChoices({
       persona: "investor",
       experience: "professional",
@@ -82,28 +77,19 @@ describe("persistSetupChoices", () => {
         mtmTarget: 5000,
         maxOrdersPerMinute: 12,
       },
+      llm: {
+        provider: "grok",
+        model: "grok-3-mini",
+        host: "",
+      },
       name: "Nav",
       interests: ["investing"],
     });
 
     expect(destination).toBe("/invest");
-    expect(storeMocks.setConfig).toHaveBeenCalledWith({
-      host: "http://localhost:5000",
-      apiKey: "test-api-key",
-      wsUrl: "ws://localhost:8765",
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      "/ft-api/v1/config/openalgo",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          api_key: "test-api-key",
-          host: "http://localhost:5000",
-          port: "5000",
-          ws_port: "8765",
-        }),
-      }),
-    );
+    // ConnectionStep has already committed the connection transaction before
+    // this final profile/layout projection runs.
+    expect(fetch).not.toHaveBeenCalled();
     expect(storeMocks.setPersona).toHaveBeenCalledWith("investor");
     expect(storeMocks.setName).toHaveBeenCalledWith("Nav");
     expect(storeMocks.setInterests).toHaveBeenCalledWith(["investing"]);
@@ -120,6 +106,12 @@ describe("persistSetupChoices", () => {
       mtmStoploss: 2500,
       mtmTarget: 5000,
       maxOrdersPerMinute: 12,
+    });
+    expect(storeMocks.setLLMSetupDraft).toHaveBeenCalledWith({
+      provider: "grok",
+      authMode: "api-key",
+      model: "grok-3-mini",
+      host: "",
     });
     expect(storeMocks.saveTabLayout).toHaveBeenCalledWith(
       "trade",
@@ -139,7 +131,42 @@ describe("persistSetupChoices", () => {
     });
 
     expect(destination).toBe("/trade");
-    expect(storeMocks.setConfig).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("normalises a legacy managed Ollama host before storing the setup draft", () => {
+    persistSetupChoices({
+      persona: "trader",
+      llm: {
+        provider: "ollama",
+        model: "qwen3:8b",
+        host: "http://127.0.0.1:11434",
+      },
+    });
+
+    expect(storeMocks.setLLMSetupDraft).toHaveBeenCalledWith({
+      provider: "ollama",
+      authMode: "api-key",
+      model: "qwen3:8b",
+      host: "",
+    });
+  });
+
+  it("stores Claude Code OAuth as an Anthropic backend with a separate auth marker", () => {
+    persistSetupChoices({
+      persona: "trader",
+      llm: {
+        provider: "claude-code-oauth",
+        model: "claude-3-5-haiku-20241022",
+        host: "",
+      },
+    });
+
+    expect(storeMocks.setLLMSetupDraft).toHaveBeenCalledWith({
+      provider: "anthropic",
+      authMode: "claude-code-oauth",
+      model: "claude-3-5-haiku-20241022",
+      host: "",
+    });
   });
 });

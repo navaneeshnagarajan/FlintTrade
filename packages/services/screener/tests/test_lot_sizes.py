@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-
+import pytest
 from flinttrade_screener.lot_sizes import (
     FALLBACK_LOT_SIZES,
     LotResolution,
@@ -113,7 +113,8 @@ class TestGetLotSizeSync:
 class TestLotSizeResolverCache:
     def _make_resolver(self, instruments: list[dict]) -> LotSizeResolver:
         client = MagicMock()
-        client.instruments.return_value = instruments
+        rows = [{"exchange": "NFO", **instrument} for instrument in instruments]
+        client.instruments.return_value = {"status": "success", "data": rows}
         return LotSizeResolver(client, cache_ttl=3600)
 
     def test_first_call_fetches_from_openalgo(self):
@@ -185,7 +186,10 @@ class TestLotSizeResolverCache:
 class TestLotSizeResolverFieldNames:
     def _resolver_with(self, instrument: dict) -> LotSizeResolver:
         client = MagicMock()
-        client.instruments.return_value = [instrument]
+        client.instruments.return_value = {
+            "status": "success",
+            "data": [{"exchange": "NFO", **instrument}],
+        }
         return LotSizeResolver(client)
 
     def test_lot_size_field(self):
@@ -217,7 +221,10 @@ class TestLotSizeResolverInvalidation:
             {"symbol": "BANKNIFTY", "lot_size": 30},
         ]
         client = MagicMock()
-        client.instruments.return_value = instruments
+        client.instruments.return_value = {
+            "status": "success",
+            "data": [{"exchange": "NFO", **instrument} for instrument in instruments],
+        }
         r = LotSizeResolver(client)
         r.get_lot_size("NIFTY", "NFO")
         r.get_lot_size("BANKNIFTY", "NFO")
@@ -253,7 +260,10 @@ class TestLotSizeResolverInvalidation:
 class TestLotSizeResolverResolve:
     def _make_resolver(self, instruments: list[dict]) -> LotSizeResolver:
         client = MagicMock()
-        client.instruments.return_value = instruments
+        client.instruments.return_value = {
+            "status": "success",
+            "data": [{"exchange": "NFO", **instrument} for instrument in instruments],
+        }
         return LotSizeResolver(client, cache_ttl=3600)
 
     def test_live_fetch_reports_live_source(self):
@@ -282,6 +292,41 @@ class TestLotSizeResolverResolve:
         resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": 75}])
         assert resolver.get_lot_size("NIFTY", "NFO") == resolver.resolve("NIFTY", "NFO").lot_size
 
+    @pytest.mark.parametrize(
+        "invalid_lot_size",
+        [True, False, 75.9, "75.9", 0, -1, float("nan"), float("inf")],
+    )
+    def test_malformed_live_lot_size_never_receives_live_provenance(self, invalid_lot_size):
+        resolver = self._make_resolver([{"symbol": "NIFTY", "lot_size": invalid_lot_size}])
+
+        resolution = resolver.resolve("NIFTY", "NFO")
+
+        assert resolution == LotResolution(FALLBACK_LOT_SIZES["NIFTY"], "fallback")
+
+    @pytest.mark.parametrize("status", ["error", "failed", "", None])
+    def test_non_success_envelope_never_receives_live_provenance(self, status):
+        client = MagicMock()
+        client.instruments.return_value = {
+            "status": status,
+            "data": [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 80}],
+        }
+
+        resolution = LotSizeResolver(client).resolve("NIFTY", "NFO")
+
+        assert resolution == LotResolution(FALLBACK_LOT_SIZES["NIFTY"], "fallback")
+
+    @pytest.mark.parametrize("row_exchange", ["NSE", "BFO", "", None])
+    def test_wrong_or_missing_row_exchange_never_receives_live_provenance(self, row_exchange):
+        client = MagicMock()
+        client.instruments.return_value = {
+            "status": "success",
+            "data": [{"symbol": "NIFTY", "exchange": row_exchange, "lot_size": 80}],
+        }
+
+        resolution = LotSizeResolver(client).resolve("NIFTY", "NFO")
+
+        assert resolution == LotResolution(FALLBACK_LOT_SIZES["NIFTY"], "fallback")
+
     def test_async_client_with_envelope_is_supported(self):
         """The REAL OpenAlgoClient.instruments is async and returns an
         envelope dict — the resolver must drive the coroutine and unwrap
@@ -294,7 +339,10 @@ class TestLotSizeResolverResolve:
 
             async def instruments(self, exchange: str = "NSE") -> dict:
                 self.calls += 1
-                return {"status": "success", "data": [{"symbol": "NIFTY", "lotsize": 75}]}
+                return {
+                    "status": "success",
+                    "data": [{"symbol": "NIFTY", "exchange": "NFO", "lotsize": 75}],
+                }
 
         client = FakeAsyncClient()
         resolver = LotSizeResolver(client)  # type: ignore[arg-type]

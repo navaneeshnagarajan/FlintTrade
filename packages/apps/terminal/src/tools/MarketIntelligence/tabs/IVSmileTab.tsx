@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Activity, LineChart } from "lucide-react";
 import { FlintMultiLineChart } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
@@ -14,36 +14,52 @@ import {
 import { useIVSmile } from "@/hooks/useMarketIntel";
 import { DataNotice, ErrorRetry, LiveSelector, SectionLabel, useLiveSelector } from "../shared";
 
-export function IVSmileTab() {
+interface IVSmileTabProps {
+  onSampleDataChange?: (isSampleData: boolean | null) => void;
+}
+
+export function IVSmileTab({ onSampleDataChange }: IVSmileTabProps = {}) {
   const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
   const { data, isLoading, isError, error, refetch } = useIVSmile(
     state.symbol,
     state.exchange,
     state.expiry ?? undefined,
   );
+  const points = data?.points;
+  const sampleFlag = isError || !data || data.points.length === 0
+    ? null
+    : data.is_sample_data !== false;
+
+  useEffect(() => {
+    onSampleDataChange?.(sampleFlag);
+  }, [onSampleDataChange, sampleFlag]);
+
+  useEffect(() => () => {
+    onSampleDataChange?.(null);
+  }, [onSampleDataChange]);
 
   const atmStrike = useMemo(() => {
-    if (!data?.length) return null;
-    const atm = data.reduce((prev, cur) =>
-      Math.abs(cur.moneyness) < Math.abs(prev.moneyness) ? cur : prev,
+    if (!points?.length) return null;
+    const atm = points.reduce((prev, cur) =>
+      Math.abs(cur.moneyness - 1) < Math.abs(prev.moneyness - 1) ? cur : prev,
     );
     return atm.strike;
-  }, [data]);
+  }, [points]);
 
   const maxIV = useMemo(() => {
-    if (!data?.length) return 1;
-    return Math.max(...data.map((d) => Math.max(d.call_iv, d.put_iv)), 1);
-  }, [data]);
+    if (!points?.length) return 1;
+    return Math.max(...points.map((point) => Math.max(point.call_iv, point.put_iv) * 100), 1);
+  }, [points]);
 
   const chartState = useMemo(() => {
-    if (!data?.length) return null;
+    if (!points?.length) return null;
 
-    const strikes = data.map((row) => row.strike);
+    const strikes = points.map((row) => row.strike);
     const strikeMin = Math.min(...strikes);
     const strikeMax = Math.max(...strikes);
     const yMax = Math.max(maxIV * 1.12, 1);
-    const tickEvery = Math.max(1, Math.ceil(data.length / 5));
-    const xTicks = data
+    const tickEvery = Math.max(1, Math.ceil(points.length / 5));
+    const xTicks = points
       .filter((_, index) => index % tickEvery === 0)
       .map((row) => row.strike);
 
@@ -57,25 +73,25 @@ export function IVSmileTab() {
           id: "call-iv",
           label: "Call IV",
           color: "#0ea5e9",
-          points: data.map((row) => ({
+          points: points.map((row) => ({
             x: row.strike,
-            y: row.call_iv,
-            label: `${row.strike.toLocaleString("en-IN")} call IV ${row.call_iv.toFixed(2)}%`,
+            y: row.call_iv * 100,
+            label: `${row.strike.toLocaleString("en-IN")} call IV ${(row.call_iv * 100).toFixed(2)}%`,
           })),
         },
         {
           id: "put-iv",
           label: "Put IV",
           color: "#f59e0b",
-          points: data.map((row) => ({
+          points: points.map((row) => ({
             x: row.strike,
-            y: row.put_iv,
-            label: `${row.strike.toLocaleString("en-IN")} put IV ${row.put_iv.toFixed(2)}%`,
+            y: row.put_iv * 100,
+            label: `${row.strike.toLocaleString("en-IN")} put IV ${(row.put_iv * 100).toFixed(2)}%`,
           })),
         },
       ],
     };
-  }, [data, maxIV]);
+  }, [maxIV, points]);
 
   return (
     <ScrollArea className="h-full">
@@ -92,7 +108,7 @@ export function IVSmileTab() {
           </div>
         ) : isError ? (
           <ErrorRetry message={(error as Error)?.message ?? "Failed to load IV Smile data"} onRetry={() => void refetch()} />
-        ) : data && data.length > 0 ? (
+        ) : points && points.length > 0 ? (
           <>
             <div>
               <SectionLabel icon={LineChart} label="IV Smile Chart" />
@@ -147,8 +163,9 @@ export function IVSmileTab() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.map((row) => {
+                    {points.map((row) => {
                       const isAtm = row.strike === atmStrike;
+                      const moneynessPct = (row.moneyness - 1) * 100;
                       return (
                         <TableRow
                           key={row.strike}
@@ -162,10 +179,10 @@ export function IVSmileTab() {
                               </Badge>
                             )}
                           </TableCell>
-                          <TableCell className="px-3 py-1.5 font-mono text-xs text-sky-400">{row.call_iv.toFixed(2)}%</TableCell>
-                          <TableCell className="px-3 py-1.5 font-mono text-xs text-amber-400">{row.put_iv.toFixed(2)}%</TableCell>
-                          <TableCell className={`px-3 py-1.5 font-mono text-xs ${row.moneyness > 0 ? "text-profit" : row.moneyness < 0 ? "text-loss" : "text-text-muted"}`}>
-                            {row.moneyness > 0 ? "+" : ""}{row.moneyness.toFixed(2)}%
+                          <TableCell className="px-3 py-1.5 font-mono text-xs text-sky-400">{(row.call_iv * 100).toFixed(2)}%</TableCell>
+                          <TableCell className="px-3 py-1.5 font-mono text-xs text-amber-400">{(row.put_iv * 100).toFixed(2)}%</TableCell>
+                          <TableCell className={`px-3 py-1.5 font-mono text-xs ${moneynessPct > 0 ? "text-profit" : moneynessPct < 0 ? "text-loss" : "text-text-muted"}`}>
+                            {moneynessPct > 0 ? "+" : ""}{moneynessPct.toFixed(2)}%
                           </TableCell>
                         </TableRow>
                       );

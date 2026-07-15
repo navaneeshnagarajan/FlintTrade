@@ -5,7 +5,7 @@
 import { BentoCard } from "@/components/bento/BentoCard";
 import { useFunds } from "@/hooks/useFunds";
 import { useHoldings } from "@/hooks/useHoldings";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -24,9 +24,9 @@ const ALLOCATION: AllocationSlice[] = [
 
 export function PortfolioCard() {
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const isBrokerConnected = useBrokerConnected();
-  const fundsQuery = useFunds({ enabled: isBrokerConnected && !isExplore });
-  const holdingsQuery = useHoldings({ enabled: isBrokerConnected && !isExplore });
+  const accountReadsEnabled = useAccountReadsEnabled();
+  const fundsQuery = useFunds({ enabled: accountReadsEnabled });
+  const holdingsQuery = useHoldings({ enabled: accountReadsEnabled });
 
   const funds = isExplore ? getDemoFunds() : fundsQuery.data;
   const holdings = isExplore ? getDemoHoldings() : holdingsQuery.data;
@@ -42,7 +42,7 @@ export function PortfolioCard() {
     <BentoCard size="default" label="Portfolio" data-testid="portfolio-card">
       <div className="p-4 h-full flex flex-col gap-3">
         <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
-          {isExplore || isBrokerConnected ? "Portfolio" : "Portfolio (Broker required)"}
+          {isExplore || accountReadsEnabled ? "Portfolio" : "Portfolio (Broker required)"}
         </p>
 
         <div>
@@ -54,7 +54,7 @@ export function PortfolioCard() {
                   currency: "INR",
                   maximumFractionDigits: 0,
                 })
-              : isExplore || isBrokerConnected ? "—" : "Connect broker"}
+              : isExplore || accountReadsEnabled ? "—" : "Connect broker"}
           </p>
         </div>
 

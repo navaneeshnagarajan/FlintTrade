@@ -239,7 +239,7 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
     () => (isExplore ? [] : [{ symbol, exchange }]),
     [isExplore, symbol, exchange],
   );
-  const { ticks: wsTicks } = useWebSocket(wsInstruments, "quote");
+  const { ticks: wsTicks } = useWebSocket(wsInstruments, "quote", !isExplore);
   const wsTick = wsTicks[`${exchange}:${symbol}`];
   const atomTick = useAtomValue(tickAtomFamily(`${exchange}:${symbol}`));
   const tick = wsTick ?? atomTick;

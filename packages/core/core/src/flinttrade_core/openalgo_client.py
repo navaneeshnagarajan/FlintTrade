@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 import logging
 import math
 import threading
@@ -49,6 +50,25 @@ _CALENDAR_EXCHANGE_ALIASES = {
     "BSE_INDEX": "BSE",
     "MCX_INDEX": "MCX",
 }
+_OPENING_RISK_CAPITAL_FIELDS = (
+    "opening_risk_capital",
+    "openingcashlimit",
+    "opening_balance",
+    "openingbalance",
+    "sod_balance",
+    "sodbalance",
+    "start_of_day_balance",
+    "starting_capital",
+)
+
+
+def _sum_fund_components(*values: Any) -> str:
+    """Return an exact finite sum for string-valued OpenAlgo fund fields."""
+    try:
+        total = sum((Decimal(str(value)) for value in values), start=Decimal())
+    except (InvalidOperation, TypeError, ValueError):
+        return "0"
+    return format(total, "f") if total.is_finite() else "0"
 
 
 def _normalise_history_timestamp(value: Any) -> str:
@@ -68,6 +88,62 @@ def _normalise_history_timestamp(value: Any) -> str:
     if isinstance(value, str):
         return value
     raise ValueError("history timestamp must be an ISO string or numeric epoch")
+
+
+_OPTION_EXPIRY_FORMATS = (
+    "%Y-%m-%d",
+    "%Y%m%d",
+    "%d%b%y",
+    "%d%b%Y",
+    "%d-%b-%y",
+    "%d-%b-%Y",
+)
+
+
+def _normalise_option_expiry_identity(value: Any) -> str | None:
+    """Normalise an explicit broker expiry without coercing non-strings."""
+    if not isinstance(value, str) or not (text := value.strip()):
+        return None
+    for expiry_format in _OPTION_EXPIRY_FORMATS:
+        try:
+            return datetime.strptime(text.upper(), expiry_format).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _validated_openalgo_option_expiry_identity(
+    data: dict[str, Any],
+    requested_expiry: str,
+) -> dict[str, str]:
+    """Return broker-observed expiry fields only when they identify one request."""
+    observed = {
+        key: data[key]
+        for key in ("expiry", "expiry_date")
+        if key in data
+    }
+    if not observed:
+        raise ValueError("OpenAlgo option-chain expiry identity is missing")
+
+    normalised: dict[str, str] = {}
+    preserved: dict[str, str] = {}
+    for key, value in observed.items():
+        identity = _normalise_option_expiry_identity(value)
+        if identity is None:
+            raise ValueError(f"OpenAlgo option-chain {key} expiry identity is invalid")
+        normalised[key] = identity
+        preserved[key] = value.strip()
+
+    if len(set(normalised.values())) != 1:
+        raise ValueError("OpenAlgo option-chain expiry identity fields conflict")
+
+    if requested_expiry:
+        requested_identity = _normalise_option_expiry_identity(requested_expiry)
+        if requested_identity is None:
+            raise ValueError("requested OpenAlgo option-chain expiry identity is invalid")
+        if next(iter(normalised.values())) != requested_identity:
+            raise ValueError("OpenAlgo option-chain expiry identity conflicts with the request")
+    return preserved
 
 
 def _normalise_calendar_date(value: Any) -> str | None:
@@ -114,21 +190,17 @@ def is_authoritative_market_calendar(
 ) -> bool:
     """Return whether a calendar response is complete enough to replace live state."""
     data = payload
-    explicit_success = False
-    explicit_year = False
     for _ in range(4):
         if not isinstance(data, dict):
             break
         if "status" in data:
-            explicit_success = str(data["status"]).strip().lower() in {"ok", "success"}
-            if not explicit_success:
+            if str(data["status"]).strip().lower() not in {"ok", "success"}:
                 return False
         if "year" in data:
             try:
                 response_year = int(data["year"])
             except (TypeError, ValueError):
                 return False
-            explicit_year = True
             if expected_year is not None and response_year != expected_year:
                 return False
         if "data" in data:
@@ -144,13 +216,19 @@ def is_authoritative_market_calendar(
         candidates = list(data)
     elif isinstance(data, dict):
         if not data:
-            return explicit_success and (expected_year is None or explicit_year)
+            return False
         candidates = []
         for values in data.values():
             if not isinstance(values, list | tuple | set):
                 return False
             candidates.extend(values)
     else:
+        return False
+
+    if not candidates:
+        # An HTTP-success envelope with no calendar rows is indistinguishable
+        # from OpenAlgo's pre-authentication placeholder. It must not replace a
+        # fail-closed year with an all-open calendar.
         return False
 
     for candidate in candidates:
@@ -881,10 +959,27 @@ class OpenAlgoClient:
     async def multi_quotes(self, symbols: list[dict[str, str]]) -> list[Quote]:
         """POST /api/v1/multiquotes — symbols=[{"symbol": "X", "exchange": "NSE"}, ...]"""
         payload = self._body({"symbols": symbols})
-        data = self._unwrap(await self._post("multiquotes", payload))
-        if isinstance(data, list):
-            return [Quote(**q) for q in data]
-        return []
+        raw = await self._post("multiquotes", payload)
+        data = raw.get("results") if isinstance(raw, dict) and "results" in raw else self._unwrap(raw)
+        if not isinstance(data, list):
+            return []
+
+        quotes: list[Quote] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            nested = item.get("data")
+            if isinstance(nested, dict):
+                normalised = dict(nested)
+                for field in ("symbol", "exchange"):
+                    if field in item:
+                        normalised[field] = item[field]
+            elif "data" in item or "error" in item:
+                continue
+            else:
+                normalised = dict(item)
+            quotes.append(Quote(**normalised))
+        return quotes
 
     async def depth(self, symbol: str, exchange: str = "NSE") -> Depth:
         """POST /api/v1/depth"""
@@ -945,48 +1040,131 @@ class OpenAlgoClient:
         payload = self._body(payload_data)
         data = self._unwrap(await self._post("optionchain", payload))
         if isinstance(data, dict):
+            expiry_identity = _validated_openalgo_option_expiry_identity(data, expiry)
             raw_strikes = data.get("strikes", data.get("chain", []))
+            if not isinstance(raw_strikes, list):
+                raise ValueError("OpenAlgo option-chain rows must be a list")
             normalised_strikes: list[dict[str, Any]] = []
             for strike in raw_strikes:
                 if not isinstance(strike, dict):
-                    continue
+                    raise ValueError("OpenAlgo option-chain source row is not an object")
                 if "ce" in strike or "pe" in strike:
+                    if any(side in strike and not isinstance(strike[side], dict) for side in ("ce", "pe")):
+                        raise ValueError("OpenAlgo option-chain leg is not an object")
                     ce = strike.get("ce") if isinstance(strike.get("ce"), dict) else {}
                     pe = strike.get("pe") if isinstance(strike.get("pe"), dict) else {}
-                    normalised_strikes.append({
+                    normalised: dict[str, Any] = {
                         "strike_price": strike.get("strike", strike.get("strike_price", 0.0)),
-                        "ce_ltp": ce.get("ltp", ce.get("last_price", 0.0)),
-                        "ce_oi": ce.get("oi", ce.get("open_interest", 0)),
-                        "ce_volume": ce.get("volume", 0),
-                        "ce_iv": ce.get("iv", ce.get("implied_volatility", 0.0)),
-                        "pe_ltp": pe.get("ltp", pe.get("last_price", 0.0)),
-                        "pe_oi": pe.get("oi", pe.get("open_interest", 0)),
-                        "pe_volume": pe.get("volume", 0),
-                        "pe_iv": pe.get("iv", pe.get("implied_volatility", 0.0)),
-                    })
+                    }
+                    aliases = {
+                        "ltp": ("ltp", "last_price"),
+                        "oi": ("oi", "open_interest"),
+                        "volume": ("volume",),
+                        "iv": ("iv", "implied_volatility"),
+                    }
+                    for prefix, leg in (("ce", ce), ("pe", pe)):
+                        for field, source_names in aliases.items():
+                            for source_name in source_names:
+                                if source_name in leg:
+                                    normalised[f"{prefix}_{field}"] = leg[source_name]
+                                    break
+                    normalised_strikes.append(normalised)
                 else:
                     normalised_strikes.append(strike)
             strikes = [OptionChainStrike(**s) for s in normalised_strikes]
-            return OptionChain(
-                underlying=data.get("underlying", data.get("symbol", symbol)),
-                exchange=data.get("exchange", exchange),
-                strikes=strikes,
-            )
+            option_chain: dict[str, Any] = {
+                "underlying": data.get("underlying", data.get("symbol", symbol)),
+                "exchange": data.get("exchange", exchange),
+                "strikes": strikes,
+            }
+            option_chain.update(expiry_identity)
+            for spot_field in ("spot_price", "spot", "underlying_spot_price", "underlying_ltp"):
+                if spot_field in data:
+                    option_chain["spot_price"] = data[spot_field]
+                    break
+            return OptionChain(**option_chain)
         return OptionChain()
 
     async def option_greeks(self, symbol: str, exchange: str = "NFO") -> OptionGreek:
         """POST /api/v1/optiongreeks"""
         payload = self._body({"symbol": symbol, "exchange": exchange})
         data = self._unwrap(await self._post("optiongreeks", payload))
-        return OptionGreek(**data) if isinstance(data, dict) else OptionGreek()
+        return self._parse_option_greek(data, endpoint="optiongreeks")
 
     async def multi_option_greeks(self, symbols: list[dict[str, str]]) -> list[OptionGreek]:
         """POST /api/v1/multioptiongreeks"""
         payload = self._body({"symbols": symbols})
         data = self._unwrap(await self._post("multioptiongreeks", payload))
-        if isinstance(data, list):
-            return [OptionGreek(**g) for g in data]
-        return []
+        if not isinstance(data, list) or len(data) != len(symbols):
+            raise APIError(502, "incomplete option Greek batch", "multioptiongreeks")
+        parsed = [
+            self._parse_option_greek(item, endpoint="multioptiongreeks")
+            for item in data
+        ]
+        expected = {
+            (str(item.get("exchange") or "").upper(), str(item.get("symbol") or ""))
+            for item in symbols
+        }
+        actual = {(item.exchange.upper(), item.symbol) for item in parsed}
+        if len(expected) != len(symbols) or actual != expected:
+            raise APIError(502, "incomplete option Greek batch", "multioptiongreeks")
+        return parsed
+
+    @staticmethod
+    def _parse_option_greek(data: Any, *, endpoint: str) -> OptionGreek:
+        if not isinstance(data, dict) or str(data.get("status") or "success").lower() != "success":
+            raise APIError(502, "incomplete option Greek batch", endpoint)
+        greeks = data.get("greeks") if isinstance(data.get("greeks"), dict) else data
+        required = ("delta", "gamma", "theta", "vega")
+        if any(name not in greeks or greeks[name] is None for name in required):
+            raise APIError(502, "incomplete option Greek batch", endpoint)
+        try:
+            values = {name: float(greeks[name]) for name in required}
+            rho = float(greeks.get("rho", 0.0))
+            iv = float(data.get("implied_volatility", data.get("iv", 0.0)))
+        except (TypeError, ValueError) as exc:
+            raise APIError(502, "invalid option Greek values", endpoint) from exc
+        if not all(math.isfinite(value) for value in (*values.values(), rho, iv)):
+            raise APIError(502, "invalid option Greek values", endpoint)
+        symbol = str(data.get("symbol") or "")
+        exchange = str(data.get("exchange") or "").upper()
+        if not symbol or not exchange:
+            raise APIError(502, "incomplete option Greek identity", endpoint)
+        return OptionGreek(
+            symbol=symbol,
+            exchange=exchange,
+            delta=values["delta"],
+            gamma=values["gamma"],
+            theta=values["theta"],
+            vega=values["vega"],
+            iv=iv,
+            rho=rho,
+        )
+
+    async def portfolio_greeks(
+        self,
+        positions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return complete per-contract Delta/Vega rows for portfolio admission."""
+        requested = [
+            {
+                "symbol": str(position.get("symbol") or ""),
+                "exchange": str(position.get("exchange") or "").upper(),
+            }
+            for position in positions
+        ]
+        parsed = await self.multi_option_greeks(requested)
+        by_key = {(item.exchange.upper(), item.symbol): item for item in parsed}
+        return [
+            {
+                "symbol": request["symbol"],
+                "instrument_id": str(position.get("instrument_id") or ""),
+                "exchange": request["exchange"],
+                "delta": by_key[(request["exchange"], request["symbol"])].delta,
+                "vega": by_key[(request["exchange"], request["symbol"])].vega,
+            }
+            for position, request in zip(positions, requested, strict=True)
+        ]
 
     async def option_symbol(
         self,
@@ -1060,16 +1238,36 @@ class OpenAlgoClient:
         raw = await self._post("funds", self._body())
         data = self._unwrap(raw)
         if isinstance(data, dict):
-            # OpenAlgo uses flat names: availablecash, usedmargin, totalbalance
+            # Current OpenAlgo uses ``utiliseddebits``; retain the older aliases
+            # accepted by FlintTrade's bridge for backwards compatibility.
             avail = data.get("availablecash", data.get("available_balance", "0"))
-            used = data.get("usedmargin", data.get("used_margin", "0"))
-            total = data.get("totalbalance", data.get("total_balance", "0"))
-            known = {"availablecash", "usedmargin", "totalbalance",
-                     "available_balance", "used_margin", "total_balance", "status"}
+            used = data.get("utiliseddebits", data.get("usedmargin", data.get("used_margin", "0")))
+            total = data.get("totalbalance", data.get("total_balance"))
+            if total in (None, ""):
+                # This inferred balance is only the L2 margin-utilisation
+                # denominator. It must not become start-of-day risk capital.
+                total = _sum_fund_components(avail, used)
+            opening_risk_capital = "0"
+            for field in _OPENING_RISK_CAPITAL_FIELDS:
+                value = data.get(field)
+                if value not in (None, ""):
+                    opening_risk_capital = str(value)
+                    break
+            known = {
+                "availablecash",
+                "utiliseddebits",
+                "usedmargin",
+                "totalbalance",
+                "available_balance",
+                "used_margin",
+                "total_balance",
+                "status",
+            }
             return Fund(
                 available_balance=str(avail),
                 used_margin=str(used),
                 total_balance=str(total),
+                opening_risk_capital=opening_risk_capital,
                 extra={k: v for k, v in data.items() if k not in known},
             )
         return Fund()
@@ -1089,9 +1287,22 @@ class OpenAlgoClient:
     async def tradebook(self) -> list[Trade]:
         """POST /api/v1/tradebook"""
         data = self._unwrap(await self._post("tradebook", self._body()))
-        if isinstance(data, list):
-            return [Trade(**t) for t in data]
-        return []
+        if not isinstance(data, list):
+            return []
+
+        trades: list[Trade] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            normalised = dict(item)
+            if "quantity" in normalised:
+                normalised["quantity"] = str(normalised["quantity"])
+            if "average_price" in normalised:
+                normalised["price"] = str(normalised["average_price"])
+            elif "price" in normalised:
+                normalised["price"] = str(normalised["price"])
+            trades.append(Trade(**normalised))
+        return trades
 
     async def positionbook(self) -> list[Position]:
         """POST /api/v1/positionbook"""

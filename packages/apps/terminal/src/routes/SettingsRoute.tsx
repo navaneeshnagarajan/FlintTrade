@@ -35,9 +35,12 @@ import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
 import { SkillSection }      from "@/tools/Settings/SkillSection";
 import { PresetSection }     from "@/tools/Settings/PresetSection";
 import { UpdatesSection }    from "@/tools/Settings/UpdatesSection";
+import { SupportSection }    from "@/tools/Settings/SupportSection";
 import { TickerSettings }    from "@/routes/settings/TickerSettings";
 import { SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
 import { useSettingsState } from "@/hooks/useSettingsState";
+
+const SETTINGS_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 // ---------------------------------------------------------------------------
 // Route component
@@ -53,7 +56,12 @@ export default function SettingsRoute() {
   };
 
   const [activeSection, setActiveSection] = useState<SectionId>(sectionFromHash);
+  const [llmWasOpened, setLlmWasOpened] = useState(activeSection === "llm");
   const [toastMsg, setToastMsg]           = useState<string | null>(null);
+  const [llmProviderDraftPending, setLlmProviderDraftPending] = useState(false);
+  const [isDesktopTablist, setIsDesktopTablist] = useState(
+    () => window.matchMedia(SETTINGS_DESKTOP_MEDIA_QUERY).matches,
+  );
   const dismissToast                      = useCallback(() => setToastMsg(null), []);
 
   const tablistRef = useRef<HTMLElement>(null);
@@ -64,17 +72,30 @@ export default function SettingsRoute() {
     return () => window.removeEventListener("hashchange", syncSectionFromHash);
   }, []);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(SETTINGS_DESKTOP_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsDesktopTablist(event.matches);
+    };
+
+    setIsDesktopTablist(mediaQuery.matches);
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
   const handleSidebarKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
-      const keys = ["ArrowUp", "ArrowDown", "Home", "End"];
+      const previousKey = isDesktopTablist ? "ArrowUp" : "ArrowLeft";
+      const nextKey = isDesktopTablist ? "ArrowDown" : "ArrowRight";
+      const keys = [previousKey, nextKey, "Home", "End"];
       if (!keys.includes(e.key)) return;
       e.preventDefault();
       const tabs = tablistRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']");
       if (!tabs || tabs.length === 0) return;
       const idx = Array.from(tabs).indexOf(document.activeElement as HTMLButtonElement);
       let next: number;
-      if (e.key === "ArrowDown") next = (idx + 1) % tabs.length;
-      else if (e.key === "ArrowUp") next = (idx - 1 + tabs.length) % tabs.length;
+      if (e.key === nextKey) next = (idx + 1) % tabs.length;
+      else if (e.key === previousKey) next = (idx - 1 + tabs.length) % tabs.length;
       else if (e.key === "Home") next = 0;
       else next = tabs.length - 1;
       const nextTab = tabs[next];
@@ -82,7 +103,7 @@ export default function SettingsRoute() {
       const sectionId = SECTIONS[next]?.id;
       if (sectionId) setActiveSection(sectionId);
     },
-    [],
+    [isDesktopTablist],
   );
 
   // Update hash when section changes for deep-link support
@@ -90,12 +111,28 @@ export default function SettingsRoute() {
     window.history.replaceState(null, "", `#${activeSection}`);
   }, [activeSection]);
 
+  useEffect(() => {
+    if (activeSection === "llm") setLlmWasOpened(true);
+  }, [activeSection]);
+
+  useEffect(() => {
+    const activeTab = tablistRef.current?.querySelector<HTMLElement>(
+      `#settings-tab-${activeSection}`,
+    );
+    activeTab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [activeSection, isDesktopTablist]);
+
   // All state and actions from Zustand stores
   const {
     general,
     trading,
     risk,
     llm,
+    llmSetupPending,
+    llmSaveState,
+    llmHydrationState,
+    llmCredentialConfigured,
+    llmCredentialLast4,
     telegram,
     whatsapp,
     dataPaths,
@@ -105,12 +142,30 @@ export default function SettingsRoute() {
     updateTradingDefaults,
     updateRiskLimits,
     updateLLM,
+    updateLLMProvider,
+    removeLLMCredential,
     updateTelegram,
     updateWhatsApp,
     updateDataPaths,
-    updateConnection,
+    acceptConnection,
     handleRestart,
   } = useSettingsState();
+
+  function renderLlmContent(): JSX.Element {
+    return (
+      <LLMSection
+        settings={llm}
+        onChange={updateLLM}
+        onProviderChange={updateLLMProvider}
+        hydrationState={llmHydrationState}
+        credentialConfigured={llmCredentialConfigured}
+        credentialLast4={llmCredentialLast4}
+        onCredentialRemove={removeLLMCredential}
+        providerActivationRequired={llmSetupPending}
+        onDraftStateChange={setLlmProviderDraftPending}
+      />
+    );
+  }
 
   function renderContent(): JSX.Element {
     switch (activeSection) {
@@ -118,14 +173,14 @@ export default function SettingsRoute() {
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
       case "appearance": return <AppearanceSection />;
       case "ticker":     return <TickerSettings />;
-      case "api":        return <ConnectionSection settings={connection} onChange={updateConnection} />;
+      case "api":        return <ConnectionSection settings={connection} onSaved={acceptConnection} />;
       case "brokers":    return <BrokerConnect />;
       case "trading":    return <TradingSection    settings={trading}    onChange={updateTradingDefaults} />;
       case "risk":       return <RiskSection       settings={risk}       onChange={updateRiskLimits} />;
       case "leverage":   return <LeverageSection />;
       case "practice":   return <PracticeSection />;
       case "keyboard":   return <KeyboardSection />;
-      case "llm":        return <LLMSection        settings={llm}        onChange={updateLLM} />;
+      case "llm":        return <></>;
       case "telegram":   return <TelegramSection   settings={telegram}   onChangeField={updateTelegram} />;
       case "whatsapp":   return <WhatsAppSection   settings={whatsapp}   onChangeField={updateWhatsApp} />;
       case "dataPaths":  return <DataSection       settings={dataPaths}  onChange={updateDataPaths} />;
@@ -134,9 +189,24 @@ export default function SettingsRoute() {
       case "skill":      return <SkillSection />;
       case "presets":    return <PresetSection />;
       case "updates":    return <UpdatesSection />;
+      case "support":    return <SupportSection />;
       case "about":      return <AboutSection />;
     }
   }
+
+  const saveStatus = llmHydrationState === "loading"
+    ? { copy: "Loading LLM settings", dot: "bg-accent animate-pulse" }
+    : llmHydrationState === "error"
+      ? { copy: "LLM settings unavailable", dot: "bg-loss" }
+      : (llmProviderDraftPending || llmSetupPending)
+    ? { copy: "LLM provider changes not applied", dot: "bg-warning" }
+    : llmSaveState === "pending"
+      ? { copy: "LLM changes pending", dot: "bg-warning" }
+      : llmSaveState === "saving"
+        ? { copy: "Saving LLM changes", dot: "bg-accent animate-pulse" }
+        : llmSaveState === "error"
+          ? { copy: "LLM changes not saved", dot: "bg-loss" }
+          : { copy: "No pending LLM changes", dot: "bg-profit" };
 
   return (
     <CinematicLayout mode="focused" className="h-full">
@@ -185,7 +255,7 @@ export default function SettingsRoute() {
         <nav
           ref={tablistRef}
           role="tablist"
-          aria-orientation="vertical"
+          aria-orientation={isDesktopTablist ? "vertical" : "horizontal"}
           aria-label="Settings sections"
           className="flex w-full flex-none gap-1 overflow-x-auto border-b border-glass-l1 bg-glass-l1 px-2 py-2 md:w-52 md:flex-col md:gap-0 md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r md:px-0"
           onKeyDown={handleSidebarKeyDown}
@@ -197,7 +267,7 @@ export default function SettingsRoute() {
               role="tab"
               id={`settings-tab-${id}`}
               aria-selected={id === activeSection}
-              aria-controls={`settings-tabpanel-${id}`}
+              aria-controls={id === activeSection ? `settings-tabpanel-${id}` : undefined}
               tabIndex={id === activeSection ? 0 : -1}
               onClick={() => setActiveSection(id)}
               className={`flex flex-none items-center gap-2.5 px-3 py-2 font-sans text-sm transition-colors text-left md:w-full ${
@@ -220,15 +290,26 @@ export default function SettingsRoute() {
           className="min-w-0 flex-1 overflow-y-auto"
         >
           <div className="w-full max-w-3xl px-4 py-5 pb-16 sm:px-6 lg:px-8">
-            {renderContent()}
+            {activeSection !== "llm" && renderContent()}
+            {(llmWasOpened || activeSection === "llm") && (
+              <div hidden={activeSection !== "llm"}>
+                {renderLlmContent()}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Footer status bar */}
-      <div className="flex-none px-4 py-2 bg-glass-l1 border-t border-glass-l1 flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-profit" />
-        <span className="text-xs text-text-muted">Changes saved automatically</span>
+      <div
+        className="flex-none px-4 py-2 bg-glass-l1 border-t border-glass-l1 flex items-center gap-2"
+        role="status"
+        aria-label="Settings save status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <div className={`size-1.5 rounded-full ${saveStatus.dot}`} />
+        <span className="text-xs text-text-muted">{saveStatus.copy}</span>
       </div>
     </section>
     </CinematicLayout>

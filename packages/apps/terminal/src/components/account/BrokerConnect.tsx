@@ -463,14 +463,14 @@ export function BrokerConnect() {
         <div className="space-y-2">
           <p>
             <strong className="text-text-primary">Native adapters are not fully tested — use at your own risk.</strong>{" "}
-            Login and account reads are verified for{" "}
+            Native connection is currently enabled for{" "}
             {connectableNativeLabel || "the currently selectable native brokers"}, but native order
             placement (place / modify / cancel) has{" "}
             <strong className="text-text-primary">not been live-verified for any broker</strong> yet —
             OpenAlgo is the recommended, community-tested path.{" "}
             {unavailableNativeLabel
-              ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their live checks pass.`
-              : "Unavailable adapters stay disabled until their live checks pass."}
+              ? `${unavailableNativeLabel} ${unavailableNativeVerb} visible as catalogued adapters and remain disabled until their activation blockers clear.`
+              : "Unavailable adapters stay disabled until their activation blockers clear."}
           </p>
           {unavailableNativeBlockers.length > 0 && (
             <ul className="space-y-1 text-xs text-text-muted" data-testid="native-connect-blockers">

@@ -26,6 +26,36 @@ import { InlineToast } from "./shared";
 
 const SAFETY_CONFIG_QUERY_KEY = ["safetyConfig"] as const;
 
+const AUTOMATE_SAFETY_FIELDS = [
+  "max_positions",
+  "max_margin_pct",
+  "daily_loss_pause_pct",
+  "daily_loss_kill_pct",
+  "max_net_delta",
+  "max_net_vega",
+] as const satisfies ReadonlyArray<keyof SafetyConfig>;
+
+type AutomateSafetyField = (typeof AUTOMATE_SAFETY_FIELDS)[number];
+
+export function buildAutomateSafetyConfigUpdate(
+  config: Partial<SafetyConfig>,
+): Partial<SafetyConfig> {
+  const pausePct = config.daily_loss_pause_pct;
+  const hardStopPct = config.daily_loss_kill_pct;
+  if (typeof pausePct !== "number" || !Number.isFinite(pausePct) || pausePct <= 0) {
+    throw new Error("Daily-loss pause threshold must be a positive number");
+  }
+  if (typeof hardStopPct !== "number" || !Number.isFinite(hardStopPct) || hardStopPct <= pausePct) {
+    throw new Error("Daily-loss hard stop must be greater than the positive pause threshold");
+  }
+
+  return Object.fromEntries(
+    AUTOMATE_SAFETY_FIELDS.flatMap((key) => (
+      config[key] === undefined ? [] : [[key, config[key]]]
+    )),
+  ) as Partial<SafetyConfig>;
+}
+
 // ---------------------------------------------------------------------------
 // Telegram test panel
 // ---------------------------------------------------------------------------
@@ -113,7 +143,9 @@ export default function SettingsSection() {
   }, [safetyConfig, configDirty]);
 
   const updateConfigMutation = useMutation({
-    mutationFn: (cfg: Partial<SafetyConfig>) => updateSafetyConfig(cfg),
+    mutationFn: (cfg: Partial<SafetyConfig>) => updateSafetyConfig(
+      buildAutomateSafetyConfigUpdate(cfg),
+    ),
     onSuccess: () => {
       setConfigDirty(false);
       void queryClient.invalidateQueries({ queryKey: SAFETY_CONFIG_QUERY_KEY });
@@ -185,7 +217,7 @@ export default function SettingsSection() {
             emergency_result: null,
           }
         : current);
-      setToast({ msg: "Kill switch reset — trading resumed", variant: "success" });
+      setToast({ msg: "Kill switch reset — live order routing resumed", variant: "success" });
       emitNotification({
         category: "system",
         title: "Kill switch reset",
@@ -203,25 +235,31 @@ export default function SettingsSection() {
     },
   });
 
-  const killSwitchActive = safetyConfig?.kill_switch_active ?? false;
-  const flattenComplete = safetyConfig?.flatten_complete ?? !killSwitchActive;
+  const killSwitchState = safetyConfig === undefined
+    ? loadingConfig ? "loading" : "unknown"
+    : safetyConfig.kill_switch_active ? "active" : "inactive";
+  const killSwitchActive = killSwitchState === "active";
+  const flattenComplete = killSwitchActive && safetyConfig?.flatten_complete === true;
 
   const updateField = <K extends keyof SafetyConfig>(key: K, value: SafetyConfig[K]) => {
     setLocalConfig((prev) => ({ ...prev, [key]: value }));
     setConfigDirty(true);
   };
 
-  const numericField = (label: string, key: keyof SafetyConfig, unit?: string) => {
+  const numericField = (label: string, key: AutomateSafetyField, unit?: string) => {
     const raw    = localConfig[key];
     const numVal = typeof raw === "number" ? raw : 0;
+    const inputId = `automate-safety-${key}`;
     return (
       <div className="space-y-1">
-        <label className="text-xs text-text-muted">{label}</label>
+        <label htmlFor={inputId} className="text-xs text-text-muted">{label}</label>
         <div className="flex items-center gap-1.5">
           <Input
+            id={inputId}
             type="number"
             value={numVal}
             onChange={(e) => updateField(key, Number(e.target.value) as SafetyConfig[typeof key])}
+            disabled={!isLive}
             className="h-8 text-xs bg-surface-base border-border-default text-text-primary w-28"
           />
           {unit && <span className="text-xs text-text-muted">{unit}</span>}
@@ -239,27 +277,55 @@ export default function SettingsSection() {
         {/* Kill Switch */}
         <GlassCard className="p-6">
           <div className="flex items-center gap-2 mb-1">
-            {killSwitchActive ? (
+            {killSwitchState === "active" ? (
               <>
                 <span className="ft-dot-kill" />
                 <ShieldAlert size={18} className="text-loss" />
               </>
-            ) : (
+            ) : killSwitchState === "inactive" ? (
               <>
                 <span className="ft-dot-running" />
                 <ShieldCheck size={18} className="text-profit" />
               </>
+            ) : killSwitchState === "loading" ? (
+              <Loader2 size={18} className="animate-spin text-text-muted" />
+            ) : (
+              <AlertTriangle size={18} className="text-warning" />
             )}
             <h3 className="font-heading font-semibold text-lg text-text-primary">Kill Switch</h3>
-            {killSwitchActive
-              ? <Badge className="ml-auto text-xs bg-loss/10 text-loss border-0">ACTIVE</Badge>
-              : <Badge className="ml-auto text-xs bg-profit/10 text-profit border-0">INACTIVE</Badge>
-            }
+            {killSwitchState === "active" && (
+              <Badge className="ml-auto text-xs bg-loss/10 text-loss border-0">ACTIVE</Badge>
+            )}
+            {killSwitchState === "inactive" && (
+              <Badge className="ml-auto text-xs bg-profit/10 text-profit border-0">INACTIVE</Badge>
+            )}
+            {killSwitchState === "loading" && (
+              <Badge className="ml-auto text-xs bg-text-muted/10 text-text-muted border-0">LOADING</Badge>
+            )}
+            {killSwitchState === "unknown" && (
+              <Badge className="ml-auto text-xs bg-warning/10 text-warning border-0">UNKNOWN</Badge>
+            )}
           </div>
           <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-            Emergency stop for all automated strategies. Cancels pending orders and closes
-            positions immediately. Also available via Telegram /kill command.
+            Process-wide emergency stop across all configured execution accounts. It blocks new
+            live order routing, then attempts to cancel orders and flatten positions; broker actions
+            may complete only partially. Also available via the Telegram /kill command.
           </p>
+
+          {(killSwitchState === "loading" || killSwitchState === "unknown") && (
+            <p className="mb-3 text-xs text-warning" role={killSwitchState === "unknown" ? "alert" : "status"}>
+              {killSwitchState === "loading"
+                ? "Checking authoritative kill-switch state..."
+                : "Authoritative kill-switch state is unavailable. Emergency actions are disabled."}
+            </p>
+          )}
+
+          {configError && safetyConfig !== undefined && (
+            <p className="mb-3 text-xs text-warning" role="alert">
+              The latest safety refresh failed. Showing the last known kill-switch state;
+              emergency controls remain disabled until the backend responds.
+            </p>
+          )}
 
           {!isLive && (
             <p className="mb-3 text-xs text-text-muted">
@@ -273,7 +339,7 @@ export default function SettingsSection() {
                 <AlertTriangle size={14} className="text-loss flex-none" />
                 <p className="text-xs text-loss">
                   {flattenComplete
-                    ? "Kill switch is active. All automation is halted."
+                    ? "Kill switch is active. New live order routing is halted and the last emergency dispatch completed."
                     : "Kill switch is active, but broker flattening is incomplete."}
                 </p>
               </div>
@@ -293,7 +359,7 @@ export default function SettingsSection() {
                     ? <Loader2 size={14} className="animate-spin" />
                     : <ShieldCheck size={14} />
                   }
-                  Reset Kill Switch — Resume Trading
+                  Reset Kill Switch — Resume Live Routing
                 </Button>
               ) : (
                 <Button
@@ -318,13 +384,13 @@ export default function SettingsSection() {
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Input
                   value={killReason}
                   onChange={(e) => setKillReason(e.target.value)}
                   disabled={!isLive}
                   placeholder="Reason (optional, logged for audit)"
-                  className="flex-1 h-9 text-xs bg-surface-base border-border-default text-text-primary"
+                  className="min-w-0 flex-[1_1_14rem] h-9 text-xs bg-surface-base border-border-default text-text-primary"
                 />
                 <Button
                   onClick={() => activateKillMutation.mutate(killReason)}
@@ -353,8 +419,8 @@ export default function SettingsSection() {
         <GlassCard className="p-6">
           <h3 className="font-heading font-semibold text-lg text-text-primary mb-1">Safety Configuration</h3>
           <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-            Hard limits enforced by the 5-layer safety system. These constraints cannot be
-            bypassed by any automation or strategy.
+            Backend order-admission thresholds used by the safety service. Broker controls remain
+            separate, and each check depends on authoritative account data being available.
           </p>
 
           {loadingConfig && (
@@ -375,7 +441,7 @@ export default function SettingsSection() {
                 {numericField("Max Positions",         "max_positions")}
                 {numericField("Max Margin",            "max_margin_pct",       "%")}
                 {numericField("Daily Loss — Pause",    "daily_loss_pause_pct", "%")}
-                {numericField("Daily Loss — Kill",     "daily_loss_kill_pct",  "%")}
+                {numericField("Daily Loss — Hard Stop", "daily_loss_kill_pct", "%")}
                 {numericField("Max Net Delta",         "max_net_delta")}
                 {numericField("Max Net Vega",          "max_net_vega")}
               </div>
@@ -385,7 +451,7 @@ export default function SettingsSection() {
                   <Button
                     size="sm"
                     onClick={() => updateConfigMutation.mutate(localConfig)}
-                    disabled={updateConfigMutation.isPending}
+                    disabled={!isLive || updateConfigMutation.isPending}
                     className="h-8 px-5 text-xs gap-1.5"
                   >
                     {updateConfigMutation.isPending

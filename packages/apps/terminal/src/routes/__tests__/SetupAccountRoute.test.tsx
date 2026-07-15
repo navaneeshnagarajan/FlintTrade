@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import type { AppMode } from "@/stores/modeStore";
 
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   downgradeMode: vi.fn(),
   persistSetupChoices: vi.fn(() => "/trade"),
+  setupFlintTradeAccount: vi.fn(),
 }));
 
 vi.mock("react-router-dom", () => ({
@@ -38,6 +39,18 @@ vi.mock("@/lib/modeAuth", () => ({
 
 vi.mock("@/routes/setup/applySetupChoices", () => ({
   persistSetupChoices: mocks.persistSetupChoices,
+}));
+
+vi.mock("@/lib/setupAccountApi", () => ({
+  AccountSetupError: class AccountSetupError extends Error {
+    kind: string;
+
+    constructor(message: string, kind: string) {
+      super(message);
+      this.kind = kind;
+    }
+  },
+  setupFlintTradeAccount: mocks.setupFlintTradeAccount,
 }));
 
 // Keep the shell light — Meteors/Particles animate on canvas.
@@ -73,7 +86,12 @@ function seedModeStepProgress(): void {
       totpUri: "otpauth://totp/x?secret=ABC",
       backupCodes: ["AAAA1111"],
       persona: "trader",
-      connection: null,
+      connection: {
+        host: "http://localhost:5000",
+        port: "5000",
+        apiKey: "legacy-browser-secret",
+        wsPort: "8765",
+      },
       trading: null,
       risk: null,
       mode: null,
@@ -83,6 +101,22 @@ function seedModeStepProgress(): void {
   );
 }
 
+function submitAccountCreation(): void {
+  fireEvent.change(screen.getByLabelText("Choose a username"), {
+    target: { value: "alice" },
+  });
+  fireEvent.change(screen.getByLabelText("Enter your email address"), {
+    target: { value: "alice@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Create a strong password"), {
+    target: { value: "Strong1!" },
+  });
+  fireEvent.change(screen.getByLabelText("Confirm your password"), {
+    target: { value: "Strong1!" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -90,6 +124,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     mocks.navigate.mockReset();
     mocks.downgradeMode.mockReset();
     mocks.persistSetupChoices.mockClear();
+    mocks.setupFlintTradeAccount.mockReset();
     seedModeStepProgress();
     useModeStore.getState().setMode("explore");
     useAuthStore.getState().setLoggedIn("setup-explore-token", "nav", "");
@@ -111,6 +146,72 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     expect(useModeStore.getState().mode).toBe("practice");
     // Setup finished — persisted progress cleared.
     expect(localStorage.getItem(PROGRESS_KEY)).toBeNull();
+  });
+
+  it("does not finish setup when the Practice response belongs to a logged-out session", async () => {
+    let finishDowngrade: ((token: string) => void) | undefined;
+    mocks.downgradeMode.mockReturnValue(
+      new Promise<string>((resolve) => {
+        finishDowngrade = resolve;
+      }),
+    );
+
+    render(<SetupAccountRoute />);
+    fireEvent.click(screen.getByText("pick-practice"));
+    await waitFor(() => expect(mocks.downgradeMode).toHaveBeenCalledOnce());
+
+    act(() => useAuthStore.getState().setLoggedOut());
+    await act(async () => {
+      finishDowngrade?.("late-practice-token");
+      await Promise.resolve();
+    });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      status: "logged-out",
+      token: null,
+      username: null,
+    });
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("removes recovery material and broker credentials from persisted progress", async () => {
+    render(<SetupAccountRoute />);
+
+    await waitFor(() => {
+      const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? "{}");
+      expect(progress).not.toHaveProperty("totpUri");
+      expect(progress).not.toHaveProperty("backupCodes");
+      expect(progress.connection).toEqual({
+        host: "http://localhost:5000",
+        port: "5000",
+        wsPort: "8765",
+      });
+      expect(JSON.stringify(progress)).not.toContain("legacy-browser-secret");
+      expect(JSON.stringify(progress)).not.toContain("AAAA1111");
+      expect(JSON.stringify(progress)).not.toContain("secret=ABC");
+    });
+  });
+
+  it("requires password-backed 2FA regeneration after a recovery-step reload", () => {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      accountCreated: true,
+      totpUri: "otpauth://totp/x?secret=LEGACY",
+      backupCodes: ["LEGACY01"],
+      persona: null,
+      connection: null,
+      trading: null,
+      risk: null,
+      mode: null,
+      displayName: "nav",
+      currentStep: 1,
+    }));
+
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/not retained/i);
+    expect(screen.getByRole("button", { name: /show QR code/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /reset 2FA/i })).toBeEnabled();
   });
 
   it("does not finish setup under a Practice badge when the transition fails", async () => {
@@ -151,5 +252,88 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     expect(mocks.downgradeMode).not.toHaveBeenCalled();
     expect(useAuthStore.getState().token).toBe("live-token");
     expect(useModeStore.getState().mode).toBe("live");
+  });
+
+  it("rejects a Live unlock response after the setup session is terminated", async () => {
+    render(<SetupAccountRoute />);
+    act(() => useAuthStore.getState().setLoggedOut());
+
+    fireEvent.click(screen.getByText("pick-live"));
+    await act(async () => Promise.resolve());
+
+    expect(useAuthStore.getState()).toMatchObject({
+      status: "logged-out",
+      token: null,
+      username: null,
+    });
+    expect(useModeStore.getState().mode).toBe("explore");
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
+  });
+
+  it("does not install a late account-setup session or advance the wizard", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    let finishSetup: ((result: {
+      token: string;
+      totpUri: string;
+      backupCodes: string[];
+    }) => void) | undefined;
+    mocks.setupFlintTradeAccount.mockReturnValue(
+      new Promise((resolve) => {
+        finishSetup = resolve;
+      }),
+    );
+    render(<SetupAccountRoute />);
+    submitAccountCreation();
+    await waitFor(() => expect(mocks.setupFlintTradeAccount).toHaveBeenCalledOnce());
+    act(() => useAuthStore.getState().setLoggedOut());
+
+    await act(async () => {
+      finishSetup?.({
+        token: "late-setup-token",
+        totpUri: "otpauth://totp/late",
+        backupCodes: ["LATE0001"],
+      });
+      await Promise.resolve();
+    });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      status: "logged-out",
+      token: null,
+      username: null,
+    });
+    expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
+  });
+
+  it("does not let a late tokenless setup response log out a newer session", async () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    let finishSetup: ((result: {
+      token: string;
+      totpUri: string;
+      backupCodes: string[];
+    }) => void) | undefined;
+    mocks.setupFlintTradeAccount.mockReturnValue(
+      new Promise((resolve) => {
+        finishSetup = resolve;
+      }),
+    );
+    render(<SetupAccountRoute />);
+    submitAccountCreation();
+    await waitFor(() => expect(mocks.setupFlintTradeAccount).toHaveBeenCalledOnce());
+    act(() => useAuthStore.getState().setLoggedIn("newer-token", "bob", ""));
+
+    await act(async () => {
+      finishSetup?.({ token: "", totpUri: "", backupCodes: [] });
+      await Promise.resolve();
+    });
+
+    expect(useAuthStore.getState()).toMatchObject({
+      status: "logged-in",
+      token: "newer-token",
+      username: "bob",
+    });
+    expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
   });
 });

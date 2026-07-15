@@ -12,6 +12,9 @@ MarketQuoteV3Api / TradeProfitAndLossApi query parameters).
 from __future__ import annotations
 
 import json
+import math
+import unicodedata
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
 
@@ -31,8 +34,8 @@ EXCHANGE_TO_UPSTOX = {
     "BSE": "BSE_EQ",
     "NFO": "NSE_FO",
     "BFO": "BSE_FO",
-    "CDS": "NSE_CD",
-    "BCD": "BSE_CD",
+    "CDS": "NCD_FO",
+    "BCD": "BCD_FO",
     "MCX": "MCX_FO",
     "NSE_INDEX": "NSE_INDEX",
     "BSE_INDEX": "BSE_INDEX",
@@ -75,17 +78,26 @@ def _validated_validity(validity: Any) -> str:
         return "DAY"
     code = str(validity).strip().upper()
     if code not in UPSTOX_VALIDITIES:
-        raise UpstoxMappingError(
-            f"Upstox supports only DAY/IOC validity, got {validity!r}"
-        )
+        raise UpstoxMappingError(f"Upstox supports only DAY/IOC validity, got {validity!r}")
     return code
 
 
 def _num(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _present_order_number(record: dict[str, Any], key: str) -> str | None:
+    if key not in record:
+        return None
+    value = record[key]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return str(value)
 
 
 def _norm_pricetype(pricetype: str) -> str:
@@ -152,17 +164,17 @@ def to_place_order_v3_params(order: Any, instrument_token: str, *, tag: str | No
     if variety not in ("regular", "amo", "iceberg", ""):
         raise UpstoxMappingError(f"Upstox v3 place does not support variety {variety!r}")
     params = _validated_core(order, instrument_token)
-    params.update({
-        "is_amo": variety == "amo",
-        "slice": variety == "iceberg",
-        "tag": tag or "",
-    })
+    params.update(
+        {
+            "is_amo": variety == "amo",
+            "slice": variety == "iceberg",
+            "tag": tag or "",
+        }
+    )
     return params
 
 
-def to_multi_order_params(
-    orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None
-) -> list[dict[str, Any]]:
+def to_multi_order_params(orders_with_tokens: list[tuple[Any, str]], *, tag: str | None = None) -> list[dict[str, Any]]:
     """Translate a basket of ``(Order, instrument_token)`` pairs into the Upstox
     ``MultiOrderRequest`` payload list (one dict per order, ``correlation_id``
     assigned positionally so per-order errors map back to the input)."""
@@ -174,12 +186,14 @@ def to_multi_order_params(
         if variety not in ("regular", "amo", "iceberg", ""):
             raise UpstoxMappingError(f"Upstox multi-order does not support variety {variety!r}")
         params = _validated_core(order, token)
-        params.update({
-            "is_amo": variety == "amo",
-            "slice": variety == "iceberg",
-            "tag": tag or "",
-            "correlation_id": str(i + 1),
-        })
+        params.update(
+            {
+                "is_amo": variety == "amo",
+                "slice": variety == "iceberg",
+                "tag": tag or "",
+                "correlation_id": str(i + 1),
+            }
+        )
         payloads.append(params)
     return payloads
 
@@ -263,9 +277,7 @@ def _product_from_upstox(code: str, exchange: str, segment: str = "") -> str:
         return UPSTOX_TO_PRODUCT.get(upstox_code, upstox_code)
     exch = str(exchange).upper()
     seg = str(segment).upper()
-    is_derivative = exch in _DERIVATIVE_EXCHANGES or any(
-        marker in seg for marker in ("_FO", "_CD", "_COM")
-    )
+    is_derivative = exch in _DERIVATIVE_EXCHANGES or any(marker in seg for marker in ("_FO", "_CD", "_COM"))
     return "NRML" if is_derivative else "CNC"
 
 
@@ -281,55 +293,241 @@ def extract_order_id(resp: dict[str, Any]) -> str:
     if isinstance(data, dict):
         ids = data.get("order_ids")
         if isinstance(ids, list) and ids:
-            return str(ids[0])
+            return canonical_order_id(ids[0])
         oid = data.get("order_id")
         if oid:
-            return str(oid)
+            return canonical_order_id(oid)
     raise UpstoxMappingError(f"No order id in Upstox response: {resp!r}")
+
+
+def canonical_order_id(value: Any) -> str:
+    """Return one printable, whitespace-free NFC Upstox order identifier."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise UpstoxMappingError("Unexpected non-canonical Upstox order id")
+    if (
+        not value.isprintable()
+        or any(character.isspace() for character in value)
+        or unicodedata.normalize("NFC", value) != value
+    ):
+        raise UpstoxMappingError("Unexpected non-canonical Upstox order id")
+    return value
 
 
 def from_upstox_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox order-book record."""
     exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
-    return {
+    quantity = d.get("quantity")
+    filled_quantity = d.get("filled_quantity")
+    pending_quantity = d.get("pending_quantity")
+    if pending_quantity is None:
+        try:
+            pending_quantity = max(int(str(quantity)) - int(str(filled_quantity)), 0)
+        except (TypeError, ValueError, OverflowError):
+            pending_quantity = 0
+    order = {
         "orderid": str(d.get("order_id", "")),
         "status": d.get("status", ""),
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
         "exchange": exchange,
+        "segment": d.get("segment", ""),
+        "instrument_token": d.get("instrument_token", ""),
+        "tag": d.get("tag", ""),
         "action": d.get("transaction_type", ""),
         "pricetype": UPSTOX_TO_ORDER_TYPE.get(d.get("order_type", ""), d.get("order_type", "")),
         "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
-        "quantity": str(d.get("quantity", 0)),
-        "price": str(d.get("price", 0)),
-        "trigger_price": str(d.get("trigger_price", 0)),
-        "filled_quantity": str(d.get("filled_quantity", 0)),
-        "average_price": str(d.get("average_price", 0)),
+        "pending_quantity": str(pending_quantity),
     }
+    for field in ("quantity", "filled_quantity", "price", "trigger_price", "average_price"):
+        value = _present_order_number(d, field)
+        if value is not None:
+            order[field] = value
+    return order
 
 
 def from_upstox_position(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox position record."""
     exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
+    accounting_fields = ("quantity", "overnight_quantity", "day_buy_quantity", "day_sell_quantity")
+    accounting_complete = all(field in d and d[field] is not None for field in accounting_fields)
+    if accounting_complete:
+        try:
+            accounting_matches = int(d["quantity"]) == (
+                int(d["overnight_quantity"]) + int(d["day_buy_quantity"]) - int(d["day_sell_quantity"])
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise UpstoxMappingError("Upstox position accounting is invalid") from exc
+        if not accounting_matches:
+            raise UpstoxMappingError("Upstox position accounting is inconsistent")
     return {
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+        "instrument_id": str(d.get("instrument_token", "")),
         "exchange": exchange,
+        "segment": d.get("segment", ""),
+        "instrument_token": d.get("instrument_token", ""),
         "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
         "quantity": str(d.get("quantity", 0)),
+        "overnight_quantity": str(d.get("overnight_quantity") or 0),
+        "day_buy_quantity": str(d.get("day_buy_quantity") or 0),
+        "day_sell_quantity": str(d.get("day_sell_quantity") or 0),
+        "_emergency_accounting_complete": accounting_complete,
+        "accounting_complete": accounting_complete,
         "average_price": str(d.get("average_price", d.get("buy_price", 0))),
         "ltp": str(d.get("last_price", 0)),
         "pnl": str(d.get("pnl", 0)),
+        "multiplier": d.get("multiplier"),
+        "fx_rate": d.get("fx_rate", d.get("reference_rate")),
+        "close_price": d.get("close_price"),
+        "previous_close_trusted": d.get("close_price") not in (None, "", 0, "0"),
+        "cross_currency": False,
+        "option_type": str(d.get("instrument_type") or d.get("option_type") or "").strip().upper(),
+        "expiry": str(d.get("expiry") or d.get("expiry_date") or ""),
+        "strike_price": _num(d.get("strike_price")),
+        "underlying": str(d.get("underlying") or d.get("underlying_symbol") or ""),
+    }
+
+
+_TERMINAL_ORDER_STATUSES = frozenset({"cancelled", "canceled", "complete", "completed", "filled", "rejected"})
+
+
+def emergency_order_ids(rows: list[Any]) -> frozenset[str]:
+    """Return every canonical identifier present in the current-day order book."""
+    order_ids: set[str] = set()
+    for raw in rows:
+        if not isinstance(raw, dict):
+            raise UpstoxMappingError("Unexpected Upstox order-book row")
+        raw_order_id = raw.get("orderid")
+        if raw_order_id in (None, ""):
+            continue
+        order_id = canonical_order_id(raw_order_id)
+        if order_id in order_ids:
+            raise UpstoxMappingError("Unexpected duplicate Upstox order id")
+        order_ids.add(order_id)
+    return frozenset(order_ids)
+
+
+def active_emergency_orders(rows: list[Any]) -> tuple[dict[str, Any], ...]:
+    """Return every non-terminal order with a canonical broker identifier."""
+    active: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        if not isinstance(raw, dict):
+            raise UpstoxMappingError("Unexpected Upstox order-book row")
+        status = str(raw.get("status") or "").strip().lower()
+        if status in _TERMINAL_ORDER_STATUSES:
+            continue
+        order_id = canonical_order_id(raw.get("orderid"))
+        if order_id in seen:
+            raise UpstoxMappingError("Unexpected duplicate active Upstox order id")
+        seen.add(order_id)
+        active.append({**raw, "orderid": order_id})
+    return tuple(active)
+
+
+def active_emergency_positions(rows: list[Any]) -> tuple[dict[str, Any], ...]:
+    """Aggregate non-zero signed positions by exact symbol/exchange/product."""
+    aggregated: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for raw in rows:
+        if not isinstance(raw, dict):
+            raise UpstoxMappingError("Unexpected Upstox position row")
+        symbol = str(raw.get("symbol") or "").strip()
+        exchange = str(raw.get("exchange") or "").strip().upper()
+        product = str(raw.get("product") or "").strip().upper()
+        if not symbol or not exchange or not product:
+            raise UpstoxMappingError("Upstox emergency position identity is incomplete")
+        try:
+            quantity = int(str(raw.get("quantity", "0")).strip())
+            overnight_quantity = int(str(raw.get("overnight_quantity", "0")).strip())
+            day_buy_quantity = int(str(raw.get("day_buy_quantity", "0")).strip())
+            day_sell_quantity = int(str(raw.get("day_sell_quantity", "0")).strip())
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise UpstoxMappingError("Upstox emergency position accounting is invalid") from exc
+        if day_buy_quantity < 0 or day_sell_quantity < 0:
+            raise UpstoxMappingError("Upstox emergency position accounting cannot be negative")
+        key = (symbol, exchange, product)
+        current = aggregated.setdefault(
+            key,
+            {
+                "symbol": symbol,
+                "exchange": exchange,
+                "product": product,
+                "quantity": 0,
+                "overnight_quantity": 0,
+                "day_buy_quantity": 0,
+                "day_sell_quantity": 0,
+                "_emergency_accounting_complete": True,
+            },
+        )
+        current["quantity"] += quantity
+        current["overnight_quantity"] += overnight_quantity
+        current["day_buy_quantity"] += day_buy_quantity
+        current["day_sell_quantity"] += day_sell_quantity
+        current["_emergency_accounting_complete"] = bool(current["_emergency_accounting_complete"]) and bool(
+            raw.get("_emergency_accounting_complete", False)
+        )
+    return tuple(
+        {
+            **position,
+            "quantity": str(position["quantity"]),
+            "overnight_quantity": str(position["overnight_quantity"]),
+            "day_buy_quantity": str(position["day_buy_quantity"]),
+            "day_sell_quantity": str(position["day_sell_quantity"]),
+        }
+        for position in aggregated.values()
+        if position["quantity"] != 0
+    )
+
+
+def is_delivery_eq_position(position: dict[str, Any]) -> bool:
+    """Whether Upstox exit-all cannot flatten this Delivery EQ position."""
+    return str(position.get("product")).upper() == "CNC" and str(position.get("exchange")).upper() in {
+        "NSE",
+        "BSE",
+    }
+
+
+def to_emergency_reducing_payload(position: dict[str, Any], *, tag: str) -> dict[str, Any]:
+    """Build the exact opposite-side MARKET write for one signed position."""
+    try:
+        signed_quantity = int(str(position["quantity"]))
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise UpstoxMappingError("Upstox emergency position quantity is invalid") from exc
+    if signed_quantity == 0:
+        raise UpstoxMappingError("Cannot build an emergency write for a flat position")
+    return {
+        "_op": "place_reducing_order",
+        "symbol": str(position["symbol"]),
+        "exchange": str(position["exchange"]),
+        "product": str(position["product"]),
+        "quantity": str(abs(signed_quantity)),
+        "expected_position_quantity": str(signed_quantity),
+        "action": "SELL" if signed_quantity > 0 else "BUY",
+        "pricetype": "MARKET",
+        "price": "0",
+        "trigger_price": "0",
+        "variety": "regular",
+        "emergency_tag": str(tag),
     }
 
 
 def from_upstox_holding(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an Upstox holding record."""
+    exchange = d.get("exchange", _exchange_of_token(d.get("instrument_token", "")))
     return {
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "exchange": d.get("exchange", ""),
+        "instrument_id": str(d.get("instrument_token", "")),
+        "exchange": exchange,
+        "product": _product_from_upstox(d.get("product", ""), exchange, d.get("segment", "")),
         "quantity": str(d.get("quantity", 0)),
         "average_price": str(d.get("average_price", 0)),
         "ltp": str(d.get("last_price", 0)),
         "pnl": str(d.get("pnl", 0)),
+        "multiplier": d.get("multiplier"),
+        "fx_rate": d.get("fx_rate", d.get("reference_rate")),
+        "close_price": d.get("close_price"),
+        "previous_close_trusted": d.get("close_price") not in (None, "", 0, "0"),
+        "cross_currency": False,
+        "t1_quantity": str(d.get("t1_quantity") or 0),
+        "accounting_complete": d.get("quantity") is not None and bool(d.get("instrument_token")),
     }
 
 
@@ -338,32 +536,56 @@ def from_upstox_trade(d: dict[str, Any]) -> dict[str, Any]:
     return {
         "orderid": str(d.get("order_id", "")),
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+        "instrument_id": str(d.get("instrument_token", "")),
         "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
         "action": d.get("transaction_type", ""),
         "quantity": str(d.get("quantity", 0)),
         "price": str(d.get("average_price", d.get("price", 0))),
         "product": _product_from_upstox(
-            d.get("product", ""), d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+            d.get("product", ""),
+            d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
             d.get("segment", ""),
         ),
-        "timestamp": str(d.get("order_timestamp", d.get("exchange_timestamp", ""))),
+        "timestamp": str(d.get("exchange_timestamp", d.get("order_timestamp", ""))),
+        "multiplier": d.get("multiplier"),
+        "fx_rate": d.get("fx_rate", d.get("reference_rate")),
+        "cross_currency": False,
     }
 
 
 def from_upstox_funds(resp: dict[str, Any]) -> dict[str, Any]:
     """Normalise the Upstox fund-and-margin response.
 
-    Upstox returns ``data: {"equity": {available_margin, used_margin, ...},
-    "commodity": {...}}``. We surface the equity segment with the raw payload.
+    V3 returns an ``available_to_trade`` breakdown. V2-shaped responses remain
+    accepted for legacy callers, but never provide inferred opening capital.
     """
     data = resp.get("data", resp) if isinstance(resp, dict) else {}
-    equity = data.get("equity", {}) if isinstance(data, dict) else {}
-    available = equity.get("available_margin", 0)
-    used = equity.get("used_margin", 0)
+    available_to_trade = data.get("available_to_trade") if isinstance(data, dict) else None
+    if isinstance(available_to_trade, dict):
+        cash_available = available_to_trade.get("cash_available_to_trade", {})
+        pledge_available = available_to_trade.get("pledge_available_to_trade", {})
+        cash_available = cash_available if isinstance(cash_available, dict) else {}
+        pledge_available = pledge_available if isinstance(pledge_available, dict) else {}
+        cash_margin = cash_available.get("margin_used", {})
+        pledge_margin = pledge_available.get("margin_used", {})
+        cash_margin = cash_margin if isinstance(cash_margin, dict) else {}
+        pledge_margin = pledge_margin if isinstance(pledge_margin, dict) else {}
+        cash = cash_available.get("cash", {})
+        cash = cash if isinstance(cash, dict) else {}
+        available = available_to_trade.get("total", 0)
+        used = _num(cash_margin.get("total", 0)) + _num(pledge_margin.get("total", 0))
+        opening_risk_capital = cash.get("opening_balance", 0)
+    else:
+        equity = data.get("equity", {}) if isinstance(data, dict) else {}
+        equity = equity if isinstance(equity, dict) else {}
+        available = equity.get("available_margin", 0)
+        used = equity.get("used_margin", 0)
+        opening_risk_capital = 0
     return {
         "available_balance": str(available),
         "used_margin": str(used),
         "total_balance": str(_num(available) + _num(used)),
+        "opening_risk_capital": str(opening_risk_capital),
         "extra": data,
     }
 
@@ -417,14 +639,16 @@ def from_upstox_candles(symbol: str, exchange: str, interval: str, resp: dict[st
     for row in rows:
         if not isinstance(row, (list, tuple)) or len(row) < 5:
             continue
-        bars.append({
-            "timestamp": str(row[0]),
-            "open": _num(row[1]),
-            "high": _num(row[2]),
-            "low": _num(row[3]),
-            "close": _num(row[4]),
-            "volume": int(_num(row[5])) if len(row) > 5 else 0,
-        })
+        bars.append(
+            {
+                "timestamp": str(row[0]),
+                "open": _num(row[1]),
+                "high": _num(row[2]),
+                "low": _num(row[3]),
+                "close": _num(row[4]),
+                "volume": int(_num(row[5])) if len(row) > 5 else 0,
+            }
+        )
     return {"symbol": symbol, "exchange": exchange, "interval": interval, "bars": bars}
 
 
@@ -453,6 +677,7 @@ def from_upstox_quote(rec: dict[str, Any]) -> dict[str, Any]:
         "bid": bid,
         "ask": ask,
         "prev_close": _num(ohlc.get("close")),
+        "previous_close_trusted": False,
         "oi": int(_num(rec.get("oi"))),
     }
 
@@ -464,11 +689,13 @@ def _upstox_depth_levels(rows: Any) -> list[dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        levels.append({
-            "price": _num(row.get("price")),
-            "quantity": int(_num(row.get("quantity"))),
-            "orders": int(_num(row.get("orders"))),
-        })
+        levels.append(
+            {
+                "price": _num(row.get("price")),
+                "quantity": int(_num(row.get("quantity"))),
+                "orders": int(_num(row.get("orders"))),
+            }
+        )
     return levels
 
 
@@ -520,9 +747,7 @@ def to_token_request_params(credentials: dict[str, Any]) -> dict[str, str]:
     client_secret = str(credentials.get("api_secret") or credentials.get("client_secret") or "")
     redirect_uri = str(credentials.get("redirect_uri") or "")
     if not (code and client_id and client_secret and redirect_uri):
-        raise UpstoxMappingError(
-            "Upstox token exchange needs code, api_key, api_secret and redirect_uri"
-        )
+        raise UpstoxMappingError("Upstox token exchange needs code, api_key, api_secret and redirect_uri")
     return {
         "code": code,
         "client_id": client_id,
@@ -558,10 +783,7 @@ def _gtt_trigger_type(override: Any, *, allowed: frozenset[str] = _GTT_TRIGGER_T
     if override is not None and str(override).strip():
         code = str(override).strip().upper()
         if code not in allowed:
-            raise UpstoxMappingError(
-                f"Upstox GTT trigger_type must be one of {sorted(allowed)}, "
-                f"got {override!r}"
-            )
+            raise UpstoxMappingError(f"Upstox GTT trigger_type must be one of {sorted(allowed)}, got {override!r}")
         return code
     return default
 
@@ -610,25 +832,29 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     target = _num(getattr(order, "target_price", 0))
     if stop_loss > 0:
-        rules.append({
-            "strategy": "STOPLOSS",
-            "trigger_type": _gtt_trigger_type(
-                getattr(order, "stop_loss_trigger_type", None),
-                allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
-                default="IMMEDIATE",
-            ),
-            "trigger_price": stop_loss,
-        })
+        rules.append(
+            {
+                "strategy": "STOPLOSS",
+                "trigger_type": _gtt_trigger_type(
+                    getattr(order, "stop_loss_trigger_type", None),
+                    allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
+                    default="IMMEDIATE",
+                ),
+                "trigger_price": stop_loss,
+            }
+        )
     if target > 0:
-        rules.append({
-            "strategy": "TARGET",
-            "trigger_type": _gtt_trigger_type(
-                getattr(order, "target_trigger_type", None),
-                allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
-                default="IMMEDIATE",
-            ),
-            "trigger_price": target,
-        })
+        rules.append(
+            {
+                "strategy": "TARGET",
+                "trigger_type": _gtt_trigger_type(
+                    getattr(order, "target_trigger_type", None),
+                    allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
+                    default="IMMEDIATE",
+                ),
+                "trigger_price": target,
+            }
+        )
     return ("MULTIPLE" if len(rules) > 1 else "SINGLE"), rules
 
 
@@ -715,7 +941,8 @@ def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
         "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
         "product": _product_from_upstox(
-            d.get("product", ""), d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+            d.get("product", ""),
+            d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
             d.get("segment", ""),
         ),
         "quantity": str(d.get("quantity", 0)),
@@ -747,8 +974,17 @@ def from_upstox_multi_order(resp: dict[str, Any]) -> dict[str, Any]:
     rows = resp.get("data", []) if isinstance(resp.get("data"), list) else []
     errors = resp.get("errors", []) if isinstance(resp.get("errors"), list) else []
     summary = resp.get("summary", {}) if isinstance(resp.get("summary"), dict) else {}
+    order_results = [
+        {
+            "order_id": str(row.get("order_id") or ""),
+            "correlation_id": str(row.get("correlation_id") or ""),
+        }
+        for row in rows
+        if isinstance(row, dict) and str(row.get("order_id") or "")
+    ]
     return {
-        "order_ids": [str(r.get("order_id", "")) for r in rows if isinstance(r, dict)],
+        "order_ids": [row["order_id"] for row in order_results],
+        "order_results": order_results,
         "errors": [e for e in errors if isinstance(e, dict)],
         "total": int(_num(summary.get("total", len(rows) + len(errors)))),
         "success": int(_num(summary.get("success", len(rows)))),
@@ -759,15 +995,68 @@ def from_upstox_cancel_exit(resp: dict[str, Any]) -> dict[str, Any]:
     """Normalise a ``CancelOrExitMultiOrderResponse`` (cancel-multi / exit-all)."""
     if not isinstance(resp, dict):
         raise UpstoxMappingError(f"Unexpected Upstox cancel/exit response: {resp!r}")
-    data = resp.get("data", {}) if isinstance(resp.get("data"), dict) else {}
-    errors = resp.get("errors", []) if isinstance(resp.get("errors"), list) else []
-    summary = resp.get("summary", {}) if isinstance(resp.get("summary"), dict) else {}
-    ids = data.get("order_ids", []) if isinstance(data.get("order_ids"), list) else []
+    status = str(resp.get("status") or "").strip().lower()
+    if status not in {"success", "partial_success"}:
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response status")
+
+    data = resp.get("data")
+    summary = resp.get("summary")
+    raw_errors = resp.get("errors")
+    if not isinstance(data, dict) or not isinstance(data.get("order_ids"), list):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response data")
+    if not isinstance(summary, dict) or not {"total", "success", "error"}.issubset(summary):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response summary")
+    if raw_errors is not None and (
+        not isinstance(raw_errors, list) or not all(isinstance(error, dict) for error in raw_errors)
+    ):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response errors")
+
+    ids = data["order_ids"]
+    if not all(isinstance(order_id, str) and order_id.strip() for order_id in ids):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response order ids")
+    if any(order_id != order_id.strip() for order_id in ids):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response padded order ids")
+    if any(
+        not order_id.isprintable()
+        or any(character.isspace() for character in order_id)
+        or unicodedata.normalize("NFC", order_id) != order_id
+        for order_id in ids
+    ):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response non-canonical order ids")
+    canonical_ids = list(ids)
+    if len(set(canonical_ids)) != len(canonical_ids):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response duplicate order ids")
+
+    counts: dict[str, int] = {}
+    try:
+        for key in ("total", "success", "error"):
+            raw_count = summary[key]
+            if isinstance(raw_count, bool) or not isinstance(raw_count, (int, str)):
+                raise ValueError(key)
+            if isinstance(raw_count, str) and not raw_count.strip().isdigit():
+                raise ValueError(key)
+            counts[key] = int(raw_count)
+    except (TypeError, ValueError, OverflowError, KeyError) as exc:
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response counts") from exc
+    total = counts["total"]
+    success = counts["success"]
+    error_count = counts["error"]
+
+    errors = raw_errors or []
+    if (
+        min(total, success, error_count) < 0
+        or total != success + error_count
+        or success != len(canonical_ids)
+        or error_count != len(errors)
+        or (status == "success" and error_count != 0)
+        or (status == "partial_success" and (success == 0 or error_count == 0))
+    ):
+        raise UpstoxMappingError("Unexpected Upstox cancel/exit response batch summary")
     return {
-        "order_ids": [str(i) for i in ids],
-        "errors": [e for e in errors if isinstance(e, dict)],
-        "total": int(_num(summary.get("total", len(ids) + len(errors)))),
-        "success": int(_num(summary.get("success", len(ids)))),
+        "order_ids": canonical_ids,
+        "errors": errors,
+        "total": total,
+        "success": success,
     }
 
 
@@ -785,9 +1074,7 @@ def to_convert_position_params(req: dict[str, Any]) -> dict[str, Any]:
     old_product = str(req.get("old_product", "")).upper()
     new_product = str(req.get("new_product", "")).upper()
     if old_product not in PRODUCT_TO_UPSTOX or new_product not in PRODUCT_TO_UPSTOX:
-        raise UpstoxMappingError(
-            f"Unsupported convert products {old_product!r} -> {new_product!r}"
-        )
+        raise UpstoxMappingError(f"Unsupported convert products {old_product!r} -> {new_product!r}")
     if PRODUCT_TO_UPSTOX[old_product] == PRODUCT_TO_UPSTOX[new_product]:
         raise UpstoxMappingError(
             f"Convert {old_product!r} -> {new_product!r} is a no-op on Upstox (both map to "
@@ -866,6 +1153,8 @@ def from_upstox_profile(resp: dict[str, Any]) -> dict[str, Any]:
 
 
 def _quote_records(resp: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    if isinstance(resp, dict) and "status" in resp and str(resp.get("status") or "").lower() != "success":
+        raise UpstoxMappingError("Upstox market-quote response was not successful")
     data = resp.get("data", {}) if isinstance(resp, dict) else {}
     if not isinstance(data, dict):
         return []
@@ -878,16 +1167,20 @@ def from_upstox_ohlc_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
     for key, rec in _quote_records(resp):
         live = rec.get("live_ohlc", {}) if isinstance(rec.get("live_ohlc"), dict) else {}
         prev = rec.get("prev_ohlc", {}) if isinstance(rec.get("prev_ohlc"), dict) else {}
-        out.append({
-            "instrument_token": str(rec.get("instrument_token", key)),
-            "ltp": _num(rec.get("last_price")),
-            "open": _num(live.get("open")),
-            "high": _num(live.get("high")),
-            "low": _num(live.get("low")),
-            "close": _num(live.get("close")),
-            "volume": int(_num(live.get("volume"))),
-            "prev_close": _num(prev.get("close")),
-        })
+        out.append(
+            {
+                "instrument_token": str(rec.get("instrument_token", key)),
+                "ltp": _num(rec.get("last_price")),
+                "open": _num(live.get("open")),
+                "high": _num(live.get("high")),
+                "low": _num(live.get("low")),
+                "close": _num(live.get("close")),
+                "volume": int(_num(live.get("volume"))),
+                "prev_close": _num(prev.get("close")),
+                "previous_close_trusted": bool(prev.get("ts")) and _num(prev.get("close")) > 0,
+                "previous_close_as_of": str(prev.get("ts") or ""),
+            }
+        )
     return out
 
 
@@ -899,6 +1192,7 @@ def from_upstox_ltp_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
             "ltp": _num(rec.get("last_price")),
             "volume": int(_num(rec.get("volume"))),
             "prev_close": _num(rec.get("cp")),
+            "previous_close_trusted": _num(rec.get("cp")) > 0,
         }
         for key, rec in _quote_records(resp)
     ]
@@ -906,19 +1200,48 @@ def from_upstox_ltp_v3(resp: dict[str, Any]) -> list[dict[str, Any]]:
 
 def from_upstox_option_greeks(resp: dict[str, Any]) -> list[dict[str, Any]]:
     """Parse a v3 option-Greek quote response (``MarketQuoteOptionGreekV3``)."""
+
+    if not isinstance(resp, dict) or str(resp.get("status") or "").lower() != "success":
+        raise UpstoxMappingError("Upstox option-Greek response was not successful")
+
+    def number(record: dict[str, Any], name: str) -> float:
+        value = record.get(name)
+        if value is None or isinstance(value, bool):
+            raise UpstoxMappingError(f"Upstox option-Greek response lacks {name}")
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}") from exc
+        if not math.isfinite(parsed):
+            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}")
+        return parsed
+
+    def count(record: dict[str, Any], name: str) -> int:
+        parsed = number(record, name)
+        if parsed < 0 or not parsed.is_integer():
+            raise UpstoxMappingError(f"Upstox option-Greek response has invalid {name}")
+        return int(parsed)
+
+    def instrument_token(record: dict[str, Any]) -> str:
+        token = record.get("instrument_token")
+        if not isinstance(token, str) or not token.strip():
+            raise UpstoxMappingError("Upstox option-Greek response lacks instrument_token")
+        return token.strip()
+
     return [
         {
-            "instrument_token": str(rec.get("instrument_token", key)),
-            "ltp": _num(rec.get("last_price")),
-            "iv": _num(rec.get("iv")),
-            "delta": _num(rec.get("delta")),
-            "gamma": _num(rec.get("gamma")),
-            "theta": _num(rec.get("theta")),
-            "vega": _num(rec.get("vega")),
-            "oi": int(_num(rec.get("oi"))),
-            "volume": int(_num(rec.get("volume"))),
+            "instrument_token": instrument_token(rec),
+            "ltp": number(rec, "last_price"),
+            "iv": number(rec, "iv"),
+            "delta": number(rec, "delta"),
+            "gamma": number(rec, "gamma"),
+            "theta": number(rec, "theta"),
+            "vega": number(rec, "vega"),
+            "oi": count(rec, "oi"),
+            "volume": count(rec, "volume"),
+            "greeks_complete": True,
         }
-        for key, rec in _quote_records(resp)
+        for _key, rec in _quote_records(resp)
     ]
 
 
@@ -933,20 +1256,22 @@ def from_upstox_instrument_rows(resp: dict[str, Any]) -> list[dict[str, Any]]:
     for d in rows:
         if not isinstance(d, dict):
             continue
-        out.append({
-            "instrument_key": str(d.get("instrument_key", "")),
-            "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-            "name": d.get("name", ""),
-            "exchange": d.get("exchange", ""),
-            "segment": d.get("segment", ""),
-            "instrument_type": d.get("instrument_type", ""),
-            "expiry": str(d.get("expiry", "")),
-            "strike_price": _num(d.get("strike_price")),
-            "lot_size": int(_num(d.get("lot_size"))),
-            "tick_size": _num(d.get("tick_size")),
-            "freeze_quantity": _num(d.get("freeze_quantity")),
-            "underlying_key": str(d.get("underlying_key", "")),
-        })
+        out.append(
+            {
+                "instrument_key": str(d.get("instrument_key", "")),
+                "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
+                "name": d.get("name", ""),
+                "exchange": d.get("exchange", ""),
+                "segment": d.get("segment", ""),
+                "instrument_type": d.get("instrument_type", ""),
+                "expiry": str(d.get("expiry", "")),
+                "strike_price": _num(d.get("strike_price")),
+                "lot_size": int(_num(d.get("lot_size"))),
+                "tick_size": _num(d.get("tick_size")),
+                "freeze_quantity": _num(d.get("freeze_quantity")),
+                "underlying_key": str(d.get("underlying_key", "")),
+            }
+        )
     return out
 
 
@@ -968,19 +1293,21 @@ def from_upstox_trade_history(resp: dict[str, Any]) -> list[dict[str, Any]]:
     for d in rows if isinstance(rows, list) else []:
         if not isinstance(d, dict):
             continue
-        out.append({
-            "trade_id": str(d.get("trade_id", "")),
-            "symbol": d.get("symbol", d.get("scrip_name", "")),
-            "exchange": d.get("exchange", ""),
-            "segment": d.get("segment", ""),
-            "action": d.get("transaction_type", ""),
-            "quantity": str(d.get("quantity", 0)),
-            "price": str(d.get("price", 0)),
-            "amount": str(d.get("amount", 0)),
-            "trade_date": str(d.get("trade_date", "")),
-            "isin": str(d.get("isin", "")),
-            "instrument_token": str(d.get("instrument_token", "")),
-        })
+        out.append(
+            {
+                "trade_id": str(d.get("trade_id", "")),
+                "symbol": d.get("symbol", d.get("scrip_name", "")),
+                "exchange": d.get("exchange", ""),
+                "segment": d.get("segment", ""),
+                "action": d.get("transaction_type", ""),
+                "quantity": str(d.get("quantity", 0)),
+                "price": str(d.get("price", 0)),
+                "amount": str(d.get("amount", 0)),
+                "trade_date": str(d.get("trade_date", "")),
+                "isin": str(d.get("isin", "")),
+                "instrument_token": str(d.get("instrument_token", "")),
+            }
+        )
     return out
 
 
@@ -993,19 +1320,21 @@ def from_upstox_pnl_rows(resp: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         buy_amount = _num(d.get("buy_amount"))
         sell_amount = _num(d.get("sell_amount"))
-        out.append({
-            "symbol": d.get("scrip_name", ""),
-            "isin": str(d.get("isin", "")),
-            "trade_type": d.get("trade_type", ""),
-            "quantity": str(d.get("quantity", 0)),
-            "buy_date": str(d.get("buy_date", "")),
-            "buy_average": str(d.get("buy_average", 0)),
-            "sell_date": str(d.get("sell_date", "")),
-            "sell_average": str(d.get("sell_average", 0)),
-            "buy_amount": str(buy_amount),
-            "sell_amount": str(sell_amount),
-            "pnl": str(sell_amount - buy_amount),
-        })
+        out.append(
+            {
+                "symbol": d.get("scrip_name", ""),
+                "isin": str(d.get("isin", "")),
+                "trade_type": d.get("trade_type", ""),
+                "quantity": str(d.get("quantity", 0)),
+                "buy_date": str(d.get("buy_date", "")),
+                "buy_average": str(d.get("buy_average", 0)),
+                "sell_date": str(d.get("sell_date", "")),
+                "sell_average": str(d.get("sell_average", 0)),
+                "buy_amount": str(buy_amount),
+                "sell_amount": str(sell_amount),
+                "pnl": str(sell_amount - buy_amount),
+            }
+        )
     return out
 
 
@@ -1045,7 +1374,7 @@ def from_upstox_holidays(resp: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalise market holidays (``/v2/market/holidays[/{date}]``)."""
     rows = resp.get("data", []) if isinstance(resp, dict) else []
     holidays: list[dict[str, Any]] = []
-    for d in (rows if isinstance(rows, list) else []):
+    for d in rows if isinstance(rows, list) else []:
         if not isinstance(d, dict):
             continue
         open_rows = d.get("open_exchanges", [])
@@ -1058,13 +1387,15 @@ def from_upstox_holidays(resp: dict[str, Any]) -> list[dict[str, Any]]:
             for session in (open_rows if isinstance(open_rows, list) else [])
             if isinstance(session, dict)
         ]
-        holidays.append({
-            "date": str(d.get("date", d.get("_date", ""))),
-            "description": d.get("description", ""),
-            "holiday_type": d.get("holiday_type", ""),
-            "closed_exchanges": list(d.get("closed_exchanges", []) or []),
-            "open_exchanges": open_exchanges,
-        })
+        holidays.append(
+            {
+                "date": str(d.get("date", d.get("_date", ""))),
+                "description": d.get("description", ""),
+                "holiday_type": d.get("holiday_type", ""),
+                "closed_exchanges": list(d.get("closed_exchanges", []) or []),
+                "open_exchanges": open_exchanges,
+            }
+        )
     return holidays
 
 
@@ -1126,59 +1457,200 @@ def from_upstox_feed_ticks(message: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         full = rec.get("fullFeed", {}) if isinstance(rec.get("fullFeed"), dict) else {}
         market = full.get("marketFF", {}) if isinstance(full.get("marketFF"), dict) else {}
-        ticks.append({
-            "instrument_key": str(key),
-            "ltp": _num(ltpc.get("ltp")),
-            "ltq": int(_num(ltpc.get("ltq"))),
-            "ltt": str(ltpc.get("ltt", "")),
-            "prev_close": _num(ltpc.get("cp")),
-            "volume": int(_num(market.get("vtt"))),
-            "oi": int(_num(market.get("oi"))),
-        })
+        ticks.append(
+            {
+                "instrument_key": str(key),
+                "ltp": _num(ltpc.get("ltp")),
+                "ltq": int(_num(ltpc.get("ltq"))),
+                "ltt": str(ltpc.get("ltt", "")),
+                "prev_close": _num(ltpc.get("cp")),
+                "volume": int(_num(market.get("vtt"))),
+                "oi": int(_num(market.get("oi"))),
+            }
+        )
     return ticks
+
+
+def _option_chain_oi(value: Any) -> int | None:
+    """Return observed OI without turning an absent field into zero."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        raise UpstoxMappingError("Upstox option chain has invalid OI")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise UpstoxMappingError("Upstox option chain has invalid OI") from exc
+    if not math.isfinite(number) or number < 0 or not number.is_integer():
+        raise UpstoxMappingError("Upstox option chain has invalid OI")
+    return int(number)
 
 
 def _leg(side: dict[str, Any]) -> dict[str, Any]:
     """Flatten one option-chain leg (market_data + option_greeks)."""
     md = side.get("market_data", {}) if isinstance(side.get("market_data"), dict) else {}
     gk = side.get("option_greeks", {}) if isinstance(side.get("option_greeks"), dict) else {}
-    return {
+    greek_values = tuple(gk.get(name) for name in ("iv", "delta", "gamma", "theta", "vega"))
+    greeks_complete = all(
+        value not in (None, "")
+        and not isinstance(value, bool)
+        and math.isfinite(_num(value, default=math.nan))
+        for value in greek_values
+    )
+    mapped = {
         "ltp": _num(md.get("ltp")),
-        "oi": int(_num(md.get("oi"))),
         "volume": int(_num(md.get("volume"))),
         "iv": _num(gk.get("iv")),
         "delta": _num(gk.get("delta")),
         "gamma": _num(gk.get("gamma")),
         "theta": _num(gk.get("theta")),
         "vega": _num(gk.get("vega")),
+        "greeks_complete": greeks_complete,
         "bid": _num(md.get("bid_price")),
         "ask": _num(md.get("ask_price")),
     }
+    oi = _option_chain_oi(md.get("oi"))
+    if oi is not None:
+        mapped["oi"] = oi
+    return mapped
 
 
-def to_option_chain_dict(underlying: str, exchange: str, resp: dict[str, Any]) -> dict[str, Any]:
+def _normalise_option_chain_expiry(value: Any) -> str | None:
+    """Normalise an Upstox expiry identity without accepting coerced values."""
+    if not isinstance(value, str) or not (text := value.strip()):
+        return None
+    for expiry_format in (
+        "%Y-%m-%d",
+        "%Y%m%d",
+        "%d%b%y",
+        "%d%b%Y",
+        "%d-%b-%y",
+        "%d-%b-%Y",
+    ):
+        try:
+            return datetime.strptime(text.upper(), expiry_format).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def to_option_chain_dict(
+    underlying: str,
+    exchange: str,
+    resp: dict[str, Any],
+    *,
+    requested_expiry: str,
+    requested_instrument_key: str,
+) -> dict[str, Any]:
     """Parse an Upstox put/call option-chain response into a FlintTrade dict.
 
     Upstox returns ``data`` as a list of strike rows, each with ``strike_price``,
     ``call_options`` and ``put_options`` (each ``{market_data, option_greeks}``).
     """
-    rows = resp.get("data", []) if isinstance(resp, dict) else []
+    if (
+        not isinstance(resp, dict)
+        or not isinstance(resp.get("status"), str)
+        or resp["status"].strip().lower() != "success"
+    ):
+        raise UpstoxMappingError("Upstox option chain requires a successful response envelope")
+
+    rows = resp.get("data")
+    if not isinstance(rows, list) or not rows:
+        raise UpstoxMappingError("Upstox option chain rows must be a list")
+
+    requested_expiry_identity = _normalise_option_chain_expiry(requested_expiry)
+    if requested_expiry_identity is None:
+        raise UpstoxMappingError("Upstox option chain requested expiry identity is invalid")
+    if not isinstance(underlying, str) or not underlying.strip():
+        raise UpstoxMappingError("Upstox option chain requested underlying identity is invalid")
+    if not isinstance(requested_instrument_key, str) or not requested_instrument_key.strip():
+        raise UpstoxMappingError("Upstox option chain requested underlying identity is invalid")
+
+    instrument_key = requested_instrument_key.strip()
+    requested_exchange = str(exchange).strip().upper()
+    expected_segment = EXCHANGE_TO_UPSTOX.get(requested_exchange, requested_exchange)
+    requested_segment, separator, _ = instrument_key.partition("|")
+    if not separator or requested_segment != expected_segment:
+        raise UpstoxMappingError("Upstox option chain requested underlying identity conflicts with exchange")
+
     strikes: list[dict[str, Any]] = []
+    spot_price: float | None = None
+    observed_expiry = ""
     for row in rows:
         if not isinstance(row, dict):
-            continue
+            raise UpstoxMappingError("Upstox option chain source row is not an object")
+
+        row_key = row.get("underlying_key")
+        if not isinstance(row_key, str) or row_key.strip() != instrument_key:
+            raise UpstoxMappingError("Upstox option chain row has conflicting underlying identity")
+        row_segment, row_separator, _ = row_key.strip().partition("|")
+        if not row_separator or row_segment != expected_segment:
+            raise UpstoxMappingError("Upstox option chain row has conflicting exchange identity")
+
+        raw_expiry = row.get("expiry")
+        row_expiry_identity = _normalise_option_chain_expiry(raw_expiry)
+        if row_expiry_identity is None or row_expiry_identity != requested_expiry_identity:
+            raise UpstoxMappingError("Upstox option chain row has conflicting expiry identity")
+        if not observed_expiry:
+            observed_expiry = raw_expiry.strip()
+
+        raw_spot = row.get("underlying_spot_price")
+        if isinstance(raw_spot, bool):
+            raise UpstoxMappingError("Upstox option chain row has invalid spot identity")
+        try:
+            candidate_spot = float(raw_spot)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise UpstoxMappingError("Upstox option chain row has invalid spot identity") from exc
+        if not math.isfinite(candidate_spot) or candidate_spot <= 0:
+            raise UpstoxMappingError("Upstox option chain row has invalid spot identity")
+        if spot_price is None:
+            spot_price = candidate_spot
+        elif candidate_spot != spot_price:
+            raise UpstoxMappingError("Upstox option chain rows do not have a consistent spot identity")
+
+        if any(
+            side in row and not isinstance(row[side], dict)
+            for side in ("call_options", "put_options")
+        ):
+            raise UpstoxMappingError("Upstox option chain leg is not an object")
         call = _leg(row.get("call_options", {}) if isinstance(row.get("call_options"), dict) else {})
         put = _leg(row.get("put_options", {}) if isinstance(row.get("put_options"), dict) else {})
-        strikes.append({
+        mapped_row = {
             "strike_price": _num(row.get("strike_price")),
-            "ce_ltp": call["ltp"], "ce_oi": call["oi"], "ce_volume": call["volume"], "ce_iv": call["iv"],
-            "ce_delta": call["delta"], "ce_gamma": call["gamma"], "ce_theta": call["theta"], "ce_vega": call["vega"],
-            "ce_bid": call["bid"], "ce_ask": call["ask"],
-            "pe_ltp": put["ltp"], "pe_oi": put["oi"], "pe_volume": put["volume"], "pe_iv": put["iv"],
-            "pe_delta": put["delta"], "pe_gamma": put["gamma"], "pe_theta": put["theta"], "pe_vega": put["vega"],
-            "pe_bid": put["bid"], "pe_ask": put["ask"],
-        })
-    return {"underlying": underlying, "exchange": exchange, "strikes": strikes}
+            "ce_ltp": call["ltp"],
+            "ce_volume": call["volume"],
+            "ce_iv": call["iv"],
+            "ce_delta": call["delta"],
+            "ce_gamma": call["gamma"],
+            "ce_theta": call["theta"],
+            "ce_vega": call["vega"],
+            "ce_greeks_complete": call["greeks_complete"],
+            "ce_bid": call["bid"],
+            "ce_ask": call["ask"],
+            "pe_ltp": put["ltp"],
+            "pe_volume": put["volume"],
+            "pe_iv": put["iv"],
+            "pe_delta": put["delta"],
+            "pe_gamma": put["gamma"],
+            "pe_theta": put["theta"],
+            "pe_vega": put["vega"],
+            "pe_greeks_complete": put["greeks_complete"],
+            "pe_bid": put["bid"],
+            "pe_ask": put["ask"],
+        }
+        if "oi" in call:
+            mapped_row["ce_oi"] = call["oi"]
+        if "oi" in put:
+            mapped_row["pe_oi"] = put["oi"]
+        strikes.append(mapped_row)
+    return {
+        "underlying": underlying.strip(),
+        "underlying_key": instrument_key,
+        "exchange": UPSTOX_TO_EXCHANGE.get(requested_segment, requested_segment),
+        "expiry": observed_expiry,
+        "spot_price": spot_price,
+        "strikes": strikes,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1201,11 +1673,7 @@ def is_api_exception(exc: BaseException) -> bool:
     Returns:
         Whether ``exc`` looks like an Upstox ``ApiException``.
     """
-    return (
-        type(exc).__name__ == "ApiException"
-        and hasattr(exc, "status")
-        and hasattr(exc, "body")
-    )
+    return type(exc).__name__ == "ApiException" and hasattr(exc, "status") and hasattr(exc, "body")
 
 
 def _parse_error_body(body: Any) -> tuple[str, str]:

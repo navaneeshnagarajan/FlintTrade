@@ -1,4 +1,4 @@
-import { get, getBase, buildHeaders } from "./ftApi.helpers";
+import { get, post, getBase, buildHeaders } from "./ftApi.helpers";
 import { z } from "zod";
 
 // ─── Order Flow ───────────────────────────────────────────────────────────────
@@ -482,6 +482,27 @@ export const getHistoricalChain = (
       (qs ? "?" + qs : ""),
   );
 };
+
+export interface HistoricalChainCapture {
+  symbol: string;
+  expiry: string;
+  exchange: string;
+  rows_inserted: number;
+  captured: boolean;
+}
+
+export const captureHistoricalChain = (
+  symbol: string,
+  expiry: string,
+  exchange: string,
+) => post<HistoricalChainCapture>(
+  "historical/chain/" +
+    encodeURIComponent(symbol) +
+    "/" +
+    encodeURIComponent(expiry) +
+    "/capture",
+  { exchange },
+);
 
 /**
  * Export rows to Excel and trigger a real browser download.

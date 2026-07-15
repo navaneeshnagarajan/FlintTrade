@@ -4,7 +4,7 @@
  * Tests: render, view toggle, donut SVG, legend, sample data.
  */
 
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -21,13 +21,19 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+const state = vi.hoisted(() => ({ connected: false, scope: "explore:mock" }));
 vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: vi.fn().mockReturnValue(false),
+  useBrokerConnected: () => state.connected,
+}));
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => state.scope,
 }));
 
+const mockGetPositionbook = vi.hoisted(() => vi.fn());
+const mockGetHoldings = vi.hoisted(() => vi.fn());
 vi.mock("@/services/api", () => ({
-  getPositionbook: vi.fn(() => Promise.resolve([])),
-  getHoldings: vi.fn(() => Promise.resolve([])),
+  getPositionbook: (...args: unknown[]) => mockGetPositionbook(...args),
+  getHoldings: (...args: unknown[]) => mockGetHoldings(...args),
 }));
 
 import PortfolioAllocationWidget from "../PortfolioAllocationWidget";
@@ -37,6 +43,15 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
+beforeEach(() => {
+  state.connected = false;
+  state.scope = "explore:mock";
+  mockGetPositionbook.mockReset();
+  mockGetHoldings.mockReset();
+  mockGetPositionbook.mockResolvedValue([]);
+  mockGetHoldings.mockResolvedValue([]);
+});
+
 describe("PortfolioAllocationWidget", () => {
   it("renders the widget header", () => {
     render(<PortfolioAllocationWidget />, { wrapper });
@@ -45,7 +60,7 @@ describe("PortfolioAllocationWidget", () => {
 
   it("shows sample data badge when disconnected", () => {
     render(<PortfolioAllocationWidget />, { wrapper });
-    expect(screen.getByText("sample data")).toBeTruthy();
+    expect(screen.getByText("Sample")).toBeTruthy();
   });
 
   it("renders the donut chart", () => {
@@ -92,5 +107,35 @@ describe("PortfolioAllocationWidget", () => {
     const pctPattern = /\d+\.\d+%/;
     const pcts = screen.getAllByText(pctPattern);
     expect(pcts.length).toBeGreaterThan(0);
+  });
+
+  it("shows an honest empty state for a connected portfolio with no allocation", async () => {
+    state.connected = true;
+    state.scope = "live:openalgo:default";
+
+    render(<PortfolioAllocationWidget />, { wrapper });
+
+    expect(await screen.findByText("No portfolio allocation data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Portfolio allocation donut chart" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Equity")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Sector"));
+    expect(screen.getByText("No portfolio allocation data")).toBeInTheDocument();
+    expect(screen.queryByText("Banking")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Portfolio allocation donut chart" })).not.toBeInTheDocument();
+  });
+
+  it("reads and labels the Practice sandbox without a live broker", async () => {
+    state.scope = "practice:sandbox:default";
+    mockGetPositionbook.mockResolvedValue([
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
+    ]);
+
+    render(<PortfolioAllocationWidget />, { wrapper });
+
+    expect(await screen.findByText("Practice")).toBeInTheDocument();
+    expect(await screen.findByText("Equity")).toBeInTheDocument();
+    expect(mockGetPositionbook).toHaveBeenCalled();
   });
 });

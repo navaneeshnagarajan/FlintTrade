@@ -156,7 +156,8 @@ function mkAction(label: "B/S CE" | "B/S PE", inBasket: boolean): GridCell {
  * a gradient visual. Low OI: sparse chars (░), mid OI: medium (▒), high OI: dense (█).
  */
 function oiBarGradient(value: number | null | undefined, maxValue: number): string {
-  if (!value || !maxValue) return "";
+  if (value == null || !Number.isFinite(value) || value < 0) return "";
+  if (value === 0 || !Number.isFinite(maxValue) || maxValue <= 0) return fmtOI(value);
   const pct = Math.min((Number(value) / Number(maxValue)) * 100, 100);
   const totalWidth = 5;
   const filled = Math.round((pct / 100) * totalWidth);
@@ -181,8 +182,8 @@ function oiSigText(signal: OISignal): string {
 }
 
 function chgColour(v: number | null | undefined): string | undefined {
-  if (v == null) return undefined;
-  return Number(v) >= 0 ? "#4ade80" : "#f87171";
+  if (v == null || !Number.isFinite(v) || v === 0) return undefined;
+  return v > 0 ? "#4ade80" : "#f87171";
 }
 
 // ---------------------------------------------------------------------------

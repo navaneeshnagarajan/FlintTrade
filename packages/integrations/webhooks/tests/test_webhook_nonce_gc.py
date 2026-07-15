@@ -70,3 +70,44 @@ def test_gc_keeps_recent(gc, conn) -> None:
     deleted = gc.gc_old_nonces(conn, now=now)
     assert deleted == 0
     assert conn.execute("SELECT COUNT(*) FROM webhook_nonces").fetchone()[0] == 1
+
+
+def test_secret_store_gc_uses_the_same_retention_contract(tmp_path) -> None:
+    from flinttrade_webhooks.webhook_replay import REASON_REPLAY
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
+
+    store = WebhookSecretStore(tmp_path / "webhook-secrets.db", "test-master-password")
+    path = "/v1/webhook/custom/gc-test"
+    assert store.check_and_record_nonce(path, "expired", 1_700.0, now=1_700.0) is None
+    assert store.check_and_record_nonce(path, "recent", 5_500.0, now=5_500.0) is None
+
+    assert store.gc_nonces(now=6_000.0) == 1
+    assert store.check_and_record_nonce(path, "expired", 6_000.0, now=6_000.0) is None
+    assert store.check_and_record_nonce(path, "recent", 6_000.0, now=6_000.0) == REASON_REPLAY
+
+
+def test_post_window_nonce_reuse_is_rebound_and_immediate_replay_is_blocked(tmp_path) -> None:
+    from flinttrade_webhooks.webhook_replay import REASON_REPLAY
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
+
+    store = WebhookSecretStore(tmp_path / "webhook-secrets.db", "test-master-password")
+    path = "/v1/webhook/custom/reused-nonce"
+
+    assert store.check_and_record_nonce(path, "reused", 1_000.0, now=1_000.0) is None
+    assert store.check_and_record_nonce(path, "reused", 1_601.0, now=1_601.0) is None
+    assert store.check_and_record_nonce(path, "reused", 1_602.0, now=1_602.0) == REASON_REPLAY
+
+
+def test_intake_prunes_expired_nonce_evidence_without_cron(tmp_path) -> None:
+    from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
+
+    db_path = tmp_path / "webhook-secrets.db"
+    store = WebhookSecretStore(db_path, "test-master-password")
+    path = "/v1/webhook/custom/opportunistic-gc"
+
+    assert store.check_and_record_nonce(path, "expired", 1_000.0, now=1_000.0) is None
+    assert store.check_and_record_nonce(path, "current", 6_000.0, now=6_000.0) is None
+
+    with sqlite3.connect(db_path) as conn:
+        remaining = {row[0] for row in conn.execute("SELECT nonce FROM webhook_nonces")}
+    assert remaining == {"current"}

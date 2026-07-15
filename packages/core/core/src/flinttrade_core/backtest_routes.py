@@ -6,7 +6,6 @@ lifecycle management.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -585,23 +584,33 @@ def strategy_start(name: str) -> tuple[Any, int]:
     Returns:
         JSON with ``status`` and confirmation message.
     """
-    from flinttrade_engine.scheduler import StrategyScheduler  # noqa: PLC0415
+    from flinttrade_engine.scheduler import (  # noqa: PLC0415
+        StrategyScheduler,
+        StrategyStartTimeoutError,
+    )
 
     _scheduler: StrategyScheduler | None = current_app.config.get("SCHEDULER")
     if _scheduler is None:
         return jsonify({"status": "error", "message": "Scheduler not available"}), 503
 
-    runner = _scheduler.get_runner(name)
-    if runner is None:
+    if _scheduler.get_runner(name) is None:
         return jsonify({"status": "error", "message": f"Strategy '{name}' not registered"}), 404
 
     try:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(runner.start())
-        finally:
-            loop.close()
+        _scheduler.start_one_threadsafe(name)
         return jsonify({"status": "success", "data": {"message": f"Strategy '{name}' started"}}), 200
+    except StrategyStartTimeoutError:
+        logger.warning("strategy_start timed out and rolled back for %s", name)
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "strategy_start_timeout",
+                    "message": "Strategy start timed out and was rolled back",
+                }
+            ),
+            504,
+        )
     except Exception:
         logger.exception("strategy_start error for %s", name)
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -617,21 +626,32 @@ def strategy_stop(name: str) -> tuple[Any, int]:
     Returns:
         JSON with ``status`` and confirmation message.
     """
-    from flinttrade_engine.scheduler import StrategyScheduler  # noqa: PLC0415
+    from flinttrade_engine.scheduler import (  # noqa: PLC0415
+        StrategyScheduler,
+        StrategyStopTimeoutError,
+    )
 
     _scheduler: StrategyScheduler | None = current_app.config.get("SCHEDULER")
     if _scheduler is None:
         return jsonify({"status": "error", "message": "Scheduler not available"}), 503
 
     try:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_scheduler.stop_one(name))
-        finally:
-            loop.close()
+        _scheduler.stop_one_threadsafe(name)
         return jsonify({"status": "success", "data": {"message": f"Strategy '{name}' stopped"}}), 200
     except KeyError:
         return jsonify({"status": "error", "message": f"Strategy '{name}' not registered"}), 404
+    except StrategyStopTimeoutError:
+        logger.warning("strategy_stop cleanup is still in progress for %s", name)
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "strategy_stop_in_progress",
+                    "message": "Strategy stop is still in progress",
+                }
+            ),
+            504,
+        )
     except Exception:
         logger.exception("strategy_stop error for %s", name)
         return jsonify({"status": "error", "message": "Internal server error"}), 500

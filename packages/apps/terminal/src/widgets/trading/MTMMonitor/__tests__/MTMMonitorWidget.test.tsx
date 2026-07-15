@@ -95,6 +95,11 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(true),
 }));
 
+const mockUseAccountReadsEnabled = vi.fn().mockReturnValue(true);
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseAccountReadsEnabled(),
+}));
+
 
 // Mock settingsStore riskLimits
 vi.mock("@/stores/settingsStore", () => ({
@@ -133,6 +138,7 @@ describe("MTMMonitorWidget", () => {
     vi.clearAllMocks();
     chartMocks.reset();
     mockUseBrokerConnected.mockReturnValue(true);
+    mockUseAccountReadsEnabled.mockReturnValue(true);
   });
 
   it("renders without crashing", () => {
@@ -207,6 +213,7 @@ describe("MTMMonitorWidget", () => {
 
   it("does not poll live positions and funds while broker is disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    mockUseAccountReadsEnabled.mockReturnValue(false);
 
     render(<MTMMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
 
@@ -268,6 +275,7 @@ describe("MTMMonitorWidget", () => {
 
   it("suppresses the error banner and staleness chip while disconnected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUsePositions.mockReturnValue({
       data: undefined,
       isError: true,

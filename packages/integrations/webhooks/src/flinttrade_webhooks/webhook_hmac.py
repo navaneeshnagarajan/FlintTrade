@@ -4,6 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+
+
+_SIGNED_ENVELOPE_VERSION = "flinttrade-webhook-v1"
+
+
+def build_webhook_signature_payload(
+    body: bytes,
+    *,
+    nonce: str,
+    timestamp: str,
+) -> bytes:
+    """Bind replay metadata and the exact request body into one HMAC payload.
+
+    A body-only signature is replayable with attacker-chosen nonce/timestamp
+    headers. The versioned JSON prefix gives relays one deterministic signing
+    contract while preserving the body bytes exactly as transmitted.
+    """
+    metadata = json.dumps(
+        {
+            "nonce": str(nonce),
+            "timestamp": str(timestamp),
+            "version": _SIGNED_ENVELOPE_VERSION,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return metadata + b"\n" + body
 
 
 def verify_hmac_sha256_signature(

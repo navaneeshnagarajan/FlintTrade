@@ -2,17 +2,22 @@
 
 All endpoints are mounted under ``/v1/sandbox``.  The
 :class:`~flinttrade_data.sandbox_engine.SandboxEngine` instance is
-retrieved from ``app.config["DATA_SANDBOX_ENGINE"]`` so it does not
-collide with the engine-level sandbox registered under ``SANDBOX_ENGINE``.
+retrieved from ``app.config["DATA_SANDBOX_ENGINE"]``.
 
 Endpoint summary::
 
     GET  /v1/sandbox/capital          — current virtual capital
+    GET  /v1/sandbox/funds            — legacy-compatible funds summary
+    GET  /v1/sandbox/config           — leverage and square-off policy
+    POST /v1/sandbox/config           — update sandbox policy
     POST /v1/sandbox/capital/adjust   — add or remove capital {amount}
     POST /v1/sandbox/order            — place a paper order
     GET  /v1/sandbox/positions        — open positions
     GET  /v1/sandbox/orders           — today's orders
+    GET  /v1/sandbox/trades           — executed trades
     GET  /v1/sandbox/pnl              — aggregate P&L
+    GET  /v1/sandbox/pnl/history      — daily P&L history
+    POST /v1/sandbox/square-off       — close all positions at supplied LTPs
     POST /v1/sandbox/reset            — clear all data (returns backup)
     GET  /v1/sandbox/export           — export as JSON string
     POST /v1/sandbox/import           — import from JSON
@@ -21,6 +26,7 @@ Endpoint summary::
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -70,6 +76,34 @@ def _engine_required() -> tuple[Any, Response | None]:
 
 
 # ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+@data_sandbox_bp.route("/config", methods=["GET"])
+def get_config() -> Response:
+    """Return the persisted Practice account configuration."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    return jsonify({"status": "success", "data": {"config": asdict(engine.config)}})
+
+
+@data_sandbox_bp.route("/config", methods=["POST"])
+def update_config() -> Response:
+    """Validate and persist selected Practice configuration fields."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    try:
+        updated = engine.update_config(**body)
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
+    return jsonify({"status": "success", "data": {"config": asdict(updated)}})
+
+
+# ---------------------------------------------------------------------------
 # Capital
 # ---------------------------------------------------------------------------
 
@@ -86,6 +120,16 @@ def get_capital() -> Response:
         return err
 
     return jsonify({"status": "success", "data": {"capital": engine.get_capital()}})
+
+
+@data_sandbox_bp.route("/funds", methods=["GET"])
+def get_funds() -> Response:
+    """Return the canonical account in the retired engine's funds shape."""
+    engine, err = _engine_required()
+    if err:
+        return err
+
+    return jsonify({"status": "success", "data": {"funds": engine.get_funds()}})
 
 
 @data_sandbox_bp.route("/status", methods=["GET"])
@@ -106,7 +150,7 @@ def get_status() -> Response:
     capital = engine.get_capital()
     pnl = engine.get_pnl()
     try:
-        trades_count = len(engine.get_orders())
+        trades_count = len(engine.get_trades())
     except Exception:  # pragma: no cover - defensive
         trades_count = 0
 
@@ -190,6 +234,9 @@ def place_order() -> Response:
     quantity = body.get("quantity")
     price = body.get("price")
     product = body.get("product", "MIS")
+    order_type = body.get("order_type", body.get("pricetype", "MARKET"))
+    trigger_price = body.get("trigger_price", 0.0)
+    strategy = body.get("strategy", "")
 
     # Basic presence validation before calling engine
     missing = [f for f, v in [("symbol", symbol), ("exchange", exchange),
@@ -207,9 +254,13 @@ def place_order() -> Response:
     try:
         quantity = int(quantity)
         price = float(price)
+        trigger_price = float(trigger_price)
     except (TypeError, ValueError):
         return (
-            jsonify({"status": "error", "message": "'quantity' must be int, 'price' must be number"}),
+            jsonify({
+                "status": "error",
+                "message": "'quantity' must be int and prices must be numbers",
+            }),
             400,
         )
 
@@ -220,10 +271,69 @@ def place_order() -> Response:
         quantity=quantity,
         price=price,
         product=product,
+        order_type=order_type,
+        trigger_price=trigger_price,
+        strategy=strategy,
     )
 
-    http_status = 200 if result["status"] == "COMPLETE" else 400
-    return jsonify({"status": "success", "data": {"order": result}}), http_status
+    accepted = result["status"] in {"COMPLETE", "PENDING"}
+    return jsonify({
+        "status": "success" if accepted else "error",
+        "data": {"order": result},
+    }), (200 if accepted else 400)
+
+
+@data_sandbox_bp.route("/order/<order_id>", methods=["DELETE"])
+def cancel_order(order_id: str) -> Response:
+    """Cancel one pending Practice order."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    result = engine.cancel_order(order_id)
+    accepted = result["status"] == "CANCELLED"
+    return jsonify({
+        "status": "success" if accepted else "error",
+        "data": {"order": result},
+    }), (200 if accepted else 400)
+
+
+@data_sandbox_bp.route("/order/<order_id>", methods=["PATCH"])
+def modify_order(order_id: str) -> Response:
+    """Modify selected fields on one pending Practice order."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    changes: dict[str, Any] = {}
+    try:
+        if "quantity" in body:
+            changes["quantity"] = int(body["quantity"])
+        if "price" in body:
+            changes["price"] = float(body["price"])
+        if "trigger_price" in body:
+            changes["trigger_price"] = float(body["trigger_price"])
+        if "order_type" in body or "pricetype" in body:
+            changes["order_type"] = body.get("order_type", body.get("pricetype"))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid request"}), 400
+    result = engine.modify_order(order_id, **changes)
+    accepted = result["status"] == "PENDING"
+    return jsonify({
+        "status": "success" if accepted else "error",
+        "data": {"order": result},
+    }), (200 if accepted else 400)
+
+
+@data_sandbox_bp.route("/orders/cancel-all", methods=["POST"])
+def cancel_all_orders() -> Response:
+    """Cancel every pending Practice order."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    return jsonify({
+        "status": "success",
+        "data": {"result": engine.cancel_pending_orders()},
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +374,15 @@ def get_orders() -> Response:
     return jsonify({"status": "success", "data": {"orders": engine.get_orders()}})
 
 
+@data_sandbox_bp.route("/trades", methods=["GET"])
+def get_trades() -> Response:
+    """Return executed Practice fills."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    return jsonify({"status": "success", "data": {"trades": engine.get_trades()}})
+
+
 # ---------------------------------------------------------------------------
 # P&L
 # ---------------------------------------------------------------------------
@@ -281,6 +400,38 @@ def get_pnl() -> Response:
         return err
 
     return jsonify({"status": "success", "data": {"pnl": engine.get_pnl()}})
+
+
+@data_sandbox_bp.route("/pnl/history", methods=["GET"])
+def get_pnl_history() -> Response:
+    """Return durable daily Practice P&L records."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    return jsonify({
+        "status": "success",
+        "data": {"pnl_history": engine.get_pnl_history()},
+    })
+
+
+@data_sandbox_bp.route("/square-off", methods=["POST"])
+def square_off_all() -> Response:
+    """Close every open Practice position at supplied current LTPs."""
+    engine, err = _engine_required()
+    if err:
+        return err
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    latest_ticks = body.get("latest_ticks")
+    if not isinstance(latest_ticks, dict):
+        return jsonify({"status": "error", "message": "'latest_ticks' must be an object"}), 400
+    try:
+        closed = engine.square_off_all(latest_ticks)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({
+        "status": "success",
+        "data": {"closed_positions": closed},
+    })
 
 
 # ---------------------------------------------------------------------------

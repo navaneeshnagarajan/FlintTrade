@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -38,20 +38,56 @@ vi.mock("lightweight-charts", () => ({
   ColorType: { Solid: "solid" },
 }));
 
-const chartGridMocks = vi.hoisted(() => ({
-  legendCallbacks: [] as Array<(state: unknown) => void>,
-}));
+const chartGridMocks = vi.hoisted(() => {
+  const candleSeries = {
+    applyOptions: vi.fn(),
+    setData: vi.fn(),
+  };
+  const chart = {
+    applyOptions: vi.fn(),
+    removeSeries: vi.fn(),
+    timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
+  };
+  const volumeSeries = {
+    applyOptions: vi.fn(),
+    setData: vi.fn(),
+  };
+  return {
+    candleSeries,
+    candleRef: { current: null as typeof candleSeries | null },
+    chart,
+    chartRef: { current: null as typeof chart | null },
+    containerRef: { current: document.createElement("div") },
+    dataScope: "explore:mock",
+    exitReplay: vi.fn(),
+    getHistory: vi.fn<(...args: unknown[]) => Promise<unknown[]>>(() => Promise.resolve([])),
+    indRef: { current: {} },
+    legendCallbacks: [] as Array<(state: unknown) => void>,
+    markersPluginRef: { current: null },
+    ready: false,
+    volumeSeries,
+    volumeRef: { current: null as typeof volumeSeries | null },
+  };
+});
+
+vi.mock("@flinttrade/design-system", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@flinttrade/design-system")>();
+  return { ...actual, applyFlintCandlestickTheme: vi.fn() };
+});
 
 vi.mock("../useChartInit", () => ({
   useChartInit: (setLegend: (state: unknown) => void) => {
     chartGridMocks.legendCallbacks.push(setLegend);
+    chartGridMocks.chartRef.current = chartGridMocks.ready ? chartGridMocks.chart : null;
+    chartGridMocks.candleRef.current = chartGridMocks.ready ? chartGridMocks.candleSeries : null;
+    chartGridMocks.volumeRef.current = chartGridMocks.ready ? chartGridMocks.volumeSeries : null;
     return {
-      containerRef: { current: document.createElement("div") },
-      chartRef: { current: null },
-      candleRef: { current: null },
-      volumeRef: { current: null },
-      markersPluginRef: { current: null },
-      indRef: { current: {} },
+      containerRef: chartGridMocks.containerRef,
+      chartRef: chartGridMocks.chartRef,
+      candleRef: chartGridMocks.candleRef,
+      volumeRef: chartGridMocks.volumeRef,
+      markersPluginRef: chartGridMocks.markersPluginRef,
+      indRef: chartGridMocks.indRef,
     };
   },
 }));
@@ -67,7 +103,7 @@ vi.mock("../useChartReplay", () => ({
     pause: vi.fn(),
     reset: vi.fn(),
     seek: vi.fn(),
-    exitReplay: vi.fn(),
+    exitReplay: chartGridMocks.exitReplay,
     enterReplay: vi.fn(),
     setSpeed: vi.fn(),
   }),
@@ -92,15 +128,19 @@ vi.mock("@/hooks/useChartTheme", () => ({
 
 vi.mock("@/services/api", () => ({
   searchSymbol: vi.fn().mockResolvedValue([]),
-  getHistory: vi.fn().mockResolvedValue([]),
+  getHistory: chartGridMocks.getHistory,
   getIntervals: vi.fn().mockResolvedValue({ intervals: ["1m", "5m", "15m", "1h", "1D"] }),
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => chartGridMocks.dataScope,
 }));
 
 vi.mock("@/lib/market", () => ({
   isMarketHours: vi.fn().mockReturnValue(false),
 }));
 
-import ChartGrid from "../ChartGrid";
+import ChartGrid, { ChartCell } from "../ChartGrid";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -109,7 +149,11 @@ import ChartGrid from "../ChartGrid";
 describe("ChartGrid", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    chartGridMocks.dataScope = "explore:mock";
+    chartGridMocks.getHistory.mockReset();
+    chartGridMocks.getHistory.mockResolvedValue([]);
     chartGridMocks.legendCallbacks = [];
+    chartGridMocks.ready = false;
     localStorage.clear();
   });
 
@@ -213,5 +257,34 @@ describe("ChartGrid", () => {
     expect(screen.getByText("24,080.00")).toBeInTheDocument();
     expect(screen.getByText("24,155.00")).toBeInTheDocument();
     expect(screen.getByText("1.25L")).toBeInTheDocument();
+  });
+
+  it("clears candles when a new data scope has no replacement history", async () => {
+    chartGridMocks.ready = true;
+    chartGridMocks.getHistory
+      .mockResolvedValueOnce([{
+        timestamp: "2026-07-11",
+        open: 100,
+        high: 103,
+        low: 99,
+        close: 102,
+        volume: 10,
+      }])
+      .mockResolvedValueOnce([]);
+    const config = { symbol: "NIFTY", exchange: "NSE_INDEX", interval: "5m" };
+    const view = render(<ChartCell config={config} onConfigChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(chartGridMocks.candleSeries.setData).toHaveBeenLastCalledWith([
+        expect.objectContaining({ close: 102 }),
+      ]);
+    });
+
+    chartGridMocks.dataScope = "live:openalgo:new-connection";
+    view.rerender(<ChartCell config={config} onConfigChange={vi.fn()} />);
+
+    await waitFor(() => expect(chartGridMocks.getHistory).toHaveBeenCalledTimes(2));
+    expect(chartGridMocks.candleSeries.setData).toHaveBeenLastCalledWith([]);
+    expect(chartGridMocks.volumeSeries.setData).toHaveBeenLastCalledWith([]);
   });
 });

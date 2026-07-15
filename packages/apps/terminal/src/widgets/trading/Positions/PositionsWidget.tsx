@@ -28,6 +28,7 @@ import { emitNotification } from "@/components/NotificationCentre/useNotificatio
 import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
 import { useModeStore } from "@/stores/modeStore";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import type { BrokerTarget } from "@/lib/brokerOrdersApi";
 import {
   type ColumnDef,
@@ -388,9 +389,10 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
 function PositionsWidget(_props: WidgetProps) {
   const appMode = useModeStore((s) => s.mode);
   const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = resolveAccountReadsEnabled(appMode, isBrokerConnected);
   const canWritePositions = isBrokerConnected && appMode === "live";
   const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions({
-    enabled: isBrokerConnected,
+    enabled: accountReadsEnabled,
   });
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
@@ -544,7 +546,7 @@ function PositionsWidget(_props: WidgetProps) {
           Positions{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
         <div className="flex items-center gap-2">
-          {!isBrokerConnected && (
+          {!accountReadsEnabled && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
@@ -553,7 +555,7 @@ function PositionsWidget(_props: WidgetProps) {
               Broker required
             </span>
           )}
-          {isBrokerConnected && appMode !== "live" && (
+          {accountReadsEnabled && appMode !== "live" && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-surface-hover text-text-muted border border-border-subtle rounded"
               role="status"
@@ -576,7 +578,7 @@ function PositionsWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          {isBrokerConnected && rows.length > 0 && (
+          {accountReadsEnabled && rows.length > 0 && (
             <button
               type="button"
               onClick={() => void handleExport()}
@@ -626,7 +628,7 @@ function PositionsWidget(_props: WidgetProps) {
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <Layers size={24} className="text-text-disabled" />
           <span className="text-sm">
-            {isBrokerConnected ? "No open positions" : "Connect a broker to load positions"}
+            {accountReadsEnabled ? "No open positions" : "Connect a broker to load positions"}
           </span>
         </div>
       ) : (

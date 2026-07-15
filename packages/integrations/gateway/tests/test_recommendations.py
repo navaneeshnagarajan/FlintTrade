@@ -169,7 +169,8 @@ def test_indmoney_is_registered_and_ranked() -> None:
 
 def test_groww_is_registered_and_ranked() -> None:
     # Groww now has a native REST adapter and capability metadata, but remains
-    # connectable=false in the public catalogue until live login/read verification.
+    # connectable=false until market-data/API permission, static-IP registration,
+    # and order-safety evidence clear.
     assert "groww" in NATIVE_BROKER_CAPABILITIES
     ranked_ids = {r.broker_id for r in recommend(BrokerUseCase.HISTORICAL_DATA)}
     assert "groww" in ranked_ids

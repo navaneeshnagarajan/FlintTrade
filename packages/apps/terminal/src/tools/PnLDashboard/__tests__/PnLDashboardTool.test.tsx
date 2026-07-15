@@ -14,9 +14,7 @@ import "@testing-library/jest-dom";
 // Mocks — must be defined before component import
 // ---------------------------------------------------------------------------
 
-const mockUsePositions = vi.fn();
-const mockUseFunds = vi.fn();
-const mockUseTradebook = vi.fn();
+const mockUseModeData = vi.fn();
 const chartRuntimeMocks = vi.hoisted(() => {
   const chart = {
     applyOptions: vi.fn(),
@@ -37,16 +35,8 @@ const chartRuntimeMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/hooks/usePositions", () => ({
-  usePositions: (...args: unknown[]) => mockUsePositions(...args),
-}));
-
-vi.mock("@/hooks/useFunds", () => ({
-  useFunds: (...args: unknown[]) => mockUseFunds(...args),
-}));
-
-vi.mock("@/hooks/useTradebook", () => ({
-  useTradebook: (...args: unknown[]) => mockUseTradebook(...args),
+vi.mock("@/hooks/useModeData", () => ({
+  useModeData: (...args: unknown[]) => mockUseModeData(...args),
 }));
 
 vi.mock("@/hooks/useChartTheme", () => ({
@@ -103,25 +93,19 @@ function setupMocks(config: {
   trades?: unknown[];
   tradesLoading?: boolean;
 } = {}) {
-  mockUsePositions.mockReturnValue(
-    queryResult({
-      data: config.positions ?? [],
-      isLoading: config.posLoading ?? false,
-      isError: config.posError ?? false,
-    }),
-  );
-  mockUseFunds.mockReturnValue(
-    queryResult({
-      data: config.funds,
-      isLoading: config.fundsLoading ?? false,
-    }),
-  );
-  mockUseTradebook.mockReturnValue(
-    queryResult({
-      data: config.trades ?? [],
-      isLoading: config.tradesLoading ?? false,
-    }),
-  );
+  mockUseModeData.mockImplementation((key: string) => {
+    if (key === "positions") {
+      return queryResult({
+        data: config.positions ?? [],
+        isLoading: config.posLoading ?? false,
+        error: config.posError ? new Error("Position data unavailable") : null,
+      });
+    }
+    if (key === "funds") {
+      return queryResult({ data: config.funds, isLoading: config.fundsLoading ?? false });
+    }
+    return queryResult({ data: config.trades ?? [], isLoading: config.tradesLoading ?? false });
+  });
 }
 
 // ---------------------------------------------------------------------------

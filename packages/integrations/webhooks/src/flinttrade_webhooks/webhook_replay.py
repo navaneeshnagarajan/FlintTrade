@@ -18,10 +18,13 @@ full migration has run.
 
 from __future__ import annotations
 
+import math
 import time
 
 # Database H8 + Identity M5 (data-layer §7.4):
 REPLAY_WINDOW_SECONDS = 600        # 10 min — TradingView/ChartInk freshness norm
+GC_GRACE_SECONDS = 3600            # 60 min forensic-evidence grace
+GC_RETAIN_SECONDS = REPLAY_WINDOW_SECONDS + GC_GRACE_SECONDS
 
 # Audit reasons surfaced to the receiver so it can emit the right event.
 REASON_STALE = "WEBHOOK_STALE"
@@ -47,6 +50,8 @@ def ensure_nonce_schema(conn) -> None:
 def is_stale(payload_ts: float, now: float | None = None) -> bool:
     """True if the payload's own timestamp is outside the freshness window."""
     now = time.time() if now is None else now
+    if not math.isfinite(payload_ts) or not math.isfinite(now):
+        return True
     return abs(now - payload_ts) > REPLAY_WINDOW_SECONDS
 
 
@@ -92,13 +97,27 @@ def record_nonce(
 ) -> None:
     """Persist a nonce after it has passed :func:`check_replay`.
 
-    Uses ``INSERT OR IGNORE`` so a race that double-inserts the same nonce is a
-    no-op rather than an integrity error — the first writer wins, the second is
-    already caught by :func:`check_replay` on its own request.
+    Rebinds an expired nonce to the newly accepted timestamp. Without the
+    conflict update, a legitimate post-window reuse would leave the old row in
+    place and an immediate replay of the newly signed request could pass. The
+    store serialises check + record with ``BEGIN IMMEDIATE``.
     """
     seen_at = time.time() if seen_at is None else seen_at
     conn.execute(
-        "INSERT OR IGNORE INTO webhook_nonces (webhook_id, nonce, seen_at, source_ip_hash) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO webhook_nonces (webhook_id, nonce, seen_at, source_ip_hash) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(webhook_id, nonce) DO UPDATE SET "
+        "seen_at = excluded.seen_at, source_ip_hash = excluded.source_ip_hash",
         (webhook_id, nonce, seen_at, source_ip_hash),
     )
+
+
+def gc_old_nonces(
+    conn,
+    retain_seconds: int = GC_RETAIN_SECONDS,
+    now: float | None = None,
+) -> int:
+    """Delete replay nonces older than the defence window plus audit grace."""
+    cutoff = (time.time() if now is None else now) - retain_seconds
+    cursor = conn.execute("DELETE FROM webhook_nonces WHERE seen_at < ?", (cutoff,))
+    return cursor.rowcount

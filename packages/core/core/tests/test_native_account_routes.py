@@ -3,7 +3,7 @@
 Upstox (its direct access-token method) is the exercise broker: ``login()`` builds
 a session from any non-empty access token WITHOUT calling the broker (validation is
 lazy, on the first API call), so the full connect -> register -> rebuild -> login ->
-session path runs offline. Dhan, Upstox, and INDmoney are connectable natives;
+session path runs offline. Dhan and Upstox are connectable natives; INDmoney,
 Kotak Neo and Groww are catalogued 'coming soon' and rejected on connect until
 their remaining live blockers clear.
 
@@ -48,6 +48,11 @@ def client(tmp_path, monkeypatch):
     native_routes._OAUTH_PENDING.clear()
     app = create_flask_app()
     app.config["TESTING"] = True
+    # Route tests do not start the process-owned safety loop. Mark that boundary
+    # explicitly so connect/relogin rebuild tests exercise routing transactions;
+    # production can set this only through _bind_runtime_emergency_dispatcher.
+    app.config["EMERGENCY_DISPATCHER"] = object()
+    app.config["EMERGENCY_RUNTIME_READY"] = True
     with app.test_client() as c:
         yield c, app, tmp_path
     native_routes._OAUTH_PENDING.clear()
@@ -105,6 +110,45 @@ def _wait_for_candidate_attempt_to_finish() -> None:
         attempt = routes._ACTIVE_CANDIDATE_ATTEMPT  # noqa: SLF001
     if attempt is not None:
         assert attempt.done.wait(2.0)
+
+
+def test_disable_broker_routing_times_out_before_mutating_under_generation_contention(client):
+    _test_client, app, _tmp_path = client
+    import flinttrade_core.native_account_routes as routes
+
+    router = _DrainRouter(True)
+    rebuild_lock = threading.RLock()
+    holder_ready = threading.Event()
+    app.config.update(
+        BROKER_ROUTER=router,
+        BROKER_ROUTER_REBUILD_LOCK=rebuild_lock,
+        BROKER_ROUTER_DRAIN_TIMEOUT_SECONDS=0.01,
+        SMART_ROUTING={"enabled": True},
+        NATIVE_ADAPTERS={"upstox": object()},
+        RECONCILE_TARGETS=object(),
+    )
+
+    def hold_generation() -> None:
+        with rebuild_lock:
+            holder_ready.set()
+            time.sleep(0.25)
+
+    holder = threading.Thread(target=hold_generation, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=1.0)
+    with app.app_context():
+        started = time.monotonic()
+        result = routes._disable_broker_routing()
+        elapsed = time.monotonic() - started
+    holder.join(timeout=1.0)
+
+    assert elapsed < 0.1
+    assert result is False
+    assert app.config["BROKER_ROUTER"] is router
+    assert app.config["SMART_ROUTING"] == {"enabled": True}
+    assert "upstox" in app.config["NATIVE_ADAPTERS"]
+    assert app.config["RECONCILE_TARGETS"] is not None
+    assert router.calls == 0
 
 
 def test_connect_upstox_stores_registers_and_establishes_session(client):
@@ -518,12 +562,18 @@ def test_list_native_brokers_catalogue(client, monkeypatch):
         "status": "ok",
     }
     assert brokers["upstox"]["connectable"] is True
-    assert brokers["indmoney"]["connectable"] is True
+    assert brokers["indmoney"]["connectable"] is False
+    assert brokers["indmoney"]["native_connect_blockers"] == [
+        "Authoritative smart-parent cancellation discriminator",
+        "Broker-native atomic reduce-only close primitive",
+        "Live order-safety proof",
+    ]
     assert brokers["indmoney"]["sdk_pin"] is None
     assert brokers["indmoney"]["sdk_attestation"]["status"] == "not_required"
     assert brokers["kotakneo"]["connectable"] is False
     assert brokers["kotakneo"]["native_connect_blockers"] == [
         "Maintainer live login/read verification with current TOTP and MPIN",
+        "Live order-safety proof",
     ]
     assert brokers["kotakneo"]["sdk_pin"] == "neo-api-client"
     assert brokers["kotakneo"]["sdk_attestation"]["status"] == "ok"
@@ -1127,6 +1177,148 @@ def test_native_account_reads_include_orders_and_trades(client, monkeypatch):
     assert trades.get_json()["data"] == [{"symbol": "INFY", "trade_id": "T1"}]
 
 
+def test_live_native_positions_trigger_authoritative_runtime_mtm_breaker(client, monkeypatch):
+    from flinttrade_engine.safety import (
+        EmergencyDispatchResult,
+        EmergencyVerbOutcome,
+        MTM_EMERGENCY_POLICY,
+        SafetySystem,
+    )
+    from flinttrade_gateway.brokers.upstox import UpstoxAdapter
+
+    async def _positions(_self, _session):
+        return [
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "product": "MIS",
+                "quantity": "10",
+                "pnl": "999999",
+            }
+        ]
+
+    async def _trade_book(_self, _session):
+        return [
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "product": "MIS",
+                "action": "BUY",
+                "quantity": "10",
+                "price": "7000",
+                "timestamp": str(int(time.time())),
+            }
+        ]
+
+    async def _holdings(_self, _session):
+        return []
+
+    async def _funds(_self, _session):
+        return {
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+        }
+
+    async def _order_book(_self, _session):
+        return []
+
+    async def _quotes(_self, _session, symbols):
+        assert symbols == ["NSE:RELIANCE"]
+        return [
+            {
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "ltp": 1000,
+                "prev_close": 900,
+                "previous_close_trusted": True,
+            }
+        ]
+
+    class RecordingDispatcher:
+        def __init__(self) -> None:
+            self.called = threading.Event()
+            self.policy = None
+
+        def dispatch(self, policy, *, reason, adapter_id, account_id):
+            assert "daily P&L" in reason
+            assert (adapter_id, account_id) == ("upstox", "UPXMTM")
+            self.policy = policy
+            self.called.set()
+            return EmergencyDispatchResult(
+                policy=policy,
+                outcomes=tuple(EmergencyVerbOutcome(verb, succeeded=True) for verb in policy.verbs),
+            )
+
+    monkeypatch.setattr(UpstoxAdapter, "positions", _positions)
+    monkeypatch.setattr(UpstoxAdapter, "trade_book", _trade_book)
+    monkeypatch.setattr(UpstoxAdapter, "holdings", _holdings)
+    monkeypatch.setattr(UpstoxAdapter, "funds", _funds)
+    monkeypatch.setattr(UpstoxAdapter, "order_book", _order_book)
+    monkeypatch.setattr(UpstoxAdapter, "quotes", _quotes)
+    c, app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={"adapter_id": "upstox", "account_id": "UPXMTM", "credentials": {"access_token": "tok"}},
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    safety = SafetySystem()
+    app.config["SAFETY"] = safety
+    dispatcher = RecordingDispatcher()
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, name="test-mtm-runtime-loop")
+    loop_thread.start()
+    try:
+        safety.bind_runtime_loop(loop)
+        safety.bind_emergency_dispatcher(dispatcher)
+
+        response = c.get("/api/v1/native/accounts/upstox/UPXMTM/positions")
+
+        assert response.status_code == 200, response.get_json()
+        assert dispatcher.called.wait(timeout=2)
+        assert dispatcher.policy is MTM_EMERGENCY_POLICY
+        assert safety.mtm_circuit_breaker.is_triggered
+    finally:
+        unbind = getattr(safety, "unbind_runtime_loop", None)
+        if callable(unbind):
+            unbind(loop)
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(timeout=2)
+        loop.close()
+
+
+def test_native_positions_mtm_submission_carries_the_exact_account_selector(client):
+    from flinttrade_core.native_account_routes import _submit_live_positions_mtm
+    from flinttrade_core.l2_state import PortfolioSafetyState
+
+    calls: list[tuple[float, str, str]] = []
+
+    class RecordingSafety:
+        def submit_daily_mtm(self, daily_pnl: float, *, adapter_id: str, account_id: str) -> bool:
+            calls.append((daily_pnl, adapter_id, account_id))
+            return True
+
+    _client, app, _tmp = client
+    app.config["SAFETY"] = RecordingSafety()
+
+    with app.app_context():
+        _submit_live_positions_mtm(
+            PortfolioSafetyState(
+                positions=[],
+                used_margin=0.0,
+                total_balance=100000.0,
+                daily_pnl=-1000.25,
+                starting_capital=100000.0,
+            ),
+            adapter_id="dhan",
+            account_id="family",
+        )
+
+    assert calls == [(-1000.25, "dhan", "family")]
+
+
 def test_native_account_reads_include_quotes_and_history(client, monkeypatch):
     """Native-only sessions can power read-only market data without OpenAlgo."""
     from flinttrade_core.models import Candles, OHLCV, Quote
@@ -1371,6 +1563,42 @@ def test_native_account_reads_include_option_greeks(client, monkeypatch):
     assert resp.status_code == 200, resp.get_json()
     assert resp.get_json()["data"][0]["delta"] == 0.55
     assert resp.get_json()["data"][1]["iv"] == 14.2
+
+
+def test_native_account_reads_include_dhan_display_alias_greeks(client, monkeypatch):
+    """Dhan's selector-aware native read serves compact-master display aliases."""
+    from flinttrade_gateway.brokers.dhan import DhanAdapter
+
+    async def _funds(_self, _session):
+        return {"available_balance": 0.0}
+
+    async def _option_greeks(_self, _session, symbols):
+        assert symbols == ["NFO:DIVISLAB 28 JUL 3600 CALL"]
+        return [{"delta": 0.52, "gamma": 0.001, "theta": -5.0, "vega": 6.4, "iv": 18.4}]
+
+    monkeypatch.setattr(DhanAdapter, "funds", _funds)
+    monkeypatch.setattr(DhanAdapter, "option_greeks", _option_greeks)
+
+    c, _app, _tmp = client
+    connected = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "dhan",
+            "account_id": "DHANGREEKS",
+            "credentials": {"client_id": "1100000000", "access_token": "tok"},
+        },
+    )
+    assert connected.status_code == 200, connected.get_json()
+
+    resp = c.get(
+        "/api/v1/native/accounts/dhan/DHANGREEKS/optiongreeks"
+        "?symbols=NFO:DIVISLAB%2028%20JUL%203600%20CALL"
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"][0]["delta"] == 0.52
+    assert resp.get_json()["data"][0]["iv"] == 18.4
 
 
 def test_native_account_reads_include_ohlc(client, monkeypatch):
@@ -1991,6 +2219,7 @@ def test_connect_dead_token_surfaces_needs_relogin_not_false_success(client, mon
 def test_connect_rejects_unattested_sdk_before_storing(client, monkeypatch):
     """A missing required SDK must fail before vault/workspace mutation."""
     c, app, tmp_path = client
+    brokers_before = _workspace_brokers(tmp_path)
     from flinttrade_core import native_account_routes as native_routes
 
     monkeypatch.setattr(
@@ -2018,7 +2247,7 @@ def test_connect_rejects_unattested_sdk_before_storing(client, monkeypatch):
     assert body["data"]["login"] == "sdk-not-ready"
     assert "Upstox native SDK is not ready" in body["message"]
     assert all(row["account_id"] != "SDKMISS" for row in app.config["CREDENTIAL_STORE"].list_accounts())
-    assert _workspace_brokers(tmp_path) == {}
+    assert _workspace_brokers(tmp_path) == brokers_before
 
 
 def test_oauth_start_rejects_unattested_sdk_before_pending_state(client, monkeypatch):
@@ -2408,6 +2637,7 @@ def test_set_primary_rollback_preserves_unrelated_concurrent_workspace_edit(clie
 
 def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
     c, app, tmp_path = client
+    brokers_before = _workspace_brokers(tmp_path)
     router = _DrainRouter(False)
     app.config["BROKER_ROUTER"] = router
 
@@ -2426,7 +2656,87 @@ def test_connect_rejects_without_mutation_when_router_cannot_drain(client):
     assert app.config["BROKER_ROUTER"] is None
     assert app.config["BROKER_ROUTER_DRAINING"] is router
     assert app.config["CREDENTIAL_STORE"].list_accounts() == []
-    assert _workspace_brokers(tmp_path) == {}
+    assert _workspace_brokers(tmp_path) == brokers_before
+
+
+def test_connect_generation_conflict_revokes_retained_router_before_unpublish(client, monkeypatch):
+    c, app, _tmp_path = client
+    from datetime import datetime, timezone
+
+    import flinttrade_core.native_account_routes as routes
+    from flinttrade_core.exceptions import SafetyBypassError
+    from flinttrade_core.models import Order
+    from flinttrade_engine.request_context import RequestContext
+    from flinttrade_engine.safety import SafetyGate, gate_order, set_safety_gate_secret
+    from flinttrade_gateway.brokers._base import ROUTER_TOKEN, Session
+    from flinttrade_gateway.router import BrokerRouter
+
+    class TokenRequiredAdapter:
+        def __init__(self) -> None:
+            self.mutations = 0
+
+        async def place_order(self, _session, _order, *, _router_token=None):
+            assert _router_token is ROUTER_TOKEN
+            self.mutations += 1
+            return "RETAINED-WRITE"
+
+    adapter = TokenRequiredAdapter()
+    session = Session(
+        access_token="retained-session",
+        expires_at=datetime.now(timezone.utc).timestamp() + 3600,
+        account_id="retained-account",
+        adapter_id="upstox",
+    )
+    set_safety_gate_secret(b"native-retained-router-secret-0123456789")
+    retained_router = BrokerRouter(
+        {"upstox": adapter},
+        lambda _request_ctx, _adapter_id, _account_id: session,
+        consume_gate=SafetyGate().consume,
+    )
+    app.config["BROKER_ROUTER"] = retained_router
+    app.config["BROKER_ROUTER_DRAINING"] = None
+    monkeypatch.setattr(routes, "_selector_credential_generation_matches", lambda *_args: False)
+
+    response = c.post(
+        "/api/v1/native/accounts",
+        headers=_h(),
+        json={
+            "adapter_id": "upstox",
+            "account_id": "CONFLICT1",
+            "credentials": {"access_token": "candidate"},
+        },
+    )
+
+    order = Order(
+        symbol="RELIANCE",
+        action="BUY",
+        exchange="NSE",
+        pricetype="MARKET",
+        product="MIS",
+        quantity="1",
+    )
+    request_ctx = RequestContext(
+        jti="retained-router-write",
+        actor_type="human",
+        actor_id="operator",
+        mode="live",
+        selector="upstox:retained-account",
+    )
+    safety_ctx = gate_order(order, request_ctx, "upstox", account_id="retained-account")
+
+    assert response.status_code == 502
+    assert app.config["BROKER_ROUTER"] is None
+    with pytest.raises(SafetyBypassError, match="revoked"):
+        asyncio.run(
+            retained_router.place_order(
+                request_ctx,
+                order=order,
+                safety_ctx=safety_ctx,
+                adapter_id="upstox",
+                account_id="retained-account",
+            )
+        )
+    assert adapter.mutations == 0
 
 
 def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client, monkeypatch):
@@ -3346,11 +3656,9 @@ def test_failed_reconnect_restores_label_and_is_primary(client, monkeypatch):
     assert bool(row["is_primary"]) is True
 
 
-@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww"])
+@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww", "indmoney"])
 def test_connect_rejects_coming_soon_native(client, adapter_id):
-    """A native broker that is catalogued but not yet tried-and-tested
-    (connectable=False, e.g. Kotak Neo or Groww) is rejected on connect with a
-    'coming soon' message."""
+    """A catalogued native with unresolved activation blockers is rejected."""
     c, _app, _tmp = client
     resp = c.post(
         "/api/v1/native/accounts",
@@ -3363,10 +3671,9 @@ def test_connect_rejects_coming_soon_native(client, adapter_id):
     assert payload["data"]["native_connect_blockers"]
 
 
-@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww"])
+@pytest.mark.parametrize("adapter_id", ["kotakneo", "groww", "indmoney"])
 def test_relogin_rejects_coming_soon_native_even_if_vault_row_exists(client, adapter_id):
-    """A stale/local vault row must not turn a catalogued-but-unverified native
-    into an active connectable broker."""
+    """A stale vault row must not bypass a native broker's activation blockers."""
     c, app, _tmp = client
     store = app.config["CREDENTIAL_STORE"]
     store.store(

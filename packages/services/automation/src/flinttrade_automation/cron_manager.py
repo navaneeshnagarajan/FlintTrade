@@ -122,6 +122,11 @@ DEFAULT_JOBS: dict[str, dict[str, Any]] = {
         "trigger_type": "cron",
         "trigger_args": {"hour": 18, "minute": 30, "day_of_week": "mon-fri", "timezone": "Asia/Kolkata"},
     },
+    "webhook_nonce_gc_job": {
+        "description": "Prune expired webhook replay nonces at 3:00 AM IST",
+        "trigger_type": "cron",
+        "trigger_args": {"hour": 3, "minute": 0, "timezone": "Asia/Kolkata"},
+    },
 }
 
 
@@ -343,6 +348,20 @@ def make_tick_retention_job(provider: Callable[[], Any]) -> Callable[[], None]:
     return tick_retention_job
 
 
+def make_webhook_nonce_gc_job(gc_nonces: Callable[[], int]) -> Callable[[], None]:
+    """Create a best-effort maintenance handler for webhook replay evidence."""
+
+    def webhook_nonce_gc_job() -> None:
+        try:
+            removed = gc_nonces()
+        except Exception as exc:
+            logger.error("webhook_nonce_gc_job: prune failed — %s", type(exc).__name__)
+            return
+        logger.info("webhook_nonce_gc_job: pruned %d expired nonces", removed)
+
+    return webhook_nonce_gc_job
+
+
 def make_eod_sync_job(
     starter: Callable[[], Any],
     holidays: set[str] | None = None,
@@ -477,6 +496,7 @@ class CronManager:
         totp_login: Any = None,
         trade_storage: Any = None,
         trade_storage_lock: Any = None,
+        webhook_nonce_gc: Callable[[], int] | None = None,
     ) -> None:
         self._jobs: dict[str, JobDefinition] = {}
         self._scheduler = None
@@ -490,6 +510,7 @@ class CronManager:
         # app factory, which runs after the CronManager is built).
         self.trade_storage = trade_storage
         self.trade_storage_lock = trade_storage_lock
+        self.webhook_nonce_gc = webhook_nonce_gc
         # The live tick store (a SEPARATE DuckDB file written by TickRecorder on
         # the async loop) + the lock it shares with that recorder. Set after
         # construction, AFTER register_builtin_jobs runs — so the maintenance job
@@ -635,6 +656,13 @@ class CronManager:
             ),
             **DEFAULT_JOBS["tick_retention_job"],
         )
+
+        if self.webhook_nonce_gc is not None:
+            self.register(
+                "webhook_nonce_gc_job",
+                handler=make_webhook_nonce_gc_job(self.webhook_nonce_gc),
+                **DEFAULT_JOBS["webhook_nonce_gc_job"],
+            )
 
         # Overnight strategy optimisation — only when an optimiser is injected.
         if self.overnight_optimiser is not None:

@@ -85,7 +85,8 @@ class MockUpstox:
     def option_chain(self, instrument_key, expiry_date):
         self.calls.append(("option_chain", (instrument_key, expiry_date)))
         return {"status": "success", "data": [
-            {"strike_price": 24000,
+            {"expiry": expiry_date, "underlying_key": instrument_key,
+             "underlying_spot_price": 24050, "strike_price": 24000,
              "call_options": {"market_data": {"ltp": 120.5, "oi": 30000, "volume": 5000, "bid_price": 120.0, "ask_price": 121.0},
                               "option_greeks": {"iv": 13.2, "delta": 0.55, "gamma": 0.002, "theta": -8.1, "vega": 6.4}},
              "put_options": {"market_data": {"ltp": 95.0, "oi": 28000, "volume": 4200, "bid_price": 94.5, "ask_price": 95.5},
@@ -94,7 +95,13 @@ class MockUpstox:
 
 
 def _adapter(mock):
-    return UpstoxAdapter(client_factory=lambda _s: mock, instrument_resolver=lambda s, e: "NSE_EQ|INE002A01018")
+    return UpstoxAdapter(
+        client_factory=lambda _s: mock,
+        instrument_resolver=lambda _symbol, exchange: {
+            "NFO": "NSE_FO|54452",
+            "NSE_INDEX": "NSE_INDEX|Nifty 50",
+        }.get(exchange, "NSE_EQ|INE002A01018"),
+    )
 
 
 async def _session(adapter):
@@ -246,8 +253,31 @@ async def test_option_chain_builds_strikes():
     session = await _session(adapter)
     chain = await adapter.option_chain(session, {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": "2025-06-26"})
     assert chain.underlying == "NIFTY" and len(chain.strikes) == 1
+    assert chain.expiry == "2025-06-26"
+    assert chain.underlying_key == "NSE_INDEX|Nifty 50"
     s = chain.strikes[0]
     assert s.strike_price == 24000.0 and s.ce_ltp == 120.5 and s.pe_delta == -0.45
+    assert s.ce_greeks_complete is True and s.pe_greeks_complete is True
+
+
+@pytest.mark.asyncio
+async def test_option_chain_rejects_a_caller_key_for_another_underlying():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(BrokerError, match="does not match the requested underlying"):
+        await adapter.option_chain(
+            session,
+            {
+                "symbol": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "expiry": "2025-06-26",
+                "instrument_key": "BSE_INDEX|SENSEX",
+            },
+        )
+
+    assert not any(call[0] == "option_chain" for call in mock.calls)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
+import { normaliseLlmHost } from "@/lib/llmProviders";
+import type { LlmAuthMode } from "@/lib/llmProviders";
 
 // ---------------------------------------------------------------------------
 // Sub-interfaces
@@ -15,9 +17,24 @@ interface RiskLimits {
 
 interface LLMSettings {
   provider: string;
+  authMode: LlmAuthMode;
   model: string;
   host: string;
   apiKey: string;
+}
+
+function normaliseLlmSettings(settings: LLMSettings): LLMSettings {
+  const provider = settings.provider.trim() || "ollama";
+  return {
+    ...settings,
+    authMode: provider === "anthropic" && settings.authMode === "claude-code-oauth"
+      ? "claude-code-oauth"
+      : "api-key",
+    host: normaliseLlmHost(provider, settings.host),
+    // Credentials live only in component-local drafts and the backend secret
+    // file. Shared frontend state never owns a raw credential.
+    apiKey: "",
+  };
 }
 
 export interface TelegramSettings {
@@ -68,6 +85,7 @@ interface SettingsStore {
   defaultOrderType: string;
   riskLimits: RiskLimits;
   llm: LLMSettings;
+  llmSetupPending: boolean;
   telegram: TelegramSettings;
   whatsapp: WhatsAppSettings;
   dataPaths: DataPaths;
@@ -88,6 +106,10 @@ interface SettingsStore {
   setTradingDefaults: (defaults: Partial<Pick<SettingsStore, "defaultExchange" | "defaultProduct" | "defaultQty" | "defaultOrderType">>) => void;
   setRiskLimits: (limits: Partial<RiskLimits>) => void;
   setLLM: (llm: Partial<LLMSettings>) => void;
+  setLLMSetupDraft: (
+    llm: Pick<LLMSettings, "provider" | "model" | "host"> & Partial<Pick<LLMSettings, "authMode">>,
+  ) => void;
+  clearLLMSetupDraft: () => void;
   setTelegram: (telegram: Partial<TelegramSettings>) => void;
   setWhatsApp: (whatsapp: Partial<WhatsAppSettings>) => void;
   setDataPaths: (dataPaths: Partial<DataPaths>) => void;
@@ -120,10 +142,12 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   },
   llm: {
     provider: "",
+    authMode: "api-key",
     model: "",
     host: "",
     apiKey: "",
   },
+  llmSetupPending: false,
   telegram: {
     enabled: false,
     botToken: "",
@@ -155,7 +179,12 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   setRiskLimits: (limits) =>
     set((state) => ({ riskLimits: { ...state.riskLimits, ...limits } })),
   setLLM: (llm) =>
-    set((state) => ({ llm: { ...state.llm, ...llm } })),
+    set((state) => ({ llm: normaliseLlmSettings({ ...state.llm, ...llm }) })),
+  setLLMSetupDraft: (llm) => set({
+    llm: normaliseLlmSettings({ authMode: "api-key", ...llm, apiKey: "" }),
+    llmSetupPending: true,
+  }),
+  clearLLMSetupDraft: () => set({ llmSetupPending: false }),
   setTelegram: (telegram) =>
     set((state) => ({ telegram: { ...state.telegram, ...telegram } })),
   setWhatsApp: (whatsapp) =>
@@ -177,7 +206,7 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 7,
+  version: 10,
   partialize: (state) => {
     const { llm, telegram, whatsapp, ...rest } = state;
     return {
@@ -235,6 +264,7 @@ const persistedStore = persist(storeImpl, {
       const oldLlm = state.llm as Record<string, unknown> | undefined;
       const migratedLlm: LLMSettings = {
         provider: oldLlm?.provider === "google" ? "gemini" : ((oldLlm?.provider as string) ?? ""),
+        authMode: "api-key",
         model: (oldLlm?.model as string) ?? "",
         host: (oldLlm?.host as string) ?? "",
         apiKey: (oldLlm?.apiKey as string) ?? "",
@@ -297,6 +327,64 @@ const persistedStore = persist(storeImpl, {
           adminUrl: "",
           ...((state.whatsapp as Record<string, unknown>) ?? {}),
         } as WhatsAppSettings,
+      };
+    }
+
+    // v7 -> v8: retire the named LM Studio integration in favour of the
+    // application-managed Ollama runtime, regardless of the legacy endpoint.
+    if (version < 8) {
+      const oldLlm = (state.llm as Record<string, unknown> | undefined) ?? {};
+      const provider = String(oldLlm.provider ?? "").trim().toLowerCase();
+      if (provider === "lmstudio") {
+        state = {
+          ...state,
+          llm: {
+            ...oldLlm,
+            provider: "ollama",
+            host: "",
+            apiKey: "",
+          } as LLMSettings,
+        };
+      }
+    }
+
+    // v8 -> v9: managed Ollama's endpoint is runtime-owned and must never be
+    // persisted in frontend state. Also accept LM Studio values that reached a
+    // v8 snapshot without the earlier migration having run.
+    if (version < 9) {
+      const oldLlm = (state.llm as Record<string, unknown> | undefined) ?? {};
+      let provider = String(oldLlm.provider ?? "").trim().toLowerCase();
+      let host = String(oldLlm.host ?? "").trim().replace(/\/$/, "");
+      if (provider === "lmstudio") {
+        provider = "ollama";
+        host = "";
+      }
+      if (provider === "ollama") host = "";
+      state = {
+        ...state,
+        llm: {
+          ...oldLlm,
+          provider,
+          host,
+          apiKey: provider === "ollama" ? "" : String(oldLlm.apiKey ?? ""),
+        } as LLMSettings,
+      };
+    }
+
+    // v9 -> v10: retain Claude Code OAuth as an explicit frontend auth choice
+    // while the backend continues to receive the real Anthropic provider.
+    if (version < 10) {
+      const oldLlm = (state.llm as Record<string, unknown> | undefined) ?? {};
+      const provider = String(oldLlm.provider ?? "").trim().toLowerCase();
+      state = {
+        ...state,
+        llm: {
+          ...oldLlm,
+          authMode: provider === "anthropic" && oldLlm.authMode === "claude-code-oauth"
+            ? "claude-code-oauth"
+            : "api-key",
+          apiKey: "",
+        } as LLMSettings,
       };
     }
 

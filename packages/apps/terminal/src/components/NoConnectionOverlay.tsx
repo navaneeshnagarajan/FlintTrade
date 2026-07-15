@@ -19,6 +19,7 @@ import { layerClassNames } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
 
 const DELAY_MS = 5000;
 
@@ -47,6 +48,7 @@ const FOCUSABLE_SELECTOR =
 
 export function NoConnectionOverlay() {
   const status = useConnectionStore((s) => s.status);
+  const mode = useModeStore((s) => s.mode);
   const [showOverlay, setShowOverlay] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,13 +60,14 @@ export function NoConnectionOverlay() {
   );
 
   useEffect(() => {
-    if (status === "disconnected") {
+    if (status === "disconnected" && mode === "live" && !isSuppressedRoute) {
       const timer = setTimeout(() => setShowOverlay(true), DELAY_MS);
       return () => clearTimeout(timer);
     }
-    // Connected — hide immediately
+    // Explore and Practice remain usable without broker data. Only Live mode
+    // owns the blocking disconnection gate.
     setShowOverlay(false);
-  }, [status]);
+  }, [isSuppressedRoute, mode, status]);
 
   // Issue #56 — Auto-focus the first interactive element when the overlay opens.
   useEffect(() => {
@@ -113,7 +116,7 @@ export function NoConnectionOverlay() {
     }
   }, []);
 
-  if (!showOverlay || isSuppressedRoute) return null;
+  if (!showOverlay || isSuppressedRoute || mode !== "live") return null;
 
   return (
     <div

@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,8 @@ vi.mock("@xyflow/react", () => ({
 // ---------------------------------------------------------------------------
 
 import FlowBuilderTool from "../FlowBuilderTool";
+import { HowItWorksTab } from "../flow/HowItWorksTab";
+import { TemplatesTab } from "../flow/TemplatesTab";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -93,7 +96,7 @@ describe("FlowBuilderTool", () => {
 
   it("displays the node count badge", () => {
     render(<FlowBuilderTool />);
-    // The badge shows the total count from getTotalNodeCount() — currently 54
+    // The badge is derived from the canonical node registry.
     const badge = screen.getByText(/\d+ nodes/);
     expect(badge).toBeInTheDocument();
   });
@@ -108,5 +111,47 @@ describe("FlowBuilderTool", () => {
   it("shows empty state message when no flows exist", () => {
     render(<FlowBuilderTool />);
     expect(screen.getByText("No flows yet")).toBeInTheDocument();
+  });
+
+  it("opens the real canvas editor without advertising an unwired Run action", () => {
+    render(<FlowBuilderTool />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "New Flow" })[0]);
+
+    expect(screen.getByTestId("react-flow-canvas")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
+  });
+
+  it("lets Enter on a palette button add a node to the canvas", async () => {
+    const user = userEvent.setup();
+    render(<FlowBuilderTool />);
+    await user.click(screen.getAllByRole("button", { name: "New Flow" })[0]);
+
+    expect(screen.getByRole("textbox", { name: "Flow name" })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Search nodes" }), "Search Symbol");
+    await user.click(screen.getByRole("button", { name: /Data/ }));
+    screen.getByRole("button", { name: "Search Symbol" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("1 nodes · 0 edges")).toBeInTheDocument();
+  });
+
+  it("describes saved flows as local drafts rather than executable automation", () => {
+    render(<HowItWorksTab />);
+
+    expect(screen.getByText(/local visual draft editor/i)).toBeInTheDocument();
+    expect(screen.getByText(/backend flow execution is not wired/i)).toBeInTheDocument();
+    expect(screen.queryByText(/flows run on the FlintTrade Python backend/i)).not.toBeInTheDocument();
+  });
+
+  it("labels templates as local drafts and only loads their canvas data", async () => {
+    const user = userEvent.setup();
+    const onUse = vi.fn();
+    render(<TemplatesTab onUse={onUse} />);
+
+    expect(screen.getByText(/local drafts only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/timed execution/i)).not.toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Load draft" })[0]);
+    expect(onUse).toHaveBeenCalledOnce();
   });
 });

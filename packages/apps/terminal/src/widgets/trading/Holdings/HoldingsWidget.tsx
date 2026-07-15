@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useHoldings } from "@/hooks/useHoldings";
 import { usePositions } from "@/hooks/usePositions";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { downloadPortfolioReport } from "@/services/ftApi.data";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { WidgetProps } from "@/types/widgets";
@@ -59,9 +59,9 @@ function resolveLtp(h: RawHolding): number {
 
 function HoldingsWidget(_props: WidgetProps) {
   // retry:false preserved — some brokers don't have a holdings endpoint
-  const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = useAccountReadsEnabled();
   const { data: holdingsData, dataUpdatedAt, refetch, isFetching, isError, error } = useHoldings({
-    enabled: isBrokerConnected,
+    enabled: accountReadsEnabled,
   });
   const [sorting, setSorting] = useState<SortingState>([{ id: "symbol", desc: false }]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -92,7 +92,7 @@ function HoldingsWidget(_props: WidgetProps) {
   const lastFetch = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
   // Positions are fetched so the portfolio report can span both books.
-  const { data: positionsData } = usePositions({ enabled: isBrokerConnected });
+  const { data: positionsData } = usePositions({ enabled: accountReadsEnabled });
   const [isExporting, setIsExporting] = useState(false);
 
   const handlePortfolioReport = useCallback(async () => {
@@ -219,7 +219,7 @@ function HoldingsWidget(_props: WidgetProps) {
         <div className="flex items-center gap-2">
           <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">Holdings</span>
           <span className="text-xxs text-text-secondary font-mono tabular-nums">({rows.length})</span>
-          {!isBrokerConnected && (
+          {!accountReadsEnabled && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
@@ -249,7 +249,7 @@ function HoldingsWidget(_props: WidgetProps) {
               {lastFetch.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })}
             </span>
           )}
-          {isBrokerConnected && (
+          {accountReadsEnabled && (
             <>
               <Button
                 type="button"
@@ -315,7 +315,7 @@ function HoldingsWidget(_props: WidgetProps) {
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <Briefcase size={24} className="text-text-disabled" />
           <span className="text-sm">
-            {!isBrokerConnected
+            {!accountReadsEnabled
               ? "Connect a broker to load holdings"
               : rows.length === 0
                 ? "No holdings"

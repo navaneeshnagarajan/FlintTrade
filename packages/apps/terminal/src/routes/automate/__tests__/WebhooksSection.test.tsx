@@ -35,18 +35,16 @@ vi.mock("@/components/ui/GlassCard", () => ({
   ),
 }));
 
-vi.mock("@/components/tradingview/AlertTemplateBrowser", () => ({
-  AlertTemplateBrowser: () => <div data-testid="alert-template-browser" />,
-}));
-
 const mockGetWebhooks = vi.fn();
 const mockCreateWebhook = vi.fn();
 const mockDeleteWebhook = vi.fn();
+const mockSetWebhookEnabled = vi.fn();
 
 vi.mock("@/services/ftApi", () => ({
   getWebhooks: (...args: unknown[]) => mockGetWebhooks(...args),
   createWebhook: (...args: unknown[]) => mockCreateWebhook(...args),
   deleteWebhook: (...args: unknown[]) => mockDeleteWebhook(...args),
+  setWebhookEnabled: (...args: unknown[]) => mockSetWebhookEnabled(...args),
 }));
 
 function createWrapper() {
@@ -73,8 +71,17 @@ describe("WebhooksSection", () => {
       name: "NIFTY Trend Signal",
       type: "tradingview",
       enabled: true,
+      secret_configured: true,
     });
-    mockDeleteWebhook.mockResolvedValue({ status: "success" });
+    mockDeleteWebhook.mockResolvedValue({ message: "Webhook removed" });
+    mockSetWebhookEnabled.mockResolvedValue({
+      id: "v1/webhook/tradingview/nifty-trend-v1",
+      path: "/v1/webhook/tradingview/nifty-trend-v1",
+      name: "NIFTY Trend Signal",
+      type: "tradingview",
+      enabled: false,
+      secret_configured: true,
+    });
   });
 
   it("renders without crashing and shows heading", () => {
@@ -82,14 +89,14 @@ describe("WebhooksSection", () => {
     expect(screen.getByText("Webhooks")).toBeInTheDocument();
   });
 
-  it("displays the three sub-tabs: Active, Create, Alert Templates", () => {
+  it("displays only the live Active and Create surfaces", () => {
     render(<WebhooksSection />, { wrapper: createWrapper() });
     // Use getAllByRole("tab") since Radix Tabs renders proper tab roles
     const tabs = screen.getAllByRole("tab");
     const tabLabels = tabs.map((t) => t.textContent);
     expect(tabLabels).toContain("Active");
     expect(tabLabels).toContain("Create");
-    expect(tabLabels).toContain("Alert Templates");
+    expect(tabLabels).not.toContain("Alert Templates");
   });
 
   it("loads registered webhooks from the backend registry", async () => {
@@ -100,6 +107,7 @@ describe("WebhooksSection", () => {
         name: "NIFTY Trend Signal",
         type: "tradingview",
         enabled: true,
+        secret_configured: true,
       }],
     });
 
@@ -139,6 +147,7 @@ describe("WebhooksSection", () => {
         name: "ChartInk Breakout",
         type: "chartink",
         enabled: true,
+        secret_configured: true,
       }],
     });
 
@@ -148,5 +157,75 @@ describe("WebhooksSection", () => {
     fireEvent.click(screen.getByTitle("Delete endpoint"));
 
     await waitFor(() => expect(mockDeleteWebhook).toHaveBeenCalledWith("v1/webhook/chartink/breakout"));
+  });
+
+  it("requires a signing secret before creating an endpoint", async () => {
+    const user = userEvent.setup();
+    render(<WebhooksSection />, { wrapper: createWrapper() });
+
+    await user.click(screen.getByRole("tab", { name: "Create" }));
+    await user.type(await screen.findByLabelText("Name"), "Unsigned Signal");
+    await user.type(screen.getByLabelText("Strategy ID"), "unsigned-signal");
+    await user.click(screen.getByRole("button", { name: /create endpoint/i }));
+
+    expect(await screen.findByText("Signing secret is required")).toBeInTheDocument();
+    expect(mockCreateWebhook).not.toHaveBeenCalled();
+  });
+
+  it("contains create failures after showing the inline error", async () => {
+    const user = userEvent.setup();
+    mockCreateWebhook.mockRejectedValueOnce(new Error("Relay registry unavailable"));
+    render(<WebhooksSection />, { wrapper: createWrapper() });
+
+    await user.click(screen.getByRole("tab", { name: "Create" }));
+    await user.type(await screen.findByLabelText("Name"), "Failed Signal");
+    await user.type(screen.getByLabelText("Strategy ID"), "failed-signal");
+    await user.type(screen.getByLabelText(/Secret/i), "secret-1");
+    await user.click(screen.getByRole("button", { name: /create endpoint/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Relay registry unavailable");
+    expect(screen.getByLabelText("Name")).toHaveValue("Failed Signal");
+  });
+
+  it("toggles a registered endpoint through the backend service", async () => {
+    mockGetWebhooks.mockResolvedValueOnce({
+      webhooks: [{
+        id: "v1/webhook/tradingview/nifty-trend-v1",
+        path: "/v1/webhook/tradingview/nifty-trend-v1",
+        name: "NIFTY Trend Signal",
+        type: "tradingview",
+        enabled: true,
+        secret_configured: true,
+      }],
+    });
+    const user = userEvent.setup();
+    render(<WebhooksSection />, { wrapper: createWrapper() });
+
+    await user.click(await screen.findByRole("switch", { name: "Disable NIFTY Trend Signal" }));
+
+    await waitFor(() => {
+      expect(mockSetWebhookEnabled).toHaveBeenCalledWith(
+        "v1/webhook/tradingview/nifty-trend-v1",
+        false,
+      );
+    });
+  });
+
+  it("marks legacy secretless rows as needing recreation and keeps them disabled", async () => {
+    mockGetWebhooks.mockResolvedValueOnce({
+      webhooks: [{
+        id: "v1/webhook/custom/legacy",
+        path: "/v1/webhook/custom/legacy",
+        name: "Legacy Relay",
+        type: "custom",
+        enabled: false,
+        secret_configured: false,
+      }],
+    });
+
+    render(<WebhooksSection />, { wrapper: createWrapper() });
+
+    expect(await screen.findByText("Needs secret")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Enable Legacy Relay" })).toBeDisabled();
   });
 });

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import math
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +375,7 @@ class Position(BaseModel):
     """Open position from positionbook."""
 
     symbol: str = ""
+    instrument_id: str = ""
     exchange: str = ""
     product: str = ""
     quantity: str = "0"
@@ -384,18 +386,43 @@ class Position(BaseModel):
     sell_quantity: str = "0"
     buy_avg: str = "0"
     sell_avg: str = "0"
+    multiplier: float | None = None
+    fx_rate: float | None = None
+    close_price: float | None = None
+    previous_close_trusted: bool = False
+    cross_currency: bool | None = None
+    overnight_quantity: str = "0"
+    day_buy_quantity: str = "0"
+    day_sell_quantity: str = "0"
+    carry_forward_buy_quantity: str = "0"
+    carry_forward_sell_quantity: str = "0"
+    accounting_complete: bool = False
+    option_type: str = ""
+    expiry: str = ""
+    strike_price: float = 0.0
+    underlying: str = ""
 
 
 class Holding(BaseModel):
     """Delivery holding from holdings endpoint."""
 
     symbol: str = ""
+    instrument_id: str = ""
     exchange: str = ""
+    product: str = ""
     quantity: str = "0"
     average_price: str = "0"
     ltp: str = "0"
     pnl: str = "0"
     pnl_percent: str = "0"
+    multiplier: float | None = None
+    fx_rate: float | None = None
+    close_price: float | None = None
+    previous_close_trusted: bool = False
+    cross_currency: bool | None = None
+    settled_quantity: str = "0"
+    t1_quantity: str = "0"
+    accounting_complete: bool = False
 
 
 class Trade(BaseModel):
@@ -403,12 +430,16 @@ class Trade(BaseModel):
 
     orderid: str = ""
     symbol: str = ""
+    instrument_id: str = ""
     exchange: str = ""
     action: str = ""
     quantity: str = "0"
     price: str = "0"
     product: str = ""
     timestamp: str = ""
+    multiplier: float | None = None
+    fx_rate: float | None = None
+    cross_currency: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +460,8 @@ class Quote(BaseModel):
     bid: float = 0.0
     ask: float = 0.0
     prev_close: float = 0.0
+    previous_close_trusted: bool = False
+    previous_close_as_of: str = ""
     oi: int = 0
 
 
@@ -496,6 +529,7 @@ class Fund(BaseModel):
     available_balance: str = "0"
     used_margin: str = "0"
     total_balance: str = "0"
+    opening_risk_capital: str = "0"
     # OpenAlgo may return additional broker-specific fields
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -514,14 +548,16 @@ class OptionGreek(BaseModel):
     theta: float = 0.0
     vega: float = 0.0
     iv: float = 0.0
+    rho: float = 0.0
 
 
 class OptionChainStrike(BaseModel):
     """Single strike in an option chain."""
 
     strike_price: float = 0.0
+    ce_instrument_id: str = ""
     ce_ltp: float = 0.0
-    ce_oi: int = 0
+    ce_oi: int | None = None
     ce_volume: int = 0
     ce_iv: float = 0.0
     ce_delta: float = 0.0
@@ -530,8 +566,10 @@ class OptionChainStrike(BaseModel):
     ce_vega: float = 0.0
     ce_bid: float = 0.0
     ce_ask: float = 0.0
+    ce_greeks_complete: bool = False
+    pe_instrument_id: str = ""
     pe_ltp: float = 0.0
-    pe_oi: int = 0
+    pe_oi: int | None = None
     pe_volume: int = 0
     pe_iv: float = 0.0
     pe_delta: float = 0.0
@@ -540,11 +578,62 @@ class OptionChainStrike(BaseModel):
     pe_vega: float = 0.0
     pe_bid: float = 0.0
     pe_ask: float = 0.0
+    pe_greeks_complete: bool = False
+
+    @field_validator("strike_price", mode="before")
+    @classmethod
+    def validate_strike_price(cls, value: Any) -> Any:
+        """Reject identities that numeric coercion would make look usable."""
+        if isinstance(value, bool):
+            raise ValueError("strike_price must be numeric, not boolean")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("strike_price must be numeric") from exc
+        if not math.isfinite(number) or number <= 0:
+            raise ValueError("strike_price must be a finite positive number")
+        return value
+
+    @field_validator("ce_oi", "pe_oi", mode="before")
+    @classmethod
+    def validate_open_interest(cls, value: Any) -> Any:
+        """Preserve missing OI and reject values that cannot be authoritative."""
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError("OI must be a finite non-negative number")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("OI must be a finite non-negative number") from exc
+        if not math.isfinite(number) or number < 0 or not number.is_integer():
+            raise ValueError("OI must be a finite non-negative number")
+        return value
 
 
 class OptionChain(BaseModel):
     """Full option chain for an underlying."""
 
     underlying: str = ""
+    underlying_key: str = ""
     exchange: str = ""
+    expiry: str = ""
+    expiry_date: str = ""
+    spot_price: float = 0.0
     strikes: list[OptionChainStrike] = Field(default_factory=list)
+
+    @field_validator("underlying_key", "expiry", "expiry_date", mode="before")
+    @classmethod
+    def reject_non_string_identity(cls, value: Any) -> Any:
+        """Keep structured or boolean values from becoming market identities."""
+        if not isinstance(value, str):
+            raise ValueError("option-chain identity fields must be strings")
+        return value
+
+    @field_validator("spot_price", mode="before")
+    @classmethod
+    def reject_boolean_spot_price(cls, value: Any) -> Any:
+        """Keep JSON booleans from masquerading as numeric market provenance."""
+        if isinstance(value, bool):
+            raise ValueError("spot_price must be numeric, not boolean")
+        return value

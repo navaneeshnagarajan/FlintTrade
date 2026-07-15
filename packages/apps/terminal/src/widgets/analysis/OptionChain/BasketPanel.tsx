@@ -9,17 +9,13 @@ import { NUM0, fmtLtp } from "./formatters";
 
 interface BasketPanelProps {
   basket: BasketItem[];
-  symLabel: string;
-  exchange: string;
-  onRemove: (strike: number, optionType: "CE" | "PE") => void;
+  onRemove: (item: BasketItem) => void;
   onClear: () => void;
   onOrder: (params: OrderParams) => void;
 }
 
 export default function BasketPanel({
   basket,
-  symLabel,
-  exchange,
   onRemove,
   onClear,
   onOrder,
@@ -50,19 +46,19 @@ export default function BasketPanel({
           <div className="flex flex-wrap gap-1 mb-1.5">
             {basket.map((item) => (
               <div
-                key={`${item.strike}-${item.optionType}`}
+                key={`${item.symbol}-${item.exchange}-${item.expiry}-${item.strike}-${item.optionType}`}
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-mono ${
                   item.optionType === "CE"
                     ? "bg-loss/10 border-loss/30 text-loss"
                     : "bg-profit/10 border-profit/30 text-profit"
                 }`}
               >
-                <span className="font-semibold">{NUM0.format(item.strike)} {item.optionType}</span>
+                <span className="font-semibold">{item.symbol} {NUM0.format(item.strike)} {item.optionType}</span>
                 {item.ltp != null && (
                   <span className="text-text-muted">@ {fmtLtp(item.ltp)}</span>
                 )}
                 <button
-                  onClick={() => onRemove(item.strike, item.optionType)}
+                  onClick={() => onRemove(item)}
                   className="ml-0.5 text-text-muted hover:text-text-primary transition-colors"
                   aria-label="Remove"
                 >
@@ -77,8 +73,8 @@ export default function BasketPanel({
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
-                    symbol: symLabel,
-                    exchange,
+                    symbol: item.symbol,
+                    exchange: item.exchange,
                     strike: item.strike,
                     optionType: item.optionType,
                     expiry: item.expiry,
@@ -95,8 +91,8 @@ export default function BasketPanel({
               onClick={() =>
                 basket.forEach((item) =>
                   onOrder({
-                    symbol: symLabel,
-                    exchange,
+                    symbol: item.symbol,
+                    exchange: item.exchange,
                     strike: item.strike,
                     optionType: item.optionType,
                     expiry: item.expiry,

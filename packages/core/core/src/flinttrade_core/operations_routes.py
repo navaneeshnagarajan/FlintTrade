@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
+import math
+import os
 import queue
+import stat
 import threading
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import datetime as _dt
 from datetime import timedelta as _td
 from datetime import timezone as _tz
@@ -24,6 +28,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from flask import Blueprint, Response, current_app, jsonify, request
+from filelock import FileLock
 from werkzeug.utils import safe_join
 
 from .auth_scopes import require_scope
@@ -33,11 +38,15 @@ logger = logging.getLogger("flinttrade")
 operations_bp = Blueprint("operations", __name__, url_prefix="/api/v1")
 
 _IST = _tz(_td(hours=5, minutes=30))
+_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS = 5.0
+_DITTO_CONTROL_LOCK = threading.RLock()
+_WEBHOOK_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
 
 
 # ------------------------------------------------------------------
 # Cron jobs
 # ------------------------------------------------------------------
+
 
 @operations_bp.route("/cron/jobs", methods=["GET"])
 def cron_jobs_list() -> tuple[Any, int]:
@@ -129,6 +138,7 @@ def cron_job_resume(name: str) -> tuple[Any, int]:
 # Audit logs
 # ------------------------------------------------------------------
 
+
 @operations_bp.route("/audit/logs", methods=["GET"])
 @require_scope("admin.audit.read")
 def audit_logs() -> tuple[Any, int]:
@@ -167,11 +177,13 @@ def audit_logs() -> tuple[Any, int]:
     try:
         all_logs = _audit.read_day(date_str)
         total = len(all_logs)
-        page = all_logs[offset: offset + limit]
-        return jsonify({
-            "status": "success",
-            "data": {"logs": page, "total": total, "date": date_str},
-        }), 200
+        page = all_logs[offset : offset + limit]
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"logs": page, "total": total, "date": date_str},
+            }
+        ), 200
     except Exception:
         logger.exception("audit_logs error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -180,6 +192,7 @@ def audit_logs() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 # Trade journal
 # ------------------------------------------------------------------
+
 
 @operations_bp.route("/trades/journal", methods=["GET"])
 def trades_journal() -> tuple[Any, int]:
@@ -255,15 +268,19 @@ def trades_journal() -> tuple[Any, int]:
             normalised.append(row)
         trades = normalised
 
-        return jsonify({
-            "status": "success",
-            "data": {"trades": trades, "total": len(trades)},
-        }), 200
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"trades": trades, "total": len(trades)},
+            }
+        ), 200
     except ImportError:
-        return jsonify({
-            "status": "error",
-            "message": "Trade storage not available (DuckDB not configured)",
-        }), 200
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Trade storage not available (DuckDB not configured)",
+            }
+        ), 200
     except Exception:
         logger.exception("trades_journal error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -273,6 +290,54 @@ def trades_journal() -> tuple[Any, int]:
 # Safety config
 # ------------------------------------------------------------------
 
+
+def _daily_pnl_selector(values: Mapping[str, Any]) -> tuple[str | None, tuple[Any, int] | None]:
+    """Return an exact optional selector from request values."""
+    from flinttrade_engine.request_context import parse_selector  # noqa: PLC0415
+
+    adapter_id = str(values.get("broker") or "").strip().lower()
+    account_id = str(values.get("account_id") or "").strip()
+    if bool(adapter_id) != bool(account_id):
+        return None, (
+            jsonify({"status": "error", "message": "Both broker and account_id are required"}),
+            400,
+        )
+    if not adapter_id:
+        return None, None
+    selector = f"{adapter_id}:{account_id}"
+    try:
+        parse_selector(selector)
+    except ValueError:
+        return None, (jsonify({"status": "error", "message": "Invalid account selector"}), 400)
+    return selector, None
+
+
+def _authorise_daily_pnl_selector(jwt_payload: Mapping[str, Any], selector: str) -> tuple[Any, int] | None:
+    """Require the authenticated operator to own the selected execution account."""
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    router = current_app.config.get("BROKER_ROUTER")
+    authorised_selectors = getattr(router, "authorised_selectors", None)
+    authorised = set(authorised_selectors(actor_id)) if callable(authorised_selectors) else set()
+    if selector not in authorised:
+        return jsonify({"status": "error", "message": "Account selector is not authorised"}), 403
+    return None
+
+
+def _authorised_account_selectors(
+    jwt_payload: Mapping[str, Any],
+) -> tuple[set[str] | None, tuple[Any, int] | None]:
+    """Return the current router generation's account ACL for one operator."""
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    router = current_app.config.get("BROKER_ROUTER")
+    authorised_selectors = getattr(router, "authorised_selectors", None)
+    if not callable(authorised_selectors):
+        return None, (
+            jsonify({"status": "error", "message": "Broker account authorisation is unavailable"}),
+            503,
+        )
+    return set(authorised_selectors(actor_id)), None
+
+
 @operations_bp.route("/safety/config", methods=["GET"])
 def safety_config_get() -> tuple[Any, int]:
     """Return the current safety system configuration.
@@ -281,13 +346,32 @@ def safety_config_get() -> tuple[Any, int]:
         JSON with ``status`` and ``data`` containing all 5-layer
         safety parameters and current kill-switch / pause state.
     """
-    from flinttrade_engine.safety import SafetySystem  # noqa: PLC0415
+    from flinttrade_engine.safety import EmergencyDispatchResult, SafetySystem  # noqa: PLC0415
 
     _safety: SafetySystem | None = current_app.config.get("SAFETY")
     if _safety is None:
         return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
 
     try:
+        selected_selector, selector_error = _daily_pnl_selector(request.args)
+        if selector_error is not None:
+            return selector_error
+        selected_l4_state = None
+        l4_states = ()
+        if selected_selector is not None:
+            jwt_payload, auth_error = _authenticated_live_operator()
+            if auth_error is not None:
+                return auth_error
+            assert jwt_payload is not None
+            selector_auth_error = _authorise_daily_pnl_selector(jwt_payload, selected_selector)
+            if selector_auth_error is not None:
+                return selector_auth_error
+            selected_l4_state = _safety.l4_pnl.state(selected_selector)
+            l4_states = (selected_l4_state,) if selected_l4_state is not None else ()
+        last_emergency_result = _safety.l5_kill.last_emergency_result
+        if not isinstance(last_emergency_result, EmergencyDispatchResult):
+            last_emergency_result = None
+        is_l5_active = bool(_safety.l5_kill.is_active)
         data = {
             "l1_order": {
                 "price_deviation_pct": _safety.l1_order.price_deviation_pct,
@@ -305,12 +389,36 @@ def safety_config_get() -> tuple[Any, int]:
             "l4_pnl": {
                 "pause_pct": _safety.l4_pnl.pause_pct,
                 "kill_pct": _safety.l4_pnl.kill_pct,
-                "is_paused": _safety.l4_pnl.is_paused,
-                "is_killed": _safety.l4_pnl.is_killed,
+                "selector": selected_selector,
+                "opening_risk_capital": (
+                    selected_l4_state.opening_risk_capital if selected_l4_state is not None else 0.0
+                ),
+                "is_paused": (
+                    selected_l4_state.paused if selected_selector is not None else _safety.l4_pnl.is_paused
+                ),
+                "is_killed": (
+                    selected_l4_state.killed if selected_selector is not None else _safety.l4_pnl.is_killed
+                ),
+                "accounts": [
+                    {
+                        "selector": state.selector,
+                        "session_key": state.session_key,
+                        "opening_risk_capital": state.opening_risk_capital,
+                        "is_paused": state.paused,
+                        "is_killed": state.killed,
+                    }
+                    for state in l4_states
+                ],
             },
             "l5_kill": {
-                "is_active": _safety.l5_kill.is_active,
+                "is_active": is_l5_active,
                 "reason": _safety.l5_kill.reason,
+                "flatten_complete": (
+                    last_emergency_result.complete
+                    if is_l5_active and last_emergency_result is not None
+                    else not is_l5_active
+                ),
+                "emergency_result": (last_emergency_result.as_dict() if last_emergency_result is not None else None),
             },
         }
         return jsonify({"status": "success", "data": data}), 200
@@ -331,37 +439,158 @@ def safety_config_update() -> tuple[Any, int]:
         max_net_delta (float): L3 maximum net options delta.
         max_net_vega (float): L3 maximum net options vega.
         pnl_pause_pct (float): L4 daily-loss % that triggers a pause.
-        pnl_kill_pct (float): L4 daily-loss % that activates kill switch.
+        pnl_kill_pct (float): L4 daily-loss % that latches the new-order hard stop.
+            Layer 4 does not activate the Layer 5 cancel-and-flatten workflow.
 
     Returns:
         JSON with ``status`` and confirmation.
     """
-    from flinttrade_engine.safety import SafetySystem  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        SafetyConfigApplicationError,
+        SafetySystem,
+    )
+    from flinttrade_engine.daily_pnl_state import DailyPnLStateError  # noqa: PLC0415
 
     _safety: SafetySystem | None = current_app.config.get("SAFETY")
     if _safety is None:
         return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
 
-    body = request.get_json(silent=True) or {}
+    raw_body = request.get_json(silent=True)
+    if not isinstance(raw_body, dict):
+        return jsonify({"status": "error", "message": "Safety config update must be a JSON object"}), 400
+    body: dict[str, Any] = raw_body
+    jwt_payload, auth_error = _authenticated_live_operator(require_unlock=True)
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
     try:
+        allowed_fields = {
+            "price_deviation_pct",
+            "check_market_hours",
+            "max_positions",
+            "max_margin_pct",
+            "max_net_delta",
+            "max_net_vega",
+            "pnl_pause_pct",
+            "pnl_kill_pct",
+            "opening_risk_capital",
+            "broker",
+            "account_id",
+        }
+        global_fields = allowed_fields - {"opening_risk_capital", "broker", "account_id"}
+        unknown_fields = sorted(set(body) - allowed_fields)
+        if unknown_fields:
+            raise ValueError(f"unknown safety config fields: {', '.join(unknown_fields)}")
+        if not body:
+            raise ValueError("safety config update cannot be empty")
+        if "opening_risk_capital" in body and set(body) & global_fields:
+            raise ValueError("opening risk capital must be configured separately from global safety limits")
+
+        update_and_persist = getattr(_safety, "update_and_persist_config", None)
+        if not callable(update_and_persist):
+            return jsonify({"status": "error", "message": "Durable safety configuration is unavailable"}), 503
+
+        def finite_number(name: str, *, minimum: float, maximum: float | None = None) -> float:
+            raw_value = body[name]
+            if isinstance(raw_value, bool):
+                raise ValueError(f"{name} must be numeric")
+            value = float(raw_value)
+            if not math.isfinite(value) or value < minimum or (maximum is not None and value > maximum):
+                raise ValueError(f"{name} is outside its permitted range")
+            return value
+
+        updates: dict[str, Any] = {}
         if "price_deviation_pct" in body:
-            _safety.l1_order.price_deviation_pct = float(body["price_deviation_pct"])
+            updates["price_deviation_pct"] = finite_number(
+                "price_deviation_pct", minimum=0.0, maximum=100.0
+            )
         if "check_market_hours" in body:
-            _safety.l1_order.check_market_hours = bool(body["check_market_hours"])
+            if not isinstance(body["check_market_hours"], bool):
+                raise ValueError("check_market_hours must be a boolean")
+            updates["check_market_hours"] = body["check_market_hours"]
         if "max_positions" in body:
-            _safety.l2_position.max_positions = int(body["max_positions"])
+            raw_max_positions = body["max_positions"]
+            if isinstance(raw_max_positions, bool) or not isinstance(raw_max_positions, int):
+                raise ValueError("max_positions must be an integer")
+            max_positions = raw_max_positions
+            if max_positions < 0:
+                raise ValueError("max_positions cannot be negative")
+            updates["max_positions"] = max_positions
         if "max_margin_pct" in body:
-            _safety.l2_position.max_margin_pct = float(body["max_margin_pct"])
+            updates["max_margin_pct"] = finite_number("max_margin_pct", minimum=0.0, maximum=100.0)
         if "max_net_delta" in body:
-            _safety.l3_portfolio.max_net_delta = float(body["max_net_delta"])
+            updates["max_net_delta"] = finite_number("max_net_delta", minimum=0.0)
         if "max_net_vega" in body:
-            _safety.l3_portfolio.max_net_vega = float(body["max_net_vega"])
+            updates["max_net_vega"] = finite_number("max_net_vega", minimum=0.0)
+
         if "pnl_pause_pct" in body:
-            _safety.l4_pnl.pause_pct = float(body["pnl_pause_pct"])
+            updates["pnl_pause_pct"] = finite_number("pnl_pause_pct", minimum=0.0)
         if "pnl_kill_pct" in body:
-            _safety.l4_pnl.kill_pct = float(body["pnl_kill_pct"])
+            updates["pnl_kill_pct"] = finite_number("pnl_kill_pct", minimum=0.0)
+
+        configured_state = None
+        capital_selector: str | None = None
+        capital: float | None = None
+        if "opening_risk_capital" in body:
+            capital_selector, selector_error = _daily_pnl_selector(body)
+            if selector_error is not None:
+                return selector_error
+            if capital_selector is None:
+                return jsonify(
+                    {"status": "error", "message": "Opening risk capital requires an exact account selector"}
+                ), 400
+            selector_auth_error = _authorise_daily_pnl_selector(jwt_payload, capital_selector)
+            if selector_auth_error is not None:
+                return selector_auth_error
+            if isinstance(body["opening_risk_capital"], bool):
+                raise ValueError("opening risk capital must be numeric")
+            capital = float(body["opening_risk_capital"])
+            if not math.isfinite(capital) or capital <= 0:
+                raise ValueError("opening risk capital must be positive and finite")
+        elif "broker" in body or "account_id" in body:
+            raise ValueError("account selector is only valid with opening risk capital")
+
+        if "opening_risk_capital" in body:
+            assert capital_selector is not None and capital is not None
+            configured_state = _safety.l4_pnl.configure_opening_capital(capital_selector, capital)
+
+        if set(body) & global_fields:
+            from .safety_config import persist_workspace_safety_config  # noqa: PLC0415
+            from .workspace import workspace_dir  # noqa: PLC0415
+
+            try:
+                update_and_persist(
+                    updates,
+                    lambda config: persist_workspace_safety_config(workspace_dir(), config),
+                )
+            except SafetyConfigApplicationError:
+                current_app.config["SAFETY_CONFIG_READY"] = False
+                from .app import retire_broker_router_generation  # noqa: PLC0415
+
+                retire_broker_router_generation(current_app)
+                logger.critical("Persisted safety configuration could not be published; routing retired")
+                return jsonify({"status": "error", "message": "Safety configuration requires restart"}), 503
+            except Exception as exc:  # noqa: BLE001 - old in-memory config remains authoritative
+                logger.error("Safety configuration persistence failed (%s)", type(exc).__name__)
+                return jsonify({"status": "error", "message": "Safety configuration could not be persisted"}), 503
+
+        if configured_state is not None:
+            audit = current_app.config.get("AUDIT")
+            log_event = getattr(audit, "log_event", None)
+            if callable(log_event):
+                try:
+                    log_event(
+                        "L4_OPENING_CAPITAL_FROZEN",
+                        selector=configured_state.selector,
+                        session_key=configured_state.session_key,
+                    )
+                except Exception:  # noqa: BLE001 - state is already durable
+                    logger.exception("Opening-risk-capital audit write failed")
 
         return jsonify({"status": "success", "data": {"message": "Safety config updated"}}), 200
+    except DailyPnLStateError as exc:
+        logger.warning("Opening risk capital update refused: %s", exc)
+        return jsonify({"status": "error", "message": str(exc)}), 409
     except (ValueError, TypeError) as exc:
         logger.debug("Invalid safety config value: %s", exc)
         return jsonify({"status": "error", "message": "Invalid value in safety config update."}), 400
@@ -370,9 +599,148 @@ def safety_config_update() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
+@operations_bp.route("/safety/l4", methods=["DELETE"])
+def daily_pnl_latches_reset() -> tuple[Any, int]:
+    """Reset one selector's current-session L4 latches without changing capital."""
+    from flinttrade_engine.daily_pnl_state import DailyPnLStateError  # noqa: PLC0415
+    from flinttrade_engine.safety import SafetySystem  # noqa: PLC0415
+
+    safety: SafetySystem | None = current_app.config.get("SAFETY")
+    if safety is None:
+        return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
+
+    values: dict[str, Any] = dict(request.args)
+    raw_body = request.get_json(silent=True)
+    if isinstance(raw_body, dict):
+        values.update(raw_body)
+    selector, selector_error = _daily_pnl_selector(values)
+    if selector_error is not None:
+        return selector_error
+    if selector is None:
+        return jsonify({"status": "error", "message": "L4 reset requires an exact account selector"}), 400
+
+    jwt_payload, auth_error = _authenticated_live_operator(require_unlock=True)
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+    selector_auth_error = _authorise_daily_pnl_selector(jwt_payload, selector)
+    if selector_auth_error is not None:
+        return selector_auth_error
+
+    try:
+        state = safety.l4_pnl.reset(selector)
+    except DailyPnLStateError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+    except Exception:
+        logger.exception("Daily P&L latch reset failed")
+        return jsonify({"status": "error", "message": "Daily-loss state is unavailable"}), 503
+
+    audit = current_app.config.get("AUDIT")
+    log_event = getattr(audit, "log_event", None)
+    if callable(log_event):
+        try:
+            log_event("L4_LATCHES_RESET", selector=selector, session_key=state.session_key)
+        except Exception:  # noqa: BLE001 - reset is already durable
+            logger.exception("Daily P&L reset audit write failed")
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "selector": selector,
+                "session_key": state.session_key,
+                "opening_risk_capital": state.opening_risk_capital,
+                "is_paused": state.paused,
+                "is_killed": state.killed,
+            },
+        }
+    ), 200
+
+
 # ------------------------------------------------------------------
 # Kill switch
 # ------------------------------------------------------------------
+
+
+def _authenticated_live_operator(
+    *,
+    require_unlock: bool = False,
+) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Return verified Live JWT claims or a ready Flask error response."""
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    jwt_payload = _decode_request_payload()
+    if not jwt_payload:
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authentication required - provide a valid JWT",
+                }
+            ),
+            401,
+        )
+    if jwt_payload.get("mode") != "live":
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Protected safety actions require an authenticated Live session",
+                }
+            ),
+            403,
+        )
+    if require_unlock and jwt_payload.get("live_mode_unlocked") is not True:
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Live mode must be PIN-unlocked before changing protected safety state",
+                }
+            ),
+            403,
+        )
+    jti = str(jwt_payload.get("jti") or "").strip()
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    if not jti or not actor_id:
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authenticated emergency principal is missing identity claims",
+                }
+            ),
+            401,
+        )
+    return jwt_payload, None
+
+
+def _authenticated_operator_identity() -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Return verified session claims for account-scoped observability reads."""
+    from .order_routes import _decode_request_payload  # noqa: PLC0415
+
+    jwt_payload = _decode_request_payload()
+    if not jwt_payload:
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authentication required - provide a valid session JWT",
+                }
+            ),
+            401,
+        )
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    if not actor_id:
+        return None, (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Authenticated observability principal is missing identity claims",
+                }
+            ),
+            401,
+        )
+    return jwt_payload, None
 
 
 @operations_bp.route("/safety/kill-switch", methods=["POST"])
@@ -381,9 +749,10 @@ def kill_switch_activate() -> tuple[Any, int]:
 
     Request JSON:
         reason (str, optional): Human-readable reason for activation.
-        broker (str, optional): Explicit adapter id. Must be paired with
-            ``account_id``; otherwise the configured execution default is used.
-        account_id (str, optional): Explicit account id paired with ``broker``.
+
+    L5 is process-global and always targets every registered execution account.
+    Per-account ``broker`` / ``account_id`` narrowing is refused so a successful
+    partial flatten cannot later unblock untouched accounts.
 
     A valid live-session JWT is required so the emergency writes carry the same
     selector ACL identity as every other broker mutation. A fresh PIN unlock is
@@ -398,27 +767,22 @@ def kill_switch_activate() -> tuple[Any, int]:
     from flinttrade_engine.safety import (  # noqa: PLC0415
         EmergencyBrokerTarget,
         GatedEmergencyBrokerDispatcher,
+        GenerationLeaseUnavailableError,
         SafetySystem,
+        bounded_generation_lease,
     )
 
-    from .order_routes import _decode_request_payload, _run_on_client_loop  # noqa: PLC0415
+    from .order_routes import _run_on_client_loop  # noqa: PLC0415
 
     _safety: SafetySystem | None = current_app.config.get("SAFETY")
     _audit: AuditLogger | None = current_app.config.get("AUDIT")
     if _safety is None:
         return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
 
-    jwt_payload = _decode_request_payload()
-    if not jwt_payload:
-        return jsonify({
-            "status": "error",
-            "message": "Authentication required — provide a valid JWT",
-        }), 401
-    if jwt_payload.get("mode") != "live":
-        return jsonify({
-            "status": "error",
-            "message": "Emergency broker actions require an authenticated Live session",
-        }), 403
+    jwt_payload, auth_error = _authenticated_live_operator()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
 
     raw_body = request.get_json(silent=True)
     body: dict[str, Any] = raw_body if isinstance(raw_body, dict) else {}
@@ -427,74 +791,115 @@ def kill_switch_activate() -> tuple[Any, int]:
     explicit_adapter = str(body.get("broker") or "").strip().lower()
     explicit_account = str(body.get("account_id") or "").strip()
     if bool(explicit_adapter) != bool(explicit_account):
-        return jsonify({
-            "status": "error",
-            "message": "Emergency target requires both broker and account_id, or neither",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Emergency target requires both broker and account_id, or neither",
+            }
+        ), 400
+    if explicit_adapter:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "The L5 kill switch is global and cannot be narrowed to one account",
+            }
+        ), 400
 
     jti = str(jwt_payload.get("jti") or "").strip()
     actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
     if not jti or not actor_id:
-        return jsonify({
-            "status": "error",
-            "message": "Authenticated emergency principal is missing identity claims",
-        }), 401
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Authenticated emergency principal is missing identity claims",
+            }
+        ), 401
 
-    def _target_provider() -> EmergencyBrokerTarget:
-        adapter_id = explicit_adapter
-        account_id = explicit_account
-        if not adapter_id:
-            current_router = current_app.config.get("BROKER_ROUTER")
-            selector = str(getattr(current_router, "default_selector", None) or "").strip()
-            if not selector:
-                raise ValueError("no configured emergency execution selector")
-            adapter_id, account_id = parse_selector(selector)
-        request_ctx = RequestContext(
-            jti=jti,
-            actor_type="human",
-            actor_id=actor_id,
-            mode="live",
-            selector=f"{adapter_id}:{account_id}",
-        )
-        return EmergencyBrokerTarget(
-            request_ctx=request_ctx,
-            adapter_id=adapter_id,
-            account_id=account_id,
-        )
-
-    dispatcher = GatedEmergencyBrokerDispatcher(
-        router_provider=lambda: current_app.config.get("BROKER_ROUTER"),
-        target_provider=_target_provider,
-        run_awaitable=_run_on_client_loop,
-    )
-
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     try:
-        emergency_result = _safety.l5_kill.activate(
-            reason,
-            emergency_dispatcher=dispatcher,
-        )
-        if _audit:
+        # Global lock order: generation lease -> KillSwitch condition -> router
+        # generation condition. The selector ACL snapshot and every emergency
+        # mutation therefore belong to one immutable router generation.
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            current_router = current_app.config.get("BROKER_ROUTER")
+            configured = getattr(current_router, "configured_selectors", ())
+            selectors = tuple(configured) if isinstance(configured, tuple) else ()
+
+            def _targets_provider() -> tuple[EmergencyBrokerTarget, ...]:
+                if not selectors:
+                    raise ValueError("no configured emergency execution selectors")
+                targets: list[EmergencyBrokerTarget] = []
+                for selector in selectors:
+                    adapter_id, account_id = parse_selector(selector)
+                    request_ctx = RequestContext(
+                        jti=jti,
+                        actor_type="human",
+                        actor_id=actor_id,
+                        mode="live",
+                        selector=selector,
+                    )
+                    targets.append(
+                        EmergencyBrokerTarget(
+                            request_ctx=request_ctx,
+                            adapter_id=adapter_id,
+                            account_id=account_id,
+                        )
+                    )
+                return tuple(targets)
+
+            dispatcher = GatedEmergencyBrokerDispatcher(
+                router_provider=lambda: current_router,
+                targets_provider=_targets_provider,
+                run_awaitable=_run_on_client_loop,
+                intent_journal=current_app.config.get("EMERGENCY_INTENT_JOURNAL"),
+            )
+            emergency_result = _safety.l5_kill.activate(
+                reason,
+                emergency_dispatcher=dispatcher,
+                replace_scope=True,
+            )
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Broker routing generation is busy; kill switch was not activated",
+            }
+        ), 503
+    except Exception:
+        logger.exception("kill_switch_activate error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+    audit_recorded = _audit is None
+    if _audit:
+        try:
             _audit.log_kill_switch(activated=True, reason=reason)
-        response_status = 200 if emergency_result.complete else 207
-        response_kind = "success" if emergency_result.complete else "partial"
-        message = (
-            "Kill switch activated and emergency broker actions completed"
-            if emergency_result.complete
-            else "Kill switch activated, but one or more emergency broker actions did not complete"
-        )
-        return jsonify({
+        except Exception:
+            logger.exception("Kill switch activated but its audit record could not be persisted")
+        else:
+            audit_recorded = True
+    response_status = 200 if emergency_result.complete else 207
+    response_kind = "success" if emergency_result.complete else "partial"
+    message = (
+        "Kill switch activated and emergency broker actions completed"
+        if emergency_result.complete
+        else "Kill switch activated, but one or more emergency broker actions did not complete"
+    )
+    return jsonify(
+        {
             "status": response_kind,
             "message": message,
             "data": {
                 "message": message,
                 "reason": reason,
                 "is_active": _safety.l5_kill.is_active,
+                "audit_recorded": audit_recorded,
                 "emergency_actions": emergency_result.as_dict(),
             },
-        }), response_status
-    except Exception:
-        logger.exception("kill_switch_activate error")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+        }
+    ), response_status
 
 
 @operations_bp.route("/safety/kill-switch", methods=["DELETE"])
@@ -504,32 +909,125 @@ def kill_switch_reset() -> tuple[Any, int]:
     Returns:
         JSON with ``status`` and confirmation.
     """
-    from flinttrade_engine.safety import SafetySystem  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        KillSwitchResetAuthorisationError,
+        SafetySystem,
+        bounded_generation_lease,
+    )
     from flinttrade_data.audit_logger import AuditLogger  # noqa: PLC0415
+    from flinttrade_core.exceptions import SafetyBypassError  # noqa: PLC0415
 
     _safety: SafetySystem | None = current_app.config.get("SAFETY")
     _audit: AuditLogger | None = current_app.config.get("AUDIT")
     if _safety is None:
         return jsonify({"status": "error", "message": "SafetySystem not available"}), 503
 
+    jwt_payload, auth_error = _authenticated_live_operator(require_unlock=True)
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+
+    emergency_result = _safety.l5_kill.last_emergency_result
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+
+    def _authorise_final_selectors(selectors: frozenset[str]) -> bool:
+        router = current_app.config.get("BROKER_ROUTER")
+        authorised_selectors = getattr(router, "authorised_selectors", None)
+        authorised = set(authorised_selectors(actor_id)) if callable(authorised_selectors) else set()
+        return selectors.issubset(authorised)
+
+    raw_body = request.get_json(silent=True)
+    body: dict[str, Any] = raw_body if isinstance(raw_body, dict) else {}
+    override_incomplete = (
+        body.get("confirm_incomplete") is True and body.get("confirmation") == "RESET WITH OPEN EXPOSURE"
+    )
+    if (
+        _safety.l5_kill.is_active
+        and (emergency_result is None or not emergency_result.complete)
+        and not override_incomplete
+    ):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Emergency broker actions are incomplete; retry flattening before reset",
+                "data": {
+                    "is_active": True,
+                    "emergency_actions": (emergency_result.as_dict() if emergency_result is not None else None),
+                },
+            }
+        ), 409
+
     try:
-        _safety.l5_kill.reset()
-        if _audit:
-            _audit.log_kill_switch(activated=False, reason="Manual reset via API")
-        return jsonify({
-            "status": "success",
-            "data": {"message": "Kill switch reset — trading may resume"},
-        }), 200
+        # Drain admitted emergency work before taking the generation lease. An
+        # activation increments the L5 dispatch count before it tries to acquire
+        # this same lease; taking the lease while waiting would starve that
+        # activation and could turn a valid flatten into a timeout. The zero-time
+        # reset recheck below closes the race between the drain and the lease.
+        _safety.l5_kill.wait_for_idle()
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            _safety.l5_kill.reset(
+                require_complete=not override_incomplete,
+                timeout=0,
+                authorise_selectors=_authorise_final_selectors,
+            )
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Broker routing generation is busy; kill switch remains active",
+            }
+        ), 503
+    except KillSwitchResetAuthorisationError:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Kill-switch reset is not authorised for every affected account",
+            }
+        ), 403
+    except SafetyBypassError:
+        latest_result = _safety.l5_kill.last_emergency_result
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Emergency broker actions are incomplete; retry flattening before reset",
+                "data": {
+                    "is_active": _safety.l5_kill.is_active,
+                    "emergency_actions": (latest_result.as_dict() if latest_result is not None else None),
+                },
+            }
+        ), 409
     except Exception:
         logger.exception("kill_switch_reset error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+    audit_recorded = _audit is None
+    if _audit:
+        try:
+            _audit.log_kill_switch(activated=False, reason="Manual reset via API")
+        except Exception:
+            logger.exception("Kill switch reset but its audit record could not be persisted")
+        else:
+            audit_recorded = True
+    message = "Kill switch reset — trading may resume"
+    return jsonify(
+        {
+            "status": "success",
+            "message": message,
+            "data": {"message": message, "audit_recorded": audit_recorded},
+        }
+    ), 200
 
 
 # ------------------------------------------------------------------
 # Webhooks
 # ------------------------------------------------------------------
 
-_WEBHOOK_SOURCES = ("tradingview", "chartink", "custom")
+_WEBHOOK_SOURCES = ("tradingview", "chartink", "gocharting", "custom")
 _WEBHOOK_REGISTRY_KEY = "automation.webhooks"
 
 
@@ -670,12 +1168,23 @@ def _save_webhook_registry(workspace: Any, rows: list[dict[str, Any]]) -> None:
     workspace.set(_WEBHOOK_REGISTRY_KEY, payload)
 
 
+def _webhook_registry_lock() -> FileLock:
+    """Serialise registry and encrypted-secret changes across processes."""
+    from .workspace import workspace_dir  # noqa: PLC0415
+
+    return FileLock(
+        workspace_dir() / ".webhook-registry.lock",
+        timeout=_WEBHOOK_REGISTRY_LOCK_TIMEOUT_SECONDS,
+        mode=0o600,
+        thread_local=False,
+    )
+
+
 def webhook_endpoint_enabled(path: str) -> bool | None:
     """Return whether a mounted webhook path is enabled in the workspace registry.
 
-    Returns ``None`` when the path is not registry-managed. The mounted receiver
-    treats that as legacy/global-receiver behaviour; only a known disabled row is
-    blocked at intake time.
+    Returns ``None`` when the path is not registry-managed. The mounted named
+    receiver treats that as unregistered and rejects it before secret lookup.
     """
     raw_path = str(path or "").strip()
     if not raw_path:
@@ -684,16 +1193,31 @@ def webhook_endpoint_enabled(path: str) -> bool | None:
         mounted_path = _normalise_webhook_path(raw_path, _webhook_type(raw_path))
     except ValueError:
         return None
-    _workspace, rows = _load_webhook_registry()
-    for row in rows:
-        if row["path"] == mounted_path:
-            return bool(row["enabled"])
+    with _webhook_registry_lock():
+        _workspace, rows = _load_webhook_registry()
+        for row in rows:
+            if row["path"] == mounted_path:
+                if not row["enabled"]:
+                    return False
+                secret_store = _get_webhook_secret_store()
+                return bool(secret_store is not None and secret_store.has_secret(mounted_path))
     return None
 
 
 def _get_webhook_secret_store() -> Any | None:
     """Return the app-injected encrypted webhook store, if available."""
     return current_app.config.get("WEBHOOK_SECRET_STORE")
+
+
+def _webhook_with_secret_state(row: dict[str, Any]) -> dict[str, Any]:
+    """Return one frontend-safe row with fail-closed secret readiness."""
+    secret_store = _get_webhook_secret_store()
+    configured = bool(secret_store is not None and secret_store.has_secret(row["path"]))
+    return {
+        **row,
+        "enabled": bool(row["enabled"] and configured),
+        "secret_configured": configured,
+    }
 
 
 @operations_bp.route("/webhooks", methods=["GET"])
@@ -706,8 +1230,10 @@ def webhooks_list() -> tuple[Any, int]:
         frontend WebhookConfig contract; the secret is never echoed).
     """
     try:
-        _workspace, webhooks = _load_webhook_registry()
-        return jsonify({"status": "success", "data": {"webhooks": webhooks}}), 200
+        with _webhook_registry_lock():
+            _workspace, webhooks = _load_webhook_registry()
+            public_rows = [_webhook_with_secret_state(row) for row in webhooks]
+        return jsonify({"status": "success", "data": {"webhooks": public_rows}}), 200
     except Exception:
         logger.exception("webhooks_list error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -721,7 +1247,7 @@ def webhooks_create() -> tuple[Any, int]:
         path (str): URL path for the webhook (e.g. ``"/webhook/custom/my_signal"``).
             Stored as the mounted receiver path ``"/v1/webhook/<source>/<slug>"``.
         name (str): Human-readable name.
-        secret (str, optional): signing secret stored in the encrypted
+        secret (str): required signing secret stored in the encrypted
             per-webhook receiver store. Never persisted to workspace.json.
 
     Returns:
@@ -737,6 +1263,8 @@ def webhooks_create() -> tuple[Any, int]:
 
         if not path_raw or not name:
             return jsonify({"status": "error", "message": "path and name are required"}), 400
+        if not secret.strip():
+            return jsonify({"status": "error", "message": "signing secret is required"}), 400
         try:
             path = _normalise_webhook_path(path_raw, source)
         except ValueError as exc:
@@ -744,25 +1272,98 @@ def webhooks_create() -> tuple[Any, int]:
             return jsonify({"status": "error", "message": "Invalid webhook path"}), 400
 
         secret_store = _get_webhook_secret_store()
-        if secret and secret_store is None:
-            return jsonify({
-                "status": "error",
-                "message": "Encrypted webhook secret store is unavailable.",
-            }), 503
+        if secret_store is None:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Encrypted webhook secret store is unavailable.",
+                }
+            ), 503
 
-        workspace, rows = _load_webhook_registry()
-        row = _webhook_dict(path, name, bool(body.get("enabled", True)))
-        rows = [existing for existing in rows if existing["path"] != path]
-        rows.append(row)
-        _save_webhook_registry(workspace, rows)
-        if secret and secret_store is not None:
-            secret_store.store_secret(path, row["type"], row["name"], secret)
-        return jsonify({
-            "status": "success",
-            "data": row,
-        }), 201
+        enabled_raw = body.get("enabled", True)
+        if not isinstance(enabled_raw, bool):
+            return jsonify({"status": "error", "message": "enabled must be a boolean"}), 400
+
+        with _webhook_registry_lock():
+            workspace, rows = _load_webhook_registry()
+            row = _webhook_dict(path, name, enabled_raw)
+            previous_row = next((existing for existing in rows if existing["path"] == path), None)
+            rows = [existing for existing in rows if existing["path"] != path]
+            rows.append(row)
+            try:
+                previous_secret = secret_store.get_secret(path)
+            except Exception:
+                logger.exception("Webhook signing secret could not be read before update")
+                return jsonify({"status": "error", "message": "Encrypted webhook secret store is unavailable."}), 503
+            try:
+                secret_store.store_secret(path, row["type"], row["name"], secret)
+            except Exception:
+                logger.exception("Webhook signing secret could not be persisted")
+                return jsonify({"status": "error", "message": "Encrypted webhook secret store is unavailable."}), 503
+            try:
+                _save_webhook_registry(workspace, rows)
+            except Exception:
+                logger.exception("Webhook registry save failed after secret persistence; rolling back secret")
+                try:
+                    if previous_secret is None:
+                        secret_store.delete_secret(path)
+                    else:
+                        rollback_row = previous_row or row
+                        secret_store.store_secret(
+                            path,
+                            rollback_row["type"],
+                            rollback_row["name"],
+                            previous_secret,
+                        )
+                except Exception:
+                    logger.critical("Webhook create rollback failed for %s", path, exc_info=True)
+                raise
+        return jsonify(
+            {
+                "status": "success",
+                "data": {**row, "secret_configured": True},
+            }
+        ), 201
     except Exception:
         logger.exception("webhooks_create error")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
+@operations_bp.route("/webhooks/<path:webhook_id>", methods=["PATCH"])
+def webhooks_update(webhook_id: str) -> tuple[Any, int]:
+    """Update the enabled state of a registered webhook endpoint."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "Request body must be a JSON object"}), 400
+    enabled = body.get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"status": "error", "message": "enabled must be a boolean"}), 400
+
+    try:
+        with _webhook_registry_lock():
+            workspace, rows = _load_webhook_registry()
+            key = webhook_id.strip()
+            path_key = f"/{key}" if not key.startswith("/") else key
+            id_key = key.lstrip("/")
+            updated: dict[str, Any] | None = None
+            for row in rows:
+                if row["id"] == id_key or row["path"] == path_key:
+                    if enabled:
+                        secret_store = _get_webhook_secret_store()
+                        if secret_store is None or not secret_store.has_secret(row["path"]):
+                            return jsonify({
+                                "status": "error",
+                                "message": "Webhook signing secret is not configured; recreate the endpoint first.",
+                            }), 409
+                    row["enabled"] = enabled
+                    updated = row
+                    break
+            if updated is None:
+                return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
+            _save_webhook_registry(workspace, rows)
+            return jsonify({"status": "success", "data": _webhook_with_secret_state(updated)}), 200
+    except Exception:
+        logger.exception("webhooks_update error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
@@ -775,36 +1376,56 @@ def webhooks_delete(webhook_id: str) -> tuple[Any, int]:
     ``<webhook_id>`` ([^/]+) would 405 once the encoded slashes decode.
 
     Args:
-        webhook_id: The path identifying the webhook (with or without a leading
-            slash), or its name.
+        webhook_id: The path-backed id identifying exactly one webhook (with or
+            without a leading slash). Display names are intentionally not ids.
 
     Returns:
         JSON with ``status`` and confirmation message.
     """
     try:
-        workspace, rows = _load_webhook_registry()
-        key = webhook_id.strip()
-        path_key = f"/{key}" if not key.startswith("/") else key
-        id_key = key.lstrip("/")
+        with _webhook_registry_lock():
+            workspace, rows = _load_webhook_registry()
+            key = webhook_id.strip()
+            path_key = f"/{key}" if not key.startswith("/") else key
+            id_key = key.lstrip("/")
 
-        kept: list[dict[str, Any]] = []
-        removed: dict[str, Any] | None = None
-        for row in rows:
-            if row["id"] == id_key or row["path"] == path_key or row["name"] == key:
-                removed = row
-                continue
-            kept.append(row)
-        if removed is not None:
-            _save_webhook_registry(workspace, kept)
-            secret_store = _get_webhook_secret_store()
-            if secret_store is not None:
-                secret_store.delete_secret(removed["path"])
-            return jsonify({
-                "status": "success",
-                "data": {"message": f"Webhook '{removed['path']}' removed"},
-            }), 200
+            removed = next(
+                (row for row in rows if row["id"] == id_key or row["path"] == path_key),
+                None,
+            )
+            kept = [row for row in rows if row is not removed]
+            if removed is not None:
+                secret_store = _get_webhook_secret_store()
+                if secret_store is None:
+                    return jsonify(
+                        {"status": "error", "message": "Encrypted webhook secret store is unavailable."}
+                    ), 503
+                previous_secret = secret_store.get_secret(removed["path"])
+                try:
+                    secret_store.delete_secret(removed["path"])
+                except Exception:
+                    logger.exception("Webhook signing secret could not be removed")
+                    return jsonify({"status": "error", "message": "Encrypted webhook secret store is unavailable."}), 503
+                try:
+                    _save_webhook_registry(workspace, kept)
+                except Exception:
+                    logger.exception("Webhook registry delete failed; restoring signing secret")
+                    if previous_secret is not None:
+                        try:
+                            secret_store.store_secret(
+                                removed["path"], removed["type"], removed["name"], previous_secret
+                            )
+                        except Exception:
+                            logger.critical("Webhook delete rollback failed for %s", removed["path"], exc_info=True)
+                    raise
+                return jsonify(
+                    {
+                        "status": "success",
+                        "data": {"message": f"Webhook '{removed['path']}' removed"},
+                    }
+                ), 200
 
-        return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
+            return jsonify({"status": "error", "message": f"Webhook '{webhook_id}' not found"}), 404
     except Exception:
         logger.exception("webhooks_delete error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -857,15 +1478,17 @@ def api_security_settings_get() -> tuple[Any, int]:
     if not isinstance(monitor, _SM):
         return jsonify({"status": "error", "message": "Security monitor not available"}), 503
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "auto_ban_enabled": monitor._auth_ban_threshold > 0,
-            "ban_threshold": monitor._auth_ban_threshold,
-            "notfound_ban_threshold": monitor._notfound_ban_threshold,
-            "ban_duration": monitor._ban_duration,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "auto_ban_enabled": monitor._auth_ban_threshold > 0,
+                "ban_threshold": monitor._auth_ban_threshold,
+                "notfound_ban_threshold": monitor._notfound_ban_threshold,
+                "ban_duration": monitor._ban_duration,
+            },
+        }
+    ), 200
 
 
 @operations_bp.route("/security/settings", methods=["POST"])
@@ -904,85 +1527,23 @@ def api_security_settings_update() -> tuple[Any, int]:
         logger.exception("api_security_settings_update error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "auto_ban_enabled": monitor._auth_ban_threshold > 0,
-            "ban_threshold": monitor._auth_ban_threshold,
-            "notfound_ban_threshold": monitor._notfound_ban_threshold,
-            "ban_duration": monitor._ban_duration,
-        },
-    }), 200
-
-
-# ------------------------------------------------------------------
-# Sandbox config proxy routes (/api/v1/sandbox/config)
-# The engine sandbox blueprint lives at /v1/sandbox-config/ which is
-# outside the /api/v1/ namespace.  These proxies let the frontend call
-# the standard /api/v1/sandbox/config path.
-# ------------------------------------------------------------------
-
-@operations_bp.route("/sandbox/config", methods=["GET"])
-def api_sandbox_config_get() -> tuple[Any, int]:
-    """Proxy GET sandbox config for frontend compatibility."""
-    engine = current_app.config.get("SANDBOX_ENGINE")
-    if engine is None:
-        return jsonify({"status": "error", "message": "Sandbox engine not configured"}), 503
-
-    cfg = engine.config
-    return jsonify({
-        "status": "success",
-        "data": {
-            "enabled": True,
-            "mode": "paper",
-            "starting_capital": cfg.starting_capital,
-            "equity_leverage": cfg.equity_leverage,
-            "futures_leverage": cfg.futures_leverage,
-            "option_buy_leverage": cfg.option_buy_leverage,
-            "option_sell_leverage": cfg.option_sell_leverage,
-            "squareoff_time": cfg.squareoff_time,
-            "mcx_squareoff_time": cfg.mcx_squareoff_time,
-        },
-    }), 200
-
-
-@operations_bp.route("/sandbox/config", methods=["POST"])
-def api_sandbox_config_update() -> tuple[Any, int]:
-    """Proxy POST sandbox config for frontend compatibility."""
-    engine = current_app.config.get("SANDBOX_ENGINE")
-    if engine is None:
-        return jsonify({"status": "error", "message": "Sandbox engine not configured"}), 503
-
-    body = request.get_json(silent=True) or {}
-    cfg = engine.config
-
-    for field_name in (
-        "starting_capital",
-        "equity_leverage",
-        "futures_leverage",
-        "option_buy_leverage",
-        "option_sell_leverage",
-        "squareoff_time",
-        "mcx_squareoff_time",
-    ):
-        if field_name in body:
-            setattr(cfg, field_name, body[field_name])
-
-    enabled = body.get("enabled")
-    mode = body.get("mode", "paper")
-
-    return jsonify({
-        "status": "success",
-        "data": {
-            "enabled": enabled if enabled is not None else True,
-            "mode": mode,
-        },
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "auto_ban_enabled": monitor._auth_ban_threshold > 0,
+                "ban_threshold": monitor._auth_ban_threshold,
+                "notfound_ban_threshold": monitor._notfound_ban_threshold,
+                "ban_duration": monitor._ban_duration,
+            },
+        }
+    ), 200
 
 
 # ------------------------------------------------------------------
 # News (server-side RSS proxy — avoids CORS in browser)
 # ------------------------------------------------------------------
+
 
 @operations_bp.route("/news", methods=["GET"])
 def api_news() -> tuple[Any, int]:
@@ -1004,6 +1565,7 @@ def api_news() -> tuple[Any, int]:
             # Use defused XML parser to prevent XXE attacks from malicious feeds
             try:
                 import defusedxml.ElementTree as _SafeET  # noqa: PLC0415
+
                 root = _SafeET.fromstring(resp.text)
             except ImportError:
                 # Fallback: disable entity resolution manually
@@ -1015,12 +1577,14 @@ def api_news() -> tuple[Any, int]:
                 link_el = item.find("link")
                 pub_el = item.find("pubDate")
                 if title_el is not None and title_el.text:
-                    articles.append({
-                        "title": title_el.text.strip(),
-                        "link": link_el.text.strip() if link_el is not None and link_el.text else "",
-                        "pub_date": pub_el.text.strip() if pub_el is not None and pub_el.text else "",
-                        "source": source_name,
-                    })
+                    articles.append(
+                        {
+                            "title": title_el.text.strip(),
+                            "link": link_el.text.strip() if link_el is not None and link_el.text else "",
+                            "pub_date": pub_el.text.strip() if pub_el is not None and pub_el.text else "",
+                            "source": source_name,
+                        }
+                    )
         except Exception:
             continue
 
@@ -1028,15 +1592,18 @@ def api_news() -> tuple[Any, int]:
     articles.sort(key=lambda a: a.get("pub_date", ""), reverse=True)
     articles = articles[:50]
 
-    return jsonify({
-        "status": "success",
-        "data": {"articles": articles},
-    }), 200
+    return jsonify(
+        {
+            "status": "success",
+            "data": {"articles": articles},
+        }
+    ), 200
 
 
 # ------------------------------------------------------------------
 # Ditto — multi-account management & position mirroring
 # ------------------------------------------------------------------
+
 
 def _ditto_account_response(acct: Any) -> dict[str, Any]:
     """Return a frontend-safe Ditto account payload without credentials."""
@@ -1044,22 +1611,25 @@ def _ditto_account_response(acct: Any) -> dict[str, Any]:
         "id": acct.account_id,
         "name": acct.name or acct.account_id,
         "broker": "OpenAlgo",
-        "capital": 0,
-        "pnl_today": 0,
+        "capital": None,
+        "pnl_today": None,
         "status": "active" if acct.enabled else "disabled",
-        "positions": 0,
+        "positions": None,
         "group": acct.group,
         "allocation_weight": acct.allocation_weight,
+        "max_loss_daily": acct.max_loss_daily,
         "is_master": acct.is_master,
     }
 
 
 def _ditto_manager_error(exc: Exception) -> tuple[Any, int]:
-    logger.warning("Ditto account operation failed: %s", exc)
-    return jsonify({
-        "status": "error",
-        "message": "Account service unavailable",
-    }), 503
+    logger.warning("Ditto account operation failed (%s)", type(exc).__name__)
+    return jsonify(
+        {
+            "status": "error",
+            "message": "Account service unavailable",
+        }
+    ), 503
 
 
 def _ditto_manager() -> Any | None:
@@ -1075,6 +1645,86 @@ def _ditto_manager() -> Any | None:
     from flinttrade_ditto.account_manager import AccountManager  # noqa: PLC0415
 
     return AccountManager(credential_store=store)
+
+
+def _ditto_runtime() -> Any | None:
+    """Return the process-owned Ditto runtime, if startup configured one."""
+    return current_app.config.get("DITTO_RUNTIME")
+
+
+def _ditto_runtime_unavailable(exc: Exception | None = None) -> tuple[Any, int]:
+    """Return a bounded Ditto failure without exposing broker responses."""
+    if exc is not None:
+        logger.warning("Ditto runtime operation failed (%s)", type(exc).__name__)
+    return jsonify(
+        {
+            "status": "error",
+            "message": (
+                "Ditto runtime operation unavailable"
+                if exc is not None
+                else "Ditto runtime unavailable"
+            ),
+        }
+    ), 503
+
+
+def _validated_ditto_runtime_status(runtime: Any) -> dict[str, Any]:
+    """Return the lifecycle fields required to prove account mutation safety."""
+    raw_status = runtime.status()
+    if not isinstance(raw_status, Mapping):
+        raise RuntimeError("Ditto runtime returned invalid status")
+
+    active = raw_status.get("active")
+    lifecycle = raw_status.get("lifecycle")
+    source = raw_status.get("source_account")
+    targets = raw_status.get("target_accounts")
+    if not isinstance(active, bool) or not isinstance(lifecycle, str):
+        raise RuntimeError("Ditto runtime returned invalid lifecycle state")
+    if source is not None and not isinstance(source, str):
+        raise RuntimeError("Ditto runtime returned invalid source state")
+    if not isinstance(targets, list) or any(not isinstance(target, str) for target in targets):
+        raise RuntimeError("Ditto runtime returned invalid target state")
+    return {
+        "active": active,
+        "lifecycle": lifecycle,
+        "source_account": source,
+        "target_accounts": list(targets),
+    }
+
+
+def _quiesce_ditto_account_generation(account_id: str) -> tuple[Any, int] | None:
+    """Drain a generation containing ``account_id`` before its store row changes.
+
+    The caller must retain ``_DITTO_CONTROL_LOCK`` through the subsequent store
+    mutation so a new route-owned generation cannot claim the account in between.
+    """
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return None
+    try:
+        status = _validated_ditto_runtime_status(runtime)
+        participates = account_id == status["source_account"] or account_id in status["target_accounts"]
+        retained_cleanup = status["lifecycle"] == "retained-shutdown"
+        if not participates and not retained_cleanup:
+            return None
+
+        # One-shot risk/emergency owners are built over a snapshot of the whole
+        # managed-account set. Their account ids are deliberately not exposed in
+        # status, so any retained owner is a global mutation barrier until its
+        # revoked router generation has drained and its clients have closed.
+        runtime.stop(timeout=5.0)
+        stopped = _validated_ditto_runtime_status(runtime)
+        fully_stopped = (
+            stopped["active"] is False
+            and stopped["source_account"] is None
+            and not stopped["target_accounts"]
+            and stopped["lifecycle"] in {"idle", "reconciliation-needed"}
+        )
+        if not fully_stopped:
+            raise RuntimeError("Ditto runtime drain was not proven")
+    except Exception as exc:  # noqa: BLE001 - runtime and broker details stay bounded
+        return _ditto_runtime_unavailable(exc)
+    return None
 
 
 @operations_bp.route("/ditto/accounts", methods=["GET"])
@@ -1093,7 +1743,7 @@ def ditto_accounts() -> tuple[Any, int]:
         accounts = [_ditto_account_response(acct) for acct in raw]
         return jsonify({"status": "success", "data": {"accounts": accounts}}), 200
     except Exception as exc:
-        logger.warning("Ditto account fetch failed: %s", exc)
+        logger.warning("Ditto account fetch failed (%s)", type(exc).__name__)
         return jsonify({"status": "error", "message": "Account service unavailable"}), 503
 
 
@@ -1104,7 +1754,7 @@ def accounts_status() -> tuple[Any, int]:
     Reports both Ditto/OpenAlgo managed accounts and vault-backed native broker
     accounts. Ditto rows live-ping OpenAlgo (200 = authenticated, 4xx = re-auth
     needed, connection error = offline). Native rows reflect the gateway session
-    registry and stored replay status, so Dhan/Upstox/INDmoney accounts appear
+    registry and stored replay status, so enabled native accounts appear
     in the Account Manager even when no OpenAlgo bridge account exists.
     """
     statuses: list[dict[str, Any]] = []
@@ -1116,7 +1766,7 @@ def accounts_status() -> tuple[Any, int]:
                 statuses.extend({"source": "openalgo", **s.to_dict()} for s in mgr.account_status_all())
     except Exception as exc:
         ditto_failed = True
-        logger.warning("Account status fetch failed: %s", exc)
+        logger.warning("Account status fetch failed (%s)", type(exc).__name__)
 
     try:
         statuses.extend(_native_account_statuses())
@@ -1182,22 +1832,24 @@ def _native_account_statuses() -> list[dict[str, Any]]:
         label = str(row.get("label") or "").strip()
         display_name = info.display_name
         return_label = label if label and label.lower() != adapter_id else f"{display_name} · {account_id}"
-        statuses.append({
-            "source": "native",
-            "broker": adapter_id,
-            "broker_display": display_name,
-            "account_id": account_id,
-            "name": return_label,
-            "enabled": connectable,
-            "connected": has_session,
-            "authenticated": has_session,
-            "needs_reauth": needs_reauth,
-            "login_retryable": login_retryable,
-            "latency_ms": 0,
-            "error": error,
-            "checked_at": now,
-            "expires_at": expires_at,
-        })
+        statuses.append(
+            {
+                "source": "native",
+                "broker": adapter_id,
+                "broker_display": display_name,
+                "account_id": account_id,
+                "name": return_label,
+                "enabled": connectable,
+                "connected": has_session,
+                "authenticated": has_session,
+                "needs_reauth": needs_reauth,
+                "login_retryable": login_retryable,
+                "latency_ms": 0,
+                "error": error,
+                "checked_at": now,
+                "expires_at": expires_at,
+            }
+        )
     return statuses
 
 
@@ -1219,31 +1871,44 @@ def ditto_account_create() -> tuple[Any, int]:
         if not value
     ]
     if missing:
-        return jsonify({
-            "status": "error",
-            "message": f"Missing required field(s): {', '.join(missing)}",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": f"Missing required field(s): {', '.join(missing)}",
+            }
+        ), 400
 
     parsed = urlparse(openalgo_host)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return jsonify({
-            "status": "error",
-            "message": "openalgo_host must be a valid http(s) URL",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "openalgo_host must be a valid http(s) URL",
+            }
+        ), 400
 
     try:
         allocation_weight = float(data.get("allocation_weight", 1.0))
         max_loss_daily = float(data.get("max_loss_daily", 50000.0))
     except (TypeError, ValueError):
-        return jsonify({
-            "status": "error",
-            "message": "allocation_weight and max_loss_daily must be numeric",
-        }), 400
-    if allocation_weight <= 0 or max_loss_daily < 0:
-        return jsonify({
-            "status": "error",
-            "message": "allocation_weight must be positive and max_loss_daily cannot be negative",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "allocation_weight and max_loss_daily must be numeric",
+            }
+        ), 400
+    if (
+        not math.isfinite(allocation_weight)
+        or not math.isfinite(max_loss_daily)
+        or allocation_weight <= 0
+        or max_loss_daily < 0
+    ):
+        return jsonify(
+            {
+                "status": "error",
+                "message": "allocation_weight must be positive and max_loss_daily cannot be negative",
+            }
+        ), 400
 
     try:
         from flinttrade_ditto.account_manager import BrokerAccount  # noqa: PLC0415
@@ -1259,14 +1924,20 @@ def ditto_account_create() -> tuple[Any, int]:
             max_loss_daily=max_loss_daily,
             is_master=bool(data.get("is_master", False)),
         )
-        mgr = _ditto_manager()
-        if mgr is None:
-            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-        mgr.add_account(account)
-        return jsonify({
-            "status": "success",
-            "data": {"account": _ditto_account_response(account)},
-        }), 201
+        with _DITTO_CONTROL_LOCK:
+            mgr = _ditto_manager()
+            if mgr is None:
+                return jsonify({"status": "error", "message": "Account service unavailable"}), 503
+            runtime_error = _quiesce_ditto_account_generation(account_id)
+            if runtime_error is not None:
+                return runtime_error
+            mgr.add_account(account)
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"account": _ditto_account_response(account)},
+            }
+        ), 201
     except Exception as exc:
         return _ditto_manager_error(exc)
 
@@ -1285,24 +1956,33 @@ def ditto_account_disable(account_id: str) -> tuple[Any, int]:
 
 def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int]:
     try:
-        mgr = _ditto_manager()
-        if mgr is None:
-            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-        account = mgr.get_account(account_id)
-        if account is None:
-            return jsonify({
-                "status": "error",
-                "message": f"Account '{account_id}' not found",
-            }), 404
-        if enabled:
-            mgr.enable_account(account_id)
-        else:
-            mgr.disable_account(account_id)
-        account.enabled = enabled
-        return jsonify({
-            "status": "success",
-            "data": {"account": _ditto_account_response(account)},
-        }), 200
+        with _DITTO_CONTROL_LOCK:
+            mgr = _ditto_manager()
+            if mgr is None:
+                return jsonify({"status": "error", "message": "Account service unavailable"}), 503
+            account = mgr.get_account(account_id)
+            if account is None:
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Account '{account_id}' not found",
+                    }
+                ), 404
+            if not enabled:
+                runtime_error = _quiesce_ditto_account_generation(account_id)
+                if runtime_error is not None:
+                    return runtime_error
+            if enabled:
+                mgr.enable_account(account_id)
+            else:
+                mgr.disable_account(account_id)
+            account.enabled = enabled
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"account": _ditto_account_response(account)},
+            }
+        ), 200
     except Exception as exc:
         return _ditto_manager_error(exc)
 
@@ -1311,20 +1991,28 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
 def ditto_account_delete(account_id: str) -> tuple[Any, int]:
     """Remove a Ditto managed account."""
     try:
-        mgr = _ditto_manager()
-        if mgr is None:
-            return jsonify({"status": "error", "message": "Account service unavailable"}), 503
-        account = mgr.get_account(account_id)
-        if account is None:
-            return jsonify({
-                "status": "error",
-                "message": f"Account '{account_id}' not found",
-            }), 404
-        mgr.remove_account(account_id)
-        return jsonify({
-            "status": "success",
-            "data": {"id": account_id, "removed": True},
-        }), 200
+        with _DITTO_CONTROL_LOCK:
+            mgr = _ditto_manager()
+            if mgr is None:
+                return jsonify({"status": "error", "message": "Account service unavailable"}), 503
+            account = mgr.get_account(account_id)
+            if account is None:
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": f"Account '{account_id}' not found",
+                    }
+                ), 404
+            runtime_error = _quiesce_ditto_account_generation(account_id)
+            if runtime_error is not None:
+                return runtime_error
+            mgr.remove_account(account_id)
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"id": account_id, "removed": True},
+            }
+        ), 200
     except Exception as exc:
         return _ditto_manager_error(exc)
 
@@ -1332,91 +2020,123 @@ def ditto_account_delete(account_id: str) -> tuple[Any, int]:
 @operations_bp.route("/ditto/mirror/status", methods=["GET"])
 def ditto_mirror_status() -> tuple[Any, int]:
     """Get position mirroring status across accounts."""
-    mirror_status = {
-        "active": False,
-        "source_account": None,
-        "target_accounts": [],
-        "mode": "proportional",
-        "mirrored_positions": 0,
-        "last_sync": None,
-        "errors": [],
-    }
-    return jsonify({"status": "success", "data": mirror_status}), 200
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return _ditto_runtime_unavailable()
+    try:
+        status = runtime.status()
+    except Exception as exc:  # noqa: BLE001 - broker/runtime detail must stay bounded
+        return _ditto_runtime_unavailable(exc)
+    return jsonify({"status": "success", "data": status}), 200
 
 
 @operations_bp.route("/ditto/mirror/start", methods=["POST"])
 def ditto_mirror_start() -> tuple[Any, int]:
-    """Start position mirroring from primary to secondary accounts.
-
-    Multi-account mirroring is not yet enabled in this build: the
-    ``PositionMirror`` engine is not wired into the running app. Rather
-    than fabricate a started session, this fails closed — it validates the
-    request shape, then truthfully reports ``active: false`` with a
-    ``deferred`` status so the front end can surface a "coming soon" state
-    instead of believing mirroring is live.
-    """
-    data = request.get_json(silent=True) or {}
-    source = data.get("source_account")
-    targets = data.get("target_accounts", [])
-    mode = data.get("mode", "proportional")
+    """Start a gated live mirror session for an authenticated operator."""
+    raw_data = request.get_json(silent=True)
+    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+    source = str(data.get("source_account") or "").strip()
+    raw_targets = data.get("target_accounts", [])
+    mode = str(data.get("mode") or "proportional").strip()
 
     if not source:
         return jsonify({"status": "error", "message": "source_account is required"}), 400
-    if not targets:
+    if not isinstance(raw_targets, list):
+        return jsonify({"status": "error", "message": "target_accounts must be a list"}), 400
+    targets = [str(account_id).strip() for account_id in raw_targets]
+    if not targets or any(not account_id for account_id in targets):
         return jsonify({"status": "error", "message": "target_accounts must be non-empty"}), 400
 
-    return jsonify({
-        "status": "deferred",
-        "message": "Multi-account mirroring is not yet enabled in this build",
-        "data": {
-            "active": False,
-            "source_account": source,
-            "target_accounts": targets,
-            "mode": mode,
-            # Timestamp of this (deferred) response, not of a live session —
-            # no PositionMirror is started. Kept as an ISO string so the
-            # response stays shape-compatible with the typed contract.
-            "started_at": _dt.now(_IST).isoformat(),
-        },
-    }), 200
+    jwt_payload, auth_error = _authenticated_live_operator(require_unlock=True)
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return _ditto_runtime_unavailable()
+    try:
+        with _DITTO_CONTROL_LOCK:
+            status = runtime.start(
+                source_account=source,
+                target_accounts=targets,
+                mode=mode,
+                actor_id=str(jwt_payload["sub"]),
+                jti=str(jwt_payload["jti"]),
+            )
+    except Exception as exc:  # noqa: BLE001 - broker/runtime detail must stay bounded
+        return _ditto_runtime_unavailable(exc)
+    return jsonify(
+        {
+            "status": "success",
+            "data": {**status, "started_at": _dt.now(_IST).isoformat()},
+        }
+    ), 200
 
 
 @operations_bp.route("/ditto/mirror/stop", methods=["POST"])
 def ditto_mirror_stop() -> tuple[Any, int]:
     """Stop position mirroring."""
-    return jsonify({
-        "status": "success",
-        "data": {"active": False, "stopped_at": _dt.now(_IST).isoformat()},
-    }), 200
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return _ditto_runtime_unavailable()
+    try:
+        with _DITTO_CONTROL_LOCK:
+            status = runtime.stop(timeout=5.0)
+    except Exception as exc:  # noqa: BLE001 - broker/runtime detail must stay bounded
+        return _ditto_runtime_unavailable(exc)
+    return jsonify(
+        {
+            "status": "success",
+            "data": {**status, "stopped_at": _dt.now(_IST).isoformat()},
+        }
+    ), 200
 
 
 @operations_bp.route("/ditto/risk", methods=["GET"])
 def ditto_risk() -> tuple[Any, int]:
-    """Per-account risk dashboard: margin utilisation, aggregate P&L.
-
-    The per-account risk engine (``MarginCalculator`` / ``RiskManager``) is
-    not yet wired into the running app, so there is no live risk data to
-    report. This returns an honest empty/deferred shape — zeroed aggregates
-    and no accounts — rather than fabricating sample accounts. The front end
-    renders this as an empty "coming soon" dashboard.
-    """
-    return jsonify({
-        "status": "deferred",
-        "message": "Per-account risk monitoring is not yet enabled in this build",
-        "data": {"aggregate_pnl": 0, "aggregate_capital": 0, "accounts": []},
-    }), 200
+    """Return one complete real-state risk snapshot across managed accounts."""
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return _ditto_runtime_unavailable()
+    try:
+        snapshot = runtime.risk_snapshot()
+    except Exception as exc:  # noqa: BLE001 - broker/runtime detail must stay bounded
+        return _ditto_runtime_unavailable(exc)
+    return jsonify({"status": "success", "data": snapshot}), 200
 
 
 @operations_bp.route("/ditto/kill-all", methods=["POST"])
 def ditto_kill_all() -> tuple[Any, int]:
-    """Emergency: close all positions across all managed accounts.
+    """Cancel and flatten all managed accounts through gated emergency writes."""
+    jwt_payload, auth_error = _authenticated_live_operator()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
 
-    Currently a stub — returns 501 Not Implemented.
-    """
-    return jsonify({
-        "status": "error",
-        "message": "Not implemented — ditto kill-all requires real account connections",
-    }), 501
+    raw_data = request.get_json(silent=True)
+    data: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+    reason = str(data.get("reason") or "Operator requested Ditto kill-all").strip()
+    reason = reason[:500] or "Operator requested Ditto kill-all"
+    runtime = _ditto_runtime()
+    if runtime is None:
+        return _ditto_runtime_unavailable()
+    try:
+        with _DITTO_CONTROL_LOCK:
+            result = runtime.kill_all(
+                actor_id=str(jwt_payload["sub"]),
+                jti=str(jwt_payload["jti"]),
+                reason=reason,
+            )
+    except Exception as exc:  # noqa: BLE001 - broker/runtime detail must stay bounded
+        return _ditto_runtime_unavailable(exc)
+    complete = bool(result.get("complete"))
+    return jsonify(
+        {
+            "status": "success" if complete else "partial",
+            "data": result,
+        }
+    ), 200 if complete else 207
 
 
 # ------------------------------------------------------------------
@@ -1533,11 +2253,13 @@ def _stream_agent_turn(
                 with contextlib.suppress(Exception):
                     await session.close()
             if not saw_done and not disconnected.is_set():
-                events.put(AgentEvent(
-                    AgentEventKind.DONE,
-                    text="",
-                    data={"backend": backend_id, "interrupted": True},
-                ))
+                events.put(
+                    AgentEvent(
+                        AgentEventKind.DONE,
+                        text="",
+                        data={"backend": backend_id, "interrupted": True},
+                    )
+                )
 
     def _runner() -> None:
         loop = asyncio.new_event_loop()
@@ -1661,27 +2383,31 @@ def ai_agents_run() -> Response | tuple[Any, int]:
 
     if profile.is_llm:
         # Honest: LLM backends are chat/completion providers, not agent runtimes.
-        return jsonify({
-            "status": "error",
-            "code": "llm_backend_not_agent_run",
-            "message": (
-                f"'{profile.display_name}' is an LLM backend — chat with it via the "
-                "AI advisor (/api/v1/advisor), not the agent-run stream."
-            ),
-            "data": {"backend": backend_id, "kind": str(profile.kind)},
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "code": "llm_backend_not_agent_run",
+                "message": (
+                    f"'{profile.display_name}' is an LLM backend — chat with it via the "
+                    "AI advisor (/api/v1/advisor), not the agent-run stream."
+                ),
+                "data": {"backend": backend_id, "kind": str(profile.kind)},
+            }
+        ), 400
 
     try:
         status = detect_backend(backend_id)
     except Exception:
         status = BackendStatus.NOT_INSTALLED
     if status == BackendStatus.NOT_INSTALLED:
-        return jsonify({
-            "status": "error",
-            "code": "backend_not_installed",
-            "message": f"{profile.display_name} is not installed on this host.",
-            "data": {"backend": backend_id, "status": str(status)},
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "code": "backend_not_installed",
+                "message": f"{profile.display_name} is not installed on this host.",
+                "data": {"backend": backend_id, "status": str(status)},
+            }
+        ), 503
 
     session_kwargs: dict[str, Any] = {}
     cwd_raw = body.get("cwd")
@@ -1698,6 +2424,7 @@ def ai_agents_run() -> Response | tuple[Any, int]:
 # ------------------------------------------------------------------
 # Frontend error reporting (H6)
 # ------------------------------------------------------------------
+
 
 @operations_bp.route("/errors", methods=["POST"])
 def receive_frontend_error() -> tuple[Any, int]:
@@ -1728,6 +2455,7 @@ def receive_frontend_error() -> tuple[Any, int]:
     # Forward to Glitchtip via sentry_sdk if available
     try:
         import sentry_sdk  # noqa: PLC0415
+
         if sentry_sdk.is_initialized():
             sentry_sdk.capture_message(
                 data.get("message", "Frontend error"),
@@ -1742,6 +2470,7 @@ def receive_frontend_error() -> tuple[Any, int]:
 # ------------------------------------------------------------------
 # Recent structured log entries (H7)
 # ------------------------------------------------------------------
+
 
 @operations_bp.route("/logs/recent", methods=["GET"])
 def get_recent_logs() -> tuple[Any, int]:
@@ -1810,6 +2539,7 @@ def positions_convert() -> tuple[Any, int]:
         JSON with ``status`` and the broker result in ``data``.
     """
     from .order_routes import (  # noqa: PLC0415
+        _admit_position_conversion,
         _gated_target,
         _gated_verb_write,
         _require_live_payload,
@@ -1823,15 +2553,28 @@ def positions_convert() -> tuple[Any, int]:
     if not isinstance(req, dict):
         req = {k: v for k, v in body.items() if k not in ("broker", "account_id")}
     if not req:
-        return jsonify({
-            "status": "error",
-            "message": "Position conversion requires the conversion fields (or a 'req' object) in the body",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Position conversion requires the conversion fields (or a 'req' object) in the body",
+            }
+        ), 400
     adapter_id, account_id = _gated_target(body)
+    admission_block = _admit_position_conversion(
+        req,
+        adapter_id,
+        account_id=account_id,
+    )
+    if admission_block is not None:
+        return admission_block
     return _gated_verb_write(
-        "convert_position", {"req": req}, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="POSITION_CONVERTED", fail_message="Position conversion failed",
+        "convert_position",
+        {"req": req},
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="POSITION_CONVERTED",
+        fail_message="Position conversion failed",
         kill_switch_gated=True,
     )
 
@@ -1845,8 +2588,9 @@ def positions_exit_all() -> tuple[Any, int]:
     carry an explicit ``{"confirm": true}`` minted by a deliberate operator
     action in the UI; a stray click, a replayed request, or an agent calling
     the endpoint speculatively is refused with 400 before any gate is minted.
-    It is deliberately NOT blocked by the L5 kill switch: exiting everything
-    REDUCES exposure and is precisely what a halted account may need to do.
+    Once L5 is active, the operator retries its selector-bound emergency action
+    instead of calling this ordinary route; that prevents overlapping square-off
+    requests from reversing exposure.
 
     Request JSON: ``confirm`` (must be boolean ``true``), optional ``tag`` /
     ``segment`` narrowing (signed into the payload; brokers without those
@@ -1866,13 +2610,15 @@ def positions_exit_all() -> tuple[Any, int]:
         return err
     body = request.get_json(silent=True) or {}
     if body.get("confirm") is not True:
-        return jsonify({
-            "status": "error",
-            "message": (
-                "Exit-all requires explicit operator confirmation — send {\"confirm\": true}. "
-                "This squares off EVERY open position at market."
-            ),
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    'Exit-all requires explicit operator confirmation — send {"confirm": true}. '
+                    "This squares off EVERY open position at market."
+                ),
+            }
+        ), 400
     fields: dict[str, Any] = {}
     if body.get("tag") is not None:
         fields["tag"] = str(body["tag"])
@@ -1880,9 +2626,13 @@ def positions_exit_all() -> tuple[Any, int]:
         fields["segment"] = str(body["segment"])
     adapter_id, account_id = _gated_target(body)
     return _gated_verb_write(
-        "exit_all_positions", fields, payload,
-        adapter_id=adapter_id, account_id=account_id,
-        audit_event="POSITIONS_EXITED_ALL", fail_message="Exit-all positions failed",
+        "exit_all_positions",
+        fields,
+        payload,
+        adapter_id=adapter_id,
+        account_id=account_id,
+        audit_event="POSITIONS_EXITED_ALL",
+        fail_message="Exit-all positions failed",
     )
 
 
@@ -1903,6 +2653,7 @@ def positions_exit_all() -> tuple[Any, int]:
 
 _RECONCILIATION_DEFAULT_LIMIT = 5
 _RECONCILIATION_MAX_LIMIT = 100
+_RECONCILIATION_TAIL_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _reconciliation_safe_component(raw: Any, fallback: str) -> str:
@@ -1924,8 +2675,13 @@ def _reconciliation_safe_component(raw: Any, fallback: str) -> str:
     """
     text = str(raw or "").strip()
     cleaned = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in text)
-    if not cleaned or set(cleaned) <= {".", "_", "-"}:
+    if not text:
         return fallback
+    if not cleaned or set(cleaned) <= {".", "_", "-"}:
+        cleaned = fallback
+    if cleaned != text:
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:10]
+        return f"{cleaned}--{digest}"
     return cleaned
 
 
@@ -1950,24 +2706,156 @@ def _read_jsonl_tail(path: Path, limit: int) -> list[dict[str, Any]]:
         Up to ``limit`` parsed report dicts, newest first; empty when the
         file is unreadable.
     """
+    descriptor = -1
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_BINARY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        descriptor = os.open(path, flags)
+        opened = os.fstat(descriptor)
+        current = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or stat.S_ISLNK(current.st_mode)
+            or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            return []
+        start = max(0, opened.st_size - _RECONCILIATION_TAIL_MAX_BYTES)
+        starts_on_boundary = start == 0
+        if start > 0:
+            os.lseek(descriptor, start - 1, os.SEEK_SET)
+            starts_on_boundary = os.read(descriptor, 1) == b"\n"
+        os.lseek(descriptor, start, os.SEEK_SET)
+        remaining = opened.st_size - start
+        chunks: list[bytes] = []
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        lines = b"".join(chunks).splitlines()
+        if start > 0 and not starts_on_boundary and lines:
+            lines = lines[1:]
     except OSError:
         return []
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
     reports: list[dict[str, Any]] = []
     for line in reversed(lines):
-        text = line.strip()
-        if not text:
+        encoded = line.strip()
+        if not encoded:
             continue
         try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
+            payload = json.loads(encoded.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             continue
         if isinstance(payload, dict):
             reports.append(payload)
         if len(reports) >= limit:
             break
     return reports
+
+
+def _normalise_reconciliation_report(payload: Any) -> dict[str, Any] | None:
+    """Return one validated report shape or ``None`` for untrusted evidence."""
+    if not isinstance(payload, Mapping):
+        return None
+    adapter_id = str(payload.get("adapter_id") or "").strip().lower()
+    account_id = str(payload.get("account_id") or "").strip()
+    generated_at = str(payload.get("generated_at") or "").strip()
+    if not adapter_id or not account_id or not generated_at:
+        return None
+
+    def rows(field: str) -> list[dict[str, Any]] | None:
+        value = payload.get(field)
+        if not isinstance(value, list) or any(not isinstance(row, Mapping) for row in value):
+            return None
+        return [dict(row) for row in value]
+
+    orders_diff = rows("orders_diff")
+    positions_diff = rows("positions_diff")
+    holdings_diff = rows("holdings_diff")
+    if orders_diff is None or positions_diff is None or holdings_diff is None:
+        return None
+
+    raw_counts = payload.get("severity_counts")
+    if not isinstance(raw_counts, Mapping):
+        return None
+
+    counts: dict[str, int] = {}
+    for name in ("info", "warning", "critical"):
+        value = raw_counts.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return None
+        counts[name] = value
+
+    clean = payload.get("clean")
+    error = payload.get("error")
+    severity = payload.get("severity")
+    if not isinstance(clean, bool) or not isinstance(error, str) or not isinstance(severity, str):
+        return None
+    if severity not in {"", "info", "warning", "critical"}:
+        return None
+    if clean and (
+        orders_diff
+        or positions_diff
+        or holdings_diff
+        or error
+        or severity
+        or counts["info"]
+        or counts["warning"]
+        or counts["critical"]
+    ):
+        return None
+
+    return {
+        "adapter_id": adapter_id,
+        "account_id": account_id,
+        "generated_at": generated_at,
+        "orders_diff": orders_diff,
+        "positions_diff": positions_diff,
+        "holdings_diff": holdings_diff,
+        "error": error,
+        "clean": clean,
+        "severity": severity,
+        "severity_counts": counts,
+    }
+
+
+def _operator_resolution_payload(resolution: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the non-secret immutable decision fields safe for HTTP errors."""
+    fields = {
+        "resolution_id",
+        "outcome",
+        "broker_order_ids",
+        "broker_order_item_indexes",
+        "not_applied_item_indexes",
+        "note",
+        "evidence_digest",
+        "status",
+        "prepared_at",
+        "snapshot_generation",
+        "snapshot_observed_at",
+    }
+    return {key: resolution.get(key) for key in fields}
+
+
+def _operator_resolution_error_data(
+    attempt_id: str,
+    resolution: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return both legacy summary fields and the full safe pending decision."""
+    return {
+        "attempt_id": attempt_id,
+        "resolution_id": resolution.get("resolution_id"),
+        "status": resolution.get("status"),
+        "resolution": _operator_resolution_payload(resolution),
+    }
 
 
 def _reconciliation_report_path(root: Path, broker: str, account_id: str) -> Path | None:
@@ -1979,6 +2867,451 @@ def _reconciliation_report_path(root: Path, broker: str, account_id: str) -> Pat
     if path != root and root not in path.parents:
         return None
     return path
+
+
+@operations_bp.route("/reconciliation/outcomes", methods=["GET"])
+@require_scope("admin.observability.read")
+def reconciliation_outcomes() -> tuple[Any, int]:
+    """Return unresolved broker outcomes for the operator's authorised accounts."""
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
+
+    jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    ledger = current_app.config.get("ORDER_LIFECYCLE_LEDGER")
+    list_outcomes = getattr(ledger, "list_unresolved_outcomes", None)
+    if not callable(list_outcomes):
+        return jsonify(
+            {"status": "error", "message": "Order lifecycle recovery is unavailable"}
+        ), 503
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    try:
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            router = current_app.config.get("BROKER_ROUTER")
+            authorised_selectors = getattr(router, "authorised_selectors", None)
+            if not callable(authorised_selectors):
+                return jsonify(
+                    {"status": "error", "message": "Broker account authorisation is unavailable"}
+                ), 503
+            authorised = set(authorised_selectors(actor_id))
+            outcomes = [
+                outcome
+                for outcome in list_outcomes()
+                if f"{outcome.get('adapter_id')}:{outcome.get('account_id')}" in authorised
+            ]
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {"status": "error", "message": "Broker routing generation is busy; retry"}
+        ), 503
+    except Exception:
+        logger.exception("Could not read unresolved broker outcomes")
+        return jsonify(
+            {"status": "error", "message": "Unresolved broker outcomes are unavailable"}
+        ), 503
+    return jsonify(
+        {"status": "success", "data": {"count": len(outcomes), "outcomes": outcomes}}
+    ), 200
+
+
+@operations_bp.route("/reconciliation/outcomes/<attempt_id>/resolve", methods=["POST"])
+@require_scope("admin.observability.run")
+def reconciliation_outcome_resolve(attempt_id: str) -> tuple[Any, int]:
+    """Commit one broker-verified unknown outcome after durable audit."""
+    from flinttrade_engine.local_state_provider import LifecycleStateError  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
+
+    jwt_payload, auth_error = _authenticated_live_operator(require_unlock=True)
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+
+    raw_body = request.get_json(silent=True)
+    if not isinstance(raw_body, dict):
+        return jsonify({"status": "error", "message": "Resolution must be a JSON object"}), 400
+    body: dict[str, Any] = raw_body
+    allowed = {
+        "broker",
+        "account_id",
+        "business_date",
+        "outcome",
+        "broker_order_ids",
+        "broker_order_item_indexes",
+        "not_applied_item_indexes",
+        "confirmation",
+        "note",
+    }
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        return jsonify(
+            {"status": "error", "message": f"Unknown resolution fields: {', '.join(unknown)}"}
+        ), 400
+
+    attempt_key = str(attempt_id).strip()
+    broker = str(body.get("broker") or "").strip().lower()
+    account_id = str(body.get("account_id") or "").strip()
+    business_date = str(body.get("business_date") or "").strip()
+    outcome = str(body.get("outcome") or "").strip().lower()
+    confirmation = str(body.get("confirmation") or "").strip()
+    note = str(body.get("note") or "").strip()
+    broker_order_ids = body.get("broker_order_ids", [])
+    broker_order_item_indexes = body.get("broker_order_item_indexes", [])
+    not_applied_item_indexes = body.get("not_applied_item_indexes", [])
+    if not attempt_key or not broker or not account_id or not business_date:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "attempt, broker, account_id, and business_date are required",
+            }
+        ), 400
+    try:
+        _dt.strptime(business_date, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"status": "error", "message": "business_date must be YYYY-MM-DD"}), 400
+    if outcome not in {"confirmed_applied", "confirmed_not_applied", "confirmed_partial"}:
+        return jsonify(
+            {
+                "status": "error",
+                "message": (
+                    "outcome must be confirmed_applied, confirmed_not_applied, "
+                    "or confirmed_partial"
+                ),
+            }
+        ), 400
+    if not isinstance(broker_order_ids, list):
+        return jsonify({"status": "error", "message": "broker_order_ids must be a list"}), 400
+    if not isinstance(broker_order_item_indexes, list):
+        return jsonify(
+            {"status": "error", "message": "broker_order_item_indexes must be a list"}
+        ), 400
+    if not isinstance(not_applied_item_indexes, list):
+        return jsonify(
+            {"status": "error", "message": "not_applied_item_indexes must be a list"}
+        ), 400
+    confirmation_decision = {
+        "confirmed_applied": "APPLIED",
+        "confirmed_not_applied": "NOT_APPLIED",
+        "confirmed_partial": "PARTIAL",
+    }[outcome]
+    selector = f"{broker}:{account_id}"
+    expected_confirmation = f"CONFIRM {confirmation_decision} {selector}:{attempt_key}"
+    if confirmation != expected_confirmation:
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Type the exact decision and account confirmation before resolving",
+            }
+        ), 400
+
+    actor_id = str(jwt_payload.get("sub") or jwt_payload.get("actor_id") or "").strip()
+    ledger = current_app.config.get("ORDER_LIFECYCLE_LEDGER")
+    audit = current_app.config.get("AUDIT")
+    if ledger is None:
+        return jsonify(
+            {"status": "error", "message": "Order lifecycle recovery is unavailable"}
+        ), 503
+    log_event = getattr(audit, "log_event", None)
+    if not callable(log_event):
+        return jsonify(
+            {"status": "error", "message": "Durable audit logging is unavailable"}
+        ), 503
+    outcome_resolution_lease = getattr(ledger, "outcome_resolution_lease", None)
+    list_outcomes = getattr(ledger, "list_unresolved_outcomes", None)
+    if not callable(outcome_resolution_lease) or not callable(list_outcomes):
+        return jsonify(
+            {"status": "error", "message": "Atomic outcome recovery is unavailable"}
+        ), 503
+
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    router_fault_cleared = False
+    resolution: Mapping[str, Any] | None = None
+    try:
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            current_router = current_app.config.get("BROKER_ROUTER")
+            if current_router is None:
+                raise RuntimeError("current broker router is unavailable")
+            current_selector_error = _authorise_daily_pnl_selector(jwt_payload, selector)
+            if current_selector_error is not None:
+                return current_selector_error
+            current_outcome = next(
+                (
+                    row
+                    for row in list_outcomes()
+                    if str(row.get("attempt_id") or "") == attempt_key
+                ),
+                None,
+            )
+            current_resolution = (
+                current_outcome.get("resolution")
+                if isinstance(current_outcome, Mapping)
+                and isinstance(current_outcome.get("resolution"), Mapping)
+                else None
+            )
+            if isinstance(current_resolution, Mapping):
+                resolution = current_resolution
+            required_snapshot_generation: int | None = None
+            resolution_status = str(
+                current_resolution.get("status") if isinstance(current_resolution, Mapping) else ""
+            )
+            if resolution_status not in {"PENDING_ROUTER_CLEAR", "COMMITTED"}:
+                runner = current_app.config.get("RECONCILIATION_RUNNER")
+                trigger = getattr(runner, "trigger", None)
+                if not callable(trigger):
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "message": (
+                                "Outcome remains blocked because fresh broker reconciliation "
+                                "is unavailable"
+                            ),
+                        }
+                    ), 503
+                refresh_payloads = trigger(selectors={selector}, force=True)
+                generations: list[int] = []
+                for payload in refresh_payloads:
+                    if not isinstance(payload, Mapping):
+                        continue
+                    payload_selector = (
+                        f"{str(payload.get('adapter_id') or '').lower()}:"
+                        f"{str(payload.get('account_id') or '')}"
+                    )
+                    try:
+                        generation = int(payload.get("snapshot_generation"))
+                    except (TypeError, ValueError):
+                        continue
+                    if payload_selector == selector and generation > 0:
+                        generations.append(generation)
+                previous_generation = (
+                    int(current_resolution.get("snapshot_generation") or 0)
+                    if isinstance(current_resolution, Mapping)
+                    else 0
+                )
+                if not generations or max(generations) <= previous_generation:
+                    error_payload: dict[str, Any] = {
+                        "status": "error",
+                        "message": (
+                            "Outcome remains blocked because a newer broker snapshot "
+                            "could not be adopted"
+                        ),
+                    }
+                    if isinstance(current_resolution, Mapping):
+                        error_payload["data"] = _operator_resolution_error_data(
+                            attempt_key,
+                            current_resolution,
+                        )
+                    return jsonify(
+                        error_payload
+                    ), 503
+                required_snapshot_generation = max(generations)
+
+            with outcome_resolution_lease():
+                current_router = current_app.config.get("BROKER_ROUTER")
+                if current_router is None:
+                    raise RuntimeError("current broker router is unavailable")
+                current_selector_error = _authorise_daily_pnl_selector(jwt_payload, selector)
+                if current_selector_error is not None:
+                    return current_selector_error
+                resolution = ledger.prepare_outcome_resolution(
+                    attempt_id=attempt_key,
+                    adapter_id=broker,
+                    account_id=account_id,
+                    business_date=business_date,
+                    outcome=outcome,
+                    broker_order_ids=broker_order_ids,
+                    broker_order_item_indexes=broker_order_item_indexes,
+                    not_applied_item_indexes=not_applied_item_indexes,
+                    actor_type="human",
+                    actor_id=actor_id,
+                    note=note,
+                    required_snapshot_generation=required_snapshot_generation,
+                )
+                audit_reference = str(resolution.get("audit_reference") or "")
+                if resolution["status"] == "PENDING_AUDIT":
+                    try:
+                        audit_reference = str(log_event(
+                            "ORDER_OUTCOME_RESOLUTION_AUTHORISED",
+                            resolution_id=resolution["resolution_id"],
+                            attempt_id=attempt_key,
+                            selector=selector,
+                            business_date=business_date,
+                            outcome=outcome,
+                            operation_count=1,
+                            broker_order_id_count=len(broker_order_ids),
+                            actor_id=actor_id,
+                            evidence_digest=resolution["evidence_digest"],
+                        ) or "")
+                        if not audit_reference:
+                            raise RuntimeError("audit logger returned no durable receipt")
+                    except Exception:  # noqa: BLE001 - audit failure keeps the ledger blocked
+                        logger.exception("Outcome resolution audit write failed")
+                        return jsonify(
+                            {
+                                "status": "error",
+                                "message": (
+                                    "Outcome remains blocked because durable audit recording failed"
+                                ),
+                                "data": _operator_resolution_error_data(
+                                    attempt_key,
+                                    resolution,
+                                ),
+                            }
+                        ), 503
+                current_router = current_app.config.get("BROKER_ROUTER")
+                if current_router is None:
+                    raise RuntimeError("current broker router is unavailable")
+                current_selector_error = _authorise_daily_pnl_selector(jwt_payload, selector)
+                if current_selector_error is not None:
+                    return current_selector_error
+                resolution = ledger.finalize_outcome_resolution(
+                    resolution["resolution_id"],
+                    audit_reference=audit_reference,
+                )
+                clear_fault = getattr(current_router, "clear_lifecycle_fault", None)
+                verify_clear = getattr(current_router, "verify_lifecycle_fault_clear", None)
+                if not callable(clear_fault) or not callable(verify_clear):
+                    raise RuntimeError("current broker router cannot clear lifecycle faults")
+                try:
+                    router_clear_receipt = clear_fault(
+                        attempt_key,
+                        resolution_id=str(resolution["resolution_id"]),
+                        selector=selector,
+                    )
+                except Exception:  # noqa: BLE001 - durable pending state must remain retryable
+                    logger.exception("Outcome decision recorded but router fault clear failed")
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "message": (
+                                "Decision recorded; outcome remains blocked pending exact router clear"
+                            ),
+                            "data": _operator_resolution_error_data(
+                                attempt_key,
+                                resolution,
+                            ),
+                        }
+                    ), 503
+                if router_clear_receipt is None:
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "message": (
+                                "Decision recorded; outcome remains blocked pending exact router clear"
+                            ),
+                            "data": _operator_resolution_error_data(
+                                attempt_key,
+                                resolution,
+                            ),
+                        }
+                    ), 503
+                try:
+                    resolution = ledger.complete_outcome_resolution(
+                        resolution["resolution_id"],
+                        router_clear_receipt=router_clear_receipt,
+                        router_clear_verifier=verify_clear,
+                    )
+                    router_fault_cleared = True
+                except Exception:  # noqa: BLE001 - keep the durable pending state visible
+                    logger.exception("Router fault cleared but durable completion failed")
+                    return jsonify(
+                        {
+                            "status": "error",
+                            "message": (
+                                "Router fault cleared; durable outcome completion remains pending"
+                            ),
+                            "data": _operator_resolution_error_data(
+                                attempt_key,
+                                resolution,
+                            ),
+                        }
+                    ), 503
+
+                try:
+                    ledger.assert_write_ready()
+                except LifecycleStateError:
+                    writes_unblocked = False
+                except Exception:
+                    logger.exception("Could not verify lifecycle write readiness after resolution")
+                    writes_unblocked = False
+                else:
+                    writes_unblocked = True
+
+                remaining_outcomes: int | None = None
+                try:
+                    authorised_selectors = getattr(current_router, "authorised_selectors", None)
+                    if callable(authorised_selectors):
+                        authorised = set(authorised_selectors(actor_id))
+                        remaining_outcomes = sum(
+                            1
+                            for unresolved in list_outcomes()
+                            if (
+                                f"{unresolved.get('adapter_id')}:{unresolved.get('account_id')}"
+                                in authorised
+                            )
+                        )
+                except Exception:
+                    logger.exception(
+                        "Could not count authorised unresolved outcomes after resolution"
+                    )
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {"status": "error", "message": "Broker routing generation is busy; retry resolution"}
+        ), 503
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except LifecycleStateError as exc:
+        data = None
+        if isinstance(resolution, Mapping):
+            data = _operator_resolution_error_data(attempt_key, resolution)
+        return jsonify(
+            {
+                "status": "error",
+                "message": str(exc),
+                **({"data": data} if data is not None else {}),
+            }
+        ), 409
+    except Exception:
+        logger.exception("Outcome resolution finalisation failed")
+        data = None
+        if isinstance(resolution, Mapping):
+            data = _operator_resolution_error_data(attempt_key, resolution)
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Outcome resolution remains blocked until finalisation succeeds",
+                **({"data": data} if data is not None else {}),
+            }
+        ), 503
+
+    assert resolution is not None
+
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "resolution_id": resolution["resolution_id"],
+                "attempt_id": attempt_key,
+                "outcome": resolution["outcome"],
+                "status": resolution["status"],
+                "evidence_digest": resolution["evidence_digest"],
+                "router_fault_cleared": router_fault_cleared,
+                "writes_unblocked": writes_unblocked,
+                "remaining_outcomes": remaining_outcomes,
+            },
+        }
+    ), 200
 
 
 @operations_bp.route("/reconciliation/reports", methods=["GET"])
@@ -1995,13 +3328,25 @@ def reconciliation_reports() -> tuple[Any, int]:
         JSON with ``status`` and ``data.reports`` — parsed JSONL report
         dicts newest first; an empty list when no history exists yet.
     """
-    broker = request.args.get("broker", "").strip()
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
+
+    jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+
+    broker = request.args.get("broker", "").strip().lower()
     account_id = request.args.get("account_id", "").strip()
     if not broker or not account_id:
-        return jsonify({
-            "status": "error",
-            "message": "broker and account_id query parameters are required",
-        }), 400
+        return jsonify(
+            {
+                "status": "error",
+                "message": "broker and account_id query parameters are required",
+            }
+        ), 400
     try:
         limit = int(request.args.get("limit", _RECONCILIATION_DEFAULT_LIMIT))
     except (TypeError, ValueError):
@@ -2010,20 +3355,49 @@ def reconciliation_reports() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "limit must be a positive integer"}), 400
     limit = min(limit, _RECONCILIATION_MAX_LIMIT)
 
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     try:
-        root = _reconciliation_root()
-        safe_broker = _reconciliation_safe_component(broker, "unknown")
-        safe_account = _reconciliation_safe_component(account_id, "default")
-        # Belt-and-braces: the sanitiser already collapses traversal input to a
-        # single component, but never read outside the reconciliation tree.
-        path = _reconciliation_report_path(root, safe_broker, safe_account)
-        if path is None:
-            return jsonify({"status": "error", "message": "Invalid broker or account_id"}), 400
-        reports = _read_jsonl_tail(path, limit) if path.is_file() else []
-        return jsonify({
-            "status": "success",
-            "data": {"broker": safe_broker, "account_id": safe_account, "reports": reports},
-        }), 200
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            selector_error = _authorise_daily_pnl_selector(
+                jwt_payload,
+                f"{broker}:{account_id}",
+            )
+            if selector_error is not None:
+                return selector_error
+            root = _reconciliation_root()
+            safe_broker = _reconciliation_safe_component(broker, "unknown")
+            safe_account = _reconciliation_safe_component(account_id, "default")
+            # The sanitiser collapses traversal input to one component; the
+            # resolved-path guard still prevents reads outside this tree.
+            path = _reconciliation_report_path(root, safe_broker, safe_account)
+            if path is None:
+                return jsonify({"status": "error", "message": "Invalid broker or account_id"}), 400
+            reports: list[dict[str, Any]] = []
+            if path.is_file():
+                for raw_report in _read_jsonl_tail(path, _RECONCILIATION_MAX_LIMIT):
+                    report = _normalise_reconciliation_report(raw_report)
+                    if (
+                        report is None
+                        or report["adapter_id"] != broker
+                        or report["account_id"] != account_id
+                    ):
+                        continue
+                    reports.append(report)
+                    if len(reports) >= limit:
+                        break
+            return jsonify(
+                {
+                    "status": "success",
+                    "data": {"broker": broker, "account_id": account_id, "reports": reports},
+                }
+            ), 200
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {"status": "error", "message": "Broker routing generation is busy; retry"}
+        ), 503
     except Exception:
         logger.exception("reconciliation_reports error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
@@ -2045,38 +3419,79 @@ def reconciliation_status() -> tuple[Any, int]:
         ``clean``, ``severity``, ``severity_counts``, and ``error`` — plus
         ``runner_active`` (bool).
     """
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
+
+    jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
+    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     try:
-        targets: list[dict[str, Any]] = []
-        root = _reconciliation_root()
-        if root.is_dir():
-            for broker_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-                for history in sorted(broker_dir.glob("*.jsonl")):
-                    latest = _read_jsonl_tail(history, 1)
-                    if not latest:
-                        continue
-                    report = latest[0]
-                    targets.append({
-                        "broker": broker_dir.name,
-                        "account_id": history.stem,
-                        "last_report_at": str(report.get("generated_at", "")),
-                        "clean": bool(report.get("clean", False)),
-                        "severity": str(report.get("severity", "")),
-                        "severity_counts": dict(report.get("severity_counts") or {}),
-                        "error": str(report.get("error", "")),
-                    })
-        runner = current_app.config.get("RECONCILIATION_RUNNER")
-        runner_active = runner is not None and bool(getattr(runner, "is_running", False))
-        return jsonify({
-            "status": "success",
-            "data": {"targets": targets, "runner_active": runner_active},
-        }), 200
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            authorised, authorised_error = _authorised_account_selectors(jwt_payload)
+            if authorised_error is not None:
+                return authorised_error
+            assert authorised is not None
+            targets: list[dict[str, Any]] = []
+            root = _reconciliation_root()
+            if root.is_dir():
+                for broker_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+                    for history in sorted(broker_dir.glob("*.jsonl")):
+                        latest = next(
+                            (
+                                report
+                                for raw_report in _read_jsonl_tail(
+                                    history,
+                                    _RECONCILIATION_MAX_LIMIT,
+                                )
+                                if (report := _normalise_reconciliation_report(raw_report))
+                                is not None
+                            ),
+                            None,
+                        )
+                        if latest is None:
+                            continue
+                        report = latest
+                        broker = str(report["adapter_id"])
+                        account_id = str(report["account_id"])
+                        if f"{broker}:{account_id}" not in authorised:
+                            continue
+                        targets.append(
+                            {
+                                "broker": broker,
+                                "account_id": account_id,
+                                "last_report_at": str(report.get("generated_at", "")),
+                                "clean": bool(report.get("clean", False)),
+                                "severity": str(report.get("severity", "")),
+                                "severity_counts": dict(report.get("severity_counts") or {}),
+                                "error": str(report.get("error", "")),
+                            }
+                        )
+            runner = current_app.config.get("RECONCILIATION_RUNNER")
+            runner_active = runner is not None and bool(getattr(runner, "is_running", False))
+            return jsonify(
+                {
+                    "status": "success",
+                    "data": {"targets": targets, "runner_active": runner_active},
+                }
+            ), 200
+    except GenerationLeaseUnavailableError:
+        return jsonify(
+            {"status": "error", "message": "Broker routing generation is busy; retry"}
+        ), 503
     except Exception:
         logger.exception("reconciliation_status error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 
 @operations_bp.route("/reconciliation/run", methods=["POST"])
-@require_scope("admin.observability.read")
+@require_scope("admin.observability.run")
 def reconciliation_run() -> tuple[Any, int]:
     """Operator-triggered reconciliation cycle over the active native targets.
 
@@ -2090,20 +3505,66 @@ def reconciliation_run() -> tuple[Any, int]:
         JSON with ``status`` and ``data`` containing ``count`` plus the
         ``reports`` produced by this cycle.
     """
-    import asyncio  # noqa: PLC0415
+    from flinttrade_engine.safety import (  # noqa: PLC0415
+        GenerationLeaseUnavailableError,
+        bounded_generation_lease,
+    )
 
+    jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
+    assert jwt_payload is not None
     runner = current_app.config.get("RECONCILIATION_RUNNER")
     if runner is None:
-        return jsonify({
-            "status": "error",
-            "message": "Reconciliation runner not active — no native broker sessions to reconcile",
-        }), 503
+        return jsonify(
+            {
+                "status": "error",
+                "message": "Reconciliation runner not active — no native broker sessions to reconcile",
+            }
+        ), 503
     try:
-        payloads = asyncio.run(runner.run_once())
-        return jsonify({
-            "status": "success",
-            "data": {"count": len(payloads), "reports": payloads},
-        }), 200
-    except Exception:
+        rebuild_lock = current_app.config.setdefault(
+            "BROKER_ROUTER_REBUILD_LOCK",
+            threading.RLock(),
+        )
+        with bounded_generation_lease(
+            rebuild_lock,
+            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+        ):
+            authorised, authorised_error = _authorised_account_selectors(jwt_payload)
+            if authorised_error is not None:
+                return authorised_error
+            assert authorised is not None
+            payloads = runner.trigger(selectors=authorised, force=False)
+            payloads = [
+                payload
+                for payload in payloads
+                if (
+                    f"{str(payload.get('adapter_id') or '').lower()}:"
+                    f"{str(payload.get('account_id') or '')}"
+                ) in authorised
+            ]
+        return jsonify(
+            {
+                "status": "success",
+                "data": {"count": len(payloads), "reports": payloads},
+            }
+        ), 200
+    except Exception as exc:
+        from flinttrade_engine.reconciliation_runner import (  # noqa: PLC0415
+            ReconciliationRunBusyError,
+        )
+
+        if isinstance(exc, ReconciliationRunBusyError):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "A reconciliation cycle is already active",
+                }
+            ), 409
+        if isinstance(exc, GenerationLeaseUnavailableError):
+            return jsonify(
+                {"status": "error", "message": "Broker routing generation is busy; retry"}
+            ), 503
         logger.exception("reconciliation_run error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

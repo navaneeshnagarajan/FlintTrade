@@ -10,10 +10,16 @@ import { render, screen, act } from "@testing-library/react";
 // ---------------------------------------------------------------------------
 
 let connectionStatus = "disconnected";
+let tradingMode = "live";
 
 vi.mock("@/stores/connectionStore", () => ({
   useConnectionStore: (selector: (s: { status: string }) => unknown) =>
     selector({ status: connectionStatus }),
+}));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (s: { mode: string }) => unknown) =>
+    selector({ mode: tradingMode }),
 }));
 
 const mockNavigate = vi.fn();
@@ -36,6 +42,7 @@ describe("NoConnectionOverlay", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     connectionStatus = "disconnected";
+    tradingMode = "live";
   });
 
   afterEach(() => {
@@ -61,4 +68,18 @@ describe("NoConnectionOverlay", () => {
     });
     expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
   });
+
+  it.each(["explore", "practice"])(
+    "does not block the %s workspace when broker data is unavailable",
+    (mode) => {
+      tradingMode = mode;
+      render(<NoConnectionOverlay />);
+
+      act(() => {
+        vi.advanceTimersByTime(5100);
+      });
+
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    },
+  );
 });

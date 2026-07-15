@@ -13,15 +13,20 @@ interface TradingStore {
   updateFromPositions: (positions: Position[]) => void;
   updateFromFunds: (funds: Funds) => void;
   setOpenOrderCount: (count: number) => void;
+  resetSessionState: () => void;
 }
 
-const storeImpl: StateCreator<TradingStore> = (set) => ({
+const EMPTY_TRADING_SESSION = {
   totalPnl: 0,
   totalPnlPercent: 0,
   positionCount: 0,
   openOrderCount: 0,
   usedMargin: 0,
   availableMargin: 0,
+};
+
+const storeImpl: StateCreator<TradingStore> = (set) => ({
+  ...EMPTY_TRADING_SESSION,
   updateFromPositions: (positions) => {
     const totalPnl = positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
     const totalInvested = positions.reduce(
@@ -38,6 +43,7 @@ const storeImpl: StateCreator<TradingStore> = (set) => ({
     });
   },
   setOpenOrderCount: (count) => set({ openOrderCount: count }),
+  resetSessionState: () => set(EMPTY_TRADING_SESSION),
 });
 
 export const useTradingStore = import.meta.env.DEV

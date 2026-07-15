@@ -55,8 +55,8 @@ Adapts to current volatility — wider SL in volatile markets.
 | Max sector concentration | 25% | 40% |
 | Max overnight F&O exposure | 10% capital | 25% capital |
 
-## Kill Switch Rules
-1. Daily loss > 3% → stop all new trades for the day
+## Strategy Risk Rules (Not FlintTrade Layer 4/5)
+1. Daily loss > 3% → stop new orders for the day; this does not activate Layer 5 or flatten positions
 2. 3 consecutive losses → pause and review
 3. Weekly loss > 7% → stop all trades, do post-mortem
 4. Any single trade > 5% loss → emergency exit, review system

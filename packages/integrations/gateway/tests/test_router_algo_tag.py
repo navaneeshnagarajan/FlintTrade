@@ -127,12 +127,13 @@ async def test_ceiling_breach_refuses_dispatch_before_adapter() -> None:
 async def test_modify_and_cancel_count_toward_the_ceiling() -> None:
     adapter, session, guard = _FakeAdapter(), _session(), _guard()
     router = _router(adapter, session, guard)
-    order = _order()
+    changes = {"price": "100", "exchange": "NSE"}
+    order = {"_op": "modify", "order_id": "OID-1", **changes}
     await router.modify_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1",
-        order=order, order_id="OID-1", changes={"price": "100"}, safety_ctx=_mint(order),
+        order=order, order_id="OID-1", changes=changes, safety_ctx=_mint(order),
     )
-    order2 = _order()
+    order2 = {"_op": "cancel", "order_id": "OID-1", "exchange": "NSE"}
     await router.cancel_order(
         _request_ctx(), adapter_id="dhan", account_id="acct-1",
         order=order2, order_id="OID-1", safety_ctx=_mint(order2),

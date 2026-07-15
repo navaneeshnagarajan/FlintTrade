@@ -10,11 +10,11 @@ volume (BIGINT), oi (BIGINT), symbol (VARCHAR), exchange (VARCHAR).
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 import duckdb
+from flinttrade_core.workspace import duckdb_path
 
 
 from .downloader import DownloadResult
@@ -62,15 +62,8 @@ def _validate_path(path: str, base_dir: str | None = None) -> Path:
 
 
 def _default_db_path() -> str:
-    """Resolve DuckDB path: env override > workspace > fallback."""
-    env = os.getenv("DUCKDB_PATH")
-    if env:
-        return env
-    try:
-        from flinttrade_core.workspace import Workspace
-        return str(Workspace().fast_data_dir / "flint.duckdb")
-    except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "flint.duckdb")
+    """Resolve the shared DuckDB path through the workspace authority."""
+    return str(duckdb_path())
 
 # Aggregation relationships: source → target with bar count
 _AGGREGATION_MAP: list[tuple[str, str, int]] = [

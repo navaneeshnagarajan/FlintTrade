@@ -11,6 +11,11 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
 
+const scopeState = vi.hoisted(() => ({ value: "explore:mock" }));
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => scopeState.value,
+}));
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
@@ -52,6 +57,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  scopeState.value = "explore:mock";
   mockConnected.mockReturnValue(false);
   mockPositions.mockReset();
   mockPositions.mockResolvedValue([]);
@@ -78,7 +84,18 @@ describe("RiskDashboardWidget", () => {
 
   it("does not show Sample badge when connected", () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     renderWidget();
+    expect(screen.queryByText("Sample")).toBeNull();
+  });
+
+  it("reads and labels the Practice sandbox without a live broker", async () => {
+    scopeState.value = "practice:sandbox:default";
+    renderWidget();
+
+    expect(await screen.findByText("Practice")).toBeTruthy();
+    await waitFor(() => expect(mockPositions).toHaveBeenCalled());
+    await waitFor(() => expect(mockFunds).toHaveBeenCalled());
     expect(screen.queryByText("Sample")).toBeNull();
   });
 
@@ -232,6 +249,7 @@ describe("RiskDashboardWidget (connected)", () => {
     expect(mockFunds).not.toHaveBeenCalled();
 
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     renderWidget();
     await waitFor(() => expect(mockPositions).toHaveBeenCalled());
     await waitFor(() => expect(mockFunds).toHaveBeenCalled());
@@ -239,6 +257,7 @@ describe("RiskDashboardWidget (connected)", () => {
 
   it("does not render fabricated greeks metrics when connected", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockResolvedValue(POS);
     mockFunds.mockResolvedValue(FUNDS);
     renderWidget();
@@ -252,6 +271,7 @@ describe("RiskDashboardWidget (connected)", () => {
 
   it("shows the honest note about unwired greeks metrics when connected", async () => {
     mockConnected.mockReturnValue(true);
+    scopeState.value = "live:openalgo:default";
     mockPositions.mockResolvedValue(POS);
     mockFunds.mockResolvedValue(FUNDS);
     renderWidget();

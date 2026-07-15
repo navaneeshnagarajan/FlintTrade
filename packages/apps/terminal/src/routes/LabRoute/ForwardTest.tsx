@@ -30,6 +30,10 @@ import {
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
 import {
+  captureAuthSessionFence,
+  isAuthSessionFenceCurrent,
+} from "@/stores/authStore";
+import {
   getStrategies,
   getRunningStrategies,
   getForwardTrades,
@@ -50,7 +54,10 @@ function useDuration(startedAt: string | null): string {
     return () => clearInterval(id);
   }, [startedAt]);
   if (!startedAt) return "00:00";
-  const diff = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  const diff = Math.max(
+    0,
+    Math.floor((now - new Date(startedAt).getTime()) / 1000),
+  );
   const m = String(Math.floor(diff / 60)).padStart(2, "0");
   const s = String(diff % 60).padStart(2, "0");
   return `${m}:${s}`;
@@ -78,10 +85,18 @@ function ForwardTradesTable({ trades }: ForwardTradesTableProps) {
             <TableHead className="text-text-muted text-xs">Exit</TableHead>
             <TableHead className="text-text-muted text-xs">Symbol</TableHead>
             <TableHead className="text-text-muted text-xs">Side</TableHead>
-            <TableHead className="text-text-muted text-xs text-right">Qty</TableHead>
-            <TableHead className="text-text-muted text-xs text-right">Entry ₹</TableHead>
-            <TableHead className="text-text-muted text-xs text-right">Exit ₹</TableHead>
-            <TableHead className="text-text-muted text-xs text-right">P&L</TableHead>
+            <TableHead className="text-text-muted text-xs text-right">
+              Qty
+            </TableHead>
+            <TableHead className="text-text-muted text-xs text-right">
+              Entry ₹
+            </TableHead>
+            <TableHead className="text-text-muted text-xs text-right">
+              Exit ₹
+            </TableHead>
+            <TableHead className="text-text-muted text-xs text-right">
+              P&L
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -225,9 +240,7 @@ function ForwardMonitor({ running, onStop, isStopping }: ForwardMonitorProps) {
           <AnimatedMetricCard
             label="Win Rate"
             numericValue={winRate * 100}
-            displayValue={
-              closedTrades.length > 0 ? fmtPct(winRate) : "—"
-            }
+            displayValue={closedTrades.length > 0 ? fmtPct(winRate) : "—"}
             animate={closedTrades.length > 0}
             positive={winRate >= 0.5}
             formatter={(v) => v.toFixed(2) + "%"}
@@ -365,6 +378,7 @@ export function ForwardTestSection() {
   const stopMutation = useMutation<{ status: string }, Error, void>({
     mutationFn: () => stopStrategy(activeStrategyName!),
     onSuccess: async () => {
+      const authFence = captureAuthSessionFence();
       const pnl = activeRunning?.virtual_pnl ?? 0;
       let lastTrades: ForwardTrade[] = [];
       try {
@@ -372,6 +386,7 @@ export function ForwardTestSection() {
       } catch {
         // ignore — summary will show partial data
       }
+      if (!isAuthSessionFenceCurrent(authFence)) return;
       setStoppedSummary({ trades: lastTrades, pnl });
       setFtState("stopped");
       setActiveStrategyName(null);
@@ -382,8 +397,7 @@ export function ForwardTestSection() {
     const closedTrades =
       stoppedSummary?.trades.filter((t) => t.exit_price > 0) ?? [];
     const wins = closedTrades.filter((t) => t.pnl > 0).length;
-    const winRate =
-      closedTrades.length > 0 ? wins / closedTrades.length : 0;
+    const winRate = closedTrades.length > 0 ? wins / closedTrades.length : 0;
     const grossWin = closedTrades
       .filter((t) => t.pnl > 0)
       .reduce((s, t) => s + t.pnl, 0);
@@ -440,8 +454,7 @@ export function ForwardTestSection() {
                 <h5 className="text-xs font-semibold text-text-secondary">
                   Trade Log
                   <span className="ml-2 text-text-muted font-normal">
-                    (
-                    {stoppedSummary.trades.length} trade
+                    ({stoppedSummary.trades.length} trade
                     {stoppedSummary.trades.length !== 1 ? "s" : ""})
                   </span>
                 </h5>

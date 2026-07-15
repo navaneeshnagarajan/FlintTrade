@@ -56,6 +56,38 @@ def _make_mock_process(pid: int = 99999, returncode: int | None = None):
     return proc
 
 
+@pytest.fixture(autouse=True)
+def _mock_complete_process_tree(monkeypatch):
+    """Model complete-tree shutdown for tests that mock ``subprocess.Popen``."""
+
+    monkeypatch.setattr(mod.platform, "system", lambda: "Linux")
+
+    def create_tree(process, _system, **_limits):
+        tree = MagicMock()
+        alive = True
+
+        def is_alive() -> bool:
+            return alive
+
+        def terminate() -> None:
+            nonlocal alive
+            process.terminate()
+            alive = False
+
+        def kill() -> None:
+            nonlocal alive
+            process.kill()
+            alive = False
+
+        tree.is_alive.side_effect = is_alive
+        tree.terminate.side_effect = terminate
+        tree.kill.side_effect = kill
+        tree.wait_gone.side_effect = lambda _timeout: not alive
+        return tree
+
+    monkeypatch.setattr(mod, "_create_process_tree", create_tree)
+
+
 # ---------------------------------------------------------------------------
 # Resource limits
 # ---------------------------------------------------------------------------
@@ -81,15 +113,21 @@ class TestResourceLimits:
             assert fn is None
 
     def test_preexec_fn_calls_setrlimit(self):
-        """The preexec_fn should call setrlimit for CPU and FD limits."""
+        """The preexec_fn should install CPU, FD, process and memory limits."""
         with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
              patch.object(mod, "_resource", create=True) as mock_res:
             mock_res.RLIMIT_CPU = 0
             mock_res.RLIMIT_NOFILE = 7
             mock_res.RLIMIT_NPROC = 6
+            mock_res.RLIMIT_AS = 9
             mock_res.setrlimit = MagicMock()
 
-            fn = mod._build_preexec_fn(cpu_limit=60, fd_limit=32, nproc_limit=0)
+            fn = mod._build_preexec_fn(
+                cpu_limit=60,
+                fd_limit=32,
+                nproc_limit=0,
+                memory_limit_bytes=128 * 1024 * 1024,
+            )
             fn()
 
             calls = mock_res.setrlimit.call_args_list
@@ -99,6 +137,20 @@ class TestResourceLimits:
             assert any(c[0][0] == mock_res.RLIMIT_NOFILE for c in calls)
             # NPROC limit
             assert any(c[0][0] == mock_res.RLIMIT_NPROC for c in calls)
+            assert (mock_res.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024)) in [
+                call.args for call in calls
+            ]
+
+    def test_preexec_fn_fails_closed_without_memory_limit_primitive(self):
+        with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
+             patch.object(mod, "_resource", create=True) as mock_res:
+            mock_res.RLIMIT_CPU = 0
+            mock_res.RLIMIT_NOFILE = 7
+            mock_res.RLIMIT_NPROC = 6
+            del mock_res.RLIMIT_AS
+
+            with pytest.raises(RuntimeError, match="memory limit"):
+                mod._build_preexec_fn(memory_limit_bytes=64 * 1024 * 1024)
 
     def test_preexec_fn_skips_nproc_when_missing(self):
         """When RLIMIT_NPROC is absent (some macOS builds), no error."""
@@ -120,9 +172,16 @@ class TestResourceLimits:
     def test_frozen_child_limits_preserve_bootloader_fd_ceiling(self):
         """Post-boot frozen limits must not lower NOFILE below open bundle FDs."""
         with patch.object(mod, "_build_preexec_fn", return_value=lambda: None) as build:
-            mod._apply_uploaded_strategy_child_limits()
+            mod._apply_uploaded_strategy_child_limits(
+                memory_limit_bytes=64 * 1024 * 1024,
+                process_limit=1,
+            )
 
-        build.assert_called_once_with(fd_limit=None)
+        build.assert_called_once_with(
+            fd_limit=None,
+            nproc_limit=0,
+            memory_limit_bytes=64 * 1024 * 1024,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +335,19 @@ class TestRestrictedBuiltins:
         assert "'__name__': '__main__'" in content
         assert "'__file__': _script" in content
 
+    def test_wrapper_installs_limits_after_bubblewrap_setup(self, tmp_path):
+        wrapper = mod._create_sandbox_wrapper(
+            tmp_path,
+            memory_limit_bytes=80 * 1024 * 1024,
+            process_limit=1,
+        )
+        content = wrapper.read_text(encoding="utf-8")
+
+        assert "RLIMIT_AS" in content
+        assert str(80 * 1024 * 1024) in content
+        assert "RLIMIT_NPROC" in content
+        assert "(0, 0)" in content
+
     def test_safe_builtins_excludes_dangerous(self):
         """The _SAFE_BUILTINS dict must not contain dangerous names."""
         dangerous = {"eval", "exec", "__import__", "compile", "globals", "locals",
@@ -322,6 +394,7 @@ class TestFallback:
 
         cmd = mock_popen.call_args[0][0]
         assert cmd[0] == "bwrap"
+        assert mock_popen.call_args.kwargs["preexec_fn"] is None
 
         runner.stop(strategy_id)
 

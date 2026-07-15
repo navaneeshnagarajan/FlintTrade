@@ -165,11 +165,12 @@ class BrokerInfo(BaseModel):
         native: A native FlintTrade adapter exists for this broker (it can be
             captured through the native connect path, not only the OpenAlgo
             bridge).
-        connectable: The native adapter has passed live login/read checks, so
-            the UI may offer a native connect. ``native=True,
-            connectable=False`` renders as "coming soon" — built but not yet
-            login/read verified — and the backend refuses native connects for
-            it. Promote a broker by flipping this single flag after evidence.
+        connectable: The native adapter has cleared every broker-specific
+            activation gate, so the UI may offer a native connect. Evidence can
+            include login/read probes, emergency-reduction coverage, static-IP
+            or permission setup, and live order-safety proof. ``native=True,
+            connectable=False`` renders as "coming soon" and the backend refuses
+            native connects while any declared blocker remains.
         requires_static_ip: The broker requires a fixed/approved outbound IP
             before live API order placement. This is setup guidance only; reads
             and MCP metadata may still work under different broker rules.

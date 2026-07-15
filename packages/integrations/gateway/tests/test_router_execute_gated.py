@@ -12,14 +12,19 @@ minting invalidates the gate.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+import threading
 
 import pytest
 
 from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.models import Order
+from flinttrade_engine.local_state_provider import OrderLifecycleLedger
 from flinttrade_engine.request_context import RequestContext
 from flinttrade_engine.safety import (
+    L5_EMERGENCY_POLICY,
+    EmergencyReductionPlan,
     GATED_WRITE_VERBS,
     gate_broker_write,
     set_safety_gate_secret,
@@ -111,12 +116,27 @@ class _FakeNativeAdapter:
         self.calls.append(("cancel_order", order_id, variety, amo, segment))
 
 
-def _session(read_only: bool = False) -> Session:
+class _BlockingLimiter:
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def acquire(self, _broker_id: str, _kind: str) -> None:
+        self.entered.set()
+        await self.release.wait()
+
+
+def _session(
+    read_only: bool = False,
+    *,
+    adapter_id: str = "dhan",
+    account_id: str = "acct-1",
+) -> Session:
     return Session(
         access_token="tok",
         expires_at=datetime.now(tz=timezone.utc).timestamp() + 3600,
-        account_id="acct-1",
-        adapter_id="dhan",
+        account_id=account_id,
+        adapter_id=adapter_id,
         read_only_until_at=(datetime.now(tz=timezone.utc).timestamp() + 3600) if read_only else None,
     )
 
@@ -125,11 +145,26 @@ def _request_ctx() -> RequestContext:
     return RequestContext(jti="jti-1", actor_type="human", actor_id="user-1", mode="live")
 
 
-def _router(adapter: object, *, read_only: bool = False, consume_gate=None) -> BrokerRouter:
+def _router(
+    adapter: object,
+    *,
+    read_only: bool = False,
+    consume_gate=None,
+    rate_limiter=None,
+    write_admission=None,
+    lifecycle_store=None,
+) -> BrokerRouter:
     return BrokerRouter(
         {"dhan": adapter, "groww": adapter, "upstox": adapter},
-        lambda _ctx, _aid, _acct: _session(read_only=read_only),
+        lambda _ctx, aid, account: _session(
+            read_only=read_only,
+            adapter_id=aid,
+            account_id=account,
+        ),
         consume_gate=consume_gate,
+        rate_limiter=rate_limiter,
+        write_admission=write_admission,
+        lifecycle_store=lifecycle_store,
     )
 
 
@@ -137,6 +172,49 @@ def _mint(verb: str, payload: dict, *, adapter_id: str = "dhan"):
     return gate_broker_write(
         verb, payload, _request_ctx(), adapter_id, account_id="acct-1"
     )
+
+
+@pytest.mark.parametrize("unidentified_exit_inflight", [False, True])
+async def test_plan_emergency_reduction_forwards_unidentified_exit_state(
+    unidentified_exit_inflight: bool,
+) -> None:
+    class _Planner:
+        def __init__(self) -> None:
+            self.received: bool | None = None
+
+        async def plan_emergency_reduction(
+            self,
+            _session,
+            *,
+            policy,
+            protected_order_ids,
+            protected_exit_order_ids,
+            protected_exit_tags,
+            unidentified_exit_inflight,
+        ):
+            self.received = unidentified_exit_inflight
+            assert policy == L5_EMERGENCY_POLICY
+            assert protected_order_ids == frozenset({"OID-1"})
+            assert protected_exit_order_ids == frozenset({"EXIT-1"})
+            assert protected_exit_tags == frozenset({"TAG-1"})
+            return EmergencyReductionPlan(writes=(), pending_verbs=frozenset())
+
+    adapter = _Planner()
+    router = _router(adapter)
+
+    result = await router.plan_emergency_reduction(
+        _request_ctx(),
+        policy=L5_EMERGENCY_POLICY,
+        protected_order_ids=frozenset({"OID-1"}),
+        protected_exit_order_ids=frozenset({"EXIT-1"}),
+        protected_exit_tags=frozenset({"TAG-1"}),
+        unidentified_exit_inflight=unidentified_exit_inflight,
+        adapter_id="dhan",
+        account_id="acct-1",
+    )
+
+    assert result == EmergencyReductionPlan(writes=(), pending_verbs=frozenset())
+    assert adapter.received is unidentified_exit_inflight
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +232,38 @@ async def test_modify_forever_dispatches_with_valid_context() -> None:
         adapter_id="dhan", account_id="acct-1",
     )
     assert adapter.calls == [("modify_forever", "GTT-1", {"price": "2900"})]
+
+
+async def test_execute_gated_dispatches_detached_nested_snapshot_after_throttle() -> None:
+    adapter = _FakeNativeAdapter()
+    limiter = _BlockingLimiter()
+    router = _router(adapter, rate_limiter=limiter)
+    payload = {
+        "_op": "modify_forever",
+        "order_id": "GTT-1",
+        "changes": {"nested": {"price": "2900"}},
+    }
+    ctx = _mint("modify_forever", payload)
+
+    dispatch = asyncio.create_task(
+        router.execute_gated(
+            _request_ctx(),
+            verb="modify_forever",
+            payload=payload,
+            safety_ctx=ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+        )
+    )
+    await limiter.entered.wait()
+    payload["order_id"] = "TAMPERED"
+    payload["changes"]["nested"]["price"] = "9999"
+    limiter.release.set()
+
+    await dispatch
+    assert adapter.calls == [
+        ("modify_forever", "GTT-1", {"nested": {"price": "2900"}}),
+    ]
 
 
 async def test_cancel_super_order_defaults_entry_leg() -> None:
@@ -195,6 +305,58 @@ async def test_place_multi_order_dispatches_typed_orders() -> None:
     )
     assert result == {"order_ids": ["OID-0", "OID-1"]}
     assert adapter.calls == [("place_multi_order", orders)]
+
+
+async def test_multi_order_acknowledgement_does_not_poison_real_lifecycle_ledger(tmp_path) -> None:
+    class _UniqueBatchAdapter(_FakeNativeAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.batch_number = 0
+
+        async def place_multi_order(self, session, orders, *, _router_token=None):
+            self._require(_router_token)
+            self.batch_number += 1
+            self.calls.append(("place_multi_order", orders))
+            return {
+                "order_ids": [
+                    f"BATCH-{self.batch_number}-OID-{index}"
+                    for index, _order in enumerate(orders)
+                ]
+            }
+
+    adapter = _UniqueBatchAdapter()
+    lifecycle = OrderLifecycleLedger(ledger_path=tmp_path / "order-lifecycle.sqlite3")
+    router = _router(adapter, lifecycle_store=lifecycle)
+    first_orders = [
+        Order(symbol="RELIANCE", action="BUY", exchange="NSE", quantity="1"),
+        Order(symbol="TCS", action="SELL", exchange="NSE", quantity="2"),
+    ]
+    first_payload = {"_op": "place_multi_order", "orders": first_orders}
+
+    assert await router.execute_gated(
+        _request_ctx(),
+        verb="place_multi_order",
+        payload=first_payload,
+        safety_ctx=_mint("place_multi_order", first_payload, adapter_id="upstox"),
+        adapter_id="upstox",
+        account_id="acct-1",
+    ) == {"order_ids": ["BATCH-1-OID-0", "BATCH-1-OID-1"]}
+
+    second_orders = [Order(symbol="INFY", action="BUY", exchange="NSE", quantity="3")]
+    second_payload = {"_op": "place_multi_order", "orders": second_orders}
+    assert await router.execute_gated(
+        _request_ctx(),
+        verb="place_multi_order",
+        payload=second_payload,
+        safety_ctx=_mint("place_multi_order", second_payload, adapter_id="upstox"),
+        adapter_id="upstox",
+        account_id="acct-1",
+    ) == {"order_ids": ["BATCH-2-OID-0"]}
+
+    assert [attempt["dispatch_state"] for attempt in lifecycle.list_dispatch_attempts()] == [
+        "ACKNOWLEDGED",
+        "ACKNOWLEDGED",
+    ]
 
 
 async def test_exit_all_positions_omits_absent_optional_kwargs() -> None:
@@ -248,6 +410,53 @@ async def test_cancel_smart_order_dispatches_with_segment() -> None:
         adapter_id="dhan", account_id="acct-1",
     )
     assert adapter.calls == [("cancel_smart_order", "DRV-1", "DERIVATIVE")]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"_op": "cancel_smart_order", "order_id": 7, "segment": "DERIVATIVE"},
+        {"_op": "cancel_smart_order", "order_id": "DRV-1", "segment": ""},
+        {"_op": "cancel_smart_order", "order_id": "DRV-1", "segment": 0},
+        {"_op": "cancel_smart_order", "order_id": "DRV-1", "segment": "derivative"},
+    ],
+)
+async def test_cancel_smart_order_rejects_noncanonical_signed_identity(payload) -> None:
+    adapter = _FakeNativeAdapter()
+    router = _router(adapter)
+    ctx = _mint("cancel_smart_order", payload)
+
+    with pytest.raises(SafetyBypassError):
+        await router.execute_gated(
+            _request_ctx(),
+            verb="cancel_smart_order",
+            payload=payload,
+            safety_ctx=ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+        )
+
+    assert adapter.calls == []
+
+
+async def test_execute_gated_marks_the_exact_adapter_invocation_boundary() -> None:
+    adapter = _FakeNativeAdapter()
+    router = _router(adapter)
+    payload = {"_op": "cancel_smart_order", "order_id": "DRV-1", "segment": "DERIVATIVE"}
+    ctx = _mint("cancel_smart_order", payload)
+    invoked: list[bool] = []
+
+    await router.execute_gated(
+        _request_ctx(),
+        verb="cancel_smart_order",
+        payload=payload,
+        safety_ctx=ctx,
+        adapter_id="dhan",
+        account_id="acct-1",
+        on_adapter_invoke=lambda: invoked.append(True),
+    )
+
+    assert invoked == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +652,76 @@ async def test_cancel_order_segment_extra_dispatches_when_covered_by_fingerprint
     assert adapter.calls == [("cancel_order", "OID-8", "regular", False, "FNO")]
 
 
+async def test_cancel_order_dispatches_signed_detached_values_after_throttle() -> None:
+    from flinttrade_engine.safety import gate_order
+
+    adapter = _FakeNativeAdapter()
+    limiter = _BlockingLimiter()
+    router = _router(adapter, rate_limiter=limiter)
+    canonical = {
+        "_op": "cancel",
+        "order_id": "OID-7",
+        "variety": "bracket",
+        "amo": False,
+    }
+    extras = {"variety": "bracket", "amo": False}
+    ctx = gate_order(canonical, _request_ctx(), "dhan", account_id="acct-1")
+
+    dispatch = asyncio.create_task(
+        router.cancel_order(
+            _request_ctx(),
+            order=canonical,
+            order_id="OID-7",
+            safety_ctx=ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+            extras=extras,
+        )
+    )
+    await limiter.entered.wait()
+    canonical["order_id"] = "TAMPERED"
+    canonical["variety"] = "cover"
+    extras["amo"] = True
+    limiter.release.set()
+
+    await dispatch
+    assert adapter.calls == [("cancel_order", "OID-7", "bracket", False, None)]
+
+
+@pytest.mark.parametrize(
+    ("canonical", "extras"),
+    [
+        ({"_op": "cancel", "order_id": "OID-7"}, {"amo": None}),
+        ({"_op": "cancel", "order_id": "OID-7", "amo": False}, {"amo": 0}),
+        ({"_op": "cancel", "order_id": "OID-7", "amo": True}, {"amo": 1}),
+    ],
+)
+async def test_cancel_order_rejects_noncanonical_extra_matches_before_gate_consumption(
+    canonical: dict[str, object],
+    extras: dict[str, object],
+) -> None:
+    from flinttrade_engine.safety import gate_order
+
+    consumed: list[str] = []
+    adapter = _FakeNativeAdapter()
+    router = _router(adapter, consume_gate=lambda gate_id: consumed.append(gate_id) or True)
+    ctx = gate_order(canonical, _request_ctx(), "dhan", account_id="acct-1")
+
+    with pytest.raises(SafetyBypassError, match="extras"):
+        await router.cancel_order(
+            _request_ctx(),
+            order=canonical,
+            order_id="OID-7",
+            safety_ctx=ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+            extras=extras,
+        )
+
+    assert consumed == []
+    assert adapter.calls == []
+
+
 async def test_cancel_order_extras_not_in_fingerprint_are_refused() -> None:
     from flinttrade_engine.safety import gate_order
 
@@ -475,6 +754,60 @@ async def test_cancel_order_extras_require_mapping_fingerprint() -> None:
             extras={"variety": "bracket"},
         )
     assert adapter.calls == []
+
+
+async def test_cancelled_native_worker_retains_router_and_safety_write_ownership() -> None:
+    from flinttrade_engine.safety import KillSwitch
+    from flinttrade_gateway.brokers._base import run_blocking_sdk_call
+
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    def blocking_cancel() -> None:
+        worker_started.set()
+        release_worker.wait(timeout=2)
+
+    class BlockingAdapter(_FakeNativeAdapter):
+        async def cancel_all_orders(self, session, *, tag=None, segment=None, _router_token=None):
+            self._require(_router_token)
+            await run_blocking_sdk_call(blocking_cancel)
+
+    kill_switch = KillSwitch(normal_write_drain_timeout=0)
+    adapter = BlockingAdapter()
+    router = _router(adapter, write_admission=kill_switch.broker_write_admission)
+    payload = {"_op": "cancel_all_orders"}
+    ctx = _mint("cancel_all_orders", payload)
+    baseline_tasks = asyncio.all_tasks()
+    dispatch = asyncio.create_task(
+        router.execute_gated(
+            _request_ctx(),
+            verb="cancel_all_orders",
+            payload=payload,
+            safety_ctx=ctx,
+            adapter_id="dhan",
+            account_id="acct-1",
+        )
+    )
+
+    try:
+        assert await asyncio.to_thread(worker_started.wait, 1)
+        for task in asyncio.all_tasks() - baseline_tasks:
+            task.cancel()
+        await asyncio.sleep(0)
+        dispatch.cancel()
+        await asyncio.sleep(0)
+
+        assert not dispatch.done()
+        assert router.revoke_and_drain(timeout=0) is False
+        with pytest.raises(SafetyBypassError, match="still in progress"):
+            kill_switch.wait_for_idle(timeout=0)
+    finally:
+        release_worker.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+    assert router.revoke_and_drain(timeout=0.1) is True
+    kill_switch.wait_for_idle(timeout=0.1)
 
 
 # ---------------------------------------------------------------------------

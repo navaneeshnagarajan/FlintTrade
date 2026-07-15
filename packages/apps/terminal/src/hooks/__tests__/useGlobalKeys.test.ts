@@ -6,22 +6,23 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
 // Mock api service
 // ---------------------------------------------------------------------------
 
 const mockCancelAllOrders = vi.fn(() => Promise.resolve());
-const mockClosePosition = vi.fn((_strategy: string) => Promise.resolve());
+const mockExitAllPositions = vi.fn(() => Promise.resolve());
+const mockEmitNotification = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
   cancelAllOrders: () => mockCancelAllOrders(),
-  closePosition: (strategy: string) => mockClosePosition(strategy),
+  exitAllPositions: () => mockExitAllPositions(),
 }));
 
 vi.mock("@/components/NotificationCentre/useNotificationFeed", () => ({
-  emitNotification: vi.fn(),
+  emitNotification: mockEmitNotification,
 }));
 
 // ---------------------------------------------------------------------------
@@ -104,30 +105,48 @@ describe("useGlobalKeys", () => {
     expect(mockCancelAllOrders).toHaveBeenCalled();
   });
 
-  it("calls closePosition with Shift+X", () => {
+  it("calls exitAllPositions with Shift+X", () => {
     renderHook(() => useGlobalKeys({}));
 
     fireKey("X", { shiftKey: true });
 
-    expect(mockClosePosition).toHaveBeenCalledWith("Flint");
+    expect(mockExitAllPositions).toHaveBeenCalledTimes(1);
   });
 
-  it("plain X (advertised in the /trade banner) confirms and calls closePosition", () => {
+  it("plain X (advertised in the /trade banner) confirms and calls exitAllPositions", () => {
     renderHook(() => useGlobalKeys({}));
 
     fireKey("x");
 
     expect(window.confirm).toHaveBeenCalledTimes(1);
-    expect(mockClosePosition).toHaveBeenCalledWith("Flint");
+    expect(mockExitAllPositions).toHaveBeenCalledTimes(1);
   });
 
-  it("does not call closePosition when the confirmation is declined", () => {
+  it("does not call exitAllPositions when the confirmation is declined", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     renderHook(() => useGlobalKeys({}));
 
     fireKey("x");
 
-    expect(mockClosePosition).not.toHaveBeenCalled();
+    expect(mockExitAllPositions).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a synchronous exit-all admission failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockExitAllPositions.mockImplementationOnce(() => {
+      throw new Error("Exit all positions is available only in Live mode.");
+    });
+    renderHook(() => useGlobalKeys({}));
+
+    fireKey("x");
+
+    await waitFor(() => {
+      expect(mockEmitNotification).toHaveBeenCalledWith({
+        category: "order",
+        title: "Exit all positions failed",
+        body: "Exit all positions is available only in Live mode.",
+      });
+    });
   });
 
   // Regression: the hook is mounted by BOTH AppLayout and TerminalRoute on
@@ -143,14 +162,14 @@ describe("useGlobalKeys", () => {
     expect(mockCancelAllOrders).toHaveBeenCalledTimes(1);
   });
 
-  it("double-mounted hook fires exactly one confirm + one closePosition for Shift+X", () => {
+  it("double-mounted hook fires exactly one confirm + one exitAllPositions for Shift+X", () => {
     renderHook(() => useGlobalKeys({}));
     renderHook(() => useGlobalKeys({}));
 
     fireKey("X", { shiftKey: true });
 
     expect(window.confirm).toHaveBeenCalledTimes(1);
-    expect(mockClosePosition).toHaveBeenCalledTimes(1);
+    expect(mockExitAllPositions).toHaveBeenCalledTimes(1);
   });
 
   it("does not fire shortcuts when INPUT is focused", () => {

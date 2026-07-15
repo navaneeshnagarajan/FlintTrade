@@ -27,7 +27,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `historical` | Python | OHLCV downloader (OpenChart, yfinance), DuckDB pipeline, expiry manager, instrument metadata | `packages/core/historical/tests/` |
 | `indicators` | Python | Pure-NumPy batch indicators (110 exports; TA-Lib stays an unused optional extra) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
-| `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan, Upstox, and INDmoney connectable; Kotak Neo and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
+| `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan and Upstox connectable; INDmoney, Kotak Neo, and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
 | `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
@@ -293,10 +293,12 @@ infrastructure shims, not broker adapters.
 5. Update [COMPATIBILITY.md](COMPATIBILITY.md) with the new broker.
 
 Native connectability is a separate release gate from adapter existence.
-Only flip `connectable=True` after the broker has been tried against a real
-account path and the evidence is captured. Built-but-unverified adapters stay
+Only flip `connectable=True` after every declared `native_connect_blocker` has
+been cleared and its evidence captured. A real account-path trial may satisfy a
+declared evidence blocker, but it does not override an unresolved broker-safety,
+SDK-attestation, or emergency-reduction blocker. Activation-blocked adapters stay
 visible as "coming soon" so their code, mappings, and mock coverage are kept
-without presenting them as live-ready.
+without presenting them as ready to connect.
 
 ---
 
@@ -394,9 +396,11 @@ order:
 2. **Position limits** — maximum five simultaneous positions, no
    single position exceeding 60 % of available margin.
 3. **Portfolio risk** — net delta and net vega caps.
-4. **Daily P&L** — pause at 3 % daily drawdown, kill at 15 %.
-5. **Kill switch** — manual (Telegram, UI button) or automatic
-   (P&L breach, OpenAlgo session loss, exchange holiday detector).
+4. **Daily P&L** — pause subsequent new orders at 3 % daily drawdown and
+   latch a new-order hard stop at 15 %. Layer 4 does not cancel or flatten.
+5. **Kill switch** — explicit operator activation through Telegram, the UI,
+   or the API cancels open orders and requests position flattening. Automatic
+   account-scoped flattening belongs to the separate rupee MTM circuit breaker.
 
 Do not bypass any layer. If you need a fast-path for high-frequency
 orders, add the path inside the layers, not around them.

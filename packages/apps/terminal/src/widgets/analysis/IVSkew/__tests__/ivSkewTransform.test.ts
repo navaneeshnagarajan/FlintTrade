@@ -22,6 +22,7 @@ function smile(): IVSmileData {
   return {
     underlying: "NIFTY",
     spot_price: 22400,
+    is_sample_data: false,
     curves: [
       {
         expiry: "10-Apr-2026",
@@ -105,13 +106,19 @@ describe("mapIVSmileToSkew", () => {
   it("returns null when there are no curves", () => {
     expect(mapIVSmileToSkew(null, "t")).toBeNull();
     expect(mapIVSmileToSkew(undefined, "t")).toBeNull();
-    expect(mapIVSmileToSkew({ underlying: "X", spot_price: 0, curves: [] }, "t")).toBeNull();
+    expect(mapIVSmileToSkew({
+      underlying: "X",
+      spot_price: 0,
+      curves: [],
+      is_sample_data: false,
+    }, "t")).toBeNull();
   });
 
   it("drops curves whose points carry no positive IV", () => {
     const empty: IVSmileData = {
       underlying: "NIFTY",
       spot_price: 22400,
+      is_sample_data: false,
       curves: [
         {
           expiry: "x",
@@ -124,5 +131,16 @@ describe("mapIVSmileToSkew", () => {
       ],
     };
     expect(mapIVSmileToSkew(empty, "t")).toBeNull();
+  });
+
+  it("drops curves whose points carry IV for only one option leg", () => {
+    const incomplete = smile();
+    incomplete.curves = [
+      {
+        ...incomplete.curves[0],
+        points: [{ strike: 22400, call_iv: 0.15, put_iv: 0, moneyness: 1 }],
+      },
+    ];
+    expect(mapIVSmileToSkew(incomplete, "t")).toBeNull();
   });
 });

@@ -1,17 +1,18 @@
-"""Tax Report Generator: Indian tax-ready P&L reports from trade history.
+"""Tax Report Generator: indicative Indian tax P&L reports from trade history.
 
 Classifies trades by segment (equity delivery LTCG/STCG, intraday, F&O,
-commodity), computes P&L per segment, STT, turnover, estimated tax liability,
-and determines audit requirement per Indian Income Tax Act.
+commodity), computes P&L per segment, STT, turnover, an estimated tax
+liability, and a preliminary audit-threshold signal.
 
-Tax rates as of Budget 2024:
+Simplified tax-estimate assumptions:
 - Equity LTCG (>12 months): 12.5% above ₹1.25 lakh exemption
 - Equity STCG (<12 months): 20%
 - Intraday / F&O / Commodity: Business income — taxed at slab rate (estimated 30%)
 
-STT rates (updated April 1, 2026 per Finance Act):
-- Futures: 0.05% on sell side (was 0.02%)
-- Options: 0.15% on premium (was 0.1%)
+Derivative STT rates by transaction date:
+- Before 1 October 2024: futures 0.0125%, options 0.0625% on the sell side
+- 1 October 2024 to 31 March 2026: futures 0.02%, options 0.1%
+- From 1 April 2026: futures 0.05%, options 0.15%
 - Equity delivery: 0.1% on buy + sell (unchanged)
 
 Usage::
@@ -32,7 +33,8 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 logger = logging.getLogger("flinttrade.data.tax_report")
@@ -50,15 +52,56 @@ LTCG_RATE = 0.125        # 12.5%
 STCG_RATE = 0.20         # 20%
 BUSINESS_INCOME_RATE = 0.30  # estimated slab rate for business income
 
-# STT rates (updated April 1, 2026 per Finance Act)
-STT_FUTURES_SELL = 0.0005         # 0.05% on sell side (was 0.000125 / 0.0125%)
-STT_OPTIONS_PREMIUM = 0.0015      # 0.15% on premium (was 0.001 / 0.1%)
-STT_EQUITY_DELIVERY = 0.001       # 0.1% on both buy and sell (unchanged)
+# STT rates. Derivative rates are selected using each transaction date.
+STT_EQUITY_DELIVERY = 0.001  # 0.1% on both buy and sell (unchanged)
+_DERIVATIVE_STT_PERIODS: tuple[tuple[date | None, date | None, float, float], ...] = (
+    (None, date(2024, 9, 30), 0.000625, 0.000125),
+    (date(2024, 10, 1), date(2026, 3, 31), 0.001, 0.0002),
+    (date(2026, 4, 1), None, 0.0015, 0.0005),
+)
+
+AUDIT_ASSESSMENT_REASON = (
+    "Complete taxpayer-specific books, payment evidence, other income, deductions, and set-offs are not available."
+)
+TAX_ESTIMATE_METHODOLOGY = (
+    "Indicative estimate from realised P&L only: equity LTCG and STCG use the modelled capital-gains rates, "
+    "while net positive business income uses an illustrative 30% slab-rate assumption."
+)
+STT_METHODOLOGY = (
+    "STT is calculated per transaction date on the applicable taxable value; the existing equity treatment is unchanged."
+)
+STT_RATE_PROVENANCE = (
+    "Derivative sell-side option/futures rates are 0.0625%/0.0125% before 1 October 2024, 0.1%/0.02% from "
+    "1 October 2024 through 31 March 2026, and 0.15%/0.05% from 1 April 2026; the effective-date changes follow "
+    "the Finance (No. 2) Act, 2024 and Finance Act, 2026 schedules."
+)
 
 # Audit thresholds (₹)
 AUDIT_TURNOVER_ABSOLUTE = 10_00_00_000.0  # 10 crore
 AUDIT_TURNOVER_CONDITIONAL = 2_00_00_000.0  # 2 crore
 AUDIT_PROFIT_PERCENT = 0.06  # 6% of turnover
+
+
+def _stt_rate_schedule() -> list[dict[str, str | float | None]]:
+    """Return the derivative STT schedule in an API-safe form."""
+    return [
+        {
+            "effective_from": start.isoformat() if start else None,
+            "effective_to": end.isoformat() if end else None,
+            "options_sell_rate": options_rate,
+            "futures_sell_rate": futures_rate,
+        }
+        for start, end, options_rate, futures_rate in _DERIVATIVE_STT_PERIODS
+    ]
+
+
+def _derivative_stt_rates(transaction_date: str) -> tuple[float, float]:
+    """Return option and futures sell-side rates for an ISO transaction date."""
+    traded_on = date.fromisoformat(transaction_date)
+    for start, end, options_rate, futures_rate in _DERIVATIVE_STT_PERIODS:
+        if (start is None or traded_on >= start) and (end is None or traded_on <= end):
+            return options_rate, futures_rate
+    raise ValueError(f"No derivative STT schedule for transaction date {transaction_date}")
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -105,7 +148,8 @@ class TaxSummary:
         turnover: Total turnover for audit calculation.
         tax_liability_estimated: Estimated total tax liability.
         ltcg_exemption_used: Portion of LTCG exemption used.
-        needs_audit: Whether tax audit is required.
+        needs_audit: Preliminary threshold signal retained for compatibility.
+        audit_assessment: Explicit completeness state for the audit assessment.
         trade_count: Total number of trades.
     """
 
@@ -120,13 +164,19 @@ class TaxSummary:
     tax_liability_estimated: float = 0.0
     ltcg_exemption_used: float = 0.0
     needs_audit: bool = False
+    audit_assessment: str = "incomplete"
+    audit_assessment_reason: str = AUDIT_ASSESSMENT_REASON
+    tax_estimate_methodology: str = TAX_ESTIMATE_METHODOLOGY
+    stt_methodology: str = STT_METHODOLOGY
+    stt_rate_provenance: str = STT_RATE_PROVENANCE
+    stt_rate_schedule: list[dict[str, str | float | None]] = field(default_factory=_stt_rate_schedule)
     trade_count: int = 0
 
 
 # ── Generator ────────────────────────────────────────────────────────────────
 
 class TaxReportGenerator:
-    """Generate tax-ready P&L reports from trade history.
+    """Generate indicative tax P&L reports from trade history.
 
     All methods are stateless — pass in trades, get results out.
     """
@@ -214,13 +264,13 @@ class TaxReportGenerator:
                 if t.action.upper() == "SELL":
                     total_stt += value * 0.00025
             elif seg == "futures":
-                # 0.05% on sell side (updated April 2026 per Finance Act)
                 if t.action.upper() == "SELL":
-                    total_stt += value * STT_FUTURES_SELL
+                    _, futures_rate = _derivative_stt_rates(t.date)
+                    total_stt += value * futures_rate
             elif seg == "options":
-                # 0.15% on premium (updated April 2026 per Finance Act)
                 if t.action.upper() == "SELL":
-                    total_stt += value * STT_OPTIONS_PREMIUM
+                    options_rate, _ = _derivative_stt_rates(t.date)
+                    total_stt += value * options_rate
             elif seg == "commodity":
                 # CTT on sell side for non-agri: 0.01%
                 if t.action.upper() == "SELL":
@@ -263,18 +313,21 @@ class TaxReportGenerator:
         return round(turnover, 2)
 
     def needs_audit(self, turnover: float, pnl: float) -> bool:
-        """Determine whether a tax audit is required under Section 44AB.
+        """Return the simplified Section 44AB turnover/profit threshold signal.
 
-        Tax audit is mandatory if:
+        This model flags:
         1. Turnover exceeds ₹10 crore (absolute), OR
         2. Turnover exceeds ₹2 crore AND profit is less than 6% of turnover
+
+        A false result is not a complete no-audit determination because this
+        model does not ingest all taxpayer-specific audit inputs.
 
         Args:
             turnover: Total turnover in INR.
             pnl: Net profit/loss in INR.
 
         Returns:
-            True if tax audit is required.
+            True if the simplified threshold signal is triggered.
         """
         if turnover > AUDIT_TURNOVER_ABSOLUTE:
             return True
@@ -400,6 +453,12 @@ class TaxReportGenerator:
                 "tax_liability_estimated": summary.tax_liability_estimated,
                 "ltcg_exemption_used": summary.ltcg_exemption_used,
                 "needs_audit": summary.needs_audit,
+                "audit_assessment": summary.audit_assessment,
+                "audit_assessment_reason": summary.audit_assessment_reason,
+                "tax_estimate_methodology": summary.tax_estimate_methodology,
+                "stt_methodology": summary.stt_methodology,
+                "stt_rate_provenance": summary.stt_rate_provenance,
+                "stt_rate_schedule": summary.stt_rate_schedule,
                 "trade_count": summary.trade_count,
             },
             "segments": segments,

@@ -8,9 +8,18 @@ import React from "react";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const state = vi.hoisted(() => ({ connected: false }));
+const state = vi.hoisted(() => ({
+  connected: false,
+  mode: "live" as "explore" | "practice" | "live",
+}));
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => state.connected,
+}));
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => `${state.mode}:test-scope`,
+}));
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (value: { mode: typeof state.mode }) => unknown) => selector({ mode: state.mode }),
 }));
 
 const mockGetHistory = vi.fn();
@@ -46,6 +55,7 @@ const FRONTIER_ROWS = Array.from({ length: 5 }, (_, i) => ({
 
 beforeEach(() => {
   state.connected = false;
+  state.mode = "live";
   mockGetHistory.mockReset();
   mockOptimise.mockReset();
   mockFrontier.mockReset();
@@ -74,6 +84,38 @@ describe("PortfolioOptimiserWidget", () => {
     expect(
       screen.getByRole("img", { name: /efficient frontier/i }),
     ).toBeInTheDocument();
+  });
+
+  it("does not reuse connected Live results while Explore is active", async () => {
+    state.connected = true;
+    state.mode = "explore";
+
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockGetHistory).not.toHaveBeenCalled();
+      expect(mockOptimise).not.toHaveBeenCalled();
+      expect(mockFrontier).not.toHaveBeenCalled();
+    });
+  });
+
+  it("labels successful sandbox-scoped optimisation as Practice", async () => {
+    state.mode = "practice";
+    mockGetHistory.mockResolvedValue(bars(100));
+    mockOptimise.mockResolvedValue({
+      weights: { RELIANCE: 0.5, TCS: 0.5 },
+      expected_return: 0.2,
+      expected_volatility: 0.15,
+      sharpe_ratio: 0.9,
+      diversification_ratio: 1.4,
+    });
+
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText("Practice")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("optimises the basket from real history when connected", async () => {
@@ -117,6 +159,26 @@ describe("PortfolioOptimiserWidget", () => {
 
     expect(await screen.findByText("Sample data")).toBeInTheDocument();
     await waitFor(() => expect(mockOptimise).not.toHaveBeenCalled());
+  });
+
+  it("does not place a sample frontier under a Live badge", async () => {
+    state.connected = true;
+    mockGetHistory.mockResolvedValue(bars(100));
+    mockOptimise.mockResolvedValue({
+      weights: { LIVE_ONLY: 1 },
+      expected_return: 0.2,
+      expected_volatility: 0.15,
+      sharpe_ratio: 0.9,
+      diversification_ratio: 1.4,
+    });
+    mockFrontier.mockResolvedValue([]);
+
+    render(<PortfolioOptimiserWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText(/Live optimisation unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByText("LIVE_ONLY")).not.toBeInTheDocument();
   });
 });
 

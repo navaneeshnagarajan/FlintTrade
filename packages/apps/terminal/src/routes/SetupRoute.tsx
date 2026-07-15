@@ -27,6 +27,7 @@ import type { TradingDefaultsFormValues } from "./setup/TradingStep";
 import { RiskStep } from "./setup/RiskStep";
 import type { RiskFormValues } from "./setup/RiskStep";
 import { LlmStep } from "./setup/LlmStep";
+import type { LlmFormValues } from "./setup/LlmStep";
 import { LayoutPreview, DoneScreen } from "./setup/ReviewStep";
 import { persistSetupChoices } from "./setup/applySetupChoices";
 
@@ -40,6 +41,7 @@ interface WizardState {
   connection: ConnectionFormValues | null;
   tradingDefaults: TradingDefaultsFormValues | null;
   riskLimits: RiskFormValues | null;
+  llm: LlmFormValues | null;
   name: string;
   interests: string[];
 }
@@ -50,6 +52,7 @@ const INITIAL_WIZARD: WizardState = {
   connection: null,
   tradingDefaults: null,
   riskLimits: null,
+  llm: null,
   name: "Trader",
   interests: [],
 };
@@ -89,11 +92,12 @@ export default function SetupRoute() {
       connection: w.connection,
       tradingDefaults: w.tradingDefaults,
       riskLimits: w.riskLimits,
+      llm: w.llm,
       name: w.name,
       interests: w.interests,
     });
 
-    navigate(destination);
+    navigate(w.llm ? "/settings#llm" : destination);
   }
 
   function toggleInterest(id: string) {
@@ -233,7 +237,17 @@ export default function SetupRoute() {
           />
         );
       }
-      if (step === 6) return <LlmStep onComplete={next} />;
+      if (step === 6) {
+        return (
+          <LlmStep
+            defaultValues={wizard.llm ?? undefined}
+            onComplete={(values) => {
+              setWizard((w) => ({ ...w, llm: values }));
+              next();
+            }}
+          />
+        );
+      }
       if (step === 7) return renderPreviewStep();
       if (step === 8) return <DoneScreen persona={wizard.persona ?? "trader"} name={wizard.name} onGo={() => applyAndNavigate(wizard)} />;
     }

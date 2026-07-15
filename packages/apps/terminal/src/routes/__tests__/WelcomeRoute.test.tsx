@@ -186,4 +186,25 @@ describe("WelcomeRoute", () => {
 
     fetchSpy.mockRestore();
   });
+
+  it("ignores an auth probe aborted by effect cleanup", async () => {
+    authState.status = "unknown";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input: RequestInfo | URL, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      }),
+    );
+
+    const { unmount } = render(<WelcomeRoute />);
+    unmount();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockSetSetupRequired).not.toHaveBeenCalled();
+    expect(mockSetLoggedOut).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
 });

@@ -128,6 +128,10 @@ for _pkg in THIRD_PARTY_COLLECT:
 # the native lib travels with the freeze.
 _safe_collect_all("duckdb")
 
+# Linux Ollama archives use tar.zst. zstandard ships a compiled extension that
+# must travel with the frozen desktop backend for verified extraction to work.
+_safe_collect_all("zstandard")
+
 # ---------------------------------------------------------------------------
 # Embed the built React terminal. build-backend.sh guarantees the dist exists.
 # It lands under ``frontend/`` in the bundle; flinttrade_core.app resolves it

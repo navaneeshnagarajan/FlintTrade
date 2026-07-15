@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -87,6 +88,20 @@ FALLBACK_LOT_SIZES: dict[str, int] = {
 
 # Cache TTL — lot sizes change infrequently; 24 hours is safe
 _CACHE_TTL_SECONDS: int = 86_400  # 24 hours
+_MAX_LIVE_LOT_SIZE: int = 1_000_000
+
+
+def _authoritative_live_lot_size(value: Any) -> int | None:
+    """Return a bounded whole contract multiplier without numeric truncation."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or number <= 0 or number > _MAX_LIVE_LOT_SIZE or not number.is_integer():
+        return None
+    return int(number)
 
 
 class LotResolution(NamedTuple):
@@ -176,11 +191,8 @@ class LotSizeResolver:
             Dict of symbol → lot size.  Empty on any error.
         """
         try:
-            # OpenAlgo /api/v1/instruments returns a list of instrument dicts
-            # with fields: symbol, exchange, lot_size (and others). The real
-            # OpenAlgoClient is async and wraps the list in a response
-            # envelope; sync duck-typed fakes may return the list directly —
-            # accept both.
+            # OpenAlgo /api/v1/instruments returns a successful response
+            # envelope whose data rows identify their exchange explicitly.
             raw: Any = self._client.instruments(exchange=exchange)
             if inspect.iscoroutine(raw):
                 # Drive the coroutine on the client's OWNER loop — ad-hoc
@@ -188,20 +200,35 @@ class LotSizeResolver:
                 from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
 
                 raw = client_call_sync(self._client, raw)
-            if isinstance(raw, dict):
-                raw = raw.get("data")
-            instruments = raw
+            if (
+                not isinstance(raw, dict)
+                or not isinstance(raw.get("status"), str)
+                or raw["status"].strip().lower() != "success"
+            ):
+                return {}
+            instruments = raw.get("data")
             if not isinstance(instruments, list):
                 return {}
             result: dict[str, int] = {}
             for inst in instruments:
-                sym = str(inst.get("symbol", "")).upper().strip()
-                lot = inst.get("lot_size") or inst.get("lotsize") or inst.get("lot")
-                if sym and lot is not None:
-                    try:
-                        result[sym] = int(lot)
-                    except (ValueError, TypeError):
-                        pass
+                if not isinstance(inst, dict):
+                    return {}
+                raw_symbol = inst.get("symbol")
+                raw_exchange = inst.get("exchange")
+                if not isinstance(raw_symbol, str) or not (sym := raw_symbol.upper().strip()):
+                    return {}
+                if not isinstance(raw_exchange, str) or raw_exchange.upper().strip() != exchange:
+                    return {}
+                raw_lot = next(
+                    (inst[key] for key in ("lot_size", "lotsize", "lot") if key in inst),
+                    None,
+                )
+                lot = _authoritative_live_lot_size(raw_lot)
+                if lot is None:
+                    continue
+                if sym in result and result[sym] != lot:
+                    return {}
+                result[sym] = lot
             logger.debug(
                 "Fetched %d lot sizes for exchange %s from OpenAlgo",
                 len(result),

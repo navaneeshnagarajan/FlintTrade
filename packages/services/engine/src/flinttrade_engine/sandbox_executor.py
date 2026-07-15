@@ -226,18 +226,24 @@ def _tail_bytes(data: bytes, max_bytes: int) -> bytes:
     return data[-max_bytes:]
 
 
-def _kill_process_tree(proc: subprocess.Popen) -> None:
+def _kill_process_tree(
+    proc: subprocess.Popen,
+    *,
+    owned_process_group: int | None = None,
+) -> None:
     """Kill a sandbox child and discoverable descendants by process identity.
 
     POSIX sandbox children own a private session/process group nested inside
     the desktop guardian's discoverable descendant tree. Group signalling is
     therefore both locally complete and compatible with whole-app containment.
+    The caller captures ``owned_process_group`` when spawning the private
+    session so descendants remain addressable after the session leader exits.
     Identity-based discovery remains the fallback when group signalling is
     unavailable; the sidecar guardian is the final process owner.
     """
     if sys.platform != "win32":
         try:
-            process_group = os.getpgid(proc.pid)
+            process_group = owned_process_group or os.getpgid(proc.pid)
             if process_group == proc.pid:
                 os.killpg(process_group, signal.SIGKILL)
                 return
@@ -720,6 +726,7 @@ class SandboxExecutor:
                 error_type="SandboxSpawnError",
             )
 
+        owned_process_group = proc.pid if sys.platform != "win32" else None
         try:
             stdout, stderr = proc.communicate(
                 input=payload, timeout=self._timeout,
@@ -727,11 +734,20 @@ class SandboxExecutor:
         except subprocess.TimeoutExpired:
             # Hard-kill the child on timeout. It remains inside the owning
             # application's process tree for desktop force-shutdown.
-            _kill_process_tree(proc)
+            _kill_process_tree(proc, owned_process_group=owned_process_group)
             try:
                 stdout, stderr = proc.communicate(timeout=2)
             except subprocess.TimeoutExpired:
-                stdout, stderr = b"", b""
+                logger.error(
+                    "sandbox: could not confirm child reap after timeout (pid=%s)",
+                    proc.pid,
+                )
+                return ExecutionResult(
+                    success=False,
+                    error="Execution timed out and could not confirm sandbox child termination",
+                    error_type="SandboxContainmentError",
+                    timed_out=True,
+                )
             logger.warning(
                 "sandbox: child killed after %ds wall-clock timeout", self._timeout,
             )

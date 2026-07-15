@@ -28,7 +28,7 @@ class TestLLMClient:
         from flinttrade_ai.llm_client import LLMConfig
         cfg = LLMConfig.from_env()
         assert cfg.provider == "ollama"
-        assert cfg.host == "http://localhost:11434"
+        assert cfg.host == ""
         assert cfg.model == "llama3"
         assert cfg.context_length == 8192
 
@@ -39,19 +39,19 @@ class TestLLMClient:
 
         from flinttrade_ai.llm_client import LLMConfig
         cfg = LLMConfig.from_env()
-        assert cfg.provider == ""
-        assert "1234" in cfg.host
+        assert cfg.provider == "ollama"
+        assert cfg.host == ""
 
     def test_client_creates_with_config(self):
         from flinttrade_ai.llm_client import LLMClient, LLMConfig
-        cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="test")
+        cfg = LLMConfig(provider="custom", host="http://127.0.0.1:9000", model="test")
         client = LLMClient(config=cfg)
-        assert client.config.provider == "lmstudio"
+        assert client.config.provider == "custom"
         client.close()
 
     def test_client_with_fallback(self):
         from flinttrade_ai.llm_client import LLMClient, LLMConfig
-        primary = LLMConfig(provider="lmstudio", host="http://localhost:1234", model="primary")
+        primary = LLMConfig(provider="custom", host="http://localhost:9000", model="primary")
         fallback = LLMConfig(provider="ollama", host="http://localhost:11434", model="fallback")
         client = LLMClient(config=primary, fallback_config=fallback)
         assert client.fallback_config is not None
@@ -96,7 +96,7 @@ class TestLLMClient:
 
     def test_provider_enum(self):
         from flinttrade_ai.llm_client import LLMProvider
-        assert LLMProvider.LMSTUDIO == "lmstudio"
+        assert not hasattr(LLMProvider, "LMSTUDIO")
         assert LLMProvider.OLLAMA == "ollama"
         assert LLMProvider.ANTHROPIC == "anthropic"
         assert LLMProvider.OPENAI == "openai"

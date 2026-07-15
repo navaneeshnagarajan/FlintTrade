@@ -362,7 +362,7 @@ class TestGenerateMarketSummary:
         assert result is None
 
     def test_does_not_force_response_format(self):
-        # Reasoning models on LM Studio return empty content when a json_schema
+        # Some reasoning models return empty content when a json_schema
         # grammar is applied (verified live against qwen3.6), so generate_market_summary
         # must rely on prompt-only JSON rather than forcing response_format.
         from flinttrade_ai.sentiment import generate_market_summary

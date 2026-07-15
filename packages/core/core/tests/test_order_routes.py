@@ -162,8 +162,7 @@ def _auth_headers(
 def test_get_safety_gate_secret_bytes_generates_and_caches(tmp_path, monkeypatch):
     """H1: the gate-secret helper generates a >=32-byte key, persists it, caches it.
 
-    Pure unit test of the loader — no create_flask_app (a second app would open a
-    second DuckDB sandbox connection and dead-lock the file under xdist).
+    Pure unit test of the loader; no second full app is needed under xdist.
     """
     import flinttrade_core.app as app_mod
 
@@ -404,7 +403,94 @@ class TestPracticeMode:
             quantity=50,
             price=0.0,
             product="MIS",
+            order_type="MARKET",
+            trigger_price=0.0,
+            strategy="",
         )
+
+    def test_practice_rejection_is_an_http_error(self, flask_app, client):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "",
+            "status": "REJECTED",
+            "message": "A market order needs a live price (LTP) to fill",
+        }
+        flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json() == {
+            "status": "error",
+            "message": "A market order needs a live price (LTP) to fill",
+        }
+
+    def test_pending_order_requires_a_running_tick_source(
+        self, flask_app, client, monkeypatch
+    ):
+        mock_sandbox = MagicMock()
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.delitem(flask_app.config, "TICK_RECORDER", raising=False)
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json={**_SAMPLE_ORDER_BODY, "order_type": "LIMIT", "price": 100.0},
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 503
+        assert "tick capture" in resp.get_json()["message"].lower()
+        mock_sandbox.place_order.assert_not_called()
+
+    def test_practice_pending_order_preserves_metadata_and_subscribes_ticks(
+        self, flask_app, client, monkeypatch
+    ):
+        mock_sandbox = MagicMock()
+        mock_sandbox.place_order.return_value = {
+            "order_id": "SB-LIMIT",
+            "status": "PENDING",
+            "message": "Pending",
+        }
+        recorder = MagicMock()
+        monkeypatch.setitem(flask_app.config, "DATA_SANDBOX_ENGINE", mock_sandbox)
+        monkeypatch.setitem(flask_app.config, "TICK_RECORDER", recorder)
+        body = {
+            **_SAMPLE_ORDER_BODY,
+            "symbol": "INFY",
+            "order_type": "LIMIT",
+            "price": 1_500.0,
+            "trigger_price": 1_490.0,
+            "strategy": "mean-revert",
+        }
+
+        resp = client.post(
+            "/api/v1/orders/place",
+            json=body,
+            headers=_auth_headers(mode="practice"),
+        )
+
+        assert resp.status_code == 200
+        assert resp.get_json()["status"] == "PENDING"
+        mock_sandbox.place_order.assert_called_once_with(
+            symbol="INFY",
+            exchange="NSE",
+            action="BUY",
+            quantity=50,
+            price=1_500.0,
+            product="MIS",
+            order_type="LIMIT",
+            trigger_price=1_490.0,
+            strategy="mean-revert",
+        )
+        recorder.add_symbols.assert_called_once_with(
+            [{"exchange": "NSE", "symbol": "INFY"}],
+            mode="ltp",
+        )
+        recorder.request_reconnect.assert_called_once_with()
 
     def test_practice_place_smart_order(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -423,9 +509,13 @@ class TestPracticeMode:
         assert resp.status_code == 200
         mock_sandbox.place_order.assert_called_once()
 
-    def test_practice_cancel_order_acknowledged(self, flask_app, client):
-        """Cancel in practice mode returns success (sandbox fills instantly)."""
+    def test_practice_cancel_order_reaches_pending_order(self, flask_app, client):
         mock_sandbox = MagicMock()
+        mock_sandbox.cancel_order.return_value = {
+            "order_id": "SB-001",
+            "status": "CANCELLED",
+            "message": "Practice order cancelled",
+        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
@@ -435,11 +525,16 @@ class TestPracticeMode:
         )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["status"] == "success"
-        assert "acknowledged" in data["message"]
+        assert data["status"] == "CANCELLED"
+        mock_sandbox.cancel_order.assert_called_once_with("SB-001")
 
-    def test_practice_cancel_all_acknowledged(self, flask_app, client):
+    def test_practice_cancel_all_reaches_pending_orders(self, flask_app, client):
         mock_sandbox = MagicMock()
+        mock_sandbox.cancel_pending_orders.return_value = {
+            "status": "CANCELLED",
+            "cancelled_count": 2,
+            "message": "Cancelled 2 pending Practice order(s)",
+        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
 
         resp = client.post(
@@ -449,20 +544,45 @@ class TestPracticeMode:
         )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["status"] == "success"
+        assert data["status"] == "CANCELLED"
+        assert data["cancelled_count"] == 2
+        mock_sandbox.cancel_pending_orders.assert_called_once_with()
 
-    def test_practice_modify_acknowledged(self, flask_app, client):
+    def test_practice_modify_reaches_pending_order(
+        self, flask_app, client, monkeypatch
+    ):
         mock_sandbox = MagicMock()
+        recorder = MagicMock()
+        mock_sandbox.modify_order.return_value = {
+            "order_id": "SB-001",
+            "status": "PENDING",
+            "message": "Practice order modified",
+        }
         flask_app.config["DATA_SANDBOX_ENGINE"] = mock_sandbox
+        monkeypatch.setitem(flask_app.config, "TICK_RECORDER", recorder)
 
         resp = client.post(
             "/api/v1/orders/modify",
-            json={"order_id": "SB-001", "quantity": 100},
+            json={
+                "order_id": "SB-001",
+                "quantity": 100,
+                "price": 100.5,
+                "trigger_price": 99.0,
+                "pricetype": "SL",
+            },
             headers=_auth_headers(mode="practice"),
         )
         assert resp.status_code == 200
         data = resp.get_json()
-        assert data["status"] == "success"
+        assert data["status"] == "PENDING"
+        mock_sandbox.modify_order.assert_called_once_with(
+            "SB-001",
+            quantity=100,
+            price=100.5,
+            trigger_price=99.0,
+            order_type="SL",
+        )
+        recorder.add_symbols.assert_not_called()
 
     def test_practice_close_position(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -492,6 +612,9 @@ class TestPracticeMode:
             quantity=50,
             price=0.0,
             product="MIS",
+            order_type="MARKET",
+            trigger_price=0.0,
+            strategy="",
         )
 
     def test_practice_close_position_no_matching(self, flask_app, client):
@@ -505,9 +628,9 @@ class TestPracticeMode:
             json={"symbol": "NIFTY", "exchange": "NSE", "product": "MIS"},
             headers=_auth_headers(mode="practice"),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 400
         data = resp.get_json()
-        assert data["status"] == "REJECTED"
+        assert data["status"] == "error"
 
     def test_practice_open_position(self, flask_app, client):
         mock_sandbox = MagicMock()
@@ -590,8 +713,9 @@ class TestLiveModeForwarding:
         )
         # The ungated raw forward must never be reached on the live /place path.
         mock_http.post.assert_not_called()
-        # Fails closed (safety layer or ACL refusal), never a silent 200 forward.
-        assert resp.status_code == 403
+        # Bare WSGI construction has no process-owned emergency runtime, so the
+        # BrokerRouter is deliberately unpublished and the write fails closed.
+        assert resp.status_code == 503
 
     @pytest.mark.parametrize("endpoint", ["/api/v1/orders/modify", "/api/v1/orders/cancel"])
     @patch("flinttrade_core.order_routes.httpx.Client")
@@ -608,9 +732,9 @@ class TestLiveModeForwarding:
             json=body,
             headers=_auth_headers(mode="live", include_live_token=True),
         )
-        # No raw httpx forward; fails closed at the ACL with the default empty acls.
+        # No raw httpx forward; bare WSGI has no emergency runtime/router.
         mock_http.post.assert_not_called()
-        assert resp.status_code == 403
+        assert resp.status_code == 503
 
     def test_kotak_cancel_signs_trading_symbol_extra(self, flask_app, monkeypatch):
         """Kotak AMO cancel ``trading_symbol`` must be covered by the signed fingerprint."""
@@ -669,7 +793,6 @@ class TestLiveModeForwarding:
         "endpoint",
         [
             "/api/v1/orders/place-smart",
-            "/api/v1/orders/cancel-all",
             "/api/v1/orders/close-position",
             "/api/v1/orders/open-position",
             "/api/v1/orders/options",
@@ -693,6 +816,19 @@ class TestLiveModeForwarding:
         data = resp.get_json()
         assert "gated broker router" in data["message"]
         mock_http.post.assert_not_called()
+
+    @patch("flinttrade_core.order_routes.httpx.Client")
+    def test_live_cancel_all_fails_closed_when_router_is_unavailable(self, mock_client_cls, client):
+        """Cancel-all must use the gated router and never fall back to raw HTTP."""
+        resp = client.post(
+            "/api/v1/orders/cancel-all",
+            json=_SAMPLE_ORDER_BODY,
+            headers=_auth_headers(mode="live", include_live_token=True),
+        )
+
+        assert resp.status_code == 503
+        assert "Order routing unavailable" in resp.get_json()["message"]
+        mock_client_cls.assert_not_called()
 
     def test_live_without_pin_token_returns_403(self, client):
         """Live orders without a PIN-unlocked JWT must be rejected with 403."""

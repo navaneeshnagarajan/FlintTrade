@@ -116,20 +116,12 @@ def _persisted_timestamp(value: Any) -> float | None:
         if isinstance(value, bool):
             return None
         if isinstance(value, datetime):
-            timestamp = (
-                value.replace(tzinfo=timezone.utc).timestamp()
-                if value.tzinfo is None
-                else value.timestamp()
-            )
+            timestamp = value.replace(tzinfo=timezone.utc).timestamp() if value.tzinfo is None else value.timestamp()
         elif isinstance(value, (int, float)):
             timestamp = float(value)
         elif isinstance(value, str):
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            timestamp = (
-                parsed.replace(tzinfo=timezone.utc).timestamp()
-                if parsed.tzinfo is None
-                else parsed.timestamp()
-            )
+            timestamp = parsed.replace(tzinfo=timezone.utc).timestamp() if parsed.tzinfo is None else parsed.timestamp()
         else:
             return None
     except (OverflowError, TypeError, ValueError):
@@ -366,19 +358,13 @@ class OrderFlowAggregator:
         max_instruments: int = 512,
     ) -> None:
         if time_bin_seconds <= 0:
-            raise ValueError(
-                f"time_bin_seconds must be positive, got {time_bin_seconds}"
-            )
+            raise ValueError(f"time_bin_seconds must be positive, got {time_bin_seconds}")
         if not is_arithmetic_safe_tick_size(tick_size):
             raise ValueError("tick_size must be a finite arithmetic-safe number")
         if max_retained_sessions <= 0:
-            raise ValueError(
-                f"max_retained_sessions must be positive, got {max_retained_sessions}"
-            )
+            raise ValueError(f"max_retained_sessions must be positive, got {max_retained_sessions}")
         if max_bins_per_session is not None and max_bins_per_session <= 0:
-            raise ValueError(
-                f"max_bins_per_session must be positive, got {max_bins_per_session}"
-            )
+            raise ValueError(f"max_bins_per_session must be positive, got {max_bins_per_session}")
         if max_instruments <= 0:
             raise ValueError(f"max_instruments must be positive, got {max_instruments}")
 
@@ -403,17 +389,14 @@ class OrderFlowAggregator:
         self._counter_high_watermarks: dict[_InstrumentIdentity, dict[int, int]] = {}
         # A lower intraday cumulative counter needs a second monotonic sample
         # before it can replace the last trusted baseline.
-        self._pending_volume_reset: dict[
-            _InstrumentIdentity, tuple[float, int, date, float]
-        ] = {}
+        self._pending_volume_reset: dict[_InstrumentIdentity, tuple[float, int, date, float]] = {}
         self._last_side: dict[_InstrumentIdentity, Side] = {}
         # Freshness describes returned footprint data, not transport activity.
         # (session, source timestamp, provenance) advances only after a positive
         # volume is successfully represented in a retained bucket.
-        self._last_data_tick: dict[
-            _InstrumentIdentity, tuple[date, float, DataProvenance]
-        ] = {}
+        self._last_data_tick: dict[_InstrumentIdentity, tuple[date, float, DataProvenance]] = {}
         self._identity_recency: OrderedDict[_InstrumentIdentity, None] = OrderedDict()
+        self._price_level_count = 0
         # feed_market_tick nests classification and recording under one state
         # transaction, so this must permit re-entry.
         self._lock = RLock()
@@ -479,9 +462,7 @@ class OrderFlowAggregator:
         import time as _time
 
         ts = timestamp if timestamp is not None else _time.time()
-        bin_start = self.calculate_aligned_time_bin(
-            ts, self.time_bin_seconds, _MARKET_OPEN_DEFAULT
-        )
+        bin_start = self.calculate_aligned_time_bin(ts, self.time_bin_seconds, _MARKET_OPEN_DEFAULT)
         price_level = self._round_to_tick(price)
         exact_volume = _exact_trade_volume(volume)
         if exact_volume is None:
@@ -491,6 +472,37 @@ class OrderFlowAggregator:
 
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
+            symbol_state = self._state.get(identity, {})
+            current_bin = symbol_state.get(bin_start)
+            if current_bin is None and not self._would_retain_bin_locked(identity, bin_start):
+                return bin_start
+            current_level = None if current_bin is None else current_bin.levels.get(price_level)
+            if current_level is not None:
+                side_index = 0 if side == "BUY" else 1
+                if current_level[side_index] > _MAX_SAFE_VOLUME - exact_volume:
+                    raise ValueError("volume accumulation exceeds the safe integer range")
+            adds_price_level = current_bin is None or price_level not in current_bin.levels
+            if adds_price_level:
+                identity_evictions = self._identity_evictions_for_touch_locked(identity)
+                reclaimed_levels = sum(
+                    self._identity_price_level_count_locked(evicted_identity) for evicted_identity in identity_evictions
+                )
+                retained_new_level = True
+                if current_bin is None:
+                    bin_evictions = self._bin_evictions_after_insert_locked(
+                        symbol_state,
+                        bin_start,
+                    )
+                    retained_new_level = bin_start not in bin_evictions
+                    if identity not in identity_evictions:
+                        reclaimed_levels += sum(
+                            len(symbol_state[evicted_bin].levels)
+                            for evicted_bin in bin_evictions
+                            if evicted_bin in symbol_state
+                        )
+                projected_levels = self._price_level_count - reclaimed_levels + int(retained_new_level)
+                if projected_levels > _MAX_STATE_PRICE_LEVELS:
+                    raise ValueError("order-flow state contains too many price levels")
             self._touch_identity_locked(identity)
             if identity not in self._state:
                 self._state[identity] = {}
@@ -503,32 +515,38 @@ class OrderFlowAggregator:
             bin_state = symbol_state.get(bin_start)
             if bin_state is not None:
                 bin_state.add(price_level, side, exact_volume, provenance)
+                if adds_price_level:
+                    self._price_level_count += 1
                 self._record_data_tick_locked(identity, float(ts), provenance)
         logger.debug(
             "add_tick: exchange=%s symbol=%s price=%.4f vol=%d side=%s bin=%d provenance=%s",
-            identity[0], identity[1], price_level, exact_volume, side, bin_start, provenance,
+            identity[0],
+            identity[1],
+            price_level,
+            exact_volume,
+            side,
+            bin_start,
+            provenance,
         )
         return bin_start
 
-    def _classify_side(self, symbol: str, ltp: float, prev_ltp: float,
-                       bid: float | None, ask: float | None,
-                       *, exchange: str = "") -> Side:
-        """Aggressor side via the quote rule (preferred) or the tick rule.
+    def _classify_side(
+        self, symbol: str, ltp: float, prev_ltp: float, bid: float | None, ask: float | None, *, exchange: str = ""
+    ) -> Side:
+        """Return an aggressor side via the quote rule or the tick rule.
 
         Lee-Ready style: a trade at or above the ask is buyer-initiated; at or
         below the bid is seller-initiated; otherwise (or with no quote) the tick
         rule — up-trade = buy, down-trade = sell, unchanged = carry the previous
-        side. This is a standard estimate; cumulative quote snapshots do not
-        identify each underlying trade's exact price or aggressor side.
+        side. The caller publishes the returned side only after accumulation
+        succeeds, keeping cumulative-tick application transactional.
         """
         identity = _instrument_identity(symbol, exchange)
         with self._lock:
             if bid is not None and ask is not None and ask >= bid > 0:
                 if ltp >= ask:
-                    self._last_side[identity] = "BUY"
                     return "BUY"
                 if ltp <= bid:
-                    self._last_side[identity] = "SELL"
                     return "SELL"
             if ltp > prev_ltp:
                 side: Side = "BUY"
@@ -536,7 +554,6 @@ class OrderFlowAggregator:
                 side = "SELL"
             else:
                 side = self._last_side.get(identity, "BUY")
-            self._last_side[identity] = side
             return side
 
     def feed_market_tick(
@@ -584,8 +601,15 @@ class OrderFlowAggregator:
                     return
                 if tick_timestamp == prev[3] and current_volume == prev[1]:
                     return
-            self._touch_identity_locked(identity)
             if prev is None or prev[2] != session_date:
+                bin_start = self.calculate_aligned_time_bin(
+                    tick_timestamp,
+                    self.time_bin_seconds,
+                    _MARKET_OPEN_DEFAULT,
+                )
+                if not self._would_retain_bin_locked(identity, bin_start):
+                    return
+                self._touch_identity_locked(identity)
                 self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
                 self._normalised_volume[identity] = current_volume
                 self._counter_offsets[identity] = (0,)
@@ -606,6 +630,7 @@ class OrderFlowAggregator:
             if current_volume < prev_vol:
                 pending = self._pending_volume_reset.get(identity)
                 if pending is None or pending[2] != session_date:
+                    self._touch_identity_locked(identity)
                     self._pending_volume_reset[identity] = (
                         ltp,
                         current_volume,
@@ -618,6 +643,7 @@ class OrderFlowAggregator:
                 if tick_timestamp <= pending_timestamp:
                     return
                 if current_volume < pending_volume:
+                    self._touch_identity_locked(identity)
                     self._pending_volume_reset[identity] = (
                         ltp,
                         current_volume,
@@ -626,6 +652,7 @@ class OrderFlowAggregator:
                     )
                     return
                 if current_volume == pending_volume:
+                    self._touch_identity_locked(identity)
                     self._pending_volume_reset[identity] = (
                         ltp,
                         current_volume,
@@ -634,7 +661,6 @@ class OrderFlowAggregator:
                     )
                     return
 
-                self._pending_volume_reset.pop(identity, None)
                 new_offset = previous_normalised - pending_volume
                 high_watermarks = dict(high_watermarks)
                 high_watermarks[new_offset] = current_volume
@@ -644,14 +670,20 @@ class OrderFlowAggregator:
                     (new_offset, *offsets),
                     high_watermarks,
                 )
-                self._counter_offsets[identity] = offsets
-                self._counter_high_watermarks[identity] = high_watermarks
                 if normalised is None:
+                    self._touch_identity_locked(identity)
+                    self._pending_volume_reset.pop(identity, None)
+                    self._counter_offsets[identity] = offsets
+                    self._counter_high_watermarks[identity] = high_watermarks
                     return
-                self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
-                self._normalised_volume[identity] = normalised
                 inc_volume = normalised - previous_normalised
                 if inc_volume <= 0:
+                    self._touch_identity_locked(identity)
+                    self._pending_volume_reset.pop(identity, None)
+                    self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                    self._normalised_volume[identity] = normalised
+                    self._counter_offsets[identity] = offsets
+                    self._counter_high_watermarks[identity] = high_watermarks
                     return
                 side = self._classify_side(
                     symbol,
@@ -670,23 +702,34 @@ class OrderFlowAggregator:
                     exchange=exchange,
                     provenance="cumulative_quote_delta",
                 )
+                self._pending_volume_reset.pop(identity, None)
+                self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                self._normalised_volume[identity] = normalised
+                self._counter_offsets[identity] = offsets
+                self._counter_high_watermarks[identity] = high_watermarks
+                self._last_side[identity] = side
                 return
-            self._pending_volume_reset.pop(identity, None)
             normalised, offsets, high_watermarks = self._select_counter_namespace(
                 current_volume,
                 previous_normalised,
                 offsets,
                 high_watermarks,
             )
-            self._counter_offsets[identity] = offsets
-            self._counter_high_watermarks[identity] = high_watermarks
             if normalised is None:
+                self._touch_identity_locked(identity)
+                self._pending_volume_reset.pop(identity, None)
+                self._counter_offsets[identity] = offsets
+                self._counter_high_watermarks[identity] = high_watermarks
                 return
-            self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
-            self._normalised_volume[identity] = normalised
 
             inc_volume = normalised - previous_normalised
             if inc_volume <= 0:
+                self._touch_identity_locked(identity)
+                self._pending_volume_reset.pop(identity, None)
+                self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+                self._normalised_volume[identity] = normalised
+                self._counter_offsets[identity] = offsets
+                self._counter_high_watermarks[identity] = high_watermarks
                 return
             side = self._classify_side(symbol, ltp, prev_ltp, bid, ask, exchange=exchange)
             self._accumulate_tick(
@@ -698,6 +741,12 @@ class OrderFlowAggregator:
                 exchange=exchange,
                 provenance="cumulative_quote_delta",
             )
+            self._pending_volume_reset.pop(identity, None)
+            self._last_tick[identity] = (ltp, current_volume, session_date, tick_timestamp)
+            self._normalised_volume[identity] = normalised
+            self._counter_offsets[identity] = offsets
+            self._counter_high_watermarks[identity] = high_watermarks
+            self._last_side[identity] = side
 
     @staticmethod
     def _select_counter_namespace(
@@ -716,10 +765,7 @@ class OrderFlowAggregator:
         """
         unique_offsets = tuple(dict.fromkeys(offsets))[:_MAX_COUNTER_EPOCHS] or (0,)
         selected_offset = unique_offsets[0]
-        retained_high_watermarks = {
-            offset: high_watermarks.get(offset, -1)
-            for offset in unique_offsets
-        }
+        retained_high_watermarks = {offset: high_watermarks.get(offset, -1) for offset in unique_offsets}
         candidates: list[tuple[int, int, int]] = []
         catching_up: list[int] = []
         for index, offset in enumerate(unique_offsets):
@@ -831,66 +877,70 @@ class OrderFlowAggregator:
                 identity = (exchange, symbol)
                 bins = []
                 for bin_start, bin_state in sorted(self._state.get(identity, {}).items()):
-                    bins.append({
-                        "timestamp_bin": bin_start,
-                        "levels": [
-                            {
-                                "price_level": price_level,
-                                "buy_volume": volumes[0],
-                                "sell_volume": volumes[1],
-                            }
-                            for price_level, volumes in sorted(bin_state.levels.items())
-                        ],
-                        "provenances": sorted(bin_state.provenances),
-                    })
+                    bins.append(
+                        {
+                            "timestamp_bin": bin_start,
+                            "levels": [
+                                {
+                                    "price_level": price_level,
+                                    "buy_volume": volumes[0],
+                                    "sell_volume": volumes[1],
+                                }
+                                for price_level, volumes in sorted(bin_state.levels.items())
+                            ],
+                            "provenances": sorted(bin_state.provenances),
+                        }
+                    )
 
                 last_tick = self._last_tick.get(identity)
                 pending_reset = self._pending_volume_reset.get(identity)
                 last_data_tick = self._last_data_tick.get(identity)
                 offsets = self._counter_offsets.get(identity, ())
                 high_watermarks = self._counter_high_watermarks.get(identity, {})
-                identities.append({
-                    "exchange": exchange,
-                    "symbol": symbol,
-                    "bins": bins,
-                    "last_tick": (
-                        {
-                            "ltp": last_tick[0],
-                            "volume": last_tick[1],
-                            "session": last_tick[2].isoformat(),
-                            "timestamp": last_tick[3],
-                        }
-                        if last_tick is not None
-                        else None
-                    ),
-                    "normalised_volume": self._normalised_volume.get(identity),
-                    "counter_offsets": list(offsets),
-                    "counter_high_watermarks": [
-                        {"offset": offset, "volume": high_watermarks[offset]}
-                        for offset in offsets
-                        if offset in high_watermarks
-                    ],
-                    "pending_volume_reset": (
-                        {
-                            "ltp": pending_reset[0],
-                            "volume": pending_reset[1],
-                            "session": pending_reset[2].isoformat(),
-                            "timestamp": pending_reset[3],
-                        }
-                        if pending_reset is not None
-                        else None
-                    ),
-                    "last_side": self._last_side.get(identity),
-                    "last_data_tick": (
-                        {
-                            "session": last_data_tick[0].isoformat(),
-                            "timestamp": last_data_tick[1],
-                            "provenance": last_data_tick[2],
-                        }
-                        if last_data_tick is not None
-                        else None
-                    ),
-                })
+                identities.append(
+                    {
+                        "exchange": exchange,
+                        "symbol": symbol,
+                        "bins": bins,
+                        "last_tick": (
+                            {
+                                "ltp": last_tick[0],
+                                "volume": last_tick[1],
+                                "session": last_tick[2].isoformat(),
+                                "timestamp": last_tick[3],
+                            }
+                            if last_tick is not None
+                            else None
+                        ),
+                        "normalised_volume": self._normalised_volume.get(identity),
+                        "counter_offsets": list(offsets),
+                        "counter_high_watermarks": [
+                            {"offset": offset, "volume": high_watermarks[offset]}
+                            for offset in offsets
+                            if offset in high_watermarks
+                        ],
+                        "pending_volume_reset": (
+                            {
+                                "ltp": pending_reset[0],
+                                "volume": pending_reset[1],
+                                "session": pending_reset[2].isoformat(),
+                                "timestamp": pending_reset[3],
+                            }
+                            if pending_reset is not None
+                            else None
+                        ),
+                        "last_side": self._last_side.get(identity),
+                        "last_data_tick": (
+                            {
+                                "session": last_data_tick[0].isoformat(),
+                                "timestamp": last_data_tick[1],
+                                "provenance": last_data_tick[2],
+                            }
+                            if last_data_tick is not None
+                            else None
+                        ),
+                    }
+                )
 
         return {
             "version": ORDERFLOW_STATE_VERSION,
@@ -961,7 +1011,7 @@ class OrderFlowAggregator:
         max_ticks: int = DEFAULT_RESTORE_MAX_TICKS,
         history_complete: bool = False,
     ) -> dict[str, int]:
-        """Atomically apply a bounded persisted tail after ``restore_state``.
+        """Atomically apply a bounded retained-session tail after ``restore_state``.
 
         Source rows older than the checkpoint watermark are naturally ignored
         by :meth:`feed_market_tick`. A tail filling the entire caller-provided
@@ -975,11 +1025,9 @@ class OrderFlowAggregator:
             now=now,
             max_ticks=max_ticks,
             reject_full_window=not history_complete,
+            current_session_only=False,
         )
-        identities = {
-            _instrument_identity(symbol, exchange)
-            for _, _, symbol, exchange, _, _, _, _ in prepared
-        }
+        identities = {_instrument_identity(symbol, exchange) for _, _, symbol, exchange, _, _, _, _ in prepared}
         if not prepared:
             return {
                 "input_ticks": len(bounded_ticks),
@@ -1042,18 +1090,15 @@ class OrderFlowAggregator:
             now=now,
             max_ticks=max_ticks,
             reject_full_window=not history_complete,
+            current_session_only=True,
         )
 
-        identities = {
-            _instrument_identity(symbol, exchange)
-            for _, _, symbol, exchange, _, _, _, _ in prepared
-        }
+        identities = {_instrument_identity(symbol, exchange) for _, _, symbol, exchange, _, _, _, _ in prepared}
         if len(identities) > self.max_instruments:
             raise ValueError(
                 f"restore contains {len(identities)} identities, exceeding max_instruments={self.max_instruments}"
             )
 
-        prepared.sort(key=lambda item: (item[0], item[1]))
         if prepared:
             with self._lock:
                 scratch = OrderFlowAggregator(
@@ -1074,7 +1119,24 @@ class OrderFlowAggregator:
                         timestamp=timestamp,
                     )
 
-                for identity in identities:
+                ordered_identities = tuple(sorted(identities))
+                replaced_levels = sum(
+                    self._identity_price_level_count_locked(identity) for identity in ordered_identities
+                )
+                replacement_levels = sum(
+                    scratch._identity_price_level_count_locked(identity) for identity in ordered_identities
+                )
+                identity_evictions = self._identity_evictions_after_replacement_locked(ordered_identities)
+                evicted_levels = sum(
+                    self._identity_price_level_count_locked(identity) for identity in identity_evictions
+                )
+                if (
+                    self._price_level_count - replaced_levels - evicted_levels + replacement_levels
+                    > _MAX_STATE_PRICE_LEVELS
+                ):
+                    raise ValueError("order-flow state contains too many price levels")
+
+                for identity in ordered_identities:
                     self._drop_identity_locked(identity)
                     for target, source in (
                         (self._state, scratch._state),
@@ -1088,6 +1150,7 @@ class OrderFlowAggregator:
                     ):
                         if identity in source:
                             target[identity] = source[identity]
+                    self._price_level_count += self._identity_price_level_count_locked(identity)
                     self._touch_identity_locked(identity)
 
         return {
@@ -1099,10 +1162,7 @@ class OrderFlowAggregator:
 
     def retain_identities(self, identities: set[_InstrumentIdentity]) -> None:
         """Discard every identity no longer present in the recorder watchlist."""
-        allowed = {
-            (str(exchange).strip().upper(), str(symbol).strip().upper())
-            for exchange, symbol in identities
-        }
+        allowed = {(str(exchange).strip().upper(), str(symbol).strip().upper()) for exchange, symbol in identities}
         with self._lock:
             known = (
                 set(self._state)
@@ -1157,11 +1217,7 @@ class OrderFlowAggregator:
             active_tick = self._last_tick.get(identity)
             if active_tick is not None and active_tick[2] > latest_session:
                 latest_session = active_tick[2]
-            session_bins = [
-                bin_start
-                for bin_start in all_bins
-                if _ist_session_date(bin_start) == latest_session
-            ]
+            session_bins = [bin_start for bin_start in all_bins if _ist_session_date(bin_start) == latest_session]
             recent_bins = session_bins[-n_bins:] if len(session_bins) > n_bins else session_bins
 
             result: list[FootprintBucket] = []
@@ -1189,6 +1245,7 @@ class OrderFlowAggregator:
                 self._last_side.clear()
                 self._last_data_tick.clear()
                 self._identity_recency.clear()
+                self._price_level_count = 0
                 return
 
             identity = _instrument_identity(symbol, exchange)
@@ -1412,8 +1469,7 @@ class OrderFlowAggregator:
 
             provenance_rows = bin_row.get("provenances")
             if not isinstance(provenance_rows, list) or any(
-                provenance not in {"trade_tick", "cumulative_quote_delta", "mixed"}
-                for provenance in provenance_rows
+                provenance not in {"trade_tick", "cumulative_quote_delta", "mixed"} for provenance in provenance_rows
             ):
                 raise ValueError("checkpoint bin provenance is invalid")
             provenances = set(provenance_rows)
@@ -1558,6 +1614,7 @@ class OrderFlowAggregator:
                 data_provenance,
             )
 
+        self._price_level_count += price_level_count
         return identity, len(symbol_state), price_level_count
 
     def _prepare_replay_ticks(
@@ -1567,22 +1624,19 @@ class OrderFlowAggregator:
         now: float | datetime | None,
         max_ticks: int,
         reject_full_window: bool,
+        current_session_only: bool,
     ) -> tuple[
         list[Mapping[str, Any]],
         list[tuple[float, int, str, str, float, int, float | None, float | None]],
     ]:
-        """Validate, bound, and source-time-sort persisted replay rows."""
+        """Validate and bound replay rows while preserving caller ingest order."""
         if isinstance(max_ticks, bool) or not isinstance(max_ticks, int):
             raise ValueError("max_ticks must be an integer")
         if not 0 < max_ticks <= MAX_RESTORE_TICKS:
-            raise ValueError(
-                f"max_ticks must be between 1 and {MAX_RESTORE_TICKS}, got {max_ticks}"
-            )
+            raise ValueError(f"max_ticks must be between 1 and {MAX_RESTORE_TICKS}, got {max_ticks}")
         bounded_ticks = list(islice(ticks, max_ticks + 1))
         if len(bounded_ticks) > max_ticks:
-            raise ValueError(
-                f"ticks exceeds max_ticks={max_ticks}; query persisted ticks with a matching limit"
-            )
+            raise ValueError(f"ticks exceeds max_ticks={max_ticks}; query persisted ticks with a matching limit")
         if reject_full_window and len(bounded_ticks) == max_ticks:
             raise ValueError(
                 "persisted tick window is potentially truncated; restore a checkpoint or prove a complete prefix"
@@ -1593,7 +1647,7 @@ class OrderFlowAggregator:
         restore_timestamp = _time.time() if now is None else _persisted_timestamp(now)
         if restore_timestamp is None:
             raise ValueError("now must be a finite timestamp or datetime")
-        current_session = _ist_session_date(restore_timestamp)
+        current_session = _ist_session_date(restore_timestamp) if current_session_only else None
         prepared: list[tuple[float, int, str, str, float, int, float | None, float | None]] = []
         for index, row in enumerate(bounded_ticks):
             if not isinstance(row, Mapping):
@@ -1617,30 +1671,29 @@ class OrderFlowAggregator:
             ):
                 continue
             try:
-                if _ist_session_date(timestamp) != current_session:
+                source_session = _ist_session_date(timestamp)
+                if current_session is not None and source_session != current_session:
                     continue
             except (OSError, OverflowError, ValueError):
                 continue
-            prepared.append((
-                timestamp,
-                index,
-                symbol,
-                exchange,
-                ltp,
-                volume,
-                _persisted_number(row.get("bid"), positive=True),
-                _persisted_number(row.get("ask"), positive=True),
-            ))
+            prepared.append(
+                (
+                    timestamp,
+                    index,
+                    symbol,
+                    exchange,
+                    ltp,
+                    volume,
+                    _persisted_number(row.get("bid"), positive=True),
+                    _persisted_number(row.get("ask"), positive=True),
+                )
+            )
 
-        identities = {
-            _instrument_identity(symbol, exchange)
-            for _, _, symbol, exchange, _, _, _, _ in prepared
-        }
+        identities = {_instrument_identity(symbol, exchange) for _, _, symbol, exchange, _, _, _, _ in prepared}
         if len(identities) > self.max_instruments:
             raise ValueError(
                 f"restore contains {len(identities)} identities, exceeding max_instruments={self.max_instruments}"
             )
-        prepared.sort(key=lambda item: (item[0], item[1]))
         return bounded_ticks, prepared
 
     def _replace_all_state_locked(self, source: OrderFlowAggregator) -> None:
@@ -1654,9 +1707,11 @@ class OrderFlowAggregator:
         self._last_side = source._last_side
         self._last_data_tick = source._last_data_tick
         self._identity_recency = source._identity_recency
+        self._price_level_count = source._price_level_count
 
     def _drop_identity_locked(self, identity: _InstrumentIdentity) -> None:
         """Remove one identity from every state map while holding ``_lock``."""
+        self._price_level_count -= self._identity_price_level_count_locked(identity)
         self._state.pop(identity, None)
         self._last_tick.pop(identity, None)
         self._normalised_volume.pop(identity, None)
@@ -1666,6 +1721,13 @@ class OrderFlowAggregator:
         self._last_side.pop(identity, None)
         self._last_data_tick.pop(identity, None)
         self._identity_recency.pop(identity, None)
+
+    def _identity_price_level_count_locked(
+        self,
+        identity: _InstrumentIdentity,
+    ) -> int:
+        """Count retained levels for one identity while holding ``_lock``."""
+        return sum(len(bin_state.levels) for bin_state in self._state.get(identity, {}).values())
 
     def _record_data_tick_locked(
         self,
@@ -1687,15 +1749,62 @@ class OrderFlowAggregator:
         self._identity_recency.pop(identity, None)
         self._identity_recency[identity] = None
         while len(self._identity_recency) > self.max_instruments:
-            oldest, _ = self._identity_recency.popitem(last=False)
-            self._state.pop(oldest, None)
-            self._last_tick.pop(oldest, None)
-            self._normalised_volume.pop(oldest, None)
-            self._counter_offsets.pop(oldest, None)
-            self._counter_high_watermarks.pop(oldest, None)
-            self._pending_volume_reset.pop(oldest, None)
-            self._last_side.pop(oldest, None)
-            self._last_data_tick.pop(oldest, None)
+            oldest = next(iter(self._identity_recency))
+            self._drop_identity_locked(oldest)
+
+    def _identity_evictions_for_touch_locked(
+        self,
+        identity: _InstrumentIdentity,
+    ) -> tuple[_InstrumentIdentity, ...]:
+        """Predict LRU removals for one touch without mutating live state."""
+        recency = list(self._identity_recency)
+        if identity in recency:
+            recency.remove(identity)
+        recency.append(identity)
+        excess = max(0, len(recency) - self.max_instruments)
+        return tuple(recency[:excess])
+
+    def _identity_evictions_after_replacement_locked(
+        self,
+        identities: tuple[_InstrumentIdentity, ...],
+    ) -> tuple[_InstrumentIdentity, ...]:
+        """Predict LRU removals after transactional identity replacement."""
+        replacement_set = set(identities)
+        recency = [identity for identity in self._identity_recency if identity not in replacement_set]
+        recency.extend(identities)
+        excess = max(0, len(recency) - self.max_instruments)
+        return tuple(recency[:excess])
+
+    def _bin_evictions_after_insert_locked(
+        self,
+        symbol_state: Mapping[int, _BinState],
+        bin_start: int,
+    ) -> set[int]:
+        """Predict retention removals after adding one bin without mutation."""
+        bins_by_session: dict[date, list[int]] = {}
+        for candidate in (*symbol_state, bin_start):
+            bins_by_session.setdefault(_ist_session_date(candidate), []).append(candidate)
+
+        retained_sessions = set(sorted(bins_by_session)[-self.max_retained_sessions :])
+        evictions: set[int] = set()
+        for session_date, session_bins in bins_by_session.items():
+            if session_date not in retained_sessions:
+                evictions.update(session_bins)
+                continue
+            evictions.update(sorted(set(session_bins))[: -self.max_bins_per_session])
+        return evictions
+
+    def _would_retain_bin_locked(
+        self,
+        identity: _InstrumentIdentity,
+        bin_start: int,
+    ) -> bool:
+        """Return whether a new bin survives retention without mutating state."""
+        symbol_state = self._state.get(identity, {})
+        return bin_start in symbol_state or bin_start not in self._bin_evictions_after_insert_locked(
+            symbol_state,
+            bin_start,
+        )
 
     def _evict_retained_state_locked(self, symbol_state: dict[int, _BinState]) -> None:
         """Bound one instrument's bins by newest IST sessions and per-session bins."""
@@ -1703,15 +1812,19 @@ class OrderFlowAggregator:
         for bin_start in symbol_state:
             bins_by_session.setdefault(_ist_session_date(bin_start), []).append(bin_start)
 
-        retained_sessions = sorted(bins_by_session)[-self.max_retained_sessions:]
+        retained_sessions = sorted(bins_by_session)[-self.max_retained_sessions :]
         retained_session_set = set(retained_sessions)
         for session_date, session_bins in bins_by_session.items():
             if session_date not in retained_session_set:
                 for bin_start in session_bins:
-                    symbol_state.pop(bin_start, None)
+                    removed = symbol_state.pop(bin_start, None)
+                    if removed is not None:
+                        self._price_level_count -= len(removed.levels)
                 continue
-            for bin_start in sorted(session_bins)[:-self.max_bins_per_session]:
-                symbol_state.pop(bin_start, None)
+            for bin_start in sorted(session_bins)[: -self.max_bins_per_session]:
+                removed = symbol_state.pop(bin_start, None)
+                if removed is not None:
+                    self._price_level_count -= len(removed.levels)
 
     def _round_to_tick(self, price: float) -> float:
         """Round ``price`` to the nearest ``tick_size`` boundary.

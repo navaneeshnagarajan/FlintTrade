@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 
 /**
@@ -19,20 +21,22 @@ import { useTradingStore } from "@/stores/tradingStore";
  * sync into other hooks — duplication is what the state-boundary rule
  * forbids.
  */
-export function useTradingStoreSync(): void {
+export function useTradingStoreSync(sessionEnabled = true): void {
   const isBrokerConnected = useBrokerConnected();
-  const funds = useFunds({ enabled: isBrokerConnected });
-  const positions = usePositions({ enabled: isBrokerConnected });
+  const mode = useModeStore((state) => state.mode);
+  const accountReadsEnabled = sessionEnabled && resolveAccountReadsEnabled(mode, isBrokerConnected);
+  const funds = useFunds({ enabled: accountReadsEnabled });
+  const positions = usePositions({ enabled: accountReadsEnabled });
 
   useEffect(() => {
-    if (funds.data) {
+    if (sessionEnabled && funds.data) {
       useTradingStore.getState().updateFromFunds(funds.data);
     }
-  }, [funds.data]);
+  }, [funds.data, sessionEnabled]);
 
   useEffect(() => {
-    if (positions.data) {
+    if (sessionEnabled && positions.data) {
       useTradingStore.getState().updateFromPositions(positions.data);
     }
-  }, [positions.data]);
+  }, [positions.data, sessionEnabled]);
 }

@@ -88,6 +88,45 @@ class TestCaptureSnapshot:
         assert pe_row["strike"] == 24000
         assert pe_row["oi"] == 80000
 
+    def test_retrieve_returns_only_the_latest_snapshot(self):
+        tracker = self._tracker()
+        rows = [
+            ("2026-03-25 15:29:00", "snapshot-old", "NIFTY", "NFO", "2026-03-26", 24000, "CE", 100, 50, 150.0, 12.0),
+            ("2026-03-25 15:29:00", "snapshot-old", "NIFTY", "NFO", "2026-03-26", 24000, "PE", 80, 40, 120.0, 13.0),
+            ("2026-03-25 15:30:00", "snapshot-new", "NIFTY", "NFO", "2026-03-26", 24000, "CE", 110, 60, 155.0, 12.5),
+            ("2026-03-25 15:30:00", "snapshot-new", "NIFTY", "NFO", "2026-03-26", 24000, "PE", 90, 45, 125.0, 13.5),
+        ]
+        tracker.connection.executemany(
+            """INSERT INTO expired_option_chains
+               (captured_at, snapshot_id, symbol, exchange, expiry_date, strike,
+                option_type, oi, volume, ltp, iv)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+
+        chain = tracker.get_historical_chain("NIFTY", "2026-03-26")
+
+        assert len(chain) == 2
+        assert {row["captured_at"].strftime("%H:%M:%S") for row in chain} == {"15:30:00"}
+        assert {row["option_type"]: row["ltp"] for row in chain} == {"CE": 155.0, "PE": 125.0}
+
+    def test_equal_timestamps_do_not_merge_distinct_snapshot_ids(self):
+        tracker = self._tracker()
+        tracker.connection.executemany(
+            """INSERT INTO expired_option_chains
+               (captured_at, snapshot_id, symbol, exchange, expiry_date, strike,
+                option_type, oi, volume, ltp, iv)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                ("2026-03-25 15:30:00", "snapshot-a", "NIFTY", "NFO", "2026-03-26", 23900, "CE", 1, 1, 1, 1),
+                ("2026-03-25 15:30:00", "snapshot-b", "NIFTY", "NFO", "2026-03-26", 24100, "CE", 2, 2, 2, 2),
+            ],
+        )
+
+        chain = tracker.get_historical_chain("NIFTY", "260326")
+
+        assert [(row["strike"], row["ltp"]) for row in chain] == [(24100, 2)]
+
     def test_capture_with_no_client_returns_zero(self):
         tracker = self._tracker(client=None)
         count = tracker.capture_snapshot("NIFTY", "260326")
@@ -198,8 +237,8 @@ class TestListExpiries:
     def test_list_returns_all_expiries(self):
         tracker = self._tracker_with_data()
         expiries = tracker.list_expiries("NIFTY")
-        assert "260326" in expiries
-        assert "260402" in expiries
+        assert "2026-03-26" in expiries
+        assert "2026-04-02" in expiries
         assert len(expiries) == 2
 
     def test_list_returns_sorted(self):
@@ -211,6 +250,29 @@ class TestListExpiries:
         tracker = self._tracker_with_data()
         expiries = tracker.list_expiries("UNKNOWN")
         assert expiries == []
+
+    def test_list_normalises_and_deduplicates_mixed_expiry_formats(self):
+        tracker = self._tracker_with_data()
+        tracker.connection.execute(
+            """UPDATE expired_option_chains
+               SET expiry_date = '26MAR26'
+               WHERE expiry_date = '2026-03-26'"""
+        )
+
+        chain = tracker.get_historical_chain("NIFTY", "2026-03-26")
+        assert chain
+        assert {row["expiry_date"] for row in chain} == {"26MAR26"}
+
+        tracker.connection.execute(
+            """INSERT INTO expired_option_chains
+               (captured_at, snapshot_id, symbol, exchange, expiry_date, strike,
+                option_type, oi, volume, ltp, iv)
+               VALUES ('2026-03-25 15:30:00', 'legacy-alias', 'NIFTY', 'NFO',
+                       '260326', 24100, 'CE', 1, 1, 1, 1)"""
+        )
+
+        assert tracker.list_expiries("NIFTY") == ["2026-03-26", "2026-04-02"]
+        assert tracker.get_historical_chain("NIFTY", "2026-03-26")
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +482,79 @@ class TestClientProvider:
 # ---------------------------------------------------------------------------
 
 
+def test_schema_migration_adds_snapshot_id_to_legacy_table(tmp_path):
+    import duckdb
+
+    from flinttrade_historical.expiry_tracker import ExpiryTracker
+
+    db_path = tmp_path / "legacy.duckdb"
+    connection = duckdb.connect(str(db_path))
+    connection.execute(
+        """CREATE TABLE expired_option_chains (
+               captured_at TIMESTAMP NOT NULL,
+               symbol VARCHAR NOT NULL,
+               exchange VARCHAR NOT NULL,
+               expiry_date VARCHAR NOT NULL,
+               strike DOUBLE NOT NULL,
+               option_type VARCHAR NOT NULL,
+               oi BIGINT DEFAULT 0,
+               volume BIGINT DEFAULT 0,
+               ltp DOUBLE DEFAULT 0.0,
+               iv DOUBLE DEFAULT 0.0,
+               PRIMARY KEY (symbol, expiry_date, strike, option_type, captured_at)
+           )"""
+    )
+    connection.executemany(
+        """INSERT INTO expired_option_chains
+           (captured_at, symbol, exchange, expiry_date, strike, option_type, oi,
+            volume, ltp, iv)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            ("2026-03-25 15:29:00", "NIFTY", "NFO", "26MAR26", 24000, "CE", 100, 50, 150, 12),
+            ("2026-03-25 15:29:00", "NIFTY", "NFO", "26MAR26", 24000, "PE", 80, 40, 120, 13),
+            ("2026-03-25 15:30:00", "NIFTY", "NFO", "26MAR26", 24100, "CE", 110, 60, 155, 12.5),
+            ("2026-03-25 15:30:00", "NIFTY", "NFO", "26MAR26", 24100, "PE", 90, 45, 125, 13.5),
+        ],
+    )
+    connection.close()
+
+    tracker = ExpiryTracker(db_path=str(db_path))
+    try:
+        columns = {
+            row[1]
+            for row in tracker.connection.execute(
+                "PRAGMA table_info('expired_option_chains')"
+            ).fetchall()
+        }
+        migration = tracker.connection.execute(
+            "SELECT name FROM _migrations WHERE name = ?",
+            ["expired_option_chains_snapshot_id_v1"],
+        ).fetchone()
+        backfill_migration = tracker.connection.execute(
+            "SELECT name FROM _migrations WHERE name = ?",
+            ["expired_option_chains_snapshot_id_backfill_v2"],
+        ).fetchone()
+        snapshots = tracker.connection.execute(
+            """SELECT captured_at, COUNT(DISTINCT snapshot_id), COUNT(*)
+               FROM expired_option_chains
+               GROUP BY captured_at
+               ORDER BY captured_at"""
+        ).fetchall()
+        assert "snapshot_id" in columns
+        assert migration == ("expired_option_chains_snapshot_id_v1",)
+        assert backfill_migration == ("expired_option_chains_snapshot_id_backfill_v2",)
+        assert snapshots == [
+            (snapshots[0][0], 1, 2),
+            (snapshots[1][0], 1, 2),
+        ]
+        assert len({row[0] for row in tracker.connection.execute(
+            "SELECT DISTINCT snapshot_id FROM expired_option_chains"
+        ).fetchall()}) == 2
+        assert [row["strike"] for row in tracker.get_historical_chain("NIFTY", "2026-03-26")] == [24100, 24100]
+    finally:
+        tracker.close()
+
+
 class TestDefaultDbPathMigration:
     """The default DB path resolves via ``workspace_dir()`` and copies a
     legacy ``~/.flinttrade/data/expiry_tracker.duckdb`` into the workspace
@@ -460,7 +595,7 @@ class TestDefaultDbPathMigration:
             assert (workspace / "data" / "expiry_tracker.duckdb").exists()
             # Copy, not move — the legacy file stays behind as a backup.
             assert (legacy_home / "expiry_tracker.duckdb").exists()
-            assert tracker.list_expiries("NIFTY") == ["260326"]
+            assert tracker.list_expiries("NIFTY") == ["2026-03-26"]
         finally:
             tracker.close()
 
@@ -483,7 +618,7 @@ class TestDefaultDbPathMigration:
         tracker = et.ExpiryTracker()
         try:
             # The workspace snapshot, NOT the legacy one.
-            assert tracker.list_expiries("NIFTY") == ["260402"]
+            assert tracker.list_expiries("NIFTY") == ["2026-04-02"]
         finally:
             tracker.close()
 
@@ -501,6 +636,6 @@ class TestDefaultDbPathMigration:
 
         tracker = et.ExpiryTracker()
         try:
-            assert tracker.list_expiries("NIFTY") == ["260326"]
+            assert tracker.list_expiries("NIFTY") == ["2026-03-26"]
         finally:
             tracker.close()

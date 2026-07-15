@@ -7,7 +7,21 @@ export interface SafetyConfigRaw {
   l1_order: { price_deviation_pct: number; check_market_hours: boolean; qty_limits: Record<string, number> };
   l2_position: { max_positions: number; max_margin_pct: number };
   l3_portfolio: { max_net_delta: number; max_net_vega: number };
-  l4_pnl: { pause_pct: number; kill_pct: number; is_paused: boolean; is_killed: boolean };
+  l4_pnl: {
+    pause_pct: number;
+    kill_pct: number;
+    selector?: string | null;
+    opening_risk_capital?: number;
+    is_paused: boolean;
+    is_killed: boolean;
+    accounts?: Array<{
+      selector: string;
+      session_key: string;
+      opening_risk_capital: number;
+      is_paused: boolean;
+      is_killed: boolean;
+    }>;
+  };
   l5_kill: {
     is_active: boolean;
     reason: string;
@@ -27,10 +41,20 @@ export interface SafetyConfig {
   max_net_vega: number;
   daily_loss_pause_pct: number;
   daily_loss_kill_pct: number;
+  daily_loss_selector?: string | null;
+  opening_risk_capital?: number;
+  daily_loss_accounts?: SafetyConfigRaw["l4_pnl"]["accounts"];
+  daily_loss_pause_active?: boolean;
+  daily_loss_hard_stop_active?: boolean;
   kill_switch_active: boolean;
   kill_switch_reason: string;
   flatten_complete: boolean;
   emergency_result: EmergencyDispatchResult | null;
+}
+
+export interface SafetyAccountTarget {
+  broker: string;
+  account_id: string;
 }
 
 export interface PendingOrder {
@@ -90,6 +114,11 @@ function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
     max_net_vega: raw.l3_portfolio?.max_net_vega ?? 500,
     daily_loss_pause_pct: raw.l4_pnl?.pause_pct ?? 2,
     daily_loss_kill_pct: raw.l4_pnl?.kill_pct ?? 5,
+    daily_loss_selector: raw.l4_pnl?.selector ?? null,
+    opening_risk_capital: raw.l4_pnl?.opening_risk_capital ?? 0,
+    daily_loss_accounts: raw.l4_pnl?.accounts ?? [],
+    daily_loss_pause_active: raw.l4_pnl?.is_paused ?? false,
+    daily_loss_hard_stop_active: raw.l4_pnl?.is_killed ?? false,
     kill_switch_active: killSwitchActive,
     kill_switch_reason: raw.l5_kill?.reason ?? "",
     flatten_complete: raw.l5_kill?.flatten_complete ?? !killSwitchActive,
@@ -97,15 +126,38 @@ function flattenSafetyConfig(raw: SafetyConfigRaw): SafetyConfig {
   };
 }
 
-export const getSafetyConfig = async (): Promise<SafetyConfig> => {
+function safetyAccountTarget(): SafetyAccountTarget | undefined {
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  const nativeTarget = pickNativeBrokerOrderTarget(mode, apiKey);
+  if (nativeTarget) return nativeTarget;
+  if (mode === "live" && apiKey.trim()) return { broker: "openalgo", account_id: "default" };
+  return undefined;
+}
+
+function safetyTargetQuery(target: SafetyAccountTarget | undefined): string {
+  if (!target) return "";
+  return `?broker=${encodeURIComponent(target.broker)}&account_id=${encodeURIComponent(target.account_id)}`;
+}
+
+async function fetchSafetyConfig(target: SafetyAccountTarget | undefined): Promise<SafetyConfig> {
   if (isDemoAuthSession()) {
     return flattenSafetyConfig({} as SafetyConfigRaw);
   }
-  const raw = await get<SafetyConfigRaw>("safety/config");
+  const raw = await get<SafetyConfigRaw>(`safety/config${safetyTargetQuery(target)}`);
   return flattenSafetyConfig(raw);
-};
+}
 
-export const updateSafetyConfig = (config: Partial<SafetyConfig>) => {
+export const getSafetyConfig = (): Promise<SafetyConfig> => fetchSafetyConfig(safetyAccountTarget());
+
+export const getSafetyConfigForTarget = (target: SafetyAccountTarget): Promise<SafetyConfig> => (
+  fetchSafetyConfig(target)
+);
+
+export const updateSafetyConfig = (
+  config: Partial<SafetyConfig>,
+  target = safetyAccountTarget(),
+) => {
   const body: Record<string, unknown> = {};
   if (config.check_market_hours !== undefined) body.check_market_hours = config.check_market_hours;
   if (config.max_positions !== undefined) body.max_positions = config.max_positions;
@@ -114,7 +166,27 @@ export const updateSafetyConfig = (config: Partial<SafetyConfig>) => {
   if (config.max_net_vega !== undefined) body.max_net_vega = config.max_net_vega;
   if (config.daily_loss_pause_pct !== undefined) body.pnl_pause_pct = config.daily_loss_pause_pct;
   if (config.daily_loss_kill_pct !== undefined) body.pnl_kill_pct = config.daily_loss_kill_pct;
+  if (config.opening_risk_capital !== undefined) {
+    if (Object.keys(body).length > 0) {
+      throw new Error("Opening risk capital must be configured separately from global safety limits");
+    }
+    if (!target) throw new Error("Select a connected execution account before setting opening risk capital");
+    body.opening_risk_capital = config.opening_risk_capital;
+    body.broker = target.broker;
+    body.account_id = target.account_id;
+  }
   return post<{ status: string }>("safety/config", body);
+};
+
+export const resetDailyPnLState = (target = safetyAccountTarget()) => {
+  if (!target) throw new Error("Select a connected execution account before resetting daily-loss state");
+  return del<{
+    selector: string;
+    session_key: string;
+    opening_risk_capital: number;
+    is_paused: boolean;
+    is_killed: boolean;
+  }>(`safety/l4${safetyTargetQuery(target)}`);
 };
 
 export const activateKillSwitch = (reason: string) =>
@@ -137,15 +209,10 @@ export const rejectOrder = (id: string) =>
     "action-center/reject/" + encodeURIComponent(id),
   );
 
-export const approveAllOrders = () =>
-  post<{ status: string; approved_count: number }>("action-center/approve-all");
-
 // NOTE: practice/sandbox mode is owned by the mode state machine
 // (ModeIndicator → POST /ft-api/v1/auth/mode + /auth/pin), not a standalone
-// `sandbox/config` toggle. The old getSandboxStatus/toggleSandbox helpers
-// pointed at /api/v1/sandbox/config — a route that never existed (the engine
-// leverage config lives at /v1/sandbox-config/config with a different shape) —
-// and were removed in the usability-recovery campaign.
+// Practice policy is edited through the canonical /v1/sandbox/config surface
+// in SandboxControls; there is no second runtime toggle or config store.
 
 // ---------------------------------------------------------------------------
 // Smart-order routing (liquidity-aware slicing through the gated path)
@@ -192,7 +259,14 @@ export interface SmartRouteParams {
 }
 
 function withSmartRouteBrokerTarget(params: SmartRouteParams): SmartRouteParams {
-  if (params.broker || params.account_id) return params;
+  if (params.broker !== undefined || params.account_id !== undefined) {
+    const broker = params.broker?.trim();
+    const accountId = params.account_id?.trim();
+    if (!broker || !accountId) {
+      throw new Error("Broker and account ID must be supplied together for a smart-routed order");
+    }
+    return { ...params, broker, account_id: accountId };
+  }
 
   const mode = useModeStore.getState().mode;
   const apiKey = useConnectionStore.getState().apiKey;
@@ -312,7 +386,14 @@ export class BracketApiError extends Error {
 }
 
 function withBracketBrokerTarget(params: PlaceBracketParams): PlaceBracketParams {
-  if (params.broker || params.account_id) return params;
+  if (params.broker !== undefined || params.account_id !== undefined) {
+    const broker = params.broker?.trim();
+    const accountId = params.account_id?.trim();
+    if (!broker || !accountId) {
+      throw new Error("Broker and account ID must be supplied together for a bracket order");
+    }
+    return { ...params, broker, account_id: accountId };
+  }
 
   const mode = useModeStore.getState().mode;
   const apiKey = useConnectionStore.getState().apiKey;

@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useCallback, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 // ---------------------------------------------------------------------------
@@ -71,8 +71,15 @@ export function InlineToast({ message, variant = "success", onDismiss }: InlineT
       : "bg-profit/10 border-profit/20 text-profit";
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded text-xs border ${cls}`}>
-      <CheckCircle2 size={13} className="flex-none" />
+    <div
+      role={variant === "error" ? "alert" : "status"}
+      aria-live={variant === "error" ? "assertive" : "polite"}
+      aria-atomic="true"
+      className={`flex items-center gap-2 px-3 py-2 rounded text-xs border ${cls}`}
+    >
+      {variant === "error"
+        ? <AlertTriangle size={13} className="flex-none" />
+        : <CheckCircle2 size={13} className="flex-none" />}
       <span>{message}</span>
     </div>
   );

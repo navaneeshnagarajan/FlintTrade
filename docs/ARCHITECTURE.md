@@ -48,6 +48,12 @@ flowchart LR
         OA[broker adapters]
     end
 
+    subgraph LocalAI["Managed local AI · loopback only (optional)"]
+        OLL[Ollama server · private dynamic port]
+        MODELS[Workspace model store]
+        OLL --> MODELS
+    end
+
     subgraph Brokers["Brokers (live)"]
         B1[Zerodha · Upstox · Fyers · Angel · ...]
     end
@@ -59,6 +65,7 @@ flowchart LR
     F --> E
     F --> S
     F --> AI
+    AI -- "OpenAI-compatible API" --> OLL
     F --> D
     F --> H
     F --> BT
@@ -81,13 +88,54 @@ OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
 origins, proxied through Vite only when that bridge is enabled. The native
 gateway contract and routing are present, and the five founder-broker adapters
 (Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
-gates pass. The current connectable native set is Dhan, Upstox, and INDmoney
-after live login/read verification. Kotak Neo and Groww are built and catalogued
-but kept `connectable=false` until their broker-specific blockers clear:
-Kotak Neo still needs a successful live adapter login/read probe, while Groww
+gates pass. The current connectable native set is Dhan and Upstox
+after live login/read verification and emergency-planner coverage. INDmoney is
+read-verified and its fail-closed planner is locally verified, but it remains
+`connectable=false`: active regular `EQ-`/`DRV-` MARKET/LIMIT rows cannot yet be
+distinguished authoritatively from smart parents after restart, and the broker
+does not expose an atomic reduce-only close primitive. A funded/live-market
+order-safety proof is still required. Kotak Neo and Groww are built and
+catalogued but also kept `connectable=false` until their broker-specific blockers clear:
+Kotak Neo's fail-closed planner is locally verified, but it still needs a successful
+live adapter login/read probe and order-safety proof, while Groww
 has approved-key login/account-read proof but still needs market-data/API
 permission, static-IP resolution, and order-safety proof.
 Portal/static-IP evidence is not enough by itself to promote them.
+
+When the operator selects managed Ollama, the backend owns an on-demand sidecar
+process. FlintTrade selects an unpredictable free high loopback port, starts
+Ollama there, and accepts the endpoint only after proving process-tree listener
+ownership. A competing bind makes startup fail closed. FlintTrade downloads the pinned runtime only after explicit
+confirmation, verifies its SHA-256 digest before extraction, disables Ollama
+cloud access, and stores models under the platform workspace. Accepted model
+digests are stored separately from Ollama's model store. Explicit acceptance
+creates a digest-derived locked alias, which each inference verifies before the
+request and against the loaded digest afterwards before releasing output. Cloud
+and custom OpenAI-compatible providers remain available;
+intentionally self-hosted servers belong under the `custom` provider.
+Runtime releases live in separate version directories. A stopped update stages
+and verifies the preferred release before atomically selecting it, retaining one
+fully rehashed rollback release. Uninstall transactionally quarantines only
+fully verified releases recognised by the current build, recovers an interrupted
+transaction at the next startup, and preserves models and trust metadata. Every
+lifecycle mutation holds an owner-only cross-process workspace lease. Lifecycle,
+receipt-journal and operation-owner lease paths reject links, reparse points,
+non-regular files and foreign POSIX ownership before use. A backend restart never
+signals an inherited PID; if Ollama survives its owner, lifecycle changes fail
+closed until the operator terminates that process. Model reclamation is
+API-driven: exact unselected names and unreferenced FlintTrade locked aliases can
+be removed, but FlintTrade never traverses Ollama's blob store to delete files.
+Browser mutations carry a durable client admission ID, making a lost or timed-out
+HTTP response idempotently reconcilable through status. A bounded detailed
+receipt journal compacts older terminal admission IDs into a fail-closed spent-ID
+filter; corrupt journals and unknown outcomes never reopen admission. Shutdown consumes one
+deadline across config-lock and runtime-state admission, operation cancellation,
+inference drain and teardown. Destructive model operations hold the runtime-state
+lock through live inventory and trust reconciliation, so shutdown either cancels
+before the irreversible request or waits for its verified result. Windows production
+children are contained in a private Job Object;
+POSIX process-group identifiers are never signalled after the retained root has
+been reaped.
 
 ---
 
@@ -262,9 +310,11 @@ inside `packages/services/engine/`:
 2. **Position limits** — max five simultaneous positions, no single
    position over 60 % of free margin.
 3. **Portfolio risk** — net delta and net vega caps across the book.
-4. **Daily P&L** — pause at 3 % drawdown, kill at 15 % drawdown.
-5. **Kill switch** — manual (UI button, Telegram bot) or automatic
-   (daily P&L breach, OpenAlgo session loss, exchange holiday detector).
+4. **Daily P&L** — pause new orders at 3 % drawdown and latch a new-order
+   hard stop at 15 % drawdown. Layer 4 does not cancel or flatten.
+5. **Kill switch** — an explicit operator action (UI button, API, or Telegram)
+   that cancels open orders and requests position flattening through the gated
+   broker path. The account MTM circuit breaker is a separate automatic path.
 
 ### Mode-system state machine
 
@@ -377,7 +427,9 @@ Lives in a platform-specific workspace directory:
 - **Storage paths** — `storage.fast` (SSD) and `storage.archive` (HDD).
 - **Enabled modules** — which packages are active.
 - **UI preferences** — theme, default exchange, time zone, density.
-- **LLM config** — provider, host, model.
+- **LLM config** — provider and model; the managed Ollama endpoint is owned
+  internally and is not persisted, while custom OpenAI-compatible providers
+  retain an editable host.
 - **Notification config** — Telegram bot settings.
 - **Order-safety settings** — rate limits, audit retention, kill-switch.
 

@@ -3,6 +3,7 @@ WebSocket frames; no SDK, no network, no credentials needed."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -10,9 +11,19 @@ import pytest
 
 from flinttrade_core.exceptions import BrokerError, RateLimitError, SessionExpired
 from flinttrade_core.models import Order
-from flinttrade_engine.safety import SafetyBypassError
+from flinttrade_engine.request_context import RequestContext
+from flinttrade_engine.safety import (
+    EMERGENCY_INTENT_SOURCE,
+    EmergencyBrokerTarget,
+    EmergencyWritePolicy,
+    GatedEmergencyBrokerDispatcher,
+    SafetyBypassError,
+    gate_broker_write,
+    set_safety_gate_secret,
+)
 from flinttrade_gateway.brokers import indmoney_mapping as m
 from flinttrade_gateway.brokers.indmoney import INDMONEY_CAPABILITIES, IndMoneyAdapter, _ROUTER_TOKEN
+from flinttrade_gateway.router import BrokerRouter
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +68,84 @@ class FakeTransport:
 
     def paths(self) -> list[str]:
         return [c["path"] for c in self.calls]
+
+
+_EMERGENCY_SCOPES = (
+    ("derivative", "margin"),
+    ("derivative", "intraday"),
+    ("equity", "cnc"),
+    ("equity", "intraday"),
+)
+
+
+class EmergencyTransport(FakeTransport):
+    """Parameter-aware broker snapshot transport for emergency tests."""
+
+    def __init__(
+        self,
+        *,
+        orders: object | None = None,
+        order_snapshots: list[object] | None = None,
+        order_envelope: object | None = None,
+        position_snapshots: list[dict[tuple[str, str], object]] | None = None,
+        placed_order_id: str = "EQ-EXIT-1",
+        placement_envelope: object | None = None,
+        cancellation_envelope: object | None = None,
+        instruments_csv: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.orders = [] if orders is None else orders
+        self.order_snapshots = order_snapshots
+        self.order_envelope = order_envelope
+        self.position_snapshots = position_snapshots or [{}]
+        self.placed_order_id = placed_order_id
+        self.placement_envelope = placement_envelope
+        self.cancellation_envelope = cancellation_envelope
+        self.instruments_csv = instruments_csv or (
+            "EXCH,SEGMENT,SECURITY_ID,TRADING_SYMBOL,SYMBOL_NAME,LOT_UNITS\n"
+            "NSE,FNO,202,NIFTY25JULFUT,NIFTY,75\n"
+            "BSE,FNO,303,SENSEX25JULFUT,SENSEX,25\n"
+        )
+        self.position_reads = 0
+        self.order_reads = 0
+
+    def __call__(self, method, url, *, headers, params=None, json_body=None):
+        path = url.replace(m.BASE_URL, "")
+        self.calls.append(
+            {"method": method, "path": path, "headers": headers, "params": params, "json": json_body}
+        )
+        if method == "GET" and path == "/order-book":
+            if self.order_envelope is not None:
+                return 200, self.order_envelope
+            orders = self.orders
+            if self.order_snapshots is not None:
+                orders = self.order_snapshots[min(self.order_reads, len(self.order_snapshots) - 1)]
+                self.order_reads += 1
+            return 200, {"status": "success", "data": orders}
+        if method == "GET" and path == "/portfolio/positions":
+            cycle = min(self.position_reads // len(_EMERGENCY_SCOPES), len(self.position_snapshots) - 1)
+            self.position_reads += 1
+            scope = (str((params or {}).get("segment")), str((params or {}).get("product")))
+            configured = self.position_snapshots[cycle].get(scope, [])
+            if isinstance(configured, dict) and "__envelope__" in configured:
+                return 200, configured["__envelope__"]
+            data = (
+                configured
+                if isinstance(configured, dict)
+                else {"net_positions": configured, "day_positions": []}
+            )
+            return 200, {"status": "success", "data": data}
+        if method == "GET" and path == "/market/instruments":
+            return 200, self.instruments_csv
+        if method == "POST" and path == "/order":
+            if self.placement_envelope is not None:
+                return 200, self.placement_envelope
+            return 200, {"status": "success", "data": {"order_id": self.placed_order_id}}
+        if method == "POST" and path in {"/order/cancel", "/smart/order/cancel"}:
+            if self.cancellation_envelope is not None:
+                return 200, self.cancellation_envelope
+            return 200, {"status": "success", "data": {}}
+        return 200, {"status": "success", "data": {}}
 
 
 def _adapter(transport, **kwargs):
@@ -158,6 +247,7 @@ async def test_place_order_with_router_token() -> None:
     assert call["json"]["limit_price"] == 2450.0
     assert call["json"]["algo_id"] == "99999"  # mandatory algo id auto-filled
     assert call["json"]["is_amo"] is False
+    assert session.extra["indmoney_order_families"] == {"EQ-1": "regular"}
 
 
 @pytest.mark.asyncio
@@ -290,6 +380,10 @@ async def test_gtt_variety_dispatches_to_smart_order() -> None:
     oid = await adapter.place_order(session, _gtt_order(), _router_token=_ROUTER_TOKEN)
     assert oid == "DRV-28131451"  # parent id returned
     assert adapter.last_child_order_id == "GTT-2914581"  # child surfaced
+    assert session.extra["indmoney_order_families"] == {
+        "DRV-28131451": "smart",
+        "GTT-2914581": "smart",
+    }
     payload = transport.calls[0]["json"]
     assert payload["sl_trigger_price"] == 34.0 and payload["tgt_trigger_price"] == 41.0
     # Explicit leg limits, honouring the documented strict inequalities.
@@ -881,3 +975,888 @@ async def test_reconcile_clean_on_empty_state() -> None:
     report = await adapter.reconcile(session)
     assert report.adapter_id == "indmoney"
     assert report.clean and report.error == ""
+
+
+# ---------------------------------------------------------------------------
+# Broker-authoritative emergency reduction
+# ---------------------------------------------------------------------------
+
+
+_CANCEL_POLICY = EmergencyWritePolicy(name="indmoney_cancel", verbs=("cancel_all_orders",))
+_EXIT_POLICY = EmergencyWritePolicy(name="indmoney_exit", verbs=("exit_all_positions",))
+_FLATTEN_POLICY = EmergencyWritePolicy(
+    name="indmoney_flatten",
+    verbs=("cancel_all_orders", "exit_all_positions"),
+)
+
+
+def _broker_order(
+    order_id: str,
+    *,
+    status: str = "PENDING",
+    security_id: str = "101",
+    symbol: str = "RELIANCE-EQ",
+    exchange: str = "NSE",
+    segment: str = "EQUITY",
+    product: str = "CNC",
+    action: str = "BUY",
+    order_type: str = "LIMIT",
+    requested_quantity: object = 5,
+    filled_quantity: object = 0,
+    **extra: object,
+) -> dict[str, object]:
+    return {
+        "id": order_id,
+        "status": status,
+        "security_id": security_id,
+        "name": symbol,
+        "exchange": exchange,
+        "segment": segment,
+        "product": product,
+        "txn_type": action,
+        "order_type": order_type,
+        "requested_qty": requested_quantity,
+        "traded_qty": filled_quantity,
+        **extra,
+    }
+
+
+def _broker_position(
+    *,
+    security_id: str = "101",
+    symbol: str = "RELIANCE-EQ",
+    exchange_segment: str = "NSE_EQ",
+    quantity: object = 5,
+) -> dict[str, object]:
+    return {
+        "security_id": security_id,
+        "trading_symbol": symbol,
+        "exchange_segment": exchange_segment,
+        "net_quantity": quantity,
+        "average_price": 2500,
+        "last_traded_price": 2510,
+        "pnl_absolute": 50,
+        "position_type": "open",
+    }
+
+
+async def _emergency_adapter(transport: EmergencyTransport) -> tuple[IndMoneyAdapter, object]:
+    adapter = _adapter(transport)
+    return adapter, await _session(adapter)
+
+
+@pytest.mark.asyncio
+async def test_emergency_plan_proves_two_quiet_books() -> None:
+    transport = EmergencyTransport()
+    adapter, session = await _emergency_adapter(transport)
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_FLATTEN_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert plan.writes == () and plan.pending_verbs == frozenset()
+    assert transport.paths() == ["/order-book", *["/portfolio/positions"] * 4]
+
+
+@pytest.mark.asyncio
+async def test_emergency_plan_cancels_regular_and_smart_orders_exactly() -> None:
+    transport = EmergencyTransport(
+        orders=[
+            _broker_order("EQ-1"),
+            _broker_order("EQ-2", order_type="TRIGGER", trigger_price=2490),
+            _broker_order("GTT-3", order_type="OCO", sl_trigger_price=2400),
+            _broker_order("EQ-DONE", status="SUCCESS"),
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert plan.pending_verbs == frozenset({"cancel_all_orders"})
+    assert [(write.verb, write.payload) for write in plan.writes] == [
+        ("cancel_order", {"_op": "cancel_order", "order_id": "EQ-1", "segment": "EQUITY"}),
+        (
+            "cancel_smart_order",
+            {"_op": "cancel_smart_order", "order_id": "EQ-2", "segment": "EQUITY"},
+        ),
+        (
+            "cancel_smart_order",
+            {"_op": "cancel_smart_order", "order_id": "GTT-3", "segment": "EQUITY"},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_emergency_cancel_batches_are_bounded_to_ten() -> None:
+    transport = EmergencyTransport(orders=[_broker_order(f"EQ-{index}") for index in range(12)])
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {f"EQ-{index}": "regular" for index in range(12)}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert len(plan.writes) == 10
+    assert [write.payload["order_id"] for write in plan.writes] == [f"EQ-{index}" for index in range(10)]
+
+
+@pytest.mark.asyncio
+async def test_emergency_protected_cancel_is_not_replayed() -> None:
+    transport = EmergencyTransport(orders=[_broker_order("EQ-1")])
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset({"EQ-1"}),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert plan.writes == ()
+    assert plan.pending_verbs == frozenset({"cancel_all_orders"})
+
+
+@pytest.mark.asyncio
+async def test_emergency_plan_builds_exact_long_and_short_reductions() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[
+            {
+                ("equity", "cnc"): [_broker_position(security_id="101", quantity=5)],
+                ("derivative", "margin"): [
+                    _broker_position(
+                        security_id="202",
+                        symbol="NIFTY25JULFUT",
+                        exchange_segment="NSE_FNO",
+                        quantity=-75,
+                    )
+                ],
+            }
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert plan.pending_verbs == frozenset({"exit_all_positions"})
+    assert len(plan.writes) == 2
+    by_security = {str(write.payload["security_id"]): write.payload for write in plan.writes}
+    assert by_security["101"]["action"] == "SELL"
+    assert by_security["101"]["quantity"] == "5"
+    assert by_security["101"]["expected_position_quantity"] == "5"
+    assert by_security["202"]["action"] == "BUY"
+    assert by_security["202"]["quantity"] == "75"
+    assert by_security["202"]["expected_position_quantity"] == "-75"
+    assert all(str(payload["emergency_tag"]).startswith("fte-indmoney-") for payload in by_security.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope", "position", "expected_product"),
+    [
+        (
+            ("derivative", "intraday"),
+            _broker_position(
+                security_id="202",
+                symbol="NIFTY25JULFUT",
+                exchange_segment="NSE_FNO",
+                quantity=75,
+            ),
+            "MIS",
+        ),
+        (("equity", "intraday"), _broker_position(quantity=-5), "MIS"),
+    ],
+)
+async def test_emergency_plan_covers_each_intraday_position_scope(
+    scope: tuple[str, str],
+    position: dict[str, object],
+    expected_product: str,
+) -> None:
+    transport = EmergencyTransport(position_snapshots=[{scope: [position]}])
+    adapter, session = await _emergency_adapter(transport)
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert len(plan.writes) == 1
+    assert plan.writes[0].payload["product"] == expected_product
+    assert plan.writes[0].payload["quantity"] == str(abs(int(position["net_quantity"])))
+
+
+@pytest.mark.asyncio
+async def test_emergency_unidentified_exit_blocks_every_write() -> None:
+    transport = EmergencyTransport(
+        orders=[_broker_order("EQ-1")],
+        position_snapshots=[{("equity", "cnc"): [_broker_position()]}],
+    )
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_FLATTEN_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+        unidentified_exit_inflight=True,
+    )
+
+    assert plan.writes == ()
+    assert plan.pending_verbs == frozenset({"cancel_all_orders", "exit_all_positions"})
+
+
+@pytest.mark.asyncio
+async def test_emergency_missing_protected_exit_id_blocks_replay() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): [_broker_position()]}]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_order_ids=frozenset({"EQ-MISSING"}),
+        protected_exit_tags=frozenset({"fte-indmoney-prior"}),
+    )
+
+    assert plan.writes == ()
+    assert plan.pending_verbs == frozenset({"exit_all_positions"})
+
+
+@pytest.mark.asyncio
+async def test_emergency_partial_exit_blocks_duplicate_for_same_episode() -> None:
+    current = {
+        "security_id": "101",
+        "symbol": "RELIANCE-EQ",
+        "exchange": "NSE",
+        "product": "CNC",
+        "quantity": "6",
+    }
+    tag = IndMoneyAdapter._emergency_exit_tag(current, quantity=10)
+    transport = EmergencyTransport(
+        orders=[
+            _broker_order(
+                "EQ-EXIT-1",
+                status="PARTIALLY FILLED",
+                action="SELL",
+                requested_quantity=10,
+                filled_quantity=4,
+            )
+        ],
+        position_snapshots=[{("equity", "cnc"): [_broker_position(quantity=6)]}],
+    )
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-EXIT-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_order_ids=frozenset({"EQ-EXIT-1"}),
+        protected_exit_tags=frozenset({tag}),
+    )
+
+    assert plan.writes == ()
+    assert plan.pending_verbs == frozenset({"exit_all_positions"})
+
+
+@pytest.mark.asyncio
+async def test_emergency_conflicting_exit_is_cancelled_before_replan() -> None:
+    current = {
+        "security_id": "101",
+        "symbol": "RELIANCE-EQ",
+        "exchange": "NSE",
+        "product": "CNC",
+        "quantity": "5",
+    }
+    transport = EmergencyTransport(
+        orders=[
+            _broker_order(
+                "EQ-EXIT-1",
+                action="SELL",
+                requested_quantity=10,
+                filled_quantity=0,
+            )
+        ],
+        position_snapshots=[{("equity", "cnc"): [_broker_position(quantity=5)]}],
+    )
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-EXIT-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_order_ids=frozenset({"EQ-EXIT-1"}),
+        protected_exit_tags=frozenset({IndMoneyAdapter._emergency_exit_tag(current)}),
+    )
+
+    assert [(write.parent_verb, write.verb, write.payload["order_id"]) for write in plan.writes] == [
+        ("exit_all_positions", "cancel_order", "EQ-EXIT-1")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_emergency_unmatched_completed_exit_blocks_another_reduction() -> None:
+    transport = EmergencyTransport(
+        orders=[
+            _broker_order(
+                "EQ-EXIT-1",
+                status="SUCCESS",
+                security_id="999",
+                action="SELL",
+                requested_quantity=5,
+                filled_quantity=5,
+            )
+        ],
+        position_snapshots=[{("equity", "cnc"): [_broker_position(quantity=5)]}],
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_order_ids=frozenset({"EQ-EXIT-1"}),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert plan.writes == ()
+    assert plan.pending_verbs == frozenset({"exit_all_positions"})
+
+
+@pytest.mark.asyncio
+async def test_emergency_malformed_completed_exit_fails_closed() -> None:
+    transport = EmergencyTransport(
+        orders=[
+            _broker_order(
+                "EQ-EXIT-1",
+                status="SUCCESS",
+                security_id="",
+                action="SELL",
+                requested_quantity=5,
+                filled_quantity=5,
+            )
+        ],
+        position_snapshots=[{("equity", "cnc"): [_broker_position(quantity=5)]}],
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="exit security id"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_order_ids=frozenset({"EQ-EXIT-1"}),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "orders",
+    [
+        {},
+        [None],
+        [_broker_order("")],
+        [_broker_order("EQ-1"), _broker_order("EQ-1")],
+    ],
+)
+async def test_emergency_malformed_order_book_fails_closed(orders: object) -> None:
+    transport = EmergencyTransport(orders=orders)
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-1": "regular"}
+
+    with pytest.raises(BrokerError, match="emergency order"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_CANCEL_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_ambiguous_active_parent_fails_closed_after_restart() -> None:
+    transport = EmergencyTransport(orders=[_broker_order("DRV-PARENT", order_type="MARKET")])
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="no authoritative regular/smart family evidence"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_CANCEL_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_local_smart_parent_evidence_selects_smart_cancel() -> None:
+    transport = EmergencyTransport(orders=[_broker_order("DRV-PARENT", order_type="MARKET")])
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"DRV-PARENT": "smart"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert [(write.verb, write.payload["order_id"]) for write in plan.writes] == [
+        ("cancel_smart_order", "DRV-PARENT")
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {},
+        {"status": "failure", "message": "broker refused"},
+        {"status": "success"},
+        {"status": 1, "data": []},
+    ],
+)
+async def test_emergency_order_envelope_must_be_explicit_success(envelope: object) -> None:
+    transport = EmergencyTransport(order_envelope=envelope)
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_CANCEL_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, "", 1])
+async def test_emergency_order_status_is_required(status: object) -> None:
+    transport = EmergencyTransport(orders=[_broker_order("GTT-1", status=status)])
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="order status"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_CANCEL_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_unknown_nonempty_status_remains_cancellable() -> None:
+    transport = EmergencyTransport(orders=[_broker_order("EQ-1", status="BROKER_NEW_STATE")])
+    adapter, session = await _emergency_adapter(transport)
+    session.extra["indmoney_order_families"] = {"EQ-1": "regular"}
+
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    assert [write.payload["order_id"] for write in plan.writes] == ["EQ-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "configured",
+    [
+        {"net_positions": []},
+        [_broker_position(quantity="1.5")],
+        [_broker_position(quantity=1), _broker_position(quantity=2)],
+    ],
+)
+async def test_emergency_malformed_position_book_fails_closed(configured: object) -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): configured}]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="emergency position"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_nonempty_day_positions_fail_closed() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[
+            {
+                ("equity", "cnc"): {
+                    "net_positions": [],
+                    "day_positions": [_broker_position(quantity=5)],
+                }
+            }
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="day-position book cannot be reconciled"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        {},
+        {"status": "failure", "message": "broker refused"},
+        {"status": "success"},
+        {"status": "success", "data": []},
+    ],
+)
+async def test_emergency_position_envelope_must_be_explicit_success(envelope: object) -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[
+            {("derivative", "margin"): {"__envelope__": envelope}}
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_duplicate_identical_position_identity_fails_closed() -> None:
+    position = _broker_position(quantity=5)
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): [position, dict(position)]}]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="duplicate identity"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_derivative_reduction_requires_whole_lot() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[
+            {
+                ("derivative", "margin"): [
+                    _broker_position(
+                        security_id="202",
+                        symbol="NIFTY25JULFUT",
+                        exchange_segment="NSE_FNO",
+                        quantity=74,
+                    )
+                ]
+            }
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError, match="whole lot"):
+        await adapter.plan_emergency_reduction(
+            session,
+            policy=_EXIT_POLICY,
+            protected_order_ids=frozenset(),
+            protected_exit_tags=frozenset(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_reducing_order_requires_router_token_before_readback() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): [_broker_position()]}]
+    )
+    adapter, session = await _emergency_adapter(transport)
+    payload = {
+        "_op": "place_reducing_order",
+        "security_id": "101",
+        "symbol": "RELIANCE-EQ",
+        "exchange": "NSE",
+        "product": "CNC",
+        "quantity": "5",
+        "expected_position_quantity": "5",
+        "action": "SELL",
+        "pricetype": "MARKET",
+        "price": "0",
+        "trigger_price": "0",
+        "variety": "regular",
+        "emergency_tag": "fte-indmoney-placeholder",
+    }
+
+    with pytest.raises(SafetyBypassError):
+        await adapter.place_reducing_order(session, payload)
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reducing_order_rechecks_position_then_places_exact_market_order() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): [_broker_position()]}],
+        placed_order_id="EQ-EXIT-9",
+    )
+    adapter, session = await _emergency_adapter(transport)
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+    payload = dict(plan.writes[0].payload)
+
+    order_id = await adapter.place_reducing_order(session, payload, _router_token=_ROUTER_TOKEN)
+
+    assert order_id == "EQ-EXIT-9"
+    placement = next(call for call in transport.calls if call["method"] == "POST")
+    assert placement["path"] == "/order"
+    assert placement["json"] == {
+        "txn_type": "SELL",
+        "exchange": "NSE",
+        "segment": "EQUITY",
+        "product": "CNC",
+        "qty": 5,
+        "order_type": "MARKET",
+        "validity": "DAY",
+        "security_id": "101",
+        "is_amo": False,
+        "algo_id": "99999",
+    }
+
+
+@pytest.mark.asyncio
+async def test_reducing_order_rejects_non_success_write_envelope() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[{("equity", "cnc"): [_broker_position()]}],
+        placement_envelope={"status": "failure", "data": {"order_id": "EQ-UNTRUSTED"}},
+    )
+    adapter, session = await _emergency_adapter(transport)
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    with pytest.raises(BrokerError):
+        await adapter.place_reducing_order(
+            session,
+            dict(plan.writes[0].payload),
+            _router_token=_ROUTER_TOKEN,
+        )
+
+
+@pytest.mark.asyncio
+async def test_emergency_cancel_rejects_non_success_write_envelope() -> None:
+    transport = EmergencyTransport(
+        orders=[_broker_order("EQ-1")],
+        cancellation_envelope={"status": "failure", "data": {}},
+    )
+    adapter, session = await _emergency_adapter(transport)
+
+    with pytest.raises(BrokerError):
+        await adapter.cancel_order(
+            session,
+            "EQ-1",
+            segment="EQUITY",
+            _router_token=_ROUTER_TOKEN,
+        )
+
+
+@pytest.mark.asyncio
+async def test_reducing_order_refuses_changed_position_before_post() -> None:
+    transport = EmergencyTransport(
+        position_snapshots=[
+            {("equity", "cnc"): [_broker_position(quantity=5)]},
+            {("equity", "cnc"): [_broker_position(quantity=4)]},
+        ]
+    )
+    adapter, session = await _emergency_adapter(transport)
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_EXIT_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+
+    with pytest.raises(BrokerError, match="position changed"):
+        await adapter.place_reducing_order(
+            session,
+            dict(plan.writes[0].payload),
+            _router_token=_ROUTER_TOKEN,
+        )
+    assert not any(call["method"] == "POST" for call in transport.calls)
+
+
+@pytest.mark.asyncio
+async def test_emergency_smart_cancel_traverses_real_broker_router() -> None:
+    set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
+    transport = EmergencyTransport(
+        orders=[_broker_order("EQ-SMART-1", order_type="TRIGGER", trigger_price=2490)]
+    )
+    adapter, session = await _emergency_adapter(transport)
+    plan = await adapter.plan_emergency_reduction(
+        session,
+        policy=_CANCEL_POLICY,
+        protected_order_ids=frozenset(),
+        protected_exit_tags=frozenset(),
+    )
+    write = plan.writes[0]
+    request_ctx = RequestContext(
+        jti="jti-indmoney",
+        actor_type="human",
+        actor_id="operator",
+        mode="live",
+        intent_source=EMERGENCY_INTENT_SOURCE,
+    )
+    safety_ctx = gate_broker_write(
+        write.verb,
+        write.payload,
+        request_ctx,
+        "indmoney",
+        account_id="U1",
+        intent_source=EMERGENCY_INTENT_SOURCE,
+    )
+    router = BrokerRouter(
+        {"indmoney": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+    )
+
+    await router.execute_gated(
+        request_ctx,
+        verb=write.verb,
+        payload=write.payload,
+        safety_ctx=safety_ctx,
+        adapter_id="indmoney",
+        account_id="U1",
+    )
+
+    assert transport.calls[-1]["path"] == "/smart/order/cancel"
+    assert transport.calls[-1]["json"] == {"order_id": "EQ-SMART-1", "segment": "EQUITY"}
+
+
+def test_full_emergency_dispatch_cancels_regular_order_with_signed_segment() -> None:
+    set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
+    transport = EmergencyTransport(
+        order_snapshots=[[_broker_order("EQ-REGULAR-1")], [], []]
+    )
+    adapter = _adapter(transport)
+    session = asyncio.run(_session(adapter))
+    session.extra["indmoney_order_families"] = {"EQ-REGULAR-1": "regular"}
+    request_ctx = RequestContext(
+        jti="jti-indmoney-cancel",
+        actor_type="human",
+        actor_id="operator",
+        mode="live",
+        selector="indmoney:U1",
+    )
+    target = EmergencyBrokerTarget(
+        request_ctx=request_ctx,
+        adapter_id="indmoney",
+        account_id="U1",
+    )
+    router = BrokerRouter(
+        {"indmoney": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: target,
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=4,
+        planned_quiet_reads=2,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(_CANCEL_POLICY, reason="adapter cancellation proof")
+
+    assert result.complete
+    assert result.succeeded("cancel_all_orders")
+    cancellations = [
+        call for call in transport.calls
+        if call["method"] == "POST" and call["path"] == "/order/cancel"
+    ]
+    assert [call["json"] for call in cancellations] == [
+        {"order_id": "EQ-REGULAR-1", "segment": "EQUITY"}
+    ]
+
+
+def test_full_emergency_dispatch_reduces_indmoney_then_proves_quiet() -> None:
+    set_safety_gate_secret(b"0123456789abcdef0123456789abcdef")
+    initial = {("equity", "cnc"): [_broker_position(quantity=5)]}
+    transport = EmergencyTransport(
+        position_snapshots=[initial, initial, {}, {}],
+        placed_order_id="EQ-FULL-1",
+    )
+    adapter = _adapter(transport)
+    session = asyncio.run(_session(adapter))
+    request_ctx = RequestContext(
+        jti="jti-indmoney-full",
+        actor_type="human",
+        actor_id="operator",
+        mode="live",
+        selector="indmoney:U1",
+    )
+    target = EmergencyBrokerTarget(
+        request_ctx=request_ctx,
+        adapter_id="indmoney",
+        account_id="U1",
+    )
+    router = BrokerRouter(
+        {"indmoney": adapter},
+        lambda _ctx, _adapter_id, _account_id: session,
+    )
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=lambda: target,
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=6,
+        planned_quiet_reads=2,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = dispatcher.dispatch(_EXIT_POLICY, reason="adapter integration proof")
+
+    assert result.complete
+    assert result.succeeded("exit_all_positions")
+    placements = [call for call in transport.calls if call["method"] == "POST" and call["path"] == "/order"]
+    assert len(placements) == 1
+    assert placements[0]["json"]["qty"] == 5

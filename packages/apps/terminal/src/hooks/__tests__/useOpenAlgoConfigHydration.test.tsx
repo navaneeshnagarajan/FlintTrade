@@ -62,6 +62,27 @@ describe("useOpenAlgoConfigHydration", () => {
     expect(useConnectionStore.getState().openAlgoHydrated).toBe(false);
   });
 
+  it("does not read protected config and clears runtime credentials without an authenticated owner", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    useConnectionStore.setState({
+      apiKey: "session-only-key",
+      host: "http://127.0.0.1:5000",
+      wsUrl: "ws://127.0.0.1:8765",
+      openAlgoHydrated: true,
+    });
+
+    renderHook(() => useOpenAlgoConfigHydration(false));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useConnectionStore.getState()).toMatchObject({
+      apiKey: "",
+      host: "",
+      wsUrl: "",
+      openAlgoHydrated: false,
+    });
+  });
+
   it("preserves an in-memory API key when the backend omits api_key", () => {
     useConnectionStore.getState().setConfig({ apiKey: "typed-this-session" });
 

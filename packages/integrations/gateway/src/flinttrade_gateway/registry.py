@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any
 
 from .session import BrokerSession
@@ -17,6 +18,19 @@ from .exceptions import BrokerNotFoundError, SessionError
 from .log_safety import account_ref, selector_ref
 
 logger = logging.getLogger("flinttrade.gateway.registry")
+
+
+def _adapter_session_is_connected(session: Any) -> bool:
+    """Return whether an authenticated adapter-layer session remains usable."""
+    connected = getattr(session, "is_connected", None)
+    if isinstance(connected, bool):
+        return connected
+    expires_at = getattr(session, "expires_at", None)
+    if isinstance(expires_at, bool):
+        return False
+    if isinstance(expires_at, (int, float)):
+        return expires_at > time.time()
+    return session is not None
 
 
 class BrokerRegistry:
@@ -325,7 +339,19 @@ class BrokerRegistry:
         forever even with a broker connected.
         """
         with self._lock:
-            return any(s.is_connected for s in self._sessions.values())
+            return any(s.is_connected for s in self._sessions.values()) or any(
+                _adapter_session_is_connected(session)
+                for session in self._adapter_sessions.values()
+            )
+
+    def list_connected_adapter_sessions(self) -> list[tuple[str, str, Any]]:
+        """Return a snapshot of usable native selector sessions in insertion order."""
+        with self._lock:
+            return [
+                (adapter_id, account_id, session)
+                for (adapter_id, account_id), session in self._adapter_sessions.items()
+                if _adapter_session_is_connected(session)
+            ]
 
     def get_primary_account_id(self) -> str | None:
         """Account id of the primary session, falling back to the first

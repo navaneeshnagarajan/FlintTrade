@@ -8,10 +8,10 @@ reset wipes positions anyway.
 Schema (§9.2): ``capital``, ``orders``, ``positions``, ``pnl``, ``mtm``. The
 ``mtm`` table is a circular buffer capped at 100k rows by the ``mtm_cap`` trigger
 (fires every 1000th insert to avoid per-row DELETE cost during tick bursts —
-Database H7). The EOD ``reset`` (§9.4) is crash-atomic: it archives orders + mtm
-to a fsync'd jsonl via tmp-then-rename, then DELETEs the archived rows inside one
-SQL transaction, all under a cross-platform file lock so a CLI run and the 15:30
-cron cannot interleave.
+Database H7). The EOD ``reset`` (§9.4) is crash-atomic: it archives the complete
+session ledger to a fsync'd jsonl via tmp-then-rename, then DELETEs the archived
+rows inside one SQL transaction, all under a cross-platform file lock so a CLI
+run and the 15:30 cron cannot interleave.
 """
 
 from __future__ import annotations
@@ -39,6 +39,24 @@ CREATE TABLE IF NOT EXISTS capital (
     updated_at   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sandbox_config (
+    id                    TEXT PRIMARY KEY DEFAULT 'default',
+    starting_capital      REAL NOT NULL,
+    equity_leverage       INTEGER NOT NULL DEFAULT 1,
+    futures_leverage      INTEGER NOT NULL DEFAULT 1,
+    option_buy_leverage   INTEGER NOT NULL DEFAULT 1,
+    option_sell_leverage  INTEGER NOT NULL DEFAULT 1,
+    squareoff_time        TEXT NOT NULL DEFAULT '15:15',
+    mcx_squareoff_time    TEXT NOT NULL DEFAULT '23:25',
+    updated_at            REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_migrations (
+    source_key   TEXT PRIMARY KEY,
+    row_counts   TEXT NOT NULL,
+    migrated_at  REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS orders (
     order_id    TEXT PRIMARY KEY,
     symbol      TEXT NOT NULL,
@@ -46,17 +64,37 @@ CREATE TABLE IF NOT EXISTS orders (
     action      TEXT NOT NULL CHECK (action IN ('BUY', 'SELL')),
     quantity    INTEGER NOT NULL,
     price       REAL NOT NULL,
+    trigger_price REAL NOT NULL DEFAULT 0.0,
+    stop_triggered INTEGER NOT NULL DEFAULT 0 CHECK (stop_triggered IN (0, 1)),
+    pricetype   TEXT NOT NULL DEFAULT 'MARKET',
     product     TEXT NOT NULL DEFAULT 'MIS',
+    strategy    TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT 'COMPLETE'
                 CHECK (status IN ('PENDING', 'COMPLETE', 'CANCELLED', 'REJECTED', 'PARTIAL')),
     filled_qty  INTEGER NOT NULL DEFAULT 0,
     avg_fill_px REAL,
+    fill_time   REAL,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_orders_created ON orders (created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_status  ON orders (status)
     WHERE status IN ('PENDING', 'PARTIAL');
+
+CREATE TABLE IF NOT EXISTS trades (
+    trade_id    TEXT PRIMARY KEY,
+    order_id    TEXT NOT NULL REFERENCES orders(order_id) ON DELETE CASCADE,
+    symbol      TEXT NOT NULL,
+    exchange    TEXT NOT NULL,
+    action      TEXT NOT NULL CHECK (action IN ('BUY', 'SELL')),
+    quantity    INTEGER NOT NULL,
+    price       REAL NOT NULL,
+    product     TEXT NOT NULL DEFAULT 'MIS',
+    strategy    TEXT NOT NULL DEFAULT '',
+    traded_at   REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trades_traded_at ON trades (traded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_order ON trades (order_id);
 
 CREATE TABLE IF NOT EXISTS positions (
     position_id     TEXT PRIMARY KEY,
@@ -84,6 +122,7 @@ CREATE TABLE IF NOT EXISTS pnl (
     gross_pnl        REAL NOT NULL DEFAULT 0.0,
     charges          REAL NOT NULL DEFAULT 0.0,
     net_pnl          REAL NOT NULL DEFAULT 0.0,
+    total_trades     INTEGER NOT NULL DEFAULT 0,
     high_water_mark  REAL NOT NULL DEFAULT 0.0,
     max_drawdown     REAL NOT NULL DEFAULT 0.0,
     updated_at       REAL NOT NULL
@@ -114,6 +153,28 @@ _MTM_RETENTION_ROWS = 100_000
 def ensure_schema(conn) -> None:
     """Idempotently create the §9.2 sandbox schema (tables, indexes, trigger)."""
     conn.executescript(_SCHEMA_DDL)
+    order_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(orders)").fetchall()
+    }
+    migrations = {
+        "trigger_price": "REAL NOT NULL DEFAULT 0.0",
+        "stop_triggered": "INTEGER NOT NULL DEFAULT 0",
+        "pricetype": "TEXT NOT NULL DEFAULT 'MARKET'",
+        "strategy": "TEXT NOT NULL DEFAULT ''",
+        "fill_time": "REAL",
+    }
+    for column, definition in migrations.items():
+        if column not in order_columns:
+            conn.execute(f"ALTER TABLE orders ADD COLUMN {column} {definition}")
+    pnl_columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(pnl)").fetchall()
+    }
+    if "total_trades" not in pnl_columns:
+        conn.execute(
+            "ALTER TABLE pnl ADD COLUMN total_trades INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def init_capital(conn, initial_capital: float) -> None:
@@ -256,13 +317,13 @@ def _reset_lock(lock_path: Path) -> Iterator[None]:
 
 
 def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_000.0) -> dict[str, Any]:
-    """End-of-day reset: archive orders + mtm; clear positions; reset capital (§9.4).
+    """End-of-day reset: archive and clear the complete Practice session (§9.4).
 
     Crash-atomic: the archive is written to a tmp file, fsync'd, atomically
     renamed, and only then are the archived rows DELETEd inside one SQL
     transaction — all under a file lock. A crash between any two steps leaves a
     consistent state (rows kept if the archive is incomplete). Idempotent within
-    a day: a second run re-archives the now-empty tables (no duplicate rows).
+    a day: repeated runs retain the existing archive and do not duplicate P&L.
     """
     workspace_dir = Path(os.fspath(workspace_dir))
     state_path = workspace_dir / "sandbox" / "state.sqlite"
@@ -277,26 +338,70 @@ def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_
     with _reset_lock(lock_path):
         with closing(open_sqlite(str(state_path), durability="normal")) as conn:
             ensure_schema(conn)
-            order_cols = [c[1] for c in conn.execute("PRAGMA table_info(orders)").fetchall()]
-            mtm_cols = [c[1] for c in conn.execute("PRAGMA table_info(mtm)").fetchall()]
-            order_rows = conn.execute("SELECT * FROM orders").fetchall()
-            mtm_rows = conn.execute("SELECT * FROM mtm").fetchall()
+            archived_records: list[dict[str, Any]] = []
+            table_rows: dict[str, list[tuple[Any, ...]]] = {}
+            for table in ("orders", "trades", "positions", "mtm"):
+                columns = [
+                    column[1]
+                    for column in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                ]
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                table_rows[table] = rows
+                archived_records.extend(
+                    {"_table": table, **dict(zip(columns, row))}
+                    for row in rows
+                )
+
+            def archive_key(record: dict[str, Any]) -> tuple[str, Any]:
+                table = str(record.get("_table") or "")
+                if not table:
+                    if "trade_id" in record:
+                        table = "trades"
+                    elif "position_id" in record:
+                        table = "positions"
+                    elif "tick_ts" in record and "id" in record:
+                        table = "mtm"
+                    elif "order_id" in record:
+                        table = "orders"
+                primary_keys = {
+                    "orders": "order_id",
+                    "trades": "trade_id",
+                    "positions": "position_id",
+                    "mtm": "id",
+                }
+                key_name = primary_keys.get(table)
+                if key_name is None:
+                    return table, json.dumps(record, sort_keys=True, default=str)
+                return table, record.get(key_name)
+
+            existing_records: list[dict[str, Any]] = []
+            if archive_path.exists():
+                for line in archive_path.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        existing_records.append(json.loads(line))
+
+            known_keys = {archive_key(record) for record in existing_records}
+            merged_records = list(existing_records)
+            for record in archived_records:
+                key = archive_key(record)
+                if key not in known_keys:
+                    merged_records.append(record)
+                    known_keys.add(key)
 
             # 1. archive → tmp → fsync → atomic rename → fsync parent dir.
-            with archive_tmp_path.open("w", encoding="utf-8") as f:
-                for row in order_rows:
-                    f.write(json.dumps(dict(zip(order_cols, row))) + "\n")
-                for row in mtm_rows:
-                    f.write(json.dumps(dict(zip(mtm_cols, row))) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(archive_tmp_path, archive_path)
-            if hasattr(os, "O_DIRECTORY"):
-                dir_fd = os.open(str(sessions_dir), os.O_DIRECTORY)
-                try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
+            if archived_records or not archive_path.exists():
+                with archive_tmp_path.open("w", encoding="utf-8") as f:
+                    for record in merged_records:
+                        f.write(json.dumps(record, default=str) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(archive_tmp_path, archive_path)
+                if hasattr(os, "O_DIRECTORY"):
+                    dir_fd = os.open(str(sessions_dir), os.O_DIRECTORY)
+                    try:
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
 
             # 2. DELETE archived rows inside one transaction (Database H10).
             conn.execute("BEGIN IMMEDIATE")
@@ -307,22 +412,41 @@ def reset(workspace_dir: str | os.PathLike[str], initial_capital: float = 1_000_
                 ).fetchone()
                 realised_total, unrealised_total = agg[0] or 0.0, agg[1] or 0.0
                 net_pnl = realised_total + unrealised_total
-                conn.execute(
-                    "INSERT INTO pnl (session_date, realised_total, unrealised_total, "
-                    "gross_pnl, charges, net_pnl, updated_at) "
-                    "VALUES (?, ?, ?, ?, 0.0, ?, ?) "
-                    "ON CONFLICT (session_date) DO UPDATE SET "
-                    "realised_total = excluded.realised_total, "
-                    "unrealised_total = excluded.unrealised_total, "
-                    "net_pnl = excluded.net_pnl, updated_at = excluded.updated_at",
-                    (session_date, realised_total, unrealised_total, net_pnl, net_pnl, time.time()),
-                )
+                total_trades = len(table_rows["trades"])
+                if archived_records:
+                    conn.execute(
+                        "INSERT INTO pnl (session_date, realised_total, unrealised_total, "
+                        "gross_pnl, charges, net_pnl, total_trades, updated_at) "
+                        "VALUES (?, ?, ?, ?, 0.0, ?, ?, ?) "
+                        "ON CONFLICT (session_date) DO UPDATE SET "
+                        "realised_total = pnl.realised_total + excluded.realised_total, "
+                        "unrealised_total = pnl.unrealised_total + excluded.unrealised_total, "
+                        "gross_pnl = pnl.gross_pnl + excluded.gross_pnl, "
+                        "net_pnl = pnl.net_pnl + excluded.net_pnl, "
+                        "total_trades = pnl.total_trades + excluded.total_trades, "
+                        "updated_at = excluded.updated_at",
+                        (
+                            session_date,
+                            realised_total,
+                            unrealised_total,
+                            net_pnl,
+                            net_pnl,
+                            total_trades,
+                            time.time(),
+                        ),
+                    )
                 conn.execute("DELETE FROM mtm")
+                conn.execute("DELETE FROM trades")
                 conn.execute("DELETE FROM positions")
-                conn.execute("DELETE FROM orders WHERE status NOT IN ('PENDING')")
+                conn.execute("DELETE FROM orders")
+                config_row = conn.execute(
+                    "SELECT starting_capital FROM sandbox_config WHERE id = 'default'"
+                ).fetchone()
+                reset_capital = float(config_row[0]) if config_row else float(initial_capital)
                 conn.execute(
-                    "UPDATE capital SET current = ?, used_margin = 0.0, updated_at = ? WHERE id = 'default'",
-                    (initial_capital, time.time()),
+                    "UPDATE capital SET initial = ?, current = ?, used_margin = 0.0, "
+                    "updated_at = ? WHERE id = 'default'",
+                    (reset_capital, reset_capital, time.time()),
                 )
                 conn.execute("COMMIT")
             except Exception:

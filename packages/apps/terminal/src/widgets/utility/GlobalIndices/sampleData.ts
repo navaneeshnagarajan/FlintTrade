@@ -108,5 +108,3 @@ export const SAMPLE_INDICES: GlobalIndexEntry[] = [
     history: generateHistory(3_041, 10),
   },
 ];
-
-export const SAMPLE_UPDATED_AT = new Date().toISOString();

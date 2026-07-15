@@ -19,7 +19,7 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 const mockModeStore = vi.hoisted(() => vi.fn());
 const mockPlaceOrder = vi.hoisted(() => vi.fn());
 const mockCancelAllOrders = vi.hoisted(() => vi.fn());
-const mockClosePosition = vi.hoisted(() => vi.fn());
+const mockExitAllPositions = vi.hoisted(() => vi.fn());
 const mockGetExpiry = vi.hoisted(() => vi.fn());
 const mockGetQuotes = vi.hoisted(() => vi.fn());
 const mockGetSymbol = vi.hoisted(() => vi.fn());
@@ -34,7 +34,7 @@ const mockTicks = vi.hoisted(() => ({
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
   cancelAllOrders: mockCancelAllOrders,
-  closePosition: mockClosePosition,
+  exitAllPositions: mockExitAllPositions,
   getExpiry: mockGetExpiry,
   getQuotes: mockGetQuotes,
   getSymbol: mockGetSymbol,
@@ -112,7 +112,7 @@ describe("ScalperWidget", () => {
     mockPlaceOrder.mockResolvedValue({});
     mockPlaceBracketOrder.mockResolvedValue({ message: "Bracket placed", data: null });
     mockCancelAllOrders.mockResolvedValue({});
-    mockClosePosition.mockResolvedValue({});
+    mockExitAllPositions.mockResolvedValue({});
     mockGetExpiry.mockResolvedValue(["2026-04-10", "2026-04-17"]);
     mockGetQuotes.mockResolvedValue({ ltp: 24000 });
     // Primary lot-size source: the broker symbol master (QuickTrade's
@@ -182,6 +182,7 @@ describe("ScalperWidget", () => {
 
     expect(screen.getByText("Close All")).toBeInTheDocument();
     expect(screen.getByText("Cancel All")).toBeInTheDocument();
+    expect(screen.getByText(/all pending orders for the selected broker account/i)).toBeInTheDocument();
   });
 
   // ── Interaction tests ────────────────────────────────────────────────────

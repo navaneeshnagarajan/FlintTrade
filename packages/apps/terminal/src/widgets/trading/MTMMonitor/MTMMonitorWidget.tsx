@@ -45,7 +45,7 @@ import { Button } from "@/components/ui/button";
 import { isMarketHours } from "@/lib/market";
 import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -139,7 +139,7 @@ function formatUpdatedAt(ms: number): string {
 // Widget
 // ---------------------------------------------------------------------------
 function MTMMonitorWidget(_props: WidgetProps) {
-  const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = useAccountReadsEnabled();
   const {
     data: positions,
     isError: isPositionsError,
@@ -147,8 +147,8 @@ function MTMMonitorWidget(_props: WidgetProps) {
     refetch: refetchPositions,
     isFetching: isPositionsFetching,
     dataUpdatedAt,
-  } = usePositions({ enabled: isBrokerConnected });
-  const { data: _funds } = useFunds({ enabled: isBrokerConnected }); // keeps store updated
+  } = usePositions({ enabled: accountReadsEnabled });
+  const { data: _funds } = useFunds({ enabled: accountReadsEnabled }); // keeps store updated
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -401,7 +401,7 @@ function MTMMonitorWidget(_props: WidgetProps) {
           <span className="text-xxs text-text-muted font-mono tabular-nums">
             Target {formatINR(riskLimits.mtmTarget)} / SL {formatINR(riskLimits.mtmStoploss)}
           </span>
-          {!isBrokerConnected && (
+          {!accountReadsEnabled && (
             <Badge
               variant="outline"
               className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
@@ -409,7 +409,7 @@ function MTMMonitorWidget(_props: WidgetProps) {
               Broker required
             </Badge>
           )}
-          {isBrokerConnected && hasUpdate && (
+          {accountReadsEnabled && hasUpdate && (
             <span
               className={`text-xxs font-mono tabular-nums flex items-center gap-0.5 ${
                 isStale ? "text-warning" : "text-text-muted"
@@ -435,7 +435,7 @@ function MTMMonitorWidget(_props: WidgetProps) {
 
       {/* Position-feed failure banner — the chart freezes on the last good
           tick, so say so instead of silently showing a frozen P&L. */}
-      {isBrokerConnected && isPositionsError && (
+      {accountReadsEnabled && isPositionsError && (
         <div
           role="alert"
           className="flex items-center gap-2 px-3 py-1.5 border-b border-loss/20 bg-loss/10 shrink-0"

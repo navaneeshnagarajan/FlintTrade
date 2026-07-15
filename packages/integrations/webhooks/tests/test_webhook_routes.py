@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +12,7 @@ from flask import Flask
 
 import flinttrade_webhooks.webhook_routes as mod
 from flinttrade_webhooks.webhook_receiver import WebhookConfig
+from flinttrade_webhooks.webhook_hmac import build_webhook_signature_payload
 from flinttrade_webhooks.webhook_secret_store import WebhookSecretStore
 
 
@@ -147,6 +149,80 @@ def test_receive_rate_limited():
     assert resp.status_code == 429
 
 
+def test_bad_signature_does_not_consume_authenticated_rate_limit():
+    """Unauthenticated traffic cannot starve valid signed relays."""
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    receiver = _mock_receiver(sig_ok=False)
+    mod.init_webhook_routes(receiver)
+    flask_app.register_blueprint(mod.webhook_bp)
+
+    with flask_app.test_client() as c:
+        resp = c.post(
+            "/v1/webhook/tradingview",
+            data=json.dumps({"symbol": "NIFTY"}),
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 401
+    receiver.check_rate_limit.assert_not_called()
+
+
+def test_unregistered_named_path_does_not_consume_authenticated_rate_limit():
+    """Unknown endpoint probes are rejected before shared quota accounting."""
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    receiver = _mock_receiver()
+    mod.init_webhook_routes(receiver, endpoint_status_provider=lambda _path: None)
+    flask_app.register_blueprint(mod.webhook_bp)
+
+    with flask_app.test_client() as c:
+        resp = c.post(
+            "/v1/webhook/custom/not-registered",
+            data=json.dumps({"symbol": "NIFTY"}),
+            content_type="application/json",
+        )
+
+    assert resp.status_code == 404
+    receiver.check_rate_limit.assert_not_called()
+
+
+def test_stale_signed_request_does_not_consume_authenticated_rate_limit(tmp_path):
+    """Captured signed traffic is rejected before shared quota accounting."""
+    secret = "stale-quota-secret"
+    path = "/v1/webhook/custom/stale-quota"
+    store = WebhookSecretStore(tmp_path / "webhooks.db", "test-master-password")
+    store.store_secret(path, "custom", "Stale quota", secret)
+    receiver = MagicMock()
+    receiver._config = WebhookConfig(rate_limit=1)
+    receiver.verify_signature.return_value = True
+    receiver.check_rate_limit.return_value = True
+    flask_app = Flask(__name__)
+    flask_app.config["TESTING"] = True
+    mod.init_webhook_routes(
+        receiver,
+        secret_store=store,
+        endpoint_status_provider=lambda candidate: candidate == path,
+    )
+    flask_app.register_blueprint(mod.webhook_bp)
+    body = json.dumps({"action": "signal", "symbol": "NIFTY"}).encode()
+
+    with flask_app.test_client() as c:
+        stale = c.post(
+            path,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Signature": "sha256=accepted-by-mock",
+                "X-Webhook-Nonce": "captured-stale-nonce",
+                "X-Webhook-Timestamp": str(time.time() - 600),
+            },
+        )
+
+    assert stale.status_code == 400
+    receiver.check_rate_limit.assert_not_called()
+
+
 def test_receive_named_endpoint_disabled_by_registry():
     """503 when the mounted endpoint registry marks a named endpoint disabled."""
     flask_app = Flask(__name__)
@@ -186,10 +262,10 @@ def test_receive_named_endpoint_registry_failure_fails_closed():
 
 
 def test_receive_invalid_json(client):
-    """400 for non-JSON body."""
+    """400 for a body that is neither JSON nor valid provider text."""
     resp = client.post(
         "/v1/webhook/tradingview",
-        data=b"not-json",
+        data=b"\xff",
         content_type="text/plain",
     )
     assert resp.status_code == 400
@@ -240,12 +316,13 @@ class TestNamedWebhookSecrets:
         import hashlib
         import hmac
 
-        ts = time.time() if timestamp is None else timestamp
+        ts = str(time.time() if timestamp is None else timestamp)
+        signed_payload = build_webhook_signature_payload(body, nonce=nonce, timestamp=ts)
         return {
             "Content-Type": "application/json",
-            "X-Signature": "sha256=" + hmac.new(_SECRET.encode(), body, hashlib.sha256).hexdigest(),
+            "X-Signature": "sha256=" + hmac.new(_SECRET.encode(), signed_payload, hashlib.sha256).hexdigest(),
             "X-Webhook-Nonce": nonce,
-            "X-Webhook-Timestamp": str(ts),
+            "X-Webhook-Timestamp": ts,
         }
 
     def test_signed_named_webhook_dispatches_and_replay_is_rejected(self, signed_client):
@@ -258,6 +335,108 @@ class TestNamedWebhookSecrets:
         replay = signed_client.post("/v1/webhook/custom/signed", data=body, headers=headers)
         assert replay.status_code == 409
         assert replay.get_json()["message"] == "Webhook replay rejected"
+
+    def test_rate_limited_signed_intent_can_retry_same_nonce(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        path = "/v1/webhook/custom/quota-retry"
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret(path, "custom", "Quota retry", _SECRET)
+        receiver = WebhookReceiver(WebhookConfig(secret="", rate_limit=1))
+        receiver.check_rate_limit = MagicMock(side_effect=[False, True])
+        mod.init_webhook_routes(receiver, secret_store=store)
+        flask_app = Flask("signed_webhook_quota_retry")
+        flask_app.config["TESTING"] = True
+        flask_app.register_blueprint(mod.webhook_bp)
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        headers = self._headers(body, nonce="quota-retry-nonce")
+
+        with flask_app.test_client() as client:
+            limited = client.post(path, data=body, headers=headers)
+            retried = client.post(path, data=body, headers=headers)
+            replay = client.post(path, data=body, headers=headers)
+
+        assert limited.status_code == 429
+        assert retried.status_code == 200
+        assert replay.status_code == 409
+        assert receiver.check_rate_limit.call_count == 2
+
+    def test_concurrent_replay_loser_does_not_consume_quota(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        path = "/v1/webhook/custom/concurrent-replay"
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret(path, "custom", "Concurrent replay", _SECRET)
+        receiver = WebhookReceiver(WebhookConfig(secret="", rate_limit=2))
+        rate_entered = threading.Event()
+        release_rate = threading.Event()
+
+        def blocking_rate_check() -> bool:
+            rate_entered.set()
+            return release_rate.wait(timeout=5)
+
+        receiver.check_rate_limit = MagicMock(side_effect=blocking_rate_check)
+        mod.init_webhook_routes(receiver, secret_store=store)
+        flask_app = Flask("signed_webhook_concurrent_replay")
+        flask_app.config["TESTING"] = True
+        flask_app.register_blueprint(mod.webhook_bp)
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        headers = self._headers(body, nonce="concurrent-replay-nonce")
+        first_result: dict[str, object] = {}
+
+        def post_first() -> None:
+            with flask_app.test_client() as client:
+                first_result["response"] = client.post(path, data=body, headers=headers)
+
+        first = threading.Thread(target=post_first)
+        first.start()
+        assert rate_entered.wait(timeout=5)
+
+        with flask_app.test_client() as client:
+            replay = client.post(path, data=body, headers=headers)
+        release_rate.set()
+        first.join(timeout=5)
+
+        assert not first.is_alive()
+        assert first_result["response"].status_code == 200
+        assert replay.status_code == 409
+        assert receiver.check_rate_limit.call_count == 1
+
+    def test_captured_body_signature_cannot_be_replayed_with_fresh_headers(self, signed_client):
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        captured = self._headers(body, nonce="captured-nonce")
+        forged = dict(captured)
+        forged["X-Webhook-Nonce"] = "fresh-nonce"
+        forged["X-Webhook-Timestamp"] = str(time.time())
+
+        resp = signed_client.post("/v1/webhook/custom/signed", data=body, headers=forged)
+
+        assert resp.status_code == 401
+        assert resp.get_json()["message"] == "Signature verification failed"
+
+    def test_unregistered_named_endpoint_is_rejected_even_with_orphan_secret(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        flask_app = Flask("orphan_webhook_secret")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret("/v1/webhook/custom/orphan", "custom", "Orphan", _SECRET)
+        mod.init_webhook_routes(
+            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
+            secret_store=store,
+            endpoint_status_provider=lambda _path: None,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+
+        resp = flask_app.test_client().post(
+            "/v1/webhook/custom/orphan",
+            data=body,
+            headers=self._headers(body, nonce="orphan-nonce"),
+        )
+
+        assert resp.status_code == 404
+        assert resp.get_json()["message"] == "Webhook endpoint is not registered"
 
     def test_signed_order_webhook_threads_verified_nonce_to_dispatcher(self, tmp_path):
         from flinttrade_webhooks.webhook_receiver import WebhookPayload, WebhookReceiver
@@ -313,6 +492,18 @@ class TestNamedWebhookSecrets:
         assert resp.status_code == 400
         assert "nonce and timestamp" in resp.get_json()["message"]
 
+    @pytest.mark.parametrize("timestamp", [float("nan"), float("inf"), float("-inf")])
+    def test_signed_named_webhook_rejects_non_finite_timestamp(self, signed_client, timestamp):
+        body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
+        resp = signed_client.post(
+            "/v1/webhook/custom/signed",
+            data=body,
+            headers=self._headers(body, nonce=f"non-finite-{timestamp}", timestamp=timestamp),
+        )
+
+        assert resp.status_code == 400
+        assert "nonce and timestamp" in resp.get_json()["message"]
+
     def test_signed_place_order_still_fails_honestly(self, signed_client):
         body = json.dumps({"action": "BUY", "symbol": "NIFTY", "exchange": "NSE"}).encode()
         resp = signed_client.post(
@@ -320,8 +511,83 @@ class TestNamedWebhookSecrets:
             data=body,
             headers=self._headers(body, nonce="order-nonce-1"),
         )
+        assert resp.status_code == 422
+        body = resp.get_json()
+        assert body["status"] == "error"
+        assert body["data"]["action"] == "place_order"
+        assert "no order was placed" in body["message"]
+
+    def test_signed_text_tradingview_payload_reaches_canonical_parser(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        flask_app = Flask("signed_text_tradingview")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret("/v1/webhook/tradingview/text-order", "tradingview", "Text Order", _SECRET)
+        mod.init_webhook_routes(
+            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
+            secret_store=store,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+
+        body = b"BUY BANKNIFTY NFO 30 LIMIT 51000"
+        resp = flask_app.test_client().post(
+            "/v1/webhook/tradingview/text-order",
+            data=body,
+            headers=self._headers(body, nonce="text-order-1"),
+        )
+
+        assert resp.status_code == 422
+        payload = resp.get_json()["data"]
+        assert payload["action"] == "place_order"
+        assert payload["symbol"] == "BANKNIFTY"
+
+    def test_signed_chartink_csv_payload_reaches_canonical_parser(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        flask_app = Flask("signed_csv_chartink")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret("/v1/webhook/chartink/csv-scan", "chartink", "CSV Scan", _SECRET)
+        mod.init_webhook_routes(
+            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
+            secret_store=store,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+
+        body = b"NSE:RELIANCE-EQ,TCS,INFY-BE"
+        resp = flask_app.test_client().post(
+            "/v1/webhook/chartink/csv-scan",
+            data=body,
+            headers=self._headers(body, nonce="csv-scan-1"),
+        )
+
         assert resp.status_code == 200
-        data = resp.get_json()["data"]
-        assert data["status"] == "error"
-        assert data["action"] == "place_order"
-        assert "no order was placed" in data["message"]
+        payload = resp.get_json()["data"]
+        assert payload["status"] == "received"
+        assert payload["symbol"] == "RELIANCE"
+
+    def test_signed_gocharting_text_payload_reaches_canonical_parser(self, tmp_path):
+        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
+
+        flask_app = Flask("signed_text_gocharting")
+        flask_app.config["TESTING"] = True
+        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
+        store.store_secret("/v1/webhook/gocharting/text-order", "gocharting", "Text Order", _SECRET)
+        mod.init_webhook_routes(
+            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
+            secret_store=store,
+        )
+        flask_app.register_blueprint(mod.webhook_bp)
+
+        body = b"BUY BANKNIFTY NFO 30 LIMIT 51000"
+        resp = flask_app.test_client().post(
+            "/v1/webhook/gocharting/text-order",
+            data=body,
+            headers=self._headers(body, nonce="gocharting-text-order-1"),
+        )
+
+        assert resp.status_code == 422
+        payload = resp.get_json()["data"]
+        assert payload["action"] == "place_order"
+        assert payload["symbol"] == "BANKNIFTY"

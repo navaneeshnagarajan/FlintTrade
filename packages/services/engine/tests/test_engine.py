@@ -70,6 +70,17 @@ class TestOrderValidation:
         assert not result.passed
         assert "exceeds" in result.reason.lower()
 
+    def test_oco_second_leg_quantity_exceeds_limit_fails(self):
+        from flinttrade_engine.safety import OrderValidation
+
+        layer = OrderValidation(qty_limits={"NSE": 1}, check_market_hours=False)
+        order = self._make_order(quantity="1", quantity1="2")
+
+        result = layer.validate(order)
+
+        assert not result.passed
+        assert "Second-leg quantity 2 exceeds NSE limit of 1" in result.reason
+
     def test_limit_price_within_tolerance_passes(self):
         from flinttrade_engine.safety import OrderValidation
         layer = OrderValidation(price_deviation_pct=5.0, check_market_hours=False)
@@ -347,6 +358,72 @@ class TestPositionLimits:
         result = layer.validate(positions, used_margin=0, total_balance=100000)
         assert result.passed  # only 2 active (A, C), under limit of 3
 
+    @pytest.mark.parametrize(
+        ("position_qty", "action"),
+        [("10", "SELL"), ("-10", "BUY")],
+    )
+    def test_strict_position_reduction_passes_when_caps_are_already_breached(
+        self,
+        position_qty,
+        action,
+    ):
+        from flinttrade_core.models import Order, Position
+        from flinttrade_engine.safety import PositionLimits
+
+        order = Order(
+            symbol="RELIANCE",
+            exchange="NSE",
+            product="MIS",
+            action=action,
+            quantity="10",
+        )
+        positions = [
+            Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity=position_qty),
+        ]
+
+        result = PositionLimits(max_positions=1, max_margin_pct=60).validate(
+            positions,
+            used_margin=90_000,
+            total_balance=100_000,
+            order=order,
+        )
+
+        assert result.passed
+
+    @pytest.mark.parametrize(
+        "order",
+        [
+            pytest.param(
+                {"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS", "action": "BUY", "quantity": "1"},
+                id="increases-long",
+            ),
+            pytest.param(
+                {"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS", "action": "SELL", "quantity": "11"},
+                id="crosses-through-zero",
+            ),
+            pytest.param(
+                {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "SELL", "quantity": "10"},
+                id="wrong-product",
+            ),
+            pytest.param(
+                {"symbol": "INFY", "exchange": "NSE", "product": "MIS", "action": "SELL", "quantity": "10"},
+                id="wrong-symbol",
+            ),
+        ],
+    )
+    def test_non_reducing_orders_remain_blocked_when_caps_are_breached(self, order):
+        from flinttrade_core.models import Order, Position
+        from flinttrade_engine.safety import PositionLimits
+
+        result = PositionLimits(max_positions=1, max_margin_pct=60).validate(
+            [Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="10")],
+            used_margin=90_000,
+            total_balance=100_000,
+            order=Order(**order),
+        )
+
+        assert not result.passed
+
 
 # ======================================================================
 # Layer 3 — Portfolio Risk (Greeks)
@@ -389,70 +466,110 @@ class TestPortfolioRisk:
 
 
 class TestDailyPnLLimits:
-    """Test Layer 4: pause trigger and kill switch."""
+    """Test Layer 4: reversible pause and persistent new-order hard stop."""
 
     def test_profit_passes(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits()
-        result = layer.validate(daily_pnl=5000, starting_capital=100000)
+        result = layer.validate(daily_pnl=5000, starting_capital=100000, selector="dhan:primary")
         assert result.passed
 
     def test_small_loss_passes(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(pause_pct=3.0)
-        result = layer.validate(daily_pnl=-2000, starting_capital=100000)
+        result = layer.validate(daily_pnl=-2000, starting_capital=100000, selector="dhan:primary")
         assert result.passed
 
     def test_3pct_loss_triggers_pause(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(pause_pct=3.0, kill_pct=15.0)
-        result = layer.validate(daily_pnl=-3500, starting_capital=100000)
+        result = layer.validate(daily_pnl=-3500, starting_capital=100000, selector="dhan:primary")
         assert not result.passed
         assert layer.is_paused
         assert "pause" in result.reason.lower()
 
-    def test_15pct_loss_triggers_kill(self):
+    def test_15pct_loss_triggers_hard_stop(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(pause_pct=3.0, kill_pct=15.0)
-        result = layer.validate(daily_pnl=-16000, starting_capital=100000)
+        result = layer.validate(daily_pnl=-16000, starting_capital=100000, selector="dhan:primary")
         assert not result.passed
         assert layer.is_killed
-        assert "kill" in result.reason.lower()
+        assert "hard stop" in result.reason.lower()
 
     def test_pause_blocks_subsequent_orders(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(pause_pct=3.0)
-        layer.validate(daily_pnl=-5000, starting_capital=100000)
+        layer.validate(daily_pnl=-5000, starting_capital=100000, selector="dhan:primary")
         assert layer.is_paused
-        result = layer.validate(daily_pnl=0, starting_capital=100000)
+        result = layer.validate(daily_pnl=0, starting_capital=100000, selector="dhan:primary")
         assert not result.passed
 
     def test_reset_pause_allows_trading(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(pause_pct=3.0)
-        layer.validate(daily_pnl=-5000, starting_capital=100000)
-        layer.reset_pause()
-        result = layer.validate(daily_pnl=0, starting_capital=100000)
+        layer.validate(daily_pnl=-5000, starting_capital=100000, selector="dhan:primary")
+        layer.reset_pause("dhan:primary")
+        result = layer.validate(daily_pnl=0, starting_capital=100000, selector="dhan:primary")
         assert result.passed
 
     def test_kill_requires_explicit_reset(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits(kill_pct=15.0)
-        layer.validate(daily_pnl=-20000, starting_capital=100000)
+        layer.validate(daily_pnl=-20000, starting_capital=100000, selector="dhan:primary")
         assert layer.is_killed
-        # Even with zero loss, kill persists
-        result = layer.validate(daily_pnl=0, starting_capital=100000)
+        # Even with zero current loss, the Layer 4 hard-stop latch persists
+        result = layer.validate(daily_pnl=0, starting_capital=100000, selector="dhan:primary")
         assert not result.passed
         # Explicit reset
-        layer.reset_kill()
-        result = layer.validate(daily_pnl=0, starting_capital=100000)
+        layer.reset_kill("dhan:primary")
+        result = layer.validate(daily_pnl=0, starting_capital=100000, selector="dhan:primary")
         assert result.passed
 
-    def test_zero_capital_passes(self):
+    def test_zero_capital_fails_closed(self):
         from flinttrade_engine.safety import DailyPnLLimits
         layer = DailyPnLLimits()
-        result = layer.validate(daily_pnl=-1000, starting_capital=0)
-        assert result.passed
+        result = layer.validate(daily_pnl=-1000, starting_capital=0, selector="openalgo:default")
+        assert not result.passed
+        assert "opening risk capital" in result.reason.lower()
+
+    def test_failed_latch_persistence_stays_blocked_until_successful_reset(self):
+        from flinttrade_engine.daily_pnl_state import InMemoryDailyPnLStateStore
+        from flinttrade_engine.safety import DailyPnLLimits
+
+        class FlakyStore(InMemoryDailyPnLStateStore):
+            fail_latch = True
+
+            def latch(self, **kwargs):
+                if self.fail_latch:
+                    raise OSError("storage unavailable")
+                return super().latch(**kwargs)
+
+        store = FlakyStore()
+        layer = DailyPnLLimits(pause_pct=3.0, kill_pct=15.0)
+        layer.bind_state_store(store)
+
+        triggered = layer.validate(
+            daily_pnl=-20_000,
+            starting_capital=100_000,
+            selector="dhan:primary",
+        )
+        assert not triggered.passed
+
+        store.fail_latch = False
+        recovered_pnl = layer.validate(
+            daily_pnl=0,
+            starting_capital=100_000,
+            selector="dhan:primary",
+        )
+        assert not recovered_pnl.passed
+        assert "manual reset" in recovered_pnl.reason.lower()
+
+        layer.reset("dhan:primary")
+        assert layer.validate(
+            daily_pnl=0,
+            starting_capital=100_000,
+            selector="dhan:primary",
+        ).passed
 
 
 # ======================================================================
@@ -530,6 +647,7 @@ class TestSafetySystem:
         ss = self._make_system()
         results = ss.check_order(
             self._make_order(),
+            selector="dhan:primary",
             ltp=2500.0,
             positions=[],
             used_margin=10000,
@@ -546,6 +664,7 @@ class TestSafetySystem:
         mid_day = datetime(2026, 3, 16, 12, 0, 0, tzinfo=IST)
         results = ss.check_order(
             self._make_order(),
+            selector="dhan:primary",
             ltp=2500.0,
             positions=[],
             used_margin=10000,
@@ -563,6 +682,7 @@ class TestSafetySystem:
         evening = datetime(2026, 3, 16, 18, 0, 0, tzinfo=IST)
         results = ss.check_order(
             self._make_order(),
+            selector="dhan:primary",
             starting_capital=100000,
             at=evening,
         )
@@ -574,23 +694,64 @@ class TestSafetySystem:
     def test_kill_switch_blocks_immediately(self):
         ss = self._make_system()
         ss.l5_kill.activate("Test")
-        results = ss.check_order(self._make_order())
+        results = ss.check_order(self._make_order(), selector="dhan:primary")
         assert len(results) == 1
         assert results[0].layer == "L5_KILL"
 
-    def test_pnl_kill_blocks_before_order_check(self):
+    def test_pnl_hard_stop_blocks_before_order_check(self):
         ss = self._make_system()
         results = ss.check_order(
             self._make_order(),
+            selector="dhan:primary",
             daily_pnl=-20000,
             starting_capital=100000,
         )
         assert any(r.layer == "L4_PNL" and not r.passed for r in results)
 
+    def test_non_finite_daily_pnl_fails_closed(self):
+        ss = self._make_system()
+
+        results = ss.check_order(
+            self._make_order(),
+            selector="dhan:primary",
+            daily_pnl=float("nan"),
+            starting_capital=100000,
+        )
+
+        assert results[-1].layer == "L4_PNL"
+        assert not results[-1].passed
+        assert "unavailable" in results[-1].reason.lower()
+
+    def test_pnl_hard_stop_never_activates_layer_five_dispatch(self):
+        from flinttrade_engine.safety import SafetyConfig, SafetySystem
+
+        dispatcher = MagicMock()
+        ss = SafetySystem(SafetyConfig(check_market_hours=False), emergency_dispatcher=dispatcher)
+
+        results = ss.check_order(
+            self._make_order(),
+            selector="dhan:primary",
+            daily_pnl=-20000,
+            starting_capital=100000,
+        )
+        subsequent = ss.check_order(
+            self._make_order(),
+            selector="dhan:primary",
+            starting_capital=100000,
+        )
+
+        assert any(r.layer == "L4_PNL" and not r.passed for r in results)
+        assert subsequent[-1].layer == "L4_PNL"
+        assert subsequent[-1].passed is False
+        assert ss.l4_pnl.is_killed is True
+        assert ss.l5_kill.is_active is False
+        assert dispatcher.mock_calls == []
+
     def test_fail_fast_on_invalid_order(self):
         ss = self._make_system()
         results = ss.check_order(
             self._make_order(symbol=""),
+            selector="dhan:primary",
             daily_pnl=0,
             starting_capital=100000,
         )
@@ -1005,10 +1166,16 @@ class TestStrategyRunner:
     def _make_strategy(self, exchange="NSE"):
         from flinttrade_core.models import OHLCV, Order, Quote
         from flinttrade_engine.strategy import BaseStrategy
+        from flinttrade_engine.strategy_execution import StrategyExecutionContract, StrategyExecutionMode
 
         class TickCountStrategy(BaseStrategy):
+            supported_execution_modes = frozenset({StrategyExecutionMode.READ_ONLY})
+
             def __init__(self, **kwargs):
-                super().__init__(**kwargs)
+                super().__init__(
+                    execution_contract=StrategyExecutionContract.read_only(),
+                    **kwargs,
+                )
                 self.ticks: list = []
                 self.squared_off = False
 
@@ -1150,30 +1317,22 @@ class TestStrategyRunner:
 
     @pytest.mark.asyncio
     async def test_runner_awaits_real_async_tick_hook(self):
-        """The scheduler must execute async hooks used by shipped strategies."""
+        """The scheduler must execute an admitted strategy's async tick hook."""
         from flinttrade_core.models import Quote
         from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
-        from flinttrade_engine.strategies.ema_crossover import EMACrossover
 
-        router = MagicMock()
-        router.route_order = AsyncMock()
-        strategy = EMACrossover(
-            symbol="RELIANCE",
-            exchange="NSE",
-            fast_period=2,
-            slow_period=3,
-            router=router,
-        )
-        strategy.start()
+        strategy = self._make_strategy()
+        delivered: list[float] = []
+
+        async def on_tick(quote: Quote) -> None:
+            await asyncio.sleep(0)
+            delivered.append(quote.ltp)
+
+        strategy.on_tick = on_tick
 
         client = MagicMock()
         client.quotes = AsyncMock(
-            side_effect=[
-                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
-                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
-                Quote(symbol="RELIANCE", exchange="NSE", ltp=100),
-                Quote(symbol="RELIANCE", exchange="NSE", ltp=110),
-            ]
+            return_value=Quote(symbol="RELIANCE", exchange="NSE", ltp=110)
         )
         scheduler = TimeScheduler()
         scheduler.is_market_open = MagicMock(return_value=True)
@@ -1185,23 +1344,24 @@ class TestStrategyRunner:
             symbol="RELIANCE",
         )
 
-        for _ in range(4):
-            await runner._tick()
+        await runner._tick()
 
-        router.route_order.assert_awaited_once()
-        assert strategy.position == 1
+        assert delivered == [110]
 
     @pytest.mark.asyncio
     async def test_runner_awaits_real_async_square_off_hook(self):
         """Square-off must finish before the strategy transitions to stopped."""
         from flinttrade_engine.scheduler import StrategyRunner, TimeScheduler
-        from flinttrade_engine.strategies.ema_crossover import EMACrossover
 
-        router = MagicMock()
-        router.route_order = AsyncMock()
-        strategy = EMACrossover(symbol="RELIANCE", exchange="NSE", router=router)
-        strategy.position = 1
-        strategy.start()
+        strategy = self._make_strategy()
+        square_off_finished = False
+
+        async def on_square_off() -> None:
+            nonlocal square_off_finished
+            await asyncio.sleep(0)
+            square_off_finished = True
+
+        strategy.on_square_off = on_square_off
         runner = StrategyRunner(
             strategy=strategy,
             client=MagicMock(),
@@ -1212,9 +1372,43 @@ class TestStrategyRunner:
 
         await runner._handle_square_off()
 
-        router.route_order.assert_awaited_once()
-        assert strategy.position == 0
+        assert square_off_finished is True
         assert strategy.state.value == "STOPPED"
+
+    def test_runner_refuses_legacy_arbitrary_router_strategy(self):
+        from flinttrade_engine.scheduler import StrategyRunner
+        from flinttrade_engine.strategies.ema_crossover import EMACrossover
+
+        router = MagicMock()
+        router.route_order = AsyncMock()
+        strategy = EMACrossover(symbol="RELIANCE", exchange="NSE", router=router)
+
+        with pytest.raises(RuntimeError, match="execution contract"):
+            StrategyRunner(strategy=strategy, client=MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_ema_strategy_emits_intent_without_calling_arbitrary_router(self):
+        from flinttrade_core.models import Quote
+        from flinttrade_engine.strategies.ema_crossover import EMACrossover
+
+        router = MagicMock()
+        router.route_order = AsyncMock()
+        strategy = EMACrossover(
+            symbol="RELIANCE",
+            exchange="NSE",
+            fast_period=1,
+            slow_period=2,
+            router=router,
+        )
+
+        await strategy.on_tick(Quote(symbol="RELIANCE", exchange="NSE", ltp=100))
+        await strategy.on_tick(Quote(symbol="RELIANCE", exchange="NSE", ltp=110))
+
+        router.route_order.assert_not_awaited()
+        orders = strategy.generate_orders()
+        assert [(order.symbol, order.action.value, order.quantity) for order in orders] == [
+            ("RELIANCE", "BUY", "1")
+        ]
 
     @pytest.mark.asyncio
     async def test_runner_awaits_async_start_and_stop_overrides(self):
@@ -1342,14 +1536,21 @@ class TestStrategyScheduler:
     def _make_strategy(self, name="S1", exchange="NSE"):
         from flinttrade_core.models import OHLCV, Order, Quote
         from flinttrade_engine.strategy import BaseStrategy
+        from flinttrade_engine.strategy_execution import StrategyExecutionContract, StrategyExecutionMode
 
         class SimpleStrat(BaseStrategy):
+            supported_execution_modes = frozenset({StrategyExecutionMode.READ_ONLY})
+
             def on_tick(self, quote: Quote) -> None: pass
             def on_bar(self, bar: OHLCV) -> None: pass
             def on_signal(self, signal: dict) -> None: pass
             def generate_orders(self) -> list[Order]: return []
 
-        return SimpleStrat(name=name, exchange=exchange)
+        return SimpleStrat(
+            name=name,
+            exchange=exchange,
+            execution_contract=StrategyExecutionContract.read_only(),
+        )
 
     @pytest.mark.asyncio
     async def test_register_and_status(self):

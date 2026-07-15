@@ -98,7 +98,7 @@ class TestMarketNewsSummarizerInit:
         from flinttrade_ai.llm_client import LLMClient, LLMConfig
         from flinttrade_ai.news_summarizer import MarketNewsSummarizer
 
-        cfg = LLMConfig(provider="lmstudio", host="http://127.0.0.1:1234", model="test")
+        cfg = LLMConfig(provider="ollama", host="http://127.0.0.1:11434", model="test")
         client = LLMClient(config=cfg)
         summarizer = MarketNewsSummarizer(llm_client=client)
         assert summarizer.llm is client

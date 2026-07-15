@@ -8,15 +8,21 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 vi.mock("@/services/ftApi.data", () => ({
+  captureHistoricalChain: vi.fn(),
   getHistoricalExpiries: vi.fn(),
   getHistoricalChain: vi.fn(),
 }));
 
-import { getHistoricalExpiries, getHistoricalChain } from "@/services/ftApi.data";
+import {
+  captureHistoricalChain,
+  getHistoricalExpiries,
+  getHistoricalChain,
+} from "@/services/ftApi.data";
 import HistoricalChainWidget from "../HistoricalChainWidget";
 
 const mockExpiries = getHistoricalExpiries as ReturnType<typeof vi.fn>;
 const mockChain = getHistoricalChain as ReturnType<typeof vi.fn>;
+const mockCapture = captureHistoricalChain as ReturnType<typeof vi.fn>;
 
 function chainRows() {
   return [
@@ -39,6 +45,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockExpiries.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiries: [] });
   mockChain.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiry: "", chain: [] });
+  mockCapture.mockResolvedValue({
+    symbol: "NIFTY",
+    exchange: "NFO",
+    expiry: "2026-03-26",
+    rows_inserted: 2,
+    captured: true,
+  });
 });
 
 describe("HistoricalChainWidget", () => {
@@ -59,13 +72,13 @@ describe("HistoricalChainWidget", () => {
 
   it("lists archived expiries and renders the chain grouped by strike", async () => {
     mockExpiries.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiries: ["26MAR26", "24APR26"] });
-    mockChain.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiry: "26MAR26", chain: chainRows() });
+    mockChain.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiry: "24APR26", chain: chainRows() });
     renderWidget();
 
     // Fetches the newest expiry's chain by default and renders both strikes.
     await waitFor(() => expect(screen.getByText("22000")).toBeInTheDocument());
     expect(screen.getByText("22100")).toBeInTheDocument();
-    expect(mockChain).toHaveBeenCalledWith("NIFTY", "26MAR26", "NFO");
+    expect(mockChain).toHaveBeenCalledWith("NIFTY", "24APR26", "NFO");
     // CALLS / PUTS column groups are present.
     expect(screen.getByText("CALLS")).toBeInTheDocument();
     expect(screen.getByText("PUTS")).toBeInTheDocument();
@@ -73,12 +86,107 @@ describe("HistoricalChainWidget", () => {
 
   it("refetches the chain when a different archived expiry is selected", async () => {
     mockExpiries.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiries: ["26MAR26", "24APR26"] });
-    mockChain.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiry: "26MAR26", chain: chainRows() });
+    mockChain.mockResolvedValue({ symbol: "NIFTY", exchange: "NFO", expiry: "24APR26", chain: chainRows() });
     renderWidget();
 
     await waitFor(() => expect(screen.getByText("22000")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText(/select archived expiry/i), { target: { value: "24APR26" } });
-    await waitFor(() => expect(mockChain).toHaveBeenCalledWith("NIFTY", "24APR26", "NFO"));
+    fireEvent.change(screen.getByLabelText(/select archived expiry/i), { target: { value: "26MAR26" } });
+    await waitFor(() => expect(mockChain).toHaveBeenCalledWith("NIFTY", "26MAR26", "NFO"));
+  });
+
+  it("defaults to the newest archived expiry", async () => {
+    mockExpiries.mockResolvedValue({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      expiries: ["2026-03-26", "2026-04-02"],
+    });
+    mockChain.mockResolvedValue({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      expiry: "2026-04-02",
+      chain: chainRows(),
+    });
+
+    renderWidget();
+
+    await waitFor(() =>
+      expect(mockChain).toHaveBeenCalledWith("NIFTY", "2026-04-02", "NFO"),
+    );
+  });
+
+  it("captures a broker option-chain snapshot and refreshes the archive", async () => {
+    mockExpiries
+      .mockResolvedValueOnce({ symbol: "NIFTY", exchange: "NFO", expiries: [] })
+      .mockResolvedValue({
+        symbol: "NIFTY",
+        exchange: "NFO",
+        expiries: ["2026-03-26"],
+      });
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText(/expiry to capture/i), {
+      target: { value: "2026-03-26" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /capture/i }));
+
+    await waitFor(() =>
+      expect(mockCapture).toHaveBeenCalledWith("NIFTY", "2026-03-26", "NFO"),
+    );
+    expect(await screen.findByText(/captured 2 rows for 2026-03-26/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockChain).toHaveBeenCalledWith("NIFTY", "2026-03-26", "NFO"),
+    );
+  });
+
+  it("surfaces capture failures", async () => {
+    mockCapture.mockRejectedValue(new Error("OpenAlgo is not connected"));
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText(/expiry to capture/i), {
+      target: { value: "2026-03-26" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /capture/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Capture failed: OpenAlgo is not connected",
+    );
+  });
+
+  it("keeps the capture identity stable while a request is pending", async () => {
+    let resolveCapture: ((value: {
+      symbol: string;
+      exchange: string;
+      expiry: string;
+      rows_inserted: number;
+      captured: boolean;
+    }) => void) | undefined;
+    mockCapture.mockReturnValue(new Promise((resolve) => {
+      resolveCapture = resolve;
+    }));
+    renderWidget();
+
+    const expiryInput = screen.getByLabelText(/expiry to capture/i);
+    fireEvent.click(screen.getByRole("button", { name: /selected symbol: NIFTY/i }));
+    expect(screen.getByRole("option", { name: "BANKNIFTY" })).toBeInTheDocument();
+    fireEvent.change(expiryInput, { target: { value: "2026-03-26" } });
+    fireEvent.click(screen.getByRole("button", { name: "Capture" }));
+
+    const pendingButton = await screen.findByRole("button", { name: /capturing/i });
+    expect(pendingButton).toBeDisabled();
+    expect(pendingButton).toHaveAttribute("aria-busy", "true");
+    expect(expiryInput).toBeDisabled();
+    expect(screen.getByRole("button", { name: /selected symbol: NIFTY/i })).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "BANKNIFTY" })).not.toBeInTheDocument();
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+
+    resolveCapture?.({
+      symbol: "NIFTY",
+      exchange: "NFO",
+      expiry: "2026-03-26",
+      rows_inserted: 2,
+      captured: true,
+    });
+    expect(await screen.findByText(/captured 2 rows for 2026-03-26/i)).toBeInTheDocument();
   });
 
   it("opens the symbol menu and switches symbol", async () => {

@@ -22,6 +22,31 @@ vi.mock("@/services/ftApi", () => ({
 
 import OISignalsWidget from "../OISignalsWidget";
 
+function analysisResponse(isSampleData?: boolean) {
+  return {
+    ...(isSampleData === undefined ? {} : { is_sample_data: isSampleData }),
+    signals: [
+      { strike: 25000, option_type: "CE", oi: 1_000_000, oi_change: 200_000, price_change: "up", signal: "Long Build-up", signal_short: "LB" },
+    ],
+    long_buildups: [25000],
+    short_coverings: [],
+    short_buildups: [],
+    long_unwindings: [],
+    summary: { "Long Build-up": 1 },
+  };
+}
+
+function unusualResponse(isSampleData?: boolean) {
+  return {
+    ...(isSampleData === undefined ? {} : { is_sample_data: isSampleData }),
+    unusual: [
+      { strike: 25000, option_type: "CE", oi: 1_000_000, oi_change: 200_000, change_pct: 25, z_score: 3.1, direction: "addition" },
+    ],
+    count: 1,
+    threshold: 2.0,
+  };
+}
+
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: React.ReactNode }) =>
@@ -57,23 +82,8 @@ describe("OISignalsWidget", () => {
 
   it("shows Live signals from the backend when connected", async () => {
     state.connected = true;
-    mockAnalysis.mockResolvedValue({
-      signals: [
-        { strike: 25000, option_type: "CE", oi: 1_000_000, oi_change: 200_000, price_change: "up", signal: "Long Build-up", signal_short: "LB" },
-      ],
-      long_buildups: [25000],
-      short_coverings: [],
-      short_buildups: [],
-      long_unwindings: [],
-      summary: { "Long Build-up": 1 },
-    });
-    mockUnusual.mockResolvedValue({
-      unusual: [
-        { strike: 25000, option_type: "CE", oi: 1_000_000, oi_change: 200_000, change_pct: 25, z_score: 3.1, direction: "addition" },
-      ],
-      count: 1,
-      threshold: 2.0,
-    });
+    mockAnalysis.mockResolvedValue(analysisResponse(false));
+    mockUnusual.mockResolvedValue(unusualResponse(false));
 
     render(<OISignalsWidget />, { wrapper: wrapper() });
 
@@ -82,5 +92,45 @@ describe("OISignalsWidget", () => {
     expect(await screen.findByText("25000")).toBeInTheDocument();
     await waitFor(() => expect(mockAnalysis).toHaveBeenCalledWith("NIFTY", "NFO", "", "flat"));
     expect(mockUnusual).toHaveBeenCalled();
+  });
+
+  it("shows mixed provenance instead of Live while unusual OI falls back locally", async () => {
+    state.connected = true;
+    mockAnalysis.mockResolvedValue(analysisResponse(false));
+    mockUnusual.mockRejectedValue(new Error("unusual OI unavailable"));
+
+    render(<OISignalsWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText("Mixed data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.getByText("25000")).toBeInTheDocument();
+    expect(screen.getByText("24500PE")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["analysis", true, false],
+    ["unusual OI", false, true],
+  ])("does not show Live when the %s backend response is sample data", async (_source, analysisSample, unusualSample) => {
+    state.connected = true;
+    mockAnalysis.mockResolvedValue(analysisResponse(analysisSample));
+    mockUnusual.mockResolvedValue(unusualResponse(unusualSample));
+
+    render(<OISignalsWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText("Mixed data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("requires explicit non-sample flags from both responses before showing Live", async () => {
+    state.connected = true;
+    mockAnalysis.mockResolvedValue(analysisResponse());
+    mockUnusual.mockResolvedValue(unusualResponse());
+
+    render(<OISignalsWidget />, { wrapper: wrapper() });
+
+    expect(await screen.findByText("25000")).toBeInTheDocument();
+    await waitFor(() => expect(mockUnusual).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 });

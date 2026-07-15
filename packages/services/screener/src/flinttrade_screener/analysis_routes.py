@@ -23,10 +23,12 @@ is set up by ``create_flask_app()`` in packages/core/core/src/app.py.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import re
 from dataclasses import asdict
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -34,6 +36,7 @@ from flask import Blueprint, current_app, jsonify, request
 from . import broker_registry_reads as broker_reads
 from .gex import calculate_gex
 from .iv_smile import calculate_iv_smile
+from .lot_sizes import FALLBACK_LOT_SIZES, LotSizeResolver
 from .oi_analysis import OIAnalysis
 from .oi_profile import calculate_oi_profile
 from .option_chain import LOT_SIZES, OptionChainSnapshot, StrikeData
@@ -54,6 +57,17 @@ logger = logging.getLogger("flinttrade.screener.analysis_routes")
 
 analysis_bp = Blueprint("analysis", __name__, url_prefix="/api/v1")
 
+_MAX_CHAIN_ROWS = 10_000
+_MAX_MARKET_VALUE = 1_000_000_000.0
+_MAX_OPEN_INTEREST = 10_000_000_000
+_MAX_OI_CHANGE = 10_000_000_000
+_MAX_LOT_SIZE = 1_000_000
+_MAX_IV_PERCENT = 10_000.0
+_MAX_GAMMA = 1_000.0
+_MAX_ABS_GREEK = 1_000_000_000.0
+_MAX_OPTION_DTE_DAYS = 3_660
+_MAX_VOL_SURFACE_EXPIRIES = 12
+
 
 # ---------------------------------------------------------------------------
 # Expiry param normalisation
@@ -67,25 +81,79 @@ analysis_bp = Blueprint("analysis", __name__, url_prefix="/api/v1")
 
 def _body_expiry(body: dict[str, Any], default: str) -> str:
     """Return a single expiry from the request body, accepting any key variant."""
-    dates = body.get("expiry_dates") or body.get("expiries")
-    return (
-        body.get("expiry")
-        or body.get("expiry_date")
-        or (dates[0] if isinstance(dates, list) and dates else None)
-        or default
-    )
+    _validate_expiry_fields(body)
+    for key in ("expiry", "expiry_date"):
+        if key in body:
+            return body[key].strip()
+    for key in ("expiry_dates", "expiries"):
+        if key in body:
+            return body[key][0].strip()
+    return default
 
 
 def _body_expiries(body: dict[str, Any], default: list[str]) -> list[str]:
     """Return a list of expiries from the request body, accepting any key variant."""
-    value = body.get("expiries") or body.get("expiry_dates")
-    if isinstance(value, list) and value:
-        return value
-    single = body.get("expiry") or body.get("expiry_date")
-    return [single] if single else default
+    _validate_expiry_fields(body)
+    for key in ("expiries", "expiry_dates"):
+        if key in body:
+            return [value.strip() for value in body[key]]
+    for key in ("expiry", "expiry_date"):
+        if key in body:
+            return [body[key].strip()]
+    return default
+
+
+def _validate_expiry_fields(body: dict[str, Any]) -> None:
+    for key in ("expiry", "expiry_date"):
+        if key in body and not isinstance(body[key], str):
+            raise ValueError(f"{key} must be a string")
+    for key in ("expiries", "expiry_dates"):
+        if key not in body:
+            continue
+        values = body[key]
+        if not isinstance(values, list) or not values:
+            raise ValueError(f"{key} must be a non-empty list of strings")
+        if any(not isinstance(value, str) for value in values):
+            raise ValueError(f"{key} must contain only strings")
 
 
 _ISO_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def _authoritative_expiry_date(expiry: Any) -> date | None:
+    """Parse a supported expiry without conflating failure with expiry day."""
+    if not isinstance(expiry, str):
+        return None
+
+    value = expiry.strip()
+    iso = _ISO_DATE_RE.fullmatch(value)
+    if iso:
+        try:
+            return date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+        except (ValueError, TypeError):
+            return None
+
+    from .symbol_converter import parse_expiry_date  # noqa: PLC0415
+
+    cleaned = value.replace("-", "").replace(" ", "").upper()
+    try:
+        return parse_expiry_date(cleaned)
+    except (ValueError, TypeError):
+        return None
+
+
+def _authoritative_days_to_expiry(expiry: Any, *, today: date | None = None) -> int | None:
+    """Return exact non-negative calendar DTE, or ``None`` on parse failure."""
+    parsed = _authoritative_expiry_date(expiry)
+    if parsed is None:
+        return None
+    return max(0, (parsed - (today or date.today())).days)
+
+
+def _live_option_days_to_expiry(expiry: Any, *, today: date | None = None) -> int | None:
+    """Return a bounded, strictly future DTE suitable for live option maths."""
+    dte = _authoritative_days_to_expiry(expiry, today=today)
+    return dte if dte is not None and 0 < dte <= _MAX_OPTION_DTE_DAYS else None
 
 
 def _days_to_expiry(expiry: str) -> int:
@@ -99,25 +167,8 @@ def _days_to_expiry(expiry: str) -> int:
     need a real time-to-expiry — a hardcoded 0 collapses gamma/theta/vega to
     zero.
     """
-    if not isinstance(expiry, str):
-        return 0
-
-    # ISO YYYY-MM-DD (the format getExpiry emits) — handled first.
-    iso = _ISO_DATE_RE.fullmatch(expiry.strip())
-    if iso:
-        try:
-            return max(0, (date(int(iso.group(1)), int(iso.group(2)), int(iso.group(3))) - date.today()).days)
-        except (ValueError, TypeError):
-            return 0
-
-    # Strict DDMMMYY or dashed/spaced DD-MMM-YY.
-    from .symbol_converter import parse_expiry_date  # noqa: PLC0415
-
-    cleaned = expiry.replace("-", "").replace(" ", "").upper()
-    try:
-        return max(0, (parse_expiry_date(cleaned) - date.today()).days)
-    except (ValueError, TypeError):
-        return 0
+    dte = _authoritative_days_to_expiry(expiry)
+    return dte if dte is not None else 0
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +185,333 @@ def _get_registry() -> Any:
     return current_app.config.get("REGISTRY")
 
 
-def _live_option_chain(symbol: str, exchange: str, expiry: str | None = None) -> dict[str, Any] | None:
+_INDEX_UNDERLYING_EXCHANGES = {
+    "NIFTY": "NSE_INDEX",
+    "BANKNIFTY": "NSE_INDEX",
+    "FINNIFTY": "NSE_INDEX",
+    "MIDCPNIFTY": "NSE_INDEX",
+    "NIFTYNXT50": "NSE_INDEX",
+    "SENSEX": "BSE_INDEX",
+    "BANKEX": "BSE_INDEX",
+    "SENSEX50": "BSE_INDEX",
+}
+
+
+def _option_chain_underlying_exchange(symbol: str, exchange: str) -> str:
+    """Translate an option venue into the underlying instrument's exchange."""
+    index_exchange = _INDEX_UNDERLYING_EXCHANGES.get(symbol.strip().upper())
+    normalised = exchange.strip().upper()
+    if index_exchange is not None:
+        allowed = (
+            {"NFO", "NSE", "NSE_INDEX"}
+            if index_exchange == "NSE_INDEX"
+            else {"BFO", "BSE", "BSE_INDEX"}
+        )
+        if normalised not in allowed:
+            raise ValueError(
+                f"exchange {exchange!r} is incompatible with index symbol {symbol!r}"
+            )
+        return index_exchange
+    return {"NFO": "NSE", "BFO": "BSE"}.get(normalised, normalised)
+
+
+def _generated_future_expiries(*day_offsets: int) -> list[str]:
+    """Build stable ISO sample-expiry labels relative to the request date."""
+    today = date.today()
+    return [(today + timedelta(days=offset)).isoformat() for offset in day_offsets]
+
+
+def _model_dump_preserving_unset(value: Any) -> Any:
+    """Dump a Pydantic model without materialising defaults as observations."""
+    try:
+        return value.model_dump(exclude_unset=True)
+    except TypeError:
+        return value.model_dump()
+
+
+def _finite_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _request_json_object() -> dict[str, Any]:
+    """Return the JSON request object, rejecting arrays, scalars, and JSON null."""
+    body = request.get_json(silent=True)
+    if body is None:
+        if request.is_json and request.get_data(cache=True).strip():
+            raise ValueError("JSON body must be an object")
+        return {}
+    if not isinstance(body, dict):
+        raise ValueError("JSON body must be an object")
+    return body
+
+
+def _request_identity_string(
+    body: dict[str, Any],
+    key: str,
+    default: str,
+    *,
+    allow_blank: bool = False,
+) -> str:
+    """Read a request identity without coercing arrays, objects, or numbers."""
+    if key not in body:
+        return default
+    value = body[key]
+    if not isinstance(value, str):
+        raise ValueError(f"{key} must be a string")
+    value = value.strip()
+    if not value and not allow_blank:
+        raise ValueError(f"{key} must not be blank")
+    return value
+
+
+def _option_request(default_expiry: str) -> tuple[dict[str, Any], str, str, str]:
+    body = _request_json_object()
+    symbol = _request_identity_string(body, "symbol", "NIFTY")
+    exchange = _request_identity_string(body, "exchange", "NFO")
+    _option_chain_underlying_exchange(symbol, exchange)
+    expiry = _body_expiry(body, default_expiry)
+    return body, symbol, exchange, expiry
+
+
+def _request_number(
+    body: dict[str, Any],
+    key: str,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    minimum_inclusive: bool = True,
+) -> float:
+    """Parse a finite request number and enforce an optional domain."""
+    number = _finite_number(body.get(key, default))
+    if number is None:
+        raise ValueError(f"{key} must be a finite number")
+    if minimum is not None and (
+        number < minimum or (not minimum_inclusive and number == minimum)
+    ):
+        operator = "at least" if minimum_inclusive else "greater than"
+        raise ValueError(f"{key} must be {operator} {minimum:g}")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{key} must be at most {maximum:g}")
+    return number
+
+
+def _request_integer(
+    body: dict[str, Any],
+    key: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int = 1000,
+) -> int:
+    """Parse a bounded integer request field without accepting booleans/NaN."""
+    number = _request_number(body, key, float(default), minimum=float(minimum), maximum=float(maximum))
+    if not number.is_integer():
+        raise ValueError(f"{key} must be an integer")
+    return int(number)
+
+
+def _normalise_identity(value: Any) -> str | None:
+    """Conservatively normalise a supplied chain identity token."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return ""
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return re.sub(r"[\s_-]+", "", stripped.upper())
+
+
+def _normalise_expiry_identity(value: Any) -> str | None:
+    if value is None:
+        return None
+    parsed = _authoritative_expiry_date(value)
+    if parsed is not None:
+        return parsed.isoformat()
+    return _normalise_identity(value)
+
+
+def _chain_identity_matches(
+    chain: dict[str, Any],
+    symbol: str,
+    exchange: str,
+    expiry: str | None,
+) -> bool:
+    """Reject any explicit response identity that contradicts the request."""
+    expected_symbol = _normalise_identity(symbol)
+    for key in ("underlying", "symbol"):
+        if key not in chain:
+            continue
+        supplied = _normalise_identity(chain.get(key))
+        if supplied != expected_symbol:
+            return False
+
+    allowed_exchanges = {
+        value
+        for value in (
+            _normalise_identity(exchange),
+            _normalise_identity(_option_chain_underlying_exchange(symbol, exchange)),
+        )
+        if value
+    }
+    for key in ("exchange", "underlying_exchange"):
+        if key not in chain:
+            continue
+        supplied = _normalise_identity(chain.get(key))
+        if supplied not in allowed_exchanges:
+            return False
+
+    expected_expiry = _normalise_expiry_identity(expiry)
+    if expected_expiry is not None:
+        for key in ("expiry", "expiry_date"):
+            if key not in chain:
+                continue
+            supplied = _normalise_expiry_identity(chain.get(key))
+            if supplied != expected_expiry:
+                return False
+    return True
+
+
+def _chain_has_requested_expiry_identity(
+    chain: dict[str, Any],
+    expiry: str | None,
+) -> bool:
+    """Require at least one explicit response expiry matching the request."""
+    expected_expiry = _normalise_expiry_identity(expiry)
+    if expected_expiry is None:
+        return False
+    observed = False
+    for key in ("expiry", "expiry_date"):
+        if key not in chain:
+            continue
+        observed = True
+        if _normalise_expiry_identity(chain.get(key)) != expected_expiry:
+            return False
+    return observed
+
+
+def _row_strike(row: dict[str, Any]) -> float | None:
+    strike = _finite_number(row.get("strike_price", row.get("strike")))
+    return strike if strike is not None and 0 < strike <= _MAX_MARKET_VALUE else None
+
+
+def _row_open_interest(row: dict[str, Any], prefix: str) -> int | None:
+    key = f"{prefix}_oi"
+    if key not in row:
+        return None
+    oi = _finite_number(row[key])
+    if oi is None or oi < 0 or oi > _MAX_OPEN_INTEREST or not oi.is_integer():
+        return None
+    return int(oi)
+
+
+def _row_has_authoritative_oi(row: dict[str, Any]) -> bool:
+    return _row_open_interest(row, "ce") is not None and _row_open_interest(row, "pe") is not None
+
+
+def _normalise_live_option_chain(chain: Any) -> dict[str, Any] | None:
+    """Normalise a native, bridge, or legacy option-chain response."""
+    if hasattr(chain, "model_dump"):
+        chain = _model_dump_preserving_unset(chain)
+    elif not isinstance(chain, dict) and hasattr(chain, "strikes"):
+        payload = {
+            "spot_price": getattr(chain, "spot_price", None),
+            "strikes": getattr(chain, "strikes", []),
+        }
+        for key in ("underlying", "symbol", "exchange", "underlying_exchange", "expiry", "expiry_date"):
+            if hasattr(chain, key):
+                payload[key] = getattr(chain, key)
+        chain = payload
+    if not isinstance(chain, dict):
+        return None
+    raw_strikes = chain.get("strikes") or chain.get("chain") or []
+    if not isinstance(raw_strikes, list) or not raw_strikes:
+        return None
+    strikes: list[dict[str, Any]] = []
+    for raw_row in raw_strikes:
+        row = _model_dump_preserving_unset(raw_row) if hasattr(raw_row, "model_dump") else raw_row
+        if not isinstance(row, dict):
+            return None
+        strikes.append(row)
+    payload = dict(chain)
+    payload["strikes"] = strikes
+    return payload
+
+
+def _chain_rows(chain: dict[str, Any]) -> list[dict[str, Any]] | None:
+    rows = chain.get("strikes")
+    if (
+        not isinstance(rows, list)
+        or not rows
+        or len(rows) > _MAX_CHAIN_ROWS
+        or not all(isinstance(row, dict) for row in rows)
+    ):
+        return None
+    return rows
+
+
+def _rows_have_unique_strikes(rows: list[dict[str, Any]]) -> bool:
+    strikes = [_row_strike(row) for row in rows]
+    return all(strike is not None for strike in strikes) and len(strikes) == len(set(strikes))
+
+
+def _chain_has_complete_greeks(chain: dict[str, Any]) -> bool:
+    """Return whether every source row has valid strikes and physical Greeks."""
+    rows = _chain_rows(chain)
+    return rows is not None and _rows_have_unique_strikes(rows) and all(
+        _row_has_valid_strike(row)
+        and _leg_has_complete_greeks(row, "ce")
+        and _leg_has_complete_greeks(row, "pe")
+        for row in rows
+    )
+
+
+def _row_has_valid_strike(row: dict[str, Any]) -> bool:
+    return _row_strike(row) is not None
+
+
+def _chain_has_valid_strike(chain: dict[str, Any]) -> bool:
+    rows = _chain_rows(chain)
+    return rows is not None and _rows_have_unique_strikes(rows)
+
+
+def _chain_has_authoritative_snapshot_inputs(chain: dict[str, Any]) -> bool:
+    return _authoritative_chain_spot(chain) is not None and _chain_has_valid_strike(chain)
+
+
+def _chain_has_required_rows(
+    chain: dict[str, Any],
+    *,
+    require_authoritative_oi: bool,
+    require_complete_greeks: bool,
+) -> bool:
+    rows = _chain_rows(chain)
+    return rows is not None and _rows_have_unique_strikes(rows) and all(
+        _row_has_valid_strike(row)
+        and (not require_authoritative_oi or _row_has_authoritative_oi(row))
+        and (
+            not require_complete_greeks
+            or (_leg_has_complete_greeks(row, "ce") and _leg_has_complete_greeks(row, "pe"))
+        )
+        for row in rows
+    )
+
+
+def _live_option_chain(
+    symbol: str,
+    exchange: str,
+    expiry: str | None = None,
+    *,
+    require_authoritative_oi: bool = False,
+    require_complete_greeks: bool = False,
+) -> dict[str, Any] | None:
     """Fetch a REAL option chain via an existing configured broker read path.
 
     The OpenAlgo client's ``OptionChainStrike`` fields (strike_price, ce/pe ltp,
@@ -144,6 +521,59 @@ def _live_option_chain(symbol: str, exchange: str, expiry: str | None = None) ->
     Returns ``None`` when no live source is configured or the fetch fails — the
     caller then falls back to honest sample data.
     """
+    underlying_exchange = _option_chain_underlying_exchange(symbol, exchange)
+    candidates: list[dict[str, Any]] = []
+    registry = _get_registry()
+    native_adapters = current_app.config.get("NATIVE_ADAPTERS") or {}
+    connected_sessions = getattr(registry, "list_connected_adapter_sessions", None)
+    if registry is not None and callable(connected_sessions):
+        for adapter_id, _account_id, session in connected_sessions():
+            adapter = native_adapters.get(adapter_id)
+            reader = getattr(adapter, "option_chain", None)
+            if not callable(reader):
+                continue
+            try:
+                chain = asyncio.run(
+                    reader(
+                        session,
+                        {
+                            "symbol": symbol,
+                            "underlying": symbol,
+                            "exchange": underlying_exchange,
+                            "expiry": expiry or "",
+                        },
+                    )
+                )
+                if (normalised := _normalise_live_option_chain(chain)) is not None:
+                    candidates.append(normalised)
+            except Exception as exc:  # noqa: BLE001 - try the next connected read source
+                logger.warning(
+                    "Live option chain via native %s failed for %s %s: %s",
+                    adapter_id,
+                    symbol,
+                    underlying_exchange,
+                    exc,
+                )
+
+    if registry and registry.is_connected():
+        try:
+            if (normalised := _normalise_live_option_chain(
+                broker_reads.get_option_chain(
+                    registry,
+                    symbol=symbol,
+                    exchange=underlying_exchange,
+                    expiry=expiry,
+                )
+            )) is not None:
+                candidates.append(normalised)
+        except Exception as exc:  # noqa: BLE001 - try the bridge/sample path
+            logger.warning(
+                "Live option chain via registry failed for %s %s: %s",
+                symbol,
+                underlying_exchange,
+                exc,
+            )
+
     client = current_app.config.get("OPENALGO_CLIENT")
     if client is not None:
         try:
@@ -152,19 +582,61 @@ def _live_option_chain(symbol: str, exchange: str, expiry: str | None = None) ->
             # loop-affine; run on its owner loop, never a fresh asyncio.run().
             from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
 
-            chain = client_call_sync(client, client.option_chain(symbol, exchange))
-            strikes = getattr(chain, "strikes", None) or []
-            if strikes:
-                return {"strikes": [s.model_dump() for s in strikes]}
+            chain = client_call_sync(
+                client,
+                client.option_chain(symbol, underlying_exchange, expiry or ""),
+            )
+            if (
+                (normalised := _normalise_live_option_chain(chain)) is not None
+                and _chain_has_requested_expiry_identity(normalised, expiry)
+            ):
+                candidates.append(normalised)
         except Exception as exc:  # noqa: BLE001 - any failure degrades to the registry/sample path
-            logger.warning("Live option chain via OpenAlgo failed for %s %s: %s", symbol, exchange, exc)
+            logger.warning(
+                "Live option chain via OpenAlgo failed for %s %s: %s",
+                symbol,
+                underlying_exchange,
+                exc,
+            )
 
-    registry = _get_registry()
-    if registry and registry.is_connected():
+    candidates = [
+        chain
+        for chain in candidates
+        if _chain_identity_matches(chain, symbol, exchange, expiry)
+    ]
+    preferred = next(
+        (
+            chain
+            for chain in candidates
+            if _authoritative_chain_spot(chain) is not None
+            and _chain_has_required_rows(
+                chain,
+                require_authoritative_oi=require_authoritative_oi,
+                require_complete_greeks=require_complete_greeks,
+            )
+        ),
+        None,
+    )
+    if require_authoritative_oi or require_complete_greeks:
+        return preferred
+    return preferred or next(
+        (chain for chain in candidates if _chain_has_authoritative_snapshot_inputs(chain)),
+        None,
+    )
+
+
+def _authoritative_chain_spot(chain_data: dict[str, Any]) -> float | None:
+    """Return an explicit finite positive underlying price, never a default."""
+    for key in ("spot", "spot_price", "underlying_spot_price", "underlying_ltp"):
+        raw = chain_data.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
         try:
-            return broker_reads.get_option_chain(registry, symbol=symbol, exchange=exchange, expiry=expiry)
-        except Exception as exc:  # noqa: BLE001 - any failure degrades to sample
-            logger.warning("Live option chain via registry failed for %s %s: %s", symbol, exchange, exc)
+            spot = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(spot) and 0 < spot <= _MAX_MARKET_VALUE:
+            return spot
     return None
 
 
@@ -188,9 +660,14 @@ def _make_sample_strikes(
     Returns:
         List of StrikeData objects around the given spot.
     """
+    safe_spot = _finite_number(spot)
+    if safe_spot is None or not 0 < safe_spot <= _MAX_MARKET_VALUE:
+        safe_spot = 1.0
+    safe_count = max(0, min(int(count), 1000))
+    safe_step = _sample_strike_step(safe_spot, step, safe_count)
     strikes: list[StrikeData] = []
-    for i in range(-count, count + 1):
-        k = spot + i * step
+    for i in range(-safe_count, safe_count + 1):
+        k = safe_spot + i * safe_step
         dist = abs(i)
         ce_oi = max(1000, 50000 - dist * 4000)
         pe_oi = max(1000, 40000 - dist * 3500)
@@ -218,6 +695,16 @@ def _make_sample_strikes(
             pe_vega=10.0 - dist * 0.4,
         ))
     return strikes
+
+
+def _sample_strike_step(spot: float, requested_step: float, count: int) -> float:
+    """Choose a positive regular step that cannot cross zero on the lower wing."""
+    step = _finite_number(requested_step)
+    if step is None or step <= 0:
+        step = max(spot * 0.01, 0.01)
+    if count <= 0:
+        return step
+    return min(step, spot / (count + 1))
 
 
 def _make_sample_snapshot(
@@ -309,6 +796,40 @@ def _dataclass_to_dict(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _chain_lot_size(chain_data: dict[str, Any] | None) -> int | None:
+    if not chain_data:
+        return None
+    for key in ("lot_size", "lotsize"):
+        if key not in chain_data:
+            continue
+        value = _finite_number(chain_data[key])
+        if value is not None and 0 < value <= _MAX_LOT_SIZE and value.is_integer():
+            return int(value)
+        return None
+    return None
+
+
+def _resolve_gex_lot_size(
+    symbol: str,
+    exchange: str,
+    chain_data: dict[str, Any] | None,
+) -> int | None:
+    """Resolve a GEX multiplier without inventing one for unknown symbols."""
+    if chain_data is not None and any(key in chain_data for key in ("lot_size", "lotsize")):
+        return _chain_lot_size(chain_data)
+
+    normalised_symbol = symbol.strip().upper()
+    client = current_app.config.get("OPENALGO_CLIENT")
+    if client is None:
+        return None
+    resolution = LotSizeResolver(client).resolve(normalised_symbol, exchange)
+    return (
+        resolution.lot_size
+        if resolution.source == "live" and 0 < resolution.lot_size <= _MAX_LOT_SIZE
+        else None
+    )
+
+
 @analysis_bp.route("/gex", methods=["POST"])
 def gex_endpoint() -> Any:
     """Gamma Exposure (GEX) calculation.
@@ -321,27 +842,61 @@ def gex_endpoint() -> Any:
     Returns:
         JSON with GEX result or error.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "")
+    try:
+        _body, symbol, exchange, expiry = _option_request("")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
-    lot_size = LOT_SIZES.get(symbol.upper(), 50)
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
     # Live data via the OpenAlgo bridge (the functional adapter).
-    chain_data = _live_option_chain(symbol, exchange)
-    if chain_data:
-        spot = float(chain_data.get("spot", spot))
-        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+    chain_data = None
+    authoritative_dte = _live_option_days_to_expiry(expiry)
+    if authoritative_dte is not None:
+        chain_data = _live_option_chain(
+            symbol,
+            exchange,
+            expiry,
+            require_authoritative_oi=True,
+            require_complete_greeks=True,
+        )
+    chain_spot = _authoritative_chain_spot(chain_data) if chain_data else None
+    if chain_data and chain_spot is not None and _chain_has_complete_greeks(chain_data):
+        spot = chain_spot
+        candidate = _snapshot_from_registry_data(
+            chain_data,
+            symbol,
+            exchange,
+            spot,
+            require_authoritative_oi=True,
+            require_complete_greeks=True,
+        )
+        snapshot = candidate if candidate.strikes else None
 
-    used_sample = snapshot is None
-    if snapshot is None:
+    authoritative_lot_size = _resolve_gex_lot_size(symbol, exchange, chain_data)
+    lot_size = authoritative_lot_size
+    used_sample = snapshot is None or authoritative_lot_size is None
+    if lot_size is None:
+        lot_size = FALLBACK_LOT_SIZES.get(symbol.strip().upper())
+        if lot_size is not None:
+            if snapshot is None:
+                snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
+            logger.info("GEX: using a sample-only fallback lot size for %s %s", symbol, exchange)
+        else:
+            snapshot = OptionChainSnapshot(
+                underlying=symbol,
+                exchange=exchange,
+                spot_price=spot,
+                atm_strike=spot,
+                strikes=[],
+            )
+            logger.warning("GEX: no authoritative lot size for %s %s", symbol, exchange)
+    elif snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("GEX: using sample data for %s %s", symbol, exchange)
 
-    result = calculate_gex(snapshot, spot=spot, lot_size=lot_size)
+    result = calculate_gex(snapshot, spot=spot, lot_size=lot_size or 0)
 
     # Shape ``data`` to the terminal's GEXData contract. The raw dataclass used
     # strike_price / total_net_gex and lacked atm_strike / gamma_flip_strike /
@@ -362,15 +917,19 @@ def gex_endpoint() -> Any:
         if result.strikes
         else spot
     )
-    # Gamma flip = first strike where net GEX crosses from positive to negative.
+    # A true gamma-flip level requires repricing the whole chain over a spot
+    # sweep. A per-strike sign change at one fixed spot is not that quantity.
     gamma_flip_strike: float | None = None
-    for i in range(len(result.strikes) - 1):
-        if result.strikes[i].net_gex >= 0 and result.strikes[i + 1].net_gex < 0:
-            gamma_flip_strike = result.strikes[i + 1].strike_price
-            break
-    dealer_zone = "Long Gamma" if result.total_net_gex > 0 else "Short Gamma"
+    dealer_zone = (
+        "Long Gamma"
+        if result.total_net_gex > 0
+        else "Short Gamma"
+        if result.total_net_gex < 0
+        else "Neutral Gamma"
+    )
 
     gex_data = {
+        "available": lot_size is not None and bool(snapshot.strikes),
         "underlying": symbol,
         "spot_price": spot,
         "atm_strike": atm_strike,
@@ -413,35 +972,60 @@ def gamma_density_endpoint() -> Any:
     """
     from .gamma_density import calculate_gamma_density  # noqa: PLC0415
 
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "")
-    interest_rate_pct = body.get("interest_rate")
+    try:
+        body, symbol, exchange, expiry = _option_request(_generated_future_expiries(7)[0])
+        expiry_supplied = any(
+            key in body for key in ("expiry", "expiry_date", "expiry_dates", "expiries")
+        )
+        interest_rate_pct = _request_number(
+            body,
+            "interest_rate",
+            0.0,
+            minimum=-100.0,
+            maximum=100.0,
+        )
+        authoritative_dte = _live_option_days_to_expiry(expiry)
+        if authoritative_dte is None:
+            raise ValueError("expiry must be a valid bounded future option date")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
-
-    chain_data = _live_option_chain(symbol, exchange)
-    if chain_data:
-        spot = float(chain_data.get("spot", spot))
-        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+    chain_data = None
+    if expiry_supplied:
+        chain_data = _live_option_chain(
+            symbol,
+            exchange,
+            expiry,
+            require_authoritative_oi=True,
+            require_complete_greeks=True,
+        )
+    chain_spot = _authoritative_chain_spot(chain_data) if chain_data else None
+    if (
+        chain_data
+        and chain_spot is not None
+        and _chain_has_complete_greeks(chain_data)
+    ):
+        spot = chain_spot
+        candidate = _snapshot_from_registry_data(
+            chain_data,
+            symbol,
+            exchange,
+            spot,
+            require_authoritative_oi=True,
+            require_complete_greeks=True,
+        )
+        snapshot = candidate if candidate.strikes else None
 
     used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("Gamma density: using sample data for %s %s", symbol, exchange)
 
-    # A live chain that lacks an explicit expiry still needs a sane horizon; the
-    # sample snapshot has no real expiry, so fall back to a weekly-ish 7 days.
-    dte_days = float(_days_to_expiry(expiry)) if expiry else 0.0
-    if dte_days <= 0:
-        dte_days = 7.0
+    dte_days = float(authoritative_dte)
 
-    try:
-        rate = float(interest_rate_pct) / 100.0 if interest_rate_pct is not None else 0.0
-    except (TypeError, ValueError):
-        rate = 0.0
+    rate = interest_rate_pct / 100.0
 
     result = calculate_gamma_density(snapshot, spot=spot, dte_days=dte_days, risk_free_rate=rate)
 
@@ -479,18 +1063,28 @@ def arbitrage_scan_endpoint() -> Any:
         scan_arbitrage,
     )
 
-    body = request.get_json(silent=True) or {}
-    cash_future_rows = body.get("cash_future") or []
-    cross_exchange_rows = body.get("cross_exchange") or []
-
     try:
-        risk_free_rate = float(body.get("risk_free_rate", 0.07))
-    except (TypeError, ValueError):
-        risk_free_rate = 0.07
-    try:
-        edge_threshold_pct = float(body.get("edge_threshold_pct", 1.0))
-    except (TypeError, ValueError):
-        edge_threshold_pct = 1.0
+        body = _request_json_object()
+        cash_future_rows = body.get("cash_future") or []
+        cross_exchange_rows = body.get("cross_exchange") or []
+        if not isinstance(cash_future_rows, list) or not isinstance(cross_exchange_rows, list):
+            raise ValueError("arbitrage rows must be lists")
+        risk_free_rate = _request_number(
+            body,
+            "risk_free_rate",
+            0.07,
+            minimum=-1.0,
+            maximum=10.0,
+        )
+        edge_threshold_pct = _request_number(
+            body,
+            "edge_threshold_pct",
+            1.0,
+            minimum=0.0,
+            maximum=1_000_000.0,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     is_sample_data = not (cash_future_rows or cross_exchange_rows)
     if is_sample_data:
@@ -532,8 +1126,13 @@ def candlestick_patterns_endpoint() -> Any:
         make_sample_pattern_scan,
     )
 
-    body = request.get_json(silent=True) or {}
-    bars = body.get("bars") or []
+    try:
+        body = _request_json_object()
+        bars = body.get("bars") or []
+        if not isinstance(bars, list):
+            raise ValueError("bars must be a list")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
 
     is_sample_data = not bars
     result = make_sample_pattern_scan() if is_sample_data else detect_patterns(bars)
@@ -565,24 +1164,51 @@ def vol_surface_endpoint() -> Any:
     Returns:
         JSON with 3-D vol surface data or error.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiries = _body_expiries(body, ["26MAR26", "24APR26"])
-    strike_count = int(body.get("strike_count", 20))
+    try:
+        body = _request_json_object()
+        symbol = _request_identity_string(body, "symbol", "NIFTY")
+        exchange = _request_identity_string(body, "exchange", "NFO")
+        _option_chain_underlying_exchange(symbol, exchange)
+        expiries_supplied = any(
+            key in body for key in ("expiry", "expiry_date", "expiry_dates", "expiries")
+        )
+        expiries = _body_expiries(body, _generated_future_expiries(7, 30))
+        if len(expiries) > _MAX_VOL_SURFACE_EXPIRIES:
+            raise ValueError(f"expiries must contain at most {_MAX_VOL_SURFACE_EXPIRIES} values")
+        strike_count = _request_integer(body, "strike_count", 20, minimum=1)
+        as_of = date.today()
+        expiry_dtes: list[tuple[str, int]] = []
+        for expiry in expiries:
+            dte = _live_option_days_to_expiry(expiry, today=as_of)
+            if dte is None:
+                raise ValueError(f"Option expiry must be a valid future date: {expiry!r}")
+            expiry_dtes.append((expiry, dte))
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     spot = 24000.0
 
     chains_by_expiry: dict[str, dict] = {}
 
-    registry = _get_registry()
-    if registry and registry.is_connected():
+    if expiries_supplied:
         try:
-            for expiry in expiries:
+            for expiry, dte in expiry_dtes:
                 chain_data = _live_option_chain(symbol, exchange, expiry)
                 if not chain_data:
                     raise ValueError("No live option-chain data returned")
-                spot = float(chain_data.get("spot", spot))
-                chains_by_expiry[expiry] = _chain_to_vol_surface_format(chain_data, spot)
+                chain_spot = _authoritative_chain_spot(chain_data)
+                if chain_spot is None:
+                    raise ValueError("Live option-chain data has no authoritative spot price")
+                if not _chain_has_valid_strike(chain_data):
+                    raise ValueError("Live option-chain data has no valid strike")
+                spot = chain_spot
+                formatted = _chain_to_vol_surface_format(
+                    chain_data,
+                    spot,
+                    days_to_expiry=dte,
+                )
+                if not formatted["strikes"]:
+                    raise ValueError("Live option-chain data has no usable volatility rows")
+                chains_by_expiry[expiry] = formatted
         except Exception as exc:
             logger.warning("Live vol surface data unavailable, using sample: %s", exc)
             chains_by_expiry = {}
@@ -635,20 +1261,42 @@ def iv_smile_endpoint() -> Any:
     Returns:
         JSON with IV smile data or error.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "26MAR26")
-    spot = 24000.0
+    try:
+        _body, symbol, exchange, expiry = _option_request("26MAR26")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    sample_spot = 24000.0
+    spot = 0.0
     snapshot: OptionChainSnapshot | None = None
+    authoritative_dte = _live_option_days_to_expiry(expiry)
 
-    chain_data = _live_option_chain(symbol, exchange, expiry)
-    if chain_data:
-        spot = float(chain_data.get("spot", spot))
-        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+    chain_data = None
+    if authoritative_dte is not None:
+        chain_data = _live_option_chain(
+            symbol,
+            exchange,
+            expiry,
+            require_complete_greeks=True,
+        )
+    if chain_data is not None:
+        live_spot = _authoritative_chain_spot(chain_data)
+        if live_spot is not None:
+            spot = live_spot
+            candidate = _snapshot_from_registry_data(
+                chain_data,
+                symbol,
+                exchange,
+                spot,
+                require_authoritative_oi=False,
+                require_complete_greeks=True,
+            )
+            snapshot = candidate if candidate.strikes else None
+        else:
+            logger.warning("IVSmile: live chain for %s %s omitted an authoritative spot", symbol, exchange)
 
     used_sample = snapshot is None
     if snapshot is None:
+        spot = sample_spot
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("IVSmile: using sample data for %s %s", symbol, exchange)
 
@@ -659,16 +1307,23 @@ def iv_smile_endpoint() -> Any:
     # (The widget read `curves`/`points` and got undefined from the raw dataclass.)
     curve = {
         "expiry": result.expiry_date or expiry,
-        "days_to_expiry": _days_to_expiry(result.expiry_date or expiry),
-        "atm_iv": result.atm_iv,
+        "days_to_expiry": (
+            authoritative_dte
+            if not used_sample and authoritative_dte is not None
+            else _days_to_expiry(result.expiry_date or expiry)
+        ),
+        # ``calculate_iv_smile`` retains the screener's historical percentage-
+        # point representation. The terminal contract is decimal IV and
+        # strike/spot moneyness, matching its typed sample data and maths.
+        "atm_iv": round(result.atm_iv / 100.0, 6),
         "atm_strike": result.atm_strike,
-        "skew_25delta": result.skew,
+        "skew_25delta": round(result.skew / 100.0, 6),
         "points": [
             {
                 "strike": p.strike_price,
-                "call_iv": p.call_iv,
-                "put_iv": p.put_iv,
-                "moneyness": p.moneyness,
+                "call_iv": round(p.call_iv / 100.0, 6),
+                "put_iv": round(p.put_iv / 100.0, 6),
+                "moneyness": round(p.strike_price / spot, 6) if spot > 0 else 0.0,
             }
             for p in result.points
         ],
@@ -677,6 +1332,7 @@ def iv_smile_endpoint() -> Any:
         "underlying": symbol,
         "spot_price": spot,
         "curves": [curve],
+        "is_sample_data": used_sample,
     }
 
     return jsonify({
@@ -712,18 +1368,25 @@ def straddle_pnl_endpoint() -> Any:
     Returns:
         JSON with P&L series, adjustments, and summary stats.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "26MAR26")
-    interval = body.get("interval", "5m")
-    adjustment_points = float(body.get("adjustment_points", 50.0))
+    try:
+        body, symbol, exchange, expiry = _option_request(_generated_future_expiries(7)[0])
+        if _live_option_days_to_expiry(expiry) is None:
+            raise ValueError("expiry must be a valid strictly future option expiry")
+        interval = _request_identity_string(body, "interval", "5m")
+        adjustment_points = _request_number(
+            body,
+            "adjustment_points",
+            50.0,
+            minimum=0.0,
+            maximum=_MAX_MARKET_VALUE,
+        )
+        strike = _request_number(body, "strike", 24000.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
+        ce_premium = _request_number(body, "ce_premium", 0.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
+        pe_premium = _request_number(body, "pe_premium", 0.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
     spot = 24000.0
-
-    strike = float(body.get("strike", spot))
-    ce_premium = float(body.get("ce_premium", 0.0))
-    pe_premium = float(body.get("pe_premium", 0.0))
     candles: list[dict[str, Any]] = []
 
     registry = _get_registry()
@@ -737,14 +1400,19 @@ def straddle_pnl_endpoint() -> Any:
                 days=1,
             )
             candles = hist.get("candles", [])
-            spot = float(hist.get("spot", spot))
+            history_spot = _finite_number(hist.get("spot"))
+            if history_spot is not None and 0 < history_spot <= _MAX_MARKET_VALUE:
+                spot = history_spot
         except Exception as exc:
             logger.warning("Live straddle candle data unavailable, using sample: %s", exc)
 
-    used_sample = not candles
     if not candles:
         candles = _make_sample_candles(spot=spot)
         logger.info("StraddlePnL: using sample candle data for %s", symbol)
+
+    # The option premiums, strike selection, lot size, and time-value path are
+    # proxy inputs. Live underlying candles alone cannot make this a live result.
+    used_sample = True
 
     # Default strike/premiums from sample data if not provided
     if strike <= 0:
@@ -824,26 +1492,41 @@ def oi_profile_endpoint() -> Any:
     Returns:
         JSON with OI profile data, butterfly, and futures OHLCV.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "26MAR26")
-    strike_count = int(body.get("strike_count", 0))
+    try:
+        body, symbol, exchange, expiry = _option_request("26MAR26")
+        strike_count = _request_integer(body, "strike_count", 0, minimum=0)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
     futures_candles: list[dict[str, Any]] = []
 
-    chain_data = _live_option_chain(symbol, exchange, expiry)
-    if chain_data:
-        spot = float(chain_data.get("spot", spot))
-        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+    chain_data = None
+    authoritative_dte = _live_option_days_to_expiry(expiry)
+    if authoritative_dte is not None:
+        chain_data = _live_option_chain(
+            symbol,
+            exchange,
+            expiry,
+            require_authoritative_oi=True,
+        )
+    chain_spot = _authoritative_chain_spot(chain_data) if chain_data else None
+    if chain_data and chain_spot is not None and _chain_has_valid_strike(chain_data):
+        spot = chain_spot
+        candidate = _snapshot_from_registry_data(
+            chain_data,
+            symbol,
+            exchange,
+            spot,
+        )
+        snapshot = candidate if candidate.strikes else None
 
     used_sample = snapshot is None
     if snapshot is None:
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
         logger.info("OIProfile: using sample data for %s %s", symbol, exchange)
 
-    if not futures_candles:
+    if used_sample and not futures_candles:
         futures_candles = _make_sample_candles(spot=spot)
 
     result = calculate_oi_profile(snapshot, futures_candles=futures_candles)
@@ -862,11 +1545,24 @@ def oi_profile_endpoint() -> Any:
             "strike": ps.strike_price,
             "ce_oi": ps.ce_oi,
             "pe_oi": ps.pe_oi,
-            "ce_oi_change": ps.ce_oi_change,
-            "pe_oi_change": ps.pe_oi_change,
+            **(
+                {
+                    "ce_oi_change": ps.ce_oi_change,
+                    "pe_oi_change": ps.pe_oi_change,
+                }
+                if result.oi_change_available or used_sample
+                else {}
+            ),
         }
         for ps in result.profile_strikes
     ]
+    if not used_sample and not result.oi_change_available:
+        for key in ("oi_change", "ce_oi_change", "pe_oi_change"):
+            data.pop(key, None)
+        for row in data.get("profile_strikes", []):
+            if isinstance(row, dict):
+                row.pop("ce_oi_change", None)
+                row.pop("pe_oi_change", None)
     # Honour the caller's strike-count window (ATM-centred), mirroring volsurface.
     # 0 / absent keeps the full set. Every per-strike array is windowed by the
     # SAME indices so the parallel arrays (oi_butterfly/oi_change/…) stay aligned
@@ -893,7 +1589,7 @@ def oi_profile_endpoint() -> Any:
         "strikes": strikes,
         "total_ce_oi": total_ce_oi,
         "total_pe_oi": total_pe_oi,
-        "pcr": (total_pe_oi / total_ce_oi) if total_ce_oi else 0.0,
+        "pcr": (total_pe_oi / total_ce_oi) if total_ce_oi else None,
     })
 
     return jsonify({
@@ -924,17 +1620,32 @@ def max_pain_endpoint() -> Any:
     Returns:
         JSON with max pain strike, total loss at max pain, and per-strike losses.
     """
-    body = request.get_json(silent=True) or {}
-    symbol = body.get("symbol", "NIFTY")
-    exchange = body.get("exchange", "NFO")
-    expiry = _body_expiry(body, "26MAR26")
+    try:
+        _body, symbol, exchange, expiry = _option_request("26MAR26")
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
     spot = 24000.0
     snapshot: OptionChainSnapshot | None = None
 
-    chain_data = _live_option_chain(symbol, exchange, expiry)
-    if chain_data:
-        spot = float(chain_data.get("spot", spot))
-        snapshot = _snapshot_from_registry_data(chain_data, symbol, exchange, spot)
+    chain_data = None
+    authoritative_dte = _live_option_days_to_expiry(expiry)
+    if authoritative_dte is not None:
+        chain_data = _live_option_chain(
+            symbol,
+            exchange,
+            expiry,
+            require_authoritative_oi=True,
+        )
+    chain_spot = _authoritative_chain_spot(chain_data) if chain_data else None
+    if chain_data and chain_spot is not None and _chain_has_valid_strike(chain_data):
+        spot = chain_spot
+        candidate = _snapshot_from_registry_data(
+            chain_data,
+            symbol,
+            exchange,
+            spot,
+        )
+        snapshot = candidate if candidate.strikes else None
 
     used_sample = snapshot is None
     if snapshot is None:
@@ -942,6 +1653,7 @@ def max_pain_endpoint() -> Any:
         logger.info("MaxPain: using sample data for %s %s", symbol, exchange)
 
     result = OIAnalysis.max_pain(snapshot)
+    available = result.max_pain_strike > 0
 
     return jsonify({
         "status": "success",
@@ -951,6 +1663,7 @@ def max_pain_endpoint() -> Any:
         "spot": spot,
         "is_sample_data": used_sample,
         "data": {
+            "available": available,
             "max_pain_strike": result.max_pain_strike,
             "total_loss_at_max_pain": result.total_loss_at_max_pain,
             "strike_losses": result.strike_losses,
@@ -1285,11 +1998,48 @@ def _candles_to_series(candles: list[dict[str, Any]]) -> _Series:
 # ---------------------------------------------------------------------------
 
 
+def _optional_row_float(
+    row: dict[str, Any],
+    key: str,
+    default: float | None = 0.0,
+) -> float | None:
+    if key not in row or row[key] is None:
+        return default
+    number = _finite_number(row[key])
+    if number is None:
+        return None
+    if key.endswith("_ltp"):
+        return number if 0 <= number <= _MAX_MARKET_VALUE else None
+    if key.endswith("_iv"):
+        return number if 0 <= number <= _MAX_IV_PERCENT else None
+    if key.endswith("_delta"):
+        return number if -1 <= number <= 1 else None
+    if key.endswith("_gamma"):
+        return number if 0 <= number <= _MAX_GAMMA else None
+    if key.endswith("_vega"):
+        return number if 0 <= number <= _MAX_ABS_GREEK else None
+    if key.endswith("_theta"):
+        return number if abs(number) <= _MAX_ABS_GREEK else None
+    return number if abs(number) <= _MAX_MARKET_VALUE else None
+
+
+def _optional_row_count(row: dict[str, Any], key: str) -> int | None:
+    if key not in row or row[key] is None:
+        return 0
+    number = _finite_number(row[key])
+    if number is None or number < 0 or number > _MAX_OPEN_INTEREST or not number.is_integer():
+        return None
+    return int(number)
+
+
 def _snapshot_from_registry_data(
     chain_data: dict[str, Any],
     symbol: str,
     exchange: str,
     spot: float,
+    *,
+    require_authoritative_oi: bool = True,
+    require_complete_greeks: bool = False,
 ) -> OptionChainSnapshot:
     """Convert BrokerRegistry option chain response to OptionChainSnapshot.
 
@@ -1298,6 +2048,11 @@ def _snapshot_from_registry_data(
         symbol: Underlying symbol.
         exchange: Exchange code.
         spot: Spot price.
+        require_authoritative_oi: Require explicit non-negative integer OI on
+            both legs. IV-only consumers may set this false; supplied invalid
+            OI is still rejected.
+        require_complete_greeks: Require both option legs to explicitly attest
+            complete, finite, physically possible IV and Greek values.
 
     Returns:
         OptionChainSnapshot populated from the registry data.
@@ -1305,28 +2060,80 @@ def _snapshot_from_registry_data(
     raw_strikes = chain_data.get("strikes", [])
     strike_data_list: list[StrikeData] = []
 
+    def empty_snapshot() -> OptionChainSnapshot:
+        return OptionChainSnapshot(
+            underlying=symbol,
+            exchange=exchange,
+            spot_price=spot,
+            atm_strike=spot,
+            strikes=[],
+        )
+
+    if not isinstance(raw_strikes, list) or not raw_strikes:
+        return empty_snapshot()
+
+    seen_strikes: set[float] = set()
+
     for row in raw_strikes:
-        k = float(row.get("strike_price", row.get("strike", 0)))
-        if k <= 0:
-            continue
+        if not isinstance(row, dict):
+            return empty_snapshot()
+        strike = _row_strike(row)
+        if strike is None or strike in seen_strikes:
+            return empty_snapshot()
+        seen_strikes.add(strike)
+        ce_oi = _row_open_interest(row, "ce")
+        pe_oi = _row_open_interest(row, "pe")
+        if ce_oi is None:
+            if require_authoritative_oi or "ce_oi" in row:
+                return empty_snapshot()
+            ce_oi = 0
+        if pe_oi is None:
+            if require_authoritative_oi or "pe_oi" in row:
+                return empty_snapshot()
+            pe_oi = 0
+        if require_complete_greeks and not (
+            _leg_has_complete_greeks(row, "ce") and _leg_has_complete_greeks(row, "pe")
+        ):
+            return empty_snapshot()
+        floats = {
+            field: _optional_row_float(row, field)
+            for field in (
+                "ce_ltp",
+                "ce_iv",
+                "ce_delta",
+                "ce_gamma",
+                "ce_theta",
+                "ce_vega",
+                "pe_ltp",
+                "pe_iv",
+                "pe_delta",
+                "pe_gamma",
+                "pe_theta",
+                "pe_vega",
+            )
+        }
+        ce_volume = _optional_row_count(row, "ce_volume")
+        pe_volume = _optional_row_count(row, "pe_volume")
+        if any(value is None for value in floats.values()) or ce_volume is None or pe_volume is None:
+            return empty_snapshot()
         sd = StrikeData(
-            strike_price=k,
-            ce_ltp=float(row.get("ce_ltp", 0)),
-            ce_oi=int(row.get("ce_oi", 0)),
-            ce_volume=int(row.get("ce_volume", 0)),
-            ce_iv=float(row.get("ce_iv", 0)),
-            ce_delta=float(row.get("ce_delta", 0)),
-            ce_gamma=float(row.get("ce_gamma", 0)),
-            ce_theta=float(row.get("ce_theta", 0)),
-            ce_vega=float(row.get("ce_vega", 0)),
-            pe_ltp=float(row.get("pe_ltp", 0)),
-            pe_oi=int(row.get("pe_oi", 0)),
-            pe_volume=int(row.get("pe_volume", 0)),
-            pe_iv=float(row.get("pe_iv", 0)),
-            pe_delta=float(row.get("pe_delta", 0)),
-            pe_gamma=float(row.get("pe_gamma", 0)),
-            pe_theta=float(row.get("pe_theta", 0)),
-            pe_vega=float(row.get("pe_vega", 0)),
+            strike_price=strike,
+            ce_ltp=floats["ce_ltp"],
+            ce_oi=ce_oi,
+            ce_volume=ce_volume,
+            ce_iv=floats["ce_iv"],
+            ce_delta=floats["ce_delta"],
+            ce_gamma=floats["ce_gamma"],
+            ce_theta=floats["ce_theta"],
+            ce_vega=floats["ce_vega"],
+            pe_ltp=floats["pe_ltp"],
+            pe_oi=pe_oi,
+            pe_volume=pe_volume,
+            pe_iv=floats["pe_iv"],
+            pe_delta=floats["pe_delta"],
+            pe_gamma=floats["pe_gamma"],
+            pe_theta=floats["pe_theta"],
+            pe_vega=floats["pe_vega"],
         )
         strike_data_list.append(sd)
 
@@ -1339,32 +2146,84 @@ def _snapshot_from_registry_data(
     )
 
 
+def _leg_has_complete_greeks(row: dict[str, Any], prefix: str) -> bool:
+    """Return whether one leg attests finite, physically possible Greeks."""
+    if row.get(f"{prefix}_greeks_complete") is not True:
+        return False
+    values: list[float] = []
+    for field in ("iv", "delta", "gamma", "theta", "vega"):
+        raw = row.get(f"{prefix}_{field}")
+        if raw is None or isinstance(raw, bool):
+            return False
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+        values.append(value)
+    iv, delta, gamma, theta, vega = values
+    delta_valid = 0.0 <= delta <= 1.0 if prefix == "ce" else -1.0 <= delta <= 0.0
+    return (
+        0.0 < iv <= _MAX_IV_PERCENT
+        and delta_valid
+        and 0.0 <= gamma <= _MAX_GAMMA
+        and abs(theta) <= _MAX_ABS_GREEK
+        and 0.0 <= vega <= _MAX_ABS_GREEK
+    )
+
+
 def _chain_to_vol_surface_format(
     chain_data: dict[str, Any],
     spot: float,
+    *,
+    days_to_expiry: int,
 ) -> dict[str, Any]:
     """Convert BrokerRegistry chain response to vol surface input format.
 
     Args:
         chain_data: Raw chain response dict.
         spot: Spot price.
+        days_to_expiry: Authoritatively parsed positive calendar DTE.
 
     Returns:
         Dict with 'dte', 'spot', and 'strikes' for vol surface calculation.
     """
+    if isinstance(days_to_expiry, bool) or not isinstance(days_to_expiry, int) or days_to_expiry <= 0:
+        raise ValueError("days_to_expiry must be an authoritative positive integer")
+
+    strikes: list[dict[str, float]] = []
+    seen_strikes: set[float] = set()
+    raw_strikes = chain_data.get("strikes", [])
+    if not isinstance(raw_strikes, list) or not raw_strikes:
+        raise ValueError("option chain must contain source rows")
+    for row in raw_strikes:
+        if not isinstance(row, dict):
+            raise ValueError("option chain source row is not an object")
+        strike = _row_strike(row)
+        if strike is None or strike in seen_strikes:
+            raise ValueError("option chain source rows must have unique bounded strikes")
+        seen_strikes.add(strike)
+        ce_ltp = _optional_row_float(row, "ce_ltp", default=None)
+        pe_ltp = _optional_row_float(row, "pe_ltp", default=None)
+        ce_iv = _optional_row_float(row, "ce_iv", default=None)
+        pe_iv = _optional_row_float(row, "pe_iv", default=None)
+        observations = (ce_ltp, pe_ltp, ce_iv, pe_iv)
+        if any(value is None or value <= 0 for value in observations):
+            raise ValueError("option chain source row lacks positive finite price/IV observations")
+        strikes.append({
+            "strike": strike,
+            "ce_ltp": ce_ltp,
+            "pe_ltp": pe_ltp,
+            "ce_iv": ce_iv,
+            "pe_iv": pe_iv,
+        })
+
+    strikes.sort(key=lambda row: row["strike"])
     return {
-        "dte": int(chain_data.get("days_to_expiry", chain_data.get("dte", 7))),
+        "dte": days_to_expiry,
         "spot": spot,
-        "strikes": [
-            {
-                "strike": float(r.get("strike_price", r.get("strike", 0))),
-                "ce_ltp": float(r.get("ce_ltp", 0)),
-                "pe_ltp": float(r.get("pe_ltp", 0)),
-                "ce_iv": float(r.get("ce_iv", 0)),
-                "pe_iv": float(r.get("pe_iv", 0)),
-            }
-            for r in chain_data.get("strikes", [])
-        ],
+        "strikes": strikes,
     }
 
 
@@ -1381,15 +2240,17 @@ def _make_sample_chains_by_expiry(
     Returns:
         ChainsByExpiry dict with synthetic multi-expiry data.
     """
-    base_dtes = [7, 30, 60, 90, 120]
     result: dict[str, dict[str, Any]] = {}
 
     for i, expiry in enumerate(expiries):
-        dte = base_dtes[i] if i < len(base_dtes) else (i + 1) * 30
+        dte = _live_option_days_to_expiry(expiry)
+        if dte is None:
+            raise ValueError(f"Sample expiry must be a valid future date: {expiry!r}")
         iv_base = 15.0 + i * 1.5  # term structure: longer expiry = higher IV
         strikes_data = []
+        step = _sample_strike_step(spot, 100.0, 10)
         for j in range(-10, 11):
-            k = spot + j * 100
+            k = spot + j * step
             dist = abs(j)
             iv = iv_base + dist * 0.6
             strikes_data.append({

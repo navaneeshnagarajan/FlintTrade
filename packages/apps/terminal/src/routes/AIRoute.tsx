@@ -807,7 +807,7 @@ function AISettingsSection() {
           {[
             {
               title: "LLM Provider",
-              desc: "LM Studio (local), Ollama (local), OpenAI API, Anthropic API, or custom OpenAI-compatible endpoint.",
+              desc: "Managed Ollama, OpenAI API, Anthropic API, or a custom OpenAI-compatible endpoint.",
             },
             {
               title: "Model Selection",

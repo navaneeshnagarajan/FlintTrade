@@ -1,10 +1,9 @@
 /**
  * WebhooksSection — Manage TradingView webhook endpoints.
  *
- * Three sub-areas surfaced via tabs:
+ * Two sub-areas surfaced via tabs:
  *  1. Active     — registered endpoints with test/delete actions
  *  2. Create     — form to register a new endpoint
- *  3. Templates  — AlertTemplateBrowser for pre-built payloads
  */
 
 import { useState } from "react";
@@ -19,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -35,11 +35,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { GlassCard } from "@/components/ui/GlassCard";
-import { AlertTemplateBrowser } from "@/components/tradingview/AlertTemplateBrowser";
 import {
   createWebhook,
   deleteWebhook,
   getWebhooks,
+  setWebhookEnabled,
   type WebhookConfig,
 } from "@/services/ftApi";
 import { InlineToast, useInlineToast } from "./shared";
@@ -70,12 +70,12 @@ function slugFromPath(path: string): string {
 // CopyableUrl
 // ---------------------------------------------------------------------------
 
-function CopyableUrl({ url }: { url: string }) {
+function CopyablePath({ path }: { path: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(path);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -87,10 +87,10 @@ function CopyableUrl({ url }: { url: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      title="Copy URL"
+      title="Copy relay path"
       className="inline-flex items-center gap-1.5 font-mono text-xs text-text-secondary hover:text-text-primary transition-colors"
     >
-      <span className="truncate max-w-[200px]">{url}</span>
+      <span className="truncate max-w-[200px]">{path}</span>
       {copied ? (
         <Check size={11} className="text-profit shrink-0" />
       ) : (
@@ -109,7 +109,9 @@ interface ActiveWebhooksTabProps {
   isLoading: boolean;
   isError: boolean;
   deletingId: string | null;
+  togglingId: string | null;
   onDelete: (id: string) => void;
+  onToggle: (id: string, enabled: boolean) => void;
 }
 
 function ActiveWebhooksTab({
@@ -117,7 +119,9 @@ function ActiveWebhooksTab({
   isLoading,
   isError,
   deletingId,
+  togglingId,
   onDelete,
+  onToggle,
 }: ActiveWebhooksTabProps) {
   if (isLoading) {
     return (
@@ -149,7 +153,7 @@ function ActiveWebhooksTab({
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
-            <TableHead>URL</TableHead>
+            <TableHead>Relay path</TableHead>
             <TableHead>Slug</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
@@ -163,7 +167,7 @@ function ActiveWebhooksTab({
                 {ep.name}
               </TableCell>
               <TableCell>
-                <CopyableUrl url={ep.path} />
+                <CopyablePath path={ep.path} />
               </TableCell>
               <TableCell className="font-mono text-xs text-text-secondary">
                 {slugFromPath(ep.path)}
@@ -174,15 +178,23 @@ function ActiveWebhooksTab({
                 </Badge>
               </TableCell>
               <TableCell>
-                {ep.enabled ? (
-                  <Badge className="text-xs bg-profit/10 text-profit border-0">
-                    Active
-                  </Badge>
-                ) : (
-                  <Badge className="text-xs bg-text-muted/10 text-text-muted border-0">
-                    Disabled
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={ep.enabled}
+                    onCheckedChange={(enabled) => onToggle(ep.id, enabled)}
+                    disabled={
+                      togglingId === ep.id || ep.secret_configured === false
+                    }
+                    aria-label={`${ep.enabled ? "Disable" : "Enable"} ${ep.name}`}
+                  />
+                  <span className="text-xs text-text-muted">
+                    {ep.secret_configured === false
+                      ? "Needs secret"
+                      : ep.enabled
+                        ? "Active"
+                        : "Disabled"}
+                  </span>
+                </div>
               </TableCell>
               <TableCell>
                 <div className="flex items-center justify-end gap-1">
@@ -192,6 +204,7 @@ function ActiveWebhooksTab({
                     onClick={() => onDelete(ep.id)}
                     disabled={deletingId === ep.id}
                     title="Delete endpoint"
+                    aria-label={`Delete ${ep.name}`}
                     className="h-7 w-7 p-0 text-text-muted hover:text-loss"
                   >
                     {deletingId === ep.id ? (
@@ -214,7 +227,12 @@ function ActiveWebhooksTab({
 // CreateWebhookTab — form schema
 // ---------------------------------------------------------------------------
 
-const WEBHOOK_TYPES = ["tradingview", "chartink", "gocharting", "custom"] as const;
+const WEBHOOK_TYPES = [
+  "tradingview",
+  "chartink",
+  "gocharting",
+  "custom",
+] as const;
 type WebhookType = (typeof WEBHOOK_TYPES)[number];
 
 const createSchema = z.object({
@@ -223,18 +241,29 @@ const createSchema = z.object({
     .string()
     .min(1, "Strategy ID is required")
     .max(64, "Strategy ID too long")
-    .regex(/^[a-z0-9-_]+$/, "Use lowercase letters, numbers, hyphens, or underscores"),
+    .regex(
+      /^[a-z0-9-_]+$/,
+      "Use lowercase letters, numbers, hyphens, or underscores",
+    ),
   type: z.enum(WEBHOOK_TYPES),
-  secret: z.string().max(128, "Secret too long").optional(),
+  secret: z
+    .string()
+    .trim()
+    .min(1, "Signing secret is required")
+    .max(128, "Secret too long"),
 });
 
 type CreateFormValues = z.infer<typeof createSchema>;
 
 interface CreateWebhookTabProps {
   onCreate: (values: CreateFormValues) => Promise<void>;
+  submissionError?: string;
 }
 
-function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
+function CreateWebhookTab({
+  onCreate,
+  submissionError,
+}: CreateWebhookTabProps) {
   const {
     register,
     handleSubmit,
@@ -250,21 +279,27 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
   const watchedType = watch("type");
   const watchedStrategyId = watch("strategyId") ?? "";
 
-  const previewUrl =
-    watchedStrategyId.trim()
-      ? `/v1/webhook/${watchedType}/${watchedStrategyId.trim()}`
-      : `/v1/webhook/${watchedType}/<strategy-id>`;
+  const previewUrl = watchedStrategyId.trim()
+    ? `/v1/webhook/${watchedType}/${watchedStrategyId.trim()}`
+    : `/v1/webhook/${watchedType}/<strategy-id>`;
 
   const onSubmit = async (values: CreateFormValues) => {
-    await onCreate(values);
-    reset();
+    try {
+      await onCreate(values);
+      reset();
+    } catch {
+      // The mutation owns the inline error state; contain the rejected promise.
+    }
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 max-w-lg">
       {/* Name */}
       <div className="space-y-1.5">
-        <Label htmlFor="wh-name" className="text-xs font-medium text-text-primary">
+        <Label
+          htmlFor="wh-name"
+          className="text-xs font-medium text-text-primary"
+        >
           Name
         </Label>
         <Input
@@ -280,7 +315,10 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
 
       {/* Type */}
       <div className="space-y-1.5">
-        <Label htmlFor="wh-type" className="text-xs font-medium text-text-primary">
+        <Label
+          htmlFor="wh-type"
+          className="text-xs font-medium text-text-primary"
+        >
           Type
         </Label>
         <Select
@@ -291,17 +329,28 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
             <SelectValue placeholder="Select type" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="tradingview" className="text-xs">TradingView</SelectItem>
-            <SelectItem value="chartink" className="text-xs">ChartInk</SelectItem>
-            <SelectItem value="gocharting" className="text-xs">GoCharting</SelectItem>
-            <SelectItem value="custom" className="text-xs">Custom</SelectItem>
+            <SelectItem value="tradingview" className="text-xs">
+              TradingView
+            </SelectItem>
+            <SelectItem value="chartink" className="text-xs">
+              ChartInk
+            </SelectItem>
+            <SelectItem value="gocharting" className="text-xs">
+              GoCharting
+            </SelectItem>
+            <SelectItem value="custom" className="text-xs">
+              Custom
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       {/* Strategy ID */}
       <div className="space-y-1.5">
-        <Label htmlFor="wh-strategy" className="text-xs font-medium text-text-primary">
+        <Label
+          htmlFor="wh-strategy"
+          className="text-xs font-medium text-text-primary"
+        >
           Strategy ID
         </Label>
         <Input
@@ -321,15 +370,17 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
 
       {/* Secret */}
       <div className="space-y-1.5">
-        <Label htmlFor="wh-secret" className="text-xs font-medium text-text-primary">
-          Secret{" "}
-          <span className="font-normal text-text-muted">(optional — used for HMAC verification)</span>
+        <Label
+          htmlFor="wh-secret"
+          className="text-xs font-medium text-text-primary"
+        >
+          Signing secret
         </Label>
         <Input
           id="wh-secret"
           type="password"
           autoComplete="new-password"
-          placeholder="Leave blank to skip HMAC verification"
+          placeholder="Enter relay signing secret"
           className="h-8 text-xs font-mono"
           {...register("secret")}
         />
@@ -338,10 +389,12 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
         )}
       </div>
 
-      {/* Generated URL preview */}
+      {/* Generated relay-path preview */}
       <div className="rounded-md border border-border-default bg-surface-base px-3 py-2.5">
-        <p className="text-xs text-text-muted mb-1">Generated endpoint URL</p>
-        <p className="font-mono text-xs text-text-primary break-all">{previewUrl}</p>
+        <p className="text-xs text-text-muted mb-1">Relay path</p>
+        <p className="font-mono text-xs text-text-primary break-all">
+          {previewUrl}
+        </p>
       </div>
 
       <Button
@@ -353,6 +406,11 @@ function CreateWebhookTab({ onCreate }: CreateWebhookTabProps) {
         {isSubmitting && <Loader2 size={12} className="animate-spin" />}
         Create Endpoint
       </Button>
+      {submissionError && (
+        <p role="alert" className="text-xs text-loss" aria-live="polite">
+          {submissionError}
+        </p>
+      )}
     </form>
   );
 }
@@ -365,6 +423,7 @@ export default function WebhooksSection() {
   const queryClient = useQueryClient();
   const { toast, setToast, dismissToast } = useInlineToast();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const webhooksQuery = useQuery({
     queryKey: ["webhooks"],
@@ -374,19 +433,17 @@ export default function WebhooksSection() {
   const webhooks = webhooksQuery.data?.webhooks ?? [];
 
   const createMutation = useMutation({
-    mutationFn: (values: CreateFormValues) => createWebhook({
-      name: values.name.trim(),
-      type: values.type,
-      path: `/v1/webhook/${values.type}/${values.strategyId.trim()}`,
-      enabled: true,
-      ...(values.secret?.trim() ? { secret: values.secret.trim() } : {}),
-    }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+    mutationFn: (values: CreateFormValues) =>
+      createWebhook({
+        name: values.name.trim(),
+        type: values.type,
+        path: `/v1/webhook/${values.type}/${values.strategyId.trim()}`,
+        enabled: true,
+        secret: values.secret.trim(),
+      }),
+    onSuccess: async () => {
       setToast({ msg: "Webhook created", variant: "success" });
-    },
-    onError: (err: Error) => {
-      setToast({ msg: err.message || "Failed to create webhook", variant: "error" });
+      await queryClient.invalidateQueries({ queryKey: ["webhooks"] });
     },
   });
 
@@ -395,15 +452,39 @@ export default function WebhooksSection() {
     onMutate: (id) => {
       setDeletingId(id);
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+    onSuccess: async () => {
       setToast({ msg: "Webhook deleted", variant: "success" });
+      await queryClient.invalidateQueries({ queryKey: ["webhooks"] });
     },
     onError: (err: Error) => {
-      setToast({ msg: err.message || "Failed to delete webhook", variant: "error" });
+      setToast({
+        msg: err.message || "Failed to delete webhook",
+        variant: "error",
+      });
     },
     onSettled: () => {
       setDeletingId(null);
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      setWebhookEnabled(id, enabled),
+    onMutate: ({ id }) => {
+      setTogglingId(id);
+    },
+    onSuccess: async () => {
+      setToast({ msg: "Webhook status updated", variant: "success" });
+      await queryClient.invalidateQueries({ queryKey: ["webhooks"] });
+    },
+    onError: (err: Error) => {
+      setToast({
+        msg: err.message || "Failed to update webhook",
+        variant: "error",
+      });
+    },
+    onSettled: () => {
+      setTogglingId(null);
     },
   });
 
@@ -419,14 +500,18 @@ export default function WebhooksSection() {
             Webhooks
           </h3>
           <p className="text-sm text-text-secondary mt-0.5">
-            Register inbound webhook endpoints for TradingView, ChartInk, GoCharting,
-            and custom integrations. Each endpoint forwards payloads to the configured strategy.
+            Register signed relay endpoints for TradingView, ChartInk,
+            GoCharting, and custom payload formats.
           </p>
         </div>
 
         {toast && (
           <div className="mb-4">
-            <InlineToast message={toast.msg} variant={toast.variant} onDismiss={dismissToast} />
+            <InlineToast
+              message={toast.msg}
+              variant={toast.variant}
+              onDismiss={dismissToast}
+            />
           </div>
         )}
 
@@ -438,9 +523,6 @@ export default function WebhooksSection() {
             <TabsTrigger value="create" className="text-xs">
               Create
             </TabsTrigger>
-            <TabsTrigger value="templates" className="text-xs">
-              Alert Templates
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="active">
@@ -449,16 +531,21 @@ export default function WebhooksSection() {
               isLoading={webhooksQuery.isLoading}
               isError={webhooksQuery.isError}
               deletingId={deletingId}
+              togglingId={togglingId}
               onDelete={(id) => deleteMutation.mutate(id)}
+              onToggle={(id, enabled) => toggleMutation.mutate({ id, enabled })}
             />
           </TabsContent>
 
           <TabsContent value="create">
-            <CreateWebhookTab onCreate={handleCreate} />
-          </TabsContent>
-
-          <TabsContent value="templates">
-            <AlertTemplateBrowser scrollHeight="520px" />
+            <CreateWebhookTab
+              onCreate={handleCreate}
+              submissionError={
+                createMutation.error instanceof Error
+                  ? createMutation.error.message || "Failed to create webhook"
+                  : undefined
+              }
+            />
           </TabsContent>
         </Tabs>
       </GlassCard>

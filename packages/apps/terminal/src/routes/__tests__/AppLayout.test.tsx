@@ -62,6 +62,14 @@ vi.mock("@/hooks/useTickerFallback", () => ({
   useTickerFallback: vi.fn(),
 }));
 
+const { mockUseOpenAlgoConfigHydration } = vi.hoisted(() => ({
+  mockUseOpenAlgoConfigHydration: vi.fn(),
+}));
+
+vi.mock("@/hooks/useOpenAlgoConfigHydration", () => ({
+  useOpenAlgoConfigHydration: mockUseOpenAlgoConfigHydration,
+}));
+
 vi.mock("@/hooks/usePrevClose", () => ({
   usePrevClose: vi.fn(),
 }));
@@ -110,7 +118,7 @@ vi.mock("@/stores/modeStore", () => ({
 vi.mock("@/stores/authStore", () => ({
   useAuthStore: Object.assign(
     vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector({ status: "authenticated" }),
+      selector({ status: "logged-in" }),
     ),
     { getState: () => ({ checkIdle: vi.fn(), touchActivity: vi.fn() }), setState: vi.fn() },
   ),
@@ -204,6 +212,13 @@ describe("AppLayout", () => {
     renderApp();
 
     expect(screen.queryByTestId("daily-welcome")).not.toBeInTheDocument();
+    expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(false);
+  });
+
+  it("hydrates broker config for an authenticated non-Explore session", () => {
+    renderApp();
+
+    expect(mockUseOpenAlgoConfigHydration).toHaveBeenCalledWith(true);
   });
 
   it("does not render the removed legacy dot tour overlay", () => {

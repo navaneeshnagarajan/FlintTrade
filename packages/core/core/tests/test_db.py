@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -75,14 +76,10 @@ def test_open_sqlite_concurrent_legacy_recovery_no_spurious_raise(tmp_path: Path
     race must retry under the lock and succeed, not re-raise at the instant
     the winner has renamed the legacy file but not yet recreated it.
 
-    Thread count is deliberately modest. The race is fully saturated with a
-    single winner plus a couple of lock losers exercising the double-checked
-    retry — extra threads add no race coverage. They DO add simultaneous
-    first-time WAL access, each of which memory-maps SQLite's ``-shm``
-    shared-memory index; a large stampede of concurrent ``xShmMap`` calls on a
-    just-recreated database has SIGBUS-crashed the whole pytest-xdist worker
-    on resource-constrained CI (``Fatal Python error: Bus error``). Eight
-    threads reliably interleave the rename race without that crash regime.
+    Connection initialisation is serialised because first-time WAL access
+    memory-maps SQLite's ``-shm`` index; a concurrent ``xShmMap`` stampede on
+    a just-recreated database can SIGBUS the whole process before Python can
+    report an exception.
     """
     db = tmp_path / "activity.db"
     db.write_bytes(_FAKE_DUCKDB_HEADER + b"\x00" * 4096)
@@ -112,6 +109,40 @@ def test_open_sqlite_concurrent_legacy_recovery_no_spurious_raise(tmp_path: Path
     # The legacy file is quarantined exactly once; the result is fresh SQLite.
     assert (tmp_path / "activity.db.pre-sqlite.bak").exists()
     assert db.read_bytes()[: len(_SQLITE_MAGIC)] == _SQLITE_MAGIC
+
+
+def test_open_sqlite_serialises_connection_initialisation(monkeypatch, tmp_path: Path) -> None:
+    from flinttrade_core import db as db_module
+
+    n_threads = 8
+    barrier = threading.Barrier(n_threads)
+    state_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def observed_connect(*_args, **_kwargs):
+        nonlocal active, max_active
+        with state_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.02)
+        with state_lock:
+            active -= 1
+        return object()
+
+    monkeypatch.setattr(db_module, "_connect", observed_connect)
+
+    def worker() -> None:
+        barrier.wait()
+        db_module.open_sqlite(tmp_path / "shared.db")
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert max_active == 1
 
 
 def test_open_sqlite_raises_on_unknown_garbage_header(tmp_path: Path) -> None:

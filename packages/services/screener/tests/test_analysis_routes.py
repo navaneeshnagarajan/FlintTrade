@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -54,8 +55,9 @@ def _post(client, path: str, body: dict | None = None):
 
 
 def _chain_payload() -> dict:
-    return {
+    payload = {
         "spot": 24000.0,
+        "lot_size": 75,
         "strikes": [
             {
                 "strike_price": 23800,
@@ -92,6 +94,22 @@ def _chain_payload() -> dict:
             },
         ],
     }
+    for row in payload["strikes"]:
+        row.update({
+            "ce_gamma": 0.001,
+            "ce_theta": -8.0,
+            "ce_vega": 6.0,
+            "ce_greeks_complete": True,
+            "pe_gamma": 0.001,
+            "pe_theta": -8.0,
+            "pe_vega": 6.0,
+            "pe_greeks_complete": True,
+        })
+    return payload
+
+
+def _future_expiry(days: int = 30) -> str:
+    return (date.today() + timedelta(days=days)).isoformat()
 
 
 def _history_candles(n: int = 80) -> list[dict]:
@@ -121,6 +139,16 @@ class _ConnectedRegistry:
     def get_option_chain(self, account_id: str, params: dict) -> dict:
         self.chain_calls.append((account_id, params))
         return _chain_payload()
+
+
+class _PayloadRegistry(_ConnectedRegistry):
+    def __init__(self, payload: dict) -> None:
+        super().__init__()
+        self.payload = payload
+
+    def get_option_chain(self, account_id: str, params: dict) -> dict:
+        self.chain_calls.append((account_id, params))
+        return self.payload
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +194,94 @@ class TestGEXEndpoint:
     def test_gex_uses_connected_registry_option_chain(self, app, client):
         registry = _ConnectedRegistry()
         app.config["REGISTRY"] = registry
+        expiry = _future_expiry()
 
-        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry})
 
         assert body["is_sample_data"] is False
-        assert registry.chain_calls == [("acc-primary", {"symbol": "NIFTY", "exchange": "NFO"})]
+        assert body["data"]["gamma_flip_strike"] is None
+        assert registry.chain_calls == [(
+            "acc-primary",
+            {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": expiry},
+        )]
+
+    def test_zero_net_gex_is_neutral(self, app, client):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row["ce_oi"] = 0
+            row["pe_oi"] = 0
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        expiry = _future_expiry()
+
+        _, body = _post(
+            client,
+            "/api/v1/gex",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert body["is_sample_data"] is False
+        assert body["data"]["net_gex"] == 0.0
+        assert body["data"]["dealer_zone"] == "Neutral Gamma"
+        assert body["data"]["gamma_flip_strike"] is None
+
+    def test_unknown_symbol_without_authoritative_lot_size_is_unavailable(self, app, client):
+        payload = _chain_payload()
+        payload.pop("lot_size")
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+
+        response, body = _post(
+            client,
+            "/api/v1/gex",
+            {"symbol": "RELIANCE", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+        assert body["lot_size"] is None
+        assert body["data"]["available"] is False
+        assert body["data"]["strikes"] == []
+
+    def test_unknown_symbol_uses_live_lot_size_resolver_when_available(self, app, client):
+        class _InstrumentClient:
+            def instruments(self, *, exchange: str):
+                assert exchange == "NFO"
+                return {
+                    "status": "success",
+                    "data": [{"symbol": "RELIANCE", "exchange": "NFO", "lot_size": 250}],
+                }
+
+        payload = _chain_payload()
+        payload.pop("lot_size")
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        app.config["OPENALGO_CLIENT"] = _InstrumentClient()
+
+        response, body = _post(
+            client,
+            "/api/v1/gex",
+            {"symbol": "RELIANCE", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        assert body["lot_size"] == 250
+        assert body["data"]["available"] is True
+
+    def test_known_index_lot_size_requires_authoritative_metadata(self, app, client):
+        payload = _chain_payload()
+        payload.pop("lot_size")
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        app.config["OPENALGO_CLIENT"] = None
+
+        _, body = _post(
+            client,
+            "/api/v1/gex",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert body["is_sample_data"] is True
+        assert body["lot_size"] == 75
+        assert body["data"]["available"] is True
+        assert body["data"]["strikes"]
 
 
 # ---------------------------------------------------------------------------
@@ -184,20 +295,20 @@ class TestVolSurfaceEndpoint:
     def test_volsurface_returns_200(self, client):
         resp, _ = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
-            "expiries": ["26MAR26", "24APR26"], "strike_count": 20,
+            "expiries": [_future_expiry(30), _future_expiry(60)], "strike_count": 20,
         })
         assert resp.status_code == 200
 
     def test_volsurface_status_ok(self, client):
-        _, body = _post(client, "/api/v1/volsurface", {
-            "symbol": "NIFTY", "exchange": "NFO", "expiries": ["26MAR26"],
+        response, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY", "exchange": "NFO", "expiries": [_future_expiry()],
         })
         assert body["status"] == "success"
 
     def test_volsurface_has_matrix(self, client):
-        _, body = _post(client, "/api/v1/volsurface", {
+        response, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
-            "expiries": ["26MAR26", "24APR26"],
+            "expiries": [_future_expiry(30), _future_expiry(60)],
         })
         # Terminal VolSurfaceData contract (mapped from the raw dataclass).
         data = body["data"]
@@ -213,7 +324,7 @@ class TestVolSurfaceEndpoint:
         """iv_matrix rows should match expiry count."""
         _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
-            "expiries": ["26MAR26", "24APR26", "29MAY26"],
+            "expiries": [_future_expiry(30), _future_expiry(60), _future_expiry(90)],
         })
         data = body["data"]
         n_expiries = len(data["days_to_expiry"])
@@ -225,25 +336,169 @@ class TestVolSurfaceEndpoint:
     def test_volsurface_strike_count_limited(self, client):
         _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY", "exchange": "NFO",
-            "expiries": ["26MAR26"], "strike_count": 5,
+            "expiries": [_future_expiry()], "strike_count": 5,
         })
         assert len(body["data"]["strikes"]) <= 5
+
+    def test_sample_volsurface_uses_the_requested_expiry_dte(self, client):
+        expiry = _future_expiry(43)
+
+        response, body = _post(
+            client,
+            "/api/v1/volsurface",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [expiry]},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+        assert body["data"]["expiries"] == [expiry]
+        assert body["data"]["days_to_expiry"] == [43]
+
+    def test_omitted_volsurface_expiries_are_generated_future_dates(self, client):
+        response, body = _post(client, "/api/v1/volsurface", {})
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+        parsed = [date.fromisoformat(value) for value in body["data"]["expiries"]]
+        assert all(value > date.today() for value in parsed)
+        assert body["data"]["days_to_expiry"] == [
+            (value - date.today()).days for value in parsed
+        ]
+
+    def test_volsurface_rejects_an_unbounded_expiry_vector(self, client):
+        expiries = [_future_expiry(offset) for offset in range(1, 14)]
+
+        response, body = _post(client, "/api/v1/volsurface", {"expiries": expiries})
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+        assert "at most 12" in body["message"]
 
     def test_volsurface_uses_connected_registry_option_chain(self, app, client):
         registry = _ConnectedRegistry()
         app.config["REGISTRY"] = registry
+        expiry = _future_expiry()
 
         _, body = _post(client, "/api/v1/volsurface", {
             "symbol": "NIFTY",
             "exchange": "NFO",
-            "expiries": ["26MAR26"],
+            "expiries": [expiry],
         })
 
         assert body["is_sample_data"] is False
         assert registry.chain_calls[0] == (
             "acc-primary",
-            {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"},
+            {"symbol": "NIFTY", "exchange": "NSE_INDEX", "expiry": expiry},
         )
+
+    @pytest.mark.parametrize("expiry_form", ["iso", "compact"])
+    def test_live_volsurface_derives_exact_dte_from_expiry(self, app, client, expiry_form):
+        from datetime import date, timedelta
+
+        from flinttrade_screener.symbol_converter import format_expiry_date
+
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+        future = date.today() + timedelta(days=23)
+        expiry = future.isoformat() if expiry_form == "iso" else format_expiry_date(future)
+
+        _, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiries": [expiry],
+        })
+
+        assert body["is_sample_data"] is False
+        assert body["data"]["expiries"] == [expiry]
+        assert body["data"]["days_to_expiry"] == [23]
+
+    def test_live_volsurface_preserves_distinct_dte_for_multiple_expiries(self, app, client):
+        from datetime import date, timedelta
+
+        from flinttrade_screener.symbol_converter import format_expiry_date
+
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+        near_expiry = (date.today() + timedelta(days=11)).isoformat()
+        far_expiry = format_expiry_date(date.today() + timedelta(days=37))
+
+        _, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiries": [far_expiry, near_expiry],
+        })
+
+        assert body["is_sample_data"] is False
+        assert body["data"]["expiries"] == [near_expiry, far_expiry]
+        assert body["data"]["days_to_expiry"] == [11, 37]
+
+    def test_live_volsurface_rejects_unparseable_expiry(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["REGISTRY"] = registry
+
+        response, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiries": ["not-an-expiry"],
+        })
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+        assert registry.chain_calls == []
+
+    @pytest.mark.parametrize("expiry", ["2020-01-01", pytest.param("today", id="same-day")])
+    def test_live_volsurface_requires_strictly_future_expiry(self, app, client, expiry):
+        app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
+        selected = date.today().isoformat() if expiry == "today" else expiry
+
+        response, body = _post(
+            client,
+            "/api/v1/volsurface",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [selected]},
+        )
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+
+    @pytest.mark.parametrize("missing_field", ["ce_ltp", "pe_ltp", "ce_iv", "pe_iv"])
+    def test_live_volsurface_rejects_omitted_price_or_iv(self, app, client, missing_field):
+        from datetime import date, timedelta
+
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row.pop(missing_field)
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        expiry = (date.today() + timedelta(days=20)).isoformat()
+
+        _, body = _post(client, "/api/v1/volsurface", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiries": [expiry],
+        })
+
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize("invalid_value", [0, -1, float("nan"), float("inf")])
+    @pytest.mark.parametrize("field", ["ce_ltp", "pe_ltp", "ce_iv", "pe_iv"])
+    def test_live_volsurface_rejects_non_positive_or_non_finite_observations(
+        self,
+        app,
+        client,
+        field,
+        invalid_value,
+    ):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row[field] = invalid_value
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+
+        _, body = _post(
+            client,
+            "/api/v1/volsurface",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [_future_expiry()]},
+        )
+
+        assert body["is_sample_data"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +546,61 @@ class TestIVSmileEndpoint:
     def test_ivsmile_uses_connected_registry_option_chain(self, app, client):
         registry = _ConnectedRegistry()
         app.config["REGISTRY"] = registry
+        expiry = _future_expiry()
 
-        _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"})
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
 
         assert body["is_sample_data"] is False
-        assert registry.chain_calls[0][1]["expiry"] == "26MAR26"
+        assert registry.chain_calls[0][1]["exchange"] == "NSE_INDEX"
+        assert registry.chain_calls[0][1]["expiry"] == expiry
+        curve = body["data"]["curves"][0]
+        assert curve["atm_iv"] == pytest.approx(0.1305)
+        atm = next(point for point in curve["points"] if point["strike"] == 24000)
+        assert atm == {
+            "strike": 24000.0,
+            "call_iv": pytest.approx(0.13),
+            "put_iv": pytest.approx(0.131),
+            "moneyness": pytest.approx(1.0),
+        }
+
+    def test_ivsmile_labels_fallback_when_every_live_option_leg_is_incomplete(self, app, client):
+        class _IncompleteRegistry(_ConnectedRegistry):
+            def get_option_chain(self, account_id: str, params: dict) -> dict:
+                payload = super().get_option_chain(account_id, params)
+                for row in payload["strikes"]:
+                    row["pe_greeks_complete"] = False
+                return payload
+
+        app.config["REGISTRY"] = _IncompleteRegistry()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"},
+        )
+
+        assert body["is_sample_data"] is True
+        curve = body["data"]["curves"][0]
+        assert curve["points"]
+        assert curve["atm_iv"] > 0.0
+
+    @pytest.mark.parametrize("expiry", ["not-an-expiry", "2020-01-01", pytest.param("today", id="same-day")])
+    def test_live_ivsmile_requires_strictly_future_expiry(self, app, client, expiry):
+        app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
+        selected = date.today().isoformat() if expiry == "today" else expiry
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": selected},
+        )
+
+        assert body["is_sample_data"] is True
+        assert body["data"]["curves"][0]["days_to_expiry"] in {0, 7}
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +613,7 @@ class TestStraddlePnLEndpoint:
 
     def test_straddlepnl_returns_200(self, client):
         resp, _ = _post(client, "/api/v1/straddlepnl", {
-            "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
+            "symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry(),
             "interval": "5m", "adjustment_points": 50,
         })
         assert resp.status_code == 200
@@ -343,13 +648,50 @@ class TestStraddlePnLEndpoint:
 
         _, body = _post(client, "/api/v1/straddlepnl", {"symbol": "NIFTY", "exchange": "NSE_INDEX"})
 
-        assert body["is_sample_data"] is False
+        assert body["is_sample_data"] is True
         account_id, params = registry.history_calls[0]
         assert account_id == "acc-primary"
         assert params["symbol"] == "NIFTY"
         assert params["exchange"] == "NSE_INDEX"
         assert params["interval"] == "5m"
         assert "start" in params and "end" in params
+
+    def test_straddle_with_live_history_and_explicit_inputs_stays_sample_without_option_provenance(
+        self,
+        app,
+        client,
+    ):
+        app.config["REGISTRY"] = _ConnectedRegistry()
+
+        response, body = _post(
+            client,
+            "/api/v1/straddlepnl",
+            {
+                "symbol": "NIFTY",
+                "exchange": "NFO",
+                "expiry": _future_expiry(),
+                "strike": 24000,
+                "ce_premium": 125,
+                "pe_premium": 110,
+            },
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize("expiry", ["not-an-expiry", "2020-01-01", date.today().isoformat()])
+    def test_straddle_rejects_an_unusable_expiry(self, client, expiry):
+        response, body = _post(client, "/api/v1/straddlepnl", {"expiry": expiry})
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+
+    def test_straddle_omitted_expiry_is_generated_and_labelled_sample(self, client):
+        response, body = _post(client, "/api/v1/straddlepnl", {})
+
+        assert response.status_code == 200
+        assert date.fromisoformat(body["expiry"]) > date.today()
+        assert body["is_sample_data"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -548,14 +890,18 @@ class TestSampleDataHonesty:
     mislabelled the sample fallback as live whenever a (disconnected) registry was
     present, presenting fabricated data as real (a house-rule violation)."""
 
-    _BODY = {"symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26"}
+    _BODY = {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()}
 
     def test_gex_reports_sample(self, client):
         _, body = _post(client, "/api/v1/gex", self._BODY)
         assert body["is_sample_data"] is True
 
     def test_volsurface_reports_sample(self, client):
-        _, body = _post(client, "/api/v1/volsurface", {**self._BODY, "expiries": ["26MAR26"]})
+        _, body = _post(
+            client,
+            "/api/v1/volsurface",
+            {**self._BODY, "expiries": [self._BODY["expiry"]]},
+        )
         assert body["is_sample_data"] is True
 
     def test_ivsmile_reports_sample(self, client):
@@ -585,14 +931,26 @@ class TestLiveOptionChain:
             self._kw = kw
 
         def model_dump(self):
-            return self._kw
+            data = dict(self._kw)
+            for prefix in ("ce", "pe"):
+                data.setdefault(f"{prefix}_gamma", 0.001)
+                data.setdefault(f"{prefix}_theta", -8.0)
+                data.setdefault(f"{prefix}_vega", 6.0)
+                data.setdefault(f"{prefix}_greeks_complete", True)
+            return data
 
     class _Chain:
-        def __init__(self, strikes):
+        def __init__(self, strikes, spot_price=24000.0, expiry_date=""):
             self.strikes = strikes
+            self.spot_price = spot_price
+            self.expiry_date = expiry_date
 
     class _FakeOpenAlgo:
-        async def option_chain(self, symbol, exchange="NFO"):
+        def __init__(self):
+            self.chain_calls = []
+
+        async def option_chain(self, symbol, exchange="NSE_INDEX", expiry=""):
+            self.chain_calls.append((symbol, exchange, expiry))
             S = TestLiveOptionChain._Strike
             return TestLiveOptionChain._Chain([
                 S(strike_price=23800, ce_ltp=260, ce_oi=30000, ce_iv=13.5, ce_delta=0.72,
@@ -605,11 +963,22 @@ class TestLiveOptionChain:
                   pe_ltp=160, pe_oi=45000, pe_iv=13.9, pe_delta=-0.59),
                 S(strike_price=24200, ce_ltp=55, ce_oi=35000, ce_iv=13.8, ce_delta=0.31,
                   pe_ltp=230, pe_oi=28000, pe_iv=14.3, pe_delta=-0.69),
-            ])
+            ], expiry_date=expiry)
+
+        def instruments(self, *, exchange):
+            assert exchange == "NFO"
+            return {
+                "status": "success",
+                "data": [{"symbol": "NIFTY", "exchange": "NFO", "lot_size": 75}],
+            }
 
     def _post_with_client(self, app, client, path):
         app.config["OPENALGO_CLIENT"] = self._FakeOpenAlgo()
-        return _post(client, path, {"symbol": "NIFTY", "exchange": "NFO"})
+        return _post(
+            client,
+            path,
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
 
     def test_gex_uses_live_chain(self, app, client):
         _, body = self._post_with_client(app, client, "/api/v1/gex")
@@ -625,6 +994,224 @@ class TestLiveOptionChain:
     def test_ivsmile_uses_live_chain(self, app, client):
         _, body = self._post_with_client(app, client, "/api/v1/ivsmile")
         assert body["is_sample_data"] is False
+
+    def test_ivsmile_passes_underlying_exchange_and_selected_expiry_to_openalgo(self, app, client):
+        openalgo = self._FakeOpenAlgo()
+        app.config["OPENALGO_CLIENT"] = openalgo
+        expiry = _future_expiry()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert body["is_sample_data"] is False
+        assert openalgo.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
+
+    def test_openalgo_chain_without_response_expiry_identity_is_not_live(self, app, client):
+        class _MissingExpiryOpenAlgo(self._FakeOpenAlgo):
+            async def option_chain(inner_self, symbol, exchange="NSE_INDEX", expiry=""):
+                chain = await super().option_chain(symbol, exchange, expiry)
+                chain.expiry_date = ""
+                return chain
+
+        app.config["OPENALGO_CLIENT"] = _MissingExpiryOpenAlgo()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert body["is_sample_data"] is True
+
+    def test_native_session_complete_greeks_outrank_incomplete_openalgo_chain(self, app, client):
+        import time
+        from types import SimpleNamespace
+
+        from flinttrade_gateway.registry import BrokerRegistry
+
+        native_calls = []
+
+        class _NativeAdapter:
+            async def option_chain(self, session, req):
+                native_calls.append((session, req))
+                return {**_chain_payload(), "spot": None, "spot_price": 25123.5}
+
+        class _IncompleteStrike:
+            def model_dump(self):
+                return {
+                    "strike_price": 25000,
+                    "ce_iv": 13.0,
+                    "pe_iv": 13.1,
+                }
+
+        class _IncompleteOpenAlgo:
+            async def option_chain(self, _symbol, _exchange="NSE_INDEX", _expiry=""):
+                return TestLiveOptionChain._Chain([_IncompleteStrike()], spot_price=24000.0)
+
+        registry = BrokerRegistry()
+        session = SimpleNamespace(expires_at=time.time() + 3600)
+        registry.put_session("dhan", "native-1", session)
+        app.config["REGISTRY"] = registry
+        app.config["NATIVE_ADAPTERS"] = {"dhan": _NativeAdapter()}
+        app.config["OPENALGO_CLIENT"] = _IncompleteOpenAlgo()
+
+        expiry = _future_expiry()
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert body["is_sample_data"] is False
+        assert body["spot"] == 25123.5
+        assert native_calls == [(
+            session,
+            {
+                "symbol": "NIFTY",
+                "underlying": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "expiry": expiry,
+            },
+        )]
+
+    def test_live_chain_selection_skips_a_spotless_complete_source(self, app, client):
+        import time
+        from types import SimpleNamespace
+
+        from flinttrade_gateway.registry import BrokerRegistry
+
+        class _NativeAdapter:
+            def __init__(self, payload):
+                self.payload = payload
+
+            async def option_chain(self, _session, _request):
+                return self.payload
+
+        spotless = _chain_payload()
+        spotless["spot"] = None
+        usable = _chain_payload()
+        usable["spot"] = 25123.5
+        registry = BrokerRegistry()
+        registry.put_session("spotless", "one", SimpleNamespace(expires_at=time.time() + 3600))
+        registry.put_session("usable", "two", SimpleNamespace(expires_at=time.time() + 3600))
+        app.config["REGISTRY"] = registry
+        app.config["NATIVE_ADAPTERS"] = {
+            "spotless": _NativeAdapter(spotless),
+            "usable": _NativeAdapter(usable),
+        }
+        app.config["OPENALGO_CLIENT"] = None
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert body["is_sample_data"] is False
+        assert body["spot"] == 25123.5
+        assert body["data"]["curves"][0]["points"]
+
+    def test_live_chain_selection_skips_a_complete_zero_strike_source(self, app, client):
+        import time
+        from types import SimpleNamespace
+
+        from flinttrade_gateway.registry import BrokerRegistry
+
+        class _NativeAdapter:
+            def __init__(self, payload):
+                self.payload = payload
+
+            async def option_chain(self, _session, _request):
+                return self.payload
+
+        zero_strike = _chain_payload()
+        for row in zero_strike["strikes"]:
+            row["strike_price"] = 0
+        usable = _chain_payload()
+        registry = BrokerRegistry()
+        registry.put_session("invalid", "one", SimpleNamespace(expires_at=time.time() + 3600))
+        registry.put_session("usable", "two", SimpleNamespace(expires_at=time.time() + 3600))
+        app.config["REGISTRY"] = registry
+        app.config["NATIVE_ADAPTERS"] = {
+            "invalid": _NativeAdapter(zero_strike),
+            "usable": _NativeAdapter(usable),
+        }
+        app.config["OPENALGO_CLIENT"] = None
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert body["is_sample_data"] is False
+        assert body["data"]["curves"][0]["points"]
+        assert all(point["strike"] > 0 for point in body["data"]["curves"][0]["points"])
+
+    def test_gex_incomplete_live_greeks_fall_back_to_labelled_sample(self, app, client):
+        class _IncompleteStrike:
+            def model_dump(self):
+                return {
+                    "strike_price": 24000,
+                    "ce_oi": 100,
+                    "pe_oi": 120,
+                    "ce_gamma": None,
+                    "pe_gamma": None,
+                }
+
+        class _IncompleteOpenAlgo:
+            async def option_chain(self, _symbol, _exchange="NSE_INDEX", _expiry=""):
+                return TestLiveOptionChain._Chain([_IncompleteStrike()], spot_price=24000.0)
+
+        app.config["OPENALGO_CLIENT"] = _IncompleteOpenAlgo()
+
+        _, body = _post(client, "/api/v1/gex", {"symbol": "NIFTY", "exchange": "NFO"})
+
+        assert body["is_sample_data"] is True
+        assert body["data"]["strikes"]
+        assert any(row["call_gex"] != 0 for row in body["data"]["strikes"])
+
+    def test_registry_chain_maps_bse_index_identity(self, app, client):
+        registry = _ConnectedRegistry()
+        app.config["OPENALGO_CLIENT"] = None
+        app.config["REGISTRY"] = registry
+
+        expiry = _future_expiry()
+        _, body = _post(
+            client,
+            "/api/v1/maxpain",
+            {"symbol": "SENSEX", "exchange": "BFO", "expiry": expiry},
+        )
+
+        assert body["is_sample_data"] is False
+        assert registry.chain_calls == [(
+            "acc-primary",
+            {"symbol": "SENSEX", "exchange": "BSE_INDEX", "expiry": expiry},
+        )]
+
+    def test_ivsmile_live_chain_without_spot_uses_labelled_sample(self, app, client):
+        class _NoSpotOpenAlgo(self._FakeOpenAlgo):
+            async def option_chain(inner_self, symbol, exchange="NSE_INDEX", expiry=""):
+                chain = await super().option_chain(symbol, exchange, expiry)
+                chain.spot_price = 0.0
+                return chain
+
+        app.config["OPENALGO_CLIENT"] = _NoSpotOpenAlgo()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO"},
+        )
+
+        assert body["is_sample_data"] is True
+        assert body["spot"] == 24000.0
+        assert body["data"]["spot_price"] == 24000.0
+        assert body["data"]["is_sample_data"] is True
+        assert body["data"]["curves"][0]["points"]
 
     def test_ivsmile_curve_echoes_real_days_to_expiry(self, app, client):
         """Integration tripwire: a real future expiry must yield days_to_expiry>0
@@ -643,6 +1230,316 @@ class TestLiveOptionChain:
         assert body["is_sample_data"] is False
         curve = body["data"]["curves"][0]
         assert curve["days_to_expiry"] > 0, "ISO expiry must yield a real positive DTE"
+
+
+class TestOptionChainTruthfulness:
+    """Live provenance requires explicit usable inputs for each calculation."""
+
+    _OI_PATHS = (
+        "/api/v1/gex",
+        "/api/v1/gammadensity",
+        "/api/v1/oiprofile",
+        "/api/v1/maxpain",
+    )
+
+    @staticmethod
+    def _configure_registry(app, payload: dict) -> _PayloadRegistry:
+        registry = _PayloadRegistry(payload)
+        app.config["REGISTRY"] = registry
+        app.config["OPENALGO_CLIENT"] = None
+        return registry
+
+    @staticmethod
+    def _reported_strikes(path: str, body: dict) -> list[float]:
+        if path == "/api/v1/maxpain":
+            return [row["strike"] for row in body["data"]["strike_losses"]]
+        return [row["strike"] for row in body["data"]["strikes"]]
+
+    @pytest.mark.parametrize("path", _OI_PATHS)
+    def test_oi_dependent_endpoint_rejects_missing_live_oi(self, app, client, path):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row.pop("ce_oi")
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            path,
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize("path", _OI_PATHS)
+    @pytest.mark.parametrize("invalid_oi", [None, -1, float("nan"), float("inf"), True])
+    def test_oi_dependent_endpoint_rejects_non_authoritative_live_oi(
+        self,
+        app,
+        client,
+        path,
+        invalid_oi,
+    ):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row["ce_oi"] = invalid_oi
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            path,
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    def test_explicit_zero_oi_remains_authoritative(self, app, client):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row["ce_oi"] = 0
+            row["pe_oi"] = 0
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            "/api/v1/maxpain",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        assert body["data"]["available"] is False
+        assert body["data"]["max_pain_strike"] == 0.0
+        assert body["data"]["strike_losses"] == []
+
+    def test_oi_profile_zero_call_total_has_unavailable_pcr(self, app, client):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row["ce_oi"] = 0
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            "/api/v1/oiprofile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        assert body["data"]["total_ce_oi"] == 0
+        assert body["data"]["total_pe_oi"] > 0
+        assert body["data"]["pcr"] is None
+        assert body["data"]["max_ce_strike"] is None
+
+    def test_oi_profile_all_zero_oi_has_no_support_or_resistance(self, app, client):
+        payload = _chain_payload()
+        for row in payload["strikes"]:
+            row["ce_oi"] = 0
+            row["pe_oi"] = 0
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            "/api/v1/oiprofile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        assert body["data"]["max_ce_strike"] is None
+        assert body["data"]["max_pe_strike"] is None
+
+    def test_snapshot_converter_never_materialises_missing_oi_as_zero(self):
+        from flinttrade_screener.analysis_routes import _snapshot_from_registry_data
+
+        row = _chain_payload()["strikes"][1]
+        row.pop("ce_oi")
+
+        snapshot = _snapshot_from_registry_data(
+            {"spot": 24000.0, "strikes": [row]},
+            "NIFTY",
+            "NFO",
+            24000.0,
+        )
+
+        assert snapshot.strikes == []
+
+    @pytest.mark.parametrize("path", _OI_PATHS)
+    def test_oi_endpoints_reject_the_whole_chain_when_any_source_row_is_malformed(
+        self,
+        app,
+        client,
+        path,
+    ):
+        from datetime import date, timedelta
+
+        valid = _chain_payload()["strikes"][1]
+        malformed = {**valid, "strike_price": "not-a-strike"}
+        boolean_strike = {**valid, "strike_price": True}
+        missing_oi = {**valid, "strike_price": 24100}
+        missing_oi.pop("pe_oi")
+        payload = {
+            "spot": 24000.0,
+            "strikes": [malformed, boolean_strike, missing_oi, valid],
+        }
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            path,
+            {
+                "symbol": "NIFTY",
+                "exchange": "NFO",
+                "expiry": (date.today() + timedelta(days=30)).isoformat(),
+            },
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize("path", ["/api/v1/ivsmile", "/api/v1/volsurface"])
+    def test_non_oi_endpoints_reject_the_whole_chain_when_any_source_row_is_malformed(
+        self,
+        app,
+        client,
+        path,
+    ):
+        valid = _chain_payload()["strikes"][1]
+        payload = {
+            "spot": 24000.0,
+            "strikes": [
+                {**valid, "strike_price": "not-a-strike"},
+                {**valid, "strike_price": True},
+                valid,
+            ],
+        }
+        self._configure_registry(app, payload)
+        expiry = _future_expiry()
+        request_body = {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry}
+        if path == "/api/v1/volsurface":
+            request_body["expiries"] = [expiry]
+
+        response, body = _post(client, path, request_body)
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize(
+        ("metadata", "value"),
+        [
+            ("underlying", "BANKNIFTY"),
+            ("exchange", "BFO"),
+            ("expiry", "2099-01-01"),
+            ("expiry", ""),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/gex",
+            "/api/v1/gammadensity",
+            "/api/v1/oiprofile",
+            "/api/v1/maxpain",
+            "/api/v1/ivsmile",
+            "/api/v1/volsurface",
+        ],
+    )
+    def test_explicit_chain_identity_mismatch_is_never_published_as_live(
+        self,
+        app,
+        client,
+        path,
+        metadata,
+        value,
+    ):
+        expiry = _future_expiry()
+        payload = {**_chain_payload(), metadata: value}
+        self._configure_registry(app, payload)
+        request_body = {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry}
+        if path == "/api/v1/volsurface":
+            request_body["expiries"] = [expiry]
+
+        response, body = _post(client, path, request_body)
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("ce_delta", -0.01),
+            ("ce_delta", 1.01),
+            ("pe_delta", 0.01),
+            ("pe_delta", -1.01),
+            ("ce_gamma", -0.01),
+            ("pe_gamma", -0.01),
+            ("ce_vega", -0.01),
+            ("pe_vega", -0.01),
+            ("ce_theta", float("nan")),
+            ("pe_theta", float("inf")),
+            ("ce_iv", 0.0),
+            ("pe_iv", -1.0),
+        ],
+    )
+    @pytest.mark.parametrize("path", ["/api/v1/gex", "/api/v1/gammadensity", "/api/v1/ivsmile"])
+    def test_physically_impossible_complete_greeks_are_rejected(
+        self,
+        app,
+        client,
+        path,
+        field,
+        value,
+    ):
+        payload = _chain_payload()
+        payload["strikes"][0][field] = value
+        self._configure_registry(app, payload)
+
+        response, body = _post(
+            client,
+            path,
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    def test_live_oi_profile_has_no_synthetic_change_or_futures_overlay(self, app, client):
+        self._configure_registry(app, _chain_payload())
+
+        response, body = _post(
+            client,
+            "/api/v1/oiprofile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        data = body["data"]
+        assert data["oi_change_available"] is False
+        assert "oi_change" not in data
+        assert "ce_oi_change" not in data
+        assert "pe_oi_change" not in data
+        assert all("ce_oi_change" not in row for row in data["strikes"])
+        assert all("pe_oi_change" not in row for row in data["strikes"])
+        assert all("ce_oi_change" not in row for row in data["profile_strikes"])
+        assert all("pe_oi_change" not in row for row in data["profile_strikes"])
+        assert data["futures_ohlcv"] == []
+
+    def test_vol_surface_attempts_openalgo_without_a_connected_registry(self, app, client):
+        openalgo = TestLiveOptionChain._FakeOpenAlgo()
+        app.config["OPENALGO_CLIENT"] = openalgo
+        expiry = _future_expiry()
+
+        response, body = _post(
+            client,
+            "/api/v1/volsurface",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [expiry]},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is False
+        assert openalgo.chain_calls == [("NIFTY", "NSE_INDEX", expiry)]
 
 
 class TestLiveRegistryHistory:
@@ -747,6 +1644,321 @@ class TestGammaDensityRoute:
         assert "density_intraday" in first
         assert "density_expiry" in first
 
+    def test_sample_density_uses_the_requested_expiry_dte(self, client):
+        expiry = _future_expiry(43)
+
+        response, body = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+        assert body["expiry"] == expiry
+        assert body["data"]["dte_days"] == 43.0
+
+    def test_omitted_density_expiry_is_a_generated_future_date(self, client):
+        response, body = _post(client, "/api/v1/gammadensity", {})
+
+        assert response.status_code == 200
+        parsed = date.fromisoformat(body["expiry"])
+        assert parsed > date.today()
+        assert body["data"]["dte_days"] == float((parsed - date.today()).days)
+
+    def test_omitted_expiry_does_not_trigger_an_invented_live_read(self, app, client):
+        registry = _PayloadRegistry(_chain_payload())
+        app.config["REGISTRY"] = registry
+        app.config["OPENALGO_CLIENT"] = None
+
+        response, payload = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO"},
+        )
+
+        assert response.status_code == 200
+        assert payload["is_sample_data"] is True
+        assert payload["data"]["dte_days"] == 7.0
+        assert registry.chain_calls == []
+
+    @pytest.mark.parametrize(
+        "expiry",
+        ["not-an-expiry", "2020-01-01", pytest.param("today", id="same-day-expiry")],
+    )
+    def test_invalid_expiry_is_rejected_before_live_read(self, app, client, expiry):
+        from datetime import date
+
+        registry = _PayloadRegistry(_chain_payload())
+        app.config["REGISTRY"] = registry
+        app.config["OPENALGO_CLIENT"] = None
+        body = {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiry": date.today().isoformat() if expiry == "today" else expiry,
+        }
+
+        response, payload = _post(client, "/api/v1/gammadensity", body)
+
+        assert response.status_code == 400
+        assert payload["status"] == "error"
+        assert registry.chain_calls == []
+
+    def test_live_gamma_density_uses_authoritative_future_dte(self, app, client):
+        from datetime import date, timedelta
+
+        registry = _PayloadRegistry(_chain_payload())
+        app.config["REGISTRY"] = registry
+        app.config["OPENALGO_CLIENT"] = None
+        expiry = (date.today() + timedelta(days=9)).isoformat()
+
+        response, payload = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert response.status_code == 200
+        assert payload["is_sample_data"] is False
+        assert payload["data"]["dte_days"] == 9.0
+
+    @pytest.mark.parametrize("expiry", ["", "not-a-date"])
+    def test_unparseable_expiry_never_labels_live_density(self, app, client, expiry):
+        app.config["OPENALGO_CLIENT"] = None
+        app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
+
+        resp, body = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert resp.status_code == 400
+        assert body["status"] == "error"
+
+    @pytest.mark.parametrize("day_offset", [-1, 0])
+    def test_non_future_expiry_never_labels_live_density(self, app, client, day_offset):
+        from datetime import date, timedelta
+
+        app.config["OPENALGO_CLIENT"] = None
+        app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
+        expiry = (date.today() + timedelta(days=day_offset)).isoformat()
+
+        response, body = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+
+    def test_future_expiry_uses_exact_live_horizon(self, app, client):
+        from datetime import date, timedelta
+
+        app.config["OPENALGO_CLIENT"] = None
+        app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())
+        expiry = (date.today() + timedelta(days=12)).isoformat()
+
+        _, body = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry},
+        )
+
+        assert body["is_sample_data"] is False
+        assert body["data"]["dte_days"] == 12.0
+
+    @pytest.mark.parametrize("value", ["garbage", "nan", float("nan"), float("inf"), True])
+    def test_invalid_interest_rate_returns_controlled_400(self, client, value):
+        response, body = _post(
+            client,
+            "/api/v1/gammadensity",
+            {"interest_rate": value, "expiry": _future_expiry()},
+        )
+
+        assert response.status_code == 400
+        assert body["status"] == "error"
+        assert "NaN" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("path", "field", "value"),
+    [
+        ("/api/v1/volsurface", "strike_count", "garbage"),
+        ("/api/v1/volsurface", "strike_count", float("nan")),
+        ("/api/v1/volsurface", "strike_count", 0),
+        ("/api/v1/oiprofile", "strike_count", "garbage"),
+        ("/api/v1/oiprofile", "strike_count", float("inf")),
+        ("/api/v1/oiprofile", "strike_count", -1),
+    ],
+)
+def test_invalid_numeric_analysis_request_returns_controlled_400(client, path, field, value):
+    request_body = {field: value, "expiry": _future_expiry()}
+    if path == "/api/v1/volsurface":
+        request_body["expiries"] = [_future_expiry()]
+
+    response, body = _post(client, path, request_body)
+
+    assert response.status_code == 400
+    assert body["status"] == "error"
+    assert "NaN" not in response.get_data(as_text=True)
+
+
+class TestSecondAdversarialChainAdmission:
+    """Regression coverage for bounded, expiry-attested whole-chain reads."""
+
+    _CHAIN_PATHS = (
+        "/api/v1/gex",
+        "/api/v1/gammadensity",
+        "/api/v1/volsurface",
+        "/api/v1/ivsmile",
+        "/api/v1/oiprofile",
+        "/api/v1/maxpain",
+    )
+
+    @staticmethod
+    def _request_body(path: str, expiry: str) -> dict:
+        body = {"symbol": "NIFTY", "exchange": "NFO", "expiry": expiry}
+        if path == "/api/v1/volsurface":
+            body["expiries"] = [expiry]
+        return body
+
+    def test_vol_surface_sorts_live_strikes_without_detaching_values(self):
+        from flinttrade_screener.analysis_routes import _chain_to_vol_surface_format
+
+        rows = [
+            {"strike_price": 24200, "ce_ltp": 21, "pe_ltp": 221, "ce_iv": 24, "pe_iv": 25},
+            {"strike_price": 23800, "ce_ltp": 223, "pe_ltp": 23, "ce_iv": 14, "pe_iv": 15},
+            {"strike_price": 24000, "ce_ltp": 120, "pe_ltp": 110, "ce_iv": 19, "pe_iv": 20},
+        ]
+
+        converted = _chain_to_vol_surface_format(
+            {"strikes": rows},
+            24000.0,
+            days_to_expiry=30,
+        )
+
+        assert [row["strike"] for row in converted["strikes"]] == [23800.0, 24000.0, 24200.0]
+        assert [(row["ce_ltp"], row["ce_iv"]) for row in converted["strikes"]] == [
+            (223.0, 14.0),
+            (120.0, 19.0),
+            (21.0, 24.0),
+        ]
+
+    @pytest.mark.parametrize("path", _CHAIN_PATHS)
+    def test_duplicate_strikes_reject_the_entire_live_chain(self, app, client, path):
+        expiry = _future_expiry()
+        payload = _chain_payload()
+        payload["strikes"].append({**payload["strikes"][0]})
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        app.config["OPENALGO_CLIENT"] = None
+
+        response, body = _post(client, path, self._request_body(path, expiry))
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+
+    @pytest.mark.parametrize("path", _CHAIN_PATHS)
+    def test_contradictory_index_venue_is_rejected_before_any_live_read(self, app, client, path):
+        registry = _PayloadRegistry(_chain_payload())
+        app.config["REGISTRY"] = registry
+        expiry = _future_expiry()
+        body = self._request_body(path, expiry)
+        body.update({"symbol": "SENSEX", "exchange": "NFO"})
+
+        response, payload = _post(client, path, body)
+
+        assert response.status_code == 400
+        assert payload["status"] == "error"
+        assert registry.chain_calls == []
+
+    @pytest.mark.parametrize("path", _CHAIN_PATHS)
+    @pytest.mark.parametrize("expiry", ["", "9999-12-31"])
+    def test_unusable_expiry_never_publishes_connected_chain_as_live(self, app, client, path, expiry):
+        registry = _PayloadRegistry(_chain_payload())
+        app.config["REGISTRY"] = registry
+        app.config["OPENALGO_CLIENT"] = None
+
+        response, body = _post(client, path, self._request_body(path, expiry))
+
+        if path in {"/api/v1/volsurface", "/api/v1/gammadensity"}:
+            assert response.status_code == 400
+            assert body["status"] == "error"
+        else:
+            assert response.status_code == 200
+            assert body["is_sample_data"] is True
+            assert body["expiry"] == expiry
+        assert registry.chain_calls == []
+
+    @pytest.mark.parametrize("path", _CHAIN_PATHS)
+    def test_non_object_json_returns_controlled_400(self, client, path):
+        response = client.post(path, data="[]", content_type="application/json")
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+
+    @pytest.mark.parametrize("path", _CHAIN_PATHS)
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("symbol", 123),
+            ("exchange", ["NFO"]),
+            ("expiry", {"date": "2099-01-01"}),
+        ],
+    )
+    def test_non_string_chain_identity_returns_controlled_400(self, client, path, field, value):
+        expiry = _future_expiry()
+        body = self._request_body(path, expiry)
+        body[field] = value
+        if path == "/api/v1/volsurface" and field == "expiry":
+            body["expiries"] = [value]
+
+        response = client.post(path, json=body)
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+
+    @pytest.mark.parametrize(
+        ("path", "payload_mutator"),
+        [
+            ("/api/v1/gex", lambda payload: payload["strikes"][0].__setitem__("ce_gamma", 1e308)),
+            ("/api/v1/gex", lambda payload: payload.__setitem__("lot_size", 10**100)),
+            ("/api/v1/oiprofile", lambda payload: payload["strikes"][0].__setitem__("ce_oi", 10**100)),
+            ("/api/v1/volsurface", lambda payload: payload["strikes"][0].__setitem__("ce_ltp", 1e308)),
+        ],
+    )
+    def test_extreme_finite_chain_observations_are_not_published_live(
+        self,
+        app,
+        client,
+        path,
+        payload_mutator,
+    ):
+        expiry = _future_expiry()
+        payload = _chain_payload()
+        payload_mutator(payload)
+        app.config["REGISTRY"] = _PayloadRegistry(payload)
+        app.config["OPENALGO_CLIENT"] = None
+
+        response, body = _post(client, path, self._request_body(path, expiry))
+
+        assert response.status_code == 200
+        assert body["is_sample_data"] is True
+        assert "Infinity" not in response.get_data(as_text=True)
+        assert "NaN" not in response.get_data(as_text=True)
+
+    def test_low_spot_sample_strikes_are_positive_and_regular(self):
+        from flinttrade_screener.analysis_routes import _make_sample_strikes
+
+        strikes = [row.strike_price for row in _make_sample_strikes(spot=1.0, step=100.0)]
+        steps = [right - left for left, right in zip(strikes, strikes[1:])]
+
+        assert min(strikes) > 0
+        assert len(set(strikes)) == len(strikes)
+        assert all(step > 0 for step in steps)
+        assert max(steps) == pytest.approx(min(steps))
+
 
 class TestArbitrageScanRoute:
     """DP3 — cash-future / cross-exchange arbitrage scanner endpoint."""
@@ -760,6 +1972,22 @@ class TestArbitrageScanRoute:
         assert data["is_sample_data"] is True
         assert len(data["scan"]["cash_future"]) > 0
         assert len(data["scan"]["cross_exchange"]) > 0
+
+    @pytest.mark.parametrize("value", ["nan", float("nan"), float("inf"), True, 1e308])
+    def test_rejects_non_finite_or_extreme_numeric_inputs(self, client, value):
+        response = client.post("/api/v1/screener/arbitrage", json={"risk_free_rate": value})
+
+        assert response.status_code == 400
+        assert response.get_json()["status"] == "error"
+
+    def test_rejects_non_object_json(self, client):
+        response = client.post(
+            "/api/v1/screener/arbitrage",
+            data="[]",
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
 
     def test_scans_supplied_rows(self, client):
         resp, body = _post(client, "/api/v1/screener/arbitrage", {
@@ -786,6 +2014,15 @@ class TestCandlestickPatternsRoute:
         data = body["data"]
         assert data["is_sample_data"] is True
         assert len(data["scan"]["matches"]) > 0
+
+    def test_rejects_non_object_json(self, client):
+        response = client.post(
+            "/api/v1/candlestick-patterns",
+            data="[]",
+            content_type="application/json",
+        )
+
+        assert response.status_code == 400
 
     def test_detects_supplied_bars(self, client):
         resp, body = _post(client, "/api/v1/candlestick-patterns", {

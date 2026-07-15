@@ -37,6 +37,8 @@ def _tracked_text_files() -> list[Path]:
     paths: list[Path] = []
     for raw in result.stdout.splitlines():
         path = ROOT / raw
+        if not path.is_file():
+            continue
         if path.suffix.lower() not in TEXT_SUFFIXES:
             continue
         if "/src/generated/" in path.as_posix():

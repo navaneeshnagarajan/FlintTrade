@@ -2,7 +2,7 @@
 
 Replaces httpx+html.parser scrapers with Crawl4AI's async crawler.
 Supports CSS extraction (free, no LLM tokens) and LLM extraction
-(via LM Studio or any OpenAI-compatible endpoint).
+through managed Ollama or any OpenAI-compatible endpoint.
 
 Usage::
 
@@ -18,7 +18,7 @@ Usage::
         schema={"name": "h1.company-name", "pe": "span.pe-ratio"},
     )
 
-    # LLM extraction (uses LM Studio)
+    # LLM extraction through managed Ollama
     structured = await client.extract_llm(
         "https://news.example.com",
         schema=MarketSummary,  # pydantic model
@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -85,22 +86,40 @@ class Crawl4AIClient:
     ``error`` message rather than raising.
 
     Args:
-        lm_studio_url: Base URL of the LM Studio OpenAI-compatible endpoint.
-        lm_studio_model: Model identifier used for LLM extraction.
+        llm_base_url: Explicit OpenAI-compatible endpoint. When omitted, the
+            FlintTrade-managed Ollama runtime is admitted dynamically.
+        llm_model: Model identifier used for LLM extraction. When omitted on the
+            managed path, the effective workspace model is used.
         timeout: Request timeout in seconds passed to the crawler.
     """
 
     def __init__(
         self,
         *,
-        lm_studio_url: str = "http://localhost:1234/v1",
-        lm_studio_model: str = "local-model",
+        llm_base_url: str | None = None,
+        llm_model: str = "",
         timeout: int = 30,
     ) -> None:
-        self._lm_url = lm_studio_url
-        self._lm_model = lm_studio_model
+        self._lm_url = str(llm_base_url or "").strip().rstrip("/")
+        self._lm_model = llm_model.strip()
         self._timeout = timeout
         self._crawl4ai_available = self._check_availability()
+
+    def _managed_model(self) -> str:
+        if self._lm_model:
+            return self._lm_model
+        try:
+            from flinttrade_core.llm_config import read_effective_llm_config
+
+            config = read_effective_llm_config()
+        except Exception as exc:  # noqa: BLE001 - mapped to one bounded local-AI error
+            raise RuntimeError("Managed local AI configuration is unavailable") from exc
+        if str(config.get("provider") or "").strip().lower() != "ollama":
+            raise RuntimeError("Managed Ollama is not the configured LLM provider")
+        model = str(config.get("model") or "").strip()
+        if not model:
+            raise RuntimeError("Managed Ollama model is not configured")
+        return model
 
     @staticmethod
     def _check_availability() -> bool:
@@ -232,7 +251,7 @@ class Crawl4AIClient:
         *,
         instruction: str = "Extract the requested data from this page.",
     ) -> ScrapeResult:
-        """Extract structured data using an LLM (via LM Studio).
+        """Extract structured data using an OpenAI-compatible LLM.
 
         Args:
             url: Target URL.
@@ -251,9 +270,20 @@ class Crawl4AIClient:
         if not self._crawl4ai_available:
             return ScrapeResult(url=url, success=False, error="crawl4ai not installed")
 
+        managed_runtime = not self._lm_url
         try:
             from crawl4ai import AsyncWebCrawler, CacheMode  # type: ignore[import]
             from crawl4ai.extraction_strategy import LLMExtractionStrategy  # type: ignore[import]
+
+            model = self._managed_model() if managed_runtime else self._lm_model
+            if not model:
+                raise ValueError("LLM model is required for extraction")
+            if managed_runtime:
+                from flinttrade_core.ollama_runtime import managed_ollama_session
+
+                endpoint_context = managed_ollama_session(model)
+            else:
+                endpoint_context = nullcontext(self._lm_url)
 
             json_schema = (
                 schema.model_json_schema()
@@ -261,35 +291,43 @@ class Crawl4AIClient:
                 else None
             )
 
-            strategy = LLMExtractionStrategy(
-                provider=f"openai/{self._lm_model}",
-                api_token="lm-studio",
-                base_url=self._lm_url,
-                schema=json_schema,
-                instruction=instruction,
-            )
-
-            async with AsyncWebCrawler() as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    cache_mode=CacheMode.BYPASS,
-                    extraction_strategy=strategy,
+            with endpoint_context as endpoint:
+                base_url = (
+                    str(endpoint).rstrip("/")
+                    if isinstance(endpoint, str)
+                    else f"{str(endpoint.base_url).rstrip('/')}/v1"
                 )
-                extracted: dict[str, Any] = {}
-                if result.extracted_content:
-                    parsed = json.loads(result.extracted_content)
-                    if isinstance(parsed, list) and parsed:
-                        extracted = parsed[0]
-                    elif isinstance(parsed, dict):
-                        extracted = parsed
-
-                return ScrapeResult(
-                    url=url,
-                    markdown=result.markdown or "",
-                    extracted=extracted,
-                    success=result.success,
-                    error=None if result.success else "LLM extraction failed",
+                strategy = LLMExtractionStrategy(
+                    provider=f"openai/{model}",
+                    api_token="local-runtime",
+                    base_url=base_url,
+                    schema=json_schema,
+                    instruction=instruction,
                 )
+
+                async with AsyncWebCrawler() as crawler:
+                    result = await crawler.arun(
+                        url=url,
+                        cache_mode=CacheMode.BYPASS,
+                        extraction_strategy=strategy,
+                    )
+                    extracted: dict[str, Any] = {}
+                    if result.extracted_content:
+                        parsed = json.loads(result.extracted_content)
+                        if isinstance(parsed, list) and parsed:
+                            extracted = parsed[0]
+                        elif isinstance(parsed, dict):
+                            extracted = parsed
+
+                    response = ScrapeResult(
+                        url=url,
+                        markdown=result.markdown or "",
+                        extracted=extracted,
+                        success=result.success,
+                        error=None if result.success else "LLM extraction failed",
+                    )
+            return response
         except Exception as exc:
             logger.exception("LLM extraction failed for %s", url)
-            return ScrapeResult(url=url, success=False, error=str(exc))
+            error = "Managed local AI extraction failed" if managed_runtime else str(exc)
+            return ScrapeResult(url=url, success=False, error=error)

@@ -6,8 +6,11 @@ DO NOT RUN — written for pytest. All tests use mocks, no live API calls.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
+
+import pytest
 
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -23,12 +26,14 @@ class TestTOTPLogin:
 
     def test_is_trading_day_weekday(self):
         from flinttrade_automation.totp_login import is_trading_day
+
         monday = date(2026, 3, 16)
         assert monday.weekday() == 0
         assert is_trading_day(monday)
 
     def test_is_trading_day_weekend(self):
         from flinttrade_automation.totp_login import is_trading_day
+
         saturday = date(2026, 3, 14)
         assert not is_trading_day(saturday)
         sunday = date(2026, 3, 15)
@@ -36,12 +41,14 @@ class TestTOTPLogin:
 
     def test_login_result_dataclass(self):
         from flinttrade_automation.totp_login import LoginResult
+
         result = LoginResult(success=False, error="test")
         assert not result.success
         assert result.error == "test"
 
     def test_totp_login_stub_returns_not_implemented(self):
         from flinttrade_automation.totp_login import TOTPLogin
+
         login = TOTPLogin()
         result = login.execute()
         assert not result.success
@@ -58,6 +65,7 @@ class TestCronManager:
 
     def test_register_job(self):
         from flinttrade_automation.cron_manager import CronManager
+
         cron = CronManager()
         handler = MagicMock()
         cron.register("test_job", handler=handler, trigger_type="interval", trigger_args={"seconds": 60})
@@ -67,6 +75,7 @@ class TestCronManager:
 
     def test_register_multiple_jobs(self):
         from flinttrade_automation.cron_manager import CronManager
+
         cron = CronManager()
         cron.register("job1", handler=MagicMock())
         cron.register("job2", handler=MagicMock())
@@ -75,6 +84,7 @@ class TestCronManager:
 
     def test_unregister_job(self):
         from flinttrade_automation.cron_manager import CronManager
+
         cron = CronManager()
         cron.register("temp", handler=MagicMock())
         cron.unregister("temp")
@@ -82,6 +92,7 @@ class TestCronManager:
 
     def test_register_defaults(self):
         from flinttrade_automation.cron_manager import CronManager, DEFAULT_JOBS
+
         cron = CronManager()
         handlers = {name: MagicMock() for name in DEFAULT_JOBS}
         cron.register_defaults(handlers)
@@ -93,6 +104,7 @@ class TestCronManager:
 
     def test_pause_resume_job(self):
         from flinttrade_automation.cron_manager import CronManager, JobStatus
+
         cron = CronManager()
         cron.register("test", handler=MagicMock())
         cron.pause("test")
@@ -104,6 +116,7 @@ class TestCronManager:
 
     def test_disable_enable_job(self):
         from flinttrade_automation.cron_manager import CronManager, JobStatus
+
         cron = CronManager()
         cron.register("test", handler=MagicMock())
         cron.disable("test")
@@ -113,6 +126,7 @@ class TestCronManager:
 
     def test_run_now_executes_handler(self):
         from flinttrade_automation.cron_manager import CronManager
+
         handler = MagicMock()
         cron = CronManager()
         cron.register("test", handler=handler)
@@ -121,6 +135,7 @@ class TestCronManager:
 
     def test_run_now_records_history(self):
         from flinttrade_automation.cron_manager import CronManager
+
         handler = MagicMock()
         cron = CronManager()
         cron.register("test", handler=handler)
@@ -131,6 +146,7 @@ class TestCronManager:
 
     def test_run_now_records_failure(self):
         from flinttrade_automation.cron_manager import CronManager
+
         handler = MagicMock(side_effect=RuntimeError("boom"))
         cron = CronManager()
         cron.register("fail_job", handler=handler)
@@ -142,6 +158,7 @@ class TestCronManager:
 
     def test_disabled_job_not_executed(self):
         from flinttrade_automation.cron_manager import CronManager
+
         handler = MagicMock()
         cron = CronManager()
         cron.register("test", handler=handler)
@@ -151,6 +168,7 @@ class TestCronManager:
 
     def test_default_job_definitions(self):
         from flinttrade_automation.cron_manager import DEFAULT_JOBS
+
         assert "health_check" in DEFAULT_JOBS
         assert DEFAULT_JOBS["health_check"]["trigger_args"]["minutes"] == 5
         assert "backup" in DEFAULT_JOBS
@@ -159,6 +177,7 @@ class TestCronManager:
 
     def test_cron_accepts_wired_dependencies(self):
         from flinttrade_automation.cron_manager import CronManager
+
         cron = CronManager(
             openalgo_client=MagicMock(),
             audit_logger=MagicMock(),
@@ -179,6 +198,7 @@ class TestCronBuiltinJobs:
 
     def test_health_check_sends_alert_on_failure(self):
         from flinttrade_automation.cron_manager import make_health_check_job
+
         mock_client = MagicMock()
         mock_client.ping = MagicMock(side_effect=RuntimeError("connection refused"))
         mock_audit = MagicMock()
@@ -194,6 +214,7 @@ class TestCronBuiltinJobs:
 
     def test_eod_logout_logs_audit(self):
         from flinttrade_automation.cron_manager import make_eod_logout_job
+
         mock_audit = MagicMock()
         job = make_eod_logout_job(mock_audit, holidays=set())
         today = datetime.now(IST).date()
@@ -207,6 +228,7 @@ class TestCronBuiltinJobs:
 
     def test_square_off_warning_sends_telegram(self):
         from flinttrade_automation.cron_manager import make_square_off_warning_job
+
         mock_bot = MagicMock()
         job = make_square_off_warning_job(mock_bot, holidays=set())
         today = datetime.now(IST).date()
@@ -218,6 +240,7 @@ class TestCronBuiltinJobs:
 
     def test_register_builtin_jobs(self):
         from flinttrade_automation.cron_manager import CronManager
+
         cron = CronManager(
             openalgo_client=MagicMock(),
             audit_logger=MagicMock(),
@@ -241,55 +264,67 @@ class TestTelegramBot:
 
     def test_parse_command_basic(self):
         from flinttrade_automation.telegram_bot import parse_command
+
         cmd, args = parse_command("/status")
         assert cmd == "status"
         assert args == []
 
     def test_parse_command_with_args(self):
         from flinttrade_automation.telegram_bot import parse_command
+
         cmd, args = parse_command("/pause MyStrategy")
         assert cmd == "pause"
         assert args == ["MyStrategy"]
 
     def test_parse_command_with_bot_suffix(self):
         from flinttrade_automation.telegram_bot import parse_command
+
         cmd, args = parse_command("/kill@flinttrade_bot")
         assert cmd == "kill"
 
     def test_parse_non_command(self):
         from flinttrade_automation.telegram_bot import parse_command
+
         cmd, args = parse_command("just a message")
         assert cmd == ""
 
     def test_authorization_correct_chat_id(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         assert bot.is_authorized("12345")
         assert bot.is_authorized(12345)
 
     def test_authorization_wrong_chat_id(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         assert not bot.is_authorized("99999")
 
     def test_authorization_no_chat_id_denies(self):
         """When TELEGRAM_CHAT_ID is not set, all commands are denied for safety."""
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id=""))
         assert not bot.is_authorized("any_id")
 
     def test_handle_status(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
-        bot.set_handler("get_positions", lambda: [
-            {"symbol": "RELIANCE", "quantity": "10", "pnl": "500", "ltp": "2500"},
-        ])
+        bot.set_handler(
+            "get_positions",
+            lambda: [
+                {"symbol": "RELIANCE", "quantity": "10", "pnl": "500", "ltp": "2500"},
+            ],
+        )
         result = bot.handle_command("/status", chat_id="12345")
         assert "RELIANCE" in result.response
         assert result.command == "status"
 
     def test_handle_kill(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         kill_fn = MagicMock()
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("kill_switch", kill_fn)
@@ -299,6 +334,7 @@ class TestTelegramBot:
 
     def test_handle_pause(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         pause_fn = MagicMock()
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("pause_strategy", pause_fn)
@@ -308,6 +344,7 @@ class TestTelegramBot:
 
     def test_handle_resume(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         resume_fn = MagicMock()
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         bot.set_handler("resume_strategy", resume_fn)
@@ -317,18 +354,21 @@ class TestTelegramBot:
 
     def test_handle_pause_no_args(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         result = bot.handle_command("/pause", chat_id="12345")
         assert "Usage" in result.response
 
     def test_handle_unknown_command(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         result = bot.handle_command("/foobar", chat_id="12345")
         assert "Unknown" in result.response
 
     def test_unauthorized_command_blocked(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
         bot = TelegramBot(config=BotConfig(chat_id="12345"))
         result = bot.handle_command("/kill", chat_id="99999")
         assert not result.authorized
@@ -336,6 +376,7 @@ class TestTelegramBot:
 
     def test_command_log(self):
         from flinttrade_automation.telegram_bot import TelegramBot
+
         bot = TelegramBot()
         bot.handle_command("/status")
         bot.handle_command("/health")
@@ -343,28 +384,36 @@ class TestTelegramBot:
 
     def test_format_positions_empty(self):
         from flinttrade_automation.telegram_bot import format_positions
+
         assert "No open positions" in format_positions([])
 
     def test_format_positions_with_data(self):
         from flinttrade_automation.telegram_bot import format_positions
-        msg = format_positions([
-            {"symbol": "RELIANCE", "quantity": "10", "pnl": "500", "ltp": "2500"},
-            {"symbol": "TCS", "quantity": "5", "pnl": "-200", "ltp": "3500"},
-        ])
+
+        msg = format_positions(
+            [
+                {"symbol": "RELIANCE", "quantity": "10", "pnl": "500", "ltp": "2500"},
+                {"symbol": "TCS", "quantity": "5", "pnl": "-200", "ltp": "3500"},
+            ]
+        )
         assert "RELIANCE" in msg
         assert "TCS" in msg
 
     def test_format_orders_empty(self):
         from flinttrade_automation.telegram_bot import format_orders
+
         assert "No pending orders" in format_orders([])
 
     def test_format_health(self):
         from flinttrade_automation.telegram_bot import format_health
-        msg = format_health({
-            "openalgo_connected": True,
-            "websocket_connected": False,
-            "disk_free_gb": 50.5,
-        })
+
+        msg = format_health(
+            {
+                "openalgo_connected": True,
+                "websocket_connected": False,
+                "disk_free_gb": 50.5,
+            }
+        )
         assert "OpenAlgo" in msg
 
 
@@ -378,33 +427,95 @@ class TestTelegramKillSwitch:
 
     @staticmethod
     def _wired_safety():
+        from flinttrade_engine.request_context import RequestContext
         from flinttrade_engine.safety import (
+            EmergencyBrokerTarget,
             EmergencyDispatchResult,
             EmergencyVerbOutcome,
             L5_EMERGENCY_POLICY,
             SafetySystem,
         )
 
-        dispatcher = MagicMock()
-        dispatcher.dispatch.return_value = EmergencyDispatchResult(
-            policy=L5_EMERGENCY_POLICY,
-            outcomes=(
-                EmergencyVerbOutcome("cancel_all_orders", succeeded=True),
-                EmergencyVerbOutcome("exit_all_positions", succeeded=True),
+        target = EmergencyBrokerTarget(
+            request_ctx=RequestContext(
+                jti="telegram-unit-authority",
+                actor_type="human",
+                actor_id="operator",
+                mode="live",
+                selector="dhan:primary",
             ),
+            adapter_id="dhan",
+            account_id="primary",
         )
+
+        class AuthorityDispatcher:
+            def __init__(self) -> None:
+                self.dispatch_prepared_calls = 0
+
+            @contextmanager
+            def authority(self):
+                yield (target,)
+
+            def dispatch_prepared(self, policy, *, reason, targets):
+                assert policy is L5_EMERGENCY_POLICY
+                assert targets == (target,)
+                self.dispatch_prepared_calls += 1
+                return EmergencyDispatchResult(
+                    policy=policy,
+                    outcomes=tuple(
+                        EmergencyVerbOutcome(
+                            verb,
+                            succeeded=True,
+                            selector=target.request_ctx.selector,
+                        )
+                        for verb in policy.verbs
+                    ),
+                )
+
+        dispatcher = AuthorityDispatcher()
         return SafetySystem(emergency_dispatcher=dispatcher), dispatcher
 
     def test_kill_switch_activates_safety(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
         safety, dispatcher = self._wired_safety()
-        bot = TelegramBot(config=BotConfig(chat_id="12345"), safety_system=safety)
+        bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
+            safety_system=safety,
+            emergency_dispatcher=dispatcher,
+        )
         result = bot.handle_command("/kill", chat_id="12345", username="test_user")
 
-        dispatcher.dispatch.assert_called_once()
+        assert dispatcher.dispatch_prepared_calls == 1
         assert safety.l5_kill.is_active
         assert "KILL" in result.response
+
+    def test_dispatcher_only_construction_refuses_before_l5_without_authority(self):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+        from flinttrade_engine.safety import EmergencyDispatchResult, SafetySystem
+
+        class DispatcherOnly:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def dispatch(self, policy, *, reason):
+                self.calls += 1
+                return EmergencyDispatchResult.failed(policy, "target_unavailable")
+
+        dispatcher = DispatcherOnly()
+        safety = SafetySystem()
+        bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
+            safety_system=safety,
+            emergency_dispatcher=dispatcher,
+        )
+
+        result = bot.handle_command("/kill", chat_id="12345", username="test_user")
+
+        assert safety.l5_kill.is_active is False
+        assert dispatcher.calls == 0
+        assert "KILL SWITCH NOT ACTIVATED" in result.response
+        assert "authority" in result.response.lower()
 
     def test_kill_switch_never_mutates_through_raw_client(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
@@ -418,10 +529,11 @@ class TestTelegramKillSwitch:
             config=BotConfig(chat_id="12345"),
             client=mock_client,
             safety_system=safety,
+            emergency_dispatcher=dispatcher,
         )
         bot.handle_command("/kill", chat_id="12345")
 
-        dispatcher.dispatch.assert_called_once()
+        assert dispatcher.dispatch_prepared_calls == 1
         mock_client.cancel_all_orders.assert_not_called()
         mock_client.close_position.assert_not_called()
 
@@ -435,6 +547,39 @@ class TestTelegramKillSwitch:
         bot.handle_command("/kill", chat_id="12345")
 
         mock_scheduler.stop_all.assert_called_once()
+
+    def test_kill_switch_submits_stop_all_to_scheduler_owner_loop(self):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
+        class OwnerLoopScheduler:
+            def __init__(self) -> None:
+                self.threadsafe_called = False
+                self.async_called = False
+
+            def stop_all_threadsafe(self) -> None:
+                self.threadsafe_called = True
+
+            async def stop_all(self) -> None:
+                self.async_called = True
+                raise AssertionError("stop_all must run on its bound owner loop")
+
+        scheduler = OwnerLoopScheduler()
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), scheduler=scheduler)
+
+        result = bot.handle_command("/kill", chat_id="12345")
+
+        assert scheduler.threadsafe_called is True
+        assert scheduler.async_called is False
+        assert "All strategies stopped" in result.response
+
+    def test_run_async_preserves_the_original_coroutine_failure(self):
+        from flinttrade_automation.telegram_bot import TelegramBot
+
+        async def fail() -> None:
+            raise ValueError("original failure")
+
+        with pytest.raises(ValueError, match="original failure"):
+            TelegramBot._run_async(fail())
 
     def test_kill_switch_logs_audit(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
@@ -452,7 +597,7 @@ class TestTelegramKillSwitch:
     def test_kill_switch_full_response(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
 
-        safety, _dispatcher = self._wired_safety()
+        safety, dispatcher = self._wired_safety()
         mock_client = MagicMock()
         mock_client.cancel_all_orders = MagicMock(return_value=None)
         mock_client.close_position = MagicMock(return_value=None)
@@ -466,12 +611,14 @@ class TestTelegramKillSwitch:
             safety_system=safety,
             scheduler=mock_scheduler,
             audit_logger=mock_audit,
+            emergency_dispatcher=dispatcher,
         )
         result = bot.handle_command("/kill", chat_id="12345")
 
         assert "KILL SWITCH ACTIVATED" in result.response
-        assert "All orders cancelled" in result.response
-        assert "All positions closed" in result.response
+        assert "Order cancellation requests accepted" in result.response
+        assert "Position exit requests accepted" in result.response
+        assert "All positions closed" not in result.response
         assert "All strategies stopped" in result.response
         mock_client.cancel_all_orders.assert_not_called()
         mock_client.close_position.assert_not_called()
@@ -501,6 +648,61 @@ class TestTelegramKillSwitch:
         assert "NSE" in result.response
         assert "ACTIVE" in result.response
 
+    def test_status_never_reports_flat_when_openalgo_position_read_fails(self):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
+        mock_client = MagicMock()
+        mock_client.positionbook.side_effect = OSError("bridge unavailable")
+        mock_client.funds.side_effect = OSError("bridge unavailable")
+        bot = TelegramBot(config=BotConfig(chat_id="12345"), client=mock_client)
+
+        result = bot.handle_command("/status", chat_id="12345")
+
+        assert "positions unavailable" in result.response.lower()
+        assert "broker state not verified" in result.response.lower()
+        assert "No open positions" not in result.response
+
+    def test_status_scopes_raw_bridge_read_and_reports_last_emergency_targets(self):
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+        from flinttrade_engine.safety import (
+            EmergencyDispatchResult,
+            EmergencyVerbOutcome,
+            L5_EMERGENCY_POLICY,
+            SafetySystem,
+        )
+
+        class CompleteDispatcher:
+            def dispatch(self, policy, *, reason):
+                return EmergencyDispatchResult(
+                    policy=policy,
+                    outcomes=tuple(
+                        EmergencyVerbOutcome(
+                            verb,
+                            succeeded=True,
+                            selector="dhan:primary",
+                        )
+                        for verb in L5_EMERGENCY_POLICY.verbs
+                    ),
+                )
+
+        safety = SafetySystem()
+        safety.l5_kill.activate("status evidence", emergency_dispatcher=CompleteDispatcher())
+        mock_client = MagicMock()
+        mock_client.run_sync.side_effect = lambda value: value
+        mock_client.positionbook.return_value = []
+        mock_client.funds.return_value = MagicMock(available_balance="100000")
+        bot = TelegramBot(
+            config=BotConfig(chat_id="12345"),
+            client=mock_client,
+            safety_system=safety,
+        )
+
+        result = bot.handle_command("/status", chat_id="12345")
+
+        assert "OpenAlgo bridge" in result.response
+        assert "1/1 targets complete" in result.response
+        assert "dhan:primary" in result.response
+
     def test_kill_fallback_to_legacy_handler(self):
         """If no safety_system wired, falls back to legacy handler."""
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
@@ -524,15 +726,37 @@ class TestPostMarketAnalysis:
 
     def _make_trades(self):
         from flinttrade_automation.post_market import TradeEntry
+
         return [
-            TradeEntry(symbol="RELIANCE", strategy="EMA", action="BUY", quantity=10, entry_price=2500, exit_price=2550, pnl=500),
-            TradeEntry(symbol="TCS", strategy="EMA", action="BUY", quantity=5, entry_price=3500, exit_price=3480, pnl=-100),
-            TradeEntry(symbol="NIFTY", strategy="Supertrend", action="SELL", quantity=75, entry_price=24000, exit_price=23900, pnl=7500),
-            TradeEntry(symbol="BANKNIFTY", strategy="Supertrend", action="BUY", quantity=30, entry_price=51000, exit_price=50800, pnl=-6000),
+            TradeEntry(
+                symbol="RELIANCE", strategy="EMA", action="BUY", quantity=10, entry_price=2500, exit_price=2550, pnl=500
+            ),
+            TradeEntry(
+                symbol="TCS", strategy="EMA", action="BUY", quantity=5, entry_price=3500, exit_price=3480, pnl=-100
+            ),
+            TradeEntry(
+                symbol="NIFTY",
+                strategy="Supertrend",
+                action="SELL",
+                quantity=75,
+                entry_price=24000,
+                exit_price=23900,
+                pnl=7500,
+            ),
+            TradeEntry(
+                symbol="BANKNIFTY",
+                strategy="Supertrend",
+                action="BUY",
+                quantity=30,
+                entry_price=51000,
+                exit_price=50800,
+                pnl=-6000,
+            ),
         ]
 
     def test_build_report_basic(self):
         from flinttrade_automation.post_market import build_report
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         assert report.total_trades == 4
@@ -542,12 +766,14 @@ class TestPostMarketAnalysis:
 
     def test_build_report_pnl(self):
         from flinttrade_automation.post_market import build_report
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         assert report.gross_pnl == 500 + (-100) + 7500 + (-6000)
 
     def test_build_report_best_worst_trade(self):
         from flinttrade_automation.post_market import build_report
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         assert report.best_trade.symbol == "NIFTY"
@@ -557,6 +783,7 @@ class TestPostMarketAnalysis:
 
     def test_build_report_strategy_breakdown(self):
         from flinttrade_automation.post_market import build_report
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         assert len(report.strategy_breakdown) == 2
@@ -566,6 +793,7 @@ class TestPostMarketAnalysis:
 
     def test_build_report_empty_trades(self):
         from flinttrade_automation.post_market import build_report
+
         report = build_report([], "2026-03-16")
         assert report.total_trades == 0
         assert report.win_rate == 0.0
@@ -573,6 +801,7 @@ class TestPostMarketAnalysis:
 
     def test_format_report_telegram(self):
         from flinttrade_automation.post_market import build_report, format_report_telegram
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         msg = format_report_telegram(report)
@@ -583,6 +812,7 @@ class TestPostMarketAnalysis:
 
     def test_report_to_dict(self):
         from flinttrade_automation.post_market import build_report
+
         trades = self._make_trades()
         report = build_report(trades, "2026-03-16")
         d = report.to_dict()
@@ -592,6 +822,7 @@ class TestPostMarketAnalysis:
 
     def test_post_market_run_with_telegram(self):
         from flinttrade_automation.post_market import PostMarketAnalysis
+
         mock_bot = MagicMock()
         pma = PostMarketAnalysis(telegram_bot=mock_bot)
         trades = self._make_trades()
@@ -601,6 +832,7 @@ class TestPostMarketAnalysis:
 
     def test_post_market_stores_reports(self):
         from flinttrade_automation.post_market import PostMarketAnalysis
+
         pma = PostMarketAnalysis()
         trades = self._make_trades()
         pma.run(trades, "2026-03-16", include_llm=False)
@@ -609,13 +841,18 @@ class TestPostMarketAnalysis:
 
     def test_strategy_performance_win_rate(self):
         from flinttrade_automation.post_market import StrategyPerformance
+
         perf = StrategyPerformance(
-            strategy="EMA", total_trades=10, winning_trades=6, losing_trades=4,
+            strategy="EMA",
+            total_trades=10,
+            winning_trades=6,
+            losing_trades=4,
         )
         assert perf.win_rate == 60.0
 
     def test_strategy_performance_zero_trades(self):
         from flinttrade_automation.post_market import StrategyPerformance
+
         perf = StrategyPerformance(strategy="Empty")
         assert perf.win_rate == 0.0
 
@@ -630,11 +867,17 @@ class TestPackageExports:
 
     def test_all_exports(self):
         from flinttrade_automation import __all__
+
         expected = [
-            "CronManager", "TelegramBot",
+            "CronManager",
+            "TelegramBot",
             "PostMarketAnalysis",
-            "LoginResult", "JobDefinition", "BotConfig",
-            "DailyReport", "TradeEntry", "is_trading_day",
+            "LoginResult",
+            "JobDefinition",
+            "BotConfig",
+            "DailyReport",
+            "TradeEntry",
+            "is_trading_day",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"

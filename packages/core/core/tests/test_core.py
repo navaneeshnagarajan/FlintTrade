@@ -278,26 +278,63 @@ class TestModels:
     def test_fund(self):
         from flinttrade_core.models import Fund
 
-        f = Fund(available_balance="100000", used_margin="25000", total_balance="125000")
+        f = Fund(
+            available_balance="100000",
+            used_margin="25000",
+            total_balance="125000",
+            opening_risk_capital="150000",
+        )
         assert f.available_balance == "100000"
+        assert f.opening_risk_capital == "150000"
+        assert Fund().opening_risk_capital == "0"
 
     def test_position(self):
         from flinttrade_core.models import Position
 
-        p = Position(symbol="RELIANCE", exchange="NSE", quantity="10", pnl="500")
+        p = Position(
+            symbol="USDINR",
+            exchange="CDS",
+            quantity="10",
+            pnl="500",
+            multiplier=1000.0,
+            fx_rate=83.25,
+            close_price=0.0025,
+        )
         assert p.pnl == "500"
+        assert p.multiplier == 1000.0
+        assert p.fx_rate == 83.25
+        assert p.close_price == 0.0025
 
     def test_holding(self):
         from flinttrade_core.models import Holding
 
-        h = Holding(symbol="TCS", quantity="5", average_price="3500")
+        h = Holding(
+            symbol="TCS",
+            exchange="NSE",
+            product="CNC",
+            quantity="5",
+            average_price="3500",
+            multiplier=1.0,
+            fx_rate=1.0,
+            close_price=3490.0,
+        )
         assert h.average_price == "3500"
+        assert (h.exchange, h.product) == ("NSE", "CNC")
+        assert (h.multiplier, h.fx_rate, h.close_price) == (1.0, 1.0, 3490.0)
 
     def test_trade(self):
         from flinttrade_core.models import Trade
 
-        t = Trade(orderid="123", symbol="INFY", action="BUY", price="1500")
+        t = Trade(
+            orderid="123",
+            symbol="INFY",
+            action="BUY",
+            price="1500",
+            multiplier=1.0,
+            fx_rate=1.0,
+        )
         assert t.price == "1500"
+        assert (t.multiplier, t.fx_rate) == (1.0, 1.0)
 
     def test_option_greek(self):
         from flinttrade_core.models import OptionGreek
@@ -311,10 +348,15 @@ class TestModels:
         chain = OptionChain(
             underlying="NIFTY",
             exchange="NFO",
+            spot_price=24050.0,
             strikes=[OptionChainStrike(strike_price=24000, ce_ltp=150, pe_ltp=120)],
         )
         assert len(chain.strikes) == 1
+        assert chain.spot_price == 24050.0
         assert chain.strikes[0].strike_price == 24000
+
+        with pytest.raises(ValueError, match="spot_price must be numeric"):
+            OptionChain(spot_price=True)
 
     def test_order_response(self):
         from flinttrade_core.models import OrderResponse
@@ -470,6 +512,8 @@ class TestClientInit:
             "data": {
                 "underlying": "NIFTY",
                 "exchange": "NFO",
+                "expiry_date": "26MAR26",
+                "spot": 24050.0,
                 "chain": [
                     {
                         "strike": 24000,
@@ -490,9 +534,166 @@ class TestClientInit:
         assert payload["expiry"] == "2026-03-26"
         assert payload["expiry_date"] == "20260326"
         assert chain.underlying == "NIFTY"
+        assert chain.expiry_date == "26MAR26"
+        assert chain.spot_price == 24050.0
         assert chain.strikes[0].strike_price == 24000
         assert chain.strikes[0].ce_oi == 100
         assert chain.strikes[0].pe_ltp == 120
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_multi_quotes_normalises_documented_results_envelope(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "results": [
+                {
+                    "symbol": "RELIANCE",
+                    "exchange": "NSE",
+                    "data": {
+                        "open": 1542.3,
+                        "high": 1571.6,
+                        "low": 1540.5,
+                        "ltp": 1569.9,
+                        "prev_close": 1539.7,
+                        "ask": 1569.9,
+                        "bid": 0,
+                        "oi": 0,
+                        "volume": 14054299,
+                    },
+                },
+                {
+                    "symbol": "NIFTY26JULFUT",
+                    "exchange": "NFO",
+                    "data": {
+                        "close": 24875.0,
+                        "ltp": 24910.5,
+                        "oi": 123456,
+                        "volume": 654321,
+                    },
+                },
+            ],
+        })
+
+        quotes = await client.multi_quotes([
+            {"symbol": "RELIANCE", "exchange": "NSE"},
+            {"symbol": "NIFTY26JULFUT", "exchange": "NFO"},
+        ])
+
+        assert [(quote.symbol, quote.exchange) for quote in quotes] == [
+            ("RELIANCE", "NSE"),
+            ("NIFTY26JULFUT", "NFO"),
+        ]
+        assert quotes[0].ltp == 1569.9
+        assert quotes[0].prev_close == 1539.7
+        assert quotes[1].ltp == 24910.5
+        assert quotes[1].prev_close == 0.0
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_multi_quotes_retains_flat_list_compatibility(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value=[
+            {
+                "symbol": "USDINR26JULFUT",
+                "exchange": "CDS",
+                "ltp": 83.45,
+                "prev_close": 83.2,
+            },
+        ])
+
+        quotes = await client.multi_quotes([{"symbol": "USDINR26JULFUT", "exchange": "CDS"}])
+
+        assert len(quotes) == 1
+        assert quotes[0].ltp == 83.45
+        assert quotes[0].prev_close == 83.2
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_tradebook_maps_documented_average_price_and_keeps_fill_time(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": [
+                {
+                    "action": "BUY",
+                    "symbol": "NIFTY26JULFUT",
+                    "exchange": "NFO",
+                    "orderid": "250408000989443",
+                    "product": "NRML",
+                    "quantity": 65,
+                    "average_price": 24875.25,
+                    "timestamp": "13:58:03",
+                    "trade_value": 1616891.25,
+                },
+                {
+                    "action": "SELL",
+                    "symbol": "USDINR26JULFUT",
+                    "exchange": "CDS",
+                    "orderid": "250408001086129",
+                    "product": "NRML",
+                    "quantity": 1,
+                    "average_price": 83.45,
+                    "timestamp": "14:28:49",
+                    "multiplier": 1000.0,
+                    "fx_rate": 1.0,
+                },
+            ],
+        })
+
+        trades = await client.tradebook()
+
+        assert trades[0].quantity == "65"
+        assert trades[0].price == "24875.25"
+        assert trades[0].timestamp == "13:58:03"
+        assert getattr(trades[0], "multiplier", None) is None
+        assert getattr(trades[0], "fx_rate", None) is None
+        assert trades[1].price == "83.45"
+        assert trades[1].timestamp == "14:28:49"
+        assert getattr(trades[1], "multiplier") == 1000.0
+        assert getattr(trades[1], "fx_rate") == 1.0
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_funds_accepts_current_openalgo_fields_without_trusting_m2m(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {
+                "availablecash": "320.66",
+                "collateral": "500.00",
+                "m2mrealized": "999999.00",
+                "m2munrealized": "-888888.00",
+                "utiliseddebits": "679.34",
+            },
+        })
+
+        funds = await client.funds()
+
+        assert funds.available_balance == "320.66"
+        assert funds.used_margin == "679.34"
+        assert funds.total_balance == "1000.00"
+        assert funds.opening_risk_capital == "0"
+        assert funds.extra["m2mrealized"] == "999999.00"
+        assert funds.extra["m2munrealized"] == "-888888.00"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_funds_uses_only_explicit_opening_balance_for_risk_capital(self):
+        client = self._make_client()
+        client._post = AsyncMock(return_value={
+            "status": "success",
+            "data": {
+                "availablecash": "400.00",
+                "utiliseddebits": "600.00",
+                "openingcashlimit": "1250.00",
+            },
+        })
+
+        funds = await client.funds()
+
+        assert funds.total_balance == "1000.00"
+        assert funds.opening_risk_capital == "1250.00"
         await client.close()
 
 
@@ -546,11 +747,18 @@ class TestErrorHandling:
         settings = Settings(openalgo_host="http://127.0.0.1:5000", openalgo_api_key="test123")
         return OpenAlgoClient(settings)
 
+    @pytest.fixture
+    async def client(self):
+        client = self._make_client()
+        try:
+            yield client
+        finally:
+            await client.close()
+
     @pytest.mark.asyncio
-    async def test_auth_error_on_401(self):
+    async def test_auth_error_on_401(self, client):
         from flinttrade_core.exceptions import OpenAlgoAuthError
 
-        client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.content = b'{"message": "Invalid API key"}'
@@ -561,10 +769,9 @@ class TestErrorHandling:
             await client.ping()
 
     @pytest.mark.asyncio
-    async def test_rate_limit_error_on_429(self):
+    async def test_rate_limit_error_on_429(self, client):
         from flinttrade_core.exceptions import OpenAlgoRateLimitError
 
-        client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.status_code = 429
         mock_resp.headers = {"Retry-After": "1"}
@@ -574,10 +781,9 @@ class TestErrorHandling:
             await client.ping()
 
     @pytest.mark.asyncio
-    async def test_api_error_on_500(self):
+    async def test_api_error_on_500(self, client):
         from flinttrade_core.exceptions import APIError
 
-        client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.content = b'{"message": "Internal error"}'
@@ -589,21 +795,19 @@ class TestErrorHandling:
             await client.ping()
 
     @pytest.mark.asyncio
-    async def test_retry_on_connection_error(self):
+    async def test_retry_on_connection_error(self, client):
         import httpx
 
         from flinttrade_core.exceptions import APIError
 
-        client = self._make_client()
         client._http.post = AsyncMock(side_effect=httpx.ConnectError("refused"))
         with pytest.raises(APIError, match="Failed after 3 retries"):
             await client.ping()
 
     @pytest.mark.asyncio
-    async def test_error_status_in_response_body(self):
+    async def test_error_status_in_response_body(self, client):
         from flinttrade_core.exceptions import APIError
 
-        client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.content = b'{"status": "error", "message": "Symbol not found"}'

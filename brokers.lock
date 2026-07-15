@@ -47,6 +47,7 @@ notes = "Groww official Python SDK installed in the repo uv environment for atte
 # pin as of 2026-07-05. INDstocks' FAQ advertises `pip install indstocks-sdk`
 # and `npm install indstocks-sdk`, but both PyPI and npm currently return no
 # matching package; keep the adapter REST-native until a real distribution exists
-# and can be pinned with licence/provenance metadata. Its activation is gated by
-# vault credentials alone (see SDK_PIN_BY_BROKER's None pin in
+# and can be pinned with licence/provenance metadata. SDK attestation is therefore
+# not required, but catalogue blockers, authoritative emergency planning, and
+# vault credentials still gate activation (see SDK_PIN_BY_BROKER's None pin in
 # flinttrade_gateway.brokers.native_factory).

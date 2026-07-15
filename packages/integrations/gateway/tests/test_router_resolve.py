@@ -47,6 +47,70 @@ def _config() -> RoutingConfig:
     )
 
 
+def test_authorised_selectors_returns_every_registered_actor_account_in_config_order() -> None:
+    config = RoutingConfig.from_workspace(
+        {
+            "registered": ["dhan:primary", "upstox:secondary", "dhan:read-only"],
+            "account_acls": {
+                "dhan": {
+                    "primary": ["user-1"],
+                    "read-only": ["someone-else"],
+                },
+                "upstox": {"secondary": ["user-1", "someone-else"]},
+            },
+            "execution": {"default": "dhan:primary"},
+            "data": {
+                "ticks": "dhan:read-only",
+                "historical": "dhan:read-only",
+                "option_chains": "dhan:read-only",
+                "quote": "dhan:read-only",
+            },
+            "failover": {"enabled": False, "order": []},
+            "cost_aware": {"enabled": False, "tasks": []},
+        }
+    )
+    router = _router(_FakeAdapter(), config=config)
+
+    assert router.authorised_selectors("user-1") == (
+        "dhan:primary",
+        "upstox:secondary",
+    )
+    assert router.authorised_selectors("unknown") == ()
+
+
+def test_registered_selectors_is_an_immutable_config_snapshot() -> None:
+    config = _config()
+    router = _router(_FakeAdapter(), config=config)
+
+    assert router.registered_selectors == ("dhan:personal",)
+    assert isinstance(router.registered_selectors, tuple)
+    assert _router(_FakeAdapter()).registered_selectors == ()
+
+
+def test_registered_selectors_excludes_adapters_absent_from_the_generation() -> None:
+    config = RoutingConfig.from_workspace(
+        {
+            "registered": ["dhan:personal", "indmoney:family"],
+            "account_acls": {
+                "dhan": {"personal": ["user-1"]},
+                "indmoney": {"family": ["user-1"]},
+            },
+            "execution": {"default": "dhan:personal"},
+            "data": {
+                "ticks": "dhan:personal",
+                "historical": "dhan:personal",
+                "option_chains": "dhan:personal",
+                "quote": "dhan:personal",
+            },
+            "failover": {"enabled": False, "order": []},
+            "cost_aware": {"enabled": False, "tasks": []},
+        }
+    )
+    router = _router(_FakeAdapter(), config=config)
+
+    assert router.registered_selectors == ("dhan:personal",)
+
+
 class _FakeAdapter:
     def __init__(self) -> None:
         self.placed: list[object] = []

@@ -25,6 +25,7 @@ vi.mock("@/components/teasers", () => ({
 import { useIVSmile } from "../useIVSmile";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import IVSmileWidget from "../IVSmileWidget";
+import { SAMPLE_IV_SMILE_DATA } from "../sampleData";
 
 const mockUseIVSmile = useIVSmile as ReturnType<typeof vi.fn>;
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -77,6 +78,7 @@ describe("IVSmileWidget", () => {
       data: {
         underlying: "NIFTY",
         spot_price: 24200,
+        is_sample_data: false,
         curves: [
           {
             expiry: "2026-03-27",
@@ -102,6 +104,57 @@ describe("IVSmileWidget", () => {
     expect(screen.getByTestId("plotly-chart")).toBeTruthy();
     expect(screen.getByText(/ATM IV/i)).toBeTruthy();
     expect(screen.getByText(/25d Skew/i)).toBeTruthy();
+  });
+
+  it("treats a connected payload with missing provenance as demo data", () => {
+    const { is_sample_data: _flag, ...unknownProvenance } = SAMPLE_IV_SMILE_DATA;
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseIVSmile.mockReturnValue({
+      data: unknownProvenance,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+
+    render(<IVSmileWidget />, { wrapper });
+
+    expect(screen.getByText("Demo data")).toBeTruthy();
+  });
+
+  it("does not render a connected half-complete option-leg point as live IV", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseIVSmile.mockReturnValue({
+      data: {
+        underlying: "NIFTY",
+        spot_price: 24200,
+        is_sample_data: false,
+        curves: [
+          {
+            expiry: "2026-03-27",
+            days_to_expiry: 3,
+            atm_iv: 0.186,
+            atm_strike: 24200,
+            skew_25delta: 0.032,
+            points: [
+              { strike: 24200, moneyness: 1, call_iv: 0.186, put_iv: 0 },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    });
+
+    render(<IVSmileWidget />, { wrapper });
+
+    expect(screen.queryByTestId("plotly-chart")).toBeNull();
+    expect(screen.getByText(/no iv data available/i)).toBeTruthy();
+    expect(screen.queryByText(/ATM IV/i)).toBeNull();
   });
 
   it("renders error banner", () => {

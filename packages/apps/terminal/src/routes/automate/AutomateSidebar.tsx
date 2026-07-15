@@ -23,11 +23,11 @@ interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "flows",      label: "Flow Builder",       icon: Workflow,   desc: "Visual 54-node automation builder" },
+  { id: "flows",      label: "Flow Builder",       icon: Workflow,   desc: "Visual flow design and local drafts" },
   { id: "schedules",  label: "Schedules",           icon: Clock,      desc: "Cron jobs & timed executions" },
   { id: "monitors",   label: "Monitors",            icon: Activity,   desc: "Live strategy monitoring" },
   { id: "strategies", label: "Strategies",          icon: FileCode2,  desc: "Upload and run Python strategies" },
-  { id: "webhooks",   label: "Webhooks",             icon: Webhook,    desc: "TradingView webhook endpoints and alert templates" },
+  { id: "webhooks",   label: "Webhooks",             icon: Webhook,    desc: "Signed relay endpoint registry" },
   { id: "n8n",        label: "n8n Bridge",          icon: Share2,     desc: "External n8n workflow automation (optional)" },
   { id: "logs",       label: "Execution Logs",      icon: FileText,   desc: "History of automated actions" },
   { id: "settings",   label: "Automation Settings", icon: Settings2,  desc: "Kill switches, limits, Telegram alerts" },

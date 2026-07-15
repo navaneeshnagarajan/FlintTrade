@@ -790,8 +790,8 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
     """Build the gated place/cancel leg dispatchers bound to a Flask app.
 
     Every placement traverses the SAME enforced chain as a human ``/place``
-    order (contract §8.1): SafetySystem L1–L5 (with best-effort live L2
-    position/margin inputs) → :func:`~flinttrade_engine.safety.gate_order`
+    order (contract §8.1): SafetySystem L1–L5 (with complete selector-scoped
+    state and post-order Layer 3 Greeks) → :func:`~flinttrade_engine.safety.gate_order`
     (one-shot HMAC ``SafetyContext`` bound to the selector-bound principal) →
     ``BrokerRouter.place_order`` (ACL + field-by-field re-verification +
     one-shot gate consumption) → broker adapter. Cancels mint the canonical
@@ -871,83 +871,106 @@ def build_gated_leg_dispatchers(app: Flask) -> tuple[PlaceLegFn, CancelLegFn]:
         from flinttrade_gateway.routing_config import RoutingHint  # noqa: PLC0415
 
         from .algo_tag_guard import AlgoTagLimitError  # noqa: PLC0415
-        from .safety import SafetyConfig, SafetySystem, gate_order  # noqa: PLC0415
+        from .safety import gate_order  # noqa: PLC0415
 
         router = _require_router()
 
-        # L2 inputs (positions/margin) — best-effort, mirroring the human
-        # /place path: a state-read hiccup must never block the order;
-        # L1/L4/L5 still apply.
-        l2_positions: list[Any] = []
-        l2_used_margin = 0.0
-        l2_total_balance = 0.0
         try:
-            from flinttrade_core.l2_state import gather_l2_state  # noqa: PLC0415
-
-            l2_positions, l2_used_margin, l2_total_balance = _call_on_owner_loop(
-                gather_l2_state(
-                    app.config, principal.adapter_id, account_id=principal.account_id
-                )
+            from flinttrade_core.safety_config import (  # noqa: PLC0415
+                SafetyRuntimeUnavailable,
+                require_ready_safety,
             )
-        except Exception:  # noqa: BLE001 — best-effort state read only
-            logger.debug("bracket L2 state gather failed", exc_info=True)
 
-        safety = app.config.get("SAFETY") or SafetySystem(SafetyConfig())
-        results = safety.check_order(
-            order,
-            positions=l2_positions,
-            used_margin=l2_used_margin,
-            total_balance=l2_total_balance,
-        )
-        blocked = next((r for r in results if not r.passed), None)
-        if blocked is not None:
-            logger.warning(
-                "Bracket leg blocked by safety layer %s | symbol=%s: %s",
-                blocked.layer, order.symbol, blocked.reason,
-            )
+            safety = require_ready_safety(app.config)
+        except SafetyRuntimeUnavailable as exc:
             raise BracketOrderError(
-                f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}"
-            )
-
-        ctx = _request_ctx(principal)
-        try:
-            safety_ctx = gate_order(
-                order, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id
-            )
-            result = _call_on_owner_loop(
-                router.place_order(
-                    ctx,
-                    order=order,
-                    safety_ctx=safety_ctx,
-                    hint=RoutingHint(
-                        adapter_id=principal.adapter_id, account_id=principal.account_id
-                    ),
-                )
-            )
-        except SafetyBypassError as exc:
-            logger.warning("Bracket leg refused by safety gate: %s", exc)
-            raise BracketOrderError("Order refused by the safety gate") from exc
-        except AlgoTagLimitError as exc:
-            logger.warning("Bracket leg refused by algo-tag guard: %s", exc)
-            raise BracketOrderError("Order refused by rate guard — retry shortly") from exc
-        except (BrokerNotFoundError, KeyError) as exc:
-            logger.warning(
-                "Bracket leg — broker not connected | adapter=%s", principal.adapter_id
-            )
-            raise BracketOrderError(
-                f"Broker '{principal.adapter_id}' (account '{principal.account_id}') "
-                "is not connected."
+                "Validated order safety configuration is unavailable; no order was sent"
             ) from exc
-        except (NotImplementedError, UnsupportedCapabilityError) as exc:
-            raise BracketOrderError(
-                f"Order placement is not yet available for broker '{principal.adapter_id}'."
-            ) from exc
-        except Exception as exc:
-            logger.exception(
-                "Bracket leg dispatch failed | adapter=%s symbol=%s",
-                principal.adapter_id, order.symbol,
+
+        selector = f"{principal.adapter_id}:{principal.account_id}"
+        with safety.order_admission(selector) as lease:
+            try:
+                from flinttrade_core.l2_state import gather_safety_state  # noqa: PLC0415
+
+                portfolio_state = _call_on_owner_loop(
+                    gather_safety_state(
+                        app.config,
+                        principal.adapter_id,
+                        account_id=principal.account_id,
+                        orders=[order],
+                        reservations=lease.reservations,
+                        include_order_margin=True,
+                    )
+                )
+                lease.reconcile(getattr(portfolio_state, "reconciled_reservation_ids", ()))
+            except Exception as exc:  # noqa: BLE001 - refuse without exposing broker details
+                logger.error("Bracket portfolio safety state is unavailable: %s", type(exc).__name__)
+                raise BracketOrderError("Order safety state unavailable; no order was sent") from exc
+
+            admission = portfolio_state.admission_for(0)
+            results = safety.check_order(
+                order,
+                selector=selector,
+                positions=admission.positions,
+                used_margin=admission.used_margin,
+                total_balance=portfolio_state.total_balance,
+                daily_pnl=portfolio_state.daily_pnl,
+                starting_capital=portfolio_state.starting_capital,
+                ltp=portfolio_state.ltp_for(order),
+                net_delta=admission.net_delta,
+                net_vega=admission.net_vega,
             )
-            raise BracketOrderError("Order dispatch failed") from exc
+            blocked = next((result for result in results if not result.passed), None)
+            if blocked is not None:
+                logger.warning(
+                    "Bracket leg blocked by safety layer %s | symbol=%s: %s",
+                    blocked.layer, order.symbol, blocked.reason,
+                )
+                raise BracketOrderError(
+                    f"Order blocked by safety system [{blocked.layer}]: {blocked.reason}"
+                )
+
+            ctx = _request_ctx(principal)
+            try:
+                safety_ctx = gate_order(
+                    order, ctx, adapter_id=principal.adapter_id, account_id=principal.account_id
+                )
+                reservation = lease.reserve(order, admission.positions)
+                result = _call_on_owner_loop(
+                    router.place_order(
+                        ctx,
+                        order=order,
+                        safety_ctx=safety_ctx,
+                        hint=RoutingHint(
+                            adapter_id=principal.adapter_id, account_id=principal.account_id
+                        ),
+                    )
+                )
+                lease.acknowledge(reservation, result)
+            except SafetyBypassError as exc:
+                logger.warning("Bracket leg refused by safety gate: %s", exc)
+                raise BracketOrderError("Order refused by the safety gate") from exc
+            except AlgoTagLimitError as exc:
+                logger.warning("Bracket leg refused by algo-tag guard: %s", exc)
+                raise BracketOrderError("Order refused by rate guard — retry shortly") from exc
+            except (BrokerNotFoundError, KeyError) as exc:
+                logger.warning(
+                    "Bracket leg — broker not connected | adapter=%s", principal.adapter_id
+                )
+                raise BracketOrderError(
+                    f"Broker '{principal.adapter_id}' (account '{principal.account_id}') "
+                    "is not connected."
+                ) from exc
+            except (NotImplementedError, UnsupportedCapabilityError) as exc:
+                raise BracketOrderError(
+                    f"Order placement is not yet available for broker '{principal.adapter_id}'."
+                ) from exc
+            except Exception as exc:
+                logger.exception(
+                    "Bracket leg dispatch failed | adapter=%s symbol=%s",
+                    principal.adapter_id, order.symbol,
+                )
+                raise BracketOrderError("Order dispatch failed") from exc
 
         _audit("BRACKET_LEG_PLACED", principal, symbol=order.symbol, orderid=str(result))
         return str(result)

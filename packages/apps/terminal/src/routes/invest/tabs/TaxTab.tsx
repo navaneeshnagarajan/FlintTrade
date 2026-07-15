@@ -1,8 +1,8 @@
 /**
- * TaxTab.tsx — Tax-ready P&L report for Indian traders
+ * TaxTab.tsx — Indicative tax P&L report for Indian traders
  *
  * Summary cards: LTCG, STCG, Intraday P&L, F&O P&L, Commodity P&L,
- * Total STT, Estimated Tax Liability, Audit Required indicator.
+ * Total STT, Estimated Tax Liability, and audit assessment indicator.
  * Segment breakdown table with per-trade details.
  * Turnover calculation and FY selector.
  *
@@ -16,7 +16,6 @@ import {
   TrendingUp,
   TrendingDown,
   AlertTriangle,
-  ShieldCheck,
   RefreshCw,
   Calendar,
   FileText,
@@ -51,36 +50,57 @@ import { DemoBanner } from "@/components/ui/DemoBanner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useTaxSummary, useTaxReport, type TaxSummary, type TaxSegment } from "@/hooks/useTaxReport";
+import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
 import { formatINR, formatINRCompact } from "../formatters";
+
+type AuditAssessment = "incomplete" | "required";
+
+type TaxSummaryWithMethodology = TaxSummary & {
+  audit_assessment: AuditAssessment;
+  audit_assessment_reason: string;
+  tax_estimate_methodology: string;
+  stt_methodology: string;
+  stt_rate_provenance: string;
+};
+
+export function getFinancialYearOptions(asOf = new Date()) {
+  const currentStartYear = asOf.getMonth() < 3 ? asOf.getFullYear() - 1 : asOf.getFullYear();
+  return [currentStartYear, currentStartYear - 1].map((startYear) => {
+    const value = `${startYear}-${String(startYear + 1).slice(-2)}`;
+    return { value, label: `FY ${value}` };
+  });
+}
 
 // ─── Demo data ────────────────────────────────────────────────────────────────
 
-const DEMO_TAX_SUMMARY: TaxSummary = {
-  fy: "2025-26",
-  equity_ltcg: 45000,
-  equity_stcg: 28000,
-  intraday_pnl: -12000,
-  fno_pnl: 185000,
-  commodity_pnl: 8500,
-  stt_paid: 4200,
-  turnover: 8500000,
-  tax_liability_estimated: 62000,
-  ltcg_exemption_used: 45000,
-  needs_audit: false,
-  trade_count: 342,
-  is_sample_data: true,
-  data_source: "sample",
-};
-import { exportToCSV, printCurrentView } from "@/lib/exportUtils";
+function getDemoTaxSummary(fy: string): TaxSummaryWithMethodology {
+  return {
+    fy,
+    equity_ltcg: 45000,
+    equity_stcg: 28000,
+    intraday_pnl: -12000,
+    fno_pnl: 185000,
+    commodity_pnl: 8500,
+    stt_paid: 4200,
+    turnover: 8500000,
+    tax_liability_estimated: 62000,
+    ltcg_exemption_used: 45000,
+    needs_audit: false,
+    audit_assessment: "incomplete",
+    audit_assessment_reason: "Complete taxpayer-specific records are not available.",
+    tax_estimate_methodology:
+      "Indicative estimate from realised P&L only: equity LTCG and STCG use the modelled capital-gains rates, while net positive business income uses an illustrative 30% slab-rate assumption.",
+    stt_methodology:
+      "STT is calculated per transaction date on the applicable taxable value; the existing equity treatment is unchanged.",
+    stt_rate_provenance:
+      "Derivative sell-side option/futures rates are 0.0625%/0.0125% before 1 October 2024, 0.1%/0.02% from 1 October 2024 through 31 March 2026, and 0.15%/0.05% from 1 April 2026; the effective-date changes follow the Finance (No. 2) Act, 2024 and Finance Act, 2026 schedules.",
+    trade_count: 342,
+    is_sample_data: true,
+    data_source: "sample",
+  };
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-/** Available financial years for the selector. */
-const FY_OPTIONS = [
-  { value: "2025-26", label: "FY 2025-26" },
-  { value: "2024-25", label: "FY 2024-25" },
-  { value: "2023-24", label: "FY 2023-24" },
-];
 
 /** Human-readable segment labels and descriptions. */
 const SEGMENT_META: Record<string, { label: string; description: string; taxRule: string }> = {
@@ -245,7 +265,8 @@ function SegmentBreakdownRow({
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function TaxTab() {
-  const [selectedFy, setSelectedFy] = useState("2025-26");
+  const fyOptions = useMemo(() => getFinancialYearOptions(), []);
+  const [selectedFy, setSelectedFy] = useState(fyOptions[0].value);
   const { data: liveSummary, isLoading: summaryLoading, isError: summaryError } = useTaxSummary(selectedFy);
   const { data: report, isLoading: reportLoading } = useTaxReport(selectedFy);
 
@@ -254,8 +275,13 @@ export function TaxTab() {
   // Fall back to demo data when API fails or returns empty. A successful
   // sample response still uses the server payload, but keeps the demo banner.
   const shouldUseDemoFallback = summaryError || (!isLoading && !liveSummary);
-  const summary = shouldUseDemoFallback ? DEMO_TAX_SUMMARY : liveSummary;
+  const summary = (
+    shouldUseDemoFallback ? getDemoTaxSummary(selectedFy) : liveSummary
+  ) as TaxSummaryWithMethodology | undefined;
   const isDemo = shouldUseDemoFallback || Boolean(summary?.is_sample_data);
+  const auditAssessment: AuditAssessment = !isDemo && summary?.audit_assessment === "required"
+    ? "required"
+    : "incomplete";
 
   // Compute total P&L for display
   const totalPnl = useMemo(() => {
@@ -300,7 +326,9 @@ export function TaxTab() {
   return (
     <div className="space-y-6">
       {/* Demo banner */}
-      {isDemo && <DemoBanner />}
+      {isDemo && (
+        <DemoBanner message="The built-in tax ledger is illustrative; live tax-history ingestion is not wired." />
+      )}
 
       {/* Header with FY selector */}
       <div className="flex items-center justify-between">
@@ -311,7 +339,7 @@ export function TaxTab() {
               Tax Report
             </h2>
             <p className="text-xxs text-text-muted">
-              {summary.trade_count} trades &middot; Budget 2024 rates
+              {summary.trade_count} trades &middot; Trade-date STT rates
             </p>
           </div>
         </div>
@@ -319,15 +347,24 @@ export function TaxTab() {
           <Button
             variant="ghost"
             size="sm"
+            disabled={isDemo}
+            title={isDemo ? "CSV export is unavailable for illustrative tax data" : undefined}
             onClick={() => {
-              if (!summary) return;
+              if (!summary || isDemo) return;
               const csvData = [
-                { Segment: "Equity LTCG", "P&L": summary.equity_ltcg, "Tax Rate": "12.5% above 1.25L", "Estimated Tax": summary.equity_ltcg > 125000 ? (summary.equity_ltcg - 125000) * 0.125 : 0, STT: "" },
-                { Segment: "Equity STCG", "P&L": summary.equity_stcg, "Tax Rate": "20%", "Estimated Tax": summary.equity_stcg * 0.2, STT: "" },
-                { Segment: "Intraday", "P&L": summary.intraday_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.intraday_pnl * 0.3, STT: "" },
-                { Segment: "F&O", "P&L": summary.fno_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.fno_pnl * 0.3, STT: "" },
-                { Segment: "Commodity", "P&L": summary.commodity_pnl, "Tax Rate": "Slab rate", "Estimated Tax": summary.commodity_pnl * 0.3, STT: "" },
-                { Segment: "Total STT", "P&L": "", "Tax Rate": "", "Estimated Tax": "", STT: summary.stt_paid },
+                { Segment: "Equity LTCG", "P&L": summary.equity_ltcg },
+                { Segment: "Equity STCG", "P&L": summary.equity_stcg },
+                { Segment: "Intraday", "P&L": summary.intraday_pnl },
+                { Segment: "F&O", "P&L": summary.fno_pnl },
+                { Segment: "Commodity", "P&L": summary.commodity_pnl },
+                {
+                  Segment: "Overall estimate",
+                  "P&L": totalPnl,
+                  "Estimated Tax": summary.tax_liability_estimated,
+                  STT: summary.stt_paid,
+                  Methodology: summary.tax_estimate_methodology,
+                  Provenance: summary.stt_rate_provenance,
+                },
               ];
               exportToCSV(csvData, `tax-summary-${selectedFy}`);
             }}
@@ -351,7 +388,7 @@ export function TaxTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FY_OPTIONS.map((opt) => (
+              {fyOptions.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
                 </SelectItem>
@@ -366,7 +403,7 @@ export function TaxTab() {
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="space-y-1">
             <p className="text-xxs text-text-muted uppercase tracking-wider font-medium">
-              Total Realized P&L ({selectedFy})
+              Total Realised P&L ({selectedFy})
             </p>
             <div className="flex items-baseline gap-3">
               <span className="text-3xl font-mono font-bold tabular-nums">
@@ -390,15 +427,15 @@ export function TaxTab() {
                 Est. Tax: {formatINRCompact(summary.tax_liability_estimated)}
               </div>
             </div>
-            {summary.needs_audit ? (
+            {auditAssessment === "required" ? (
               <Badge variant="destructive" className="text-xxs gap-1">
                 <AlertTriangle className="size-3" />
                 Tax Audit Required
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-xxs gap-1 border-profit/30 text-profit">
-                <ShieldCheck className="size-3" />
-                No Audit Required
+              <Badge variant="outline" className="text-xxs gap-1 border-yellow-500/30 text-yellow-500">
+                <AlertTriangle className="size-3" />
+                Audit assessment incomplete
               </Badge>
             )}
           </div>
@@ -469,22 +506,27 @@ export function TaxTab() {
           <div>
             <p className="text-xs text-text-muted">Audit Threshold</p>
             <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-              Mandatory if turnover &gt; 10Cr, or &gt; 2Cr with profit &lt; 6% of turnover.
+              Simplified threshold check: turnover &gt; 10Cr, or &gt; 2Cr with profit &lt; 6% of turnover.
               Your turnover: {formatINRCompact(summary.turnover)}.
             </p>
           </div>
           <div>
             <p className="text-xs text-text-muted">Audit Status</p>
             <div className="mt-1">
-              {summary.needs_audit ? (
+              {auditAssessment === "required" ? (
                 <div className="flex items-center gap-1.5 text-loss text-sm font-medium">
                   <AlertTriangle className="size-4" />
                   Audit required — consult a CA
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 text-profit text-sm font-medium">
-                  <ShieldCheck className="size-4" />
-                  Below audit threshold
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-yellow-500 text-sm font-medium">
+                    <AlertTriangle className="size-4" />
+                    Audit assessment incomplete
+                  </div>
+                  <p className="text-xxs text-text-muted leading-relaxed">
+                    {summary.audit_assessment_reason}
+                  </p>
                 </div>
               )}
             </div>
@@ -532,10 +574,8 @@ export function TaxTab() {
 
       {/* Disclaimer */}
       <p className="text-xxs text-text-muted leading-relaxed">
-        Tax calculations are estimates based on Budget 2024 rates. LTCG: 12.5% above
-        1.25L exemption. STCG: 20%. Business income (intraday, F&O, commodity) taxed at
-        slab rate (estimated 30%). Consult a Chartered Accountant for filing. STT is
-        deductible as business expense for F&O/intraday traders.
+        Tax calculations are estimates. {summary.tax_estimate_methodology} {summary.stt_methodology} Provenance:{" "}
+        {summary.stt_rate_provenance} Consult a Chartered Accountant for filing.
       </p>
     </div>
   );

@@ -15,6 +15,14 @@ export const connectionSchema = z.object({
   wsPort: z.string().min(1, "WebSocket port is required"),
 });
 
+/** Settings may preserve an already-configured key by leaving this field blank. */
+export const editableConnectionSchema = connectionSchema.extend({
+  apiKey: z.string().refine(
+    (value) => value === "" || value.length >= 8,
+    "API key must be at least 8 characters",
+  ),
+});
+
 export type ConnectionFormValues = z.infer<typeof connectionSchema>;
 
 export function deriveWsUrl(host: string, wsPort: string): string {

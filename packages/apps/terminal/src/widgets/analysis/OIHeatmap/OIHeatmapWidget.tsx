@@ -52,6 +52,37 @@ function fmtOI(v: number): string {
   return String(v);
 }
 
+function optionalFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
+}
+
+function optionalNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
+function positiveFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function optionOI(row: RawOptionRow | null | undefined): number | null {
+  const value = row?.oi ?? row?.open_interest;
+  return typeof value === "number"
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
 /** Map a 0–1 intensity to an RGBA string for CE (indigo/accent) cells. */
 function ceColour(intensity: number): string {
   // From surface-hover (dim) to accent-blue
@@ -112,12 +143,12 @@ const SAMPLE_STRIKES: SampleStrike[] = buildSampleChain(SAMPLE_ATM, 50, 21);
 
 interface StrikeCell {
   strike: number;
-  ceOi: number;
-  peOi: number;
-  ceOiChange: number;
-  peOiChange: number;
-  ceVolume: number;
-  peVolume: number;
+  ceOi: number | null;
+  peOi: number | null;
+  ceOiChange: number | null;
+  peOiChange: number | null;
+  ceVolume: number | null;
+  peVolume: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,9 +161,9 @@ interface TooltipState {
   y: number;
   strike: number;
   optionType: "CE" | "PE";
-  oi: number;
-  oiChange: number;
-  volume: number;
+  oi: number | null;
+  oiChange: number | null;
+  volume: number | null;
   pcr: number | null;
 }
 
@@ -142,8 +173,8 @@ interface TooltipState {
 
 interface CellProps {
   colour: string;
-  oi: number;
-  oiChange: number;
+  oi: number | null;
+  oiChange: number | null;
   isATM: boolean;
   isMaxOI: boolean;
   onMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => void;
@@ -165,13 +196,14 @@ function HeatmapCell({
         isATM ? "ring-1 ring-inset ring-accent/70" : ""
       } ${isMaxOI ? "ring-1 ring-inset ring-warning/60" : ""}`}
       style={{ backgroundColor: colour }}
+      data-max-oi={isMaxOI ? "true" : undefined}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
       <span className="text-xxs font-mono text-text-primary/90 leading-none tabular-nums">
-        {fmtOI(oi)}
+        {oi === null ? "--" : fmtOI(oi)}
       </span>
-      {oiChange !== 0 && (
+      {oiChange !== null && oiChange !== 0 && (
         <span className={`mt-0.5 ${oiChange > 0 ? "text-profit" : "text-loss"}`}>
           {oiChange > 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
         </span>
@@ -229,19 +261,29 @@ function ColourLegend() {
 function OIHeatmapWidget() {
   const [symbolIdx, setSymbolIdx] = useState(0);
   const [expiries, setExpiries] = useState<string[]>([]);
-  const [selectedExpiry, setSelectedExpiry] = useState<string>("");
+  const [selectedExpiryValue, setSelectedExpiry] = useState<string>("");
+  const [expiryIdentity, setExpiryIdentity] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawChain, setRawChain] = useState<RawOptionChain | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false, x: 0, y: 0, strike: 0, optionType: "CE",
-    oi: 0, oiChange: 0, volume: 0, pcr: null,
+    oi: null, oiChange: null, volume: null, pcr: null,
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const requestGenerationRef = useRef(0);
+  const inFlightRequestKeysRef = useRef(new Map<string, number>());
   const isConnected = useBrokerConnected();
   const symDef = SYMBOLS[symbolIdx];
+  const identityKey = `${isConnected}:${symDef.label}:${symDef.exchange}`;
+  const currentExpiries = expiryIdentity === identityKey ? expiries : [];
+  const expiryCandidate = selectedExpiryValue.trim();
+  const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : "";
+  const requestKey = `${identityKey}:${selectedExpiry}`;
+  const activeRequestKeyRef = useRef(requestKey);
+  activeRequestKeyRef.current = requestKey;
 
   // ---------------------------------------------------------------------------
   // Fetch expiries when symbol changes
@@ -250,6 +292,7 @@ function OIHeatmapWidget() {
   useEffect(() => {
     setExpiries([]);
     setSelectedExpiry("");
+    setExpiryIdentity(null);
     setRawChain(null);
     setError(null);
     if (!isConnected) return;
@@ -259,17 +302,32 @@ function OIHeatmapWidget() {
       try {
         const result = await getExpiry(symDef.label, symDef.exchange);
         if (cancelled) return;
-        const list = Array.isArray(result)
+        const rawList = Array.isArray(result)
           ? (result as string[])
           : ((result as { expiry?: string[] })?.expiry ?? []);
+        const list = rawList.flatMap((value) => {
+          if (typeof value !== "string") return [];
+          const expiry = value.trim();
+          return expiry ? [expiry] : [];
+        });
         setExpiries(list);
-        if (list.length > 0) setSelectedExpiry(list[0]);
+        setExpiryIdentity(identityKey);
+        setSelectedExpiry(list[0] ?? "");
       } catch (e) {
         if (!cancelled) setError(`Expiry fetch failed: ${(e as Error).message}`);
       }
     })();
     return () => { cancelled = true; };
-  }, [symDef.label, symDef.exchange, isConnected]);
+  }, [identityKey, symDef.label, symDef.exchange, isConnected]);
+
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+    setRawChain(null);
+    setLoading(false);
+    setFetching(false);
+    setError(null);
+    setTooltip((current) => ({ ...current, visible: false }));
+  }, [requestKey]);
 
   // ---------------------------------------------------------------------------
   // Fetch chain data
@@ -277,16 +335,39 @@ function OIHeatmapWidget() {
 
   const fetchChain = useCallback(async () => {
     if (!isConnected || !selectedExpiry) return;
+    const fetchKey = `${isConnected}:${symDef.label}:${symDef.exchange}:${selectedExpiry}`;
+    const inFlightGeneration = inFlightRequestKeysRef.current.get(fetchKey);
+    if (inFlightGeneration === requestGenerationRef.current) return;
+    const requestGeneration = ++requestGenerationRef.current;
+    inFlightRequestKeysRef.current.set(fetchKey, requestGeneration);
     setFetching(true);
     setError(null);
     try {
       const chain = await getOptionChain(symDef.label, symDef.exchange, selectedExpiry);
+      if (
+        requestGeneration !== requestGenerationRef.current
+        || fetchKey !== activeRequestKeyRef.current
+      ) return;
       setRawChain(chain as unknown as RawOptionChain);
     } catch (e) {
-      setError((e as Error).message);
+      if (
+        requestGeneration === requestGenerationRef.current
+        && fetchKey === activeRequestKeyRef.current
+      ) {
+        setRawChain(null);
+        setError((e as Error).message);
+      }
     } finally {
-      setFetching(false);
-      setLoading(false);
+      if (inFlightRequestKeysRef.current.get(fetchKey) === requestGeneration) {
+        inFlightRequestKeysRef.current.delete(fetchKey);
+      }
+      if (
+        requestGeneration === requestGenerationRef.current
+        && fetchKey === activeRequestKeyRef.current
+      ) {
+        setFetching(false);
+        setLoading(false);
+      }
     }
   }, [isConnected, selectedExpiry, symDef.label, symDef.exchange]);
 
@@ -297,7 +378,10 @@ function OIHeatmapWidget() {
     void fetchChain();
     const interval = isMarketHours() ? 3_000 : 30_000;
     const id = setInterval(() => void fetchChain(), interval);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      requestGenerationRef.current += 1;
+    };
   }, [fetchChain, isConnected, selectedExpiry]);
 
   // ---------------------------------------------------------------------------
@@ -320,17 +404,19 @@ function OIHeatmapWidget() {
 
     if (rawChain.chain && rawChain.chain.length > 0) {
       for (const entry of rawChain.chain as ChainEntry[]) {
-        if (entry.ce) callMap[entry.strike] = entry.ce;
-        if (entry.pe) putMap[entry.strike]  = entry.pe;
+        const strike = positiveFiniteNumber(entry.strike);
+        if (strike === null) continue;
+        if (entry.ce) callMap[strike] = entry.ce;
+        if (entry.pe) putMap[strike] = entry.pe;
       }
     } else {
       (rawChain.calls ?? []).forEach((c) => {
-        const k = c.strike_price ?? c.strike ?? 0;
-        callMap[k] = c;
+        const strike = positiveFiniteNumber(c.strike_price ?? c.strike);
+        if (strike !== null) callMap[strike] = c;
       });
       (rawChain.puts ?? []).forEach((p) => {
-        const k = p.strike_price ?? p.strike ?? 0;
-        putMap[k] = p;
+        const strike = positiveFiniteNumber(p.strike_price ?? p.strike);
+        if (strike !== null) putMap[strike] = p;
       });
     }
 
@@ -342,8 +428,13 @@ function OIHeatmapWidget() {
       return { strikes: [], atmStrike: null, maxCeOI: 0, maxPeOI: 0, pcr: null };
     }
 
-    const atm = rawChain.atm_strike ?? allStrikes[Math.floor(allStrikes.length / 2)];
-    const atmIdx = allStrikes.indexOf(atm);
+    const spot = positiveFiniteNumber(rawChain.underlying_ltp);
+    const atm = spot !== null
+      ? allStrikes.reduce((nearest, strike) => (
+          Math.abs(strike - spot) < Math.abs(nearest - spot) ? strike : nearest
+        ))
+      : null;
+    const atmIdx = allStrikes.indexOf(atm ?? 0);
     const lo = Math.max(0, atmIdx - STRIKES_EACH_SIDE);
     const hi = Math.min(allStrikes.length - 1, atmIdx + STRIKES_EACH_SIDE);
     const visible = allStrikes.slice(lo, hi + 1);
@@ -353,21 +444,25 @@ function OIHeatmapWidget() {
       const pe = putMap[s];
       return {
         strike: s,
-        ceOi:       Number(ce?.oi ?? ce?.open_interest ?? 0),
-        ceOiChange: Number(ce?.oi_change ?? 0),
-        ceVolume:   0, // OpenAlgo OI chain may not always carry volume per strike
-        peOi:       Number(pe?.oi ?? pe?.open_interest ?? 0),
-        peOiChange: Number(pe?.oi_change ?? 0),
-        peVolume:   0,
+        ceOi:       optionOI(ce),
+        ceOiChange: optionalFiniteNumber(ce?.oi_change),
+        ceVolume:   optionalNonNegativeInteger(ce?.volume),
+        peOi:       optionOI(pe),
+        peOiChange: optionalFiniteNumber(pe?.oi_change),
+        peVolume:   optionalNonNegativeInteger(pe?.volume),
       };
     });
 
-    const maxCeOI = Math.max(1, ...cells.map((c) => c.ceOi));
-    const maxPeOI = Math.max(1, ...cells.map((c) => c.peOi));
+    const knownCeOI = cells.flatMap((cell) => cell.ceOi === null ? [] : [cell.ceOi]);
+    const knownPeOI = cells.flatMap((cell) => cell.peOi === null ? [] : [cell.peOi]);
+    const maxCeOI = Math.max(1, ...knownCeOI);
+    const maxPeOI = Math.max(1, ...knownPeOI);
 
-    const totalCe = cells.reduce((s, c) => s + c.ceOi, 0);
-    const totalPe = cells.reduce((s, c) => s + c.peOi, 0);
-    const pcr = totalCe > 0 ? totalPe / totalCe : null;
+    const hasCompleteCeOI = cells.length > 0 && cells.every((cell) => cell.ceOi !== null);
+    const hasCompletePeOI = cells.length > 0 && cells.every((cell) => cell.peOi !== null);
+    const totalCe = hasCompleteCeOI ? knownCeOI.reduce((sum, oi) => sum + oi, 0) : null;
+    const totalPe = hasCompletePeOI ? knownPeOI.reduce((sum, oi) => sum + oi, 0) : null;
+    const pcr = totalCe !== null && totalPe !== null && totalCe > 0 ? totalPe / totalCe : null;
 
     return { strikes: cells, atmStrike: atm, maxCeOI, maxPeOI, pcr };
   }, [rawChain]);
@@ -393,14 +488,16 @@ function OIHeatmapWidget() {
   const activeATM    = isConnected ? atmStrike : sampleATM;
 
   // Max OI strikes
-  const maxCeStrike = activeStrikes.reduce(
-    (best, s) => (s.ceOi > best.ceOi ? s : best),
-    activeStrikes[0] ?? { strike: 0, ceOi: 0 } as StrikeCell,
-  ).strike;
-  const maxPeStrike = activeStrikes.reduce(
-    (best, s) => (s.peOi > best.peOi ? s : best),
-    activeStrikes[0] ?? { strike: 0, peOi: 0 } as StrikeCell,
-  ).strike;
+  const hasCompleteCeOI = activeStrikes.length > 0 && activeStrikes.every((cell) => cell.ceOi !== null);
+  const hasCompletePeOI = activeStrikes.length > 0 && activeStrikes.every((cell) => cell.peOi !== null);
+  const maxCeRow = hasCompleteCeOI
+    ? activeStrikes.reduce((best, cell) => cell.ceOi! > best.ceOi! ? cell : best)
+    : null;
+  const maxPeRow = hasCompletePeOI
+    ? activeStrikes.reduce((best, cell) => cell.peOi! > best.peOi! ? cell : best)
+    : null;
+  const maxCeStrike = maxCeRow !== null && maxCeRow.ceOi! > 0 ? maxCeRow.strike : null;
+  const maxPeStrike = maxPeRow !== null && maxPeRow.peOi! > 0 ? maxPeRow.strike : null;
 
   // ---------------------------------------------------------------------------
   // Tooltip handlers
@@ -412,9 +509,9 @@ function OIHeatmapWidget() {
       const oi = type === "CE" ? cell.ceOi : cell.peOi;
       const oiChange = type === "CE" ? cell.ceOiChange : cell.peOiChange;
       const volume = type === "CE" ? cell.ceVolume : cell.peVolume;
-      const totalCe = activeStrikes.reduce((s, c) => s + c.ceOi, 0);
-      const totalPe = activeStrikes.reduce((s, c) => s + c.peOi, 0);
-      const strikePcr = cell.ceOi > 0 ? cell.peOi / cell.ceOi : null;
+      const strikePcr = cell.ceOi !== null && cell.peOi !== null && cell.ceOi > 0
+        ? cell.peOi / cell.ceOi
+        : null;
       setTooltip({
         visible: true,
         x: rect ? e.clientX - rect.left : e.clientX,
@@ -426,9 +523,8 @@ function OIHeatmapWidget() {
         volume,
         pcr: strikePcr,
       });
-      void totalCe; void totalPe;
     },
-    [activeStrikes],
+    [],
   );
 
   const handleCellLeave = useCallback(() => {
@@ -450,7 +546,7 @@ function OIHeatmapWidget() {
         </div>
         {/* Cells */}
         {activeStrikes.map((cell) => {
-          const intensity = activeMaxCe > 0 ? cell.ceOi / activeMaxCe : 0;
+          const intensity = cell.ceOi !== null && activeMaxCe > 0 ? cell.ceOi / activeMaxCe : 0;
           return (
             <div key={`ce-${cell.strike}`} className="flex-1 min-w-0" style={{ minWidth: 32, height: 52 }}>
               <HeatmapCell
@@ -458,7 +554,7 @@ function OIHeatmapWidget() {
                 oi={cell.ceOi}
                 oiChange={cell.ceOiChange}
                 isATM={cell.strike === activeATM}
-                isMaxOI={cell.strike === maxCeStrike}
+                isMaxOI={maxCeStrike !== null && cell.strike === maxCeStrike}
                 onMouseEnter={(e) => handleCellEnter(e, cell, "CE")}
                 onMouseLeave={handleCellLeave}
               />
@@ -490,7 +586,7 @@ function OIHeatmapWidget() {
             style={{ writingMode: "vertical-rl" }}>PE</span>
         </div>
         {activeStrikes.map((cell) => {
-          const intensity = activeMaxPe > 0 ? cell.peOi / activeMaxPe : 0;
+          const intensity = cell.peOi !== null && activeMaxPe > 0 ? cell.peOi / activeMaxPe : 0;
           return (
             <div key={`pe-${cell.strike}`} className="flex-1 min-w-0" style={{ minWidth: 32, height: 52 }}>
               <HeatmapCell
@@ -498,7 +594,7 @@ function OIHeatmapWidget() {
                 oi={cell.peOi}
                 oiChange={cell.peOiChange}
                 isATM={cell.strike === activeATM}
-                isMaxOI={cell.strike === maxPeStrike}
+                isMaxOI={maxPeStrike !== null && cell.strike === maxPeStrike}
                 onMouseEnter={(e) => handleCellEnter(e, cell, "PE")}
                 onMouseLeave={handleCellLeave}
               />
@@ -520,12 +616,26 @@ function OIHeatmapWidget() {
           <div className="flex flex-col gap-0.5 text-xxs">
             <div className="flex justify-between gap-3">
               <span className="text-text-muted">OI</span>
-              <span className="font-mono tabular-nums text-text-primary">{fmtOI(tooltip.oi)}</span>
+              <span className="font-mono tabular-nums text-text-primary">
+                {tooltip.oi === null ? "--" : fmtOI(tooltip.oi)}
+              </span>
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-text-muted">OI Chg</span>
-              <span className={`font-mono tabular-nums ${tooltip.oiChange >= 0 ? "text-profit" : "text-loss"}`}>
-                {tooltip.oiChange >= 0 ? "+" : ""}{fmtOI(Math.abs(tooltip.oiChange))}
+              <span className={`font-mono tabular-nums ${
+                tooltip.oiChange === null
+                  ? "text-text-muted"
+                  : tooltip.oiChange >= 0 ? "text-profit" : "text-loss"
+              }`}>
+                {tooltip.oiChange === null
+                  ? "--"
+                  : `${tooltip.oiChange >= 0 ? "+" : ""}${fmtOI(Math.abs(tooltip.oiChange))}`}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">Volume</span>
+              <span className="font-mono tabular-nums text-text-primary">
+                {tooltip.volume === null ? "--" : fmtOI(tooltip.volume)}
               </span>
             </div>
             {tooltip.pcr !== null && (
@@ -556,13 +666,13 @@ function OIHeatmapWidget() {
           </SelectContent>
         </Select>
 
-        {isConnected && expiries.length > 0 && (
+        {isConnected && currentExpiries.length > 0 && (
           <Select value={selectedExpiry} onValueChange={setSelectedExpiry}>
             <SelectTrigger className="h-7 px-2 text-xs w-32" data-testid="expiry-select">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {expiries.map((ex) => (
+              {currentExpiries.map((ex) => (
                 <SelectItem key={ex} value={ex} className="text-xs">{ex}</SelectItem>
               ))}
             </SelectContent>
@@ -586,7 +696,7 @@ function OIHeatmapWidget() {
 
         <button
           onClick={() => void fetchChain()}
-          disabled={fetching || !isConnected}
+          disabled={fetching || !isConnected || !selectedExpiry}
           className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
           title="Refresh"
           data-testid="refresh-btn"

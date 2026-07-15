@@ -6,29 +6,104 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockSetLoggedIn, mockUpdateToken, mockSetMode, modeState } = vi.hoisted(() => ({
-  mockSetLoggedIn: vi.fn(),
-  mockUpdateToken: vi.fn(),
-  mockSetMode: vi.fn((mode: "explore" | "practice" | "live") => {
+const {
+  authState,
+  modeState,
+  mockCaptureAuthSessionFence,
+  mockSetLoggedInIfCurrent,
+  mockSetMode,
+  mockUpdateToken,
+} = vi.hoisted(() => {
+  type MockAuthStatus =
+    | "unknown"
+    | "transitioning"
+    | "logged-in"
+    | "logged-out"
+    | "pin-required"
+    | "setup-required";
+  interface MockFence {
+    status: MockAuthStatus;
+    principal: string | null;
+    generation: number;
+  }
+  const authState = {
+    status: "logged-out" as MockAuthStatus,
+    token: null as string | null,
+    reauthToken: null as string | null,
+    username: null as string | null,
+    sessionGeneration: 7,
+  };
+  const currentFence = (): MockFence => ({
+    status: authState.status,
+    principal: authState.username?.trim() || null,
+    generation: authState.sessionGeneration,
+  });
+  const fenceIsCurrent = (fence: MockFence): boolean => (
+    fence.status === authState.status &&
+    fence.principal === (authState.username?.trim() || null) &&
+    fence.generation === authState.sessionGeneration
+  );
+  const mockCaptureAuthSessionFence = vi.fn(currentFence);
+  const mockSetLoggedInIfCurrent = vi.fn(
+    (token: string, username: string, _expiresAt: string, fence: MockFence) => {
+      if (!fenceIsCurrent(fence)) return false;
+      Object.assign(authState, {
+        status: "logged-in",
+        token,
+        reauthToken: null,
+        username,
+        sessionGeneration: authState.sessionGeneration + 1,
+      });
+      return true;
+    },
+  );
+  const mockUpdateToken = vi.fn((token: string, expectedGeneration: number) => {
+    if (authState.status !== "logged-in" || authState.sessionGeneration !== expectedGeneration) {
+      return false;
+    }
+    authState.token = token;
+    authState.sessionGeneration += 1;
+    return true;
+  });
+  const modeState = { mode: "explore" as "explore" | "practice" | "live" };
+  const mockSetMode = vi.fn((mode: "explore" | "practice" | "live") => {
     modeState.mode = mode;
-  }),
-  modeState: { mode: "explore" as "explore" | "practice" | "live" },
-}));
+  });
+  return {
+    authState,
+    modeState,
+    mockCaptureAuthSessionFence,
+    mockSetLoggedInIfCurrent,
+    mockSetMode,
+    mockUpdateToken,
+    fenceIsCurrent,
+  };
+});
 
 vi.mock("@/stores/authStore", () => ({
+  captureAuthSessionFence: mockCaptureAuthSessionFence,
+  isAuthSessionFenceCurrent: (fence: {
+    status: string;
+    principal: string | null;
+    generation: number;
+  }) => (
+    fence.status === authState.status &&
+    fence.principal === (authState.username?.trim() || null) &&
+    fence.generation === authState.sessionGeneration
+  ),
   useAuthStore: Object.assign(() => ({}), {
     getState: () => ({
-      setLoggedIn: mockSetLoggedIn,
+      ...authState,
+      setLoggedInIfCurrent: mockSetLoggedInIfCurrent,
       updateToken: mockUpdateToken,
       setLoggedOut: vi.fn(),
-      username: "testuser",
     }),
     setState: vi.fn(),
   }),
@@ -64,6 +139,13 @@ describe("LoginRoute", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    Object.assign(authState, {
+      status: "logged-out",
+      token: null,
+      reauthToken: null,
+      username: null,
+      sessionGeneration: 7,
+    });
     modeState.mode = "explore";
   });
 
@@ -105,7 +187,12 @@ describe("LoginRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce());
-    expect(mockSetLoggedIn).toHaveBeenCalledWith("explore-session", "testuser", "2026-07-02T08:00:00+05:30");
+    expect(mockSetLoggedInIfCurrent).toHaveBeenCalledWith(
+      "explore-session",
+      "testuser",
+      "2026-07-02T08:00:00+05:30",
+      { status: "logged-out", principal: null, generation: 7 },
+    );
     expect(mockSetMode).toHaveBeenCalledWith("explore");
   });
 
@@ -146,9 +233,120 @@ describe("LoginRoute", () => {
       "/ft-api/v1/auth/mode",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "practice" }) }),
     );
-    expect(mockUpdateToken).toHaveBeenCalledWith("practice-session");
+    expect(mockUpdateToken).toHaveBeenCalledWith("practice-session", 8);
     // Mode stays practice — it must NOT have been dropped to explore.
     expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+  });
+
+  it("does not install a password response after a different login wins", async () => {
+    let finishLogin: ((response: Response) => void) | undefined;
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        finishLogin = resolve;
+      }),
+    );
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    Object.assign(authState, {
+      status: "logged-in",
+      token: "newer-token",
+      username: "bob",
+      sessionGeneration: 8,
+    });
+
+    await act(async () => {
+      finishLogin?.(new Response(JSON.stringify({
+        status: "success",
+        data: { token: "late-token", username: "alice", expires_at: "" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await Promise.resolve();
+    });
+
+    expect(mockSetLoggedInIfCurrent).toHaveReturnedWith(false);
+    expect(authState).toMatchObject({ token: "newer-token", username: "bob", sessionGeneration: 8 });
+    expect(mockSetMode).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not install a PIN response after the locked session is terminated", async () => {
+    Object.assign(authState, {
+      status: "pin-required",
+      token: null,
+      reauthToken: "locked-token",
+      username: "testuser",
+      sessionGeneration: 11,
+    });
+    let finishPin: ((response: Response) => void) | undefined;
+    vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        finishPin = resolve;
+      }),
+    );
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="pin" />);
+    fireEvent.change(screen.getByLabelText("Enter your 6-digit PIN"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    Object.assign(authState, {
+      status: "logged-out",
+      reauthToken: null,
+      username: null,
+      sessionGeneration: 12,
+    });
+
+    await act(async () => {
+      finishPin?.(new Response(JSON.stringify({
+        status: "success",
+        data: { token: "late-live-token" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await Promise.resolve();
+    });
+
+    expect(mockSetLoggedInIfCurrent).toHaveReturnedWith(false);
+    expect(authState).toMatchObject({ status: "logged-out", token: null, username: null });
+    expect(mockSetMode).not.toHaveBeenCalledWith("live");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not downgrade or navigate when a stale Practice upgrade fails", async () => {
+    modeState.mode = "practice";
+    let failPractice: ((error: Error) => void) | undefined;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "success",
+        data: { token: "explore-session", username: "alice", expires_at: "" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockReturnValueOnce(new Promise<Response>((_resolve, reject) => {
+        failPractice = reject;
+      }));
+    const onSuccess = vi.fn();
+    render(<LoginRoute onSuccess={onSuccess} mode="full" />);
+    fireEvent.change(screen.getByLabelText("Enter your password"), { target: { value: "password" } });
+    fireEvent.change(screen.getByLabelText("Enter your 2FA code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2));
+    Object.assign(authState, {
+      status: "logged-in",
+      token: "newer-token",
+      username: "bob",
+      sessionGeneration: 9,
+    });
+
+    await act(async () => {
+      failPractice?.(new Error("late failure"));
+      await Promise.resolve();
+    });
+
+    expect(mockSetMode).not.toHaveBeenCalledWith("explore");
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(authState).toMatchObject({ token: "newer-token", username: "bob" });
   });
 
   it("accepts an 8-char backup code in the 2FA field and enables Sign In", () => {
@@ -162,6 +360,83 @@ describe("LoginRoute", () => {
 
     expect(field.value).toBe("A1B2C3D4"); // upper-cased, all 8 chars kept
     expect(screen.getByRole("button", { name: /sign in/i })).not.toBeDisabled();
+  });
+
+  it("resets a forgotten password through the email OTP routes", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ status: "success", message: "If registered, a code was sent." }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ status: "success", message: "Password has been reset." }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /forgot your password/i }));
+    fireEvent.change(screen.getByLabelText("Password reset email"), {
+      target: { value: " operator@example.com " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send reset code/i }));
+
+    await waitFor(() => expect(screen.getByText("Enter reset code")).toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      1,
+      "/ft-api/v1/auth/forgot-password-otp",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "operator@example.com" }),
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Password reset code"), { target: { value: "12a3456" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    await waitFor(() => expect(screen.getByText("Password reset")).toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      2,
+      "/ft-api/v1/auth/reset-password-otp",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          email: "operator@example.com",
+          otp: "123456",
+          new_password: "new-password",
+        }),
+      }),
+    );
+  });
+
+  it("does not submit a password reset when confirmations differ", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: "success" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    render(<LoginRoute onSuccess={vi.fn()} mode="full" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /forgot your password/i }));
+    fireEvent.change(screen.getByLabelText("Password reset email"), {
+      target: { value: "operator@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send reset code/i }));
+    await waitFor(() => expect(screen.getByText("Enter reset code")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Password reset code"), { target: { value: "123456" } });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "new-password" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "different" } });
+    fireEvent.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match.");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it("recovers a lost authenticator: password mints a fresh QR + backup codes", async () => {

@@ -42,16 +42,10 @@ _DITTO_ADAPTER_ID = "openalgo"
 
 
 def _default_db() -> str:
-    """Resolve the metadata SQLite path: env override > workspace > fallback."""
-    env = os.getenv("DATA_DIR")
-    if env:
-        return env + "/ditto_accounts.sqlite"
-    try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+    """Resolve the metadata SQLite path through the canonical workspace helper."""
+    from flinttrade_core.workspace import ditto_accounts_path  # noqa: PLC0415
 
-        return str(Workspace().fast_data_dir / "ditto_accounts.sqlite")
-    except Exception:
-        return str(Path.home() / ".flinttrade" / "data" / "ditto_accounts.sqlite")
+    return str(ditto_accounts_path())
 
 
 # ---------------------------------------------------------------------------

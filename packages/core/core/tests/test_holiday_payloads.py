@@ -71,6 +71,9 @@ def test_rejects_invalid_dates_and_unrelated_envelope_metadata() -> None:
                 }
             ],
         },
+        {"status": "success", "year": 2026, "data": []},
+        {"status": "success", "year": 2026, "data": {}},
+        {"holidays": []},
     ],
 )
 def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> None:
@@ -80,8 +83,6 @@ def test_rejects_non_authoritative_market_calendar_envelopes(payload: Any) -> No
 @pytest.mark.parametrize(
     "payload",
     [
-        {"status": "success", "year": 2026, "data": []},
-        {"holidays": []},
         {"data": {"holidays": ["2026-01-26"]}},
         ["2026-01-26"],
     ],

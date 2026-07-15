@@ -26,7 +26,9 @@ import type {
   OptionGreeksParams,
   Greeks,
   GexEntry,
+  ProvenancedRows,
   IVSmileEntry,
+  IVSmileSeriesData,
   MaxPainData,
   OIProfileEntry,
   SyntheticFutureData,
@@ -67,7 +69,7 @@ import {
   selectNativeReadAccount,
 } from "@/services/brokerAccountsApi";
 import { z } from "zod";
-import { get as getFtApi, post as postFtApi } from "./ftApi.helpers";
+import { get as getFtApi, getV1 as getFtV1, post as postFtApi } from "./ftApi.helpers";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
 const ORDER_ENDPOINTS = new Set([
@@ -147,8 +149,8 @@ function getApiKey(): string {
   return useConnectionStore.getState().apiKey;
 }
 
-function isExploreModeWithoutKey(): boolean {
-  return useModeStore.getState().mode === "explore" && getApiKey().trim().length === 0;
+function isExploreMode(): boolean {
+  return useModeStore.getState().mode === "explore";
 }
 
 type NativeReadAccountCandidate = Awaited<ReturnType<typeof listLiveNativeReadAccounts>>[number];
@@ -159,7 +161,7 @@ function pickNativeReadAccount(accounts: Awaited<ReturnType<typeof listLiveNativ
 }
 
 async function primaryNativeReadAccountFor(kind: NativeReadKind): Promise<NativeReadAccountCandidate | undefined> {
-  if (getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
+  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
   // Account-scoped reads expose the REAL broker account and must be Live-only.
   // Market-data kinds stay readable in every mode.
   if (NATIVE_ACCOUNT_SCOPED_KINDS.has(kind) && useModeStore.getState().mode !== "live") {
@@ -190,12 +192,39 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function toStrictNumber(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNonNegativeInteger(value: unknown): number | null {
+  const parsed = toStrictNumber(value);
+  return parsed !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function toPositiveFiniteNumber(value: unknown): number | null {
+  const parsed = toStrictNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
 function normaliseFundsShape(value: unknown): Funds {
   const row = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const availableCash = toNumber(
+    row.availableCash ?? row.availablecash ?? row.available_balance ?? row.available ?? row.cash,
+  );
+  const usedMargin = toNumber(
+    row.usedMargin ?? row.utiliseddebits ?? row.usedmargin ?? row.used_margin
+      ?? row.utilized_margin ?? row.utilised_margin,
+  );
   return {
-    availableCash: toNumber(row.availableCash ?? row.available_balance ?? row.available ?? row.cash),
-    usedMargin: toNumber(row.usedMargin ?? row.used_margin ?? row.utilized_margin ?? row.utilised_margin),
-    totalBalance: toNumber(row.totalBalance ?? row.total_balance ?? row.total ?? row.net),
+    availableCash,
+    usedMargin,
+    totalBalance: toNumber(
+      row.totalBalance ?? row.totalbalance ?? row.total_balance ?? row.total ?? row.net
+        ?? (availableCash + usedMargin),
+    ),
   };
 }
 
@@ -378,11 +407,15 @@ function normaliseNativeQuote(value: unknown): Quote {
   if (!isRecord(raw)) {
     throw new Error("Native broker returned no quote.");
   }
+  const ltp = toPositiveFiniteNumber(raw.ltp ?? raw.last_price ?? raw.lastPrice);
+  if (ltp === null) {
+    throw new Error("Native broker quote lacks a valid positive LTP.");
+  }
   return {
     ...(raw as Partial<Quote>),
     symbol: String(raw.symbol ?? ""),
     exchange: String(raw.exchange ?? ""),
-    ltp: toNumber(raw.ltp ?? raw.last_price ?? raw.lastPrice),
+    ltp,
     open: toNumber(raw.open),
     high: toNumber(raw.high),
     low: toNumber(raw.low),
@@ -539,19 +572,46 @@ function normaliseNativeTimings(value: unknown): MarketTiming[] {
   }));
 }
 
+function greekNumber(row: Record<string, unknown>, field: string, ...aliases: string[]): number {
+  const raw = [field, ...aliases].map((key) => row[key]).find((item) => item !== undefined);
+  if (
+    raw === null
+    || raw === undefined
+    || typeof raw === "boolean"
+    || (typeof raw !== "number" && typeof raw !== "string")
+    || (typeof raw === "string" && !raw.trim())
+  ) {
+    throw new Error(`Option-Greeks row lacks ${field}`);
+  }
+  const parsed = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(parsed)) throw new Error(`Option-Greeks row has invalid ${field}`);
+  return parsed;
+}
+
 function nativeGreeksRow(value: unknown): Greeks {
-  const row = isRecord(value) ? value : {};
+  if (!isRecord(value)) throw new Error("Invalid native option-Greeks row");
+  const row = value;
+  const symbol = stringParam(row.symbol ?? row.trading_symbol ?? row.tradingsymbol).trim();
+  const exchange = stringParam(row.exchange).trim().toUpperCase();
+  const instrumentId = stringParam(row.instrument_id ?? row.instrument_token).trim();
+  if (!symbol || !exchange || !instrumentId) {
+    throw new Error("Native option-Greeks row lacks contract identity");
+  }
   return {
-    delta: toNumber(row.delta ?? row.Delta),
-    gamma: toNumber(row.gamma ?? row.Gamma),
-    theta: toNumber(row.theta ?? row.Theta),
-    vega: toNumber(row.vega ?? row.Vega),
-    iv: toNumber(row.iv ?? row.implied_volatility ?? row.IV ?? row.vix),
+    symbol,
+    exchange,
+    instrument_id: instrumentId,
+    delta: greekNumber(row, "delta", "Delta"),
+    gamma: greekNumber(row, "gamma", "Gamma"),
+    theta: greekNumber(row, "theta", "Theta"),
+    vega: greekNumber(row, "vega", "Vega"),
+    iv: greekNumber(row, "iv", "implied_volatility", "IV", "vix"),
   };
 }
 
 function normaliseNativeGreeks(value: unknown): Greeks[] {
-  const rows = Array.isArray(value) ? value : [];
+  if (!Array.isArray(value)) throw new Error("Invalid native option-Greeks response");
+  const rows = value;
   return rows.map(nativeGreeksRow);
 }
 
@@ -559,48 +619,243 @@ function normaliseNativeExpiry(value: unknown): { expiry: string[] } {
   const rows = Array.isArray(value)
     ? value
     : (isRecord(value) && Array.isArray(value.expiry) ? value.expiry : []);
-  return { expiry: rows.map((item) => String(item)).filter(Boolean) };
-}
-
-function nativeOptionLeg(row: Record<string, unknown>, prefix: "ce" | "pe"): Record<string, number> {
-  const field = (name: string) => row[`${prefix}_${name}`];
   return {
-    ltp: toNumber(field("ltp")),
-    last_price: toNumber(field("ltp")),
-    oi: toNumber(field("oi")),
-    open_interest: toNumber(field("oi")),
-    volume: toNumber(field("volume")),
-    iv: toNumber(field("iv")),
-    implied_volatility: toNumber(field("iv")),
-    delta: toNumber(field("delta")),
-    gamma: toNumber(field("gamma")),
-    theta: toNumber(field("theta")),
-    vega: toNumber(field("vega")),
-    bid: toNumber(field("bid")),
-    ask: toNumber(field("ask")),
+    expiry: rows.flatMap((item) => {
+      if (typeof item !== "string") return [];
+      const expiry = item.trim();
+      return expiry ? [expiry] : [];
+    }),
   };
 }
 
-function normaliseNativeOptionChain(value: unknown): unknown {
-  if (isRecord(value) && Array.isArray(value.chain)) return value;
-  const row = isRecord(value) ? value : {};
-  const rawStrikes = isRecord(value) && Array.isArray(value.strikes) ? value.strikes : [];
-  const chain = rawStrikes.filter(isRecord).map((row) => {
-    const strike = toNumber(row.strike_price ?? row.strike);
-    return {
-      strike,
-      ce: nativeOptionLeg(row, "ce"),
-      pe: nativeOptionLeg(row, "pe"),
-    };
-  }).filter((entry) => entry.strike > 0).sort((a, b) => a.strike - b.strike);
-  const totalCallOi = chain.reduce((acc, row) => acc + toNumber(row.ce.oi), 0);
-  const totalPutOi = chain.reduce((acc, row) => acc + toNumber(row.pe.oi), 0);
+type OptionLegNumberKind = "finite" | "nonnegative" | "nonnegative-integer";
+
+const OPTION_LEG_NUMERIC_FIELDS: ReadonlyArray<readonly [string, OptionLegNumberKind]> = [
+  ["ltp", "nonnegative"],
+  ["last_price", "nonnegative"],
+  ["bid", "nonnegative"],
+  ["ask", "nonnegative"],
+  ["change", "finite"],
+  ["change_percent", "finite"],
+  ["change_pct", "finite"],
+  ["oi_change", "finite"],
+  ["oi", "nonnegative-integer"],
+  ["open_interest", "nonnegative-integer"],
+  ["volume", "nonnegative-integer"],
+  ["delta", "finite"],
+  ["gamma", "finite"],
+  ["theta", "finite"],
+  ["vega", "finite"],
+  ["iv", "nonnegative"],
+  ["implied_volatility", "nonnegative"],
+];
+
+function optionLegNumber(
+  value: unknown,
+  label: string,
+  field: string,
+  kind: OptionLegNumberKind = "finite",
+): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = toStrictNumber(value);
+  const valid = parsed !== null
+    && (kind === "finite" || parsed >= 0)
+    && (kind !== "nonnegative-integer" || Number.isInteger(parsed));
+  if (!valid) throw new Error(`Invalid option-chain ${label} ${field}`);
+  return parsed;
+}
+
+function normaliseOptionLegNumericFields(
+  value: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  const normalised = { ...value };
+  for (const [field, kind] of OPTION_LEG_NUMERIC_FIELDS) {
+    if (!(field in value)) continue;
+    const parsed = optionLegNumber(value[field], label, field, kind);
+    if (parsed === undefined) delete normalised[field];
+    else normalised[field] = parsed;
+  }
+  const mirrorAlias = (primary: string, alias: string) => {
+    const parsed = normalised[primary] ?? normalised[alias];
+    if (typeof parsed !== "number") return;
+    normalised[primary] = parsed;
+    normalised[alias] = parsed;
+  };
+  mirrorAlias("ltp", "last_price");
+  mirrorAlias("change_percent", "change_pct");
+  mirrorAlias("oi", "open_interest");
+  mirrorAlias("iv", "implied_volatility");
+  return normalised;
+}
+
+function nativeOptionLeg(
+  row: Record<string, unknown>,
+  prefix: "ce" | "pe",
+): Record<string, number | null> {
+  const field = (name: string) => row[`${prefix}_${name}`];
+  const label = `native ${prefix.toUpperCase()} leg`;
+  const greeksComplete = field("greeks_complete") === true;
+  const requiredGreek = (name: string, value: number | undefined): number => {
+    if (value === undefined) throw new Error(`Invalid option-chain ${label} ${name}: unavailable`);
+    return value;
+  };
+  const ltp = optionLegNumber(field("ltp"), label, "ltp", "nonnegative");
+  const bid = optionLegNumber(field("bid"), label, "bid", "nonnegative");
+  const ask = optionLegNumber(field("ask"), label, "ask", "nonnegative");
+  const oi = optionLegNumber(field("oi"), label, "oi", "nonnegative-integer");
+  const volume = optionLegNumber(field("volume"), label, "volume", "nonnegative-integer");
+  const change = optionLegNumber(field("change"), label, "change");
+  const changePercentValue = optionLegNumber(field("change_percent"), label, "change_percent");
+  const changePctValue = optionLegNumber(field("change_pct"), label, "change_pct");
+  const changePercent = changePercentValue ?? changePctValue;
+  const oiChange = optionLegNumber(field("oi_change"), label, "oi_change");
+  const rawIV = optionLegNumber(field("iv"), label, "iv", "nonnegative");
+  const rawDelta = optionLegNumber(field("delta"), label, "delta");
+  const rawGamma = optionLegNumber(field("gamma"), label, "gamma");
+  const rawTheta = optionLegNumber(field("theta"), label, "theta");
+  const rawVega = optionLegNumber(field("vega"), label, "vega");
+  const iv = greeksComplete ? requiredGreek("iv", rawIV) / 100 : null;
+  const delta = greeksComplete ? requiredGreek("delta", rawDelta) : null;
+  const gamma = greeksComplete ? requiredGreek("gamma", rawGamma) : null;
+  const theta = greeksComplete ? requiredGreek("theta", rawTheta) : null;
+  const vega = greeksComplete ? requiredGreek("vega", rawVega) : null;
   return {
+    ...(ltp === undefined ? {} : { ltp, last_price: ltp }),
+    ...(oi === undefined ? {} : { oi, open_interest: oi }),
+    ...(volume === undefined ? {} : { volume }),
+    ...(change === undefined ? {} : { change }),
+    ...(changePercent === undefined ? {} : { change_percent: changePercent, change_pct: changePercent }),
+    ...(oiChange === undefined ? {} : { oi_change: oiChange }),
+    iv,
+    implied_volatility: iv,
+    delta,
+    gamma,
+    theta,
+    vega,
+    ...(bid === undefined ? {} : { bid }),
+    ...(ask === undefined ? {} : { ask }),
+  };
+}
+
+function normaliseNativePreShapedOptionLeg(value: unknown, label: string): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  return normaliseOptionLegNumericFields(value, label);
+}
+
+function normaliseOpenAlgoOptionLeg(value: unknown, label: string): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) throw new Error(`Invalid OpenAlgo option-chain ${label} leg`);
+  return normaliseOptionLegNumericFields(value, label);
+}
+
+function normaliseOpenAlgoOptionChain(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error("Invalid OpenAlgo option-chain response");
+
+  if (value.chain === undefined && value.calls === undefined && value.puts === undefined) {
+    throw new Error("OpenAlgo option-chain response contains no recognised chain arrays");
+  }
+  if (value.chain !== undefined && !Array.isArray(value.chain)) {
+    throw new Error("Invalid OpenAlgo option-chain chain array");
+  }
+  if (value.calls !== undefined && !Array.isArray(value.calls)) {
+    throw new Error("Invalid OpenAlgo option-chain calls array");
+  }
+  if (value.puts !== undefined && !Array.isArray(value.puts)) {
+    throw new Error("Invalid OpenAlgo option-chain puts array");
+  }
+
+  const chain = value.chain === undefined
+    ? undefined
+    : (value.chain as unknown[]).map((candidate, index) => {
+      if (!isRecord(candidate)) throw new Error(`Invalid OpenAlgo option-chain row ${index}`);
+      const strike = toPositiveFiniteNumber(candidate.strike ?? candidate.strike_price);
+      if (strike === null) throw new Error(`Invalid OpenAlgo option-chain strike at row ${index}`);
+      return {
+        ...candidate,
+        strike,
+        ce: normaliseOpenAlgoOptionLeg(candidate.ce, `CE row ${index}`),
+        pe: normaliseOpenAlgoOptionLeg(candidate.pe, `PE row ${index}`),
+      };
+    });
+
+  const normaliseLegacyRows = (rows: unknown[], label: "call" | "put") => rows.map((candidate, index) => {
+    if (!isRecord(candidate)) throw new Error(`Invalid OpenAlgo option-chain ${label} row ${index}`);
+    const strike = toPositiveFiniteNumber(candidate.strike_price ?? candidate.strike);
+    if (strike === null) throw new Error(`Invalid OpenAlgo option-chain ${label} strike at row ${index}`);
+    return {
+      ...normaliseOptionLegNumericFields(candidate, `${label} row ${index}`),
+      strike,
+      strike_price: strike,
+    };
+  });
+  return {
+    ...value,
+    ...(chain === undefined ? {} : { chain }),
+    ...(value.calls === undefined ? {} : { calls: normaliseLegacyRows(value.calls as unknown[], "call") }),
+    ...(value.puts === undefined ? {} : { puts: normaliseLegacyRows(value.puts as unknown[], "put") }),
+  };
+}
+
+function nativeOptionChainPCR(
+  chain: Array<{ ce: Record<string, unknown> | null; pe: Record<string, unknown> | null }>,
+): number | null {
+  const callOi = chain.map((entry) => toNonNegativeInteger(entry.ce?.oi));
+  const putOi = chain.map((entry) => toNonNegativeInteger(entry.pe?.oi));
+  const hasCompleteOi = chain.length > 0
+    && callOi.every((oi) => oi !== null)
+    && putOi.every((oi) => oi !== null);
+  if (!hasCompleteOi) return null;
+  const totalCallOi = callOi.reduce((total, oi) => total + oi!, 0);
+  const totalPutOi = putOi.reduce((total, oi) => total + oi!, 0);
+  return totalCallOi > 0 ? totalPutOi / totalCallOi : null;
+}
+
+function normaliseNativeOptionChain(value: unknown): unknown {
+  const row = isRecord(value) ? value : {};
+  const spot = toPositiveFiniteNumber(
+    row.underlying_ltp ?? row.spot_price ?? row.spotPrice ?? row.spot,
+  );
+  if (spot === null) {
+    throw new Error("Native option chain lacks a valid positive spot price.");
+  }
+
+  const chain = Array.isArray(row.chain)
+    ? row.chain.filter(isRecord).flatMap((entry) => {
+        const strike = toPositiveFiniteNumber(entry.strike ?? entry.strike_price);
+        if (strike === null) return [];
+        return [{
+          strike,
+          ce: normaliseNativePreShapedOptionLeg(entry.ce, "native CE leg"),
+          pe: normaliseNativePreShapedOptionLeg(entry.pe, "native PE leg"),
+        }];
+      })
+    : (Array.isArray(row.strikes) ? row.strikes : []).filter(isRecord).flatMap((strikeRow) => {
+        const strike = toPositiveFiniteNumber(strikeRow.strike_price ?? strikeRow.strike);
+        if (strike === null) return [];
+        return [{
+          strike,
+          ce: nativeOptionLeg(strikeRow, "ce"),
+          pe: nativeOptionLeg(strikeRow, "pe"),
+        }];
+      });
+  chain.sort((a, b) => a.strike - b.strike);
+
+  const requestedAtm = toPositiveFiniteNumber(row.atm_strike);
+  const atmStrike = requestedAtm !== null && chain.some((entry) => entry.strike === requestedAtm)
+    ? requestedAtm
+    : chain.reduce<{ strike: number } | null>((nearest, entry) => (
+        nearest === null || Math.abs(entry.strike - spot) < Math.abs(nearest.strike - spot)
+          ? entry
+          : nearest
+      ), null)?.strike ?? null;
+  return {
+    ...row,
     chain,
-    atm_strike: chain[Math.floor(chain.length / 2)]?.strike ?? null,
-    underlying_ltp: toNumber(row.underlying_ltp ?? row.spotPrice ?? row.spot),
+    atm_strike: atmStrike,
+    underlying_ltp: spot,
     expiry: String(row.expiry ?? row.expiry_date ?? ""),
-    pcr: totalCallOi > 0 ? totalPutOi / totalCallOi : null,
+    pcr: nativeOptionChainPCR(chain),
   };
 }
 
@@ -656,32 +911,41 @@ function normaliseNativeSymbol(value: unknown): {
 }
 
 interface BackendMaxPainData {
-  max_pain_strike?: number | string;
-  total_loss_at_max_pain?: number | string;
+  is_sample_data?: unknown;
+  max_pain_strike?: unknown;
+  total_loss_at_max_pain?: unknown;
   strike_losses?: Array<{
-    strike?: number | string;
-    strike_price?: number | string;
-    total_loss?: number | string;
-    total_pain?: number | string;
+    strike?: unknown;
+    strike_price?: unknown;
+    total_loss?: unknown;
+    total_pain?: unknown;
   }>;
-  strikes?: MaxPainData["strikes"];
+  strikes?: Array<{
+    strike?: unknown;
+    call_oi?: unknown;
+    put_oi?: unknown;
+    call_pain?: unknown;
+    put_pain?: unknown;
+    total_pain?: unknown;
+  }>;
+}
+
+interface BackendGexEntry {
+  strike?: number | string;
+  call_gex?: number | string;
+  put_gex?: number | string;
+  net_gex?: number | string;
+  call_oi?: number | string;
+  put_oi?: number | string;
 }
 
 interface BackendGexData {
-  strikes?: Array<{
-    strike?: number | string;
-    call_gamma?: number | string;
-    put_gamma?: number | string;
-    net_gamma?: number | string;
-    call_gex?: number | string;
-    put_gex?: number | string;
-    net_gex?: number | string;
-    call_oi?: number | string;
-    put_oi?: number | string;
-  }>;
+  is_sample_data?: unknown;
+  strikes?: BackendGexEntry[];
 }
 
 interface BackendIVSmileData {
+  is_sample_data?: unknown;
   curves?: Array<{
     points?: IVSmileEntry[];
   }>;
@@ -689,14 +953,13 @@ interface BackendIVSmileData {
 }
 
 interface BackendOIProfileData {
+  is_sample_data?: unknown;
   strikes?: Array<{
     strike?: number | string;
     ce_oi?: number | string;
     pe_oi?: number | string;
     ce_oi_change?: number | string;
     pe_oi_change?: number | string;
-    ce_ltp?: number | string;
-    pe_ltp?: number | string;
   }>;
 }
 
@@ -735,72 +998,164 @@ type InstrumentRow = {
   token: string;
 };
 
-function normaliseGexEntries(value: BackendGexData | GexEntry[]): GexEntry[] {
-  if (Array.isArray(value)) return value;
-  return (value.strikes ?? []).map((row) => ({
-    strike: toNumber(row.strike),
-    call_gamma: toNumber(row.call_gamma ?? row.call_gex),
-    put_gamma: toNumber(row.put_gamma ?? row.put_gex),
-    net_gamma: toNumber(row.net_gamma ?? row.net_gex),
-    call_oi: toNumber(row.call_oi),
-    put_oi: toNumber(row.put_oi),
-  })).filter((row) => row.strike > 0);
-}
-
-function normaliseIVSmileEntries(value: BackendIVSmileData | IVSmileEntry[]): IVSmileEntry[] {
-  if (Array.isArray(value)) return value;
-  const curve = value.curves?.[0];
-  return (value.points ?? curve?.points ?? []).map((row) => ({
-    strike: toNumber(row.strike),
-    call_iv: toNumber(row.call_iv),
-    put_iv: toNumber(row.put_iv),
-    moneyness: toNumber(row.moneyness),
-  })).filter((row) => row.strike > 0);
-}
-
-function normaliseOIProfileEntries(value: BackendOIProfileData | OIProfileEntry[]): OIProfileEntry[] {
-  if (Array.isArray(value)) return value;
-  return (value.strikes ?? []).flatMap((row) => {
-    const strike = toNumber(row.strike);
-    if (strike <= 0) return [];
-    return [
-      {
-        strike,
-        type: "CE" as const,
-        oi: toNumber(row.ce_oi),
-        oi_delta_d: toNumber(row.ce_oi_change),
-        ltp: toNumber(row.ce_ltp),
-      },
-      {
-        strike,
-        type: "PE" as const,
-        oi: toNumber(row.pe_oi),
-        oi_delta_d: toNumber(row.pe_oi_change),
-        ltp: toNumber(row.pe_ltp),
-      },
-    ];
+function normaliseGexEntries(
+  value: BackendGexData | Array<BackendGexEntry | GexEntry>,
+): ProvenancedRows<GexEntry> {
+  const rawRows = Array.isArray(value) ? value : value.strikes ?? [];
+  const rows = rawRows.flatMap((row) => {
+    const strike = toStrictNumber(row.strike);
+    const callGex = toStrictNumber(row.call_gex);
+    const putGex = toStrictNumber(row.put_gex);
+    const netGex = toStrictNumber(row.net_gex);
+    const callOi = toNonNegativeInteger(row.call_oi);
+    const putOi = toNonNegativeInteger(row.put_oi);
+    const expectedNetGex = callGex === null || putGex === null ? null : callGex + putGex;
+    const exposureScale = expectedNetGex === null || netGex === null
+      ? 1
+      : Math.max(1, Math.abs(callGex!), Math.abs(putGex!), Math.abs(netGex), Math.abs(expectedNetGex));
+    if (
+      strike === null || strike <= 0
+      || callGex === null || putGex === null || netGex === null
+      || callOi === null || putOi === null
+      || expectedNetGex === null
+      || Math.abs(netGex - expectedNetGex) > exposureScale * 1e-6
+    ) return [];
+    return [{
+      strike,
+      call_gex: callGex,
+      put_gex: putGex,
+      net_gex: netGex,
+      call_oi: callOi,
+      put_oi: putOi,
+    }];
   });
+  return {
+    rows,
+    is_sample_data: Array.isArray(value) || value.is_sample_data !== false,
+  };
+}
+
+function normaliseIVSmileEntries(value: BackendIVSmileData | IVSmileEntry[]): IVSmileSeriesData {
+  const curve = Array.isArray(value) ? undefined : value.curves?.[0];
+  const rawPoints = Array.isArray(value) ? value : (value.points ?? curve?.points ?? []);
+  const points = rawPoints.flatMap((row) => {
+    const strike = toStrictNumber(row.strike);
+    const callIv = toStrictNumber(row.call_iv);
+    const putIv = toStrictNumber(row.put_iv);
+    const moneyness = toStrictNumber(row.moneyness);
+    if (
+      strike === null || strike <= 0
+      || callIv === null || callIv <= 0
+      || putIv === null || putIv <= 0
+      || moneyness === null || moneyness <= 0
+    ) return [];
+    return [{ strike, call_iv: callIv, put_iv: putIv, moneyness }];
+  });
+  return {
+    points,
+    is_sample_data: Array.isArray(value) || value.is_sample_data !== false,
+  };
+}
+
+function normaliseOIProfileEntries(
+  value: BackendOIProfileData | OIProfileEntry[],
+): ProvenancedRows<OIProfileEntry> {
+  const rows = Array.isArray(value)
+    ? value.flatMap((row) => {
+        const strike = toStrictNumber(row.strike);
+        const oi = toNonNegativeInteger(row.oi);
+        if (strike === null || strike <= 0 || (row.type !== "CE" && row.type !== "PE") || oi === null) {
+          return [];
+        }
+        const oiDelta = toStrictNumber(row.oi_delta_d);
+        const ltp = toStrictNumber(row.ltp);
+        const priceChange = toStrictNumber(row.price_change);
+        return [{
+          strike,
+          type: row.type,
+          oi,
+          ...(oiDelta === null ? {} : { oi_delta_d: oiDelta }),
+          ...(ltp === null || ltp < 0 ? {} : { ltp }),
+          ...(priceChange === null ? {} : { price_change: priceChange }),
+        }];
+      })
+    : (value.strikes ?? []).flatMap((row) => {
+        const strike = toStrictNumber(row.strike);
+        if (strike === null || strike <= 0) return [];
+        const ceOi = toNonNegativeInteger(row.ce_oi);
+        const peOi = toNonNegativeInteger(row.pe_oi);
+        const ceOiChange = toStrictNumber(row.ce_oi_change);
+        const peOiChange = toStrictNumber(row.pe_oi_change);
+        return [
+          ...(ceOi === null ? [] : [{
+            strike,
+            type: "CE" as const,
+            oi: ceOi,
+            ...(ceOiChange === null ? {} : { oi_delta_d: ceOiChange }),
+          }]),
+          ...(peOi === null ? [] : [{
+            strike,
+            type: "PE" as const,
+            oi: peOi,
+            ...(peOiChange === null ? {} : { oi_delta_d: peOiChange }),
+          }]),
+        ];
+      });
+  return {
+    rows,
+    is_sample_data: Array.isArray(value) || value.is_sample_data !== false,
+  };
 }
 
 function normaliseMaxPainData(value: BackendMaxPainData): MaxPainData {
-  const strikeLosses = (value.strike_losses ?? []).map((row) => ({
-    strike: toNumber(row.strike ?? row.strike_price),
-    total_loss: toNumber(row.total_loss ?? row.total_pain),
-  })).filter((row) => row.strike > 0);
+  const parsedStrikeLosses = (value.strike_losses ?? []).flatMap((row) => {
+    const strike = toStrictNumber(row.strike ?? row.strike_price);
+    const totalLoss = toStrictNumber(row.total_loss ?? row.total_pain);
+    return strike !== null && strike > 0 && totalLoss !== null && totalLoss >= 0
+      ? [{ strike, total_loss: totalLoss }]
+      : [];
+  });
+  const maxPainStrike = toStrictNumber(value.max_pain_strike);
+  const totalLossAtMaxPain = toStrictNumber(value.total_loss_at_max_pain);
+  const parsedStrikes = value.strikes
+    ? value.strikes.flatMap((row) => {
+        const strike = toStrictNumber(row.strike);
+        const totalPain = toStrictNumber(row.total_pain);
+        if (strike === null || strike <= 0 || totalPain === null || totalPain < 0) return [];
 
-  const strikes = value.strikes ?? strikeLosses.map((row) => ({
-    strike: row.strike,
-    call_oi: 0,
-    put_oi: 0,
-    call_pain: 0,
-    put_pain: 0,
-    total_pain: row.total_loss,
-  }));
+        const callOi = toNonNegativeInteger(row.call_oi);
+        const putOi = toNonNegativeInteger(row.put_oi);
+        const callPain = toStrictNumber(row.call_pain);
+        const putPain = toStrictNumber(row.put_pain);
+        return [{
+          strike,
+          ...(callOi === null ? {} : { call_oi: callOi }),
+          ...(putOi === null ? {} : { put_oi: putOi }),
+          ...(callPain === null || callPain < 0 ? {} : { call_pain: callPain }),
+          ...(putPain === null || putPain < 0 ? {} : { put_pain: putPain }),
+          total_pain: totalPain,
+        }];
+      })
+    : parsedStrikeLosses.map((row) => ({
+        strike: row.strike,
+        total_pain: row.total_loss,
+      }));
+  const meaningfulMaxPainStrike = maxPainStrike !== null && maxPainStrike > 0
+    ? maxPainStrike
+    : null;
+  const strikeLosses = meaningfulMaxPainStrike === null
+    ? parsedStrikeLosses.filter((row) => row.total_loss > 0)
+    : parsedStrikeLosses;
+  const strikes = meaningfulMaxPainStrike === null
+    ? parsedStrikes.filter((row) => row.total_pain > 0)
+    : parsedStrikes;
 
   return {
-    ...value,
-    max_pain_strike: toNumber(value.max_pain_strike),
-    total_loss_at_max_pain: toNumber(value.total_loss_at_max_pain),
+    is_sample_data: value.is_sample_data !== false,
+    max_pain_strike: meaningfulMaxPainStrike,
+    ...(meaningfulMaxPainStrike === null || totalLossAtMaxPain === null || totalLossAtMaxPain < 0
+      ? {}
+      : { total_loss_at_max_pain: totalLossAtMaxPain }),
     strike_losses: strikeLosses,
     strikes,
   };
@@ -863,7 +1218,9 @@ function syntheticFutureFromOptionChain(
   const syntheticPrice = round2(row.strike + row.ceLtp - row.peLtp);
   return {
     underlying,
-    underlying_ltp: toNumber(source.underlying_ltp ?? source.spotPrice ?? source.spot ?? syntheticPrice),
+    underlying_ltp: toNumber(
+      source.underlying_ltp ?? source.spot_price ?? source.spotPrice ?? source.spot ?? syntheticPrice,
+    ),
     expiry: String(expiry ?? source.expiry ?? ""),
     atm_strike: row.strike,
     synthetic_future_price: syntheticPrice,
@@ -875,7 +1232,7 @@ async function getNativeSyntheticFuture(
   exchange: string,
   expiry_date?: string,
 ): Promise<SyntheticFutureData | undefined> {
-  if (getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
+  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
   const chain = await getOptionChain(symbol, exchange, expiry_date);
   return syntheticFutureFromOptionChain(chain, symbol, expiry_date);
 }
@@ -990,7 +1347,7 @@ async function nativeCapabilityBroker(): Promise<string | undefined> {
 }
 
 async function getNativeIntervals(): Promise<string[] | undefined> {
-  if (getApiKey().trim().length > 0 || isExploreModeWithoutKey()) return undefined;
+  if (getApiKey().trim().length > 0 || isExploreMode()) return undefined;
   const broker = await nativeCapabilityBroker();
   if (!broker) return undefined;
   const endpoint = `broker/capabilities?broker=${encodeURIComponent(broker)}`;
@@ -1122,6 +1479,136 @@ function mockHoldings(): Holding[] {
   }));
 }
 
+function mockTrades(): Trade[] {
+  return mockOrders()
+    .filter((order) => ["complete", "completed", "filled"].includes(order.status.toLowerCase()))
+    .map((order) => ({
+      tradeId: order.orderId,
+      orderId: order.orderId,
+      symbol: order.symbol,
+      exchange: order.exchange,
+      action: order.action,
+      quantity: order.quantity,
+      price: order.price,
+      timestamp: order.timestamp,
+    }));
+}
+
+function normalisePracticePosition(value: unknown): Position | undefined {
+  if (!isRecord(value)) return undefined;
+  const quantity = toNumber(value.quantity ?? value.net_qty);
+  const averagePrice = toNumber(value.averagePrice ?? value.average_price ?? value.avg_price);
+  const realisedPnl = toNumber(value.realised_pnl ?? value.realized_pnl);
+  const unrealisedPnl = toNumber(value.unrealised_pnl ?? value.unrealized_pnl);
+  const pnl = toNumber(value.pnl ?? (realisedPnl + unrealisedPnl));
+  const ltp = quantity !== 0 && unrealisedPnl !== 0
+    ? averagePrice + (unrealisedPnl / quantity)
+    : toNumber(value.ltp ?? averagePrice);
+  const cost = Math.abs(quantity * averagePrice);
+  return {
+    symbol: String(value.symbol ?? ""),
+    exchange: String(value.exchange ?? ""),
+    product: String(value.product ?? "MIS"),
+    quantity,
+    averagePrice,
+    ltp,
+    pnl,
+    pnlPercent: cost > 0 ? (pnl / cost) * 100 : 0,
+  };
+}
+
+function normalisePracticeOrder(value: unknown): Order | undefined {
+  if (!isRecord(value)) return undefined;
+  const orderId = String(value.orderId ?? value.order_id ?? "");
+  if (!orderId) return undefined;
+  const action = String(value.action ?? "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+  return {
+    orderId,
+    symbol: String(value.symbol ?? ""),
+    exchange: String(value.exchange ?? ""),
+    action,
+    quantity: toNumber(value.quantity),
+    price: toNumber(value.price ?? value.avg_fill_px),
+    orderType: String(value.orderType ?? value.order_type ?? "MARKET"),
+    status: String(value.status ?? ""),
+    product: String(value.product ?? "MIS"),
+    strategy: String(value.strategy ?? "Practice"),
+    timestamp: String(value.timestamp ?? value.created_at ?? ""),
+  };
+}
+
+function normalisePracticeTrade(value: unknown): Trade | undefined {
+  if (!isRecord(value)) return undefined;
+  const orderId = String(value.orderId ?? value.order_id ?? "");
+  const tradeId = String(value.tradeId ?? value.trade_id ?? orderId);
+  if (!tradeId || !orderId) return undefined;
+  const action = String(value.action ?? "BUY").toUpperCase() === "SELL" ? "SELL" : "BUY";
+  return {
+    tradeId,
+    orderId,
+    symbol: String(value.symbol ?? ""),
+    exchange: String(value.exchange ?? ""),
+    action,
+    quantity: toNumber(value.quantity),
+    price: toNumber(value.price ?? value.fill_price ?? value.avg_fill_px),
+    timestamp: String(value.timestamp ?? value.traded_at ?? value.fill_time ?? ""),
+  };
+}
+
+async function getPracticeOrders(): Promise<Order[]> {
+  const payload = await getFtV1<{ orders?: unknown[] }>("sandbox/orders");
+  return (payload.orders ?? []).map(normalisePracticeOrder).filter((order): order is Order => order !== undefined);
+}
+
+async function getPracticeTrades(): Promise<Trade[]> {
+  const payload = await getFtV1<{ trades?: unknown[] }>("sandbox/trades");
+  return (payload.trades ?? [])
+    .map(normalisePracticeTrade)
+    .filter((trade): trade is Trade => trade !== undefined);
+}
+
+/** Read account data from the same sandbox that executes Practice orders. */
+async function readPracticeAccountData<T>(endpoint: string, extra: object = {}): Promise<T | undefined> {
+  if (useModeStore.getState().mode !== "practice") return undefined;
+  const kind = NATIVE_READ_ENDPOINTS[endpoint];
+  if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
+
+  if (endpoint === "funds" || endpoint === "limits") {
+    const payload = await getFtV1<{ capital?: unknown }>("sandbox/capital");
+    const capital = isRecord(payload.capital) ? payload.capital : {};
+    const funds = normaliseFundsShape({
+      availableCash: capital.available,
+      usedMargin: capital.used_margin,
+      totalBalance: capital.current,
+    });
+    return (endpoint === "funds" ? funds : capital) as T;
+  }
+  if (endpoint === "positionbook") {
+    const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
+    const positions = (payload.positions ?? [])
+      .map(normalisePracticePosition)
+      .filter((position): position is Position => position !== undefined);
+    return { positions } as T;
+  }
+  if (endpoint === "orderbook") {
+    return { orders: await getPracticeOrders() } as T;
+  }
+  if (endpoint === "tradebook") {
+    return { trades: await getPracticeTrades() } as T;
+  }
+  if (endpoint === "holdings") {
+    return { holdings: [] } as T;
+  }
+  if (endpoint === "orderstatus") {
+    const params = extra as Record<string, unknown>;
+    const orderId = stringParam(params.order_id ?? params.orderId ?? params.orderid);
+    const order = (await getPracticeOrders()).find((candidate) => candidate.orderId === orderId);
+    return { status: order?.status ?? "not found" } as T;
+  }
+
+  throw new Error(`${endpoint} is not available from the Practice sandbox.`);
+}
+
 function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefined {
   const params = extra as Record<string, unknown>;
   const symbol = typeof params.symbol === "string" ? params.symbol : undefined;
@@ -1169,6 +1656,8 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
       } as T;
     case "orderbook":
       return { orders: mockOrders() } as T;
+    case "tradebook":
+      return { trades: mockTrades() } as T;
     case "positionbook":
       return { positions: mockPositions() } as T;
     case "holdings":
@@ -1299,7 +1788,10 @@ async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
   }
 
   const json = await resp.json();
-  if (json.status === "error") throw new Error(json.message || `Order API ${ftEndpoint} error`);
+  const responseStatus = String(json.status ?? "").toUpperCase();
+  if (responseStatus === "ERROR" || responseStatus === "REJECTED") {
+    throw new Error(json.message || `Order API ${ftEndpoint} error`);
+  }
   return (json.data ?? json) as T;
 }
 
@@ -1319,12 +1811,22 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
     }
   }
 
+  if (isExploreMode()) {
+    const fallback = getExplorePostFallback<T>(endpoint, extra);
+    if (fallback !== undefined) return fallback;
+    const kind = NATIVE_READ_ENDPOINTS[endpoint];
+    if (kind && NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) {
+      throw new Error(`${endpoint} is not available in Explore mode.`);
+    }
+  }
+
+  const practiceRead = await readPracticeAccountData<T>(endpoint, extra);
+  if (practiceRead !== undefined) return practiceRead;
+
   const nativeRead = await readPrimaryNative<T>(endpoint, extra);
   if (nativeRead !== undefined) return nativeRead;
 
-  if (isExploreModeWithoutKey()) {
-    const fallback = getExplorePostFallback<T>(endpoint, extra);
-    if (fallback !== undefined) return fallback;
+  if (isExploreMode()) {
     requireApiKey(endpoint);
   } else {
     requireApiKey(endpoint);
@@ -1358,7 +1860,10 @@ async function post<T>(endpoint: string, extra: object = {}): Promise<T> {
 
   const json = await resp.json();
   if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
-  return (json.data ?? json) as T;
+  const data = json.data ?? json;
+  if (endpoint === "optionchain") return normaliseOpenAlgoOptionChain(data) as T;
+  if (endpoint === "expiry") return normaliseNativeExpiry(data) as T;
+  return data as T;
 }
 
 async function get<T>(endpoint: string): Promise<T> {
@@ -1366,7 +1871,7 @@ async function get<T>(endpoint: string): Promise<T> {
     throw new Error(`Rate limit exceeded for GET ${endpoint}`);
   }
 
-  if (isExploreModeWithoutKey()) {
+  if (isExploreMode()) {
     const fallback = getExploreGetFallback<T>(endpoint);
     if (fallback !== undefined) return fallback;
     requireApiKey(endpoint);
@@ -1420,12 +1925,25 @@ export const placeOrder = (params: PlaceOrderParams) =>
   postOrder<{ orderId: string }>("place", params);
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
   postOrder<{ orderId: string }>("place-smart", params);
-export const cancelAllOrders = (strategy = "Flint") =>
-  postOrder<void>("cancel-all", { strategy });
+export const cancelAllOrders = () =>
+  postOrder<void>("cancel-all");
 export const cancelOrder = (orderId: string, strategy = "Flint") =>
   postOrder<void>("cancel", { orderId, strategy });
 export const closePosition = (strategy = "Flint") =>
   postOrder<void>("close-position", { strategy });
+export const exitAllPositions = () => {
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  if (mode !== "live") {
+    throw new Error("Exit all positions is available only in Live mode. Use the Positions widget for practice trades.");
+  }
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  const nativeTarget = pickNativeWriteTarget(mode, apiKey);
+  const target = nativeTarget
+    ? { broker: nativeTarget.broker, account_id: nativeTarget.accountId }
+    : { broker: "openalgo", account_id: "default" };
+  return postFtApi<void>("positions/exit-all", { confirm: true, ...target });
+};
 export const modifyOrder = (params: ModifyOrderParams) =>
   postOrder<{ orderId: string }>("modify", params);
 export const orderStatus = (params: OrderStatusParams) =>
@@ -1733,8 +2251,47 @@ export function searchSymbol(
   return post<Array<{ symbol: string; exchange: string }>>("search", body);
 }
 export const getIntervals = async () => (await getNativeIntervals()) ?? get<string[]>("intervals");
-export const getMultiOptionGreeks = (symbols: Array<{ symbol: string; exchange: string }>) =>
-  post<Greeks[]>("multioptiongreeks", { symbols });
+export async function getMultiOptionGreeks(
+  symbols: Array<{ symbol: string; exchange: string }>,
+): Promise<Greeks[]> {
+  const value = await post<unknown>("multioptiongreeks", { symbols });
+  if (!Array.isArray(value) || value.length !== symbols.length) {
+    throw new Error("Option-Greeks response does not match the requested contracts");
+  }
+  const requestedKeys = symbols.map(({ symbol, exchange }) => (
+    `${exchange.trim().toUpperCase()}:${symbol.trim().toUpperCase()}`
+  ));
+  if (new Set(requestedKeys).size !== requestedKeys.length) {
+    throw new Error("Option-Greeks request repeats a contract identity");
+  }
+  const requested = new Set(requestedKeys);
+  const byContract = new Map<string, Greeks>();
+  value.forEach((candidate) => {
+    if (!isRecord(candidate)) throw new Error("Invalid option-Greeks row");
+    const symbol = stringParam(candidate.symbol ?? candidate.trading_symbol ?? candidate.tradingsymbol).trim();
+    const exchange = stringParam(candidate.exchange).trim().toUpperCase();
+    if (!symbol || !exchange) throw new Error("Option-Greeks row lacks contract identity");
+    const key = `${exchange}:${symbol.toUpperCase()}`;
+    if (!requested.has(key) || byContract.has(key)) {
+      throw new Error("Option-Greeks response does not match the requested contracts");
+    }
+    const instrumentId = stringParam(candidate.instrument_id ?? candidate.instrument_token).trim();
+    byContract.set(key, {
+      symbol,
+      exchange,
+      ...(instrumentId ? { instrument_id: instrumentId } : {}),
+      delta: greekNumber(candidate, "delta", "Delta"),
+      gamma: greekNumber(candidate, "gamma", "Gamma"),
+      theta: greekNumber(candidate, "theta", "Theta"),
+      vega: greekNumber(candidate, "vega", "Vega"),
+      iv: greekNumber(candidate, "iv", "implied_volatility", "IV", "vix"),
+    });
+  });
+  if (byContract.size !== requestedKeys.length) {
+    throw new Error("Option-Greeks response does not match the requested contracts");
+  }
+  return requestedKeys.map((key) => byContract.get(key)!);
+}
 export const getOptionSymbol = (
   underlying: string,
   exchange: string,
@@ -1758,21 +2315,21 @@ export const getInstruments = async (): Promise<InstrumentRow[]> => {
   if (getApiKey().trim().length === 0) return [];
   return normaliseInstrumentList(await get<InstrumentRow[] | { data?: InstrumentRow[]; instruments?: InstrumentRow[] }>("instruments"));
 };
-export const getGex = (symbol: string, exchange: string, expiry_date?: string) =>
-  postFtApi<BackendGexData | GexEntry[]>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) })
+export const getGex = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
+  postFtApi<BackendGexData | Array<BackendGexEntry | GexEntry>>("gex", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseGexEntries);
-export const getIVSmile = (symbol: string, exchange: string, expiry_date?: string) =>
-  postFtApi<BackendIVSmileData | IVSmileEntry[]>("ivsmile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) })
+export const getIVSmile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
+  postFtApi<BackendIVSmileData | IVSmileEntry[]>("ivsmile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseIVSmileEntries);
-export const getMaxPain = (symbol: string, exchange: string, expiry_date?: string) =>
-  postFtApi<BackendMaxPainData>("maxpain", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) })
+export const getMaxPain = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
+  postFtApi<BackendMaxPainData>("maxpain", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseMaxPainData);
-export const getOIProfile = (symbol: string, exchange: string, expiry_date?: string) =>
-  postFtApi<BackendOIProfileData | OIProfileEntry[]>("oiprofile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) })
+export const getOIProfile = (symbol: string, exchange: string, expiry_date?: string, signal?: AbortSignal) =>
+  postFtApi<BackendOIProfileData | OIProfileEntry[]>("oiprofile", { symbol, exchange, ...(expiry_date ? { expiry_date } : {}) }, signal)
     .then(normaliseOIProfileEntries);
 
 // --- Account ---
-export const getFunds = () => post<Funds>("funds");
+export const getFunds = async () => normaliseFundsShape(await post<unknown>("funds"));
 export const getMargin = (symbol: string, exchange: string, qty: number, product: string, action: string) =>
   post<MarginData>("margin", { symbol, exchange, qty, product, action });
 export const getOrderHistory = (orderId: string) =>

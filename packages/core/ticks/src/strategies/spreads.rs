@@ -884,14 +884,14 @@ fn validate_cross_bar_arithmetic(
 // Parallel batch execution
 // ---------------------------------------------------------------------------
 
-type SpreadBatchItem = (
+pub type SpreadBatchItem = (
     SpreadBacktest,
     Vec<i64>,
     Vec<Vec<f64>>,
     Vec<bool>,
     Vec<bool>,
 );
-type RawSpreadBatchItem = (
+pub type RawSpreadBatchItem = (
     String,
     SpreadConfig,
     Vec<i64>,
@@ -981,15 +981,7 @@ fn execute_raw_spread_batch(
 /// results = run_spreads_batch(items)
 /// assert results[0].total_pnl == 2.0
 /// ```
-pub fn run_spreads_batch(
-    items: Vec<(
-        SpreadBacktest,
-        Vec<i64>,
-        Vec<Vec<f64>>,
-        Vec<bool>,
-        Vec<bool>,
-    )>,
-) -> Result<Vec<BacktestResult>, EngineError> {
+pub fn run_spreads_batch(items: Vec<SpreadBatchItem>) -> Result<Vec<BacktestResult>, EngineError> {
     validate_spread_batch(&items)?;
     execute_spread_batch(items)
 }
@@ -1023,16 +1015,7 @@ pub(crate) fn run_spreads_batch_py(items: &Bound<'_, PyAny>) -> PyResult<Vec<Bac
 /// objects on the Python side.  Each tuple is:
 /// `(name, config, timestamps, legs_premiums, entries, exits)`.
 /// Invalid input returns `EngineError::InvalidSpreadInput`.
-pub fn run_batch(
-    items: Vec<(
-        String,
-        SpreadConfig,
-        Vec<i64>,
-        Vec<Vec<f64>>,
-        Vec<bool>,
-        Vec<bool>,
-    )>,
-) -> Result<Vec<BacktestResult>, EngineError> {
+pub fn run_batch(items: Vec<RawSpreadBatchItem>) -> Result<Vec<BacktestResult>, EngineError> {
     validate_raw_spread_batch(&items)?;
     execute_raw_spread_batch(items)
 }

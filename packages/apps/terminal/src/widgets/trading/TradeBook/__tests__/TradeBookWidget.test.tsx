@@ -14,6 +14,7 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 const mockRefetch = vi.fn();
 const mockUseTradebook = vi.fn();
 const mockUseBrokerConnected = vi.fn();
+const mockUseAccountReadsEnabled = vi.fn();
 
 vi.mock("@/hooks/useTradebook", () => ({
   useTradebook: (...args: unknown[]) => mockUseTradebook(...args),
@@ -21,6 +22,10 @@ vi.mock("@/hooks/useTradebook", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseAccountReadsEnabled(),
 }));
 
 import TradeBookWidget from "../TradeBookWidget";
@@ -67,6 +72,7 @@ describe("TradeBookWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockUseBrokerConnected.mockReturnValue(true);
+    mockUseAccountReadsEnabled.mockReturnValue(true);
   });
 
   it("renders without crashing", () => {
@@ -134,6 +140,7 @@ describe("TradeBookWidget", () => {
 
   it("does not fetch or refresh tradebook without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUseTradebook.mockReturnValue(queryResult({ data: [] }));
     render(<TradeBookWidget {...makeDockviewPanelProps()} />);
 

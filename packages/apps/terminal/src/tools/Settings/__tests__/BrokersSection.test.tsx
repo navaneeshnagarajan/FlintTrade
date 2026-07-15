@@ -96,9 +96,13 @@ const BROKERS = [
     connectable: true,
     requires_static_ip: true,
     native_connect_blockers: [],
-    // REST-native — no third-party SDK. The UI readiness check fails closed
-    // on ABSENT attestation, so the fixture must carry the real backend shape.
-    sdk_attestation: { status: "not_required" as const },
+    sdk_pin: "upstox-python-sdk",
+    sdk_attestation: {
+      pin: "upstox-python-sdk",
+      pinned_version: "2.28.0",
+      installed_version: "2.28.0",
+      status: "ok" as const,
+    },
     oauth_redirect_uri: "http://127.0.0.1:5100/api/v1/native/oauth/callback",
     postback_uri: "http://127.0.0.1:5100/api/v1/native/postbacks/upstox",
     auth_methods: [
@@ -134,7 +138,10 @@ const BROKERS = [
     display_name: "Kotak Neo",
     connectable: false,
     requires_static_ip: true,
-    native_connect_blockers: ["Maintainer live login/read verification with current TOTP and MPIN"],
+    native_connect_blockers: [
+      "Maintainer live login/read verification with current TOTP and MPIN",
+      "Live order-safety proof",
+    ],
     auth_methods: [
       {
         id: "totp_mpin",
@@ -160,9 +167,13 @@ const BROKERS = [
   {
     adapter_id: "indmoney",
     display_name: "INDmoney",
-    connectable: true,
+    connectable: false,
     requires_static_ip: true,
-    native_connect_blockers: [],
+    native_connect_blockers: [
+      "Authoritative smart-parent cancellation discriminator",
+      "Broker-native atomic reduce-only close primitive",
+      "Live order-safety proof",
+    ],
     auth_methods: [
       {
         id: "access_token",
@@ -502,9 +513,9 @@ describe("BrokersSection", () => {
     await waitFor(() => expect(screen.getByText(/No broker accounts connected/i)).toBeInTheDocument());
     expect(screen.getByText(/not fully tested — use at your own risk/i)).toBeInTheDocument();
     await waitFor(() => {
-      const nativeWarning = screen.getByText(/Login and account reads are verified for/i);
-      expect(nativeWarning).toHaveTextContent("Dhan, Upstox, and INDmoney");
-      expect(nativeWarning).toHaveTextContent("Kotak Neo and Groww stay visible");
+      const nativeWarning = screen.getByText(/Native connection is currently enabled for/i);
+      expect(nativeWarning).toHaveTextContent("Dhan and Upstox");
+      expect(nativeWarning).toHaveTextContent("Kotak Neo, INDmoney, and Groww stay visible");
       expect(nativeWarning).toHaveTextContent("not been live-verified for any broker");
     });
   });
@@ -671,7 +682,7 @@ describe("BrokersSection", () => {
 
     expect(await screen.findByText("Broker MCP assistants")).toBeInTheDocument();
     expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
-      "Kotak Neo: Maintainer live login/read verification with current TOTP and MPIN",
+      "Kotak Neo: Maintainer live login/read verification with current TOTP and MPIN and Live order-safety proof",
     );
     expect(screen.getByTestId("native-connect-blockers")).toHaveTextContent(
       "Groww: Broker-side market-data/API permission and Live order-safety proof",
@@ -944,21 +955,21 @@ describe("BrokersSection", () => {
     expect(screen.queryByLabelText(/consumer key/i)).not.toBeInTheDocument();
   });
 
-  it("surfaces the live INDstocks token constraints from the catalogue", async () => {
+  it("keeps INDmoney disabled with its activation blockers visible", async () => {
     renderSection();
     await waitFor(() => expect(listNativeBrokers).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("combobox", { name: /broker/i }));
-    fireEvent.click(await screen.findByRole("option", { name: "INDmoney" }));
-
-    expect(screen.getByText(/INDstocks API dashboard/i)).toBeInTheDocument();
-    expect(screen.getByTestId("native-broker-static-ip")).toHaveTextContent(
-      "Static outbound IP required for live API orders.",
+    const indmoney = await screen.findByRole("option", { name: /INDmoney.*Coming soon/i });
+    expect(indmoney).toHaveAttribute("aria-disabled", "true");
+    const blockers = screen.getByTestId("native-connect-blockers");
+    expect(blockers).toHaveTextContent(
+      "Authoritative smart-parent cancellation discriminator",
     );
-    expect(screen.getByText(/Save your static outbound IP before live algo orders/i)).toBeInTheDocument();
-    expect(screen.getByText(/resets tokens daily at 06:00 IST/i)).toBeInTheDocument();
-    expect(screen.getByText(/up to five active tokens/i)).toBeInTheDocument();
-    expect(screen.getByText(/daily 06:00 IST reset/i)).toBeInTheDocument();
+    expect(blockers).toHaveTextContent(
+      "Broker-native atomic reduce-only close primitive",
+    );
+    expect(blockers).toHaveTextContent("Live order-safety proof");
   });
 });
 

@@ -51,9 +51,13 @@ vi.mock("@/stores/brokerStore", () => ({
 
 import {
   BracketApiError,
+  getSafetyConfigForTarget,
   placeBracketOrder,
+  resetDailyPnLState,
   startSmartRoute,
+  updateSafetyConfig,
   type PlaceBracketParams,
+  type SafetyAccountTarget,
   type SmartRouteJob,
   type SmartRouteParams,
 } from "../ftApi.trading";
@@ -150,6 +154,16 @@ describe("startSmartRoute", () => {
     await startSmartRoute({ ...BASE_PARAMS, broker: "dhan", account_id: "D1" });
 
     expect(requestBody(fetchMock)).toMatchObject({ broker: "dhan", account_id: "D1" });
+  });
+
+  it.each([
+    { broker: "dhan" },
+    { account_id: "D1" },
+  ])("rejects a partial explicit smart-route target: %o", async (target) => {
+    await expect(startSmartRoute({ ...BASE_PARAMS, ...target })).rejects.toThrow(
+      /broker and account ID must be supplied together/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps OpenAlgo primary when an OpenAlgo API key is configured", async () => {
@@ -283,6 +297,16 @@ describe("placeBracketOrder", () => {
     expect(requestBody(fetchMock)).toMatchObject({ broker: "dhan", account_id: "D1" });
   });
 
+  it.each([
+    { broker: "dhan" },
+    { account_id: "D1" },
+  ])("rejects a partial explicit bracket target: %o", async (target) => {
+    await expect(placeBracketOrder({ ...BRACKET_PARAMS, ...target })).rejects.toThrow(
+      /broker and account ID must be supplied together/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed instead of retargeting when the active native account is not yet connected", async () => {
     storeState.brokerState = {
       accounts: [
@@ -343,5 +367,68 @@ describe("placeBracketOrder", () => {
     await expect(placeBracketOrder(BRACKET_PARAMS)).rejects.toThrow(
       /Bracket order failed \(HTTP 500\)/,
     );
+  });
+});
+
+describe("account-bound safety state", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const target: SafetyAccountTarget = { broker: "upstox", account_id: "U1" };
+
+  beforeEach(() => {
+    storeState.mode = "live";
+    storeState.apiKey = "";
+    storeState.token = "";
+    storeState.brokerState = { accounts: [], activeAccountId: null };
+    fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      status: "success",
+      data: {
+        l1_order: {},
+        l2_position: {},
+        l3_portfolio: {},
+        l4_pnl: {
+          selector: "upstox:U1",
+          opening_risk_capital: 100000,
+          is_paused: false,
+          is_killed: false,
+        },
+        l5_kill: {},
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the caller's explicit selector for reads", async () => {
+    const result = await getSafetyConfigForTarget(target);
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/api/v1/safety/config?broker=upstox&account_id=U1",
+    );
+    expect(result.daily_loss_selector).toBe("upstox:U1");
+  });
+
+  it("uses the caller's explicit selector for opening capital even if stores differ", async () => {
+    storeState.apiKey = "openalgo-key";
+
+    await updateSafetyConfig({ opening_risk_capital: 100000 }, target);
+
+    expect(requestBody(fetchMock)).toEqual({
+      opening_risk_capital: 100000,
+      broker: "upstox",
+      account_id: "U1",
+    });
+  });
+
+  it("uses the caller's explicit selector for L4 reset even if stores differ", async () => {
+    storeState.apiKey = "openalgo-key";
+
+    await resetDailyPnLState(target);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/safety/l4?broker=upstox&account_id=U1");
+    expect(init.method).toBe("DELETE");
   });
 });

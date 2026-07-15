@@ -56,6 +56,7 @@ import {
   getDittoAccounts,
   getDittoMirrorStatus,
   getDittoRisk,
+  dittoKillAll,
   removeDittoAccount,
   setDittoAccountEnabled,
 } from "@/services/ftApi";
@@ -68,6 +69,7 @@ const mockRemoveAccount = removeDittoAccount as ReturnType<typeof vi.fn>;
 const mockSetAccountEnabled = setDittoAccountEnabled as ReturnType<typeof vi.fn>;
 const mockGetMirrorStatus = getDittoMirrorStatus as ReturnType<typeof vi.fn>;
 const mockGetRisk = getDittoRisk as ReturnType<typeof vi.fn>;
+const mockKillAll = dittoKillAll as ReturnType<typeof vi.fn>;
 const mockListBrokerRecommendations = listBrokerRecommendations as unknown as ReturnType<typeof vi.fn>;
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -101,6 +103,7 @@ const sampleAccounts = {
       positions: 8,
       group: "HNI",
       allocation_weight: 1.0,
+      max_loss_daily: 50000,
       is_master: true,
     },
     {
@@ -113,6 +116,7 @@ const sampleAccounts = {
       positions: 5,
       group: "HNI",
       allocation_weight: 0.6,
+      max_loss_daily: 50000,
       is_master: false,
     },
   ],
@@ -122,13 +126,14 @@ const sampleMirrorStatus = {
   active: false,
   source_account: null,
   target_accounts: [],
-  mode: "proportional" as const,
+  mode: "weighted" as const,
   mirrored_positions: 0,
   last_sync: null,
   errors: [],
 };
 
 const sampleRisk = {
+  complete: true,
   aggregate_pnl: 4300,
   aggregate_capital: 8000000,
   accounts: [
@@ -139,6 +144,7 @@ const sampleRisk = {
       pnl_today: 12500,
       positions: 8,
       risk_status: "OK" as const,
+      capital: 5000000,
     },
     {
       id: "acc_2",
@@ -147,6 +153,7 @@ const sampleRisk = {
       pnl_today: -8200,
       positions: 5,
       risk_status: "WARNING" as const,
+      capital: 3000000,
     },
   ],
 };
@@ -183,6 +190,13 @@ beforeEach(() => {
   mockSetAccountEnabled.mockResolvedValue(sampleAccounts.accounts[0]);
   mockGetMirrorStatus.mockResolvedValue(sampleMirrorStatus);
   mockGetRisk.mockResolvedValue(sampleRisk);
+  mockKillAll.mockResolvedValue({
+    complete: true,
+    cleanup_complete: true,
+    message: "All managed accounts are flat",
+    accounts_affected: 2,
+    emergency_actions: {},
+  });
 });
 
 describe("DittoRoute", () => {
@@ -225,6 +239,20 @@ describe("DittoRoute", () => {
     await waitFor(() => {
       expect(screen.getByText("Master")).toBeInTheDocument();
     });
+  });
+
+  it("does not present unknown account metrics as zero when live risk is unavailable", async () => {
+    mockGetRisk.mockRejectedValue(new Error("Risk snapshot unavailable"));
+    render(<DittoRoute />, { wrapper: createWrapper() });
+
+    expect(
+      await screen.findByText(
+        /Live capital, P&L, and position metrics are unavailable/,
+        {},
+        { timeout: 3_000 },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
   });
 
   it("switches to Position Mirror tab on click", async () => {
@@ -322,5 +350,52 @@ describe("DittoRoute", () => {
     await waitFor(() => {
       expect(screen.getByText("Start Position Mirroring")).toBeInTheDocument();
     });
+    expect(dittoRouteSource()).toContain("Copy 1:1 (full quantity to each target)");
+    expect(dittoRouteSource()).toContain("By allocation weight (split quantity)");
+  });
+
+  it("hydrates and locks configuration while a mirror generation is active", async () => {
+    mockGetMirrorStatus.mockResolvedValue({
+      active: true,
+      source_account: "acc_1",
+      target_accounts: ["acc_2"],
+      mode: "equal",
+      mirrored_positions: 4,
+      last_sync: "2026-07-14T10:00:00+05:30",
+      errors: [],
+    });
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Position Mirror"));
+
+    expect(await screen.findByText("Mirror Status: Active")).toBeInTheDocument();
+    const comboboxes = screen.getAllByRole("combobox");
+    expect(comboboxes).toHaveLength(2);
+    comboboxes.forEach((control) => expect(control).toBeDisabled());
+    expect(screen.getByRole("button", { name: /Client: Priya Sharma/ })).toBeDisabled();
+    expect(screen.queryByText("Start Position Mirroring")).not.toBeInTheDocument();
+  });
+
+  it("renders risk failure as unavailable instead of zero exposure", async () => {
+    mockGetRisk.mockRejectedValue(new Error("Risk snapshot unavailable"));
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+
+    expect(await screen.findByRole("alert", {}, { timeout: 3_000 })).toHaveTextContent(
+      "Risk snapshot unavailable",
+    );
+    expect(screen.queryByText("₹0")).not.toBeInTheDocument();
+  });
+
+  it("keeps the kill confirmation open and reports an incomplete flatten", async () => {
+    mockKillAll.mockRejectedValue(new Error("One or more managed accounts could not be fully flattened"));
+    render(<DittoRoute />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("Risk Dashboard"));
+    fireEvent.click(await screen.findByText("Kill All Positions"));
+    fireEvent.click(screen.getByText("Confirm Kill All"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "One or more managed accounts could not be fully flattened",
+    );
+    expect(screen.getByText("Confirm Kill All")).toBeInTheDocument();
   });
 });

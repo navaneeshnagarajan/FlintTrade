@@ -6,8 +6,23 @@
  */
 import { create } from "zustand";
 import { clearDemoSession } from "@/lib/demoSession";
+import { purgeAuthenticatedQueryCache } from "@/lib/authenticatedQueryCache";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useTradingStore } from "@/stores/tradingStore";
 
-type AuthStatus = "unknown" | "logged-in" | "logged-out" | "pin-required" | "setup-required";
+type AuthStatus =
+  | "unknown"
+  | "transitioning"
+  | "logged-in"
+  | "logged-out"
+  | "pin-required"
+  | "setup-required";
+
+export interface AuthSessionFence {
+  readonly status: AuthStatus;
+  readonly principal: string | null;
+  readonly generation: number;
+}
 
 interface AuthState {
   status: AuthStatus;
@@ -25,10 +40,19 @@ interface AuthState {
   username: string | null;
   expiresAt: string | null;
   lastActivity: number;
+  /** Monotonic fence for async work started under an older auth context. */
+  sessionGeneration: number;
   /** Internal: timer ID for the 08:00 IST daily expiry. */
   _expiryTimerId: ReturnType<typeof setTimeout> | null;
 
   setLoggedIn: (token: string, username: string, expiresAt: string) => void;
+  /** Install a login response only if its originating auth context is unchanged. */
+  setLoggedInIfCurrent: (
+    token: string,
+    username: string,
+    expiresAt: string,
+    expectedFence: AuthSessionFence,
+  ) => boolean;
   setLoggedOut: () => void;
   setPinRequired: () => void;
   setSetupRequired: () => void;
@@ -41,11 +65,33 @@ interface AuthState {
    * mode-switch downgrade). Preserves status/username/expiresAt and
    * resets activity so the idle timer doesn't immediately downgrade.
    */
-  updateToken: (token: string) => void;
+  updateToken: (token: string, expectedGeneration: number) => boolean;
 }
 
 const IDLE_PIN_THRESHOLD = 5 * 60 * 1000;    // 5 min → PIN required
 const IDLE_LOGOUT_THRESHOLD = 30 * 60 * 1000; // 30 min → full logout
+
+function retireAuthenticatedClientState(): void {
+  useBrokerStore.getState?.().resetSessionState?.();
+  useTradingStore.getState?.().resetSessionState?.();
+  purgeAuthenticatedQueryCache();
+}
+
+function normalisePrincipal(username: string | null): string | null {
+  const principal = username?.trim();
+  return principal || null;
+}
+
+function authStateMatchesFence(
+  state: Pick<AuthState, "status" | "username" | "sessionGeneration">,
+  fence: AuthSessionFence,
+): boolean {
+  return (
+    state.status === fence.status &&
+    normalisePrincipal(state.username) === fence.principal &&
+    state.sessionGeneration === fence.generation
+  );
+}
 
 /**
  * Returns milliseconds until the next 08:00 IST (UTC+05:30 = UTC+02:30).
@@ -69,68 +115,182 @@ function msUntilNext8amIST(): number {
   return next8am.getTime() - now.getTime();
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  status: "unknown",
-  token: null,
-  reauthToken: null,
-  username: null,
-  expiresAt: null,
-  lastActivity: Date.now(),
-  _expiryTimerId: null,
+export const useAuthStore = create<AuthState>((set, get) => {
+  const installLoggedInSession = (
+    token: string,
+    username: string,
+    expiresAt: string,
+    expectedFence?: AuthSessionFence,
+  ): boolean => {
+    const current = get();
+    if (expectedFence && !authStateMatchesFence(current, expectedFence)) return false;
 
-  startExpiryTimer: () => {
-    // Clear any existing timer before setting a new one
-    const existing = get()._expiryTimerId;
-    if (existing !== null) clearTimeout(existing);
-
-    const ms = msUntilNext8amIST();
-    const timerId = setTimeout(() => {
-      get().setLoggedOut();
-    }, ms);
-
-    set({ _expiryTimerId: timerId });
-  },
-
-  setLoggedIn: (token, username, expiresAt) => {
+    const previousPrincipal = normalisePrincipal(current.username);
+    const nextGeneration = current.sessionGeneration + 1;
     set({
-      status: "logged-in", token, reauthToken: null, username, expiresAt, lastActivity: Date.now(),
+      status: "transitioning",
+      token: null,
+      reauthToken: null,
+      sessionGeneration: nextGeneration,
     });
-    // Schedule automatic expiry at the next 08:00 IST
-    get().startExpiryTimer();
-  },
+    retireAuthenticatedClientState();
 
-  setLoggedOut: () => {
-    // Clear expiry timer on any logout path
-    const existing = get()._expiryTimerId;
-    if (existing !== null) clearTimeout(existing);
-    clearDemoSession();
-    set({
-      status: "logged-out", token: null, reauthToken: null, username: null,
-      expiresAt: null, _expiryTimerId: null,
+    let installed = false;
+    set((state) => {
+      if (
+        state.status !== "transitioning" ||
+        state.sessionGeneration !== nextGeneration ||
+        normalisePrincipal(state.username) !== previousPrincipal
+      ) {
+        return state;
+      }
+      installed = true;
+      return {
+        status: "logged-in",
+        token,
+        reauthToken: null,
+        username,
+        expiresAt,
+        lastActivity: Date.now(),
+      };
     });
-  },
+    if (installed) get().startExpiryTimer();
+    return installed;
+  };
 
-  // Lock the UI but RETAIN the session token for the PIN re-auth (moved out of
-  // the active `token` so nothing makes authenticated calls while locked).
-  setPinRequired: () =>
-    set((s) => ({ status: "pin-required", token: null, reauthToken: s.token ?? s.reauthToken })),
+  return {
+    status: "unknown",
+    token: null,
+    reauthToken: null,
+    username: null,
+    expiresAt: null,
+    lastActivity: Date.now(),
+    sessionGeneration: 0,
+    _expiryTimerId: null,
 
-  setSetupRequired: () =>
-    set({ status: "setup-required", token: null, reauthToken: null, username: null }),
+    startExpiryTimer: () => {
+      // Clear any existing timer before setting a new one
+      const existing = get()._expiryTimerId;
+      if (existing !== null) clearTimeout(existing);
 
-  updateToken: (token) => set({ token, lastActivity: Date.now() }),
+      const ms = msUntilNext8amIST();
+      const timerId = setTimeout(() => {
+        get().setLoggedOut();
+      }, ms);
 
-  touchActivity: () => set({ lastActivity: Date.now() }),
+      set({ _expiryTimerId: timerId });
+    },
 
-  checkIdle: () => {
-    const { status, lastActivity } = get();
-    if (status !== "logged-in") return;
+    setLoggedIn: (token, username, expiresAt) => {
+      installLoggedInSession(token, username, expiresAt);
+    },
 
-    const idle = Date.now() - lastActivity;
-    if (idle >= IDLE_LOGOUT_THRESHOLD) {
-      get().setLoggedOut();
-    } else if (idle >= IDLE_PIN_THRESHOLD) {
-      set((s) => ({ status: "pin-required", token: null, reauthToken: s.token ?? s.reauthToken }));
-    }
-  },
-}));
+    setLoggedInIfCurrent: (token, username, expiresAt, expectedFence) =>
+      installLoggedInSession(token, username, expiresAt, expectedFence),
+
+    setLoggedOut: () => {
+      // Clear expiry timer on any logout path
+      const existing = get()._expiryTimerId;
+      if (existing !== null) clearTimeout(existing);
+      clearDemoSession();
+      set((state) => ({
+        status: "logged-out", token: null, reauthToken: null, username: null,
+        expiresAt: null, _expiryTimerId: null,
+        sessionGeneration: state.sessionGeneration + 1,
+      }));
+      retireAuthenticatedClientState();
+    },
+
+    // Lock the UI but RETAIN the session token for the PIN re-auth (moved out of
+    // the active `token` so nothing makes authenticated calls while locked).
+    setPinRequired: () => {
+      const reauthToken = get().token ?? get().reauthToken;
+      set((state) => ({
+        status: "pin-required",
+        token: null,
+        reauthToken,
+        sessionGeneration: state.sessionGeneration + 1,
+      }));
+      retireAuthenticatedClientState();
+    },
+
+    setSetupRequired: () => {
+      set((state) => ({
+        status: "setup-required",
+        token: null,
+        reauthToken: null,
+        username: null,
+        sessionGeneration: state.sessionGeneration + 1,
+      }));
+      retireAuthenticatedClientState();
+    },
+
+    updateToken: (token, expectedGeneration) => {
+      const current = get();
+      const expectedPrincipal = current.username?.trim();
+      if (
+        current.status !== "logged-in" ||
+        !expectedPrincipal ||
+        current.sessionGeneration !== expectedGeneration
+      ) {
+        return false;
+      }
+
+      const nextGeneration = expectedGeneration + 1;
+      set({
+        status: "transitioning",
+        token: null,
+        sessionGeneration: nextGeneration,
+      });
+      retireAuthenticatedClientState();
+
+      let updated = false;
+      set((state) => {
+        if (
+          state.status !== "transitioning" ||
+          state.sessionGeneration !== nextGeneration ||
+          state.username?.trim() !== expectedPrincipal
+        ) {
+          return state;
+        }
+        updated = true;
+        return {
+          status: "logged-in",
+          token,
+          reauthToken: null,
+          lastActivity: Date.now(),
+        };
+      });
+      return updated;
+    },
+
+    touchActivity: () => set({ lastActivity: Date.now() }),
+
+    checkIdle: () => {
+      const { status, lastActivity } = get();
+      if (status !== "logged-in") return;
+
+      const idle = Date.now() - lastActivity;
+      if (idle >= IDLE_LOGOUT_THRESHOLD) {
+        get().setLoggedOut();
+      } else if (idle >= IDLE_PIN_THRESHOLD) {
+        get().setPinRequired();
+      }
+    },
+  };
+});
+
+/** Capture the complete auth context for asynchronous work. */
+export function captureAuthSessionFence(): AuthSessionFence {
+  const state = useAuthStore.getState();
+  return {
+    status: state.status,
+    principal: normalisePrincipal(state.username),
+    generation: state.sessionGeneration,
+  };
+}
+
+/** Return whether asynchronous work still belongs to its originating auth context. */
+export function isAuthSessionFenceCurrent(fence: AuthSessionFence): boolean {
+  return authStateMatchesFence(useAuthStore.getState(), fence);
+}

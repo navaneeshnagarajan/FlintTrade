@@ -22,6 +22,7 @@ JWT secret is process-global, so no app context is needed to mint tokens).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -32,7 +33,7 @@ from flinttrade_core.auth_routes import _create_token
 from flinttrade_core.exceptions import SafetyBypassError, UnsupportedCapabilityError
 from flinttrade_core.operations_routes import operations_bp
 from flinttrade_core.order_routes import orders_bp
-from flinttrade_engine.safety import set_safety_gate_secret
+from flinttrade_engine.safety import SafetyConfig, SafetySystem, set_safety_gate_secret
 
 pytestmark = pytest.mark.unit
 
@@ -46,9 +47,100 @@ def _bind_secret() -> None:
 
 
 def _app(broker_router: object | None = None, safety: object | None = None) -> Flask:
+    if safety is None:
+        safety = _passing_safety()
     app = Flask(__name__)
     app.config["BROKER_ROUTER"] = broker_router
     app.config["SAFETY"] = safety
+    app.config["SAFETY_CONFIG_READY"] = safety is not None
+    state_adapter = MagicMock()
+    state_adapter.positions = AsyncMock(return_value=[])
+    state_adapter.funds = AsyncMock(
+        return_value={
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+        }
+    )
+    state_adapter.trade_book = AsyncMock(return_value=[])
+    state_adapter.order_book = AsyncMock(return_value=[])
+    state_adapter.holdings = AsyncMock(return_value=[])
+    state_adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    forever_order = {
+        "orderid": "GTT-1",
+        "status": "OPEN",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": "5",
+        "filled_quantity": "0",
+        "price": "2900",
+        "pricetype": "LIMIT",
+        "product": "MIS",
+    }
+    super_order = {
+        "orderid": "SUP-1",
+        "status": "OPEN",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": "5",
+        "filled_quantity": "0",
+        "price": "100",
+        "pricetype": "LIMIT",
+        "product": "MIS",
+        "legs": [
+            {
+                "leg_name": "TARGET_LEG",
+                "status": "OPEN",
+                "price": "105",
+            }
+        ],
+    }
+    state_adapter.forever_orders = AsyncMock(return_value=[forever_order])
+    state_adapter.super_orders = AsyncMock(return_value=[super_order])
+    def quote_rows(_session: object, symbols: list[str]) -> list[dict[str, Any]]:
+        return [
+            {
+                "exchange": value.split(":", 1)[0],
+                "symbol": value.split(":", 1)[1],
+                "ltp": 2_900,
+            }
+            for value in symbols
+        ]
+
+    state_adapter.quotes = AsyncMock(side_effect=quote_rows)
+    app.config["NATIVE_ADAPTERS"] = {
+        broker: state_adapter for broker in ("dhan", "indmoney", "upstox")
+    }
+    registry = MagicMock()
+    registry.get_session_for.return_value = object()
+    app.config["REGISTRY"] = registry
+    app.config["OPENALGO_CLIENT"] = SimpleNamespace(
+        positionbook=AsyncMock(return_value=[]),
+        holdings=AsyncMock(return_value=[]),
+        funds=AsyncMock(
+            return_value={
+                "used_margin": "0",
+                "total_balance": "100000",
+                "opening_risk_capital": "100000",
+            }
+        ),
+        tradebook=AsyncMock(return_value=[]),
+        orderbook=AsyncMock(return_value=[]),
+        multi_quotes=AsyncMock(
+            side_effect=lambda symbols: [
+                {
+                    "exchange": value["exchange"],
+                    "symbol": value["symbol"],
+                    "ltp": 2_900,
+                }
+                for value in symbols
+            ]
+        ),
+        gtt_orderbook=AsyncMock(return_value=[forever_order]),
+        margin=AsyncMock(return_value={"data": {"required_margin": "100"}}),
+    )
     app.register_blueprint(orders_bp)
     app.register_blueprint(operations_bp)
     return app
@@ -70,23 +162,22 @@ def _practice_headers() -> dict[str, str]:
     return _headers(_create_token("nava", mode="practice"))
 
 
-def _passing_safety() -> MagicMock:
+def _passing_safety() -> SafetySystem:
     """A SafetySystem stub whose check_order and kill switch both pass."""
-    safety = MagicMock()
-    safety.check_order.return_value = []
-    safety.l5_kill.validate.return_value = MagicMock(passed=True)
+    safety = SafetySystem(SafetyConfig(check_market_hours=False))
+    safety.check_order = MagicMock(return_value=[])
+    safety.l5_kill.validate = MagicMock(return_value=MagicMock(passed=True))
     return safety
 
 
 def _real_safety(**cfg: Any) -> object:
-    from flinttrade_engine.safety import SafetyConfig, SafetySystem
-
     return SafetySystem(SafetyConfig(check_market_hours=False, **cfg))
 
 
 def _gated_router(result: Any = {"status": "ok"}) -> MagicMock:
     router = MagicMock()
     router.execute_gated = AsyncMock(return_value=result)
+    router.place_order = AsyncMock(return_value="OID-1")
     return router
 
 
@@ -105,7 +196,30 @@ def _app_with_native_state(
     registry.get_session_for.return_value = session
     adapter = MagicMock()
     adapter.positions = AsyncMock(return_value=positions or [])
-    adapter.funds = AsyncMock(return_value=funds or {})
+    adapter.funds = AsyncMock(
+        return_value={
+            "used_margin": "0",
+            "total_balance": "100000",
+            "opening_risk_capital": "100000",
+            **(funds or {}),
+        }
+    )
+    adapter.trade_book = AsyncMock(return_value=[])
+    adapter.order_book = AsyncMock(return_value=[])
+    adapter.holdings = AsyncMock(return_value=[])
+    adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    adapter.quotes = AsyncMock(
+        return_value=[
+            {
+                "symbol": getattr(position, "symbol", ""),
+                "exchange": str(getattr(position, "exchange", "NSE")),
+                "ltp": 100,
+                "prev_close": 100,
+                "previous_close_trusted": True,
+            }
+            for position in (positions or [])
+        ]
+    )
     app.config["REGISTRY"] = registry
     app.config["NATIVE_ADAPTERS"] = {adapter_id: adapter}
     return app, adapter, registry
@@ -212,7 +326,8 @@ def test_forever_place_malformed_body_returns_400() -> None:
 
 def test_forever_modify_happy_path_mints_and_dispatches() -> None:
     router = _gated_router()
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
         json={"changes": {"price": "2900"}, "broker": "dhan", "account_id": "personal"},
@@ -231,6 +346,7 @@ def test_forever_modify_happy_path_mints_and_dispatches() -> None:
     assert kw["hint"].account_id == "personal"
     # The minted context is bound to the SAME payload object the router gets.
     assert kw["safety_ctx"] is not None
+    safety.check_order.assert_not_called()
 
 
 def test_forever_modify_missing_changes_returns_400() -> None:
@@ -283,15 +399,15 @@ def test_forever_cancel_happy_path() -> None:
     assert kw["payload"] == {"_op": "cancel_forever", "order_id": "GTT-9"}
 
 
-def test_forever_cancel_not_blocked_by_kill_switch() -> None:
-    """Cancels reduce exposure — a halted account must still be able to cancel."""
+def test_forever_cancel_is_blocked_by_kill_switch() -> None:
+    """An ordinary cancel may remove a protective exit; only L5 policy bypasses."""
     safety = MagicMock()
     safety.l5_kill.validate.return_value = MagicMock(passed=False, layer="L5_KILL", reason="halted")
     router = _gated_router(result=None)
     client = _app(broker_router=router, safety=safety).test_client()
     resp = client.delete("/api/v1/orders/forever/GTT-9?broker=dhan", headers=_live_headers())
-    assert resp.status_code == 200
-    router.execute_gated.assert_awaited_once()
+    assert resp.status_code == 403
+    router.execute_gated.assert_not_called()
 
 
 def test_forever_unsupported_broker_returns_501() -> None:
@@ -299,7 +415,30 @@ def test_forever_unsupported_broker_returns_501() -> None:
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'kotakneo' does not support 'modify_forever'")
     )
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        _passing_safety(),
+        adapter_id="kotakneo",
+        account_id="default",
+    )
+    adapter.forever_orders = AsyncMock(
+        return_value=[
+            {
+                "orderid": "GTT-1",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "quantity": "5",
+                "filled_quantity": "0",
+                "price": "2900",
+                "pricetype": "LIMIT",
+                "product": "MIS",
+            }
+        ]
+    )
+    adapter.margin_calculator = AsyncMock(return_value={"required_margin": "100"})
+    client = app.test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
         json={"changes": {"price": "2900"}, "broker": "kotakneo"},
@@ -428,7 +567,8 @@ def test_list_requires_auth() -> None:
 
 def test_super_modify_happy_path() -> None:
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety).test_client()
     resp = client.put(
         "/api/v1/orders/super/SUP-1",
         json={"changes": {"leg_name": "TARGET_LEG", "price": "105"}, "broker": "dhan"},
@@ -438,6 +578,60 @@ def test_super_modify_happy_path() -> None:
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "modify_super_order"
     assert kw["payload"]["changes"]["leg_name"] == "TARGET_LEG"
+    safety.check_order.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("path", "reader_name"),
+    [
+        ("/api/v1/orders/forever/GTT-1", "forever_orders"),
+        ("/api/v1/orders/super/SUP-1", "super_orders"),
+    ],
+)
+def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
+    path: str,
+    reader_name: str,
+) -> None:
+    blocked = MagicMock(passed=False, layer="L1_ORDER", reason="quantity limit")
+    safety = _passing_safety()
+    safety.check_order.return_value = [blocked]
+    router = _gated_router(result=None)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="dhan",
+        account_id="D1",
+    )
+    current = {
+        "orderid": path.rsplit("/", 1)[-1],
+        "status": "PENDING",
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": "1",
+        "filled_quantity": "0",
+        "price": "0",
+        "pricetype": "MARKET",
+        "product": "MIS",
+    }
+    setattr(adapter, reader_name, AsyncMock(return_value=[current]))
+    adapter.margin_calculator = AsyncMock(
+        side_effect=[
+            {"required_margin": "100"},
+            {"required_margin": "250"},
+            {"required_margin": "250"},
+        ]
+    )
+
+    response = app.test_client().put(
+        path,
+        json={"changes": {"quantity": 2}, "broker": "dhan", "account_id": "D1"},
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 403
+    safety.check_order.assert_called_once()
+    router.execute_gated.assert_not_called()
 
 
 def test_super_modify_missing_changes_returns_400() -> None:
@@ -651,7 +845,7 @@ def test_trigger_place_native_l2_blocks_before_gate() -> None:
         _real_safety(max_positions=1),
         adapter_id="dhan",
         account_id="D1",
-        positions=[Position(symbol="INFY", exchange="NSE", quantity="50")],
+        positions=[Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")],
         funds={"used_margin": "0", "total_balance": "100000"},
     )
     body = {**_TRIGGER_BODY, "account_id": "D1"}
@@ -661,7 +855,7 @@ def test_trigger_place_native_l2_blocks_before_gate() -> None:
     assert "L2_POSITION" in resp.get_json()["message"]
     router.execute_gated.assert_not_called()
     registry.get_session_for.assert_called_once_with("dhan", "D1")
-    adapter.positions.assert_awaited_once()
+    assert adapter.positions.await_count == 2
     adapter.funds.assert_awaited_once()
 
 
@@ -708,30 +902,156 @@ _MULTI_BODY = {
 }
 
 
+def _batch_request(path: str) -> dict[str, Any]:
+    if path.endswith("/triggers"):
+        return {
+            "condition": {
+                "field": "LTP",
+                "operator": ">=",
+                "value": 100,
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+            },
+            **_MULTI_BODY,
+        }
+    return dict(_MULTI_BODY)
+
+
+def _batch_state(*admissions: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(
+        positions=[],
+        used_margin=0.0,
+        total_balance=100_000.0,
+        daily_pnl=0.0,
+        starting_capital=100_000.0,
+        net_delta=0.0,
+        net_vega=0.0,
+        ltp_for=lambda _order: None,
+        admission_for=lambda index: admissions[index],
+    )
+
+
+@pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
+def test_batch_writes_accumulate_position_count_before_gate(
+    path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import order_routes
+
+    state = _batch_state(
+        SimpleNamespace(positions=[], used_margin=0.0, net_delta=0.0, net_vega=0.0),
+        SimpleNamespace(
+            positions=[SimpleNamespace(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="1")],
+            used_margin=0.0,
+            net_delta=0.0,
+            net_vega=0.0,
+        ),
+    )
+    if path.endswith("/multi"):
+        states = iter((_batch_state(state.admission_for(0)), _batch_state(state.admission_for(1))))
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: next(states))
+    else:
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
+    router = _gated_router()
+    response = _app(router, _real_safety(max_positions=1)).test_client().post(
+        path,
+        json=_batch_request(path),
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 403
+    assert "L2_POSITION" in response.get_json()["message"]
+    if path.endswith("/multi"):
+        router.place_order.assert_awaited_once()
+    else:
+        router.execute_gated.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
+def test_batch_writes_accumulate_margin_before_gate(
+    path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import order_routes
+
+    state = _batch_state(
+        SimpleNamespace(positions=[], used_margin=50_000.0, net_delta=0.0, net_vega=0.0),
+        SimpleNamespace(positions=[], used_margin=70_000.0, net_delta=0.0, net_vega=0.0),
+    )
+    if path.endswith("/multi"):
+        states = iter((_batch_state(state.admission_for(0)), _batch_state(state.admission_for(1))))
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: next(states))
+    else:
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
+    router = _gated_router()
+    response = _app(router, _real_safety(max_margin_pct=60.0)).test_client().post(
+        path,
+        json=_batch_request(path),
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 403
+    assert "L2_POSITION" in response.get_json()["message"]
+    if path.endswith("/multi"):
+        router.place_order.assert_awaited_once()
+    else:
+        router.execute_gated.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["/api/v1/orders/triggers", "/api/v1/orders/multi"])
+def test_batch_writes_accumulate_greeks_before_gate(
+    path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from flinttrade_core import order_routes
+
+    state = _batch_state(
+        SimpleNamespace(positions=[], used_margin=0.0, net_delta=30.0, net_vega=0.0),
+        SimpleNamespace(positions=[], used_margin=0.0, net_delta=60.0, net_vega=0.0),
+    )
+    if path.endswith("/multi"):
+        states = iter((_batch_state(state.admission_for(0)), _batch_state(state.admission_for(1))))
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: next(states))
+    else:
+        monkeypatch.setattr(order_routes, "_gather_safety_state", lambda *_args, **_kwargs: state)
+    router = _gated_router()
+    response = _app(router, _real_safety(max_net_delta=50.0)).test_client().post(
+        path,
+        json=_batch_request(path),
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 403
+    assert "L3_PORTFOLIO" in response.get_json()["message"]
+    if path.endswith("/multi"):
+        router.place_order.assert_awaited_once()
+    else:
+        router.execute_gated.assert_not_called()
+
+
 def test_multi_place_happy_path() -> None:
-    router = _gated_router(result={"order_ids": ["OID-0", "OID-1"]})
+    router = _gated_router()
+    router.place_order.side_effect = ["OID-0", "OID-1"]
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
     assert resp.status_code == 200
     assert resp.get_json()["data"] == {"order_ids": ["OID-0", "OID-1"]}
-    kw = router.execute_gated.await_args.kwargs
-    assert kw["verb"] == "place_multi_order"
-    assert [o.symbol for o in kw["payload"]["orders"]] == ["RELIANCE", "TCS"]
-    # L1-L5 ran for EVERY leg before the gate was minted.
+    assert [call.kwargs["order"].symbol for call in router.place_order.await_args_list] == ["RELIANCE", "TCS"]
+    # L1-L5 ran immediately before each independently gated leg.
     assert safety.check_order.call_count == 2
 
 
 def test_multi_place_safety_block_returns_403() -> None:
     blocked = MagicMock(passed=False, layer="L1_ORDER", reason="quantity exceeds limit")
-    safety = MagicMock()
+    safety = _passing_safety()
     safety.check_order.return_value = [blocked]
     router = _gated_router()
     client = _app(broker_router=router, safety=safety).test_client()
     resp = client.post("/api/v1/orders/multi", json=_MULTI_BODY, headers=_live_headers())
     assert resp.status_code == 403
     assert "L1_ORDER" in resp.get_json()["message"]
-    router.execute_gated.assert_not_called()
+    router.place_order.assert_not_called()
 
 
 def test_multi_place_native_l2_blocks_before_gate() -> None:
@@ -744,7 +1064,7 @@ def test_multi_place_native_l2_blocks_before_gate() -> None:
         _real_safety(max_positions=1),
         adapter_id="upstox",
         account_id="U1",
-        positions=[Position(symbol="INFY", exchange="NSE", quantity="50")],
+        positions=[Position(symbol="INFY", exchange="NSE", product="MIS", quantity="50")],
         funds={"used_margin": "0", "total_balance": "100000"},
     )
     body = {**_MULTI_BODY, "account_id": "U1"}
@@ -754,7 +1074,7 @@ def test_multi_place_native_l2_blocks_before_gate() -> None:
     assert "L2_POSITION" in resp.get_json()["message"]
     router.execute_gated.assert_not_called()
     registry.get_session_for.assert_called_once_with("upstox", "U1")
-    adapter.positions.assert_awaited_once()
+    assert adapter.positions.await_count == 2
     adapter.funds.assert_awaited_once()
 
 
@@ -785,7 +1105,7 @@ def test_multi_place_practice_jwt_rejected() -> None:
 
 def test_multi_place_unsupported_broker_returns_501() -> None:
     router = MagicMock()
-    router.execute_gated = AsyncMock(
+    router.place_order = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'dhan' does not support 'place_multi_order'")
     )
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
@@ -832,20 +1152,21 @@ def test_native_cancel_all_with_strategy_scope_fails_closed() -> None:
     router.execute_gated.assert_not_called()
 
 
-def test_cancel_all_without_broker_fails_closed_until_gated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No explicit broker must not fall back to the raw OpenAlgo forward."""
+def test_cancel_all_without_broker_uses_gated_openalgo_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default OpenAlgo sweep must use BrokerRouter, never the raw forward."""
     import flinttrade_core.order_routes as orr
 
     def _fake_forward(endpoint: str, body: dict[str, Any]) -> tuple[Any, int]:
         raise AssertionError(f"raw OpenAlgo forward reached for {endpoint}: {body}")
 
     monkeypatch.setattr(orr, "_forward_to_openalgo", _fake_forward)
-    router = _gated_router()
+    router = _gated_router(result={"status": "ok"})
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
     resp = client.post("/api/v1/orders/cancel-all", json={}, headers=_live_headers())
-    assert resp.status_code == 501
-    assert "gated broker router" in resp.get_json()["message"]
-    router.execute_gated.assert_not_called()
+    assert resp.status_code == 200
+    kw = router.execute_gated.await_args.kwargs
+    assert kw["verb"] == "cancel_all_orders"
+    assert kw["hint"].adapter_id == "openalgo"
 
 
 def test_cancel_all_unsupported_broker_returns_501() -> None:
@@ -908,9 +1229,19 @@ _CONVERT_BODY = {
 
 
 def test_positions_convert_happy_path() -> None:
+    from flinttrade_core.models import Position
+
     router = _gated_router(result=None)
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
-    resp = client.post("/api/v1/positions/convert", json=_CONVERT_BODY, headers=_live_headers())
+    app, _adapter, _registry = _app_with_native_state(
+        router,
+        _passing_safety(),
+        adapter_id="dhan",
+        account_id="default",
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
+    )
+    resp = app.test_client().post(
+        "/api/v1/positions/convert", json=_CONVERT_BODY, headers=_live_headers()
+    )
     assert resp.status_code == 200
     kw = router.execute_gated.await_args.kwargs
     assert kw["verb"] == "convert_position"
@@ -918,6 +1249,96 @@ def test_positions_convert_happy_path() -> None:
     # Routing fields never leak into the signed broker request.
     assert "broker" not in kw["payload"]["req"]
     assert "account_id" not in kw["payload"]["req"]
+
+
+def test_positions_convert_margin_increase_runs_full_safety_before_gate() -> None:
+    from flinttrade_core.models import Position
+
+    blocked = MagicMock(passed=False, layer="L2_POSITION", reason="margin limit")
+    safety = _passing_safety()
+    safety.check_order.return_value = [blocked]
+    router = _gated_router(result=None)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="dhan",
+        account_id="default",
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
+        funds={"used_margin": "100"},
+    )
+    adapter.margin_calculator = AsyncMock(
+        side_effect=[
+            {"required_margin": "100"},
+            {"required_margin": "700"},
+        ]
+    )
+
+    response = app.test_client().post(
+        "/api/v1/positions/convert",
+        json=_CONVERT_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 403
+    checked_order = safety.check_order.call_args.args[0]
+    checked_inputs = safety.check_order.call_args.kwargs
+    assert str(checked_order.product) == "CNC"
+    assert checked_inputs["used_margin"] == 700.0
+    assert checked_inputs["positions"] == []
+    router.execute_gated.assert_not_called()
+
+
+def test_positions_convert_margin_reduction_skips_l1_l4_and_dispatches() -> None:
+    from flinttrade_core.models import Position
+
+    safety = _passing_safety()
+    safety.check_order.side_effect = AssertionError("no-increase conversion entered L1-L4")
+    router = _gated_router(result=None)
+    app, adapter, _registry = _app_with_native_state(
+        router,
+        safety,
+        adapter_id="dhan",
+        account_id="default",
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="CNC", quantity="5")],
+    )
+    adapter.margin_calculator = AsyncMock(
+        side_effect=[
+            {"required_margin": "700"},
+            {"required_margin": "100"},
+        ]
+    )
+    body = {**_CONVERT_BODY, "from_product": "CNC", "to_product": "MIS"}
+
+    response = app.test_client().post(
+        "/api/v1/positions/convert",
+        json=body,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 200
+    assert adapter.margin_calculator.await_count == 2
+    safety.check_order.assert_not_called()
+    router.execute_gated.assert_awaited_once()
+
+
+def test_positions_convert_unmatched_position_fails_closed_before_gate() -> None:
+    router = _gated_router(result=None)
+    app, _adapter, _registry = _app_with_native_state(
+        router,
+        _passing_safety(),
+        adapter_id="dhan",
+        account_id="default",
+        positions=[],
+    )
+
+    response = app.test_client().post(
+        "/api/v1/positions/convert",
+        json=_CONVERT_BODY,
+        headers=_live_headers(),
+    )
+
+    assert response.status_code == 400
+    router.execute_gated.assert_not_called()
 
 
 def test_positions_convert_empty_body_returns_400() -> None:
@@ -937,11 +1358,20 @@ def test_positions_convert_practice_jwt_rejected() -> None:
 
 
 def test_positions_convert_unsupported_broker_returns_501() -> None:
+    from flinttrade_core.models import Position
+
     router = MagicMock()
     router.execute_gated = AsyncMock(
         side_effect=UnsupportedCapabilityError("broker adapter 'kotakneo' does not support 'convert_position'")
     )
-    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+    app, _adapter, _registry = _app_with_native_state(
+        router,
+        _passing_safety(),
+        adapter_id="kotakneo",
+        account_id="default",
+        positions=[Position(symbol="RELIANCE", exchange="NSE", product="MIS", quantity="5")],
+    )
+    client = app.test_client()
     resp = client.post(
         "/api/v1/positions/convert", json={**_CONVERT_BODY, "broker": "kotakneo"},
         headers=_live_headers(),
@@ -976,8 +1406,8 @@ def test_positions_exit_all_happy_path() -> None:
     assert "confirm" not in kw["payload"]
 
 
-def test_positions_exit_all_not_blocked_by_kill_switch() -> None:
-    """Exit-all reduces exposure — the halted-account companion action."""
+def test_positions_exit_all_is_blocked_by_kill_switch() -> None:
+    """L5 retries are coordinated; ordinary exit-all must not double-square-off."""
     safety = MagicMock()
     safety.l5_kill.validate.return_value = MagicMock(passed=False, layer="L5_KILL", reason="halted")
     router = _gated_router(result={"status": "ok"})
@@ -986,8 +1416,8 @@ def test_positions_exit_all_not_blocked_by_kill_switch() -> None:
         "/api/v1/positions/exit-all", json={"confirm": True, "broker": "dhan"},
         headers=_live_headers(),
     )
-    assert resp.status_code == 200
-    router.execute_gated.assert_awaited_once()
+    assert resp.status_code == 403
+    router.execute_gated.assert_not_called()
 
 
 def test_positions_exit_all_practice_jwt_rejected() -> None:

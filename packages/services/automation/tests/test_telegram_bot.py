@@ -5,9 +5,11 @@ All HTTP calls and external libraries are mocked. No real Telegram tokens needed
 
 from __future__ import annotations
 
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # BotConfig
@@ -164,6 +166,20 @@ class TestSendMessage:
         with patch("httpx.post", side_effect=Exception("network down")):
             result = bot.send_message("test")
         assert result is False
+
+    def test_send_message_exception_never_logs_the_bot_token(self, caplog):
+        import logging
+
+        from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
+
+        token = "123:SECRETTOKEN"
+        bot = TelegramBot(config=BotConfig(token=token, chat_id="123"))
+        error = RuntimeError(f"request failed for https://api.telegram.org/bot{token}/sendMessage")
+        with caplog.at_level(logging.ERROR), patch("httpx.post", side_effect=error):
+            assert bot.send_message("test") is False
+
+        assert "SECRETTOKEN" not in caplog.text
+        assert "RuntimeError" in caplog.text
 
     def test_send_message_no_token_returns_false(self):
         from flinttrade_automation.telegram_bot import BotConfig, TelegramBot
@@ -664,6 +680,153 @@ class TestPollingLoop:
             bot._running = True
             bot.run_polling(client=client)
         assert calls["n"] == 2  # retried after the error rather than dying
+
+    def test_stop_waits_for_blocked_poll_and_discards_returned_kill(self):
+        bot = self._bot()
+        poll_started = threading.Event()
+        release_poll = threading.Event()
+        client = MagicMock()
+
+        def get_updates(offset=None, timeout=30):
+            if timeout == 0:
+                return []
+            poll_started.set()
+            assert release_poll.wait(2)
+            return [self._msg("/kill")]
+
+        client.get_updates.side_effect = get_updates
+        dispatched = MagicMock()
+        bot.handle_command = dispatched
+        bot._running = True
+        poll_thread = threading.Thread(target=bot.run_polling, kwargs={"client": client})
+        bot._poll_thread = poll_thread
+        poll_thread.start()
+        assert poll_started.wait(1)
+
+        stop_error: list[BaseException] = []
+
+        def stop_bot() -> None:
+            try:
+                bot.stop(timeout=1.0)
+            except BaseException as exc:  # noqa: BLE001 - asserted below
+                stop_error.append(exc)
+
+        stop_thread = threading.Thread(target=stop_bot)
+        stop_thread.start()
+        time.sleep(0.02)
+        stop_waited_for_poll = stop_thread.is_alive()
+        release_poll.set()
+        bot._running = False
+        stop_thread.join(1)
+        poll_thread.join(1)
+
+        assert stop_waited_for_poll is True
+        assert stop_error == []
+        assert stop_thread.is_alive() is False
+        assert poll_thread.is_alive() is False
+        dispatched.assert_not_called()
+
+    def test_stop_timeout_retains_live_poll_owner(self):
+        bot = self._bot()
+        poll_started = threading.Event()
+        release_poll = threading.Event()
+        client = MagicMock()
+
+        def get_updates(offset=None, timeout=30):
+            if timeout == 0:
+                return []
+            poll_started.set()
+            assert release_poll.wait(2)
+            return []
+
+        client.get_updates.side_effect = get_updates
+        bot._running = True
+        poll_thread = threading.Thread(target=bot.run_polling, kwargs={"client": client})
+        bot._poll_thread = poll_thread
+        poll_thread.start()
+        assert poll_started.wait(1)
+
+        try:
+            with pytest.raises(TimeoutError, match="Telegram polling shutdown timed out"):
+                bot.stop(timeout=0.01)
+
+            assert bot._poll_thread is poll_thread
+            assert poll_thread.is_alive()
+        finally:
+            bot._running = False
+            release_poll.set()
+            poll_thread.join(1)
+
+    def test_start_cannot_replace_owner_while_stop_is_joining(self):
+        bot = self._bot()
+        old_poll_started = threading.Event()
+        release_old_poll = threading.Event()
+        old_at_stop_log = threading.Event()
+        allow_old_return = threading.Event()
+        new_poll_started = threading.Event()
+        release_new_poll = threading.Event()
+        old_client = MagicMock()
+        new_client = MagicMock()
+
+        def old_updates(offset=None, timeout=30):
+            if timeout == 0:
+                return []
+            old_poll_started.set()
+            assert release_old_poll.wait(2)
+            return []
+
+        def new_updates(offset=None, timeout=30):
+            if timeout == 0:
+                return []
+            new_poll_started.set()
+            assert release_new_poll.wait(2)
+            return []
+
+        old_client.get_updates.side_effect = old_updates
+        new_client.get_updates.side_effect = new_updates
+        stop_log_seen = False
+
+        def hold_old_stop_log(message, *args):
+            nonlocal stop_log_seen
+            if message == "Telegram polling loop stopped" and not stop_log_seen:
+                stop_log_seen = True
+                old_at_stop_log.set()
+                assert allow_old_return.wait(2)
+
+        stop_error: list[BaseException] = []
+
+        def stop_bot() -> None:
+            try:
+                bot.stop(timeout=1.0)
+            except BaseException as exc:  # noqa: BLE001 - asserted below
+                stop_error.append(exc)
+
+        started_during_stop = False
+        with (
+            patch(
+                "flinttrade_automation.telegram_bot.TelegramClient",
+                side_effect=[old_client, new_client],
+            ),
+            patch("flinttrade_automation.telegram_bot.logger.info", side_effect=hold_old_stop_log),
+        ):
+            assert bot.start_background() is True
+            assert old_poll_started.wait(1)
+            stop_thread = threading.Thread(target=stop_bot)
+            stop_thread.start()
+            release_old_poll.set()
+            assert old_at_stop_log.wait(1)
+            try:
+                started_during_stop = bot.start_background()
+            finally:
+                allow_old_return.set()
+                stop_thread.join(1)
+                if started_during_stop:
+                    release_new_poll.set()
+                    bot.stop(timeout=1.0)
+
+        assert started_during_stop is False
+        assert new_poll_started.is_set() is False
+        assert stop_error == []
 
     def test_unauthorised_chat_gets_no_reply_and_no_action(self):
         bot = self._bot()  # authorised chat is 999

@@ -8,11 +8,13 @@ Run with:
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from unittest.mock import MagicMock
 
 import pytest
 from flask import Flask
 
+from flinttrade_data.sandbox_engine import SandboxConfig
 from flinttrade_data.sandbox_routes import data_sandbox_bp
 
 
@@ -38,7 +40,27 @@ def _make_mock_engine(starting_capital: float = 500_000.0) -> MagicMock:
     }
     engine.get_positions.return_value = []
     engine.get_orders.return_value = []
+    engine.get_trades.return_value = []
     engine.get_pnl.return_value = {"realised": 0.0, "unrealised": 0.0, "total": 0.0}
+    engine.get_pnl_history.return_value = []
+    engine.config = SandboxConfig(starting_capital=starting_capital)
+    engine.update_config.return_value = engine.config
+    engine.square_off_all.return_value = 2
+    engine.cancel_order.return_value = {
+        "status": "CANCELLED",
+        "order_id": "SB-001",
+        "message": "Practice order cancelled",
+    }
+    engine.cancel_pending_orders.return_value = {
+        "status": "CANCELLED",
+        "cancelled_count": 2,
+        "message": "Cancelled 2 pending Practice order(s)",
+    }
+    engine.modify_order.return_value = {
+        "status": "PENDING",
+        "order_id": "SB-001",
+        "message": "Practice order modified",
+    }
     engine.place_order.return_value = {
         "status": "COMPLETE",
         "order_id": "SB-001",
@@ -131,6 +153,39 @@ class TestPlaceOrder:
             quantity=50,
             price=24000.0,
             product="MIS",
+            order_type="MARKET",
+            trigger_price=0.0,
+            strategy="",
+        )
+
+    def test_pending_order_is_success_and_forwards_union_fields(self, client, engine):
+        engine.place_order.return_value = {
+            "status": "PENDING",
+            "order_id": "SB-LIMIT",
+            "message": "Pending",
+        }
+        resp = client.post("/v1/sandbox/order", json={
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "action": "BUY",
+            "quantity": 10,
+            "price": 1_500.0,
+            "pricetype": "LIMIT",
+            "trigger_price": 1_490.0,
+            "strategy": "mean-revert",
+        })
+
+        assert resp.status_code == 200
+        engine.place_order.assert_called_once_with(
+            symbol="INFY",
+            exchange="NSE",
+            action="BUY",
+            quantity=10,
+            price=1_500.0,
+            product="MIS",
+            order_type="LIMIT",
+            trigger_price=1_490.0,
+            strategy="mean-revert",
         )
 
     def test_place_order_missing_fields(self, client):
@@ -227,11 +282,90 @@ class TestGetStatus:
         # capital must be a number, not the nested capital object
         assert isinstance(data["capital"], (int, float))
 
-    def test_trades_count_reflects_orders(self, client, engine):
-        engine.get_orders.return_value = [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+    def test_trades_count_reflects_executed_trades(self, client, engine):
+        engine.get_trades.return_value = [{"id": "1"}, {"id": "2"}, {"id": "3"}]
         resp = client.get("/v1/sandbox/status")
         assert resp.get_json()["data"]["trades_count"] == 3
 
     def test_no_engine_returns_503(self, client_no_engine):
         resp = client_no_engine.get("/v1/sandbox/status")
         assert resp.status_code == 503
+
+
+class TestMergedSandboxSurface:
+    def test_get_config(self, client, engine):
+        resp = client.get("/v1/sandbox/config")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["config"] == asdict(engine.config)
+
+    def test_update_config_uses_validating_engine_method(self, client, engine):
+        updated = SandboxConfig(starting_capital=500_000.0, equity_leverage=4)
+        engine.update_config.return_value = updated
+
+        resp = client.post("/v1/sandbox/config", json={"equity_leverage": 4})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["config"]["equity_leverage"] == 4
+        engine.update_config.assert_called_once_with(equity_leverage=4)
+
+    def test_update_config_rejects_invalid_input(self, client, engine):
+        engine.update_config.side_effect = ValueError("invalid")
+
+        resp = client.post("/v1/sandbox/config", json={"equity_leverage": 0})
+
+        assert resp.status_code == 400
+        assert resp.get_json()["status"] == "error"
+
+    def test_get_trades_and_pnl_history(self, client, engine):
+        engine.get_trades.return_value = [{"trade_id": "T-1"}]
+        engine.get_pnl_history.return_value = [{"date": "2026-07-14"}]
+
+        trades = client.get("/v1/sandbox/trades")
+        pnl = client.get("/v1/sandbox/pnl/history")
+
+        assert trades.get_json()["data"]["trades"] == [{"trade_id": "T-1"}]
+        assert pnl.get_json()["data"]["pnl_history"] == [{"date": "2026-07-14"}]
+
+    def test_get_legacy_funds_shape_from_canonical_engine(self, client, engine):
+        engine.get_funds.return_value = {
+            "starting_capital": 500_000.0,
+            "used_margin": 10_000.0,
+            "realized_pnl": 500.0,
+            "available_balance": 490_000.0,
+            "total_equity": 500_500.0,
+        }
+
+        resp = client.get("/v1/sandbox/funds")
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["funds"]["total_equity"] == 500_500.0
+
+    def test_square_off_forwards_exchange_qualified_ticks(self, client, engine):
+        ticks = {"NSE:INFY": 1_510.0, "NSE:TCS": 3_900.0}
+
+        resp = client.post("/v1/sandbox/square-off", json={"latest_ticks": ticks})
+
+        assert resp.status_code == 200
+        assert resp.get_json()["data"]["closed_positions"] == 2
+        engine.square_off_all.assert_called_once_with(ticks)
+
+    def test_cancel_modify_and_cancel_all_reach_engine(self, client, engine):
+        cancelled = client.delete("/v1/sandbox/order/SB-001")
+        modified = client.patch(
+            "/v1/sandbox/order/SB-001",
+            json={"quantity": 5, "price": 100.0, "pricetype": "LIMIT"},
+        )
+        all_cancelled = client.post("/v1/sandbox/orders/cancel-all")
+
+        assert cancelled.status_code == 200
+        assert modified.status_code == 200
+        assert all_cancelled.status_code == 200
+        engine.cancel_order.assert_called_once_with("SB-001")
+        engine.modify_order.assert_called_once_with(
+            "SB-001",
+            quantity=5,
+            price=100.0,
+            order_type="LIMIT",
+        )
+        engine.cancel_pending_orders.assert_called_once_with()

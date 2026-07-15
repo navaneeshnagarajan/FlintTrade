@@ -1,6 +1,6 @@
 # Engine
 
-> Five-layer safety system, order router, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation.
+> Five-layer order-admission safety, gated scheduled-strategy execution, scheduler, base strategy class, AST-guarded sandbox executor, bracket-order engine, mode guard, and reconciliation.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -8,8 +8,8 @@
 
 ## Public surface
 
-- `src/flinttrade_engine/safety.py — kill switches across 5 layers`
-- `src/flinttrade_engine/router.py — broker-agnostic order routing`
+- `src/flinttrade_engine/safety.py — five-layer order-admission safety, explicit L5 kill switch, and account-scoped MTM circuit breaker`
+- `src/flinttrade_engine/strategy_execution.py — gated scheduled-strategy execution through BrokerRouter`
 - `src/flinttrade_engine/strategy.py — base class for live strategies`
 - `src/flinttrade_engine/sandbox_executor.py — user-strategy execution with AST guard`
 - `src/flinttrade_engine/mode_guard.py — server-side Explore / Practice / Live enforcement`

@@ -30,11 +30,16 @@ const mockGetPositionbook = vi.fn<() => Promise<Position[]>>();
 const mockGetMargin = vi.fn<
   (sym: string, exch: string, qty: number, prod: string, act: string) => Promise<MarginData>
 >();
+const dataScopeState = vi.hoisted(() => ({ value: "live:openalgo:first" }));
 
 vi.mock("@/services/api", () => ({
   getOrderbook: () => mockGetOrderbook(),
   getPositionbook: () => mockGetPositionbook(),
   getMargin: (...args: [string, string, number, string, string]) => mockGetMargin(...args),
+}));
+
+vi.mock("@/hooks/useDataScope", () => ({
+  useDataScope: () => dataScopeState.value,
 }));
 
 // isMarketHours drives refetchInterval and the session-union helper.
@@ -74,6 +79,7 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  dataScopeState.value = "live:openalgo:first";
   // clearAllMocks keeps implementations — re-pin the "all sessions closed"
   // default so a per-test mockImplementation cannot leak forward.
   mockIsMarketHours.mockImplementation(() => false);
@@ -341,5 +347,19 @@ describe("useMargin — enabled gate", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toStrictEqual(margin);
+  });
+
+  it("does not reuse a margin result after the account data scope changes", async () => {
+    mockGetMargin.mockResolvedValue(makeMargin());
+    const { rerender } = renderHook(
+      () => useMargin("NIFTY", "NFO", 50, "MIS", "BUY"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(1));
+
+    dataScopeState.value = "live:openalgo:second";
+    rerender();
+
+    await waitFor(() => expect(mockGetMargin).toHaveBeenCalledTimes(2));
   });
 });

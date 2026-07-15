@@ -371,21 +371,27 @@ def test_quote_from_feed_peels_double_nested_data():
 
 def test_to_option_chain_dict():
     resp = {"status": "success", "data": {"last_price": 24000, "oc": {
-        "24100.000000": {"ce": {"last_price": 100}, "pe": {"last_price": 180}},
+        "24100.000000": {
+            "ce": {"security_id": 49083, "last_price": 100},
+            "pe": {"security_id": 49084, "last_price": 180},
+        },
         "24000.000000": {
-            "ce": {"last_price": 150, "oi": 10000, "volume": 500, "implied_volatility": 12.5,
+            "ce": {"security_id": 49081, "last_price": 150, "oi": 10000, "volume": 500, "implied_volatility": 12.5,
                    "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -5, "vega": 8},
                    "top_bid_price": 149, "top_ask_price": 151},
-            "pe": {"last_price": 140, "oi": 12000, "greeks": {"delta": -0.5}},
+            "pe": {"security_id": 49082, "last_price": 140, "oi": 12000, "greeks": {"delta": -0.5}},
         },
     }}}
     oc = to_option_chain_dict("NIFTY", "NSE_INDEX", resp)
     assert oc["underlying"] == "NIFTY" and len(oc["strikes"]) == 2
+    assert oc["spot_price"] == 24000.0
     # sorted ascending by strike
     assert oc["strikes"][0]["strike_price"] == 24000.0
     assert oc["strikes"][1]["strike_price"] == 24100.0
     s0 = oc["strikes"][0]
     assert s0["ce_ltp"] == 150.0 and s0["ce_delta"] == 0.5 and s0["pe_oi"] == 12000
+    assert s0["ce_instrument_id"] == "49081"
+    assert s0["pe_instrument_id"] == "49082"
 
 
 def test_to_option_chain_dict_peels_double_nested_data():
@@ -401,6 +407,7 @@ def test_to_option_chain_dict_peels_double_nested_data():
         },
     }}, "status": "success"}}
     oc = to_option_chain_dict("NIFTY", "NSE_INDEX", resp)
+    assert oc["spot_price"] == 25642.8
     assert len(oc["strikes"]) == 1
     assert oc["strikes"][0]["strike_price"] == 25650.0
     assert oc["strikes"][0]["ce_ltp"] == 134.0 and oc["strikes"][0]["pe_oi"] == 3096145

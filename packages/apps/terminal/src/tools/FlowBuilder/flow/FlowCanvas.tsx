@@ -13,15 +13,7 @@ import {
   MiniMap,
   Panel,
 } from "@xyflow/react";
-import {
-  X,
-  Workflow,
-  Terminal,
-  Save,
-  Trash2,
-  ChevronRight,
-  AlertCircle,
-} from "lucide-react";
+import { Workflow, Save, Trash2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { useFlowStore } from "@/stores/flowStore";
@@ -66,10 +58,21 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
 
   const [name, setName] = useState(flowName);
   const [saved, setSaved] = useState(true);
-  const [showRunNote, setShowRunNote] = useState(false);
   const [logCollapsed, setLogCollapsed] = useState(false);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+
+  const addNodeAt = useCallback(
+    (nodeType: string, position: { x: number; y: number }) => {
+      const catId = NODE_TYPE_TO_CATEGORY.get(nodeType) ?? "utilities";
+      const color = NODE_TYPE_TO_COLOR.get(nodeType) ?? "#a78bfa";
+      const label = NODE_TYPE_TO_LABEL.get(nodeType) ?? nodeType;
+
+      addNode(nodeType, position, label, catId, color);
+      setSaved(false);
+    },
+    [addNode]
+  );
 
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
@@ -83,14 +86,20 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         y: e.clientY - bounds.top,
       };
 
-      const catId = NODE_TYPE_TO_CATEGORY.get(nodeType) ?? "utilities";
-      const color = NODE_TYPE_TO_COLOR.get(nodeType) ?? "#a78bfa";
-      const label = NODE_TYPE_TO_LABEL.get(nodeType) ?? nodeType;
-
-      addNode(nodeType, position, label, catId, color);
-      setSaved(false);
+      addNodeAt(nodeType, position);
     },
-    [addNode]
+    [addNodeAt]
+  );
+
+  const handlePaletteAdd = useCallback(
+    (nodeType: string) => {
+      const index = nodes.length;
+      addNodeAt(nodeType, {
+        x: 120 + (index % 4) * 180,
+        y: 80 + Math.floor(index / 4) * 120,
+      });
+    },
+    [addNodeAt, nodes.length]
   );
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -140,10 +149,6 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
     addLogEntry("success", `Workflow "${name}" saved (${nodes.length} nodes, ${edges.length} edges)`);
   }
 
-  function handleRunClick(): void {
-    setShowRunNote((v) => !v);
-  }
-
   function handleClear(): void {
     clearCanvas();
     setSaved(false);
@@ -173,6 +178,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
             <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
           </button>
           <input
+            aria-label="Flow name"
             value={name}
             onChange={(e) => { setName(e.target.value); setSaved(false); }}
             style={{ fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid transparent", borderRadius: 4, color: "var(--color-text)", padding: "2px 6px", outline: "none" }}
@@ -201,16 +207,6 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
 
           <Button
             size="sm"
-            variant="ghost"
-            className="h-6 px-2 text-xs text-amber-400 hover:text-amber-300 gap-1"
-            onClick={handleRunClick}
-          >
-            <Terminal size={11} />
-            Run
-          </Button>
-
-          <Button
-            size="sm"
             className="h-6 px-3 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
             onClick={handleSave}
             disabled={saved}
@@ -221,40 +217,10 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         </div>
       </div>
 
-      {/* Run backend note */}
-      {showRunNote && (
-        <div
-          style={{
-            background: "var(--color-card)",
-            borderBottom: "1px solid var(--color-border)",
-            padding: "6px 12px",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            flexShrink: 0,
-          }}
-        >
-          <AlertCircle size={12} style={{ color: "#f59e0b", flexShrink: 0 }} />
-          <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-            Connect the Python backend to execute flows. Run{" "}
-            <span style={{ fontFamily: "monospace", color: "var(--color-text)" }}>
-              python -m packages.automation.src.flow_runner
-            </span>{" "}
-            and enable execution in Settings.
-          </span>
-          <button
-            onClick={() => setShowRunNote(false)}
-            style={{ marginLeft: "auto", color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer" }}
-          >
-            <X size={11} />
-          </button>
-        </div>
-      )}
-
       {/* Canvas row: palette + React Flow + config panel */}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* Left: Node palette */}
-        <NodePalette />
+        <NodePalette onAddNode={handlePaletteAdd} />
 
         {/* Centre: React Flow */}
         <div
@@ -335,7 +301,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
                   </div>
                   <div style={{ fontSize: 13, color: "var(--color-text)" }}>Empty canvas</div>
                   <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
-                    Drag nodes from the palette to get started
+                    Choose or drag a node from the palette
                   </div>
                 </div>
               </Panel>

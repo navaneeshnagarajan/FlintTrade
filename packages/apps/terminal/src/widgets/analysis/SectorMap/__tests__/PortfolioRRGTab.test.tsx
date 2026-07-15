@@ -241,6 +241,30 @@ describe("PortfolioRRGTab", () => {
     expect(screen.getByText(/failed to load rrg data/i)).toBeInTheDocument();
   });
 
+  it("badges an explicitly sample portfolio RRG response", () => {
+    localStorageMock.setItem("flinttrade_portfolio_rrg_symbols", JSON.stringify(["RELIANCE"]));
+    mockUseQuery.mockReturnValue({
+      data: {
+        benchmark: "NIFTY50",
+        tail_length: 8,
+        is_sample_data: true,
+        sectors: [{
+          symbol: "RELIANCE",
+          name: "Reliance Industries",
+          tail: [{ date: "2026-07-11", rs_ratio: 100, rs_momentum: 100 }],
+          current_quadrant: "neutral" as const,
+        }],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    render(<PortfolioRRGTab />);
+
+    expect(screen.getByRole("status", { name: /portfolio rrg is showing sample data/i })).toHaveTextContent("Sample data");
+  });
+
   describe("Drill-down panel", () => {
     it("shows back button and sector name in drill-down view", () => {
       localStorageMock.setItem("flinttrade_portfolio_rrg_symbols", JSON.stringify(["NIFTY_IT"]));
@@ -310,6 +334,66 @@ describe("PortfolioRRGTab", () => {
       render(<PortfolioRRGTab />);
       // On error, error message should show
       expect(screen.getByText(/failed to load rrg data/i)).toBeInTheDocument();
+    });
+
+    it("badges an explicitly sample constituent response", () => {
+      localStorageMock.setItem("flinttrade_portfolio_rrg_symbols", JSON.stringify(["NIFTY_IT"]));
+
+      mockUseQuery.mockImplementation((options: { queryKey: string[] }) => {
+        if (options.queryKey[0] === "sectorConstituents") {
+          return {
+            data: {
+              sector: "NIFTY_IT",
+              benchmark: "NIFTY50",
+              is_sample_data: true,
+              constituents: [{
+                symbol: "TCS",
+                name: "Tata Consultancy Services",
+                weight: 0.3,
+                tail: [{ date: "2026-07-11", rs_ratio: 100, rs_momentum: 100 }],
+                current_quadrant: "neutral" as const,
+              }],
+            },
+            isLoading: false,
+            isError: false,
+            refetch: vi.fn(),
+          };
+        }
+        return {
+          data: {
+            benchmark: "NIFTY50",
+            tail_length: 8,
+            is_sample_data: false,
+            sectors: [{
+              symbol: "NIFTY_IT",
+              name: "Nifty IT",
+              tail: [{ date: "2026-07-11", rs_ratio: 100, rs_momentum: 100 }],
+              current_quadrant: "neutral" as const,
+            }],
+          },
+          isLoading: false,
+          isError: false,
+          refetch: vi.fn(),
+        };
+      });
+
+      render(<PortfolioRRGTab />);
+      const canvas = document.querySelector("canvas");
+      expect(canvas).toBeInTheDocument();
+      vi.spyOn(canvas!, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        right: 200,
+        bottom: 200,
+        left: 0,
+        width: 200,
+        height: 200,
+        toJSON: () => ({}),
+      });
+      fireEvent.click(canvas!, { clientX: 100, clientY: 100 });
+
+      expect(screen.getByRole("status", { name: /sector constituents are showing sample data/i })).toHaveTextContent("Sample data");
     });
   });
 });

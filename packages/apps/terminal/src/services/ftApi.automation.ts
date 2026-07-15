@@ -1,4 +1,4 @@
-import { get, isDemoAuthSession, post, del } from "./ftApi.helpers";
+import { del, get, isDemoAuthSession, isDemoUserSession, patch, post } from "./ftApi.helpers";
 
 export interface CronJob {
   name: string;
@@ -16,9 +16,12 @@ export interface WebhookConfig {
   name: string;
   type: "tradingview" | "chartink" | "gocharting" | "custom";
   enabled: boolean;
-  /** Optional: supplied when creating a webhook; never echoed by the list/get
-   * endpoints (the backend does not leak HMAC secrets in responses). */
-  secret?: string;
+  secret_configured: boolean;
+}
+
+export interface WebhookCreateConfig extends Omit<WebhookConfig, "id" | "secret_configured"> {
+  /** Required at creation and never echoed by list/get responses. */
+  secret: string;
 }
 
 export interface N8nWorkflow {
@@ -49,15 +52,24 @@ export const resumeCronJob = (name: string) =>
   );
 
 export const getWebhooks = () =>
-  isDemoAuthSession()
+  isDemoUserSession()
     ? Promise.resolve({ webhooks: [] })
     : get<{ webhooks: WebhookConfig[] }>("webhooks");
 
-export const createWebhook = (config: Omit<WebhookConfig, "id">) =>
-  post<WebhookConfig>("webhooks", config);
+export const createWebhook = (config: WebhookCreateConfig) =>
+  isDemoUserSession()
+    ? Promise.reject(new Error("Webhook configuration is unavailable in Demo mode."))
+    : post<WebhookConfig>("webhooks", config);
+
+export const setWebhookEnabled = (id: string, enabled: boolean) =>
+  isDemoUserSession()
+    ? Promise.reject(new Error("Webhook configuration is unavailable in Demo mode."))
+    : patch<WebhookConfig>("webhooks/" + encodeURIComponent(id), { enabled });
 
 export const deleteWebhook = (id: string) =>
-  del<{ status: string }>("webhooks/" + encodeURIComponent(id));
+  isDemoUserSession()
+    ? Promise.reject(new Error("Webhook configuration is unavailable in Demo mode."))
+    : del<{ message: string }>("webhooks/" + encodeURIComponent(id));
 
 export const checkN8nHealth = () =>
   isDemoAuthSession()

@@ -27,6 +27,7 @@ import inspect
 import shutil
 import threading
 import time
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -85,6 +86,39 @@ def _default_db_path() -> Path:
 _CHAIN_METHOD_NAMES = ("get_option_chain", "option_chain", "optionchain")
 
 IST = timezone(timedelta(hours=5, minutes=30))
+_CAPTURE_WRITE_LOCK = threading.Lock()
+
+
+def _parse_expiry(expiry: str) -> date | None:
+    """Parse every expiry format accepted by historical capture."""
+    value = expiry.strip().upper()
+    for date_format in ("%Y-%m-%d", "%y%m%d", "%d%b%y"):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
+def normalise_expiry(expiry: str) -> str:
+    """Return an ISO expiry when recognised, preserving unknown broker values."""
+    parsed = _parse_expiry(expiry)
+    return parsed.isoformat() if parsed is not None else expiry.strip().upper()
+
+
+def _expiry_aliases(expiry: str) -> tuple[str, ...]:
+    """Return canonical and legacy spellings for one expiry date."""
+    raw = expiry.strip().upper()
+    parsed = _parse_expiry(raw)
+    if parsed is None:
+        return (raw,)
+    values = (
+        parsed.isoformat(),
+        parsed.strftime("%y%m%d"),
+        parsed.strftime("%d%b%y").upper(),
+        raw,
+    )
+    return tuple(dict.fromkeys(values))
 
 # ---------------------------------------------------------------------------
 # Rate limiter (adapted from ExpiryFlow's DataApiRateLimiter)
@@ -156,6 +190,7 @@ class SnapshotRateLimiter:
 _SCHEMA_OPTION_CHAIN = """
 CREATE TABLE IF NOT EXISTS expired_option_chains (
     captured_at   TIMESTAMP NOT NULL,
+    snapshot_id   VARCHAR NOT NULL,
     symbol        VARCHAR NOT NULL,
     exchange      VARCHAR NOT NULL,
     expiry_date   VARCHAR NOT NULL,
@@ -265,6 +300,47 @@ class ExpiryTracker:
         """
         self.connection.execute(_SCHEMA_MIGRATIONS)
         self.connection.execute(_SCHEMA_OPTION_CHAIN)
+        table_info = self.connection.execute(
+            "PRAGMA table_info('expired_option_chains')"
+        ).fetchall()
+        columns = {row[1] for row in table_info}
+        if "snapshot_id" not in columns:
+            self.connection.execute(
+                "ALTER TABLE expired_option_chains ADD COLUMN snapshot_id VARCHAR"
+            )
+            table_info = self.connection.execute(
+                "PRAGMA table_info('expired_option_chains')"
+            ).fetchall()
+        legacy_groups = self.connection.execute(
+            """SELECT DISTINCT symbol, exchange, expiry_date, captured_at
+               FROM expired_option_chains
+               WHERE snapshot_id IS NULL
+               ORDER BY symbol, exchange, expiry_date, captured_at"""
+        ).fetchall()
+        for symbol, exchange, expiry_date, captured_at in legacy_groups:
+            legacy_snapshot_id = "legacy-" + uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"flinttrade:expiry-snapshot:{symbol}:{exchange}:{expiry_date}:{captured_at}",
+            ).hex
+            self.connection.execute(
+                """UPDATE expired_option_chains
+                   SET snapshot_id = ?
+                   WHERE snapshot_id IS NULL AND symbol = ? AND exchange = ?
+                     AND expiry_date = ? AND captured_at = ?""",
+                [legacy_snapshot_id, symbol, exchange, expiry_date, captured_at],
+            )
+        snapshot_column = next(row for row in table_info if row[1] == "snapshot_id")
+        if not snapshot_column[3]:
+            self.connection.execute("DROP INDEX IF EXISTS idx_expired_oc_sym_exp")
+            self.connection.execute(
+                "ALTER TABLE expired_option_chains ALTER COLUMN snapshot_id SET NOT NULL"
+            )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO _migrations VALUES ('expired_option_chains_snapshot_id_v1')"
+        )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO _migrations VALUES ('expired_option_chains_snapshot_id_backfill_v2')"
+        )
         self.connection.execute(_INDEX_OPTION_CHAIN)
         self.connection.execute(_SCHEMA_DOWNLOAD_METADATA)
         self.connection.execute(_SCHEMA_DOWNLOAD_SEQ)
@@ -306,28 +382,41 @@ class ExpiryTracker:
             logger.error("Failed to fetch option chain for %s %s: %s", symbol, expiry, exc)
             return 0
 
-        rows = self._parse_option_chain(data, symbol, exchange, expiry)
+        canonical_expiry = normalise_expiry(expiry)
+        rows = self._parse_option_chain(data, symbol, exchange, canonical_expiry)
         if not rows:
             logger.warning("No option chain data returned for %s %s", symbol, expiry)
             return 0
 
-        now = datetime.now(IST)
-        insert_rows = [
-            (now, r["symbol"], r["exchange"], r["expiry_date"],
-             r["strike"], r["option_type"], r["oi"], r["volume"],
-             r["ltp"], r["iv"])
-            for r in rows
-        ]
+        snapshot_id = uuid.uuid4().hex
+        with _CAPTURE_WRITE_LOCK:
+            now = datetime.now(IST).replace(tzinfo=None)
+            latest = self.connection.execute(
+                """SELECT MAX(captured_at) FROM expired_option_chains
+                   WHERE symbol = ? AND expiry_date = ? AND exchange = ?""",
+                [symbol, canonical_expiry, exchange],
+            ).fetchone()
+            if latest is not None and latest[0] is not None and now <= latest[0]:
+                now = latest[0] + timedelta(microseconds=1)
 
-        self.connection.executemany(
-            """INSERT INTO expired_option_chains
-               (captured_at, symbol, exchange, expiry_date, strike,
-                option_type, oi, volume, ltp, iv)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            insert_rows,
-        )
+            insert_rows = [
+                (now, snapshot_id, r["symbol"], r["exchange"], r["expiry_date"],
+                 r["strike"], r["option_type"], r["oi"], r["volume"],
+                 r["ltp"], r["iv"])
+                for r in rows
+            ]
 
-        self._record_download(symbol, exchange, expiry, len(insert_rows))
+            self.connection.executemany(
+                """INSERT INTO expired_option_chains
+                   (captured_at, snapshot_id, symbol, exchange, expiry_date,
+                    strike, option_type, oi, volume, ltp, iv)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                insert_rows,
+            )
+
+            self._record_download(
+                symbol, exchange, canonical_expiry, len(insert_rows)
+            )
 
         logger.info(
             "Captured %d option chain rows for %s expiry %s",
@@ -541,10 +630,13 @@ class ExpiryTracker:
         Returns:
             True if at least one row exists for this combination.
         """
+        aliases = _expiry_aliases(expiry)
+        placeholders = ", ".join("?" for _ in aliases)
         row = self.connection.execute(
-            """SELECT COUNT(*) FROM download_metadata
-               WHERE symbol = ? AND expiry_date = ? AND exchange = ?""",
-            [symbol, expiry, exchange],
+            f"""SELECT COUNT(*) FROM download_metadata
+                WHERE symbol = ? AND expiry_date IN ({placeholders})
+                  AND exchange = ?""",  # noqa: S608 - placeholders only
+            [symbol, *aliases, exchange],
         ).fetchone()
         return row is not None and row[0] > 0
 
@@ -667,13 +759,30 @@ class ExpiryTracker:
             List of dicts with keys: strike, option_type, oi, volume, ltp, iv,
             captured_at, symbol, exchange, expiry_date.
         """
+        aliases = _expiry_aliases(expiry)
+        placeholders = ", ".join("?" for _ in aliases)
+        latest = self.connection.execute(
+            f"""SELECT snapshot_id, captured_at
+                FROM expired_option_chains
+                WHERE symbol = ? AND expiry_date IN ({placeholders})
+                  AND exchange = ?
+                ORDER BY captured_at DESC, snapshot_id DESC NULLS LAST
+                LIMIT 1""",  # noqa: S608 - placeholders only
+            [symbol, *aliases, exchange],
+        ).fetchone()
+        if latest is None:
+            return []
+
+        snapshot_id, _captured_at = latest
+
         result = self.connection.execute(
-            """SELECT captured_at, symbol, exchange, expiry_date,
-                      strike, option_type, oi, volume, ltp, iv
-               FROM expired_option_chains
-               WHERE symbol = ? AND expiry_date = ? AND exchange = ?
-               ORDER BY strike, option_type""",
-            [symbol, expiry, exchange],
+            f"""SELECT captured_at, symbol, exchange, expiry_date,
+                       strike, option_type, oi, volume, ltp, iv
+                FROM expired_option_chains
+                WHERE symbol = ? AND expiry_date IN ({placeholders})
+                  AND exchange = ? AND snapshot_id = ?
+                ORDER BY strike, option_type""",  # noqa: S608 - placeholders only
+            [symbol, *aliases, exchange, snapshot_id],
         )
         columns = [desc[0] for desc in result.description]
         return [dict(zip(columns, row)) for row in result.fetchall()]
@@ -695,8 +804,7 @@ class ExpiryTracker:
         result = self.connection.execute(
             """SELECT DISTINCT expiry_date
                FROM expired_option_chains
-               WHERE symbol = ? AND exchange = ?
-               ORDER BY expiry_date""",
+               WHERE symbol = ? AND exchange = ?""",
             [symbol, exchange],
         )
-        return [row[0] for row in result.fetchall()]
+        return sorted({normalise_expiry(row[0]) for row in result.fetchall()})

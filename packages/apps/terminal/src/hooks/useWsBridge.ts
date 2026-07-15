@@ -89,7 +89,7 @@ export function useTickSubscription(
   }, [wsUrl, apiKey, symbol, exchange, mode]);
 }
 
-export function useWsBridge(): void {
+export function useWsBridge(enabled = true): void {
   const setWsConnected = useConnectionStore((s) => s.setWsConnected);
   const setWsFailure = useConnectionStore((s) => s.setWsFailure);
   const apiKey = useConnectionStore((s) => s.apiKey);
@@ -104,7 +104,7 @@ export function useWsBridge(): void {
   // Implemented with store.sub (not useAtomValue) so selection changes do not
   // re-render the app shell that mounts this bridge.
   useEffect(() => {
-    if (!wsUrl) return;
+    if (!enabled || !wsUrl || !apiKey) return;
     const ws = getWsService(wsUrl, apiKey);
     if (!ws) return;
 
@@ -133,10 +133,14 @@ export function useWsBridge(): void {
         current = null;
       }
     };
-  }, [store, apiKey, wsUrl]);
+  }, [enabled, store, apiKey, wsUrl]);
 
   useEffect(() => {
-    if (!wsUrl) return;
+    if (!enabled || !wsUrl || !apiKey) {
+      setWsConnected(false);
+      setWsFailure(null);
+      return;
+    }
     const ws = getWsService(wsUrl, apiKey);
     if (!ws) return;
 
@@ -216,11 +220,7 @@ export function useWsBridge(): void {
       unsubTick();
       unsubStatus();
       unsubFailure();
-      // NOTE: The WebSocket service (getWsService singleton) is intentionally
-      // NOT disconnected here. It persists across hook mount/unmount cycles so
-      // that navigating between routes does not drop the WS connection and
-      // lose real-time market data. The singleton is created once per (wsUrl,
-      // apiKey) pair and lives for the lifetime of the browser tab.
+      ws.disconnect();
     };
-  }, [setWsConnected, setWsFailure, store, apiKey, wsUrl]);
+  }, [enabled, setWsConnected, setWsFailure, store, apiKey, wsUrl]);
 }

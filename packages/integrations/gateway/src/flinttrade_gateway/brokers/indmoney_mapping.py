@@ -177,6 +177,15 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _present_order_number(record: dict[str, Any], key: str) -> str | None:
+    if key not in record:
+        return None
+    value = record[key]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return str(value)
+
+
 def parse_indian_number(value: Any) -> float:
     """Parse a numeric string that may use Indian comma grouping (``"5,82,909"``).
 
@@ -656,7 +665,7 @@ def _reverse_exchange(d: dict[str, Any]) -> str:
 
 def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise an IndMoney order-book/order-details record."""
-    return {
+    order = {
         "orderid": str(d.get("id", "")),
         "status": str(d.get("status", "")),
         "symbol": str(d.get("name", "")),
@@ -664,11 +673,6 @@ def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
         "action": str(d.get("txn_type", "")),
         "pricetype": str(d.get("order_type", "")),
         "product": PRODUCT_REVERSE_MAP.get(str(d.get("product", "")), str(d.get("product", ""))),
-        "quantity": str(d.get("requested_qty", 0)),
-        "price": str(d.get("requested_price", "") or 0),
-        "trigger_price": str(d.get("sl_trigger_price", "") or 0),
-        "filled_quantity": str(d.get("traded_qty", 0)),
-        "average_price": str(d.get("traded_price", "") or 0),
         # Smart-order leg prices + forensic context, preserved verbatim.
         "sl_trigger_price": str(d.get("sl_trigger_price", "")),
         "sl_limit_price": str(d.get("sl_limit_price", "")),
@@ -678,6 +682,17 @@ def from_indmoney_order(d: dict[str, Any]) -> dict[str, Any]:
         "exchange_order_id": str(d.get("exch_order_id", "")),
         "security_id": str(d.get("security_id", "")),
     }
+    for field, source_field in {
+        "quantity": "requested_qty",
+        "filled_quantity": "traded_qty",
+        "price": "requested_price",
+        "trigger_price": "sl_trigger_price",
+        "average_price": "traded_price",
+    }.items():
+        value = _present_order_number(d, source_field)
+        if value is not None:
+            order[field] = value
+    return order
 
 
 def from_indmoney_trade(d: dict[str, Any]) -> dict[str, Any]:

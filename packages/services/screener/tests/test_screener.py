@@ -122,6 +122,23 @@ class TestPCR:
         pcr = OIAnalysis.pcr(snap)
         assert pcr.pcr_oi > 1.0  # PE OI >> CE OI (which is clamped to 1000/strike)
 
+    def test_pcr_zero_call_denominators_are_unavailable(self):
+        from flinttrade_screener.oi_analysis import OIAnalysis
+        from flinttrade_screener.option_chain import OptionChainSnapshot, StrikeData
+
+        snapshot = OptionChainSnapshot(
+            strikes=[
+                StrikeData(strike_price=24000, ce_oi=0, pe_oi=5000, ce_volume=0, pe_volume=800),
+                StrikeData(strike_price=24100, ce_oi=0, pe_oi=3000, ce_volume=0, pe_volume=400),
+            ],
+        )
+
+        pcr = OIAnalysis.pcr(snapshot)
+
+        assert pcr.pcr_oi is None
+        assert pcr.pcr_volume is None
+        assert pcr.sentiment == "UNAVAILABLE"
+
 
 # ======================================================================
 # Max Pain
@@ -157,6 +174,25 @@ class TestMaxPain:
         empty = OptionChainSnapshot()
         result = OIAnalysis.max_pain(empty)
         assert result.max_pain_strike == 0
+
+    def test_max_pain_all_zero_oi_is_unavailable(self):
+        from flinttrade_screener.oi_analysis import OIAnalysis
+        from flinttrade_screener.option_chain import OptionChainSnapshot, StrikeData
+
+        snapshot = OptionChainSnapshot(
+            underlying="NIFTY",
+            spot_price=24000.0,
+            strikes=[
+                StrikeData(strike_price=23900.0, ce_oi=0, pe_oi=0),
+                StrikeData(strike_price=24000.0, ce_oi=0, pe_oi=0),
+            ],
+        )
+
+        result = OIAnalysis.max_pain(snapshot)
+
+        assert result.max_pain_strike == 0.0
+        assert result.total_loss_at_max_pain == 0.0
+        assert result.strike_losses == []
 
     def test_max_pain_is_minimum_loss(self):
         from flinttrade_screener.oi_analysis import OIAnalysis
@@ -487,6 +523,21 @@ class TestOIAnalysis:
         assert sr.resistance_oi > 0
         assert sr.support_oi > 0
 
+    def test_all_zero_oi_has_no_support_or_resistance(self):
+        from flinttrade_screener.oi_analysis import OIAnalysis
+
+        snap = _make_snapshot()
+        for strike in snap.strikes:
+            strike.ce_oi = 0
+            strike.pe_oi = 0
+
+        sr = OIAnalysis.support_resistance(snap)
+
+        assert sr.resistance_strike is None
+        assert sr.resistance_oi is None
+        assert sr.support_strike is None
+        assert sr.support_oi is None
+
     def test_oi_change(self):
         from flinttrade_screener.oi_analysis import OIAnalysis
         prev = _make_snapshot()
@@ -503,6 +554,24 @@ class TestOIAnalysis:
         assert atm_change.ce_writing
         assert atm_change.pe_oi_change == -5000
         assert atm_change.pe_unwinding
+
+    def test_oi_change_does_not_infer_a_new_strike_from_zero(self):
+        from flinttrade_screener.oi_analysis import OIAnalysis
+        from flinttrade_screener.option_chain import StrikeData
+
+        prev = _make_snapshot()
+        curr = _make_snapshot()
+        curr.strikes.append(StrikeData(strike_price=25100, ce_oi=12345, pe_oi=23456))
+
+        changes = OIAnalysis.oi_change(curr, prev)
+        new_strike = next(change for change in changes if change.strike_price == 25100)
+
+        assert new_strike.ce_oi_prev is None
+        assert new_strike.pe_oi_prev is None
+        assert new_strike.ce_oi_change is None
+        assert new_strike.pe_oi_change is None
+        assert new_strike.ce_writing is False
+        assert new_strike.pe_writing is False
 
     def test_oi_spurt(self):
         from flinttrade_screener.oi_analysis import OIAnalysis

@@ -14,6 +14,7 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 const mockRefetch = vi.fn();
 const mockUseHoldings = vi.fn();
 const mockUseBrokerConnected = vi.fn();
+const mockUseAccountReadsEnabled = vi.fn();
 
 vi.mock("@/hooks/useHoldings", () => ({
   useHoldings: (...args: unknown[]) => mockUseHoldings(...args),
@@ -21,6 +22,10 @@ vi.mock("@/hooks/useHoldings", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseAccountReadsEnabled(),
 }));
 
 // Positions are fetched for the portfolio-report export.
@@ -78,6 +83,7 @@ describe("HoldingsWidget", () => {
     // between tests — the "nothing to export" assertion checks not-called.
     vi.clearAllMocks();
     mockUseBrokerConnected.mockReturnValue(true);
+    mockUseAccountReadsEnabled.mockReturnValue(true);
     mockUsePositions.mockReturnValue({ data: [] });
   });
 
@@ -175,6 +181,7 @@ describe("HoldingsWidget", () => {
 
   it("does not fetch, refresh, or export holdings without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
+    mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
     mockUsePositions.mockReturnValue({ data: [] });
     render(<HoldingsWidget {...makeDockviewPanelProps()} />);

@@ -3,11 +3,11 @@
  *
  * All query keys live here so invalidation, refetching, and cache access are
  * consistent across hooks and components.  Use the leaf helpers (e.g.
- * `queryKeys.positions.list()`) instead of bare string arrays everywhere.
+ * `queryKeys.positions.list(scope)`) instead of bare string arrays everywhere.
  *
  * Convention:
  *   `.all`   — root key (invalidates the entire namespace)
- *   `.list()` — the concrete query key used in useQuery
+ *   `.list(scope)` — the concrete query key used in useQuery
  *   `.detail(id)` — per-item variant where applicable
  */
 
@@ -17,27 +17,28 @@ export const queryKeys = {
   // -------------------------------------------------------------------------
   positions: {
     all: ["positions"] as const,
-    list: () => [...queryKeys.positions.all, "list"] as const,
+    list: (scope: string) => [...queryKeys.positions.all, "list", scope] as const,
   },
   orders: {
     all: ["orders"] as const,
-    list: () => [...queryKeys.orders.all, "list"] as const,
+    list: (scope: string) => [...queryKeys.orders.all, "list", scope] as const,
   },
   tradebook: {
     all: ["tradebook"] as const,
-    list: () => [...queryKeys.tradebook.all, "list"] as const,
+    list: (scope: string) => [...queryKeys.tradebook.all, "list", scope] as const,
   },
   holdings: {
     all: ["holdings"] as const,
-    list: () => [...queryKeys.holdings.all, "list"] as const,
+    list: (scope: string) => [...queryKeys.holdings.all, "list", scope] as const,
   },
   funds: {
     all: ["funds"] as const,
-    detail: () => [...queryKeys.funds.all, "detail"] as const,
+    detail: (scope: string) => [...queryKeys.funds.all, "detail", scope] as const,
   },
   margin: {
     all: ["margin"] as const,
     detail: (
+      scope: string,
       symbol: string,
       exchange: string,
       qty: number,
@@ -46,6 +47,7 @@ export const queryKeys = {
     ) =>
       [
         ...queryKeys.margin.all,
+        scope,
         symbol,
         exchange,
         qty,

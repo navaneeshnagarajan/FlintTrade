@@ -60,11 +60,9 @@ def _get_pipeline() -> DataPipeline:
 def _get_bhavcopy_dir() -> Path:
     global _bhavcopy_dir  # noqa: PLW0603
     if _bhavcopy_dir is None:
-        try:
-            from flinttrade_core.workspace import Workspace  # noqa: PLC0415
-            _bhavcopy_dir = Workspace().fast_data_dir / "bhavcopy"
-        except Exception:
-            _bhavcopy_dir = Path.home() / ".flinttrade" / "data" / "bhavcopy"
+        from flinttrade_core.workspace import bhavcopy_dir  # noqa: PLC0415
+
+        _bhavcopy_dir = bhavcopy_dir()
     return _bhavcopy_dir
 
 

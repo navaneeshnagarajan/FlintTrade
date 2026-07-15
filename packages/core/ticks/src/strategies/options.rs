@@ -457,15 +457,10 @@ impl OptionsStrategy {
         }
     }
 
-    fn entry_price(&self, premium: f64, is_call: bool) -> f64 {
-        // Short = we sell; buyer pays ask (we receive ask = premium * (1 + slip))
-        // Long  = we buy;  we pay ask
+    fn entry_price(&self, premium: f64, _is_call: bool) -> f64 {
+        // Short entries sell at bid; long entries buy at ask.
         if self.config.short {
-            if is_call {
-                premium * (1.0 - self.config.slippage_pct) // we receive bid
-            } else {
-                premium * (1.0 - self.config.slippage_pct)
-            }
+            premium * (1.0 - self.config.slippage_pct) // we receive bid
         } else {
             premium * (1.0 + self.config.slippage_pct) // we pay ask
         }

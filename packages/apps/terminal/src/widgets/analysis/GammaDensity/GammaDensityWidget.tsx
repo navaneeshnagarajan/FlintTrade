@@ -8,7 +8,7 @@
  * clearly-marked sample surface renders behind a preview teaser.
  */
 
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { ChevronDown, RefreshCw, Loader2 } from "lucide-react";
 import { FlintMultiLineChart } from "@flinttrade/design-system";
 import { useGammaDensity } from "./useGammaDensity";
@@ -16,6 +16,7 @@ import { SAMPLE_GAMMA_DENSITY } from "./sampleData";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
+import { getExpiry } from "@/services/api";
 
 const SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"];
 const SYMBOL_EXCHANGE: Record<string, string> = {
@@ -27,16 +28,49 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 };
 
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+const EXPIRY_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+function expiryEpoch(expiry: string): number | null {
+  const value = expiry.trim().toUpperCase();
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const market = /^(\d{2})-?([A-Z]{3})-?(\d{2}|\d{4})$/.exec(value);
+  const year = iso ? Number(iso[1]) : market ? Number(market[3]) + (market[3].length === 2 ? 2000 : 0) : NaN;
+  const month = iso ? Number(iso[2]) - 1 : market ? EXPIRY_MONTHS.indexOf(market[2]) : NaN;
+  const day = iso ? Number(iso[3]) : market ? Number(market[1]) : NaN;
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || month < 0) return null;
+  const timestamp = Date.UTC(year, month, day);
+  const parsed = new Date(timestamp);
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month && parsed.getUTCDate() === day
+    ? timestamp
+    : null;
+}
+
+export function selectFutureExpiry(expiries: readonly string[], now = new Date()): string | null {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value);
+  const today = Date.UTC(part("year"), part("month") - 1, part("day"));
+  return expiries
+    .flatMap((expiry) => {
+      const timestamp = expiryEpoch(expiry);
+      return timestamp !== null && timestamp > today ? [{ expiry, timestamp }] : [];
+    })
+    .sort((left, right) => left.timestamp - right.timestamp)[0]?.expiry ?? null;
+}
 
 /**
- * True when the payload carries the backend's `is_sample_data: true` honesty
- * flag (propagated onto object payloads by the ftApi response unwrapper).
+ * Live provenance is accepted only when the backend explicitly attests
+ * `is_sample_data: false`. Missing or malformed flags fail closed as sample.
  */
-function carriesSampleFlag(payload: unknown): boolean {
+function carriesExplicitLiveFlag(payload: unknown): boolean {
   return (
     typeof payload === "object" &&
     payload !== null &&
-    (payload as { is_sample_data?: unknown }).is_sample_data === true
+    (payload as { is_sample_data?: unknown }).is_sample_data === false
   );
 }
 
@@ -82,15 +116,56 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 
 function GammaDensityWidget() {
   const [symbol, setSymbol] = useState("NIFTY");
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const [expiryLoading, setExpiryLoading] = useState(false);
+  const [expiryUnavailable, setExpiryUnavailable] = useState(false);
   const isConnected = useBrokerConnected();
   const exchange = SYMBOL_EXCHANGE[symbol] ?? "NFO";
 
-  const { data: liveData, isLoading, isFetching, refetch } = useGammaDensity(symbol, exchange, "", isConnected);
-  const data = isConnected && liveData ? liveData : SAMPLE_GAMMA_DENSITY;
-  // Badge keys off the payload FLAG, not connection state alone: the backend
-  // serves a clearly-flagged sample surface (is_sample_data) when it has no
-  // live chain, even while a broker is connected.
-  const isSample = !isConnected || !liveData || carriesSampleFlag(liveData);
+  useEffect(() => {
+    setExpiry(null);
+    setExpiryUnavailable(false);
+    if (!isConnected) {
+      setExpiryLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setExpiryLoading(true);
+    void getExpiry(symbol, exchange, "options")
+      .then((response) => {
+        if (cancelled) return;
+        const expiries = Array.isArray(response) ? response : response.expiry ?? [];
+        const selected = selectFutureExpiry(expiries);
+        setExpiry(selected);
+        setExpiryUnavailable(selected === null);
+      })
+      .catch(() => {
+        if (!cancelled) setExpiryUnavailable(true);
+      })
+      .finally(() => {
+        if (!cancelled) setExpiryLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [exchange, isConnected, symbol]);
+
+  const liveQueryEnabled = isConnected && expiry !== null;
+  const {
+    data: liveData,
+    isLoading,
+    isFetching,
+    isError,
+    isRefetchError,
+    refetch,
+  } = useGammaDensity(
+    symbol,
+    exchange,
+    expiry ?? "",
+    liveQueryEnabled,
+  );
+  const usableQueryData = liveQueryEnabled && !isError && !isRefetchError ? liveData : undefined;
+  const data = isConnected && usableQueryData ? usableQueryData : SAMPLE_GAMMA_DENSITY;
+  const isSample = !isConnected || !usableQueryData || !carriesExplicitLiveFlag(usableQueryData);
 
   const chartState = useMemo(() => {
     const rows = data.strikes;
@@ -141,17 +216,29 @@ function GammaDensityWidget() {
           <h3 className="text-sm font-semibold text-text-primary">Gamma Density</h3>
           <p className="text-[10px] text-text-muted">
             Γ×OI · {data.dte_days.toFixed(0)}d
+            {expiry && !isSample && <span className="ml-1">· {expiry}</span>}
             {isSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {expiryUnavailable && <span className="ml-1 text-amber-500">· No future expiry</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Selector value={symbol} options={SYMBOLS} onChange={setSymbol} />
+          <Selector
+            value={symbol}
+            options={SYMBOLS}
+            onChange={(nextSymbol) => {
+              setExpiry(null);
+              setExpiryUnavailable(false);
+              setSymbol(nextSymbol);
+            }}
+          />
           {isConnected && (
             <button
               type="button"
-              onClick={() => void refetch()}
-              className="p-1 rounded hover:bg-surface-hover text-text-muted"
+              onClick={() => { if (expiry !== null) void refetch(); }}
+              disabled={expiry === null || isFetching}
+              className="p-1 rounded hover:bg-surface-hover text-text-muted disabled:opacity-40"
               aria-label="Refresh gamma density"
+              title={expiry === null ? "No future expiry available" : "Refresh gamma density"}
             >
               {isFetching ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             </button>
@@ -165,7 +252,7 @@ function GammaDensityWidget() {
         <StatCard label="Gamma wall" value={data.peak_expiry_strike !== null ? INR.format(data.peak_expiry_strike) : "—"} hint="peak density" />
       </div>
 
-      {isLoading && isConnected ? (
+      {(expiryLoading || (isLoading && liveQueryEnabled)) && isConnected ? (
         <div className="flex-1 flex items-center justify-center text-text-muted">
           <Loader2 size={16} className="animate-spin" />
         </div>

@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
+import copy
+import json
+import logging
 import threading
 import time
+import uuid
 from collections.abc import Awaitable, Mapping
-from typing import Any, Callable
+from contextlib import nullcontext
+from dataclasses import dataclass
+from typing import Any, Callable, ContextManager
 
 from flinttrade_core.exceptions import UnsupportedCapabilityError
 from flinttrade_engine.request_context import RequestContext, parse_selector
-from flinttrade_engine.safety import GATED_WRITE_VERBS, SafetyBypassError, SafetyContext
+from flinttrade_engine.safety import (
+    EMERGENCY_INTENT_SOURCE,
+    EMERGENCY_REDUCING_VERBS,
+    GATED_WRITE_VERBS,
+    EmergencyReductionPlan,
+    EmergencyWritePolicy,
+    SafetyBypassError,
+    SafetyContext,
+)
 
 from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
 from .brokers._base import BrokerAdapter, Session
 from .routing_config import RoutingConfig, RoutingHint
+
+logger = logging.getLogger("flinttrade.gateway.router")
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +41,74 @@ from .routing_config import RoutingConfig, RoutingHint
 # mutable field can ever reach the broker, and passes the per-process
 # _ROUTER_TOKEN so the adapter's write guard recognises a real router dispatch.
 
-_GatedDispatch = Callable[[BrokerAdapter, Session, Mapping[str, Any]], Awaitable[Any]]
+_AdapterInvokeCallback = Callable[[], None] | None
+_GatedDispatch = Callable[
+    [BrokerAdapter, Session, Mapping[str, Any], _AdapterInvokeCallback],
+    Awaitable[Any],
+]
+
+_CANCEL_EXTRA_KEYS = ("variety", "amo", "trading_symbol", "segment")
+
+
+def _canonical_json(value: object) -> str:
+    """Encode with the exact JSON semantics used by SafetyContext.order_hash_for."""
+    if isinstance(value, Mapping):
+        data: object = value
+    else:
+        attrs = getattr(value, "__dict__", None)
+        data = attrs if isinstance(attrs, dict) else {"_repr": repr(value)}
+    try:
+        return json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise SafetyBypassError("broker write payload is not canonically serialisable") from exc
+
+
+def _detached_snapshot(value: Any) -> Any:
+    """Deep-copy one signed value and prove canonical equivalence before awaits."""
+    before = _canonical_json(value)
+    try:
+        snapshot = copy.deepcopy(value)
+    except Exception as exc:
+        raise SafetyBypassError("broker write payload cannot be detached safely") from exc
+    if _canonical_json(snapshot) != before:
+        raise SafetyBypassError("detached broker write payload changed canonical form")
+    return snapshot
+
+
+def _signed_mapping_snapshot(value: Any, *, operation: str) -> Mapping[str, Any]:
+    """Detach and validate an operation-discriminated signed mapping."""
+    if not isinstance(value, Mapping):
+        raise SafetyBypassError(
+            f"{operation} requires an operation-discriminated Mapping {operation} fingerprint"
+        )
+    snapshot = _detached_snapshot(value)
+    if not isinstance(snapshot, Mapping):  # pragma: no cover - defensive against hostile deepcopy hooks
+        raise SafetyBypassError(
+            f"{operation} requires an operation-discriminated Mapping {operation} fingerprint"
+        )
+    if snapshot.get("_op") != operation:
+        raise SafetyBypassError(f"signed payload _op does not match required operation {operation!r}")
+    return snapshot
+
+
+def _signed_order_id(payload: Mapping[str, Any]) -> str:
+    """Return one non-empty, whitespace-canonical signed broker order id."""
+    order_id = payload.get("order_id")
+    if (
+        not isinstance(order_id, str)
+        or not order_id
+        or order_id != order_id.strip()
+        or not order_id.isprintable()
+        or any(character.isspace() for character in order_id)
+    ):
+        raise SafetyBypassError("signed payload order_id must be a non-empty canonical string")
+    return order_id
+
+
+def _require_canonical_match(actual: object, expected: object, *, field: str) -> None:
+    """Refuse Python-equal but canonically different compatibility arguments."""
+    if _canonical_json(actual) != _canonical_json(expected):
+        raise SafetyBypassError(f"unsigned compatibility {field} is not covered by the signed payload")
 
 
 def _adapter_write(adapter: BrokerAdapter, verb: str) -> Callable[..., Awaitable[Any]]:
@@ -42,6 +125,18 @@ def _adapter_write(adapter: BrokerAdapter, verb: str) -> Callable[..., Awaitable
             f"broker adapter {broker!r} does not support the gated write verb {verb!r}"
         )
     return method
+
+
+async def _invoke_adapter(
+    method: Callable[..., Awaitable[Any]],
+    on_adapter_invoke: _AdapterInvokeCallback,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    """Mark the exact boundary after argument validation and before adapter code."""
+    if on_adapter_invoke is not None:
+        on_adapter_invoke()
+    return await method(*args, **kwargs)
 
 
 def _required(payload: Mapping[str, Any], key: str) -> Any:
@@ -67,38 +162,106 @@ def _optional_kwargs(payload: Mapping[str, Any], *keys: str) -> dict[str, Any]:
     return {k: payload[k] for k in keys if payload.get(k) is not None}
 
 
-async def _dispatch_modify_forever(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+def _optional_order_segment(payload: Mapping[str, Any]) -> dict[str, str]:
+    """Return a present signed INDstocks segment without coercion."""
+    if "segment" not in payload:
+        return {}
+    segment = payload["segment"]
+    if not isinstance(segment, str) or segment not in {"EQUITY", "DERIVATIVE"}:
+        raise SafetyBypassError("signed payload segment must be EQUITY or DERIVATIVE")
+    return {"segment": segment}
+
+
+async def _dispatch_modify_forever(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "modify_forever")
-    return await fn(session, str(_required(p, "order_id")), dict(_required(p, "changes")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        str(_required(p, "order_id")),
+        dict(_required(p, "changes")),
+        _router_token=_ROUTER_TOKEN,
+    )
 
 
-async def _dispatch_cancel_forever(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_cancel_forever(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "cancel_forever")
-    return await fn(session, str(_required(p, "order_id")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn, on_adapter_invoke, session, str(_required(p, "order_id")), _router_token=_ROUTER_TOKEN
+    )
 
 
-async def _dispatch_modify_super_order(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_modify_super_order(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "modify_super_order")
-    return await fn(session, str(_required(p, "order_id")), dict(_required(p, "changes")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        str(_required(p, "order_id")),
+        dict(_required(p, "changes")),
+        _router_token=_ROUTER_TOKEN,
+    )
 
 
-async def _dispatch_cancel_super_order(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_cancel_super_order(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "cancel_super_order")
-    return await fn(
-        session, str(_required(p, "order_id")), str(p.get("leg", "ENTRY_LEG")), _router_token=_ROUTER_TOKEN
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        str(_required(p, "order_id")),
+        str(p.get("leg", "ENTRY_LEG")),
+        _router_token=_ROUTER_TOKEN,
     )
 
 
-async def _dispatch_place_conditional_trigger(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_place_conditional_trigger(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "place_conditional_trigger")
-    return await fn(
-        session, dict(_required(p, "condition")), list(_required(p, "orders")), _router_token=_ROUTER_TOKEN
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        dict(_required(p, "condition")),
+        list(_required(p, "orders")),
+        _router_token=_ROUTER_TOKEN,
     )
 
 
-async def _dispatch_modify_conditional_trigger(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_modify_conditional_trigger(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "modify_conditional_trigger")
-    return await fn(
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
         session,
         str(_required(p, "alert_id")),
         dict(_required(p, "condition")),
@@ -107,35 +270,98 @@ async def _dispatch_modify_conditional_trigger(adapter: BrokerAdapter, session: 
     )
 
 
-async def _dispatch_cancel_conditional_trigger(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_cancel_conditional_trigger(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "cancel_conditional_trigger")
-    return await fn(session, str(_required(p, "alert_id")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn, on_adapter_invoke, session, str(_required(p, "alert_id")), _router_token=_ROUTER_TOKEN
+    )
 
 
-async def _dispatch_convert_position(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_convert_position(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "convert_position")
-    return await fn(session, dict(_required(p, "req")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn, on_adapter_invoke, session, dict(_required(p, "req")), _router_token=_ROUTER_TOKEN
+    )
 
 
-async def _dispatch_exit_all_positions(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_exit_all_positions(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "exit_all_positions")
-    return await fn(session, **_optional_kwargs(p, "tag", "segment"), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        **_optional_kwargs(p, "tag", "segment"),
+        _router_token=_ROUTER_TOKEN,
+    )
 
 
-async def _dispatch_place_multi_order(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_place_reducing_order(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
+    fn = _adapter_write(adapter, "place_reducing_order")
+    return await _invoke_adapter(fn, on_adapter_invoke, session, dict(p), _router_token=_ROUTER_TOKEN)
+
+
+async def _dispatch_place_multi_order(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "place_multi_order")
-    return await fn(session, list(_required(p, "orders")), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn, on_adapter_invoke, session, list(_required(p, "orders")), _router_token=_ROUTER_TOKEN
+    )
 
 
-async def _dispatch_cancel_all_orders(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_cancel_all_orders(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "cancel_all_orders")
-    return await fn(session, **_optional_kwargs(p, "tag", "segment"), _router_token=_ROUTER_TOKEN)
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        **_optional_kwargs(p, "tag", "segment"),
+        _router_token=_ROUTER_TOKEN,
+    )
 
 
-async def _dispatch_cancel_smart_order(adapter: BrokerAdapter, session: Session, p: Mapping[str, Any]) -> Any:
+async def _dispatch_cancel_smart_order(
+    adapter: BrokerAdapter,
+    session: Session,
+    p: Mapping[str, Any],
+    on_adapter_invoke: _AdapterInvokeCallback,
+) -> Any:
     fn = _adapter_write(adapter, "cancel_smart_order")
-    return await fn(
-        session, str(_required(p, "order_id")), **_optional_kwargs(p, "segment"), _router_token=_ROUTER_TOKEN
+    return await _invoke_adapter(
+        fn,
+        on_adapter_invoke,
+        session,
+        _signed_order_id(p),
+        **_optional_order_segment(p),
+        _router_token=_ROUTER_TOKEN,
     )
 
 
@@ -149,6 +375,7 @@ _GATED_VERB_DISPATCH: dict[str, _GatedDispatch] = {
     "cancel_conditional_trigger": _dispatch_cancel_conditional_trigger,
     "convert_position": _dispatch_convert_position,
     "exit_all_positions": _dispatch_exit_all_positions,
+    "place_reducing_order": _dispatch_place_reducing_order,
     "place_multi_order": _dispatch_place_multi_order,
     "cancel_all_orders": _dispatch_cancel_all_orders,
     "cancel_smart_order": _dispatch_cancel_smart_order,
@@ -162,6 +389,17 @@ if set(_GATED_VERB_DISPATCH) != GATED_WRITE_VERBS:  # pragma: no cover - import-
         f"table-only={sorted(set(_GATED_VERB_DISPATCH) - GATED_WRITE_VERBS)} "
         f"registry-only={sorted(GATED_WRITE_VERBS - set(_GATED_VERB_DISPATCH))}"
     )
+
+
+@dataclass(frozen=True)
+class LifecycleFaultClearReceipt:
+    """Opaque proof that one exact router generation removed one exact fault."""
+
+    receipt_id: str
+    resolution_id: str
+    attempt_id: str
+    selector: str
+    router_generation: str
 
 
 class BrokerRouter:
@@ -186,6 +424,8 @@ class BrokerRouter:
         config: RoutingConfig | None = None,
         rate_limiter: Any | None = None,
         algo_tag_guard: Any | None = None,
+        write_admission: Callable[[bool, str], ContextManager[None]] | None = None,
+        lifecycle_store: Any | None = None,
     ) -> None:
         self._adapters = adapters
         self._session_provider = session_provider
@@ -209,6 +449,24 @@ class BrokerRouter:
         # dispatch, never bypass safety. None → no tagging (the adapters'
         # retail-default algo ids apply unchanged).
         self._algo_tag_guard = algo_tag_guard
+        self._write_admission = write_admission
+        # App-owned durable intent ledger. Kept as a duck-typed dependency so
+        # the gateway does not import the engine's storage implementation.
+        self._lifecycle_store = lifecycle_store
+        self._lifecycle_faults: dict[str, str] = {}
+        self._router_generation = uuid.uuid4().hex
+        self._lifecycle_clear_receipts: dict[str, LifecycleFaultClearReceipt] = {}
+        list_unresolved = getattr(lifecycle_store, "list_unresolved_outcomes", None)
+        if callable(list_unresolved):
+            try:
+                for outcome in list_unresolved():
+                    attempt_id = str(outcome.get("attempt_id") or "").strip()
+                    if attempt_id:
+                        self._lifecycle_faults[attempt_id] = str(
+                            outcome.get("error_kind") or "durable unresolved broker outcome"
+                        )
+            except Exception:
+                logger.exception("Could not hydrate durable lifecycle faults into router generation")
         # A router instance is one immutable routing generation. Runtime
         # rebuilds revoke the old generation before dropping it from app state;
         # retained references then fail closed, while writes admitted before
@@ -290,6 +548,258 @@ class BrokerRouter:
         if not selector:
             return None
         return str(selector).strip() or None
+
+    @property
+    def registered_selectors(self) -> tuple[str, ...]:
+        """Configured selectors backed by an adapter in this router generation."""
+        if self._config is None:
+            return ()
+        return tuple(
+            selector
+            for selector in self._config.registered
+            if parse_selector(selector)[0] in self._adapters
+        )
+
+    @property
+    def configured_selectors(self) -> tuple[str, ...]:
+        """Every configured account, including adapters unavailable this generation.
+
+        Global emergency controls use this broader set so a dormant or failed
+        adapter remains an explicit incomplete target instead of disappearing
+        from the durable L5 scope.
+        """
+        if self._config is None:
+            return ()
+        return tuple(self._config.registered)
+
+    def authorised_selectors(self, actor_id: str) -> tuple[str, ...]:
+        """Return registered selectors explicitly authorised for ``actor_id``.
+
+        This is a read-only snapshot used by parent-owned emergency controls to
+        build one normal gated dispatch per account. The session provider still
+        performs the authoritative ACL check immediately before every write, so
+        a concurrent ACL removal fails closed rather than widening access.
+        """
+        actor_id = str(actor_id).strip()
+        if not actor_id or self._config is None:
+            return ()
+        authorised: list[str] = []
+        for selector in self._config.registered:
+            try:
+                adapter_id, account_id = parse_selector(selector)
+            except ValueError:
+                continue
+            actors = self._config.account_acls.get(adapter_id, {}).get(account_id, ())
+            if actor_id in actors:
+                authorised.append(selector)
+        return tuple(authorised)
+
+    def clear_lifecycle_fault(
+        self,
+        attempt_id: str,
+        *,
+        resolution_id: str,
+        selector: str,
+    ) -> LifecycleFaultClearReceipt | None:
+        """Clear one exact fault and return a receipt bound to this generation."""
+        attempt_key = str(attempt_id).strip()
+        resolution_key = str(resolution_id).strip()
+        selector_key = str(selector).strip()
+        store = self._lifecycle_store
+        binding_reader = getattr(store, "outcome_resolution_binding", None)
+        binding = binding_reader(attempt_key) if attempt_key and callable(binding_reader) else None
+        if (
+            not isinstance(binding, Mapping)
+            or str(binding.get("attempt_id") or "") != attempt_key
+            or str(binding.get("resolution_id") or "") != resolution_key
+            or str(binding.get("selector") or "") != selector_key
+            or str(binding.get("status") or "") != "PENDING_ROUTER_CLEAR"
+        ):
+            raise SafetyBypassError("order lifecycle attempt is not durably resolved")
+        with self._write_condition:
+            existing_receipt = self._lifecycle_clear_receipts.get(resolution_key)
+            if existing_receipt is not None:
+                return existing_receipt
+            if attempt_key not in self._lifecycle_faults:
+                return None
+            del self._lifecycle_faults[attempt_key]
+            receipt = LifecycleFaultClearReceipt(
+                receipt_id=uuid.uuid4().hex,
+                resolution_id=resolution_key,
+                attempt_id=attempt_key,
+                selector=selector_key,
+                router_generation=self._router_generation,
+            )
+            self._lifecycle_clear_receipts[resolution_key] = receipt
+            return receipt
+
+    def verify_lifecycle_fault_clear(
+        self,
+        receipt: object,
+        *,
+        resolution_id: str,
+        attempt_id: str,
+        selector: str,
+    ) -> bool:
+        """Verify a receipt against this still-current in-process generation."""
+        if not isinstance(receipt, LifecycleFaultClearReceipt):
+            return False
+        with self._write_condition:
+            stored = self._lifecycle_clear_receipts.get(str(resolution_id).strip())
+            return bool(
+                stored == receipt
+                and receipt.resolution_id == str(resolution_id).strip()
+                and receipt.attempt_id == str(attempt_id).strip()
+                and receipt.selector == str(selector).strip()
+                and receipt.router_generation == self._router_generation
+                and receipt.attempt_id not in self._lifecycle_faults
+            )
+
+    def _broker_write_lease(
+        self,
+        emergency_reduction: bool,
+        selector: str,
+    ) -> ContextManager[None]:
+        """Order a normal write against L5 before generation admission."""
+        if self._write_admission is None:
+            return nullcontext()
+        return self._write_admission(emergency_reduction, selector)
+
+    def _prepare_lifecycle(
+        self,
+        *,
+        request_ctx: RequestContext,
+        adapter_id: str,
+        account_id: str,
+        operation: str,
+        payload: Any,
+        emergency: bool,
+    ) -> str | None:
+        """Persist normal-write intent before the adapter invocation boundary."""
+        store = self._lifecycle_store
+        if store is None:
+            return None
+        if not emergency:
+            with self._write_condition:
+                faulted = bool(self._lifecycle_faults)
+            if faulted:
+                raise SafetyBypassError(
+                    "order lifecycle ledger requires reconciliation before another broker write"
+                )
+            try:
+                store.assert_write_ready()
+            except Exception as exc:
+                raise SafetyBypassError(
+                    "order lifecycle ledger is not ready for a broker write"
+                ) from exc
+        try:
+            return str(store.prepare_dispatch(
+                adapter_id=adapter_id,
+                account_id=account_id,
+                operation=operation,
+                request_context=request_ctx,
+                payload=payload,
+            ))
+        except Exception as exc:
+            if emergency:
+                logger.critical(
+                    "Emergency broker write proceeding without lifecycle attempt: %s",
+                    type(exc).__name__,
+                )
+                return None
+            raise SafetyBypassError(
+                "order lifecycle ledger could not persist the broker write intent"
+            ) from exc
+
+    def _invocation_callback(
+        self,
+        *,
+        attempt_id: str | None,
+        external_callback: _AdapterInvokeCallback,
+        emergency: bool,
+        invoked: list[bool],
+    ) -> Callable[[], None]:
+        """Build the exact-boundary callback shared by every gated write verb."""
+        def callback() -> None:
+            if external_callback is not None:
+                external_callback()
+            if attempt_id is not None:
+                try:
+                    self._lifecycle_store.mark_invoked(attempt_id)
+                except Exception as exc:
+                    if not emergency:
+                        raise SafetyBypassError(
+                            "order lifecycle ledger could not mark adapter invocation"
+                        ) from exc
+                    logger.critical(
+                        "Emergency lifecycle invocation marker failed: %s",
+                        type(exc).__name__,
+                    )
+            invoked[0] = True
+
+        return callback
+
+    def _record_lifecycle_failure(
+        self,
+        *,
+        attempt_id: str | None,
+        invoked: bool,
+        error: BaseException,
+        emergency: bool,
+    ) -> None:
+        if attempt_id is None:
+            return
+        operation = "mark_outcome_unknown" if invoked else "mark_failed_before_invoke"
+        try:
+            getattr(self._lifecycle_store, operation)(attempt_id, type(error).__name__)
+        except Exception as ledger_error:
+            logger.critical(
+                "Lifecycle failure recording failed after broker dispatch error: %s",
+                type(ledger_error).__name__,
+            )
+        if invoked and not emergency:
+            with self._write_condition:
+                self._lifecycle_faults[attempt_id] = type(error).__name__
+
+    def _record_lifecycle_success(
+        self,
+        *,
+        attempt_id: str | None,
+        result: Any,
+        emergency: bool,
+    ) -> None:
+        if attempt_id is None:
+            return
+        try:
+            self._lifecycle_store.acknowledge(attempt_id, result)
+        except Exception as exc:
+            # The adapter already returned. Raising here could encourage a
+            # duplicate broker write, so return its acknowledgement and block
+            # later normal writes until reconciliation resolves the uncertainty.
+            logger.critical(
+                "Broker acknowledgement could not be persisted in lifecycle ledger: %s",
+                type(exc).__name__,
+            )
+            try:
+                self._lifecycle_store.mark_outcome_unknown(
+                    attempt_id,
+                    type(exc).__name__,
+                )
+            except Exception as transition_error:
+                logger.critical(
+                    "Lifecycle unknown-outcome marker could not be persisted: %s",
+                    type(transition_error).__name__,
+                )
+                try:
+                    self._lifecycle_store.mark_health_critical(type(exc).__name__)
+                except Exception as health_error:
+                    logger.critical(
+                        "Lifecycle health marker could not be persisted: %s",
+                        type(health_error).__name__,
+                    )
+            if not emergency:
+                with self._write_condition:
+                    self._lifecycle_faults[attempt_id] = type(exc).__name__
 
     async def _throttle(self, adapter_id: str, kind: str) -> None:
         if self._rate_limiter is not None:
@@ -430,19 +940,56 @@ class BrokerRouter:
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
     ) -> Any:
-        self._admit_write()
-        try:
-            if hint is not None or adapter_id is None:
-                adapter_id, account_id = self._resolve(routing_key, order, hint)
-            session = self._session_provider(request_ctx, adapter_id, account_id)
-            if session.is_read_only:
-                raise SafetyBypassError(f"session {account_id!r} is read-only")
-            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-            self._algo_tag(adapter_id, session, order)
-            await self._throttle(adapter_id, "order")
-            return await self._adapters[adapter_id].place_order(session, order, _router_token=_ROUTER_TOKEN)
-        finally:
-            self._release_write()
+        signed_order = _detached_snapshot(order)
+        with self._broker_write_lease(False, f"{safety_ctx.adapter_id}:{safety_ctx.account_id}"):
+            self._admit_write()
+            try:
+                if hint is not None or adapter_id is None:
+                    adapter_id, account_id = self._resolve(routing_key, signed_order, hint)
+                session = self._session_provider(request_ctx, adapter_id, account_id)
+                if session.is_read_only:
+                    raise SafetyBypassError(f"session {account_id!r} is read-only")
+                self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                self._algo_tag(adapter_id, session, signed_order)
+                await self._throttle(adapter_id, "order")
+                attempt_id = self._prepare_lifecycle(
+                    request_ctx=request_ctx,
+                    adapter_id=adapter_id,
+                    account_id=account_id,
+                    operation="place_order",
+                    payload=signed_order,
+                    emergency=False,
+                )
+                invoked = [False]
+                try:
+                    result = await _invoke_adapter(
+                        self._adapters[adapter_id].place_order,
+                        self._invocation_callback(
+                            attempt_id=attempt_id,
+                            external_callback=None,
+                            emergency=False,
+                            invoked=invoked,
+                        ),
+                        session,
+                        signed_order,
+                        _router_token=_ROUTER_TOKEN,
+                    )
+                except BaseException as exc:
+                    self._record_lifecycle_failure(
+                        attempt_id=attempt_id,
+                        invoked=invoked[0],
+                        error=exc,
+                        emergency=False,
+                    )
+                    raise
+                self._record_lifecycle_success(
+                    attempt_id=attempt_id,
+                    result=result,
+                    emergency=False,
+                )
+                return result
+            finally:
+                self._release_write()
 
     async def modify_order(
         self,
@@ -459,26 +1006,74 @@ class BrokerRouter:
     ) -> Any:
         """Modify a live order through the same verify-then-consume gate as place.
 
-        ``order`` is the canonical modify fingerprint that ``gate_order`` signed;
-        ``order_id`` + ``changes`` are the dispatch payload forwarded to the
-        adapter. Resolution, ACL, read-only, SafetyContext verification, and
-        one-shot gate consumption are identical to :meth:`place_order`.
+        ``order`` is the operation-discriminated modify fingerprint that
+        ``gate_order`` signed. ``order_id`` and ``changes`` remain compatibility
+        parameters for existing callers, but are validation-only: the adapter
+        receives values derived solely from a detached copy of ``order``.
         """
-        self._admit_write()
-        try:
-            if hint is not None or adapter_id is None:
-                adapter_id, account_id = self._resolve(routing_key, order, hint)
-            session = self._session_provider(request_ctx, adapter_id, account_id)
-            if session.is_read_only:
-                raise SafetyBypassError(f"session {account_id!r} is read-only")
-            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-            self._algo_tag(adapter_id, session, order)
-            await self._throttle(adapter_id, "order")
-            return await self._adapters[adapter_id].modify_order(
-                session, order_id, changes, _router_token=_ROUTER_TOKEN
-            )
-        finally:
-            self._release_write()
+        signed_order = _signed_mapping_snapshot(order, operation="modify")
+        signed_order_id = _signed_order_id(signed_order)
+        signed_changes = {
+            key: value
+            for key, value in signed_order.items()
+            if key not in {"_op", "order_id", "_requested_change_fields"}
+        }
+        compatibility_changes = _detached_snapshot(changes)
+        if not isinstance(compatibility_changes, Mapping):
+            raise SafetyBypassError("modify changes must be a Mapping")
+        _require_canonical_match(order_id, signed_order_id, field="order_id")
+        _require_canonical_match(compatibility_changes, signed_changes, field="changes")
+
+        with self._broker_write_lease(False, f"{safety_ctx.adapter_id}:{safety_ctx.account_id}"):
+            self._admit_write()
+            try:
+                if hint is not None or adapter_id is None:
+                    adapter_id, account_id = self._resolve(routing_key, signed_order, hint)
+                session = self._session_provider(request_ctx, adapter_id, account_id)
+                if session.is_read_only:
+                    raise SafetyBypassError(f"session {account_id!r} is read-only")
+                self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                self._algo_tag(adapter_id, session, signed_order)
+                await self._throttle(adapter_id, "order")
+                attempt_id = self._prepare_lifecycle(
+                    request_ctx=request_ctx,
+                    adapter_id=adapter_id,
+                    account_id=account_id,
+                    operation="modify_order",
+                    payload=signed_order,
+                    emergency=False,
+                )
+                invoked = [False]
+                try:
+                    result = await _invoke_adapter(
+                        self._adapters[adapter_id].modify_order,
+                        self._invocation_callback(
+                            attempt_id=attempt_id,
+                            external_callback=None,
+                            emergency=False,
+                            invoked=invoked,
+                        ),
+                        session,
+                        signed_order_id,
+                        dict(signed_changes),
+                        _router_token=_ROUTER_TOKEN,
+                    )
+                except BaseException as exc:
+                    self._record_lifecycle_failure(
+                        attempt_id=attempt_id,
+                        invoked=invoked[0],
+                        error=exc,
+                        emergency=False,
+                    )
+                    raise
+                self._record_lifecycle_success(
+                    attempt_id=attempt_id,
+                    result=result,
+                    emergency=False,
+                )
+                return result
+            finally:
+                self._release_write()
 
     async def cancel_order(
         self,
@@ -492,48 +1087,96 @@ class BrokerRouter:
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
         extras: Mapping[str, Any] | None = None,
+        on_adapter_invoke: _AdapterInvokeCallback = None,
     ) -> Any:
         """Cancel a live order through the same verify-then-consume gate as place.
 
-        ``order`` is the canonical cancel fingerprint that ``gate_order`` signed;
-        ``order_id`` is the dispatch payload. Resolution, ACL, read-only,
-        SafetyContext verification, and one-shot gate consumption mirror
-        :meth:`place_order`.
+        ``order`` is the operation-discriminated cancel fingerprint that
+        ``gate_order`` signed. ``order_id`` and ``extras`` remain compatibility
+        parameters for existing callers, but are validation-only: every adapter
+        argument is derived solely from a detached copy of ``order``.
 
         ``extras`` are optional adapter-level cancel kwargs (e.g. Kotak Neo's
         ``variety``/``amo`` for bracket/cover leg exits). They are forwarded ONLY
-        when every extra is field-matched against the signed ``order``
-        fingerprint, so an extra the gate did not cover can never reach the
-        broker.
+        when their exact canonical representation matches the signed fields, so
+        Python-equal substitutions such as ``False``/``0`` cannot pass.
         """
-        self._admit_write()
-        try:
-            if hint is not None or adapter_id is None:
-                adapter_id, account_id = self._resolve(routing_key, order, hint)
-            session = self._session_provider(request_ctx, adapter_id, account_id)
-            if session.is_read_only:
-                raise SafetyBypassError(f"session {account_id!r} is read-only")
-            self._verify_safety(request_ctx, order, safety_ctx, adapter_id, account_id)
-            if extras:
-                # Field-by-field coverage check: every dispatched extra must appear
-                # verbatim in the verified canonical fingerprint (contract §8.0 — no
-                # unhashed mutable field may reach the broker).
-                if not isinstance(order, Mapping):
-                    raise SafetyBypassError(
-                        "cancel extras require a Mapping cancel fingerprint that covers them"
+        emergency_intent = safety_ctx.intent_source == EMERGENCY_INTENT_SOURCE
+        operation = "cancel_order" if emergency_intent else "cancel"
+        signed_order = _signed_mapping_snapshot(order, operation=operation)
+        signed_order_id = _signed_order_id(signed_order)
+        signed_extras = {
+            key: signed_order[key]
+            for key in _CANCEL_EXTRA_KEYS
+            if key in signed_order
+        }
+        compatibility_extras: Mapping[str, Any]
+        if extras is None:
+            compatibility_extras = {}
+        else:
+            detached_extras = _detached_snapshot(extras)
+            if not isinstance(detached_extras, Mapping):
+                raise SafetyBypassError("cancel extras must be a Mapping")
+            compatibility_extras = detached_extras
+        _require_canonical_match(order_id, signed_order_id, field="order_id")
+        _require_canonical_match(compatibility_extras, signed_extras, field="extras")
+
+        with self._broker_write_lease(
+            emergency_intent,
+            f"{safety_ctx.adapter_id}:{safety_ctx.account_id}",
+        ):
+            self._admit_write()
+            try:
+                if hint is not None or adapter_id is None:
+                    adapter_id, account_id = self._resolve(routing_key, signed_order, hint)
+                session = self._session_provider(request_ctx, adapter_id, account_id)
+                if session.is_read_only:
+                    raise SafetyBypassError(f"session {account_id!r} is read-only")
+                self._verify_safety(request_ctx, signed_order, safety_ctx, adapter_id, account_id)
+                if emergency_intent:
+                    session.algo_id = ""
+                else:
+                    self._algo_tag(adapter_id, session, signed_order)
+                await self._throttle(adapter_id, "order")
+                attempt_id = self._prepare_lifecycle(
+                    request_ctx=request_ctx,
+                    adapter_id=adapter_id,
+                    account_id=account_id,
+                    operation="cancel_order",
+                    payload=signed_order,
+                    emergency=emergency_intent,
+                )
+                invoked = [False]
+                try:
+                    result = await _invoke_adapter(
+                        self._adapters[adapter_id].cancel_order,
+                        self._invocation_callback(
+                            attempt_id=attempt_id,
+                            external_callback=on_adapter_invoke,
+                            emergency=emergency_intent,
+                            invoked=invoked,
+                        ),
+                        session,
+                        signed_order_id,
+                        **dict(signed_extras),
+                        _router_token=_ROUTER_TOKEN,
                     )
-                mismatched = sorted(k for k, v in extras.items() if order.get(k) != v)
-                if mismatched:
-                    raise SafetyBypassError(
-                        f"cancel extras not covered by the signed cancel fingerprint: {mismatched}"
+                except BaseException as exc:
+                    self._record_lifecycle_failure(
+                        attempt_id=attempt_id,
+                        invoked=invoked[0],
+                        error=exc,
+                        emergency=emergency_intent,
                     )
-            self._algo_tag(adapter_id, session, order)
-            await self._throttle(adapter_id, "order")
-            return await self._adapters[adapter_id].cancel_order(
-                session, order_id, **dict(extras or {}), _router_token=_ROUTER_TOKEN
-            )
-        finally:
-            self._release_write()
+                    raise
+                self._record_lifecycle_success(
+                    attempt_id=attempt_id,
+                    result=result,
+                    emergency=emergency_intent,
+                )
+                return result
+            finally:
+                self._release_write()
 
     async def execute_gated(
         self,
@@ -546,6 +1189,7 @@ class BrokerRouter:
         account_id: str | None = None,
         hint: RoutingHint | None = None,
         routing_key: str = "execution",
+        on_adapter_invoke: _AdapterInvokeCallback = None,
     ) -> Any:
         """Dispatch an extended gated write verb (contract §8.1, table-driven).
 
@@ -582,27 +1226,69 @@ class BrokerRouter:
             UnsupportedCapabilityError: The resolved adapter does not implement
                 ``verb``.
         """
-        self._admit_write()
-        try:
-            dispatch = _GATED_VERB_DISPATCH.get(verb)
-            if dispatch is None:
-                raise SafetyBypassError(f"unknown gated write verb {verb!r}")
-            if not isinstance(payload, Mapping) or payload.get("_op") != verb:
-                raise SafetyBypassError(
-                    f"gated payload _op does not match verb {verb!r} — a SafetyContext "
-                    "minted for one verb cannot dispatch another"
+        dispatch = _GATED_VERB_DISPATCH.get(verb)
+        if dispatch is None:
+            raise SafetyBypassError(f"unknown gated write verb {verb!r}")
+        signed_payload = _signed_mapping_snapshot(payload, operation=verb)
+        emergency_intent = safety_ctx.intent_source == EMERGENCY_INTENT_SOURCE
+        if emergency_intent and verb not in EMERGENCY_REDUCING_VERBS:
+            raise SafetyBypassError(
+                f"emergency intent cannot dispatch non-reducing verb {verb!r}"
+            )
+        with self._broker_write_lease(
+            emergency_intent,
+            f"{safety_ctx.adapter_id}:{safety_ctx.account_id}",
+        ):
+            self._admit_write()
+            try:
+                if hint is not None or adapter_id is None:
+                    adapter_id, account_id = self._resolve(routing_key, signed_payload, hint)
+                session = self._session_provider(request_ctx, adapter_id, account_id)
+                if session.is_read_only:
+                    raise SafetyBypassError(f"session {account_id!r} is read-only")
+                self._verify_safety(request_ctx, signed_payload, safety_ctx, adapter_id, account_id)
+                if emergency_intent:
+                    session.algo_id = ""
+                else:
+                    self._algo_tag(adapter_id, session, signed_payload)
+                await self._throttle(adapter_id, "order")
+                attempt_id = self._prepare_lifecycle(
+                    request_ctx=request_ctx,
+                    adapter_id=adapter_id,
+                    account_id=account_id,
+                    operation=verb,
+                    payload=signed_payload,
+                    emergency=emergency_intent,
                 )
-            if hint is not None or adapter_id is None:
-                adapter_id, account_id = self._resolve(routing_key, payload, hint)
-            session = self._session_provider(request_ctx, adapter_id, account_id)
-            if session.is_read_only:
-                raise SafetyBypassError(f"session {account_id!r} is read-only")
-            self._verify_safety(request_ctx, payload, safety_ctx, adapter_id, account_id)
-            self._algo_tag(adapter_id, session, payload)
-            await self._throttle(adapter_id, "order")
-            return await dispatch(self._adapters[adapter_id], session, payload)
-        finally:
-            self._release_write()
+                invoked = [False]
+                try:
+                    result = await dispatch(
+                        self._adapters[adapter_id],
+                        session,
+                        signed_payload,
+                        self._invocation_callback(
+                            attempt_id=attempt_id,
+                            external_callback=on_adapter_invoke,
+                            emergency=emergency_intent,
+                            invoked=invoked,
+                        ),
+                    )
+                except BaseException as exc:
+                    self._record_lifecycle_failure(
+                        attempt_id=attempt_id,
+                        invoked=invoked[0],
+                        error=exc,
+                        emergency=emergency_intent,
+                    )
+                    raise
+                self._record_lifecycle_success(
+                    attempt_id=attempt_id,
+                    result=result,
+                    emergency=emergency_intent,
+                )
+                return result
+            finally:
+                self._release_write()
 
     # ------------------------------------------------------------------
     # Operator onboarding (trust-on-first-use)
@@ -636,6 +1322,43 @@ class BrokerRouter:
     # ------------------------------------------------------------------
     # Read path
     # ------------------------------------------------------------------
+
+    async def plan_emergency_reduction(
+        self,
+        request_ctx: RequestContext,
+        *,
+        policy: EmergencyWritePolicy,
+        protected_order_ids: frozenset[str],
+        protected_exit_order_ids: frozenset[str],
+        protected_exit_tags: frozenset[str],
+        unidentified_exit_inflight: bool,
+        adapter_id: str,
+        account_id: str,
+    ) -> EmergencyReductionPlan | None:
+        """Read one exact account snapshot and ask the adapter for a bounded plan.
+
+        This method never mutates broker state and never receives the router
+        token. Concrete writes from the returned plan must come back through the
+        normal one-shot gated methods.
+        """
+        session = self._session_provider(request_ctx, adapter_id, account_id)
+        if session.is_read_only:
+            raise SafetyBypassError(f"session {account_id!r} is read-only")
+        planner = getattr(self._adapters[adapter_id], "plan_emergency_reduction", None)
+        if not callable(planner):
+            return None
+        await self._throttle(adapter_id, "data")
+        plan = await planner(
+            session,
+            policy=policy,
+            protected_order_ids=protected_order_ids,
+            protected_exit_order_ids=protected_exit_order_ids,
+            protected_exit_tags=protected_exit_tags,
+            unidentified_exit_inflight=unidentified_exit_inflight,
+        )
+        if not isinstance(plan, EmergencyReductionPlan):
+            raise SafetyBypassError("adapter returned an invalid emergency reduction plan")
+        return plan
 
     async def quotes(
         self,

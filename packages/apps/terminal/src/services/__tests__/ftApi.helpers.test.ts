@@ -28,7 +28,7 @@ vi.mock("@/stores/authStore", () => ({
   useAuthStore: { getState: () => ({ token: "" }) },
 }));
 
-import { parseResponse, post, get, getV1, putV1, delV1 } from "../ftApi.helpers";
+import { FtApiError, parseResponse, post, get, getV1, putV1, delV1 } from "../ftApi.helpers";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -105,14 +105,14 @@ describe("parseResponse — is_sample_data survives the data-unwrap", () => {
     expect(result).toStrictEqual({ spot: 24000 });
   });
 
-  it("does not add the flag when the sibling value is false", async () => {
+  it("propagates a sibling is_sample_data: false as explicit live provenance", async () => {
     const res = makeJsonResponse({
       status: "success",
       is_sample_data: false,
       data: { spot: 24000 },
     });
-    const result = await parseResponse<{ spot: number }>(res, "gex");
-    expect(result).toStrictEqual({ spot: 24000 });
+    const result = await parseResponse<{ spot: number; is_sample_data: boolean }>(res, "gex");
+    expect(result).toStrictEqual({ spot: 24000, is_sample_data: false });
   });
 
   it("fail-closed: an envelope-level true overrides a nested false", async () => {
@@ -185,6 +185,31 @@ describe("post — HTTP error handling", () => {
     );
   });
 
+  it("preserves the HTTP status and structured data from a non-ok JSON body", async () => {
+    const pending = {
+      resolution_id: "resolution-1",
+      attempt_id: "attempt-1",
+      status: "PENDING_ROUTER_CLEAR",
+    };
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse(
+        {
+          status: "error",
+          message: "Decision recorded; outcome remains blocked pending exact router clear",
+          data: pending,
+        },
+        503,
+      ),
+    );
+
+    const error = await post("reconciliation/outcomes/attempt-1/resolve", {}).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(FtApiError);
+    expect(error).toMatchObject({ status: 503, data: pending });
+  });
+
   it("sends Content-Type application/json", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeJsonResponse({ data: { ok: true } }),
@@ -201,6 +226,18 @@ describe("post — HTTP error handling", () => {
     await post("ditto/risk", {});
     const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
     expect(url).toBe("/ft-api/api/v1/ditto/risk");
+  });
+
+  it("forwards an AbortSignal to fetch", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeJsonResponse({ data: null }),
+    );
+    const controller = new AbortController();
+
+    await post("oiprofile", {}, controller.signal);
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
   });
 });
 

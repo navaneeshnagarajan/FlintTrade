@@ -1,17 +1,16 @@
 /**
- * StrategyMonitorWidget — Live status of running algorithmic strategies.
+ * StrategyMonitorWidget — Read-only local preview of strategy monitoring.
  *
  * Features:
  *   - One row per strategy: name, status, symbol, P&L, trade count, signal count
  *   - Status: Running (green) / Paused (amber) / Stopped (grey) / Error (red)
- *   - Per-strategy Start / Pause / Stop action buttons
  *   - Overall health indicator in header (all OK / degraded / critical)
  *   - Log viewer: last 5 log messages per strategy (expandable)
  *   - Sample data when broker disconnected
  */
 
-import { useState, useCallback, useEffect, memo } from "react";
-import { Activity, Play, Pause, Square, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { useState, useEffect, memo } from "react";
+import { Activity, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
@@ -160,14 +159,11 @@ const LOG_COLOUR: Record<StrategyLogEntry["level"], string> = {
 
 interface StrategyRowProps {
   strategy: Strategy;
-  onStart: (id: string) => void;
-  onPause: (id: string) => void;
-  onStop:  (id: string) => void;
 }
 
-function StrategyRow({ strategy, onStart, onPause, onStop }: StrategyRowProps) {
+function StrategyRow({ strategy }: StrategyRowProps) {
   const [logsOpen, setLogsOpen] = useState(false);
-  const { id, name, status, symbol, pnl, tradesToday, signalsGenerated, logs } = strategy;
+  const { name, status, symbol, pnl, tradesToday, signalsGenerated, logs } = strategy;
 
   return (
     <div
@@ -219,42 +215,6 @@ function StrategyRow({ strategy, onStart, onPause, onStop }: StrategyRowProps) {
           <div>{signalsGenerated}S</div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-1 shrink-0" role="group" aria-label={`Actions for ${name}`}>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onStart(id)}
-            disabled={status === "running"}
-            className="h-auto w-auto p-1 text-text-muted hover:text-profit hover:bg-profit/10 transition-colors disabled:opacity-30"
-            title="Start"
-            aria-label={`Start ${name}`}
-          >
-            <Play size={11} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onPause(id)}
-            disabled={status !== "running"}
-            className="h-auto w-auto p-1 text-text-muted hover:text-warning hover:bg-warning/10 transition-colors disabled:opacity-30"
-            title="Pause"
-            aria-label={`Pause ${name}`}
-          >
-            <Pause size={11} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onStop(id)}
-            disabled={status === "stopped"}
-            className="h-auto w-auto p-1 text-text-muted hover:text-loss hover:bg-loss/10 transition-colors disabled:opacity-30"
-            title="Stop"
-            aria-label={`Stop ${name}`}
-          >
-            <Square size={11} />
-          </Button>
-        </div>
       </div>
 
       {/* Log drawer */}
@@ -303,49 +263,20 @@ const HEALTH_LABEL: Record<OverallHealth, string> = {
 function StrategyMonitorWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
-  const [strategies, setStrategies] = useState<Strategy[]>(() =>
-    isConnected ? [] : SAMPLE_STRATEGIES,
-  );
+  const strategies = isConnected ? [] : SAMPLE_STRATEGIES;
 
   useEffect(() => {
     track("trade", "widget_view_strategy_monitor");
   }, [track]);
 
-  // House rule: never render fabricated live P&L. Demo strategies show only when
-  // no broker is connected (explore/demo, with the "Sample" badge). When a broker
-  // IS connected we show the honest "No strategies configured" empty state rather
-  // than sample data presented as live — real strategy monitoring is wired via
-  // Automate -> Strategies (the StrategyRunner) until this widget subscribes to it.
-  useEffect(() => {
-    setStrategies(isConnected ? [] : SAMPLE_STRATEGIES);
-  }, [isConnected]);
-
   const health = computeHealth(strategies);
-
-  const handleStart = useCallback((id: string) => {
-    setStrategies((prev) =>
-      prev.map((s) => s.id === id ? { ...s, status: "running" as StrategyStatus } : s),
-    );
-  }, []);
-
-  const handlePause = useCallback((id: string) => {
-    setStrategies((prev) =>
-      prev.map((s) => s.id === id ? { ...s, status: "paused" as StrategyStatus } : s),
-    );
-  }, []);
-
-  const handleStop = useCallback((id: string) => {
-    setStrategies((prev) =>
-      prev.map((s) => s.id === id ? { ...s, status: "stopped" as StrategyStatus } : s),
-    );
-  }, []);
 
   const runningCount = strategies.filter((s) => s.status === "running").length;
 
   return (
     <div
       className="h-full flex flex-col bg-surface-base overflow-hidden"
-      aria-label="Strategy Monitor widget"
+      aria-label="Strategy Monitor local preview"
     >
       {/* Header */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
@@ -353,16 +284,29 @@ function StrategyMonitorWidget() {
         <span className="text-xs font-semibold text-text-primary">Strategy Monitor</span>
 
         <span
-          className={cn("px-1.5 py-0.5 text-xxs font-medium border rounded", HEALTH_CLASS[health])}
-          aria-label={`Overall health: ${HEALTH_LABEL[health]}`}
+          className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-secondary"
+          role="status"
+          aria-label="Read-only local preview; strategy lifecycle controls are unavailable"
+          title="Read-only local preview. Start, pause and stop controls are unavailable until backend lifecycle mutations are wired."
         >
-          {health === "critical" && <AlertTriangle size={9} className="inline mr-0.5" />}
-          {HEALTH_LABEL[health]}
+          Local preview
         </span>
+
+        {strategies.length > 0 && (
+          <span
+            className={cn("px-1.5 py-0.5 text-xxs font-medium border rounded", HEALTH_CLASS[health])}
+            aria-label={`Preview health: ${HEALTH_LABEL[health]}`}
+          >
+            {health === "critical" && <AlertTriangle size={9} className="inline mr-0.5" />}
+            {HEALTH_LABEL[health]}
+          </span>
+        )}
 
         <div className="flex-1" />
 
-        <span className="text-xxs text-text-muted">{runningCount} running</span>
+        {strategies.length > 0 && (
+          <span className="text-xxs text-text-muted">{runningCount} running</span>
+        )}
 
         {/* Honest disclosure — sample strategies are shown only when no broker is
             connected (connected → empty state); upgrade to the canonical badge. */}
@@ -370,8 +314,8 @@ function StrategyMonitorWidget() {
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample strategies; no broker connected"
-            title="No broker connected — showing sample strategies so the widget is usable in explore mode. Connect a broker to monitor live strategies."
+            aria-label="Showing local sample strategies"
+            title="Illustrative local data only. This widget does not yet read or control backend strategy lifecycle state."
           >
             Sample data
           </span>
@@ -385,7 +329,6 @@ function StrategyMonitorWidget() {
         <div className="w-16 shrink-0 text-right">Status</div>
         <div className="w-16 shrink-0 text-right">P&amp;L</div>
         <div className="w-12 shrink-0 text-right">T / S</div>
-        <div className="w-20 shrink-0 text-right">Actions</div>
       </div>
 
       {/* Strategy rows */}
@@ -398,7 +341,7 @@ function StrategyMonitorWidget() {
           <div className="flex flex-col items-center justify-center gap-2 h-full px-4 text-center">
             <p className="text-sm text-text-muted">No strategies configured</p>
             <p className="text-xxs text-text-muted leading-snug">
-              Build and deploy a strategy in the Strategy Lab to monitor it here.
+              Strategy lifecycle monitoring is not connected to this preview yet.
             </p>
             <Button
               variant="outline"
@@ -418,9 +361,6 @@ function StrategyMonitorWidget() {
             <StrategyRow
               key={s.id}
               strategy={s}
-              onStart={handleStart}
-              onPause={handlePause}
-              onStop={handleStop}
             />
           ))
         )}

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Activity, Target } from "lucide-react";
 import { FlintStackedBarChart, type FlintStackedBarSeries } from "@flinttrade/design-system";
 import { Badge } from "@/components/ui/badge";
@@ -16,13 +16,34 @@ import { useMaxPain } from "@/hooks/useMarketIntel";
 import { DataNotice, ErrorRetry, LiveSelector, LoadingRows, SectionLabel, useLiveSelector } from "../shared";
 import { formatOINum } from "../utils";
 
-export function MaxPainTab() {
+interface MaxPainTabProps {
+  onSampleDataChange?: (isSampleData: boolean | null) => void;
+}
+
+export function MaxPainTab({ onSampleDataChange }: MaxPainTabProps = {}) {
   const { state, setSymbol, setExchange, setExpiry } = useLiveSelector();
   const { data, isLoading, isError, error, refetch } = useMaxPain(
     state.symbol,
     state.exchange,
     state.expiry ?? undefined,
   );
+  const maxPainStrike = typeof data?.max_pain_strike === "number"
+    && Number.isFinite(data.max_pain_strike)
+    && data.max_pain_strike > 0
+    ? data.max_pain_strike
+    : null;
+  const hasUsableData = Boolean(data && data.strikes.length > 0 && maxPainStrike !== null);
+  const sampleFlag = isError || !hasUsableData || !data
+    ? null
+    : data.is_sample_data !== false;
+
+  useEffect(() => {
+    onSampleDataChange?.(sampleFlag);
+  }, [onSampleDataChange, sampleFlag]);
+
+  useEffect(() => () => {
+    onSampleDataChange?.(null);
+  }, [onSampleDataChange]);
 
   const maxTotalPain = useMemo(() => {
     if (!data?.strikes?.length) return 1;
@@ -32,21 +53,31 @@ export function MaxPainTab() {
     if (!data?.strikes?.length) return [];
     return data.strikes.map((row) => {
       const strike = row.strike.toLocaleString("en-IN");
-      return row.strike === data.max_pain_strike ? `${strike} MAX` : strike;
+      return row.strike === maxPainStrike ? `${strike} MAX` : strike;
     });
-  }, [data]);
+  }, [data, maxPainStrike]);
   const painSeries = useMemo<FlintStackedBarSeries[]>(() => {
     if (!data?.strikes?.length) return [];
+    const hasPainComponents = data.strikes.every(
+      (row) => row.call_pain !== undefined && row.put_pain !== undefined,
+    );
+    if (!hasPainComponents) {
+      return [{
+        label: "Total Pain",
+        color: "rgba(14, 165, 233, 0.72)",
+        values: data.strikes.map((row) => row.total_pain),
+      }];
+    }
     return [
       {
         label: "Call Pain",
         color: "rgba(16, 185, 129, 0.72)",
-        values: data.strikes.map((row) => row.call_pain),
+        values: data.strikes.map((row) => row.call_pain!),
       },
       {
         label: "Put Pain",
         color: "rgba(239, 68, 68, 0.72)",
-        values: data.strikes.map((row) => row.put_pain),
+        values: data.strikes.map((row) => row.put_pain!),
       },
     ];
   }, [data]);
@@ -54,7 +85,7 @@ export function MaxPainTab() {
   return (
     <ScrollArea className="h-full">
       <div className="p-4 space-y-4">
-        <DataNotice text="Max Pain is the strike price where option buyers would collectively lose the most at expiry. Historically, price tends to gravitate toward max pain as expiry approaches. Refreshes every 30s during market hours." />
+        <DataNotice text="Max Pain is the strike price where option buyers would collectively lose the most at expiry. Historically, price tends to gravitate toward max pain as expiry approaches. Refreshes every 60s during market hours." />
 
         <LiveSelector state={state} setSymbol={setSymbol} setExchange={setExchange} setExpiry={setExpiry} />
 
@@ -69,7 +100,7 @@ export function MaxPainTab() {
           </div>
         ) : isError ? (
           <ErrorRetry message={(error as Error)?.message ?? "Failed to load Max Pain data"} onRetry={() => void refetch()} />
-        ) : data ? (
+        ) : data && data.strikes.length > 0 && maxPainStrike !== null ? (
           <>
             <Card className="bg-surface-card border-primary/30">
               <CardContent className="pt-4 pb-4 px-5">
@@ -80,7 +111,7 @@ export function MaxPainTab() {
                       Max Pain Strike
                     </div>
                     <div className="text-4xl font-mono font-bold tabular-nums text-primary">
-                      {data.max_pain_strike.toLocaleString("en-IN")}
+                      {maxPainStrike.toLocaleString("en-IN")}
                     </div>
                     <div className="text-xs text-text-secondary mt-1">
                       {state.symbol} · {state.exchange} · {state.expiry ?? "—"}
@@ -124,7 +155,7 @@ export function MaxPainTab() {
                       <LoadingRows cols={6} />
                     ) : (
                       data.strikes.map((row) => {
-                        const isMaxPain = row.strike === data.max_pain_strike;
+                        const isMaxPain = row.strike === maxPainStrike;
                         return (
                           <TableRow
                             key={row.strike}
@@ -138,10 +169,18 @@ export function MaxPainTab() {
                                 </Badge>
                               )}
                             </TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">{formatOINum(row.call_oi)}</TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">{formatOINum(row.put_oi)}</TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{formatOINum(row.call_pain)}</TableCell>
-                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">{formatOINum(row.put_pain)}</TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-profit">
+                              {row.call_oi === undefined ? "--" : formatOINum(row.call_oi)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-loss">
+                              {row.put_oi === undefined ? "--" : formatOINum(row.put_oi)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                              {row.call_pain === undefined ? "--" : formatOINum(row.call_pain)}
+                            </TableCell>
+                            <TableCell className="px-2 py-1.5 font-mono text-xs text-text-secondary">
+                              {row.put_pain === undefined ? "--" : formatOINum(row.put_pain)}
+                            </TableCell>
                             <TableCell className="px-2 py-1.5 font-mono text-xs font-semibold text-text-primary">{formatOINum(row.total_pain)}</TableCell>
                           </TableRow>
                         );

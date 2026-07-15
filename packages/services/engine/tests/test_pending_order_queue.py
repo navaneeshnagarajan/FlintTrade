@@ -106,6 +106,41 @@ class TestEnqueue:
         pending = q.list_pending()
         assert pending[0].order_params["symbol"] == "BANKNIFTY"
 
+    def test_enqueue_persists_selector_origin_and_intent_context(self, tmp_path: Path):
+        q = _make_queue(tmp_path)
+
+        q.enqueue(
+            _make_order("RELIANCE"),
+            reason="Autonomous-agent BUY signal",
+            adapter_id="upstox",
+            account_id="primary",
+            source="autonomous-agent",
+            intent_type="entry",
+            producer_ref="agent-session-1",
+            intent_context={"entry_price": 2500.0, "stop_loss": 2450.0},
+        )
+
+        q.close()
+        PendingOrderQueue, *_ = _queue_module()
+        reopened = PendingOrderQueue(db_path=tmp_path / "test_ac.duckdb")
+        persisted = reopened.list_pending()[0]
+        assert persisted.adapter_id == "upstox"
+        assert persisted.account_id == "primary"
+        assert persisted.source == "autonomous-agent"
+        assert persisted.intent_type == "entry"
+        assert persisted.producer_ref == "agent-session-1"
+        assert persisted.intent_context == {"entry_price": 2500.0, "stop_loss": 2450.0}
+
+    def test_enqueue_rejects_auth_or_credential_material(self, tmp_path: Path):
+        _, ActionCenterError, _ = _queue_module()
+        q = _make_queue(tmp_path)
+
+        with pytest.raises(ActionCenterError, match="credential|authentication"):
+            q.enqueue(
+                {**_make_order(), "access_token": "must-not-be-persisted"},
+                reason="Unsafe payload",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Approve
@@ -148,6 +183,80 @@ class TestApprove:
         history = q.list_history(statuses=["approved"])
         assert len(history) == 1
         assert history[0].id == req.id
+
+
+class TestDispatchClaim:
+    """The durable queue must make approval single-use before broker dispatch."""
+
+    def test_claim_is_atomic_and_cannot_be_replayed(self, tmp_path: Path):
+        _, ActionCenterError, _ = _queue_module()
+        q = _make_queue(tmp_path)
+        req = q.enqueue(_make_order(), reason="Test")
+
+        claimed = q.claim_for_dispatch(req.id)
+
+        assert claimed.status == "dispatching"
+        with pytest.raises(ActionCenterError, match="dispatching"):
+            q.claim_for_dispatch(req.id)
+
+    def test_expired_request_cannot_be_claimed(self, tmp_path: Path):
+        _, ActionCenterError, _ = _queue_module()
+        q = _make_queue(tmp_path)
+        req = q.enqueue(_make_order(), reason="Test", ttl_minutes=0)
+        time.sleep(0.05)
+
+        with pytest.raises(ActionCenterError, match="expired"):
+            q.claim_for_dispatch(req.id)
+
+        assert q.get(req.id).status == "expired"
+
+    def test_mark_approved_records_result_and_resolution_time(self, tmp_path: Path):
+        q = _make_queue(tmp_path)
+        req = q.enqueue(_make_order(), reason="Test")
+        q.claim_for_dispatch(req.id)
+
+        approved = q.mark_approved(req.id, broker_order_id="BROKER-1")
+
+        assert approved.status == "approved"
+        assert approved.broker_order_id == "BROKER-1"
+        assert approved.resolved_at is not None
+
+    def test_mark_failed_is_terminal_and_never_returns_to_pending(self, tmp_path: Path):
+        _, ActionCenterError, _ = _queue_module()
+        q = _make_queue(tmp_path)
+        req = q.enqueue(_make_order(), reason="Test")
+        q.claim_for_dispatch(req.id)
+
+        failed = q.mark_failed(
+            req.id,
+            reason="Broker outcome unknown; inspect the order book",
+            outcome_uncertain=True,
+        )
+
+        assert failed.status == "failed"
+        assert failed.outcome_uncertain is True
+        assert q.list_pending() == []
+        with pytest.raises(ActionCenterError, match="failed"):
+            q.claim_for_dispatch(req.id)
+
+    def test_reject_by_producer_closes_only_pending_entries(self, tmp_path: Path):
+        q = _make_queue(tmp_path)
+        pending = q.enqueue(
+            _make_order("A"),
+            reason="Test",
+            producer_ref="session-a",
+        )
+        other = q.enqueue(
+            _make_order("B"),
+            reason="Test",
+            producer_ref="session-b",
+        )
+
+        count = q.reject_pending_by_producer("session-a", "Agent session ended")
+
+        assert count == 1
+        assert q.get(pending.id).status == "rejected"
+        assert q.get(other.id).status == "pending"
 
 
 # ---------------------------------------------------------------------------

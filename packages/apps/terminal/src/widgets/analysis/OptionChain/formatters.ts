@@ -8,12 +8,12 @@ export const NUM  = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 })
 export const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 export function fmtLtp(v: number | null | undefined): string {
-  if (v == null || v === 0) return "—";
+  if (v == null) return "—";
   return NUM.format(v);
 }
 
 export function fmtOI(v: number | null | undefined): string {
-  if (v == null || v === 0) return "—";
+  if (v == null) return "—";
   const n = Number(v);
   if (n >= 1_00_00_000) return `${(n / 1_00_00_000).toFixed(1)}Cr`;
   if (n >= 1_00_000)    return `${(n / 1_00_000).toFixed(1)}L`;
@@ -24,7 +24,8 @@ export function fmtOI(v: number | null | undefined): string {
 export function fmtChg(v: number | null | undefined): string {
   if (v == null) return "—";
   const n = Number(v);
-  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
 export function fmtDelta(v: number | null | undefined): string {
@@ -61,9 +62,16 @@ export function getOISignal(row: RawOptionRow | null): OISignal {
   if (!row) return null;
   const chgPct = row.change_percent ?? row.change_pct ?? null;
   const oiChg  = row.oi_change ?? null;
-  if (chgPct == null || oiChg == null) return null;
-  const priceUp = Number(chgPct) >= 0;
-  const oiUp    = Number(oiChg) >= 0;
+  if (
+    typeof chgPct !== "number"
+    || typeof oiChg !== "number"
+    || !Number.isFinite(chgPct)
+    || !Number.isFinite(oiChg)
+    || chgPct === 0
+    || oiChg === 0
+  ) return null;
+  const priceUp = chgPct > 0;
+  const oiUp    = oiChg > 0;
   if (priceUp  && oiUp)   return "Long Build Up";
   if (priceUp  && !oiUp)  return "Short Covering";
   if (!priceUp && !oiUp)  return "Long Unwinding";

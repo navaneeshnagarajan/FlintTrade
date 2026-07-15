@@ -13,9 +13,9 @@
  * smile (`getFtIVSmile` — the same screener source the IVSmile and GreeksSurface
  * widgets use) and maps it to skew curves (`ivSkewTransform`), showing a "Live"
  * badge. Per-strike IV is NOT in the OpenAlgo option-chain feed, so it must come
- * from the dedicated IV-smile endpoint. When disconnected — or no usable curve
- * comes back — it falls back to deterministic sample curves with an amber
- * "Sample data" badge so the figures are never mistaken for live market data.
+ * from the dedicated IV-smile endpoint. Deterministic sample curves are limited
+ * to disconnected Explore state; connected sample, empty, or failed responses
+ * render as unavailable rather than being promoted to live-derived figures.
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
@@ -261,10 +261,11 @@ function IVSkewWidget() {
 
   // Live IV-skew — fetch the screener IV smile (the dedicated IV source) and
   // map it to skew curves. Only runs once a broker is connected.
-  const { data: liveData } = useQuery({
+  const { data: liveData, isError, isPending } = useQuery({
     queryKey: ["ivskew", symbol, symDef.exchange],
     queryFn: async () => {
       const smile = await getFtIVSmile(symDef.label, symDef.exchange);
+      if (smile?.is_sample_data !== false) return null;
       return mapIVSmileToSkew(smile, new Date().toISOString());
     },
     enabled: isConnected,
@@ -273,14 +274,15 @@ function IVSkewWidget() {
     retry: false,
   });
 
-  const isLive = isConnected && liveData != null && liveData.curves.length > 0;
-  const data = isLive && liveData ? liveData : SAMPLE_IV_SKEW_DATA;
-  const firstCurve = data.curves[0];
+  const isLive = isConnected && !isError && liveData != null && liveData.curves.length > 0;
+  const isSample = !isConnected;
+  const data = isLive && liveData ? liveData : isSample ? SAMPLE_IV_SKEW_DATA : null;
+  const firstCurve = data?.curves[0];
 
   const skew25d = firstCurve?.skew_25delta ?? null;
   const atmIV = firstCurve?.atm_iv ?? null;
 
-  const overlays = useMemo(() => buildOverlays(data, xMode), [data, xMode]);
+  const overlays = useMemo(() => data ? buildOverlays(data, xMode) : [], [data, xMode]);
   const skewChart = useMemo(() => buildIVSkewChart(overlays, xMode), [overlays, xMode]);
 
   useEffect(() => {
@@ -296,10 +298,7 @@ function IVSkewWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
         <Activity size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">IV Skew</span>
-        {/* Data-source badge — flips to "Live" only when a broker is connected
-            AND the chain yielded a usable skew curve. Otherwise it stays on the
-            honest amber "Sample data" affordance so the curves are never
-            mistaken for live market data. */}
+        {/* Data-source badge requires explicit live provenance and usable curves. */}
         {isLive ? (
           <span
             className="inline-flex items-center rounded border border-profit/40 bg-profit/10 px-1.5 py-0.5 text-[10px] font-medium text-profit"
@@ -309,14 +308,29 @@ function IVSkewWidget() {
           >
             Live
           </span>
-        ) : (
+        ) : isSample ? (
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing sample data; no live backend endpoint yet"
-            title="No live data wired yet — showing sample IV skew curves so the widget is usable in explore mode."
+            aria-label="Showing sample IV skew while disconnected"
+            title="Disconnected Explore state; values are deterministic sample data."
           >
             Sample data
+          </span>
+        ) : isPending ? (
+          <span
+            className="inline-flex items-center rounded border border-border-default bg-surface-hover px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
+            role="status"
+          >
+            Loading
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center rounded border border-loss/40 bg-loss/10 px-1.5 py-0.5 text-[10px] font-medium text-loss"
+            role="status"
+            aria-label="Live IV skew unavailable"
+          >
+            Unavailable
           </span>
         )}
 
@@ -386,26 +400,36 @@ function IVSkewWidget() {
         <span className="text-xxs text-text-muted">{symbol}</span>
       </div>
 
-      {/* Chart */}
-      <div className="flex-1 min-h-0 overflow-hidden px-1 pt-1">
-        <FlintBandedLineChart
-          ariaLabel="IV Skew chart"
-          bands={[]}
-          series={skewChart.series}
-          markers={skewChart.markers}
-          xDomain={skewChart.xDomain}
-          yDomain={skewChart.yDomain}
-          yTicks={skewChart.yTicks}
-          yFormatter={(value) => `${value.toFixed(0)}%`}
-          xAxisLabel={skewChart.xAxisLabel}
-          referenceLines={skewChart.referenceLines}
-          width={320}
-          height={160}
-        />
-      </div>
+      {data ? (
+        <>
+          {/* Chart */}
+          <div className="flex-1 min-h-0 overflow-hidden px-1 pt-1">
+            <FlintBandedLineChart
+              ariaLabel="IV Skew chart"
+              bands={[]}
+              series={skewChart.series}
+              markers={skewChart.markers}
+              xDomain={skewChart.xDomain}
+              yDomain={skewChart.yDomain}
+              yTicks={skewChart.yTicks}
+              yFormatter={(value) => `${value.toFixed(0)}%`}
+              xAxisLabel={skewChart.xAxisLabel}
+              referenceLines={skewChart.referenceLines}
+              width={320}
+              height={160}
+            />
+          </div>
 
-      {/* Legend */}
-      <ChartLegend overlays={overlays} />
+          {/* Legend */}
+          <ChartLegend overlays={overlays} />
+        </>
+      ) : (
+        <div className="flex-1 min-h-0 grid place-items-center px-4 text-center" role="status">
+          <span className="text-xs text-text-muted">
+            {isPending ? "Loading live IV skew…" : "Live IV skew is unavailable for this symbol."}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

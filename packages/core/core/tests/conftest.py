@@ -44,11 +44,11 @@ for _rel_path in _PY_PACKAGE_SRCS:
         sys.path.append(_src)
 
 
-# DBs whose on-disk engine changed DuckDB→SQLite (activity_log, security_tracker).
-# A persistent test workspace reused across the migration may still hold the
-# legacy DuckDB file, which open_sqlite cannot read. Remove these scratch files
-# so the SQLite code recreates them fresh. Only touches the pytest workspace.
-_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db")
+# Persistent scratch DBs must not carry state between independent pytest runs.
+# activity/security also changed DuckDB→SQLite and may hold a foreign-format
+# file; the emergency journal intentionally survives production restarts but a
+# prior simulated kill episode must not poison a later test process.
+_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db", "emergency_intents.sqlite")
 
 
 def _clean_legacy_scratch_dbs(base: Path) -> None:
@@ -84,13 +84,13 @@ def _isolate_workspace() -> None:
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         _clean_legacy_scratch_dbs(Path(existing))
         _pin_duckdb_path(Path(existing))
         return
     else:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
+        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     _pin_duckdb_path(base)
@@ -125,19 +125,7 @@ def _isolated_auth_state(tmp_path_factory):
 
 @pytest.fixture(scope="module", autouse=True)
 def _per_module_workspace(request):
-    """Give each test module its OWN workspace subdirectory.
-
-    ``_isolate_workspace`` gives each xdist worker its own workspace, but every
-    module-scoped ``flask_app`` fixture running in that worker shares the one
-    ``engine-sandbox/default.duckdb`` under it. DuckDB refuses a second open of a
-    file already held open by another connection, so two such modules landing in
-    the same worker collide ("IO Error: ... file is already open"). Scoping the
-    workspace per module gives each module-scoped app a distinct sandbox DuckDB
-    path, so they never contend — independent of any single test's logic.
-
-    Runs as an autouse module fixture so it sets the env BEFORE a module's own
-    ``flask_app`` fixture builds its app.
-    """
+    """Give each app-building test module its own persistent-state workspace."""
     prev = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     base = Path(prev) if prev else (Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main")
     mod_dir = base / Path(request.module.__file__).stem

@@ -18,6 +18,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from flinttrade_core.rate_limiter import rate_limit
 
 from .mode_guard import require_non_explore
+from .strategy_runner import PackagedChildConfigurationError, StrategyNotRunningError
 
 logger = logging.getLogger("flinttrade.engine.strategy_routes")
 
@@ -201,6 +202,18 @@ def start_strategy(strategy_id: str) -> Response:
         runner.start(strategy_id)
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
+    except PackagedChildConfigurationError as exc:
+        logger.error("Packaged strategy launcher is unavailable for %s: %s", strategy_id, exc)
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "code": "packaged_child_unavailable",
+                    "message": "Packaged strategy launcher is unavailable. Restart FlintTrade and try again.",
+                }
+            ),
+            503,
+        )
     except RuntimeError:
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     except Exception:
@@ -234,7 +247,7 @@ def stop_strategy(strategy_id: str) -> Response:
         runner.stop(strategy_id)
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
-    except RuntimeError:
+    except StrategyNotRunningError:
         # Not running — treat as a no-op success
         return jsonify({"status": "success", "message": "Strategy was already stopped"})
     except Exception:
@@ -264,6 +277,9 @@ def delete_strategy(strategy_id: str) -> Response:
         return err
 
     try:
+        cron_scheduler = _get_cron_scheduler()
+        if cron_scheduler is not None:
+            cron_scheduler.unschedule(strategy_id)
         runner.delete(strategy_id)
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Requested resource was not found"}), 404

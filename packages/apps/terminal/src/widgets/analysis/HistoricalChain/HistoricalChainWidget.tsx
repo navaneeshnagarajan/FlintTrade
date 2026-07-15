@@ -14,9 +14,13 @@
  */
 
 import { useState, useMemo, memo } from "react";
-import { Archive, ChevronDown } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { getHistoricalExpiries, getHistoricalChain } from "@/services/ftApi.data";
+import { Archive, ChevronDown, Loader2, RefreshCw } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  captureHistoricalChain,
+  getHistoricalExpiries,
+  getHistoricalChain,
+} from "@/services/ftApi.data";
 import type { HistoricalOptionRow } from "@/services/ftApi.data";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +48,12 @@ interface StrikeRow {
   strike: number;
   ce: HistoricalOptionRow | null;
   pe: HistoricalOptionRow | null;
+}
+
+interface CaptureRequest {
+  symbol: string;
+  exchange: string;
+  expiry: string;
 }
 
 function groupByStrike(rows: HistoricalOptionRow[]): StrikeRow[] {
@@ -99,12 +109,18 @@ function carriesSampleFlag(payload: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 function HistoricalChainWidget() {
+  const queryClient = useQueryClient();
   const [symbol, setSymbol] = useState("NIFTY");
   const [showSymbolMenu, setShowSymbolMenu] = useState(false);
   const [expiry, setExpiry] = useState("");
+  const [captureExpiry, setCaptureExpiry] = useState("");
 
   const symDef = useMemo(
-    () => SYMBOLS.find((s) => s.label === symbol) ?? { label: symbol, exchange: "NFO" },
+    () =>
+      SYMBOLS.find((s) => s.label === symbol) ?? {
+        label: symbol,
+        exchange: "NFO",
+      },
     [symbol],
   );
 
@@ -116,18 +132,24 @@ function HistoricalChainWidget() {
   });
 
   const expiries = expData?.expiries ?? [];
-  // The chosen expiry, falling back to the newest archived one.
-  const selectedExpiry = expiry && expiries.includes(expiry) ? expiry : expiries[0] ?? "";
+  // The chosen expiry, falling back to the newest archived one. The backend
+  // returns the archive in ascending expiry order.
+  const selectedExpiry =
+    expiry && expiries.includes(expiry) ? expiry : (expiries.at(-1) ?? "");
 
   const { data: chainData, isLoading: loadingChain } = useQuery({
     queryKey: ["historical-chain", symbol, symDef.exchange, selectedExpiry],
-    queryFn: () => getHistoricalChain(symDef.label, selectedExpiry, symDef.exchange),
+    queryFn: () =>
+      getHistoricalChain(symDef.label, selectedExpiry, symDef.exchange),
     enabled: Boolean(selectedExpiry),
     staleTime: 5 * 60_000,
     retry: false,
   });
 
-  const strikes = useMemo(() => groupByStrike(chainData?.chain ?? []), [chainData]);
+  const strikes = useMemo(
+    () => groupByStrike(chainData?.chain ?? []),
+    [chainData],
+  );
   const capturedAt = chainData?.chain?.[0]?.captured_at ?? null;
 
   // Badge keys off the payload FLAG: the archive endpoints serve real captures
@@ -135,19 +157,51 @@ function HistoricalChainWidget() {
   // payload is_sample_data the fabrication must be visible.
   const isSample = carriesSampleFlag(expData) || carriesSampleFlag(chainData);
 
+  const captureMutation = useMutation({
+    mutationFn: (capture: CaptureRequest) =>
+      captureHistoricalChain(capture.symbol, capture.expiry, capture.exchange),
+    onSuccess: async (result, capture) => {
+      setExpiry(result.expiry);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["historical-expiries", capture.symbol, capture.exchange],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [
+            "historical-chain",
+            capture.symbol,
+            capture.exchange,
+            result.expiry,
+          ],
+        }),
+      ]);
+    },
+  });
+
   const handleSymbol = (s: string) => {
+    if (captureMutation.isPending) return;
     setSymbol(s);
     setExpiry("");
+    setCaptureExpiry("");
+    captureMutation.reset();
     setShowSymbolMenu(false);
   };
 
   return (
-    <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Historical Option Chain widget">
-
+    <div
+      className="h-full flex flex-col bg-surface-base overflow-hidden"
+      aria-label="Historical Option Chain widget"
+    >
       {/* Header */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
-        <Archive size={13} className="text-accent shrink-0" aria-hidden="true" />
-        <span className="text-xs font-semibold text-text-primary">Historical Chain</span>
+        <Archive
+          size={13}
+          className="text-accent shrink-0"
+          aria-hidden="true"
+        />
+        <span className="text-xs font-semibold text-text-primary">
+          Historical Chain
+        </span>
         {isSample && (
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
@@ -164,9 +218,10 @@ function HistoricalChainWidget() {
         <div className="relative">
           <button
             onClick={() => setShowSymbolMenu((v) => !v)}
+            disabled={captureMutation.isPending}
             aria-label={`Selected symbol: ${symbol}`}
             aria-expanded={showSymbolMenu}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-text-primary bg-surface-hover rounded border border-border-default hover:border-accent transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs text-text-primary bg-surface-hover rounded border border-border-default hover:border-accent transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             {symbol}
             <ChevronDown size={10} aria-hidden="true" />
@@ -183,7 +238,8 @@ function HistoricalChainWidget() {
                   role="option"
                   aria-selected={s.label === symbol}
                   onClick={() => handleSymbol(s.label)}
-                  className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover transition-colors ${s.label === symbol ? "text-accent" : "text-text-primary"}`}
+                  disabled={captureMutation.isPending}
+                  className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${s.label === symbol ? "text-accent" : "text-text-primary"}`}
                 >
                   {s.label}
                 </button>
@@ -195,7 +251,12 @@ function HistoricalChainWidget() {
 
       {/* Expiry selector */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 border-b border-border-default bg-surface-base">
-        <label htmlFor="hist-expiry" className="text-xxs text-text-muted uppercase tracking-wide">Expiry</label>
+        <label
+          htmlFor="hist-expiry"
+          className="text-xxs text-text-muted uppercase tracking-wide"
+        >
+          Expiry
+        </label>
         <select
           id="hist-expiry"
           value={selectedExpiry}
@@ -208,38 +269,124 @@ function HistoricalChainWidget() {
             <option value="">No archived expiries</option>
           ) : (
             expiries.map((e) => (
-              <option key={e} value={e}>{e}</option>
+              <option key={e} value={e}>
+                {e}
+              </option>
             ))
           )}
         </select>
         {capturedAt && (
-          <span className="text-xxs text-text-muted whitespace-nowrap" title={`Archived at ${capturedAt}`}>
+          <span
+            className="text-xxs text-text-muted whitespace-nowrap"
+            title={`Archived at ${capturedAt}`}
+          >
             captured {capturedAt.slice(0, 10)}
           </span>
         )}
       </div>
 
+      <div className="flex-none flex items-center gap-2 border-b border-border-default bg-surface-base px-2 py-1.5">
+        <label
+          htmlFor="hist-capture-expiry"
+          className="text-xxs text-text-muted uppercase tracking-wide"
+        >
+          Capture
+        </label>
+        <input
+          id="hist-capture-expiry"
+          type="date"
+          value={captureExpiry}
+          onChange={(event) => {
+            setCaptureExpiry(event.target.value);
+            captureMutation.reset();
+          }}
+          disabled={captureMutation.isPending}
+          aria-label="Expiry to capture"
+          className="h-7 min-w-0 flex-1 rounded border border-border-default bg-surface-hover px-1.5 text-xs text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            if (!captureExpiry) return;
+            setShowSymbolMenu(false);
+            captureMutation.mutate({
+              symbol: symDef.label,
+              exchange: symDef.exchange,
+              expiry: captureExpiry,
+            });
+          }}
+          disabled={!captureExpiry || captureMutation.isPending}
+          aria-busy={captureMutation.isPending}
+          title="Capture the current broker option chain for this expiry"
+          className="inline-flex h-7 items-center gap-1 rounded border border-border-default bg-surface-hover px-2 text-xs text-text-primary transition-colors hover:border-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {captureMutation.isPending ? (
+            <Loader2 size={11} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <RefreshCw size={11} aria-hidden="true" />
+          )}
+          {captureMutation.isPending ? "Capturing..." : "Capture"}
+        </button>
+      </div>
+
+      {captureMutation.isError && (
+        <div
+          className="flex-none border-b border-border-default bg-loss/10 px-2 py-1 text-xxs text-loss"
+          role="alert"
+        >
+          Capture failed: {captureMutation.error.message}
+        </div>
+      )}
+      {captureMutation.isSuccess && (
+        <div
+          className="flex-none border-b border-border-default bg-profit/10 px-2 py-1 text-xxs text-profit"
+          role="status"
+        >
+          {captureMutation.data.captured
+            ? `Captured ${captureMutation.data.rows_inserted} rows for ${captureMutation.data.expiry}.`
+            : `No option-chain rows were returned for ${captureMutation.data.expiry}.`}
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex-1 min-h-0 overflow-auto">
         {loadingExpiries || loadingChain ? (
-          <div className="flex items-center justify-center h-full text-xs text-text-muted">Loading…</div>
+          <div className="flex items-center justify-center h-full text-xs text-text-muted">
+            Loading…
+          </div>
         ) : expiries.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-1 text-center px-4">
-            <Archive size={22} className="text-text-disabled" aria-hidden="true" />
-            <span className="text-xs text-text-muted">No historical chains captured for {symbol} yet.</span>
-            <span className="text-xxs text-text-disabled">Chains are archived as live expiries roll off, or after a historical backfill.</span>
+            <Archive
+              size={22}
+              className="text-text-disabled"
+              aria-hidden="true"
+            />
+            <span className="text-xs text-text-muted">
+              No historical chains captured for {symbol} yet.
+            </span>
+            <span className="text-xxs text-text-disabled">
+              Chains are archived as live expiries roll off, or after a
+              historical backfill.
+            </span>
           </div>
         ) : strikes.length === 0 ? (
           <div className="flex items-center justify-center h-full text-xs text-text-muted">
             No strikes stored for this expiry.
           </div>
         ) : (
-          <table className="w-full text-xxs" aria-label="Historical option chain table">
+          <table
+            className="w-full text-xxs"
+            aria-label="Historical option chain table"
+          >
             <thead className="sticky top-0 bg-surface-card z-10">
               <tr className="border-b border-border-default text-text-muted">
-                <th className="px-1 py-1 text-right font-medium" colSpan={4}>CALLS</th>
+                <th className="px-1 py-1 text-right font-medium" colSpan={4}>
+                  CALLS
+                </th>
                 <th className="px-2 py-1 text-center font-medium">Strike</th>
-                <th className="px-1 py-1 text-left font-medium" colSpan={4}>PUTS</th>
+                <th className="px-1 py-1 text-left font-medium" colSpan={4}>
+                  PUTS
+                </th>
               </tr>
               <tr className="border-b border-border-default text-text-muted">
                 <th className="px-1 py-0.5 text-right font-normal">OI</th>
@@ -255,16 +402,37 @@ function HistoricalChainWidget() {
             </thead>
             <tbody>
               {strikes.map((row) => (
-                <tr key={row.strike} className="border-b border-border-default/50 hover:bg-surface-hover transition-colors font-mono tabular-nums">
-                  <td className="px-1 py-1 text-right text-text-secondary">{fmtNum(row.ce?.oi)}</td>
-                  <td className="px-1 py-1 text-right text-text-muted">{fmtNum(row.ce?.volume)}</td>
-                  <td className="px-1 py-1 text-right text-text-primary">{fmtPrice(row.ce?.ltp)}</td>
-                  <td className="px-1 py-1 text-right text-text-muted">{fmtIv(row.ce?.iv)}</td>
-                  <td className="px-2 py-1 text-center font-semibold text-text-primary bg-surface-card/60">{row.strike}</td>
-                  <td className="px-1 py-1 text-left text-text-muted">{fmtIv(row.pe?.iv)}</td>
-                  <td className="px-1 py-1 text-left text-text-primary">{fmtPrice(row.pe?.ltp)}</td>
-                  <td className="px-1 py-1 text-left text-text-muted">{fmtNum(row.pe?.volume)}</td>
-                  <td className="px-1 py-1 text-left text-text-secondary">{fmtNum(row.pe?.oi)}</td>
+                <tr
+                  key={row.strike}
+                  className="border-b border-border-default/50 hover:bg-surface-hover transition-colors font-mono tabular-nums"
+                >
+                  <td className="px-1 py-1 text-right text-text-secondary">
+                    {fmtNum(row.ce?.oi)}
+                  </td>
+                  <td className="px-1 py-1 text-right text-text-muted">
+                    {fmtNum(row.ce?.volume)}
+                  </td>
+                  <td className="px-1 py-1 text-right text-text-primary">
+                    {fmtPrice(row.ce?.ltp)}
+                  </td>
+                  <td className="px-1 py-1 text-right text-text-muted">
+                    {fmtIv(row.ce?.iv)}
+                  </td>
+                  <td className="px-2 py-1 text-center font-semibold text-text-primary bg-surface-card/60">
+                    {row.strike}
+                  </td>
+                  <td className="px-1 py-1 text-left text-text-muted">
+                    {fmtIv(row.pe?.iv)}
+                  </td>
+                  <td className="px-1 py-1 text-left text-text-primary">
+                    {fmtPrice(row.pe?.ltp)}
+                  </td>
+                  <td className="px-1 py-1 text-left text-text-muted">
+                    {fmtNum(row.pe?.volume)}
+                  </td>
+                  <td className="px-1 py-1 text-left text-text-secondary">
+                    {fmtNum(row.pe?.oi)}
+                  </td>
                 </tr>
               ))}
             </tbody>

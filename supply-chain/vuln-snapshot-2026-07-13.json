@@ -322,7 +322,7 @@
     },
     {
       "name": "pillow",
-      "version": "12.2.0",
+      "version": "12.3.0",
       "vulns": []
     },
     {
@@ -550,9 +550,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-07-13T06:53:09.062563Z",
-    "audited_at": "2026-07-13T06:53:09.062563Z",
-    "requirements_lock_sha256": "781ff5fd8814b2d4607b36315fd124bb611e91cbb6bf34fbf53be1b1e70c044e",
+    "generated_at": "2026-07-13T09:59:18.730077Z",
+    "audited_at": "2026-07-13T09:59:18.730077Z",
+    "requirements_lock_sha256": "654de09caf8cc6b8dd9e7ada45ac6a8adfc97f67a93a55efbbcb32874ccef9c9",
     "pip_audit_exit_code": 0
   }
 }

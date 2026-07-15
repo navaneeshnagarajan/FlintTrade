@@ -25,8 +25,10 @@ from flinttrade_core.exceptions import (
     SessionExpired,
     UnsupportedOrderType,
 )
+from flinttrade_gateway.reconciliation import normalise_order_status
 
 BASE_URL = "https://api.groww.in"
+_MISSING = object()
 
 
 def _text(value: Any) -> str:
@@ -53,6 +55,20 @@ def _int(value: Any, default: int = 0) -> int:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def _present_order_number(row: dict[str, Any], key: str, *, integral: bool = False) -> Any:
+    if key not in row:
+        return _MISSING
+    value = row[key]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return _MISSING
+    if isinstance(value, bool):
+        return value
+    try:
+        return int(float(value)) if integral else float(value)
+    except (TypeError, ValueError, OverflowError):
+        return value
 
 
 def _error_fields(payload: Any) -> tuple[str, str]:
@@ -241,7 +257,9 @@ def extract_order_id(payload: Any) -> str:
 
 def from_order(row: dict[str, Any]) -> dict[str, Any]:
     exchange = openalgo_exchange(row.get("exchange"), row.get("segment"))
-    return {
+    quantity = _present_order_number(row, "quantity", integral=True)
+    filled_quantity = _present_order_number(row, "filled_quantity", integral=True)
+    order = {
         "orderid": _text(row.get("groww_order_id") or row.get("order_id")),
         "symbol": _text(row.get("trading_symbol")),
         "exchange": exchange,
@@ -250,14 +268,25 @@ def from_order(row: dict[str, Any]) -> dict[str, Any]:
         "pricetype": reverse_order_type(row.get("order_type")),
         "order_type": reverse_order_type(row.get("order_type")),
         "product": reverse_product(row.get("product")),
-        "quantity": _int(row.get("quantity") or row.get("filled_quantity")),
-        "price": _float(row.get("price")),
-        "trigger_price": _float(row.get("trigger_price")),
-        "status": _status(row.get("order_status") or row.get("status")),
+        "status": _status(
+            row.get("order_status") or row.get("status"),
+            quantity=_int(quantity) if quantity is not _MISSING else 0,
+            filled_quantity=_int(filled_quantity) if filled_quantity is not _MISSING else 0,
+        ),
         "order_timestamp": _text(row.get("created_at") or row.get("order_date_time")),
         "order_reference_id": _text(row.get("order_reference_id")),
         "raw": row,
     }
+    for field, value in {
+        "quantity": quantity,
+        "filled_quantity": filled_quantity,
+        "price": _present_order_number(row, "price"),
+        "trigger_price": _present_order_number(row, "trigger_price"),
+        "average_price": _present_order_number(row, "average_price"),
+    }.items():
+        if value is not _MISSING:
+            order[field] = value
+    return order
 
 
 def from_trade(row: dict[str, Any]) -> dict[str, Any]:
@@ -427,18 +456,9 @@ def parse_instruments_csv(text: str) -> list[dict[str, str]]:
     return list(csv.DictReader(StringIO(text)))
 
 
-def _status(value: Any) -> str:
-    status = _upper(value)
-    return {
-        "NEW": "open",
-        "ACKED": "open",
-        "APPROVED": "open",
-        "OPEN": "open",
-        "TRIGGER_PENDING": "trigger pending",
-        "EXECUTED": "complete",
-        "COMPLETED": "complete",
-        "CANCELLED": "cancelled",
-        "CANCELLATION_REQUESTED": "cancelled",
-        "REJECTED": "rejected",
-        "FAILED": "rejected",
-    }.get(status, status.lower() or "open")
+def _status(value: Any, *, quantity: float = 0.0, filled_quantity: float = 0.0) -> str:
+    return normalise_order_status(
+        value,
+        quantity=quantity,
+        filled_quantity=filled_quantity,
+    )

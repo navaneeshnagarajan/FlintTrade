@@ -101,36 +101,78 @@ export function ErrorRetry({ message, onRetry }: { message: string; onRetry: () 
 }
 
 export function useLiveSelector(defaultSymbol: LiveSymbol = "NIFTY", defaultExchange = "NFO") {
-  const [symbol, setSymbol] = useState<LiveSymbol>(defaultSymbol);
-  const [exchange, setExchange] = useState(defaultExchange);
-  const [expiry, setExpiry] = useState<string | null>(null);
-  const [expiries, setExpiries] = useState<string[]>([]);
-  const [expiryLoading, setExpiryLoading] = useState(false);
+  const [state, setState] = useState<LiveSelectorState>({
+    symbol: defaultSymbol,
+    exchange: defaultExchange,
+    expiry: null,
+    expiries: [],
+    expiryLoading: true,
+  });
+  const { symbol, exchange } = state;
 
   useEffect(() => {
     let cancelled = false;
-    setExpiries([]);
-    setExpiry(null);
-    setExpiryLoading(true);
+    setState((current) => (
+      current.symbol === symbol && current.exchange === exchange
+        ? { ...current, expiry: null, expiries: [], expiryLoading: true }
+        : current
+    ));
     (async () => {
       try {
         const data = await getExpiry(symbol, exchange, "options");
         if (cancelled) return;
-        const list: string[] = Array.isArray(data)
-          ? (data as string[])
-          : ((data as { expiry?: string[] })?.expiry ?? []);
-        setExpiries(list);
-        setExpiry(list[0] ?? null);
+        const rawList = Array.isArray(data)
+          ? data
+          : ((data as { expiry?: unknown[] })?.expiry ?? []);
+        const list = rawList.flatMap((value) => {
+          if (typeof value !== "string") return [];
+          const candidate = value.trim();
+          return candidate ? [candidate] : [];
+        });
+        setState((current) => (
+          current.symbol === symbol && current.exchange === exchange
+            ? { ...current, expiries: list, expiry: list[0] ?? null, expiryLoading: false }
+            : current
+        ));
       } catch {
-        if (!cancelled) setExpiry(null);
-      } finally {
-        if (!cancelled) setExpiryLoading(false);
+        if (cancelled) return;
+        setState((current) => (
+          current.symbol === symbol && current.exchange === exchange
+            ? { ...current, expiries: [], expiry: null, expiryLoading: false }
+            : current
+        ));
       }
     })();
     return () => { cancelled = true; };
   }, [symbol, exchange]);
 
-  const state: LiveSelectorState = { symbol, exchange, expiry, expiries, expiryLoading };
+  const setSymbol = (nextSymbol: LiveSymbol) => {
+    setState((current) => current.symbol === nextSymbol
+      ? current
+      : {
+          ...current,
+          symbol: nextSymbol,
+          expiry: null,
+          expiries: [],
+          expiryLoading: true,
+        });
+  };
+  const setExchange = (nextExchange: string) => {
+    setState((current) => current.exchange === nextExchange
+      ? current
+      : {
+          ...current,
+          exchange: nextExchange,
+          expiry: null,
+          expiries: [],
+          expiryLoading: true,
+        });
+  };
+  const setExpiry = (nextExpiry: string) => {
+    const candidate = nextExpiry.trim();
+    setState((current) => ({ ...current, expiry: candidate || null }));
+  };
+
   return { state, setSymbol, setExchange, setExpiry };
 }
 

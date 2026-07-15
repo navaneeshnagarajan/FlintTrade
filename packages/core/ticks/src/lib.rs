@@ -398,15 +398,14 @@ fn ema_crossover_signals(bars: &[[f64; 6]], fast: usize, slow: usize) -> Vec<i8>
     let n = bars.len();
     let mut signals = vec![0i8; n];
     for i in 1..n {
-        match (fast_ema[i], slow_ema[i], fast_ema[i - 1], slow_ema[i - 1]) {
-            (Some(f), Some(s), Some(pf), Some(ps)) => {
-                if f > s && pf <= ps {
-                    signals[i] = 1;
-                } else if f < s && pf >= ps {
-                    signals[i] = -1;
-                }
+        if let (Some(f), Some(s), Some(pf), Some(ps)) =
+            (fast_ema[i], slow_ema[i], fast_ema[i - 1], slow_ema[i - 1])
+        {
+            if f > s && pf <= ps {
+                signals[i] = 1;
+            } else if f < s && pf >= ps {
+                signals[i] = -1;
             }
-            _ => {}
         }
     }
     signals

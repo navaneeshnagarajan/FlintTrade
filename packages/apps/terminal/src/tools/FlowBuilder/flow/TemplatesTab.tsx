@@ -3,7 +3,7 @@
  */
 
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,10 @@ export function TemplatesTab({ onUse }: TemplatesTabProps) {
 
   return (
     <div className="p-4">
+      <div className="mb-4 flex items-start gap-2 rounded-md border border-atm-border bg-atm-bg px-3 py-2 text-xs text-text-secondary">
+        <Info size={13} className="mt-0.5 shrink-0 text-amber-400" />
+        <span>Local drafts only. Loading a template does not execute a workflow or send an order.</span>
+      </div>
       <div className="flex items-center gap-1.5 flex-wrap mb-4">
         {["All", ...categories].map((cat) => (
           <button
@@ -89,7 +93,7 @@ export function TemplatesTab({ onUse }: TemplatesTabProps) {
                   onClick={() => onUse(tmpl)}
                   disabled={tmpl.workflow.nodes.length === 0}
                 >
-                  Use template
+                  Load draft
                   <ChevronRight size={11} />
                 </Button>
               </div>

@@ -173,8 +173,9 @@ These endpoints are the first-party native broker path used by Setup →
 Brokers and Settings → Brokers. Connect writes store credentials in the
 encrypted gateway vault, register a workspace selector, rebuild the broker
 router, and attempt login transactionally. Brokers that are built but not
-live-verified stay `connectable=false`; their connect/re-login routes return
-"coming soon" rather than creating sessions. Account and market-data reads
+cleared for activation stay `connectable=false` while any declared
+`native_connect_blocker` remains; their connect/re-login routes return "coming
+soon" rather than creating sessions. Account and market-data reads
 require a live native session but do not create an order safety context.
 Legacy gateway `/v1` account/auth routes reject native broker ids and include
 the same `data.native_connect_blockers` payload when a catalogued native broker
@@ -223,6 +224,42 @@ Source: `packages/services/ai/`. GET unless noted.
 | `sentiment/analyse` (**POST**) | Sentiment for a text snippet or symbol (LLM, rule-based fallback). |
 | `ai/refine-strategy` (**POST**) | AI improvement suggestions for a backtested strategy. |
 | `rag/query` (**POST**) | Knowledge-base RAG query (when RAG is enabled). |
+
+Managed local inference is controlled through authenticated, localhost-only
+routes under `/ft-api/v1/ai/local-runtime`. Runtime and model downloads never
+start at boot and require an explicit confirmation payload. Every mutating POST
+except `stop` also requires a client-generated `admission_id` matching
+`adm_[0-9a-f]{32}`. The status operation echoes that admission ID, so a caller
+can retry the same request idempotently and reconcile an HTTP timeout. `stop`
+instead accepts only the exact ID of a currently running operation; terminal
+operation IDs are rejected. Detailed receipts are size- and count-bounded; IDs
+compacted from the detailed journal remain fail-closed in a fixed-size spent-ID
+filter. An `indeterminate` receipt means the mutation outcome cannot be proved:
+clients must not issue a replacement admission ID. Further mutations remain
+blocked until the operator explicitly acknowledges that exact operation and its
+original admission ID through `operations/reconcile`. Acknowledgement does not
+replay the mutation or change its outcome to success; it records only that the
+unknown result was reviewed. The terminal validates every successful status,
+model-list and direct-result payload before changing local state, and clears a
+pending admission only when a direct receipt has the exact shape required by
+that action.
+
+| Endpoint | Purpose |
+|---|---|
+| `ai/local-runtime/status` (**GET**) | Report the managed release, target and rollback versions, ownership, readiness, integrity, progress and teardown state. |
+| `ai/local-runtime/install` (**POST**) | Download, hash-verify and install the pinned Ollama release after confirmation. |
+| `ai/local-runtime/update` (**POST**) | Stage the preferred release while stopped, then retain the previously active verified release for rollback. |
+| `ai/local-runtime/repair` (**POST**) | Recover invalid version metadata or replace a corrupt managed release while no Ollama listener is active. |
+| `ai/local-runtime/rollback` (**POST**) | Rehash and activate the retained previous release while stopped. |
+| `ai/local-runtime/uninstall` (**POST**) | Remove recognised managed runtime releases while preserving models and model-trust metadata. |
+| `ai/local-runtime/start` · `ai/local-runtime/stop` (**POST**) | Start or stop only the Ollama process owned by this backend. |
+| `ai/local-runtime/operations/reconcile` (**POST**) | Explicitly acknowledge one indeterminate receipt using its exact operation and original admission IDs, without replaying it or inferring success. |
+| `ai/local-runtime/models` (**GET**) | Return the live bounded model catalogue after reconciling FlintTrade trust metadata. |
+| `ai/local-runtime/models/pull` (**POST**) | Download one validated model identifier after confirmation. |
+| `ai/local-runtime/models/delete` (**POST**) | Delete one exact unselected model name after confirmation. |
+| `ai/local-runtime/models/prune` (**POST**) | Delete only unreferenced `flinttrade/sha256-*:locked` aliases; never walk arbitrary model blobs. |
+| `ai/local-runtime/models/digests/accept` (**POST**) | Confirm one exact live digest and create a digest-derived inference alias. |
+| `ai/local-runtime/models/digests/reset` (**POST**) | Remove invalid FlintTrade trust metadata without deleting Ollama model data. |
 
 ### Sandbox / paper trading (`/ft-api/v1/sandbox/*`)
 
@@ -294,6 +331,8 @@ The terminal has two development proxy namespaces:
 | `/api/v1/traffic/recent` | Recent request records for operator forensics. |
 | `/api/v1/latency/stats` | Per-broker order latency percentiles. Fed by the gated order dispatch, which records each order's round-trip latency. |
 | `/api/v1/latency/recent` | Recent latency records. |
+| `/api/v1/reconciliation/outcomes` | Unresolved broker-write outcomes, including the exact selector, business date, non-secret persisted intent, fresh-snapshot evidence and any retryable `PENDING_AUDIT` or `PENDING_ROUTER_CLEAR` decision. Requires an authenticated session with `admin.observability.read`; results and remaining-outcome counts are filtered through the current router's account ACL. |
+| `/api/v1/reconciliation/outcomes/<attempt_id>/resolve` (**POST**) | Record `confirmed_applied`, `confirmed_not_applied`, or basket-only `confirmed_partial` after broker verification. Requires an authenticated, PIN-unlocked Live JWT, current-router selector ACL, exact `CONFIRM <APPLIED\|NOT_APPLIED\|PARTIAL> <broker>:<account>:<attempt>` confirmation, a newly adopted exact-selector reconciliation generation, and a durable hash-chained audit receipt. Snapshots are monotonic; same-time conflicts and malformed reports fail closed, and historical observations remain evidence. Applied placement IDs must be first observed after invocation and match every persisted material identity field; basket requests map applied IDs to `broker_order_item_indexes` and partition all remaining children in `not_applied_item_indexes`. Modify and cancel recovery require operation-specific evidence. A `PENDING_AUDIT` retry requires newer evidence, archives the prior revision and receives a new resolution ID; a `PENDING_ROUTER_CLEAR` retry resumes the committed decision without another broker read. Success and structured-error responses carry the exact attempt and canonical decision; the terminal runtime-validates identity, status and primitive types before updating state. Ambiguous and unsupported cases remain blocked; this route performs no broker write. |
 | `/health`, `/health/detail`, `/healthz`, `/readyz`, `/api/v1/ping` | Process health and compatibility probes. |
 | `/v1/admin/system` | CPU, memory, disk, network, uptime, and process metrics for the Admin system panel. |
 | `/v1/audit/*`, `/v1/activity/*`, `/v1/operations/audit/logs` | Scoped audit/activity views; admin audit endpoints require `admin.audit.read`. |
@@ -304,6 +343,16 @@ The terminal has two development proxy namespaces:
 |---|---|
 | `errors` | Front-end error reporting sink. The terminal posts unhandled errors here. |
 | `changelog` | Read the bundled changelog.md programmatically (used by the "What's new" widget). |
+
+### Support diagnostics (`/ft-api/v1/support/*`)
+
+Source: `packages/core/core/src/flinttrade_core/support_routes.py`. The route is
+covered by the backend's global authentication and additionally requires the
+`admin.errors.read` session scope. Responses use `Cache-Control: no-store`.
+
+| Endpoint | Purpose |
+|---|---|
+| `support/diagnostics` (**GET**) | Return bounded app/runtime metadata plus at most 50 aggregated recent error groups. The DuckDB projection excludes raw bodies, messages, tracebacks, entry/user ids and account identifiers; concrete paths are reduced to registered route patterns or safe client-screen names. |
 
 There are roughly 20 FlintTrade-specific endpoint families across the
 13 Python packages. The complete list of registered Flask blueprints

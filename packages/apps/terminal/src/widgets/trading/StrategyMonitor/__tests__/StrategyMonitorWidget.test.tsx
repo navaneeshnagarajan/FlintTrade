@@ -37,6 +37,12 @@ describe("StrategyMonitorWidget", () => {
     expect(screen.getByText("Strategy Monitor")).toBeTruthy();
   });
 
+  it("labels the surface as a local preview even when connected", () => {
+    mockConnected.mockReturnValue(true);
+    render(<StrategyMonitorWidget />);
+    expect(screen.getByText("Local preview")).toBeTruthy();
+  });
+
   it("shows the 'Sample data' badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
     render(<StrategyMonitorWidget />);
@@ -119,13 +125,13 @@ describe("StrategyMonitorWidget", () => {
     expect(screen.getByText(firstStrategy.logs[0].message)).toBeTruthy();
   });
 
-  it("Start button is disabled for running strategy", () => {
+  it("does not expose lifecycle controls without a backend mutation", () => {
     mockConnected.mockReturnValue(false);
     render(<StrategyMonitorWidget />);
-    const runningStrategy = SAMPLE_STRATEGIES.find((s) => s.status === "running")!;
-    const startBtn = screen.getByLabelText(`Start ${runningStrategy.name}`);
-    expect(startBtn).toBeTruthy();
-    expect((startBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryAllByRole("button", { name: /^Start / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Pause / })).toHaveLength(0);
+    expect(screen.queryAllByRole("button", { name: /^Stop / })).toHaveLength(0);
+    expect(screen.queryByText("Actions")).toBeNull();
   });
 
   it("renders footer with total P&L, trades, signals", () => {

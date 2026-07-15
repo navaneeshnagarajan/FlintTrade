@@ -113,6 +113,49 @@ class TestCreateBackup:
         assert ".flinttrade/credentials.db" in names
         assert ".flinttrade/master_password" not in names
 
+    def test_create_never_includes_live_order_reservation_state(self, tmp_path: Path) -> None:
+        ws = tmp_path / ".flinttrade"
+        _populate_workspace(ws)
+        runtime_files = {
+            "order_exposure_reservations.sqlite",
+            "order_exposure_reservations.sqlite-journal",
+            "order_exposure_reservations.sqlite-shm",
+            "order_exposure_reservations.sqlite-wal",
+        }
+        for name in runtime_files:
+            (ws / name).write_bytes(b"live-admission-state")
+
+        out = tmp_path / "backup.tar.gz"
+        WorkspaceBackup(workspace_dir=ws).create_backup(out, include_credentials=True)
+
+        with tarfile.open(out, "r:gz") as tar:
+            names = {Path(name).name for name in tar.getnames()}
+        assert runtime_files.isdisjoint(names)
+
+    def test_create_excludes_only_runtime_order_lifecycle_ledger(self, tmp_path: Path) -> None:
+        ws = tmp_path / ".flinttrade"
+        _populate_workspace(ws)
+        runtime_files = {
+            "order-lifecycle.sqlite3",
+            "order-lifecycle.sqlite3-journal",
+            "order-lifecycle.sqlite3-shm",
+            "order-lifecycle.sqlite3-wal",
+        }
+        retained_files = {
+            "order-lifecycle-history.sqlite3",
+            "order-lifecycle.sqlite3.snapshot",
+        }
+        for name in runtime_files | retained_files:
+            (ws / name).write_bytes(name.encode())
+
+        out = tmp_path / "backup.tar.gz"
+        WorkspaceBackup(workspace_dir=ws).create_backup(out)
+
+        with tarfile.open(out, "r:gz") as tar:
+            names = set(tar.getnames())
+        assert {f".flinttrade/{name}" for name in runtime_files}.isdisjoint(names)
+        assert {f".flinttrade/{name}" for name in retained_files} <= names
+
     def test_create_embeds_manifest(self, tmp_path: Path) -> None:
         ws = tmp_path / ".flinttrade"
         _populate_workspace(ws)
@@ -197,6 +240,81 @@ class TestRestoreBackup:
         # Should not raise with force=True.
         result = bk.restore_backup(archive, target_dir=target, force=True)
         assert result["files_restored"] >= 1
+
+    @pytest.mark.parametrize(
+        "archive_name",
+        [
+            "order_exposure_reservations.sqlite",
+            "ORDER_EXPOSURE_RESERVATIONS.SQLITE",
+        ],
+    )
+    def test_restore_never_overwrites_live_order_reservation_state(
+        self,
+        tmp_path: Path,
+        archive_name: str,
+    ) -> None:
+        stale_ledger = tmp_path / "stale.sqlite"
+        stale_ledger.write_bytes(b"stale-admission-state")
+        archive = tmp_path / "legacy-backup.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(
+                stale_ledger,
+                arcname=f".flinttrade/{archive_name}",
+            )
+
+        target = tmp_path / "restore"
+        live_ledger = target / ".flinttrade" / "order_exposure_reservations.sqlite"
+        live_ledger.parent.mkdir(parents=True)
+        live_ledger.write_bytes(b"live-admission-state")
+
+        result = WorkspaceBackup(workspace_dir=target / ".flinttrade").restore_backup(
+            archive,
+            target_dir=target,
+            force=True,
+        )
+
+        assert live_ledger.read_bytes() == b"live-admission-state"
+        assert result["files_restored"] == 0
+
+    def test_restore_excludes_only_runtime_order_lifecycle_ledger(self, tmp_path: Path) -> None:
+        runtime_files = {
+            "order-lifecycle.sqlite3",
+            "order-lifecycle.sqlite3-journal",
+            "order-lifecycle.sqlite3-shm",
+            "order-lifecycle.sqlite3-wal",
+        }
+        retained_files = {
+            "order-lifecycle-history.sqlite3",
+            "order-lifecycle.sqlite3.snapshot",
+        }
+        archive_source = tmp_path / "archive-source"
+        archive_source.mkdir()
+        archive = tmp_path / "legacy-backup.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for name in runtime_files | retained_files:
+                source = archive_source / name
+                source.write_bytes(f"archived:{name}".encode())
+                tar.add(source, arcname=f".flinttrade/{name}")
+
+        target = tmp_path / "restore"
+        workspace = target / ".flinttrade"
+        workspace.mkdir(parents=True)
+        live_ledger = workspace / "order-lifecycle.sqlite3"
+        live_ledger.write_bytes(b"live-order-state")
+
+        result = WorkspaceBackup(workspace_dir=workspace).restore_backup(
+            archive,
+            target_dir=target,
+            force=True,
+        )
+
+        assert live_ledger.read_bytes() == b"live-order-state"
+        assert not (workspace / "order-lifecycle.sqlite3-journal").exists()
+        assert not (workspace / "order-lifecycle.sqlite3-shm").exists()
+        assert not (workspace / "order-lifecycle.sqlite3-wal").exists()
+        for name in retained_files:
+            assert (workspace / name).read_bytes() == f"archived:{name}".encode()
+        assert result["files_restored"] == len(retained_files)
 
 
 # ---------------------------------------------------------------------------

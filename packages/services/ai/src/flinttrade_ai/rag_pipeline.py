@@ -1040,7 +1040,7 @@ class RAGPipeline:
         embedding_provider: EmbeddingProvider | None = None,
         vector_store: VectorStore | None = None,
         domain_filter: DomainFilter | None = None,
-        enable_domain_filter: bool = True,
+        enable_domain_filter: bool = False,
     ) -> None:
         self.config = config or PipelineConfig()
 

@@ -243,6 +243,19 @@ describe("useModeData — live mode", () => {
   });
 });
 
+describe("useModeData — practice mode", () => {
+  it("reads the backend sandbox without requiring a live broker connection", async () => {
+    currentMode = "practice";
+    brokerConnected = false;
+
+    const { result } = renderHook(() => useModeData("positions"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.data).toEqual(mockPositions));
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tests: Mode switching
 // ---------------------------------------------------------------------------

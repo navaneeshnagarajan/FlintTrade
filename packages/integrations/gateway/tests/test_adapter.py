@@ -219,6 +219,7 @@ class TestBrokerCatalog:
         assert entry.connectable is False
         assert entry.native_connect_blockers == [
             "Maintainer live login/read verification with current TOTP and MPIN",
+            "Live order-safety proof",
         ]
 
     def test_upstox_analytics_access_token_is_catalogued_as_read_only(self):

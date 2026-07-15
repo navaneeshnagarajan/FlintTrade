@@ -55,17 +55,24 @@
 //! turns by printing ``FLINTTRADE_NOTIFY\t<title>\t<body>`` on stdout — so
 //! alerts reach the operator even while the window is hidden.
 
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command as StdCommand, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+#[cfg(test)]
+use std::process::ExitStatus;
 
 use fs2::FileExt;
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::process::{Command as ShellCommand, CommandEvent, TerminatedPayload};
 use tauri_plugin_shell::ShellExt;
 
 /// Stdout line the backend prints once its listening socket is bound.
@@ -80,7 +87,15 @@ const APPLICATION_PID_SENTINEL: &str = "FLINTTRADE_BACKEND_PID";
 /// only this launch's exact pending record safe for guarded cleanup.
 const PENDING_RECORD_EXIT_ACK_SENTINEL: &str = "FLINTTRADE_BACKEND_PENDING_EXIT_ACK";
 
+/// Exact-token proof emitted and persisted by the POSIX guardian only after it
+/// has confirmed that the complete owned backend process tree is gone.
+const CLEANUP_COMPLETE_SENTINEL: &str = "FLINTTRADE_BACKEND_CLEANUP_COMPLETE";
+
+/// Maximum retained stdout tail while waiting for a fragmented handshake.
+const MAX_HANDSHAKE_BUFFER_BYTES: usize = 4_096;
+
 /// Stable POSIX shell command/PID/start identity captured before sidecar spawn.
+#[cfg(unix)]
 const PARENT_IDENTITY_ENV: &str = "FLINTTRADE_PARENT_IDENTITY";
 
 /// Stable OS boot-session identity persisted into every current recovery record.
@@ -99,7 +114,7 @@ const SIDECAR_PID_FILE: &str = "desktop_backend.pid";
 
 /// Recovery-record schema carrying both the spawned launcher and real Python
 /// application process identities.
-const SIDECAR_RECORD_VERSION: &str = "v3";
+const SIDECAR_RECORD_VERSION: &str = "v4";
 
 /// File carrying the process-lifetime kernel lock that prevents two desktop
 /// instances from spawning sidecars into the same workspace. Its text is only
@@ -118,32 +133,59 @@ const SIDECAR_SHUTDOWN_COMMAND: &[u8] = b"FLINTTRADE_SHUTDOWN\n";
 /// terminates its contained tree, avoiding signals to PIDs recovered from disk.
 const SIDECAR_FORCE_EXIT_COMMAND: &[u8] = b"FLINTTRADE_FORCE_EXIT\n";
 
-/// Maximum wait for Python's valid sequential shutdown path: smart orders
-/// (30s), autonomous agent (30s), broker-router retirement (10s), tick capture
-/// (3s), and active-request drain (60s), plus 17s scheduling/filesystem margin.
-/// Polls are 100ms, so this is a 150-second budget.
-const SIDECAR_SHUTDOWN_POLLS: usize = 1_500;
+/// Python's documented sequential maxima total 297 seconds: smart orders (30),
+/// agent (30), four uploaded strategies (28), rotation (30), Ditto (5), router
+/// retirement (10), capture (3), request drain (60), the post-drain strategy /
+/// Ditto / router pass (43), storage (3), local AI (5), and client close (50).
+/// Round that to 300 seconds, then leave separate graceful and force margins.
+const SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS: u64 = 300;
+const SIDECAR_GRACEFUL_SHUTDOWN_TIMEOUT: Duration =
+    Duration::from_secs(SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS + 10);
+const SIDECAR_TOTAL_SHUTDOWN_TIMEOUT: Duration =
+    Duration::from_secs(SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS + 20);
 
 /// Short window for Python to promote the exact pending recovery record. A
 /// pending PID must not consume the 150-second confirmed-application budget.
-const SIDECAR_PENDING_HANDSHAKE_POLLS: usize = 30;
+const SIDECAR_PENDING_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Initial grace before stale-sidecar recovery fails closed. Python may take
 /// almost 2s to observe parent death, waits 12s before its complete-tree orphan
 /// fallback, then may spend 5s confirming descendants are gone. Twenty-two
 /// seconds covers every stage plus scheduling margin.
-const SIDECAR_WATCHDOG_GRACE_POLLS: usize = 220;
+const SIDECAR_WATCHDOG_GRACE_TIMEOUT: Duration = Duration::from_secs(22);
 
 /// Brief confirmation window after a hard kill before retaining recovery data.
-const SIDECAR_KILL_CONFIRM_POLLS: usize = 10;
+const SIDECAR_KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Give Python containment longer than its 5s POSIX descendant-kill pass before
 /// retaining the launcher/guardian and recovery record for continued cleanup.
-const SIDECAR_FORCE_EXIT_POLLS: usize = 70;
+const SIDECAR_FORCE_EXIT_TIMEOUT: Duration = Duration::from_secs(7);
 
 /// Consecutive inconclusive supervisor probes tolerated before recovery state
 /// is retained for the next explicit startup repair instead of polling forever.
 const SIDECAR_SUPERVISOR_UNKNOWN_POLLS: usize = 50;
+
+#[cfg(any(windows, test))]
+const WINDOWS_JOB_OBJECT_LIMIT_BREAKAWAY_OK: u32 = 0x0000_0800;
+#[cfg(any(windows, test))]
+const WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_CLOSE: u32 = 0x0000_2000;
+#[cfg(any(windows, test))]
+const WINDOWS_SHELL_JOB_LIMIT_FLAGS: u32 =
+    WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_CLOSE | WINDOWS_JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+#[cfg(any(windows, test))]
+const WINDOWS_CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+#[cfg(any(windows, test))]
+const WINDOWS_CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+#[cfg(any(windows, test))]
+const WINDOWS_CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+#[cfg(any(windows, test))]
+const WINDOWS_CREATE_NO_WINDOW: u32 = 0x0800_0000;
+#[cfg(any(windows, test))]
+const WINDOWS_BACKEND_CREATION_FLAGS: u32 = WINDOWS_CREATE_NO_WINDOW;
+#[cfg(any(windows, test))]
+const WINDOWS_DETACHED_UPDATER_FLAGS: u32 = WINDOWS_CREATE_NEW_CONSOLE
+    | WINDOWS_CREATE_NEW_PROCESS_GROUP
+    | WINDOWS_CREATE_BREAKAWAY_FROM_JOB;
 
 /// File name of the platform's bootstrap install/update script. The same file
 /// can live inside a source workspace (``scripts/install/``) or inside the
@@ -217,12 +259,531 @@ struct ReapRecord {
     application_pid: Option<u32>,
     shell_pid: u32,
     boot_id: Option<String>,
+    spawn_contained: bool,
+}
+
+#[derive(Debug)]
+enum SpawnContainment {
+    #[cfg(unix)]
+    PosixGroup { pgid: u32 },
+    #[cfg(windows)]
+    WindowsShellJob,
+}
+
+#[cfg(windows)]
+static WINDOWS_SHELL_JOB: OnceLock<Result<WindowsJobHandle, String>> = OnceLock::new();
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsJobHandle(usize);
+
+#[cfg(windows)]
+impl WindowsJobHandle {
+    fn create() -> std::io::Result<Self> {
+        use std::ffi::c_void;
+
+        #[repr(C)]
+        struct IoCounters {
+            read_operations: u64,
+            write_operations: u64,
+            other_operations: u64,
+            read_bytes: u64,
+            write_bytes: u64,
+            other_bytes: u64,
+        }
+        #[repr(C)]
+        struct BasicLimitInformation {
+            per_process_user_time_limit: i64,
+            per_job_user_time_limit: i64,
+            limit_flags: u32,
+            minimum_working_set_size: usize,
+            maximum_working_set_size: usize,
+            active_process_limit: u32,
+            affinity: usize,
+            priority_class: u32,
+            scheduling_class: u32,
+        }
+        #[repr(C)]
+        struct ExtendedLimitInformation {
+            basic_limit_information: BasicLimitInformation,
+            io_info: IoCounters,
+            process_memory_limit: usize,
+            job_memory_limit: usize,
+            peak_process_memory_used: usize,
+            peak_job_memory_used: usize,
+        }
+        extern "system" {
+            fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> *mut c_void;
+            fn SetInformationJobObject(
+                job: *mut c_void,
+                information_class: i32,
+                information: *mut c_void,
+                information_length: u32,
+            ) -> i32;
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut information: ExtendedLimitInformation = unsafe { std::mem::zeroed() };
+        // Backend descendants do not request breakaway and remain contained.
+        // The updater alone uses CREATE_BREAKAWAY_FROM_JOB so it can survive
+        // the shell exit that hands control to the installer.
+        information.basic_limit_information.limit_flags = WINDOWS_SHELL_JOB_LIMIT_FLAGS;
+        let configured = unsafe {
+            SetInformationJobObject(
+                handle,
+                9,
+                std::ptr::addr_of_mut!(information).cast(),
+                std::mem::size_of::<ExtendedLimitInformation>() as u32,
+            )
+        };
+        if configured == 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                CloseHandle(handle);
+            }
+            return Err(error);
+        }
+        Ok(Self(handle as usize))
+    }
+
+    fn assign_current_process(&self) -> std::io::Result<()> {
+        use std::ffi::c_void;
+
+        extern "system" {
+            fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+            fn GetCurrentProcess() -> *mut c_void;
+        }
+        let process = unsafe { GetCurrentProcess() };
+        if unsafe { AssignProcessToJobObject(self.0 as *mut c_void, process) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn ensure_windows_shell_job() -> std::io::Result<()> {
+    match WINDOWS_SHELL_JOB.get_or_init(|| {
+        let job = WindowsJobHandle::create().map_err(|error| error.to_string())?;
+        job.assign_current_process()
+            .map_err(|error| error.to_string())?;
+        Ok(job)
+    }) {
+        Ok(_) => Ok(()),
+        Err(message) => Err(std::io::Error::other(message.clone())),
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJobHandle {
+    fn drop(&mut self) {
+        use std::ffi::c_void;
+        extern "system" {
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+        unsafe {
+            CloseHandle(self.0 as *mut c_void);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ContainedCommandChild {
+    child: Arc<Mutex<Child>>,
+    leader_reaped: Arc<AtomicBool>,
+    stdin: Mutex<Option<ChildStdin>>,
+    pid: u32,
+    containment: SpawnContainment,
+}
+
+impl ContainedCommandChild {
+    fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let mut stdin = self.stdin.lock().unwrap();
+        stdin
+            .as_mut()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "backend stdin is closed")
+            })?
+            .write_all(bytes)
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        match &self.containment {
+            #[cfg(unix)]
+            SpawnContainment::PosixGroup { pgid } => {
+                let child = self.child.lock().unwrap();
+                if self.leader_reaped.load(Ordering::Acquire) {
+                    return Err(std::io::Error::other(
+                        "backend process-group authority was reaped before termination",
+                    ));
+                }
+                // The Python guardian deliberately remains in this outer group
+                // while the application moves into an inner group. SIGTERM asks
+                // that guardian to clean the complete tracked tree; SIGKILL
+                // would destroy the cleanup authority and strand descendants.
+                // Holding the Child lock prevents the waiter from reaping the
+                // group leader, so its PID/PGID cannot be reused at this sink.
+                signal_unreaped_posix_group(&child, *pgid, 15)?;
+            }
+            #[cfg(windows)]
+            SpawnContainment::WindowsShellJob => {
+                let mut child = self.child.lock().unwrap();
+                if child.try_wait()?.is_none() {
+                    child.kill()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn wait_for_test(&mut self) -> std::io::Result<ExitStatus> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = {
+                let mut child = self.child.lock().unwrap();
+                let status = child.try_wait()?;
+                if status.is_some() {
+                    self.leader_reaped.store(true, Ordering::Release);
+                }
+                status
+            };
+            if let Some(status) = status {
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "contained test child did not exit",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[cfg(unix)]
+fn signal_unreaped_posix_group(child: &Child, pgid: u32, signal: i32) -> std::io::Result<()> {
+    if child.id() != pgid {
+        return Err(std::io::Error::other(
+            "backend child no longer owns the recorded process group",
+        ));
+    }
+    let raw_pgid = i32::try_from(pgid).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "backend PGID exceeds i32")
+    })?;
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    if unsafe { kill(-raw_pgid, signal) } == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(3) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+fn spawn_pipe_event_reader<R, F>(
+    reader: R,
+    sender: tauri::async_runtime::Sender<CommandEvent>,
+    event: F,
+) -> std::thread::JoinHandle<()>
+where
+    R: Read + Send + 'static,
+    F: Fn(Vec<u8>) -> CommandEvent + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        loop {
+            let mut bytes = Vec::new();
+            match reader.read_until(b'\n', &mut bytes) {
+                Ok(0) => return,
+                Ok(_) => {
+                    if sender.blocking_send(event(bytes)).is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.blocking_send(CommandEvent::Error(error.to_string()));
+                    return;
+                }
+            }
+        }
+    })
+}
+
+#[cfg(unix)]
+fn request_unpublished_posix_cleanup(child: &mut Child, pgid: u32) -> bool {
+    if signal_unreaped_posix_group(child, pgid, 15).is_err() {
+        let _ = child.kill();
+        return wait_for_child_exit_bounded(child, SIDECAR_KILL_CONFIRM_TIMEOUT);
+    }
+    // The backend may already have forked its guardian. Give that guardian a
+    // catchable request so it can clean any inner group instead of killing the
+    // cleanup authority itself.
+    let mut last_warning = Instant::now();
+    let deadline = Instant::now() + SIDECAR_FORCE_EXIT_TIMEOUT;
+    loop {
+        if spawn_containment_liveness(pgid) == ProcessLiveness::Dead {
+            let _ = child.try_wait();
+            return true;
+        }
+        if Instant::now() >= deadline {
+            eprintln!(
+                "[flinttrade] unrecorded backend containment did not exit within the cleanup budget"
+            );
+            return false;
+        }
+        if last_warning.elapsed() >= Duration::from_secs(1) {
+            eprintln!(
+                "[flinttrade] unrecorded backend containment is still alive; startup remains blocked"
+            );
+            let _ = signal_unreaped_posix_group(child, pgid, 15);
+            last_warning = Instant::now();
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_child_exit_bounded(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Err(_) => return false,
+            Ok(None) => {}
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn retain_unpublished_cleanup_authority<F, W>(mut cleanup: F, mut wait: W)
+where
+    F: FnMut() -> bool,
+    W: FnMut(),
+{
+    while !cleanup() {
+        eprintln!(
+            "[flinttrade] unrecorded backend ownership remains unresolved; retaining the instance lock"
+        );
+        wait();
+    }
+}
+
+fn cleanup_failed_spawn(child: &mut Child, containment: &SpawnContainment) -> bool {
+    match containment {
+        #[cfg(unix)]
+        SpawnContainment::PosixGroup { pgid } => request_unpublished_posix_cleanup(child, *pgid),
+        #[cfg(windows)]
+        SpawnContainment::WindowsShellJob => {
+            let _ = child.kill();
+            wait_for_child_exit_bounded(child, SIDECAR_KILL_CONFIRM_TIMEOUT)
+        }
+    }
+}
+
+fn terminate_unrecorded_sidecar(child: &mut ContainedCommandChild) -> bool {
+    let sidecar_pid = child.pid();
+    let _ = child.write(SIDECAR_FORCE_EXIT_COMMAND);
+    let mut last_warning = Instant::now();
+    let deadline = Instant::now() + SIDECAR_FORCE_EXIT_TIMEOUT;
+    loop {
+        let _ = child.kill();
+        #[cfg(unix)]
+        let exited = wait_for_spawn_containment_exit(sidecar_pid, Duration::from_millis(250));
+        #[cfg(windows)]
+        let exited = wait_for_process_exit(sidecar_pid, Duration::from_millis(250));
+        if exited {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            eprintln!("[flinttrade] unrecorded backend did not exit within the cleanup budget");
+            return false;
+        }
+        if last_warning.elapsed() >= Duration::from_secs(1) {
+            eprintln!("[flinttrade] unrecorded backend is still alive; startup remains blocked");
+            last_warning = Instant::now();
+        }
+    }
+}
+
+fn spawn_contained_std_command(
+    mut command: StdCommand,
+) -> std::io::Result<(
+    tauri::async_runtime::Receiver<CommandEvent>,
+    ContainedCommandChild,
+)> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        ensure_windows_shell_job()?;
+        // Children of a process in a non-breakaway Job enter that Job as part
+        // of process creation, leaving no spawn-to-assignment crash window.
+        command.creation_flags(WINDOWS_BACKEND_CREATION_FLAGS);
+    }
+
+    let mut child = command.spawn()?;
+    let pid = child.id();
+
+    #[cfg(unix)]
+    let containment = {
+        extern "C" {
+            fn getpgid(pid: i32) -> i32;
+        }
+        let raw_pid = i32::try_from(pid).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "backend PID exceeds i32")
+        })?;
+        if unsafe { getpgid(raw_pid) } != raw_pid {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::other(
+                "backend did not enter its spawn-owned process group",
+            ));
+        }
+        match unix_process_start_token(pid) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                retain_unpublished_cleanup_authority(
+                    || request_unpublished_posix_cleanup(&mut child, pid),
+                    || std::thread::sleep(Duration::from_millis(100)),
+                );
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "backend process identity disappeared immediately after spawn",
+                ));
+            }
+            Err(error) => {
+                retain_unpublished_cleanup_authority(
+                    || request_unpublished_posix_cleanup(&mut child, pid),
+                    || std::thread::sleep(Duration::from_millis(100)),
+                );
+                return Err(error);
+            }
+        }
+        SpawnContainment::PosixGroup { pgid: pid }
+    };
+    #[cfg(windows)]
+    let containment = SpawnContainment::WindowsShellJob;
+
+    let stdin = child.stdin.take();
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            retain_unpublished_cleanup_authority(
+                || cleanup_failed_spawn(&mut child, &containment),
+                || std::thread::sleep(Duration::from_millis(100)),
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "backend stdout pipe is unavailable",
+            ));
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            retain_unpublished_cleanup_authority(
+                || cleanup_failed_spawn(&mut child, &containment),
+                || std::thread::sleep(Duration::from_millis(100)),
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "backend stderr pipe is unavailable",
+            ));
+        }
+    };
+    let child = Arc::new(Mutex::new(child));
+    let leader_reaped = Arc::new(AtomicBool::new(false));
+    let (sender, receiver) = tauri::async_runtime::channel(64);
+    let stdout_reader = spawn_pipe_event_reader(stdout, sender.clone(), CommandEvent::Stdout);
+    let stderr_reader = spawn_pipe_event_reader(stderr, sender.clone(), CommandEvent::Stderr);
+    let wait_child = Arc::clone(&child);
+    let wait_leader_reaped = Arc::clone(&leader_reaped);
+    std::thread::spawn(move || {
+        let status = loop {
+            let wait_result = {
+                let mut child = wait_child.lock().unwrap();
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        wait_leader_reaped.store(true, Ordering::Release);
+                        Some(Ok(status))
+                    }
+                    Ok(None) => None,
+                    Err(error) => Some(Err(error)),
+                }
+            };
+            match wait_result {
+                Some(result) => break result,
+                None => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        let _ = stdout_reader.join();
+        let _ = stderr_reader.join();
+        let event = match status {
+            Ok(status) => CommandEvent::Terminated(TerminatedPayload {
+                code: status.code(),
+                #[cfg(unix)]
+                signal: {
+                    use std::os::unix::process::ExitStatusExt;
+                    status.signal()
+                },
+                #[cfg(windows)]
+                signal: None,
+            }),
+            Err(error) => CommandEvent::Error(error.to_string()),
+        };
+        let _ = sender.blocking_send(event);
+    });
+
+    Ok((
+        receiver,
+        ContainedCommandChild {
+            child,
+            leader_reaped,
+            stdin: Mutex::new(stdin),
+            pid,
+            containment,
+        },
+    ))
+}
+
+fn spawn_contained_shell_command(
+    command: ShellCommand,
+) -> std::io::Result<(
+    tauri::async_runtime::Receiver<CommandEvent>,
+    ContainedCommandChild,
+)> {
+    spawn_contained_std_command(command.into())
 }
 
 struct ManagedSidecar {
-    child: CommandChild,
+    child: ContainedCommandChild,
     record: SidecarRecord,
     pending_exit_acknowledged: Arc<AtomicBool>,
+    cleanup_complete_acknowledged: Arc<AtomicBool>,
     shutdown_identity_tracker: ShutdownProcessIdentityTracker,
 }
 
@@ -736,8 +1297,6 @@ fn spawn_detached_updater(
     handoff: Option<&Path>,
 ) -> std::io::Result<std::process::Child> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
     // Binary-first updates run the script bundled in the app's resource dir
     // ($INSTDIR). The NSIS updater it launches replaces $INSTDIR wholesale,
@@ -766,7 +1325,7 @@ fn spawn_detached_updater(
     }
     cmd.env("FLINTTRADE_YES", "1")
         .current_dir(run_dir)
-        .creation_flags(CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP);
+        .creation_flags(WINDOWS_DETACHED_UPDATER_FLAGS);
     if let Some(marker) = handoff {
         cmd.env("FLINTTRADE_UPDATE_HANDOFF", marker);
     }
@@ -897,7 +1456,7 @@ pub fn run() {
                 .env("FLINTTRADE_LAUNCH_TOKEN", &launch_token);
             #[cfg(unix)]
             let command = command.env(PARENT_IDENTITY_ENV, parent_identity);
-            let (mut rx, mut child) = command.spawn()?;
+            let (mut rx, mut child) = spawn_contained_shell_command(command)?;
             let sidecar_pid = child.pid();
             let sidecar_record = SidecarRecord {
                 sidecar_pid,
@@ -907,12 +1466,14 @@ pub fn run() {
                 launch_token,
             };
             let pending_exit_acknowledged = Arc::new(AtomicBool::new(false));
+            let cleanup_complete_acknowledged = Arc::new(AtomicBool::new(false));
             // Record the sidecar identity so the *next* launch can reap it if
             // this shell dies without running its kill-on-exit cleanup.
             if let Err(error) = write_sidecar_record(&sidecar_record) {
-                let _ = child.write(SIDECAR_FORCE_EXIT_COMMAND);
-                let _ = child.kill();
-                let _ = wait_for_process_exit(sidecar_pid, SIDECAR_KILL_CONFIRM_POLLS);
+                retain_unpublished_cleanup_authority(
+                    || terminate_unrecorded_sidecar(&mut child),
+                    || std::thread::sleep(Duration::from_millis(100)),
+                );
                 return Err(std::io::Error::other(format!(
                     "could not atomically record the backend sidecar; launch aborted: {error}"
                 ))
@@ -923,6 +1484,7 @@ pub fn run() {
                     child,
                     record: sidecar_record.clone(),
                     pending_exit_acknowledged: Arc::clone(&pending_exit_acknowledged),
+                    cleanup_complete_acknowledged: Arc::clone(&cleanup_complete_acknowledged),
                     shutdown_identity_tracker: ShutdownProcessIdentityTracker::default(),
                 });
             }
@@ -933,15 +1495,27 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let mut buffer = String::new();
                 let mut pid_buffer = String::new();
+                let mut cleanup_buffer = String::new();
                 let mut sidecar_record = sidecar_record;
+                let mut application_identity = None;
                 let mut ready_port = None;
                 let mut shown = false;
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(bytes) => {
                             let chunk = String::from_utf8_lossy(&bytes);
+                            if !cleanup_complete_acknowledged.load(Ordering::Acquire) {
+                                append_bounded_handshake_output(&mut cleanup_buffer, &chunk);
+                                if output_has_cleanup_complete_ack(
+                                    &cleanup_buffer,
+                                    &sidecar_record.launch_token,
+                                ) {
+                                    cleanup_complete_acknowledged.store(true, Ordering::Release);
+                                    cleanup_buffer.clear();
+                                }
+                            }
                             if sidecar_record.application_pid.is_none() {
-                                pid_buffer.push_str(&chunk);
+                                append_bounded_handshake_output(&mut pid_buffer, &chunk);
                                 if output_has_pending_record_exit_ack(
                                     &pid_buffer,
                                     &sidecar_record.launch_token,
@@ -949,19 +1523,38 @@ pub fn run() {
                                     pending_exit_acknowledged.store(true, Ordering::Release);
                                 }
                                 if let Some(application_pid) = parse_application_pid(&pid_buffer) {
-                                    match confirm_application_process(application_pid).and_then(|()| {
-                                        promote_sidecar_record(&sidecar_record, application_pid)
-                                    }) {
-                                        Ok(promoted) => {
+                                    match confirm_application_process(application_pid).and_then(
+                                        |identity| {
+                                            promote_sidecar_record(
+                                                &sidecar_record,
+                                                application_pid,
+                                            )
+                                            .map(|promoted| (promoted, identity))
+                                        },
+                                    ) {
+                                        Ok((promoted, identity)) => {
                                             if let Some(state) = handle.try_state::<BackendState>() {
                                                 let mut active = state.0.lock().unwrap();
                                                 if let Some(managed) = active.as_mut() {
                                                     if managed.record == sidecar_record {
                                                         managed.record = promoted.clone();
+                                                        managed
+                                                            .shutdown_identity_tracker
+                                                            .application
+                                                            .bind(application_pid, identity.clone());
+                                                        if application_pid
+                                                            == sidecar_record.sidecar_pid
+                                                        {
+                                                            managed
+                                                                .shutdown_identity_tracker
+                                                                .launcher
+                                                                .bind(application_pid, identity.clone());
+                                                        }
                                                     }
                                                 }
                                             }
                                             sidecar_record = promoted;
+                                            application_identity = Some(identity);
                                             pid_buffer.clear();
                                         }
                                         Err(error) => {
@@ -981,8 +1574,13 @@ pub fn run() {
                                 }
                             }
                             if !shown {
-                                buffer.push_str(&chunk);
-                                ready_port = ready_port.or_else(|| parse_ready_port(&buffer));
+                                if ready_port.is_none() {
+                                    append_bounded_handshake_output(&mut buffer, &chunk);
+                                    ready_port = parse_ready_port(&buffer);
+                                    if ready_port.is_some() {
+                                        buffer.clear();
+                                    }
+                                }
                                 if let (Some(port), Some(_)) =
                                     (ready_port, sidecar_record.application_pid)
                                 {
@@ -1007,12 +1605,20 @@ pub fn run() {
                                 },
                                 ProcessLiveness::Dead,
                             ) {
-                                finalise_terminated_backend(&handle, &sidecar_record);
+                                clear_terminated_backend(&handle, &sidecar_record);
+                                let _ = remove_sidecar_record(&sidecar_record);
+                                surface_backend_recovery(&handle);
                                 break;
                             }
+                            let cleanup_acknowledged =
+                                cleanup_complete_acknowledged.load(Ordering::Acquire);
                             match process_tree_liveness(&sidecar_record) {
                                 ProcessLiveness::Dead => {
-                                    finalise_terminated_backend(&handle, &sidecar_record);
+                                    finalise_terminated_backend(
+                                        &handle,
+                                        &sidecar_record,
+                                        cleanup_acknowledged,
+                                    );
                                 }
                                 ProcessLiveness::Alive => {
                                     eprintln!(
@@ -1021,6 +1627,8 @@ pub fn run() {
                                     supervise_terminated_application(
                                         &handle,
                                         &sidecar_record,
+                                        Arc::clone(&cleanup_complete_acknowledged),
+                                        application_identity.clone(),
                                     );
                                 }
                                 ProcessLiveness::Unknown => {
@@ -1032,6 +1640,8 @@ pub fn run() {
                                         supervise_terminated_application(
                                             &handle,
                                             &sidecar_record,
+                                            Arc::clone(&cleanup_complete_acknowledged),
+                                            application_identity.clone(),
                                         );
                                     }
                                 }
@@ -1083,6 +1693,18 @@ fn parse_ready_port(buffer: &str) -> Option<u16> {
     None
 }
 
+fn append_bounded_handshake_output(buffer: &mut String, chunk: &str) {
+    buffer.push_str(chunk);
+    if buffer.len() <= MAX_HANDSHAKE_BUFFER_BYTES {
+        return;
+    }
+    let mut start = buffer.len() - MAX_HANDSHAKE_BUFFER_BYTES;
+    while !buffer.is_char_boundary(start) {
+        start += 1;
+    }
+    buffer.drain(..start);
+}
+
 /// Extract the real Python application PID from its earliest stdout line.
 fn parse_application_pid(buffer: &str) -> Option<u32> {
     for line in buffer.lines() {
@@ -1125,6 +1747,20 @@ fn output_has_pending_record_exit_ack(buffer: &str, expected_token: &str) -> boo
     buffer
         .lines()
         .any(|line| parse_pending_record_exit_ack(line, expected_token))
+}
+
+/// Accept only the guardian's complete, exact-token cleanup acknowledgement.
+fn parse_cleanup_complete_ack(line: &str, expected_token: &str) -> bool {
+    let mut fields = line.split_whitespace();
+    fields.next() == Some(CLEANUP_COMPLETE_SENTINEL)
+        && fields.next().and_then(|field| field.strip_prefix("token=")) == Some(expected_token)
+        && fields.next().is_none()
+}
+
+fn output_has_cleanup_complete_ack(buffer: &str, expected_token: &str) -> bool {
+    buffer
+        .lines()
+        .any(|line| parse_cleanup_complete_ack(line, expected_token))
 }
 
 /// Whether an in-webview navigation target may load in the privileged main
@@ -1462,24 +2098,50 @@ fn surface_backend_recovery(app: &AppHandle) {
     }
 }
 
-fn finalise_terminated_backend(app: &AppHandle, record: &SidecarRecord) {
+fn finalise_terminated_backend(
+    app: &AppHandle,
+    record: &SidecarRecord,
+    cleanup_acknowledged: bool,
+) {
     clear_terminated_backend(app, record);
     // Remove only this launch's exact record. The instance lock prevents a
     // successor shell from replacing it while this process remains alive.
-    remove_sidecar_record(record);
+    let _ = remove_sidecar_record_after_cleanup(record, cleanup_acknowledged);
     surface_backend_recovery(app);
 }
 
-fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
+fn supervise_terminated_application(
+    app: &AppHandle,
+    record: &SidecarRecord,
+    cleanup_complete_acknowledged: Arc<AtomicBool>,
+    application_identity: Option<String>,
+) {
     let monitor_app = app.clone();
     let monitor_record = record.clone();
     if let Err(error) = std::thread::Builder::new()
         .name("flinttrade-backend-supervisor".to_string())
         .spawn(move || {
-            match wait_for_recorded_application_exit(&monitor_record) {
+            match wait_for_recorded_application_exit(
+                &monitor_record,
+                application_identity.as_deref(),
+            ) {
                 RecordedApplicationExit::ConfirmedDead
                 | RecordedApplicationExit::ConfirmedReused => {
-                    finalise_terminated_backend(&monitor_app, &monitor_record);
+                    if wait_for_spawn_containment_exit(
+                        monitor_record.sidecar_pid,
+                        SIDECAR_FORCE_EXIT_TIMEOUT,
+                    ) {
+                        finalise_terminated_backend(
+                            &monitor_app,
+                            &monitor_record,
+                            cleanup_complete_acknowledged.load(Ordering::Acquire),
+                        );
+                    } else {
+                        eprintln!(
+                            "[flinttrade] backend application exited before its containment guardian; retaining recovery state"
+                        );
+                        surface_backend_recovery(&monitor_app);
+                    }
                 }
                 RecordedApplicationExit::Unresolved => {
                     eprintln!(
@@ -1497,32 +2159,65 @@ fn supervise_terminated_application(app: &AppHandle, record: &SidecarRecord) {
     }
 }
 
-fn launcher_kill_allowed_after_force_request(force_pipe_written: bool) -> bool {
-    !force_pipe_written
+fn wait_for_spawn_containment_exit(pgid: u32, timeout: Duration) -> bool {
+    #[cfg(windows)]
+    {
+        let _ = (pgid, timeout);
+        true
+    }
+    #[cfg(unix)]
+    {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if spawn_containment_liveness(pgid) == ProcessLiveness::Dead {
+                return true;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            std::thread::sleep((deadline - now).min(Duration::from_millis(100)));
+        }
+    }
+}
+
+fn shutdown_phase_deadlines(started: Instant) -> (Instant, Instant, Instant) {
+    let shutdown = started + SIDECAR_TOTAL_SHUTDOWN_TIMEOUT;
+    let force = shutdown - SIDECAR_KILL_CONFIRM_TIMEOUT;
+    let graceful = force - SIDECAR_FORCE_EXIT_TIMEOUT;
+    (graceful, force, shutdown)
 }
 
 /// Gracefully stop the backend sidecar, with a bounded hard-kill fallback.
 fn kill_backend(app: &AppHandle) {
     if let Some(state) = app.try_state::<BackendState>() {
         if let Some(mut managed) = state.0.lock().unwrap().take() {
+            let (graceful_deadline, force_phase_deadline, shutdown_deadline) =
+                shutdown_phase_deadlines(Instant::now());
             let record_path = sidecar_pid_file();
             if managed.child.write(SIDECAR_SHUTDOWN_COMMAND).is_ok()
                 && wait_for_sidecar_shutdown(
                     &mut managed.record,
-                    SIDECAR_PENDING_HANDSHAKE_POLLS,
-                    SIDECAR_SHUTDOWN_POLLS,
+                    SIDECAR_PENDING_HANDSHAKE_TIMEOUT,
+                    SIDECAR_GRACEFUL_SHUTDOWN_TIMEOUT,
+                    graceful_deadline,
                     record_path.as_deref(),
                     &mut managed.shutdown_identity_tracker,
                 )
             {
-                remove_sidecar_record(&managed.record);
+                let _ = remove_sidecar_record_after_cleanup(
+                    &managed.record,
+                    managed
+                        .cleanup_complete_acknowledged
+                        .load(Ordering::Acquire),
+                );
                 return;
             }
             match process_tree_liveness(&managed.record) {
                 ProcessLiveness::Alive => {
                     if managed.record.application_pid.is_some() {
                         eprintln!(
-                            "[flinttrade] backend did not stop gracefully within 150s; forcing exit"
+                            "[flinttrade] backend did not stop within the shared graceful deadline; forcing exit"
                         );
                     } else {
                         eprintln!(
@@ -1547,40 +2242,47 @@ fn kill_backend(app: &AppHandle) {
             if force_exit_written
                 && wait_for_sidecar_shutdown(
                     &mut managed.record,
-                    SIDECAR_FORCE_EXIT_POLLS,
-                    SIDECAR_FORCE_EXIT_POLLS,
+                    SIDECAR_FORCE_EXIT_TIMEOUT,
+                    SIDECAR_FORCE_EXIT_TIMEOUT,
+                    force_phase_deadline,
                     record_path.as_deref(),
                     &mut managed.shutdown_identity_tracker,
                 )
             {
-                remove_sidecar_record(&managed.record);
+                let _ = remove_sidecar_record_after_cleanup(
+                    &managed.record,
+                    managed
+                        .cleanup_complete_acknowledged
+                        .load(Ordering::Acquire),
+                );
                 return;
             }
-            // An accepted pipe request tells the external guardian / Job Object
-            // to clean the complete tree. Killing its launcher here could make
-            // the two recorded leader PIDs look dead before escaped descendants
-            // are gone, so preserve it and retain recovery state if cleanup
-            // remains unresolved. The exact launcher kill is only a fallback
-            // when no containment request reached Python.
-            if launcher_kill_allowed_after_force_request(force_exit_written) {
-                if let Err(error) = managed.child.kill() {
-                    eprintln!("[flinttrade] backend launcher hard-kill request failed: {error}");
-                }
+            // A successful pipe write proves only that bytes entered the pipe,
+            // not that Python or its guardian consumed them. Always activate
+            // the OS containment fallback after the force deadline. POSIX sends
+            // catchable SIGTERM to the outer guardian; Windows relies on the
+            // shell Job closing when this process exits.
+            if let Err(error) = managed.child.kill() {
+                eprintln!("[flinttrade] backend containment fallback failed: {error}");
             }
             if wait_for_sidecar_shutdown(
                 &mut managed.record,
-                SIDECAR_KILL_CONFIRM_POLLS,
-                SIDECAR_KILL_CONFIRM_POLLS,
+                SIDECAR_KILL_CONFIRM_TIMEOUT,
+                SIDECAR_KILL_CONFIRM_TIMEOUT,
+                shutdown_deadline,
                 record_path.as_deref(),
                 &mut managed.shutdown_identity_tracker,
             ) {
-                remove_sidecar_record(&managed.record);
+                let _ = remove_sidecar_record_after_cleanup(
+                    &managed.record,
+                    managed
+                        .cleanup_complete_acknowledged
+                        .load(Ordering::Acquire),
+                );
             } else if pending_record_cleanup_allowed(
                 &managed.record,
                 if managed.pending_exit_acknowledged.load(Ordering::Acquire) {
                     PendingRecordExitProof::ApplicationAcknowledged
-                } else if force_exit_written {
-                    PendingRecordExitProof::PipeWriteAccepted
                 } else {
                     PendingRecordExitProof::None
                 },
@@ -1589,7 +2291,7 @@ fn kill_backend(app: &AppHandle) {
                 // Python acknowledged only after removing this exact pending
                 // record before backend import. The launcher is also dead, so
                 // no untracked PyInstaller application tree can remain.
-                remove_sidecar_record(&managed.record);
+                let _ = remove_sidecar_record(&managed.record);
             } else {
                 eprintln!(
                     "[flinttrade] backend process tree is unresolved after hard stop; retaining recovery record"
@@ -1599,64 +2301,76 @@ fn kill_backend(app: &AppHandle) {
     }
 }
 
-fn wait_for_sidecar_shutdown_with<R, L, W>(
+fn wait_for_sidecar_shutdown_with<R, L, N, W>(
     record: &mut SidecarRecord,
-    pending_polls: usize,
-    confirmed_polls: usize,
+    pending_timeout: Duration,
+    confirmed_timeout: Duration,
+    overall_deadline: Instant,
     mut refresh: R,
     mut liveness: L,
+    mut now: N,
     mut wait: W,
 ) -> bool
 where
     R: FnMut(&SidecarRecord) -> Option<SidecarRecord>,
     L: FnMut(&SidecarRecord) -> ProcessLiveness,
-    W: FnMut(),
+    N: FnMut() -> Instant,
+    W: FnMut(Duration),
 {
-    let mut remaining = if record.application_pid.is_some() {
-        confirmed_polls
+    let started_at = now();
+    let mut phase_deadline = if record.application_pid.is_some() {
+        (started_at + confirmed_timeout).min(overall_deadline)
     } else {
-        pending_polls
+        (started_at + pending_timeout).min(overall_deadline)
     };
     loop {
+        if now() >= phase_deadline {
+            return false;
+        }
         let was_pending = record.application_pid.is_none();
         if let Some(refreshed) = refresh(record) {
             *record = refreshed;
             if was_pending && record.application_pid.is_some() {
-                remaining = confirmed_polls;
+                phase_deadline = (now() + confirmed_timeout).min(overall_deadline);
             }
+        }
+        if now() >= phase_deadline {
+            return false;
         }
         if liveness(record) == ProcessLiveness::Dead {
             return true;
         }
-        if remaining == 0 {
+        let current = now();
+        if current >= phase_deadline {
             return false;
         }
-        remaining -= 1;
-        wait();
+        wait((phase_deadline - current).min(Duration::from_millis(100)));
     }
 }
 
 fn wait_for_sidecar_shutdown(
     record: &mut SidecarRecord,
-    pending_polls: usize,
-    confirmed_polls: usize,
+    pending_timeout: Duration,
+    confirmed_timeout: Duration,
+    overall_deadline: Instant,
     record_path: Option<&Path>,
     identity_tracker: &mut ShutdownProcessIdentityTracker,
 ) -> bool {
     wait_for_sidecar_shutdown_with(
         record,
-        pending_polls,
-        confirmed_polls,
+        pending_timeout,
+        confirmed_timeout,
+        overall_deadline,
         |expected| record_path.and_then(|path| refresh_sidecar_record_at(path, expected)),
         |current| identity_tracker.process_tree_liveness(current),
-        || std::thread::sleep(std::time::Duration::from_millis(100)),
+        Instant::now,
+        std::thread::sleep,
     )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PendingRecordExitProof {
     None,
-    PipeWriteAccepted,
     ApplicationAcknowledged,
 }
 
@@ -1677,6 +2391,86 @@ fn pending_record_cleanup_allowed(
 /// Path of the sidecar PID file inside the workspace dir.
 fn sidecar_pid_file() -> Option<PathBuf> {
     flinttrade_home().map(|d| d.join(SIDECAR_PID_FILE))
+}
+
+fn cleanup_complete_proof_path(record_path: &Path) -> std::io::Result<PathBuf> {
+    let file_name = record_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sidecar record path has no valid file name",
+            )
+        })?;
+    Ok(record_path.with_file_name(format!(".{file_name}.cleanup-complete")))
+}
+
+fn format_cleanup_complete_proof(launch_token: &str) -> String {
+    format!("{CLEANUP_COMPLETE_SENTINEL} token={launch_token}\n")
+}
+
+fn cleanup_complete_proof_matches_at(record_path: &Path, launch_token: &str) -> bool {
+    if !valid_launch_token(launch_token) {
+        return false;
+    }
+    let Ok(proof_path) = cleanup_complete_proof_path(record_path) else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(&proof_path) else {
+        return false;
+    };
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return false;
+        }
+    }
+    std::fs::read_to_string(proof_path)
+        .is_ok_and(|contents| contents == format_cleanup_complete_proof(launch_token))
+}
+
+fn cleanup_complete_proven(record: &SidecarRecord, acknowledged: bool) -> bool {
+    #[cfg(windows)]
+    {
+        let _ = (record, acknowledged);
+        true
+    }
+    #[cfg(unix)]
+    {
+        let Some(path) = sidecar_pid_file() else {
+            return false;
+        };
+        // The durable token-bound proof is authoritative across shell crashes;
+        // the stdout acknowledgement is retained as immediate runtime evidence.
+        let durable = cleanup_complete_proof_matches_at(&path, &record.launch_token);
+        if acknowledged && !durable {
+            eprintln!(
+                "[flinttrade] cleanup acknowledgement lacked its durable proof; retaining recovery state"
+            );
+        }
+        durable
+    }
+}
+
+fn startup_cleanup_complete_proven_at(record_path: &Path, record: Option<&SidecarRecord>) -> bool {
+    let Some(record) = record else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        let _ = (record_path, record);
+        true
+    }
+    #[cfg(unix)]
+    {
+        cleanup_complete_proof_matches_at(record_path, &record.launch_token)
+    }
 }
 
 fn instance_lock_file() -> Option<PathBuf> {
@@ -1703,6 +2497,7 @@ impl DesktopInstanceLock {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path)?;
         if let Err(error) = file.try_lock_exclusive() {
             return Err(if instance_lock_contended(&error) {
@@ -1800,21 +2595,44 @@ fn boot_session_identity() -> std::io::Result<String> {
     }
     #[cfg(windows)]
     {
-        let output = std::process::Command::new("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Console]::Out.Write((Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc())",
-            ])
-            .output()?;
-        if !output.status.success() {
+        use std::ffi::c_void;
+
+        #[repr(C)]
+        struct SystemTimeOfDayInformation {
+            boot_time: i64,
+            current_time: i64,
+            time_zone_bias: i64,
+            time_zone_id: u32,
+            reserved: u32,
+            boot_time_bias: u64,
+            sleep_time_bias: u64,
+        }
+        #[link(name = "ntdll")]
+        extern "system" {
+            fn NtQuerySystemInformation(
+                information_class: u32,
+                information: *mut c_void,
+                information_length: u32,
+                return_length: *mut u32,
+            ) -> i32;
+        }
+
+        let mut information: SystemTimeOfDayInformation = unsafe { std::mem::zeroed() };
+        let mut returned = 0u32;
+        let status = unsafe {
+            NtQuerySystemInformation(
+                3, // SystemTimeOfDayInformation
+                std::ptr::addr_of_mut!(information).cast(),
+                std::mem::size_of::<SystemTimeOfDayInformation>() as u32,
+                std::ptr::addr_of_mut!(returned),
+            )
+        };
+        if status < 0 || information.boot_time <= 0 {
             return Err(std::io::Error::other(format!(
-                "Windows boot identity query exited with status {}",
-                output.status
+                "native Windows boot identity query failed with NTSTATUS {status:#x}"
             )));
         }
-        return normalise_boot_identity(&output.stdout);
+        return normalise_boot_identity(information.boot_time.to_string().as_bytes());
     }
     #[allow(unreachable_code)]
     Err(std::io::Error::new(
@@ -1878,6 +2696,48 @@ fn parse_sidecar_record(contents: &str) -> Option<SidecarRecord> {
     })
 }
 
+fn parse_v3_sidecar_record(contents: &str) -> Option<ReapRecord> {
+    let mut lines = contents.lines();
+    if lines.next()?.trim() != "v3" {
+        return None;
+    }
+    let sidecar_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let raw_application_pid = lines.next()?.trim();
+    let application_pid = if raw_application_pid == "pending" {
+        None
+    } else {
+        Some(
+            raw_application_pid
+                .parse::<u32>()
+                .ok()
+                .filter(|pid| *pid > 0)?,
+        )
+    };
+    let shell_pid = lines
+        .next()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|pid| *pid > 0)?;
+    let boot_id = lines.next()?.to_string();
+    let launch_token = lines.next()?;
+    if lines.next().is_some() || !valid_boot_id(&boot_id) || !valid_launch_token(launch_token) {
+        return None;
+    }
+    Some(ReapRecord {
+        sidecar_pid,
+        application_pid,
+        shell_pid,
+        boot_id: Some(boot_id),
+        spawn_contained: false,
+    })
+}
+
 fn parse_v2_sidecar_record(contents: &str) -> Option<ReapRecord> {
     let mut lines = contents.lines();
     if lines.next()?.trim() != "v2" {
@@ -1915,6 +2775,7 @@ fn parse_v2_sidecar_record(contents: &str) -> Option<ReapRecord> {
         application_pid,
         shell_pid,
         boot_id: None,
+        spawn_contained: false,
     })
 }
 
@@ -1941,6 +2802,7 @@ fn parse_v1_sidecar_record(contents: &str) -> Option<ReapRecord> {
         application_pid: None,
         shell_pid,
         boot_id: None,
+        spawn_contained: false,
     })
 }
 
@@ -1966,6 +2828,7 @@ fn parse_legacy_sidecar_record(contents: &str) -> Option<ReapRecord> {
         application_pid: None,
         shell_pid,
         boot_id: None,
+        spawn_contained: false,
     })
 }
 
@@ -1976,7 +2839,9 @@ fn parse_reap_record(contents: &str) -> Option<ReapRecord> {
             application_pid: record.application_pid,
             shell_pid: record.shell_pid,
             boot_id: Some(record.boot_id),
+            spawn_contained: true,
         })
+        .or_else(|| parse_v3_sidecar_record(contents))
         .or_else(|| parse_v2_sidecar_record(contents))
         .or_else(|| parse_v1_sidecar_record(contents))
         .or_else(|| parse_legacy_sidecar_record(contents))
@@ -2009,7 +2874,7 @@ fn looks_like_desktop_shell(command_line: &str) -> bool {
     )
 }
 
-#[cfg(any(unix, test))]
+#[cfg(test)]
 fn parse_unix_ps_identity(text: &str, expected_pid: u32, start_token: &str) -> Option<String> {
     let mut fields = text.trim().splitn(2, char::is_whitespace);
     let pid = fields.next()?.parse::<u32>().ok()?;
@@ -2130,38 +2995,99 @@ fn unix_process_start_token(_pid: u32) -> std::io::Result<Option<String>> {
     ))
 }
 
-/// Return a stable command + PID + kernel process-start identity from unix `ps`, or
-/// ``None`` when no such process exists. Tool failures stay distinct from
-/// absence so startup remains fail closed.
+#[cfg(target_os = "linux")]
+fn unix_process_command(pid: u32) -> std::io::Result<Option<String>> {
+    let bytes = match std::fs::read(format!("/proc/{pid}/cmdline")) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let command = String::from_utf8_lossy(&bytes)
+        .replace('\0', " ")
+        .trim()
+        .to_string();
+    if command.is_empty() {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("process {pid} has no readable command line"),
+        ))
+    } else {
+        Ok(Some(command))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn unix_process_command(pid: u32) -> std::io::Result<Option<String>> {
+    use std::ffi::c_void;
+
+    extern "C" {
+        fn proc_pidpath(pid: i32, buffer: *mut c_void, buffer_size: u32) -> i32;
+    }
+    let raw_pid = i32::try_from(pid).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "process PID exceeds i32")
+    })?;
+    let mut buffer = vec![0u8; 4_096];
+    let read = unsafe {
+        proc_pidpath(
+            raw_pid,
+            buffer.as_mut_ptr().cast(),
+            u32::try_from(buffer.len()).expect("process path buffer fits u32"),
+        )
+    };
+    if read <= 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(3) {
+            Ok(None)
+        } else {
+            Err(error)
+        };
+    }
+    buffer.truncate(usize::try_from(read).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "proc_pidpath returned an invalid path length",
+        )
+    })?);
+    let command = String::from_utf8_lossy(&buffer).trim().to_string();
+    if command.is_empty() {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("process {pid} has no readable executable path"),
+        ))
+    } else {
+        Ok(Some(command))
+    }
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn unix_process_command(_pid: u32) -> std::io::Result<Option<String>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "native Unix process command lookup is unsupported",
+    ))
+}
+
+/// Return a stable native command + PID + kernel process-start identity, or
+/// ``None`` when no such process exists. Probe errors remain distinct from
+/// absence so startup and shutdown retain recovery state on uncertainty.
 #[cfg(unix)]
 fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
     let Some(before) = unix_process_start_token(pid)? else {
         return Ok(None);
     };
-    let out = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "pid=", "-o", "args="])
-        .output()?;
-    if !out.status.success() {
-        return if out.stdout.is_empty() {
-            Ok(None)
-        } else {
-            Err(std::io::Error::other(format!(
-                "ps exited with status {}",
-                out.status
-            )))
-        };
-    }
+    let Some(command) = unix_process_command(pid)? else {
+        return Ok(None);
+    };
     let Some(after) = unix_process_start_token(pid)? else {
         return Ok(None);
     };
     if after != before {
         return Ok(None);
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    Ok(parse_unix_ps_identity(&text, pid, &before))
+    Ok(Some(format!("{command}\t{pid}\t{before}")))
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 fn parse_windows_process_identity(text: &str, expected_pid: u32) -> Option<String> {
     let line = text
         .lines()
@@ -2181,28 +3107,144 @@ fn parse_windows_process_identity(text: &str, expected_pid: u32) -> Option<Strin
     ))
 }
 
-/// Return a stable image + PID + creation-time identity for a Windows process,
-/// or ``None`` when no such process exists.
-#[cfg(windows)]
-fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
-    let query = format!(
-        "$ErrorActionPreference = 'Stop'; $process = Get-Process -Id {pid}; \
-         [Console]::Out.WriteLine($process.ProcessName + [char]9 + $process.Id + \
-         [char]9 + $process.StartTime.ToFileTimeUtc())"
-    );
-    let out = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &query])
-        .output()?;
-    if !out.status.success() {
-        return Err(std::io::Error::other(format!(
-            "PowerShell process identity query exited with status {}",
-            out.status
-        )));
+#[cfg(any(windows, test))]
+fn classify_windows_process_wait(
+    open_error: Option<u32>,
+    wait_result: Option<u32>,
+) -> ProcessLiveness {
+    if let Some(error) = open_error {
+        return if error == 87 {
+            ProcessLiveness::Dead
+        } else {
+            ProcessLiveness::Unknown
+        };
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    Ok(parse_windows_process_identity(&text, pid))
+    match wait_result {
+        Some(0x0000_0000) => ProcessLiveness::Dead,
+        Some(0x0000_0102) => ProcessLiveness::Alive,
+        _ => ProcessLiveness::Unknown,
+    }
 }
 
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsProcessHandle(usize);
+
+#[cfg(windows)]
+impl WindowsProcessHandle {
+    fn open(pid: u32, access: u32) -> std::io::Result<Option<Self>> {
+        use std::ffi::c_void;
+        extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        }
+        let handle = unsafe { OpenProcess(access, 0, pid) };
+        if !handle.is_null() {
+            return Ok(Some(Self(handle as usize)));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(87) {
+            Ok(None)
+        } else {
+            Err(error)
+        }
+    }
+
+    fn wait_result(&self) -> u32 {
+        use std::ffi::c_void;
+        extern "system" {
+            fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
+        }
+        unsafe { WaitForSingleObject(self.0 as *mut c_void, 0) }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsProcessHandle {
+    fn drop(&mut self) {
+        use std::ffi::c_void;
+        extern "system" {
+            fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+        unsafe {
+            CloseHandle(self.0 as *mut c_void);
+        }
+    }
+}
+
+/// Return a stable image + PID + native creation-time identity for a Windows
+/// process, or ``None`` when that process has exited.
+#[cfg(windows)]
+fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+    extern "system" {
+        fn QueryFullProcessImageNameW(
+            process: *mut c_void,
+            flags: u32,
+            image: *mut u16,
+            size: *mut u32,
+        ) -> i32;
+        fn GetProcessTimes(
+            process: *mut c_void,
+            creation: *mut FileTime,
+            exit: *mut FileTime,
+            kernel: *mut FileTime,
+            user: *mut FileTime,
+        ) -> i32;
+    }
+
+    let Some(handle) = WindowsProcessHandle::open(pid, 0x0010_0000 | 0x0000_1000)? else {
+        return Ok(None);
+    };
+    if classify_windows_process_wait(None, Some(handle.wait_result())) == ProcessLiveness::Dead {
+        return Ok(None);
+    }
+    let mut image = vec![0u16; 32_768];
+    let mut image_len = image.len() as u32;
+    if unsafe {
+        QueryFullProcessImageNameW(
+            handle.0 as *mut c_void,
+            0,
+            image.as_mut_ptr(),
+            std::ptr::addr_of_mut!(image_len),
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut creation: FileTime = unsafe { std::mem::zeroed() };
+    let mut exit: FileTime = unsafe { std::mem::zeroed() };
+    let mut kernel: FileTime = unsafe { std::mem::zeroed() };
+    let mut user: FileTime = unsafe { std::mem::zeroed() };
+    if unsafe {
+        GetProcessTimes(
+            handle.0 as *mut c_void,
+            std::ptr::addr_of_mut!(creation),
+            std::ptr::addr_of_mut!(exit),
+            std::ptr::addr_of_mut!(kernel),
+            std::ptr::addr_of_mut!(user),
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    let created_at = (u64::from(creation.high) << 32) | u64::from(creation.low);
+    if created_at == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Windows process creation time is zero",
+        ));
+    }
+    let image = String::from_utf16_lossy(&image[..image_len as usize]).to_ascii_lowercase();
+    Ok(Some(format!("{image}\t{pid}\t{created_at}")))
+}
+
+#[cfg(any(unix, test))]
 fn required_parent_identity_with<I>(pid: u32, identity: I) -> std::io::Result<String>
 where
     I: FnOnce(u32) -> std::io::Result<Option<String>>,
@@ -2243,47 +3285,59 @@ fn process_liveness(pid: u32) -> ProcessLiveness {
     }
 }
 
-/// Tri-state liveness probe that never treats a tasklist failure as death.
+/// Tri-state liveness probe backed only by a native process handle.
 #[cfg(windows)]
 fn process_liveness(pid: u32) -> ProcessLiveness {
-    let Ok(output) = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .output()
-    else {
-        return ProcessLiveness::Unknown;
-    };
-    if !output.status.success() {
-        return ProcessLiveness::Unknown;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let needle = format!("\"{pid}\"");
-    if text.lines().any(|line| line.contains(&needle)) {
-        ProcessLiveness::Alive
-    } else {
-        ProcessLiveness::Dead
+    match WindowsProcessHandle::open(pid, 0x0010_0000) {
+        Ok(Some(handle)) => classify_windows_process_wait(None, Some(handle.wait_result())),
+        Ok(None) => classify_windows_process_wait(Some(87), None),
+        Err(error) => classify_windows_process_wait(
+            error
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok()),
+            None,
+        ),
     }
 }
 
-/// Wait a bounded number of 100 ms polls for one process to disappear.
-fn wait_for_process_exit(pid: u32, polls: usize) -> bool {
-    for _ in 0..polls {
+/// Wait until one monotonic wall-clock deadline for a process to disappear.
+fn wait_for_process_exit(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
         match process_liveness(pid) {
             ProcessLiveness::Dead => return true,
             ProcessLiveness::Alive | ProcessLiveness::Unknown => {}
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        std::thread::sleep((deadline - now).min(Duration::from_millis(100)));
     }
-    process_liveness(pid) == ProcessLiveness::Dead
 }
 
 /// Aggregate the current launch's recorded launcher and application states.
 /// A pending application PID is always unknown: launcher death alone cannot
 /// prove that PyInstaller did not leave an unreported child alive.
 fn process_tree_liveness(record: &SidecarRecord) -> ProcessLiveness {
+    #[cfg(unix)]
+    let containment = spawn_containment_liveness(record.sidecar_pid);
+    #[cfg(windows)]
+    let containment = ProcessLiveness::Dead;
+    if containment == ProcessLiveness::Alive {
+        return ProcessLiveness::Alive;
+    }
     let Some(application_pid) = record.application_pid else {
-        return ProcessLiveness::Unknown;
+        let launcher = process_liveness(record.sidecar_pid);
+        return if launcher == ProcessLiveness::Dead && containment == ProcessLiveness::Dead {
+            ProcessLiveness::Dead
+        } else if launcher == ProcessLiveness::Alive {
+            ProcessLiveness::Alive
+        } else {
+            ProcessLiveness::Unknown
+        };
     };
-    let mut saw_unknown = false;
+    let mut saw_unknown = containment == ProcessLiveness::Unknown;
     for pid in [record.sidecar_pid, application_pid] {
         match process_liveness(pid) {
             ProcessLiveness::Alive => return ProcessLiveness::Alive,
@@ -2308,6 +3362,11 @@ struct TrackedProcessIdentity {
 }
 
 impl TrackedProcessIdentity {
+    fn bind(&mut self, pid: u32, identity: String) {
+        self.pid = Some(pid);
+        self.identity = Some(identity);
+    }
+
     fn observe_with<L, I>(
         &mut self,
         pid: u32,
@@ -2360,12 +3419,25 @@ impl ShutdownProcessIdentityTracker {
         L: FnMut(u32) -> ProcessLiveness,
         I: FnMut(u32) -> std::io::Result<Option<String>>,
     {
-        let Some(application_pid) = record.application_pid else {
-            return ProcessLiveness::Unknown;
-        };
         let launcher = self
             .launcher
             .observe_with(record.sidecar_pid, &mut liveness, &mut identity);
+        #[cfg(unix)]
+        let containment = spawn_containment_liveness(record.sidecar_pid);
+        #[cfg(windows)]
+        let containment = ProcessLiveness::Dead;
+        if containment == ProcessLiveness::Alive {
+            return ProcessLiveness::Alive;
+        }
+        let Some(application_pid) = record.application_pid else {
+            return if launcher == ProcessLiveness::Dead && containment == ProcessLiveness::Dead {
+                ProcessLiveness::Dead
+            } else if launcher == ProcessLiveness::Alive {
+                ProcessLiveness::Alive
+            } else {
+                ProcessLiveness::Unknown
+            };
+        };
         let application = if application_pid == record.sidecar_pid {
             launcher
         } else {
@@ -2378,6 +3450,7 @@ impl ShutdownProcessIdentityTracker {
             ProcessLiveness::Alive
         } else if matches!(launcher, ProcessLiveness::Unknown)
             || matches!(application, ProcessLiveness::Unknown)
+            || containment == ProcessLiveness::Unknown
         {
             ProcessLiveness::Unknown
         } else {
@@ -2400,6 +3473,7 @@ enum RecordedApplicationExit {
 fn wait_for_recorded_application_exit_with<L, I, W>(
     record: &SidecarRecord,
     max_unknown_polls: usize,
+    expected_identity: Option<&str>,
     mut liveness: L,
     mut identity: I,
     mut wait: W,
@@ -2413,6 +3487,10 @@ where
         return RecordedApplicationExit::Unresolved;
     };
     let initial_identity = match identity(application_pid) {
+        Ok(Some(value)) if expected_identity.is_some_and(|expected| expected == value) => value,
+        Ok(Some(_)) if expected_identity.is_some() => {
+            return RecordedApplicationExit::ConfirmedReused
+        }
         Ok(Some(value)) if looks_like_backend_sidecar(&value) => value,
         Ok(Some(_)) => return RecordedApplicationExit::ConfirmedReused,
         Ok(None) | Err(_) => {
@@ -2446,10 +3524,14 @@ where
     }
 }
 
-fn wait_for_recorded_application_exit(record: &SidecarRecord) -> RecordedApplicationExit {
+fn wait_for_recorded_application_exit(
+    record: &SidecarRecord,
+    expected_identity: Option<&str>,
+) -> RecordedApplicationExit {
     wait_for_recorded_application_exit_with(
         record,
         SIDECAR_SUPERVISOR_UNKNOWN_POLLS,
+        expected_identity,
         process_liveness,
         process_command_line,
         || std::thread::sleep(std::time::Duration::from_millis(100)),
@@ -2471,6 +3553,40 @@ enum LiveSidecarIdentity {
     Dead,
 }
 
+fn pending_record_repair_allowed(
+    spawn_contained: bool,
+    launcher: LiveSidecarIdentity,
+    containment: ProcessLiveness,
+) -> bool {
+    spawn_contained && launcher == LiveSidecarIdentity::Dead && containment == ProcessLiveness::Dead
+}
+
+#[cfg(unix)]
+fn spawn_containment_liveness(pgid: u32) -> ProcessLiveness {
+    let Ok(raw_pgid) = i32::try_from(pgid) else {
+        return ProcessLiveness::Unknown;
+    };
+    extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    if unsafe { kill(-raw_pgid, 0) } == 0 {
+        return ProcessLiveness::Alive;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(3) => ProcessLiveness::Dead,
+        Some(1) => ProcessLiveness::Alive,
+        _ => ProcessLiveness::Unknown,
+    }
+}
+
+#[cfg(windows)]
+fn spawn_containment_liveness(launcher_pid: u32) -> ProcessLiveness {
+    // The previous shell was the only owner of the outer kill-on-close Job.
+    // Once its instance lock is available, a dead launcher means that Job has
+    // closed and Windows has terminated every non-breakaway member.
+    process_liveness(launcher_pid)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReapError {
     WorkspaceUnavailable,
@@ -2485,6 +3601,7 @@ enum ReapError {
     SidecarIdentityLookupFailed { pid: u32 },
     SidecarIdentityUnconfirmed { pid: u32 },
     SidecarStillAlive { pid: u32 },
+    CleanupUnconfirmed,
     RecordChanged,
     RecordRemoval { message: String },
 }
@@ -2541,6 +3658,10 @@ impl std::fmt::Display for ReapError {
                 formatter,
                 "sidecar pid {pid} is still a FlintTrade backend after watchdog grace"
             ),
+            Self::CleanupUnconfirmed => write!(
+                formatter,
+                "backend processes appear gone but guardian cleanup completion is unproven"
+            ),
             Self::RecordChanged => write!(formatter, "sidecar recovery record changed during reap"),
             Self::RecordRemoval { message } => {
                 write!(
@@ -2569,11 +3690,18 @@ fn remove_reaped_record(
                 });
             }
         }
-        std::fs::remove_file(path)
-            .map(|()| outcome)
-            .map_err(|error| ReapError::RecordRemoval {
-                message: error.to_string(),
-            })
+        let current = parse_sidecar_record(expected_contents);
+        std::fs::remove_file(path).map_err(|error| ReapError::RecordRemoval {
+            message: error.to_string(),
+        })?;
+        if let Some(record) = current {
+            if cleanup_complete_proof_matches_at(path, &record.launch_token) {
+                if let Ok(proof_path) = cleanup_complete_proof_path(path) {
+                    let _ = std::fs::remove_file(proof_path);
+                }
+            }
+        }
+        Ok(outcome)
     })
     .map_err(|error| ReapError::RecordRemoval {
         message: error.to_string(),
@@ -2645,18 +3773,20 @@ where
 
 /// Startup layer of orphan protection. Every ambiguous process state is an
 /// error so setup cannot overwrite an unresolved record and spawn a duplicate.
-fn reap_stale_sidecar_at_for_boot_with_grace<L, I, G>(
+fn reap_stale_sidecar_at_for_boot_with_grace<L, I, G, C>(
     path: &Path,
     current_shell_pid: u32,
     current_boot_id: &str,
     liveness: L,
     identity: I,
     await_watchdog_exit: G,
+    cleanup_complete: C,
 ) -> Result<ReapOutcome, ReapError>
 where
     L: Fn(u32) -> ProcessLiveness,
     I: Fn(u32) -> std::io::Result<Option<String>>,
     G: Fn(u32) -> bool,
+    C: Fn(Option<&SidecarRecord>) -> bool,
 {
     if !valid_boot_id(current_boot_id) {
         return Err(ReapError::InvalidRecord);
@@ -2673,6 +3803,8 @@ where
         }
     };
     let record = parse_reap_record(&contents).ok_or(ReapError::InvalidRecord)?;
+    let current_sidecar_record = parse_sidecar_record(&contents);
+    let current_cleanup_confirmed = cleanup_complete(current_sidecar_record.as_ref());
     if record
         .boot_id
         .as_deref()
@@ -2729,18 +3861,33 @@ where
         // before Rust received Python's first stdout line. A dead launcher is
         // not proof that no application child survived, so this record is
         // deliberately retained for operator-visible recovery.
-        match inspect_sidecar_after_watchdog_grace(
+        let launcher = inspect_sidecar_after_watchdog_grace(
             record.sidecar_pid,
             &liveness,
             &identity,
             &await_watchdog_exit,
-        )? {
+        )?;
+        match launcher.clone() {
             LiveSidecarIdentity::Backend(_) => {
                 return Err(ReapError::SidecarStillAlive {
                     pid: record.sidecar_pid,
                 });
             }
             LiveSidecarIdentity::Dead | LiveSidecarIdentity::Reused => {
+                if pending_record_repair_allowed(
+                    record.spawn_contained,
+                    launcher,
+                    spawn_containment_liveness(record.sidecar_pid),
+                ) {
+                    if !current_cleanup_confirmed {
+                        return Err(ReapError::CleanupUnconfirmed);
+                    }
+                    return remove_reaped_record(
+                        path,
+                        &contents,
+                        ReapOutcome::RemovedConfirmedDead,
+                    );
+                }
                 return Err(ReapError::ApplicationPidPending {
                     launcher_pid: record.sidecar_pid,
                 });
@@ -2749,6 +3896,7 @@ where
     };
 
     let mut outcome = ReapOutcome::RemovedConfirmedDead;
+    let mut launcher_reused = false;
     let process_pids = if application_pid == record.sidecar_pid {
         vec![application_pid]
     } else {
@@ -2767,11 +3915,34 @@ where
                     "[flinttrade] recorded backend pid {pid} was reused; leaving the process alone"
                 );
                 outcome = ReapOutcome::RemovedConfirmedReused;
+                if pid == record.sidecar_pid {
+                    launcher_reused = true;
+                }
             }
             LiveSidecarIdentity::Dead => {}
         }
     }
 
+    #[cfg(unix)]
+    if record.spawn_contained && !launcher_reused {
+        match spawn_containment_liveness(record.sidecar_pid) {
+            ProcessLiveness::Dead => {}
+            ProcessLiveness::Alive => {
+                return Err(ReapError::SidecarStillAlive {
+                    pid: record.sidecar_pid,
+                });
+            }
+            ProcessLiveness::Unknown => {
+                return Err(ReapError::SidecarLivenessUnknown {
+                    pid: record.sidecar_pid,
+                });
+            }
+        }
+    }
+
+    if !current_cleanup_confirmed {
+        return Err(ReapError::CleanupUnconfirmed);
+    }
     remove_reaped_record(path, &contents, outcome)
 }
 
@@ -2804,6 +3975,7 @@ where
         liveness,
         identity,
         await_watchdog_exit,
+        |_| true,
     )
 }
 
@@ -2825,6 +3997,7 @@ where
         liveness,
         identity,
         |_| false,
+        |_| true,
     )
 }
 
@@ -2847,6 +4020,7 @@ where
         liveness,
         identity,
         |_| false,
+        |_| true,
     )
 }
 
@@ -2858,7 +4032,8 @@ fn reap_stale_sidecar(current_boot_id: &str) -> Result<ReapOutcome, ReapError> {
         current_boot_id,
         process_liveness,
         process_command_line,
-        |pid| wait_for_process_exit(pid, SIDECAR_WATCHDOG_GRACE_POLLS),
+        |pid| wait_for_process_exit(pid, SIDECAR_WATCHDOG_GRACE_TIMEOUT),
+        |record| startup_cleanup_complete_proven_at(&path, record),
     )
 }
 
@@ -2952,10 +4127,10 @@ fn replace_path_atomically(source: &Path, destination: &Path) -> std::io::Result
     }
 }
 
-fn sync_record_parent(path: &Path) -> std::io::Result<()> {
+fn sync_record_parent(_path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        let parent = path.parent().ok_or_else(|| {
+        let parent = _path.parent().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "sidecar record path has no parent directory",
@@ -3045,7 +4220,7 @@ fn atomically_replace_sidecar_record(
     )
 }
 
-fn confirm_application_process(pid: u32) -> std::io::Result<()> {
+fn confirm_application_process(pid: u32) -> std::io::Result<String> {
     match process_liveness(pid) {
         ProcessLiveness::Dead => {
             return Err(std::io::Error::new(
@@ -3061,7 +4236,7 @@ fn confirm_application_process(pid: u32) -> std::io::Result<()> {
         ProcessLiveness::Alive => {}
     }
     match process_command_line(pid)? {
-        Some(identity) if looks_like_backend_sidecar(&identity) => Ok(()),
+        Some(identity) if looks_like_backend_sidecar(&identity) => Ok(identity),
         Some(_) => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("announced pid {pid} is not the FlintTrade backend"),
@@ -3162,6 +4337,11 @@ fn remove_sidecar_record_at(path: &Path, expected: &SidecarRecord) -> std::io::R
             return Ok(false);
         }
         std::fs::remove_file(path)?;
+        if cleanup_complete_proof_matches_at(path, &expected.launch_token) {
+            if let Ok(proof_path) = cleanup_complete_proof_path(path) {
+                let _ = std::fs::remove_file(proof_path);
+            }
+        }
         Ok(true)
     })?
 }
@@ -3208,20 +4388,32 @@ where
     Ok(result)
 }
 
-fn remove_sidecar_record(expected: &SidecarRecord) {
+fn remove_sidecar_record(expected: &SidecarRecord) -> bool {
     let Some(path) = sidecar_pid_file() else {
         eprintln!("[flinttrade] could not resolve workspace dir; retaining sidecar record");
-        return;
+        return false;
     };
     match remove_sidecar_record_at(&path, expected) {
-        Ok(true) => {}
-        Ok(false) => eprintln!(
-            "[flinttrade] sidecar recovery record no longer matches this launch; retaining it"
-        ),
+        Ok(true) => true,
+        Ok(false) => {
+            eprintln!(
+                "[flinttrade] sidecar recovery record no longer matches this launch; retaining it"
+            );
+            false
+        }
         Err(error) => {
-            eprintln!("[flinttrade] could not remove sidecar recovery record: {error}")
+            eprintln!("[flinttrade] could not remove sidecar recovery record: {error}");
+            false
         }
     }
+}
+
+fn remove_sidecar_record_after_cleanup(expected: &SidecarRecord, acknowledged: bool) -> bool {
+    if !cleanup_complete_proven(expected, acknowledged) {
+        eprintln!("[flinttrade] backend cleanup completion is unproven; retaining recovery state");
+        return false;
+    }
+    remove_sidecar_record(expected)
 }
 
 // ---------------------------------------------------------------------------
@@ -3344,6 +4536,16 @@ mod tests {
     }
 
     #[test]
+    fn handshake_output_buffer_keeps_a_bounded_utf8_tail() {
+        let mut buffer = "old".repeat(2_000);
+        append_bounded_handshake_output(&mut buffer, "\nπFLINTTRADE_BACKEND_PID pid=5678\n");
+
+        assert!(buffer.len() <= MAX_HANDSHAKE_BUFFER_BYTES);
+        assert!(buffer.is_char_boundary(0));
+        assert_eq!(parse_application_pid(&buffer), Some(5678));
+    }
+
+    #[test]
     fn pending_record_exit_ack_requires_the_exact_launch_token() {
         let token = "a".repeat(64);
         let exact =
@@ -3372,6 +4574,48 @@ mod tests {
         assert!(!output_has_pending_record_exit_ack(&buffer, &token));
         buffer.push_str(&format!("{token} reason=promotion-failed\n"));
         assert!(output_has_pending_record_exit_ack(&buffer, &token));
+    }
+
+    #[test]
+    fn cleanup_complete_ack_requires_the_exact_launch_token_and_complete_line() {
+        let token = "a".repeat(64);
+        let exact = format!("FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={token}");
+        let mut fragmented = "FLINTTRADE_BACKEND_CLEANUP_COMPLETE token=".to_string();
+
+        assert!(parse_cleanup_complete_ack(&exact, &token));
+        assert!(!parse_cleanup_complete_ack(&exact, &"b".repeat(64)));
+        assert!(!parse_cleanup_complete_ack(
+            &format!("{exact} trailing"),
+            &token
+        ));
+        assert!(!output_has_cleanup_complete_ack(&fragmented, &token));
+        fragmented.push_str(&format!("{token}\n"));
+        assert!(output_has_cleanup_complete_ack(&fragmented, &token));
+    }
+
+    #[test]
+    fn durable_cleanup_proof_is_exact_token_bound_and_owner_only() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-cleanup-proof-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+        let token = "a".repeat(64);
+        let proof_path = cleanup_complete_proof_path(&path).unwrap();
+        std::fs::write(&proof_path, format_cleanup_complete_proof(&token)).unwrap();
+        harden_file(&proof_path);
+
+        assert!(cleanup_complete_proof_matches_at(&path, &token));
+        assert!(!cleanup_complete_proof_matches_at(&path, &"b".repeat(64)));
+        std::fs::write(
+            &proof_path,
+            format!("{}trailing", format_cleanup_complete_proof(&token)),
+        )
+        .unwrap();
+        assert!(!cleanup_complete_proof_matches_at(&path, &token));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -3516,7 +4760,7 @@ mod tests {
     }
 
     #[test]
-    fn crash_before_application_pid_handshake_stays_fail_closed() {
+    fn current_contained_crash_before_application_pid_handshake_is_repairable() {
         let root = std::env::temp_dir().join(format!(
             "flinttrade-reap-pending-child-{}",
             std::time::SystemTime::now()
@@ -3543,11 +4787,150 @@ mod tests {
                 |_| ProcessLiveness::Dead,
                 |_| panic!("identity lookup must not run for dead processes"),
             ),
-            Err(ReapError::ApplicationPidPending { launcher_pid: 1234 })
+            Ok(ReapOutcome::RemovedConfirmedDead)
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pending_record_repair_requires_dead_spawn_containment() {
+        assert!(pending_record_repair_allowed(
+            true,
+            LiveSidecarIdentity::Dead,
+            ProcessLiveness::Dead,
+        ));
+        assert!(!pending_record_repair_allowed(
+            true,
+            LiveSidecarIdentity::Dead,
+            ProcessLiveness::Alive,
+        ));
+        assert!(!pending_record_repair_allowed(
+            false,
+            LiveSidecarIdentity::Dead,
+            ProcessLiveness::Dead,
+        ));
+        assert!(!pending_record_repair_allowed(
+            true,
+            LiveSidecarIdentity::Reused,
+            ProcessLiveness::Dead,
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidecar_spawn_enters_its_own_process_group_before_exec() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let (_events, mut child) = spawn_contained_std_command(command).unwrap();
+        let pid = child.pid();
+        extern "C" {
+            fn getpgid(pid: i32) -> i32;
+        }
+
+        assert_eq!(unsafe { getpgid(pid as i32) }, pid as i32);
+        child.kill().unwrap();
+        let status = child.wait_for_test().unwrap();
+        assert!(status.signal().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn contained_kill_refuses_a_group_after_its_validated_leader_was_reaped() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-contained-group-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let descendant_path = root.join("descendant.pid");
+        let mut command = std::process::Command::new("sh");
+        command
+            .args(["-c", "sleep 2 & printf '%s' \"$!\" > \"$1\"", "sh"])
+            .arg(&descendant_path);
+        let (_events, mut child) = spawn_contained_std_command(command).unwrap();
+        let launcher_pid = child.pid();
+
+        assert!(child.wait_for_test().unwrap().success());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !descendant_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let descendant_pid = std::fs::read_to_string(&descendant_path)
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        assert_eq!(process_liveness(descendant_pid), ProcessLiveness::Alive);
+        let record = SidecarRecord {
+            sidecar_pid: launcher_pid,
+            application_pid: Some(launcher_pid),
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        assert_eq!(process_tree_liveness(&record), ProcessLiveness::Alive);
+        let record_path = root.join("desktop-backend.pid");
+        let record_contents = format_sidecar_record(&record);
+        std::fs::write(&record_path, &record_contents).unwrap();
+        assert_eq!(
+            reap_stale_sidecar_at(
+                &record_path,
+                99,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    pid if pid == launcher_pid => ProcessLiveness::Dead,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Ok(None),
+            ),
+            Err(ReapError::SidecarStillAlive { pid: launcher_pid })
+        );
+        assert_eq!(
+            std::fs::read_to_string(&record_path).unwrap(),
+            record_contents
+        );
+        assert!(!wait_for_spawn_containment_exit(
+            launcher_pid,
+            Duration::ZERO
+        ));
+
+        let kill_result = child.kill();
+        let exited = wait_for_process_exit(descendant_pid, Duration::from_millis(100));
+        let containment_exited = wait_for_spawn_containment_exit(launcher_pid, Duration::ZERO);
+
+        assert!(kill_result.is_err());
+        assert!(
+            !exited,
+            "the signal sink targeted a group whose leader could have been reused"
+        );
+        assert!(
+            !containment_exited,
+            "the reused numeric group identifier was treated as stable authority"
+        );
+        assert!(wait_for_process_exit(
+            descendant_pid,
+            Duration::from_secs(3)
+        ));
+        assert!(wait_for_spawn_containment_exit(
+            launcher_pid,
+            Duration::from_secs(1)
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unrecorded_sidecar_cleanup_waits_for_complete_group_death() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 30 & wait"]);
+        let (_events, mut child) = spawn_contained_std_command(command).unwrap();
+        let pgid = child.pid();
+
+        assert!(terminate_unrecorded_sidecar(&mut child));
+
+        assert!(wait_for_spawn_containment_exit(pgid, Duration::ZERO));
     }
 
     #[test]
@@ -3716,10 +5099,57 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
 
         drop(first);
-        let successor = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let successor = loop {
+            match DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)) {
+                Ok(lock) => break lock,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("successor could not claim released instance lock: {error}"),
+            }
+        };
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "99\n");
         drop(successor);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unpublished_cleanup_retains_instance_lock_until_death_is_proven() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-instance-cleanup-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-instance.lock");
+        let owner = DesktopInstanceLock::acquire_at(&path, 77, "a".repeat(64)).unwrap();
+        let mut attempts = 0;
+
+        retain_unpublished_cleanup_authority(
+            || {
+                attempts += 1;
+                let error = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64))
+                    .expect_err("a successor claimed the lock before cleanup was proven");
+                assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+                attempts == 3
+            },
+            || {},
+        );
+
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        drop(owner);
+        let successor = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap();
+        drop(successor);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -3736,10 +5166,7 @@ mod tests {
     fn stale_or_empty_diagnostics_do_not_control_kernel_lock_ownership() {
         let root = std::env::temp_dir().join(format!(
             "flinttrade-instance-diagnostic-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            generate_launch_token().unwrap()
         ));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("desktop-instance.lock");
@@ -4427,9 +5854,107 @@ mod tests {
     }
 
     #[test]
+    fn current_boot_recovery_retains_a_dead_tree_without_guardian_cleanup_proof() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-cleanup-proof-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(1234),
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let contents = format_sidecar_record(&record);
+        std::fs::write(&path, &contents).unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at_for_boot_with_grace(
+                &path,
+                99,
+                &record.boot_id,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Ok(Some("/usr/bin/python3 unrelated.py".to_string())),
+                |_| false,
+                |_| false,
+            ),
+            Err(ReapError::CleanupUnconfirmed)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+
+        let proof_path = cleanup_complete_proof_path(&path).unwrap();
+        std::fs::write(
+            &proof_path,
+            format_cleanup_complete_proof(&record.launch_token),
+        )
+        .unwrap();
+        harden_file(&proof_path);
+        assert_eq!(
+            reap_stale_sidecar_at_for_boot_with_grace(
+                &path,
+                99,
+                &record.boot_id,
+                |pid| match pid {
+                    77 => ProcessLiveness::Dead,
+                    1234 => ProcessLiveness::Alive,
+                    _ => panic!("unexpected pid {pid}"),
+                },
+                |_| Ok(Some("/usr/bin/python3 unrelated.py".to_string())),
+                |_| false,
+                |current| {
+                    current.is_some_and(|record| {
+                        cleanup_complete_proof_matches_at(&path, &record.launch_token)
+                    })
+                },
+            ),
+            Ok(ReapOutcome::RemovedConfirmedReused)
+        );
+        assert!(!path.exists());
+        assert!(!proof_path.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn same_boot_legacy_record_without_guardian_proof_is_retained() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-reap-legacy-proof-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join(SIDECAR_PID_FILE);
+        let boot_id = "c".repeat(64);
+        let contents = format!("v3\n1234\n5678\n77\n{boot_id}\n{}\n", "a".repeat(64));
+        std::fs::write(&path, &contents).unwrap();
+
+        assert_eq!(
+            reap_stale_sidecar_at_for_boot_with_grace(
+                &path,
+                99,
+                &boot_id,
+                |_| ProcessLiveness::Dead,
+                |_| panic!("identity lookup must not run for a dead process"),
+                |_| false,
+                |_| false,
+            ),
+            Err(ReapError::CleanupUnconfirmed)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn exit_confirmation_never_claims_the_current_process_is_dead() {
         assert_eq!(process_liveness(std::process::id()), ProcessLiveness::Alive);
-        assert!(!wait_for_process_exit(std::process::id(), 0));
+        assert!(!wait_for_process_exit(std::process::id(), Duration::ZERO));
     }
 
     #[test]
@@ -4454,6 +5979,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |pid| {
                     probed.borrow_mut().push(pid);
                     states
@@ -4484,6 +6010,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |_| panic!("pending application PID must not be probed"),
                 |_| panic!("pending application identity must not be probed"),
                 || panic!("pending application PID must not be polled"),
@@ -4512,6 +6039,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |_| ProcessLiveness::Alive,
                 |_| identities
                     .borrow_mut()
@@ -4522,6 +6050,32 @@ mod tests {
             RecordedApplicationExit::ConfirmedReused
         );
         assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn terminated_launcher_rejects_reused_backend_identity_on_first_sample() {
+        let record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let expected = "flinttrade-backend\t5678\toriginal-start";
+        let waits = std::cell::Cell::new(0);
+
+        assert_eq!(
+            wait_for_recorded_application_exit_with(
+                &record,
+                3,
+                Some(expected),
+                |_| ProcessLiveness::Alive,
+                |_| Ok(Some("flinttrade-backend\t5678\treused-start".to_string())),
+                || waits.set(waits.get() + 1),
+            ),
+            RecordedApplicationExit::ConfirmedReused
+        );
+        assert_eq!(waits.get(), 0);
     }
 
     #[test]
@@ -4540,6 +6094,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 2,
+                None,
                 |_| ProcessLiveness::Unknown,
                 |_| {
                     if first.replace(false) {
@@ -4569,6 +6124,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |_| ProcessLiveness::Dead,
                 |_| Err(std::io::Error::other(
                     "process exited during identity lookup"
@@ -4593,6 +6149,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |_| ProcessLiveness::Alive,
                 |_| Ok(None),
                 || panic!("an unconfirmed initial identity must not enter the poll loop"),
@@ -4603,6 +6160,7 @@ mod tests {
             wait_for_recorded_application_exit_with(
                 &record,
                 3,
+                None,
                 |_| ProcessLiveness::Dead,
                 |_| Ok(None),
                 || panic!("a confirmed-dead application must not be polled"),
@@ -4613,7 +6171,7 @@ mod tests {
 
     #[test]
     fn pending_shutdown_uses_short_handshake_budget() {
-        assert!(SIDECAR_PENDING_HANDSHAKE_POLLS < SIDECAR_SHUTDOWN_POLLS);
+        assert!(SIDECAR_PENDING_HANDSHAKE_TIMEOUT < SIDECAR_GRACEFUL_SHUTDOWN_TIMEOUT);
     }
 
     #[test]
@@ -4674,8 +6232,9 @@ mod tests {
 
         assert!(wait_for_sidecar_shutdown_with(
             &mut pending,
-            1,
-            3,
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+            Instant::now() + Duration::from_secs(3),
             |_| refreshes.borrow_mut().pop_front().flatten(),
             |record| {
                 if record.application_pid.is_none() {
@@ -4686,10 +6245,36 @@ mod tests {
                     ProcessLiveness::Dead
                 }
             },
-            || {},
+            Instant::now,
+            |_| {},
         ));
         assert_eq!(pending, promoted);
         assert_eq!(promoted_polls.get(), 2);
+    }
+
+    #[test]
+    fn shutdown_wait_obeys_a_monotonic_wall_clock_deadline() {
+        let mut record = SidecarRecord {
+            sidecar_pid: 1234,
+            application_pid: Some(5678),
+            shell_pid: 77,
+            boot_id: "c".repeat(64),
+            launch_token: "a".repeat(64),
+        };
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_millis(55);
+
+        assert!(!wait_for_sidecar_shutdown_with(
+            &mut record,
+            std::time::Duration::from_millis(55),
+            std::time::Duration::from_millis(55),
+            deadline,
+            |_| None,
+            |_| ProcessLiveness::Alive,
+            Instant::now,
+            |duration| std::thread::sleep(duration.min(std::time::Duration::from_millis(30))),
+        ));
+        assert!(started.elapsed() < std::time::Duration::from_millis(110));
     }
 
     #[test]
@@ -4701,25 +6286,31 @@ mod tests {
             boot_id: "c".repeat(64),
             launch_token: "a".repeat(64),
         };
-        let polls = std::cell::Cell::new(0usize);
+        let started = Instant::now();
+        let clock = std::rc::Rc::new(std::cell::Cell::new(started));
+        let liveness_clock = std::rc::Rc::clone(&clock);
+        let now_clock = std::rc::Rc::clone(&clock);
+        let wait_clock = std::rc::Rc::clone(&clock);
+        let complete_at = started + Duration::from_secs(SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS);
 
         assert!(wait_for_sidecar_shutdown_with(
             &mut record,
-            SIDECAR_PENDING_HANDSHAKE_POLLS,
-            SIDECAR_SHUTDOWN_POLLS,
+            SIDECAR_PENDING_HANDSHAKE_TIMEOUT,
+            SIDECAR_GRACEFUL_SHUTDOWN_TIMEOUT,
+            started + SIDECAR_TOTAL_SHUTDOWN_TIMEOUT,
             |_| None,
             |_| {
-                let current = polls.get();
-                polls.set(current + 1);
-                if current < 1_330 {
-                    ProcessLiveness::Alive
-                } else {
+                if liveness_clock.get() >= complete_at {
                     ProcessLiveness::Dead
+                } else {
+                    ProcessLiveness::Alive
                 }
             },
-            || {},
+            move || now_clock.get(),
+            move |duration| wait_clock.set(wait_clock.get() + duration),
         ));
-        assert_eq!(polls.get(), 1_331);
+        assert!(clock.get() >= complete_at);
+        assert!(clock.get() < started + SIDECAR_GRACEFUL_SHUTDOWN_TIMEOUT);
     }
 
     #[test]
@@ -4760,6 +6351,24 @@ mod tests {
     }
 
     #[test]
+    fn bound_process_identity_rejects_pid_reuse_on_first_shutdown_probe() {
+        let mut tracked = TrackedProcessIdentity::default();
+        tracked.bind(
+            5678,
+            "flinttrade-backend\t5678\tFri Jul 11 10:11:12 2026".to_string(),
+        );
+
+        assert_eq!(
+            tracked.observe_with(5678, &mut |_| ProcessLiveness::Alive, &mut |_| {
+                Ok(Some(
+                    "flinttrade-backend\t5678\tFri Jul 11 10:11:13 2026".to_string(),
+                ))
+            },),
+            ProcessLiveness::Dead
+        );
+    }
+
+    #[test]
     fn pending_record_cleanup_requires_application_ack_and_dead_launcher() {
         let pending = SidecarRecord {
             sidecar_pid: 1234,
@@ -4773,11 +6382,6 @@ mod tests {
             ..pending.clone()
         };
 
-        assert!(!pending_record_cleanup_allowed(
-            &pending,
-            PendingRecordExitProof::PipeWriteAccepted,
-            ProcessLiveness::Dead
-        ));
         assert!(pending_record_cleanup_allowed(
             &pending,
             PendingRecordExitProof::ApplicationAcknowledged,
@@ -4801,24 +6405,72 @@ mod tests {
     }
 
     #[test]
-    fn accepted_force_pipe_keeps_the_launcher_guardian_alive() {
-        assert!(!launcher_kill_allowed_after_force_request(true));
-        assert!(launcher_kill_allowed_after_force_request(false));
-        assert!(SIDECAR_FORCE_EXIT_POLLS > 50);
+    fn force_cleanup_budget_exceeds_the_guardians_kill_confirmation() {
+        assert!(SIDECAR_FORCE_EXIT_TIMEOUT > Duration::from_secs(5));
     }
 
     #[test]
-    fn graceful_shutdown_budget_covers_python_drain_and_cleanup() {
-        // Sequential valid maxima: smart orders 30s + agent 30s + router 10s
-        // + tick capture 3s + active request drain 60s = 133s.
-        assert!(SIDECAR_SHUTDOWN_POLLS > 1_330);
+    fn shared_shutdown_budget_includes_strategy_and_force_cleanup() {
+        assert_eq!(
+            SIDECAR_TOTAL_SHUTDOWN_TIMEOUT,
+            Duration::from_secs(SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS + 20)
+        );
+        let started = Instant::now();
+        let (graceful, force, shutdown) = shutdown_phase_deadlines(started);
+        assert_eq!(force - graceful, SIDECAR_FORCE_EXIT_TIMEOUT);
+        assert_eq!(shutdown - force, SIDECAR_KILL_CONFIRM_TIMEOUT);
+        assert_eq!(shutdown - started, SIDECAR_TOTAL_SHUTDOWN_TIMEOUT);
+        assert!(
+            graceful - started
+                >= Duration::from_secs(SIDECAR_PYTHON_SEQUENTIAL_SHUTDOWN_SECONDS + 10)
+        );
     }
 
     #[test]
     fn stale_reap_grace_covers_python_watchdog_and_orphan_fallback() {
         // Python may poll for 2s, wait 12s, then spend up to 5s confirming
         // complete descendant cleanup in its external guardian.
-        assert!(SIDECAR_WATCHDOG_GRACE_POLLS > 190);
+        assert!(SIDECAR_WATCHDOG_GRACE_TIMEOUT > Duration::from_secs(19));
+    }
+
+    #[test]
+    fn windows_wait_results_are_classified_without_process_commands() {
+        assert_eq!(
+            classify_windows_process_wait(Some(87), None),
+            ProcessLiveness::Dead
+        );
+        assert_eq!(
+            classify_windows_process_wait(None, Some(0x0000_0102)),
+            ProcessLiveness::Alive
+        );
+        assert_eq!(
+            classify_windows_process_wait(None, Some(0x0000_0000)),
+            ProcessLiveness::Dead
+        );
+        assert_eq!(
+            classify_windows_process_wait(Some(5), None),
+            ProcessLiveness::Unknown
+        );
+    }
+
+    #[test]
+    fn windows_job_breakaway_is_reserved_for_the_detached_updater() {
+        assert_ne!(
+            WINDOWS_SHELL_JOB_LIMIT_FLAGS & WINDOWS_JOB_OBJECT_LIMIT_KILL_ON_CLOSE,
+            0
+        );
+        assert_ne!(
+            WINDOWS_SHELL_JOB_LIMIT_FLAGS & WINDOWS_JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+            0
+        );
+        assert_ne!(
+            WINDOWS_DETACHED_UPDATER_FLAGS & WINDOWS_CREATE_BREAKAWAY_FROM_JOB,
+            0
+        );
+        assert_eq!(
+            WINDOWS_BACKEND_CREATION_FLAGS & WINDOWS_CREATE_BREAKAWAY_FROM_JOB,
+            0
+        );
     }
 
     #[cfg(unix)]

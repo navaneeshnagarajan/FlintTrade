@@ -1,7 +1,8 @@
 """Flask Blueprint for webhook receiver endpoints.
 
-External URLs (frontend/TradingView/ChartInk call these via /ft-api/v1/webhook/*;
-the WSGI prefix stripper in app.py rewrites to /v1/webhook/* before Flask dispatch):
+Signed relays call these via ``/ft-api/v1/webhook/*``; the WSGI prefix stripper
+in app.py rewrites to ``/v1/webhook/*`` before Flask dispatch. Direct provider
+delivery does not produce the required HMAC/nonce/timestamp envelope.
 
 - ``POST /ft-api/v1/webhook/<source>`` — receive, verify, parse, and
   dispatch a webhook from ``tradingview``, ``chartink``, ``gocharting``, or ``custom``.
@@ -38,17 +39,22 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
+import time
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from flask import Blueprint, Response, jsonify, request
 
 try:
     from .webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver
+    from .webhook_hmac import build_webhook_signature_payload
     from .webhook_replay import REASON_REPLAY, REASON_STALE
     from .webhook_secret_store import WebhookSecretStore
 except ImportError:
     from webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver  # type: ignore[no-redef]
+    from webhook_hmac import build_webhook_signature_payload  # type: ignore[no-redef]
     from webhook_replay import REASON_REPLAY, REASON_STALE  # type: ignore[no-redef]
     from webhook_secret_store import WebhookSecretStore  # type: ignore[no-redef]
 
@@ -83,7 +89,7 @@ def init_webhook_routes(
         endpoint_status_provider: Optional ``path -> enabled`` callable backed
             by the mounted endpoint registry. Return ``False`` to block a known
             disabled endpoint, ``True`` for a known enabled endpoint, and
-            ``None`` when the path is not registry-managed.
+            ``None`` to reject a named path as unregistered.
     """
     global _receiver, _secret_store, _endpoint_status_provider  # noqa: PLW0603
     _receiver = receiver
@@ -109,7 +115,7 @@ def _get_receiver() -> WebhookReceiver:
 # ---------------------------------------------------------------------------
 
 
-def _parse_request_body() -> tuple[bytes, dict[str, Any] | None]:
+def _parse_request_body() -> tuple[bytes, dict[str, Any] | str | None]:
     """Read the raw request body and attempt JSON decoding.
 
     Returns:
@@ -117,10 +123,16 @@ def _parse_request_body() -> tuple[bytes, dict[str, Any] | None]:
     """
     raw: bytes = request.get_data()
     try:
-        parsed: dict[str, Any] | None = json.loads(raw.decode("utf-8"))
+        text = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return raw, None
+    if not text:
+        return raw, None
+    try:
+        decoded = json.loads(text)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        parsed = None
-    return raw, parsed
+        return raw, text
+    return raw, decoded if isinstance(decoded, dict) else None
 
 
 def _mounted_webhook_path(source: str, webhook_id: str | None) -> str | None:
@@ -138,12 +150,14 @@ def _registered_endpoint_enabled(path: str) -> bool | None:
 
 def _parse_replay_timestamp(value: Any) -> float | None:
     if isinstance(value, int | float):
-        return float(value)
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
     text = str(value or "").strip()
     if not text:
         return None
     try:
-        return float(text)
+        parsed = float(text)
+        return parsed if math.isfinite(parsed) else None
     except ValueError:
         pass
     try:
@@ -152,29 +166,34 @@ def _parse_replay_timestamp(value: Any) -> float | None:
         dt = datetime.fromisoformat(text)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
+        parsed = dt.timestamp()
+        return parsed if math.isfinite(parsed) else None
     except ValueError:
         return None
 
 
-def _extract_replay_fields(body: dict[str, Any]) -> tuple[str, float] | None:
+def _extract_replay_fields(
+    body: Mapping[str, Any] | str,
+) -> tuple[str, str, float] | None:
+    body_values = body if isinstance(body, Mapping) else {}
     nonce = (
         request.headers.get("X-Webhook-Nonce")
         or request.headers.get("X-Nonce")
-        or body.get("nonce")
-        or body.get("webhook_nonce")
+        or body_values.get("nonce")
+        or body_values.get("webhook_nonce")
     )
     timestamp = (
         request.headers.get("X-Webhook-Timestamp")
         or request.headers.get("X-Timestamp")
-        or body.get("timestamp")
-        or body.get("webhook_timestamp")
+        or body_values.get("timestamp")
+        or body_values.get("webhook_timestamp")
     )
     nonce_text = str(nonce or "").strip()
-    payload_ts = _parse_replay_timestamp(timestamp)
+    timestamp_text = str(timestamp or "").strip()
+    payload_ts = _parse_replay_timestamp(timestamp_text)
     if not nonce_text or payload_ts is None:
         return None
-    return nonce_text, payload_ts
+    return nonce_text, timestamp_text, payload_ts
 
 
 def _source_ip_hash() -> str | None:
@@ -197,17 +216,19 @@ def _run_dispatch(receiver: WebhookReceiver, payload: WebhookPayload) -> dict[st
         Dispatch result dict.
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Running inside an existing async context (e.g. ASGI wrapper)
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, receiver.dispatch(payload))
-                return future.result(timeout=10)
-        else:
-            return loop.run_until_complete(receiver.dispatch(payload))
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(receiver.dispatch(payload))
+
+    # A running loop cannot be nested, so execute the coroutine on a bounded
+    # worker thread when Flask is hosted through an async wrapper.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, receiver.dispatch(payload))
+        # A dispatch may already have reached the broker. Wait for its definitive
+        # result instead of returning an ambiguous timeout that invites a retry.
+        return future.result()
 
 
 # ---------------------------------------------------------------------------
@@ -247,18 +268,6 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             "status": "error",
             "message": f"Unknown source '{source}'. Allowed: {sorted(_VALID_SOURCES)}",
         }), 404
-    # Rate limiting FIRST: this intake is reachable unauthenticated (signed
-    # external webhooks bypass the API-key guard), so the limiter must shed
-    # floods before the endpoint-registry lookup below does a workspace.json
-    # disk read + parse per request.
-    if not receiver.check_rate_limit():
-        logger.warning("Webhook rate limit exceeded for source=%s", source)
-        return jsonify({
-            "status": "error",
-            "message": "Rate limit exceeded",
-            "remaining": 0,
-        }), 429
-
     mounted_path = _mounted_webhook_path(source, webhook_id)
     if mounted_path:
         try:
@@ -268,13 +277,15 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             return jsonify({"status": "error", "message": "Webhook endpoint registry unavailable"}), 503
         if enabled is False:
             return jsonify({"status": "error", "message": "Webhook endpoint disabled"}), 503
+        if enabled is None and _endpoint_status_provider is not None:
+            return jsonify({"status": "error", "message": "Webhook endpoint is not registered"}), 404
 
     # Read body
     raw, body_dict = _parse_request_body()
-    if body_dict is None or not isinstance(body_dict, dict):
+    if body_dict is None:
         return jsonify({
             "status": "error",
-            "message": "Request body must be valid JSON object",
+            "message": "Request body must be a JSON object or supported text payload",
         }), 400
 
     # Signature verification
@@ -287,34 +298,20 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
             logger.exception("Webhook secret lookup failed for source=%s", source)
             return jsonify({"status": "error", "message": "Webhook secret store unavailable"}), 503
 
-    if not receiver.verify_signature(raw, sig_header, secret=signing_secret):
+    replay_fields = _extract_replay_fields(body_dict) if mounted_path and signing_secret else None
+    if mounted_path and signing_secret and replay_fields is None:
+        return jsonify({
+            "status": "error",
+            "message": "Signed webhooks require a nonce and timestamp",
+        }), 400
+    signed_raw = raw
+    if replay_fields is not None:
+        nonce, timestamp_text, _payload_ts = replay_fields
+        signed_raw = build_webhook_signature_payload(raw, nonce=nonce, timestamp=timestamp_text)
+
+    if not receiver.verify_signature(signed_raw, sig_header, secret=signing_secret):
         logger.warning("Signature verification failed for source=%s", source)
         return jsonify({"status": "error", "message": "Signature verification failed"}), 401
-
-    verified_replay_nonce: str | None = None
-    if mounted_path and signing_secret and _secret_store is not None:
-        replay_fields = _extract_replay_fields(body_dict)
-        if replay_fields is None:
-            return jsonify({
-                "status": "error",
-                "message": "Signed webhooks require a nonce and timestamp",
-            }), 400
-        nonce, payload_ts = replay_fields
-        try:
-            reason = _secret_store.check_and_record_nonce(
-                mounted_path,
-                nonce,
-                payload_ts,
-                source_ip_hash=_source_ip_hash(),
-            )
-        except Exception:
-            logger.exception("Webhook replay check failed for source=%s", source)
-            return jsonify({"status": "error", "message": "Webhook replay check unavailable"}), 503
-        if reason == REASON_REPLAY:
-            return jsonify({"status": "error", "message": "Webhook replay rejected"}), 409
-        if reason == REASON_STALE:
-            return jsonify({"status": "error", "message": "Webhook timestamp is stale"}), 400
-        verified_replay_nonce = nonce
 
     # Parse
     try:
@@ -325,12 +322,57 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
         elif source == "gocharting":
             payload = receiver.parse_gocharting(body_dict)
         else:
+            if not isinstance(body_dict, dict):
+                raise ValueError("Custom webhooks require a JSON object")
             payload = receiver.parse_custom(body_dict)
     except Exception as exc:
         logger.warning("Webhook parse error for source=%s: %s", source, exc)
         return jsonify({"status": "error", "message": "Webhook parse failed"}), 422
-    payload.webhook_nonce = verified_replay_nonce
     payload.webhook_path = mounted_path
+
+    replay_reservation: tuple[str, float] | None = None
+    if mounted_path and signing_secret and _secret_store is not None:
+        assert replay_fields is not None
+        nonce, _timestamp_text, payload_ts = replay_fields
+        claimed_at = time.time()
+        try:
+            reason = _secret_store.check_and_record_nonce(
+                mounted_path,
+                nonce,
+                payload_ts,
+                source_ip_hash=_source_ip_hash(),
+                now=claimed_at,
+            )
+        except Exception:
+            logger.exception("Webhook replay reservation failed for source=%s", source)
+            return jsonify({"status": "error", "message": "Webhook replay check unavailable"}), 503
+        if reason == REASON_REPLAY:
+            return jsonify({"status": "error", "message": "Webhook replay rejected"}), 409
+        if reason == REASON_STALE:
+            return jsonify({"status": "error", "message": "Webhook timestamp is stale"}), 400
+        replay_reservation = (nonce, claimed_at)
+        payload.webhook_nonce = nonce
+
+    # Claim the signed nonce before consuming quota so concurrent copies fail as
+    # replays without starving other intents. A quota refusal releases only this
+    # request's exact claim, allowing its relay to retry when capacity returns.
+    if not receiver.check_rate_limit():
+        if replay_reservation is not None and mounted_path and _secret_store is not None:
+            nonce, claimed_at = replay_reservation
+            try:
+                released = _secret_store.release_nonce_reservation(mounted_path, nonce, claimed_at)
+            except Exception:
+                logger.exception("Webhook replay reservation release failed for source=%s", source)
+                return jsonify({"status": "error", "message": "Webhook replay check unavailable"}), 503
+            if not released:
+                logger.error("Webhook replay reservation ownership was lost for source=%s", source)
+                return jsonify({"status": "error", "message": "Webhook replay check unavailable"}), 503
+        logger.warning("Webhook rate limit exceeded for source=%s", source)
+        return jsonify({
+            "status": "error",
+            "message": "Rate limit exceeded",
+            "remaining": 0,
+        }), 429
 
     # Dispatch
     try:
@@ -343,6 +385,9 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
         "Webhook dispatched: source=%s action=%s symbol=%s status=%s",
         source, payload.action, payload.symbol, result.get("status"),
     )
+    if result.get("status") in {"error", "unhandled"}:
+        message = str(result.get("message") or "Webhook dispatch was rejected")
+        return jsonify({"status": "error", "message": message, "data": result}), 422
     return jsonify({"status": "success", "data": result}), 200
 
 

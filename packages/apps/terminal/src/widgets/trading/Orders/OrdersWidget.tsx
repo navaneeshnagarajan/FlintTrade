@@ -27,7 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useModeStore } from "@/stores/modeStore";
 import { cancelOrder, modifyOrder } from "@/services/api";
 import { queryKeys } from "@/services/queryKeys";
@@ -295,9 +295,9 @@ function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) 
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
 function OrdersWidget(_props: WidgetProps) {
-  const isBrokerConnected = useBrokerConnected();
+  const accountReadsEnabled = useAccountReadsEnabled();
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const { data: ordersData, refetch, isFetching, isError, error } = useOrders({ enabled: isBrokerConnected });
+  const { data: ordersData, refetch, isFetching, isError, error } = useOrders({ enabled: accountReadsEnabled });
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
@@ -532,7 +532,7 @@ function OrdersWidget(_props: WidgetProps) {
           Orders{rows.length > 0 ? ` (${rows.length})` : ""}
         </span>
         <div className="flex items-center gap-2">
-          {!isBrokerConnected && (
+          {!accountReadsEnabled && (
             <span
               className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
               role="status"
@@ -541,7 +541,7 @@ function OrdersWidget(_props: WidgetProps) {
               Broker required
             </span>
           )}
-          {isBrokerConnected && (
+          {accountReadsEnabled && (
             <Button
               type="button"
               variant="ghost"
@@ -598,7 +598,7 @@ function OrdersWidget(_props: WidgetProps) {
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <FileText size={24} className="text-text-disabled" />
           <span className="text-sm">
-            {isBrokerConnected ? "No orders today" : "Connect a broker to load orders"}
+            {accountReadsEnabled ? "No orders today" : "Connect a broker to load orders"}
           </span>
         </div>
       ) : (

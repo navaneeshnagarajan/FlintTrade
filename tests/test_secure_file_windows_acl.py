@@ -1,10 +1,4 @@
-"""Windows secret-file ACL hardening contract (HI18 / Security H5; sub-spec §13.3).
-
-Runs in the `windows-acl-test` job of supply-chain.yml on windows-latest (which carries
-pywin32, so the DACL-content assertions execute). On a Windows machine without pywin32
-the icacls-driven harden() still runs (idempotency + missing-file L1 message verified);
-the DACL-inspection tests skip. On POSIX the chmod-0o600 path is verified instead.
-"""
+"""Windows secret-file ACL hardening contract (HI18 / Security H5; sub-spec §13.3)."""
 
 from __future__ import annotations
 
@@ -27,6 +21,7 @@ posix_only = pytest.mark.skipif(IS_WIN, reason="POSIX mode-bit semantics")
 win_dacl = pytest.mark.skipif(
     not (IS_WIN and HAS_PYWIN32), reason="needs Windows + pywin32 for DACL inspection"
 )
+windows_only = pytest.mark.skipif(not IS_WIN, reason="Windows DACL semantics")
 
 
 # --------------------------------------------------------------------------
@@ -140,7 +135,7 @@ def test_harden_preserves_system_for_defender(tmp_path):
     assert system_sid in set(_dacl_sids(f))  # OS-level ops must keep working
 
 
-@win_dacl
+@windows_only
 def test_assert_hardened_accepts_system_ace_rejects_administrators(tmp_path):
     import subprocess
 

@@ -6,6 +6,8 @@ additive to the legacy account_id-only ``get_session`` used by OpenAlgo reads.
 
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,6 +42,24 @@ def test_put_and_get_session_for_round_trip() -> None:
     reg.put_session("dhan", "family", s_family)
     assert reg.get_session_for("dhan", "personal") is s_personal
     assert reg.get_session_for("dhan", "family") is s_family
+
+
+def test_native_adapter_session_is_visible_to_connectivity_and_read_discovery() -> None:
+    reg = BrokerRegistry()
+    session = SimpleNamespace(expires_at=time.time() + 3600)
+
+    reg.put_session("dhan", "native-1", session)
+
+    assert reg.is_connected() is True
+    assert reg.list_connected_adapter_sessions() == [("dhan", "native-1", session)]
+
+
+def test_expired_native_adapter_session_is_not_connected() -> None:
+    reg = BrokerRegistry()
+    reg.put_session("upstox", "native-1", SimpleNamespace(expires_at=time.time() - 1))
+
+    assert reg.is_connected() is False
+    assert reg.list_connected_adapter_sessions() == []
 
 
 def test_get_session_for_missing_raises_naming_selector() -> None:

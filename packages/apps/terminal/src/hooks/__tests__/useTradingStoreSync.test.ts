@@ -21,6 +21,7 @@ import type { Funds, Position } from "@/types/api";
 const mockUseFunds = vi.fn();
 const mockUsePositions = vi.fn();
 const mockUseBrokerConnected = vi.fn();
+let currentMode: "explore" | "practice" | "live" = "live";
 const mockUpdateFromFunds = vi.fn();
 const mockUpdateFromPositions = vi.fn();
 
@@ -34,6 +35,10 @@ vi.mock("@/hooks/usePositions", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (state: { mode: typeof currentMode }) => unknown) => selector({ mode: currentMode }),
 }));
 
 vi.mock("@/stores/tradingStore", () => ({
@@ -70,6 +75,7 @@ const POSITIONS: Position[] = [
 describe("useTradingStoreSync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    currentMode = "live";
     mockUseBrokerConnected.mockReturnValue(true);
   });
 
@@ -83,12 +89,47 @@ describe("useTradingStoreSync", () => {
     expect(mockUpdateFromPositions).not.toHaveBeenCalled();
   });
 
-  it("disables broker-backed sync queries when no broker is connected", () => {
+  it("disables live account sync when no broker is connected", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     mockUseFunds.mockReturnValue({ data: undefined });
     mockUsePositions.mockReturnValue({ data: undefined });
 
     renderHook(() => useTradingStoreSync());
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUpdateFromFunds).not.toHaveBeenCalled();
+    expect(mockUpdateFromPositions).not.toHaveBeenCalled();
+  });
+
+  it("reads the sandbox in practice mode without a live broker connection", () => {
+    currentMode = "practice";
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseFunds.mockReturnValue({ data: undefined });
+    mockUsePositions.mockReturnValue({ data: undefined });
+
+    renderHook(() => useTradingStoreSync());
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+  });
+
+  it("keeps explore mode on its local sample data", () => {
+    currentMode = "explore";
+    mockUseFunds.mockReturnValue({ data: undefined });
+    mockUsePositions.mockReturnValue({ data: undefined });
+
+    renderHook(() => useTradingStoreSync());
+
+    expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("does not read or publish cached account data when the auth session is inactive", () => {
+    mockUseFunds.mockReturnValue({ data: FUNDS });
+    mockUsePositions.mockReturnValue({ data: POSITIONS });
+
+    renderHook(() => useTradingStoreSync(false));
 
     expect(mockUseFunds).toHaveBeenCalledWith({ enabled: false });
     expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });

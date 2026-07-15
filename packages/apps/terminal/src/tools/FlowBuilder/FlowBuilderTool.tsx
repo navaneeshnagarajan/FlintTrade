@@ -11,7 +11,7 @@
  *
  * State managed via flowStore (Zustand). Persistence via localStorage.
  *
- * 54 nodes across 8 categories:
+ * Node catalogue across 8 categories:
  *   Triggers · Orders · Conditions · Logic · Data · WebSocket · Account · Integration
  *
  * Modules:

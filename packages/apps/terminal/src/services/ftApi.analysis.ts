@@ -221,6 +221,104 @@ export interface GlobalIndicesResponse {
   is_sample_data?: boolean;
 }
 
+export type ProvenancedGammaDensityData = GammaDensityData & { is_sample_data: boolean };
+
+function requireGammaRecord(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Gamma Density ${label}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireGammaNumber(value: unknown, label: string, minimum?: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || (minimum !== undefined && value < minimum)) {
+    throw new Error(`Invalid Gamma Density ${label}`);
+  }
+  return value;
+}
+
+function requireGammaInteger(value: unknown, label: string, minimum = 0): number {
+  const parsed = requireGammaNumber(value, label, minimum);
+  if (!Number.isInteger(parsed)) throw new Error(`Invalid Gamma Density ${label}`);
+  return parsed;
+}
+
+function requireGammaString(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Invalid Gamma Density ${label}`);
+  return value.trim();
+}
+
+function normaliseGammaBand(value: unknown, label: string, spot: number): GammaDensityData["intraday_band"] {
+  const row = requireGammaRecord(value, `${label} band`);
+  const band = {
+    sigma_move: requireGammaNumber(row.sigma_move, `${label} sigma_move`, 0),
+    one_sigma_low: requireGammaNumber(row.one_sigma_low, `${label} one_sigma_low`),
+    one_sigma_high: requireGammaNumber(row.one_sigma_high, `${label} one_sigma_high`),
+    two_sigma_low: requireGammaNumber(row.two_sigma_low, `${label} two_sigma_low`),
+    two_sigma_high: requireGammaNumber(row.two_sigma_high, `${label} two_sigma_high`),
+  };
+  if (
+    band.two_sigma_low > band.one_sigma_low
+    || band.one_sigma_low > spot
+    || band.one_sigma_high < spot
+    || band.two_sigma_high < band.one_sigma_high
+  ) {
+    throw new Error(`Invalid Gamma Density ${label} band ordering`);
+  }
+  return band;
+}
+
+function normalisePeakStrike(value: unknown, label: string): number | null {
+  if (value === null) return null;
+  return requireGammaNumber(value, label, Number.MIN_VALUE);
+}
+
+function normaliseGammaDensityData(value: unknown): ProvenancedGammaDensityData {
+  const row = requireGammaRecord(value, "response");
+  if (typeof row.is_sample_data !== "boolean") {
+    throw new Error("Invalid Gamma Density provenance");
+  }
+  const spot = requireGammaNumber(row.spot_price, "spot_price", Number.MIN_VALUE);
+  if (!Array.isArray(row.strikes)) throw new Error("Invalid Gamma Density strikes");
+  const strikes = row.strikes.map((candidate, index) => {
+    const strike = requireGammaRecord(candidate, `strike row ${index}`);
+    return {
+      strike: requireGammaNumber(strike.strike, `strike row ${index} strike`, Number.MIN_VALUE),
+      ce_oi: requireGammaInteger(strike.ce_oi, `strike row ${index} ce_oi`),
+      pe_oi: requireGammaInteger(strike.pe_oi, `strike row ${index} pe_oi`),
+      iv: requireGammaNumber(strike.iv, `strike row ${index} iv`, Number.MIN_VALUE),
+      density_intraday: requireGammaNumber(strike.density_intraday, `strike row ${index} density_intraday`, 0),
+      density_expiry: requireGammaNumber(strike.density_expiry, `strike row ${index} density_expiry`, 0),
+    };
+  });
+  if (strikes.length === 0) throw new Error("Invalid Gamma Density empty strikes");
+
+  const peakIntraday = normalisePeakStrike(row.peak_intraday_strike, "peak_intraday_strike");
+  const peakExpiry = normalisePeakStrike(row.peak_expiry_strike, "peak_expiry_strike");
+  const strikeSet = new Set(strikes.map((entry) => entry.strike));
+  if (
+    (peakIntraday !== null && !strikeSet.has(peakIntraday))
+    || (peakExpiry !== null && !strikeSet.has(peakExpiry))
+  ) {
+    throw new Error("Invalid Gamma Density peak strike");
+  }
+
+  return {
+    underlying: requireGammaString(row.underlying, "underlying"),
+    exchange: requireGammaString(row.exchange, "exchange"),
+    spot_price: spot,
+    atm_strike: requireGammaNumber(row.atm_strike, "atm_strike", Number.MIN_VALUE),
+    atm_iv: requireGammaNumber(row.atm_iv, "atm_iv", Number.MIN_VALUE),
+    dte_days: requireGammaNumber(row.dte_days, "dte_days", Number.MIN_VALUE),
+    peak_intraday_strike: peakIntraday,
+    peak_expiry_strike: peakExpiry,
+    intraday_band: normaliseGammaBand(row.intraday_band, "intraday", spot),
+    expiry_band: normaliseGammaBand(row.expiry_band, "expiry", spot),
+    strikes,
+    is_sample_data: row.is_sample_data,
+  };
+}
+
 export const getGEXData = (
   symbol: string,
   exchange: string,
@@ -237,11 +335,11 @@ export const getGammaDensityData = (
   exchange: string,
   expiry?: string,
 ) =>
-  post<GammaDensityData>("gammadensity", {
+  post<unknown>("gammadensity", {
     symbol,
     exchange,
     ...(expiry ? { expiry } : {}),
-  });
+  }).then(normaliseGammaDensityData);
 
 export interface ArbitrageScanRequest {
   cash_future?: Array<{
@@ -293,12 +391,13 @@ export const getFtIVSmile = (
   symbol: string,
   exchange: string,
   expiry_dates?: string[],
+  signal?: AbortSignal,
 ) =>
   post<IVSmileData>("ivsmile", {
     symbol,
     exchange,
     ...(expiry_dates ? { expiry_dates } : {}),
-  });
+  }, signal);
 
 export const getStraddlePnL = (
   symbol: string,
@@ -461,6 +560,7 @@ export interface OIChangeSignalRow {
 }
 
 export interface OIChangeAnalysisData {
+  is_sample_data: boolean;
   signals: OIChangeSignalRow[];
   long_buildups: number[];
   short_coverings: number[];
@@ -474,9 +574,9 @@ export interface OIChangeAnalysisData {
  * Build-up / Long Unwinding given the underlying's price direction.
  *
  * Registered at the bare ``/v1/oi`` family → {@link postV1}. The backend uses
- * the live option chain when a broker is connected, else a sample chain; the
- * caller decides sample-vs-live presentation by connection state (the route's
- * ``is_sample_data`` flag is a sibling of ``data`` and unwrapped away).
+ * the live option chain when a broker is connected, else a sample chain. The
+ * response's sibling ``is_sample_data`` flag is retained by ``parseResponse``
+ * so callers can require explicit live provenance.
  */
 export const getOIChangeAnalysis = (
   symbol: string,
@@ -503,6 +603,7 @@ export interface UnusualOIRow {
 }
 
 export interface UnusualOIData {
+  is_sample_data: boolean;
   unusual: UnusualOIRow[];
   count: number;
   threshold: number;

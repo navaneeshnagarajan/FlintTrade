@@ -9,9 +9,12 @@ All tests are unit-level — no live OpenAlgo or network calls.
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from flinttrade_ditto.account_manager import BrokerAccount
 from flinttrade_ditto.mirror import (
@@ -23,6 +26,7 @@ from flinttrade_ditto.mirror import (
     compute_multiplier_allocation,
 )
 from flinttrade_core.models import Order
+from flinttrade_gateway.log_safety import account_ref
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +182,26 @@ class TestPositionWatcher:
         watcher.stop()
         assert not watcher.is_running
 
+    def test_stop_timeout_retains_live_thread_for_retry(self) -> None:
+        watcher = self._make_watcher()
+        release_thread = threading.Event()
+        thread = threading.Thread(target=release_thread.wait, daemon=True)
+        watcher._running = True
+        watcher._thread = thread
+        thread.start()
+
+        try:
+            assert watcher.stop(timeout=0.01) is False
+            assert watcher._thread is thread
+            assert watcher.is_running is True
+        finally:
+            release_thread.set()
+            thread.join(timeout=1.0)
+
+        assert watcher.stop(timeout=1.0) is True
+        assert watcher._thread is None
+        assert watcher.is_running is False
+
     def test_double_start_is_noop(self) -> None:
         watcher = self._make_watcher(poll_interval=60.0)
         try:
@@ -194,9 +218,179 @@ class TestPositionWatcher:
         watcher.on_change(cb)
         assert cb in watcher._callbacks
 
+    def test_prime_seeds_source_snapshot_without_emitting_a_change(self) -> None:
+        watcher = self._make_watcher()
+        callback = MagicMock()
+        watcher.on_change(callback)
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "status": "success",
+            "data": [
+                {
+                    "symbol": "RELIANCE",
+                    "quantity": 3,
+                    "exchange": "NSE",
+                    "product": "MIS",
+                }
+            ],
+        }
+        http = MagicMock()
+        http.__enter__ = MagicMock(return_value=http)
+        http.__exit__ = MagicMock(return_value=False)
+        http.post.return_value = response
+
+        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
+            snapshot = watcher.prime()
+
+        assert snapshot[("NSE", "RELIANCE", "MIS")]["quantity"] == 3
+        assert watcher._last_snapshot == snapshot
+        callback.assert_not_called()
+
+    def test_snapshot_keeps_same_symbol_in_distinct_products(self) -> None:
+        watcher = self._make_watcher()
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "status": "success",
+            "data": [
+                {
+                    "symbol": "RELIANCE",
+                    "quantity": 3,
+                    "exchange": "NSE",
+                    "product": "MIS",
+                },
+                {
+                    "symbol": "RELIANCE",
+                    "quantity": 7,
+                    "exchange": "NSE",
+                    "product": "CNC",
+                },
+            ],
+        }
+        http = MagicMock()
+        http.__enter__ = MagicMock(return_value=http)
+        http.__exit__ = MagicMock(return_value=False)
+        http.post.return_value = response
+
+        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
+            snapshot = watcher._fetch_snapshot()
+
+        assert snapshot == {
+            ("NSE", "RELIANCE", "MIS"): {
+                "symbol": "RELIANCE",
+                "quantity": 3,
+                "exchange": "NSE",
+                "product": "MIS",
+            },
+            ("NSE", "RELIANCE", "CNC"): {
+                "symbol": "RELIANCE",
+                "quantity": 7,
+                "exchange": "NSE",
+                "product": "CNC",
+            },
+        }
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"status": "success"},
+            {"status": "success", "data": None},
+            {"status": "error", "data": []},
+            {"status": "success", "data": [None]},
+            {"status": "success", "data": [{"quantity": 1, "exchange": "NSE", "product": "MIS"}]},
+            {"status": "success", "data": [{"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS"}]},
+            {
+                "status": "success",
+                "data": [
+                    {
+                        "symbol": "RELIANCE",
+                        "quantity": "not-a-quantity",
+                        "exchange": "NSE",
+                        "product": "MIS",
+                    }
+                ],
+            },
+        ],
+    )
+    def test_fetch_snapshot_rejects_incomplete_or_malformed_payloads(
+        self,
+        payload: object,
+    ) -> None:
+        watcher = self._make_watcher()
+        response = MagicMock(status_code=200)
+        response.json.return_value = payload
+        http = MagicMock()
+        http.__enter__ = MagicMock(return_value=http)
+        http.__exit__ = MagicMock(return_value=False)
+        http.post.return_value = response
+
+        with (
+            patch("flinttrade_ditto.mirror.httpx.Client", return_value=http),
+            pytest.raises(RuntimeError, match="positionbook"),
+        ):
+            watcher._fetch_snapshot()
+
+    def test_authoritative_empty_snapshot_is_valid_and_closes_prior_position(self) -> None:
+        watcher = self._make_watcher()
+        watcher._last_snapshot = {
+            "RELIANCE": {
+                "symbol": "RELIANCE",
+                "quantity": 3,
+                "exchange": "NSE",
+                "product": "MIS",
+            }
+        }
+        callback = MagicMock()
+        watcher.on_change(callback)
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"status": "success", "data": []}
+        http = MagicMock()
+        http.__enter__ = MagicMock(return_value=http)
+        http.__exit__ = MagicMock(return_value=False)
+        http.post.return_value = response
+
+        with patch("flinttrade_ditto.mirror.httpx.Client", return_value=http):
+            watcher._poll_once()
+
+        callback.assert_called_once()
+        assert callback.call_args.args[1]["quantity"] == 0
+        assert watcher._last_snapshot == {}
+
+    def test_malformed_snapshot_never_becomes_a_flat_position(self) -> None:
+        watcher = self._make_watcher()
+        prior = {
+            "RELIANCE": {
+                "symbol": "RELIANCE",
+                "quantity": 3,
+                "exchange": "NSE",
+                "product": "MIS",
+            }
+        }
+        watcher._last_snapshot = prior
+        callback = MagicMock()
+        watcher.on_change(callback)
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "status": "success",
+            "data": [{"symbol": "RELIANCE", "exchange": "NSE", "product": "MIS"}],
+        }
+        http = MagicMock()
+        http.__enter__ = MagicMock(return_value=http)
+        http.__exit__ = MagicMock(return_value=False)
+        http.post.return_value = response
+
+        with (
+            patch("flinttrade_ditto.mirror.httpx.Client", return_value=http),
+            pytest.raises(RuntimeError, match="positionbook"),
+        ):
+            watcher._poll_once()
+
+        callback.assert_not_called()
+        assert watcher._last_snapshot == prior
+
     def test_detect_changes_new_position(self) -> None:
         watcher = self._make_watcher()
-        current = {"NIFTY25APR20000CE": {"tradingsymbol": "NIFTY25APR20000CE", "netqty": 75}}
+        current = {"NIFTY25APR20000CE": {"symbol": "NIFTY25APR20000CE", "quantity": 75}}
         changed = watcher._detect_changes(current)
         assert "NIFTY25APR20000CE" in changed
 
@@ -204,39 +398,56 @@ class TestPositionWatcher:
         watcher = self._make_watcher()
         # Seed a previous snapshot
         watcher._last_snapshot = {
-            "NIFTY25APR20000CE": {"tradingsymbol": "NIFTY25APR20000CE", "netqty": 75}
+            "NIFTY25APR20000CE": {"symbol": "NIFTY25APR20000CE", "quantity": 75}
         }
-        current = {"NIFTY25APR20000CE": {"tradingsymbol": "NIFTY25APR20000CE", "netqty": 150}}
+        current = {"NIFTY25APR20000CE": {"symbol": "NIFTY25APR20000CE", "quantity": 150}}
         changed = watcher._detect_changes(current)
         assert "NIFTY25APR20000CE" in changed
 
     def test_detect_changes_unchanged_position_not_reported(self) -> None:
         watcher = self._make_watcher()
-        pos = {"tradingsymbol": "RELIANCE", "netqty": 10}
+        pos = {"symbol": "RELIANCE", "quantity": 10}
         watcher._last_snapshot = {"RELIANCE": pos}
         changed = watcher._detect_changes({"RELIANCE": dict(pos)})
         assert "RELIANCE" not in changed
 
     def test_detect_changes_closed_position(self) -> None:
-        """A position that disappears reports netqty=0."""
+        """A position that disappears from an authoritative snapshot reports quantity=0."""
         watcher = self._make_watcher()
         watcher._last_snapshot = {
-            "BANKNIFTY25APR47000CE": {"tradingsymbol": "BANKNIFTY25APR47000CE", "netqty": 30}
+            "BANKNIFTY25APR47000CE": {"symbol": "BANKNIFTY25APR47000CE", "quantity": 30}
         }
         changed = watcher._detect_changes({})  # position closed
         assert "BANKNIFTY25APR47000CE" in changed
-        assert changed["BANKNIFTY25APR47000CE"]["netqty"] == 0
+        assert changed["BANKNIFTY25APR47000CE"]["quantity"] == 0
 
-    def test_detect_changes_net_qty_field_alias(self) -> None:
-        """Accept both 'netqty' and 'net_qty' field names."""
+    def test_product_transition_closes_old_leg_before_opening_new_leg(self) -> None:
         watcher = self._make_watcher()
+        mis_key = ("NSE", "RELIANCE", "MIS")
+        cnc_key = ("NSE", "RELIANCE", "CNC")
         watcher._last_snapshot = {
-            "NIFTY": {"tradingsymbol": "NIFTY", "net_qty": 75}
+            mis_key: {
+                "symbol": "RELIANCE",
+                "quantity": 3,
+                "exchange": "NSE",
+                "product": "MIS",
+            }
         }
-        # Same quantity — should NOT report change
-        current = {"NIFTY": {"tradingsymbol": "NIFTY", "net_qty": 75}}
-        changed = watcher._detect_changes(current)
-        assert "NIFTY" not in changed
+
+        changed = watcher._detect_changes(
+            {
+                cnc_key: {
+                    "symbol": "RELIANCE",
+                    "quantity": 3,
+                    "exchange": "NSE",
+                    "product": "CNC",
+                }
+            }
+        )
+
+        assert list(changed) == [mis_key, cnc_key]
+        assert changed[mis_key]["quantity"] == 0
+        assert changed[cnc_key]["quantity"] == 3
 
     def test_callback_fires_on_position_change(self) -> None:
         """Full integration: mock HTTP response triggers callback."""
@@ -248,7 +459,12 @@ class TestPositionWatcher:
         response_data = {
             "status": "success",
             "data": [
-                {"tradingsymbol": "NIFTY25APR20000CE", "netqty": 75, "exchange": "NFO"}
+                {
+                    "symbol": "NIFTY25APR20000CE",
+                    "quantity": 75,
+                    "exchange": "NFO",
+                    "product": "MIS",
+                }
             ],
         }
 
@@ -269,7 +485,7 @@ class TestPositionWatcher:
             watcher.stop()
 
         assert len(fired) >= 1
-        assert fired[0][1]["tradingsymbol"] == "NIFTY25APR20000CE"
+        assert fired[0][1]["symbol"] == "NIFTY25APR20000CE"
 
     def test_http_error_does_not_crash_watcher(self) -> None:
         """A failed HTTP poll should not stop the watcher thread."""
@@ -285,6 +501,44 @@ class TestPositionWatcher:
             time.sleep(0.1)
             assert watcher.is_running
             watcher.stop()
+
+    def test_poll_failure_notifies_error_callbacks_without_exception_detail(self) -> None:
+        watcher = self._make_watcher(poll_interval=60.0)
+        failures: list[str] = []
+        watcher.on_error(failures.append)
+
+        def fail_once() -> None:
+            watcher._stop_event.set()
+            raise RuntimeError("private broker failure detail")
+
+        watcher._poll_once = fail_once  # type: ignore[method-assign]
+        watcher._poll_loop()
+
+        assert failures == [watcher._account.account_id]
+
+    def test_poll_log_redacts_account_and_broker_exception(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        private_account_id = "private-account-9087"
+        private_detail = "broker rejected secret credential material"
+        watcher = PositionWatcher(_make_account(private_account_id), poll_interval=60.0)
+
+        def fail_once() -> dict[str, dict]:
+            watcher._stop_event.set()
+            raise RuntimeError(private_detail)
+
+        watcher._fetch_snapshot = fail_once  # type: ignore[method-assign]
+        caplog.set_level(logging.WARNING, logger="flinttrade.ditto.mirror")
+
+        watcher.start()
+        assert watcher._thread is not None
+        watcher._thread.join(timeout=1.0)
+        watcher.stop(timeout=1.0)
+
+        assert private_account_id not in caplog.text
+        assert private_detail not in caplog.text
+        assert account_ref(private_account_id) in caplog.text
 
     def test_min_poll_interval_enforced(self) -> None:
         acc = _make_account()

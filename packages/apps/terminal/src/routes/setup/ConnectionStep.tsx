@@ -9,44 +9,15 @@
  */
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  connectionSchema,
-  type ConnectionFormValues,
-} from "./connectionForm";
-import {
-  CheckCircle,
-  XCircle,
-  Loader2,
-  Wifi,
-  ArrowRight,
-  CheckCheck,
-  Info,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useBrokerStore } from "@/stores/brokerStore";
-import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
-import { useTestConnection } from "@/hooks/useTestConnection";
-import { applyOpenAlgoRestPort } from "@/services/ftApi.openalgo";
+import { ArrowRight, CheckCheck, Info } from "lucide-react";
+
 import { BrokerConnect } from "@/components/account/BrokerConnect";
+import { OpenAlgoConnectionForm } from "@/components/account/OpenAlgoConnectionForm";
+import { Button } from "@/components/ui/button";
+import { useBrokerAccounts } from "@/hooks/useBrokerAccounts";
+import { useBrokerStore } from "@/stores/brokerStore";
 import type { BrokerAccount } from "@/types/broker";
-
-// ---------------------------------------------------------------------------
-// Schema
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
-// Utility
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
-// Tab toggle
-// ---------------------------------------------------------------------------
+import type { ConnectionFormValues } from "./connectionForm";
 
 type ConnectionMode = "openalgo" | "direct";
 
@@ -74,163 +45,6 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// OpenAlgo-compatible bridge sub-panel
-// ---------------------------------------------------------------------------
-
-interface OpenAlgoFormProps {
-  defaultValues?: Partial<ConnectionFormValues>;
-  onComplete: (values: ConnectionFormValues) => void;
-}
-
-function OpenAlgoForm({ defaultValues, onComplete }: OpenAlgoFormProps) {
-  const {
-    register,
-    handleSubmit,
-    getValues,
-    formState: { errors },
-  } = useForm<ConnectionFormValues>({
-    resolver: zodResolver(connectionSchema),
-    defaultValues: {
-      host: defaultValues?.host ?? "http://localhost:5000",
-      port: defaultValues?.port ?? "5000",
-      apiKey: defaultValues?.apiKey ?? "",
-      wsPort: defaultValues?.wsPort ?? "8765",
-    },
-  });
-
-  const { status: testState, message: testMessage, testConnection } = useTestConnection();
-
-  async function handleTest() {
-    // Test the CANDIDATE form values only — never commit them to the live
-    // connection store here. Committing before the test ran meant a failed
-    // test still repointed the app at an unverified host/key (item 4); the
-    // values are committed on explicit Continue via persistSetupChoices.
-    const vals = getValues();
-    await testConnection(applyOpenAlgoRestPort(vals.host, vals.port), vals.apiKey);
-  }
-
-  return (
-    <form onSubmit={handleSubmit(onComplete)} className="space-y-5">
-      <div className="space-y-1.5">
-        <Label htmlFor="host" className="text-text-secondary text-xs uppercase tracking-wider">
-          OpenAlgo-Compatible URL
-        </Label>
-        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
-          <Input
-            id="host"
-            placeholder="http://localhost:5000"
-            aria-label="OpenAlgo-compatible URL"
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("host")}
-          />
-        </div>
-        {errors.host && (
-          <p className="text-red-400 text-xs">{errors.host.message}</p>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="port" className="text-text-secondary text-xs uppercase tracking-wider">
-          REST Port
-        </Label>
-        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
-          <Input
-            id="port"
-            placeholder="5000"
-            aria-label="REST port"
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("port")}
-          />
-        </div>
-        {errors.port && (
-          <p className="text-red-400 text-xs">{errors.port.message}</p>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="apiKey" className="text-text-secondary text-xs uppercase tracking-wider">
-          API Key
-        </Label>
-        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
-          <Input
-            id="apiKey"
-            type="password"
-            autoComplete="off"
-            placeholder="Your gateway API key"
-            aria-label="OpenAlgo-compatible API key"
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("apiKey")}
-          />
-        </div>
-        {errors.apiKey && (
-          <p className="text-red-400 text-xs">{errors.apiKey.message}</p>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="wsPort" className="text-text-secondary text-xs uppercase tracking-wider">
-          WebSocket Port
-        </Label>
-        <div className="rounded-md focus-within:ring-2 focus-within:ring-accent/30">
-          <Input
-            id="wsPort"
-            placeholder="8765"
-            aria-label="WebSocket port"
-            className="h-9 text-sm bg-surface-base border-border-default text-text-primary font-mono"
-            {...register("wsPort")}
-          />
-        </div>
-        {errors.wsPort && (
-          <p className="text-red-400 text-xs">{errors.wsPort.message}</p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3 pt-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void handleTest()}
-          disabled={testState === "testing"}
-          className="border-border-default text-text-secondary hover:text-text-primary"
-        >
-          {testState === "testing" ? (
-            <Loader2 className="size-3.5 mr-1.5 animate-spin" />
-          ) : (
-            <Wifi className="size-3.5 mr-1.5" />
-          )}
-          Test Connection
-        </Button>
-
-        {testState === "ok" && (
-          <span className="flex items-center gap-1.5 text-green-400 text-sm">
-            <CheckCircle className="size-4" /> Connected
-          </span>
-        )}
-        {testState === "error" && (
-          <span className="flex items-center gap-1.5 text-red-400 text-sm">
-            <XCircle className="size-4" />
-            <span className="truncate max-w-50">{testMessage || "Failed"}</span>
-          </span>
-        )}
-      </div>
-
-      <Button
-        type="submit"
-        className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-      >
-        Continue
-        <ArrowRight className="size-4 ml-2" />
-      </Button>
-    </form>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Direct Connect sub-panel
-// ---------------------------------------------------------------------------
-
 /**
  * Synthetic ConnectionFormValues used when proceeding from Direct Connect.
  * Host/key are left as placeholder values — the gateway adapter handles auth
@@ -257,19 +71,17 @@ interface DirectConnectPanelProps {
 
 function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   useBrokerAccounts();
-  const hasWriteCapableBroker = useBrokerStore((s) => s.accounts.some(isWriteCapableBrokerAccount));
-  const hasReadOnlyConnectedBroker = useBrokerStore((s) =>
-    s.accounts.some(isReadOnlyConnectedBrokerAccount),
+  const hasWriteCapableBroker = useBrokerStore((state) =>
+    state.accounts.some(isWriteCapableBrokerAccount),
+  );
+  const hasReadOnlyConnectedBroker = useBrokerStore((state) =>
+    state.accounts.some(isReadOnlyConnectedBrokerAccount),
   );
 
   return (
     <div className="space-y-4">
       <BrokerConnect />
 
-      {/* Demotion reason — a freshly connected account can come back read-only
-          (the backend demotes sessions without order-placement authorisation
-          from write routing, fail-closed). Without this note the disabled gate
-          below gives no reason (item 5). */}
       {!hasWriteCapableBroker && hasReadOnlyConnectedBroker && (
         <div
           role="note"
@@ -298,23 +110,18 @@ function DirectConnectPanel({ onComplete }: DirectConnectPanelProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// ConnectionStep (public export)
-// ---------------------------------------------------------------------------
-
 interface ConnectionStepProps {
   onComplete: (values: ConnectionFormValues) => void;
   defaultValues?: Partial<ConnectionFormValues>;
 }
 
 export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProps) {
-  // OpenAlgo is the primary, community-tested connect path (principle 2), so it
-  // is the default tab; native FlintTrade adapters are the secondary option.
+  // OpenAlgo is the primary, community-tested connect path, so it remains the
+  // default tab; native FlintTrade adapters are the secondary option.
   const [mode, setMode] = useState<ConnectionMode>("openalgo");
 
   return (
     <div className="space-y-5">
-      {/* Mode toggle */}
       <div
         className="flex gap-1 p-1 rounded-lg bg-surface-base border border-border-default"
         role="tablist"
@@ -328,7 +135,6 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         </TabButton>
       </div>
 
-      {/* Mode description */}
       {mode === "openalgo" ? (
         <p className="text-xs text-text-muted">
           <strong className="text-text-secondary">Recommended.</strong> Connect through OpenAlgo — 30+
@@ -342,14 +148,12 @@ export function ConnectionStep({ onComplete, defaultValues }: ConnectionStepProp
         </p>
       )}
 
-      {/* Active panel */}
       {mode === "openalgo" ? (
-        <OpenAlgoForm defaultValues={defaultValues} onComplete={onComplete} />
+        <OpenAlgoConnectionForm defaultValues={defaultValues} onSaved={onComplete} />
       ) : (
         <DirectConnectPanel onComplete={onComplete} />
       )}
 
-      {/* Skip / connect later */}
       <div className="pt-2 border-t border-border-default space-y-2">
         <button
           type="button"

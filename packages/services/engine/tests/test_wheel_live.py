@@ -129,11 +129,16 @@ class TestWheelCSPEntry:
         _run(strat.run_cycle())
         assert client.telegram.called
 
-    def test_csp_entry_calls_place_order_twice(self):
-        """Sell + SL buy = 2 place_order calls."""
+    def test_csp_entry_emits_two_intents_without_raw_client_write(self):
+        """Sell + SL buy are queued for the canonical gated strategy runtime."""
         strat, client = _strategy(option_ltp=80.0)
         _run(strat.run_cycle())
-        assert client.place_order.call_count == 2
+        orders = strat.generate_orders()
+        assert [(order.action.value, order.pricetype.value) for order in orders] == [
+            ("SELL", "MARKET"),
+            ("BUY", "SL"),
+        ]
+        client.place_order.assert_not_awaited()
 
     def test_csp_sl_price_is_30pct_above_premium(self):
         strat, client = _strategy(option_ltp=100.0)

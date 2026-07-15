@@ -10,6 +10,7 @@ GET  /v1/tax/report?fy=2025-26   — Detailed breakdown by segment
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -91,9 +92,23 @@ def _sample_meta() -> dict[str, Any]:
 
 
 def _get_trades_for_fy(fy: str) -> list[TaxableTransaction]:
-    """Return sample trades. In production, this would query DuckDB."""
-    # For now, return all sample trades regardless of FY
-    return _SAMPLE_TRADES
+    """Return sample trades whose transaction dates fall within ``fy``."""
+    try:
+        start_text, end_text = fy.split("-", maxsplit=1)
+        start_year = int(start_text)
+    except (TypeError, ValueError):
+        return []
+
+    if end_text != str(start_year + 1)[-2:]:
+        return []
+
+    starts_on = date(start_year, 4, 1)
+    ends_before = date(start_year + 1, 4, 1)
+    return [
+        trade
+        for trade in _SAMPLE_TRADES
+        if starts_on <= date.fromisoformat(trade.date) < ends_before
+    ]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -107,8 +122,7 @@ def _current_fy() -> str:
     parameters so the endpoint always tracks the live calendar instead
     of a hardcoded "2025-26" that goes stale on FY-rollover.
     """
-    import datetime as _dt
-    today = _dt.date.today()
+    today = date.today()
     start = today.year - 1 if today.month < 4 else today.year
     return f"{start}-{str(start + 1)[2:]}"
 
@@ -147,6 +161,12 @@ def tax_summary() -> tuple[Any, int]:
             "tax_liability_estimated": summary.tax_liability_estimated,
             "ltcg_exemption_used": summary.ltcg_exemption_used,
             "needs_audit": summary.needs_audit,
+            "audit_assessment": summary.audit_assessment,
+            "audit_assessment_reason": summary.audit_assessment_reason,
+            "tax_estimate_methodology": summary.tax_estimate_methodology,
+            "stt_methodology": summary.stt_methodology,
+            "stt_rate_provenance": summary.stt_rate_provenance,
+            "stt_rate_schedule": summary.stt_rate_schedule,
             "trade_count": summary.trade_count,
             **sample_meta,
         },

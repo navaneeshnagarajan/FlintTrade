@@ -25,6 +25,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getPositionbook } from "@/services/api";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { queryKeys } from "@/services/queryKeys";
+import { useDataScope } from "@/hooks/useDataScope";
 
 const SESSION_FLAG_KEY = "flinttrade:session_active";
 
@@ -46,12 +47,13 @@ export function useCrashRecovery(): CrashRecoveryState {
   const [dismissed, setDismissed] = useState<boolean>(false);
 
   const isConnected = useBrokerConnected();
+  const dataScope = useDataScope();
 
   // Fetch positions only when a crash was detected and broker is connected.
   const shouldFetchPositions = didCrash && !dismissed && isConnected;
 
   const positionsQuery = useQuery({
-    queryKey: queryKeys.positions.all,
+    queryKey: queryKeys.positions.list(dataScope),
     queryFn: getPositionbook,
     enabled: shouldFetchPositions,
     // Single fetch is sufficient — no polling needed for this diagnostic

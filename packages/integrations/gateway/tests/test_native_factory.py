@@ -48,10 +48,10 @@ def test_sdk_pins_are_derived_from_broker_catalogue():
 def test_rest_only_native_declares_no_sdk_pin():
     """REST-only natives have no third-party SDK pin.
 
-    IndMoney sets its pin to ``None``, which ``attest_ok`` treats as trivially
-    attested — credentials remain the only activation gate. Groww now has the
-    official SDK installed for attestation/parity, even though the adapter still
-    uses FlintTrade's REST transport.
+    INDmoney sets its pin to ``None``, which ``attest_ok`` treats as trivially
+    attested. Catalogue blockers, authoritative emergency planning, and vault
+    credentials still gate activation. Groww has the official SDK installed for
+    attestation/parity even though the adapter uses FlintTrade's REST transport.
     """
     assert BROKER_CATALOG["indmoney"].sdk_pin is None
     assert SDK_PIN_BY_BROKER["indmoney"] is None
@@ -121,7 +121,7 @@ def test_skip_reasons_reported():
 def test_coming_soon_natives_never_activate_from_factory():
     skips: list[tuple[str, str]] = []
     out = build_native_adapters(
-        ["kotakneo", "groww"],
+        ["kotakneo", "indmoney", "groww"],
         attest_ok=lambda _b: True,
         has_credentials=lambda _b: True,
         on_skip=lambda b, why: skips.append((b, why)),
@@ -129,9 +129,28 @@ def test_coming_soon_natives_never_activate_from_factory():
 
     assert out == {}
     assert skips == [
-        ("kotakneo", "coming-soon-not-live-verified"),
-        ("groww", "coming-soon-not-live-verified"),
+        ("kotakneo", "coming-soon-activation-blocked"),
+        ("indmoney", "coming-soon-activation-blocked"),
+        ("groww", "coming-soon-activation-blocked"),
     ]
+
+
+def test_connectable_native_without_emergency_planner_never_activates(monkeypatch):
+    class NoEmergencyPlanner:
+        pass
+
+    skips: list[tuple[str, str]] = []
+    monkeypatch.setitem(NATIVE_ADAPTER_CLASSES, "dhan", NoEmergencyPlanner)
+
+    out = build_native_adapters(
+        ["dhan"],
+        attest_ok=lambda _b: True,
+        has_credentials=lambda _b: True,
+        on_skip=lambda b, why: skips.append((b, why)),
+    )
+
+    assert out == {}
+    assert skips == [("dhan", "authoritative-emergency-planner-unavailable")]
 
 
 @pytest.mark.parametrize(

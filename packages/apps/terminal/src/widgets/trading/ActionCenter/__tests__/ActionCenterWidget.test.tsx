@@ -20,7 +20,6 @@ vi.mock("@/services/ftApi", () => ({
   getPendingOrders: vi.fn().mockResolvedValue([] as unknown[]),
   approveOrder: vi.fn().mockResolvedValue({ status: "ok" }),
   rejectOrder: vi.fn().mockResolvedValue({ status: "ok" }),
-  approveAllOrders: vi.fn().mockResolvedValue({ status: "ok" }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -115,6 +114,13 @@ describe("ActionCenterWidget", () => {
 
     beforeEach(() => {
       mockGetPendingOrders.mockResolvedValue([ORDER]);
+    });
+
+    it("requires pending live intents to be reviewed one at a time", async () => {
+      render(<ActionCenterWidget {...defaultProps} />, { wrapper: createWrapper() });
+
+      await screen.findByRole("button", { name: "Approve order: BUY 75 NIFTY24APR24000CE" });
+      expect(screen.queryByRole("button", { name: /approve all/i })).not.toBeInTheDocument();
     });
 
     it("surfaces the server message with a retry affordance when approval fails", async () => {

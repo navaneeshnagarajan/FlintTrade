@@ -94,27 +94,29 @@ QUOTE_TYPES = frozenset(QUOTE_TYPE_CANONICAL)
 # ``instrument_token`` for an index is its NAME, not a numeric scrip token. Both
 # the quote and the subscription path pass these names through unresolved.
 # Compared case-insensitively (``is_index_name``) since callers vary the casing.
-INDEX_NAMES = frozenset({
-    "NIFTY 50",
-    "NIFTY BANK",
-    "NIFTY FIN SERVICE",
-    "SENSEX",
-    "BANKEX",
-    "INDIA VIX",
-    "NIFTY MIDCAP 100",
-    "NIFTY 100",
-    "NIFTY PSU BANK",
-    "NIFTY PHARMA",
-    "NIFTY IT",
-    "NIFTY PSE",
-    "NIFTY FMCG",
-    "NIFTY 500",
-    "NIFTY AUTO",
-    "NIFTY CPSE",
-    "NIFTY 200",
-    "NIFTY NEXT 50",
-    "NIFTY MID SELECT",
-})
+INDEX_NAMES = frozenset(
+    {
+        "NIFTY 50",
+        "NIFTY BANK",
+        "NIFTY FIN SERVICE",
+        "SENSEX",
+        "BANKEX",
+        "INDIA VIX",
+        "NIFTY MIDCAP 100",
+        "NIFTY 100",
+        "NIFTY PSU BANK",
+        "NIFTY PHARMA",
+        "NIFTY IT",
+        "NIFTY PSE",
+        "NIFTY FMCG",
+        "NIFTY 500",
+        "NIFTY AUTO",
+        "NIFTY CPSE",
+        "NIFTY 200",
+        "NIFTY NEXT 50",
+        "NIFTY MID SELECT",
+    }
+)
 _INDEX_NAME_CANONICAL = {
     "NIFTY 50": "Nifty 50",
     "NIFTY BANK": "Nifty Bank",
@@ -145,6 +147,7 @@ def canonical_index_name(name: str) -> str:
     """Return the case-sensitive index name Kotak documents, where known."""
     text = str(name).strip()
     return _INDEX_NAME_CANONICAL.get(text.upper(), text)
+
 
 # HSM live-feed terse keys -> long names (settings.stock_key_mapping).
 STOCK_FEED_KEYS = {
@@ -200,6 +203,15 @@ def _num(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _present_order_number(record: dict[str, Any], key: str) -> str | None:
+    if key not in record:
+        return None
+    value = record[key]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return str(value)
 
 
 def _norm(value: Any, default: str = "") -> str:
@@ -309,9 +321,7 @@ def _apply_variety_legs(order: Any, variety: str, params: dict[str, Any]) -> Non
         # CO carries its stop level in trigger_price, NOT a bracket leg field.
         cover_trigger = stop_loss if stop_loss > 0 else _num(getattr(order, "trigger_price", 0))
         if cover_trigger <= 0:
-            raise KotakNeoMappingError(
-                "A cover order needs a stop level (stop_loss_price or trigger_price)"
-            )
+            raise KotakNeoMappingError("A cover order needs a stop level (stop_loss_price or trigger_price)")
         params["trigger_price"] = str(cover_trigger)
         # Strip any bracket-only legs that the base place/margin params seeded.
         for field in _BRACKET_ONLY_LEG_FIELDS:
@@ -426,6 +436,37 @@ def ensure_ok(resp: Any) -> Any:
     return resp
 
 
+def require_write_success(resp: Any, *, expected_order_id: str | None = None) -> dict[str, Any]:
+    """Require Kotak's documented affirmative write acknowledgement.
+
+    ``ensure_ok`` remains deliberately tolerant for legacy read surfaces. Live
+    mutations need the stronger contract documented by the place/cancel APIs:
+    an object with ``stat=Ok``, integer ``stCode=200`` and a canonical order
+    number. When cancelling, that number must be the exact requested order.
+    """
+    ensure_ok(resp)
+    if not isinstance(resp, dict):
+        raise KotakNeoMappingError("Kotak Neo write response is malformed")
+    status = resp.get("stat")
+    status_code = resp.get("stCode")
+    order_id = resp.get("nOrdNo")
+    if not isinstance(status, str) or status.strip().lower() != "ok":
+        raise KotakNeoMappingError("Kotak Neo write response has no explicit success status")
+    if isinstance(status_code, bool) or not isinstance(status_code, int) or status_code != 200:
+        raise KotakNeoMappingError("Kotak Neo write response has no explicit HTTP 200 status")
+    if (
+        not isinstance(order_id, str)
+        or not order_id
+        or order_id != order_id.strip()
+        or not order_id.isprintable()
+        or any(character.isspace() for character in order_id)
+    ):
+        raise KotakNeoMappingError("Kotak Neo write response has no canonical order id")
+    if expected_order_id is not None and order_id != expected_order_id:
+        raise KotakNeoMappingError("Kotak Neo cancellation acknowledged a different order id")
+    return resp
+
+
 def extract_order_id(resp: dict[str, Any]) -> str:
     """Pull the order number from a NEO place/modify response.
 
@@ -456,7 +497,7 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
     ``Order_history.md``); history rows carry ``exchTmstp``+``dclQty`` where the
     report uses ``ordDtTm``+``dscQty``, so each field falls back across both.
     """
-    return {
+    order = {
         "orderid": str(d.get("nOrdNo", "")),
         "status": d.get("ordSt", d.get("stat", "")),
         "symbol": d.get("trdSym", d.get("sym", "")),
@@ -464,19 +505,26 @@ def from_kotak_order(d: dict[str, Any]) -> dict[str, Any]:
         "action": KOTAK_TO_SIDE.get(str(d.get("trnsTp", "")), str(d.get("trnsTp", ""))),
         "pricetype": KOTAK_TO_ORDER_TYPE.get(str(d.get("prcTp", "")), str(d.get("prcTp", ""))),
         "product": KOTAK_TO_PRODUCT.get(str(d.get("prod", "")), str(d.get("prod", ""))),
-        "quantity": str(d.get("qty", 0)),
-        "price": str(d.get("prc", 0)),
-        "trigger_price": str(d.get("trgPrc", 0)),
-        "filled_quantity": str(d.get("fldQty", 0)),
-        "average_price": str(d.get("avgPrc", 0)),
         "timestamp": str(d.get("ordDtTm", d.get("exchTmstp", d.get("flDtTm", "")))),
         "validity": str(d.get("vldt", d.get("ordDur", ""))),
         "disclosed_quantity": str(d.get("dscQty", d.get("dclQty", 0))),
         "rejection_reason": "" if str(d.get("rejRsn", "")) in ("--", "NA") else str(d.get("rejRsn", "")),
-        "exchange_order_id": "" if str(d.get("exOrdId", d.get("exchOrdId", ""))) == "NA"
+        "exchange_order_id": ""
+        if str(d.get("exOrdId", d.get("exchOrdId", ""))) == "NA"
         else str(d.get("exOrdId", d.get("exchOrdId", ""))),
         "tag": str(d.get("GuiOrdId", "") or ""),
     }
+    for field, source_field in {
+        "quantity": "qty",
+        "filled_quantity": "fldQty",
+        "price": "prc",
+        "trigger_price": "trgPrc",
+        "average_price": "avgPrc",
+    }.items():
+        value = _present_order_number(d, source_field)
+        if value is not None:
+            order[field] = value
+    return order
 
 
 def order_history_rows(resp: Any) -> list[dict[str, Any]]:
@@ -720,10 +768,12 @@ def to_quote_tokens(resolved: list[tuple[str, str]]) -> list[dict[str, str]]:
     tokens: list[dict[str, str]] = []
     for instrument_token, exchange in resolved:
         ex = _norm(exchange)
-        tokens.append({
-            "instrument_token": str(instrument_token),
-            "exchange_segment": EXCHANGE_TO_KOTAK.get(ex, ex.lower()),
-        })
+        tokens.append(
+            {
+                "instrument_token": str(instrument_token),
+                "exchange_segment": EXCHANGE_TO_KOTAK.get(ex, ex.lower()),
+            }
+        )
     return tokens
 
 
@@ -738,6 +788,7 @@ def from_kotak_quote(rec: dict[str, Any]) -> dict[str, Any]:
     Bid/ask prices come from ``buy_price``/``sell_price`` or the first depth
     levels; ``total_buy``/``total_sell`` are quantities, not prices.
     """
+
     def g(*keys: str) -> Any:
         for k in keys:
             if k in rec and rec[k] not in (None, ""):
@@ -812,11 +863,13 @@ def _normalise_depth_levels(rows: Any) -> list[dict]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        levels.append({
-            "price": _num(row.get("price", 0)),
-            "quantity": int(_num(row.get("quantity", 0))),
-            "orders": int(_num(row.get("orders", 0))),
-        })
+        levels.append(
+            {
+                "price": _num(row.get("price", 0)),
+                "quantity": int(_num(row.get("quantity", 0))),
+                "orders": int(_num(row.get("orders", 0))),
+            }
+        )
     return levels
 
 
@@ -922,50 +975,56 @@ def decode_kotak_feed(frame: Any) -> list[dict[str, Any]]:
             "token": str(rec.get("tk", rec.get("instrument_token", "")) or ""),
         }
         if "iv" in rec or rec.get("name") == "if":
-            ticks.append({
-                **base,
-                "kind": "index",
-                "ltp": _num(_fv(rec, "iv", INDEX_FEED_KEYS)),
-                "prev_close": _num(_fv(rec, "ic", INDEX_FEED_KEYS)),
-                "open": _num(_fv(rec, "openingPrice", INDEX_FEED_KEYS)),
-                "high": _num(_fv(rec, "highPrice", INDEX_FEED_KEYS)),
-                "low": _num(_fv(rec, "lowPrice", INDEX_FEED_KEYS)),
-                "volume": 0,
-                "bid": 0.0,
-                "ask": 0.0,
-                "oi": 0,
-                "timestamp": str(_fv(rec, "tvalue", INDEX_FEED_KEYS, "") or ""),
-            })
+            ticks.append(
+                {
+                    **base,
+                    "kind": "index",
+                    "ltp": _num(_fv(rec, "iv", INDEX_FEED_KEYS)),
+                    "prev_close": _num(_fv(rec, "ic", INDEX_FEED_KEYS)),
+                    "open": _num(_fv(rec, "openingPrice", INDEX_FEED_KEYS)),
+                    "high": _num(_fv(rec, "highPrice", INDEX_FEED_KEYS)),
+                    "low": _num(_fv(rec, "lowPrice", INDEX_FEED_KEYS)),
+                    "volume": 0,
+                    "bid": 0.0,
+                    "ask": 0.0,
+                    "oi": 0,
+                    "timestamp": str(_fv(rec, "tvalue", INDEX_FEED_KEYS, "") or ""),
+                }
+            )
         elif rec.get("name") == "dp" or ("bp1" in rec and "ltp" not in rec):
             book = from_kotak_depth(rec)
             bids, asks = book.get("bids", []), book.get("asks", [])
-            ticks.append({
-                **base,
-                "kind": "depth",
-                "ltp": 0.0,
-                "volume": 0,
-                "bid": _num(bids[0]["price"]) if bids else 0.0,
-                "ask": _num(asks[0]["price"]) if asks else 0.0,
-                "oi": 0,
-                "timestamp": "",
-                "depth": book,
-            })
+            ticks.append(
+                {
+                    **base,
+                    "kind": "depth",
+                    "ltp": 0.0,
+                    "volume": 0,
+                    "bid": _num(bids[0]["price"]) if bids else 0.0,
+                    "ask": _num(asks[0]["price"]) if asks else 0.0,
+                    "oi": 0,
+                    "timestamp": "",
+                    "depth": book,
+                }
+            )
         else:
-            ticks.append({
-                **base,
-                "kind": "quote",
-                "ltp": _num(_fv(rec, "ltp", STOCK_FEED_KEYS)),
-                "volume": int(_num(_fv(rec, "v", STOCK_FEED_KEYS))),
-                "bid": _num(_fv(rec, "bp", STOCK_FEED_KEYS)),
-                "ask": _num(_fv(rec, "sp", STOCK_FEED_KEYS)),
-                # Best bid/ask size at level 1: NEO's SDK ``stock_key_mapping``
-                # keys these ``bq``/``sq`` (NOT ``bs`` — that is a depth-frame
-                # offer-size key), so the long-name fallback resolves them too.
-                "buy_quantity": int(_num(_fv(rec, "bq", STOCK_FEED_KEYS))),
-                "sell_quantity": int(_num(_fv(rec, "sq", STOCK_FEED_KEYS))),
-                "oi": int(_num(_fv(rec, "oi", STOCK_FEED_KEYS))),
-                "timestamp": str(_fv(rec, "ltt", STOCK_FEED_KEYS, "") or ""),
-            })
+            ticks.append(
+                {
+                    **base,
+                    "kind": "quote",
+                    "ltp": _num(_fv(rec, "ltp", STOCK_FEED_KEYS)),
+                    "volume": int(_num(_fv(rec, "v", STOCK_FEED_KEYS))),
+                    "bid": _num(_fv(rec, "bp", STOCK_FEED_KEYS)),
+                    "ask": _num(_fv(rec, "sp", STOCK_FEED_KEYS)),
+                    # Best bid/ask size at level 1: NEO's SDK ``stock_key_mapping``
+                    # keys these ``bq``/``sq`` (NOT ``bs`` — that is a depth-frame
+                    # offer-size key), so the long-name fallback resolves them too.
+                    "buy_quantity": int(_num(_fv(rec, "bq", STOCK_FEED_KEYS))),
+                    "sell_quantity": int(_num(_fv(rec, "sq", STOCK_FEED_KEYS))),
+                    "oi": int(_num(_fv(rec, "oi", STOCK_FEED_KEYS))),
+                    "timestamp": str(_fv(rec, "ltt", STOCK_FEED_KEYS, "") or ""),
+                }
+            )
     return ticks
 
 

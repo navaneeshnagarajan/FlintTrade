@@ -191,7 +191,7 @@ jobs:
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
       - name: Run core tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       - name: Build check
@@ -309,3 +309,27 @@ jobs:
         with:
           workspaces: packages/core/ticks
       - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
+
+  # Desktop process ownership, backend supervision, and shutdown behaviour live
+  # in Rust. Keep the frequent gate on Linux; macOS/Windows execute in the
+  # weekly cross-platform workflow where hosted-runner cost is bounded.
+  rust-desktop-tests:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/apps/desktop/src-tauri -> target
+      - name: Install Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev
+      - run: cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   placeOrder,
   cancelAllOrders,
-  closePosition,
+  exitAllPositions,
   getExpiry,
   getQuotes,
   getSymbol,
@@ -208,7 +208,7 @@ function ScalperWidget(_props: WidgetProps) {
     return list;
   }, [symbol, spotExch, ceSymbol, peSymbol, optExch]);
 
-  const { ticks } = useWebSocket(instruments, "quote");
+  const { ticks } = useWebSocket(instruments, "quote", !isExplore);
 
   // Read ticks at click time without recreating executeOrder on every tick.
   const ticksRef = useRef(ticks);
@@ -485,7 +485,7 @@ function ScalperWidget(_props: WidgetProps) {
     }
     showStatus("Closing all…", "pending", 0);
     try {
-      await closePosition("FlintScalper");
+      await exitAllPositions();
       showStatus("All positions closed", "success");
     } catch (err) {
       showStatus(err instanceof Error ? err.message : "Close failed", "error");
@@ -500,7 +500,7 @@ function ScalperWidget(_props: WidgetProps) {
     }
     showStatus("Cancelling…", "pending", 0);
     try {
-      await cancelAllOrders("FlintScalper");
+      await cancelAllOrders();
       showStatus("All orders cancelled", "success");
     } catch (err) {
       showStatus(err instanceof Error ? err.message : "Cancel failed", "error");

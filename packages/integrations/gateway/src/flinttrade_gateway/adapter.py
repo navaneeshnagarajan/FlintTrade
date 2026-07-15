@@ -1021,6 +1021,7 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         requires_static_ip=True,
         native_connect_blockers=[
             "Maintainer live login/read verification with current TOTP and MPIN",
+            "Live order-safety proof",
         ],
         auth_methods=_NATIVE_AUTH["kotakneo"],
         sdk_pin="neo-api-client",
@@ -1121,7 +1122,16 @@ BROKER_CATALOG: dict[str, BrokerInfo] = {
         auth_flow=AuthFlowType.api_key_direct,
         exchanges=["NSE", "BSE", "NFO", "BFO", "NSE_INDEX", "BSE_INDEX"],
         native=True,
-        connectable=True,  # login/read verified against INDstocks dashboard token read paths
+        # Login/read paths and the fail-closed emergency planner are locally
+        # verified. INDstocks does not expose a durable order-family discriminator
+        # or a broker-atomic reduce-only close primitive, so cancellation and
+        # flattening cannot yet satisfy the activation safety contract.
+        connectable=False,
+        native_connect_blockers=[
+            "Authoritative smart-parent cancellation discriminator",
+            "Broker-native atomic reduce-only close primitive",
+            "Live order-safety proof",
+        ],
         requires_static_ip=True,
         auth_methods=_NATIVE_AUTH["indmoney"],
         sdk_pin=None,

@@ -50,13 +50,12 @@ interface ExecutionLogProps {
 export function ExecutionLog({ collapsed, onToggle }: ExecutionLogProps) {
   const executionLog = useFlowStore((s) => s.executionLog);
   const clearLog = useFlowStore((s) => s.clearLog);
-  const isRunning = useFlowStore((s) => s.isRunning);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const logBodyRef = useRef<HTMLDivElement>(null);
 
   // Scroll to newest entry when new log arrives and panel is open
   useEffect(() => {
-    if (!collapsed && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    if (!collapsed && logBodyRef.current) {
+      logBodyRef.current.scrollTop = logBodyRef.current.scrollHeight;
     }
   }, [executionLog.length, collapsed]);
 
@@ -89,13 +88,8 @@ export function ExecutionLog({ collapsed, onToggle }: ExecutionLogProps) {
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Terminal size={11} style={{ color: "var(--color-text-muted)" }} />
           <span style={{ fontSize: 10, fontWeight: 600, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Execution Log
+            Activity
           </span>
-          {isRunning && (
-            <span style={{ fontSize: 9, color: "#22c55e", animation: "pulse 1.5s infinite" }}>
-              RUNNING
-            </span>
-          )}
           {executionLog.length > 0 && (
             <span
               style={{
@@ -135,10 +129,10 @@ export function ExecutionLog({ collapsed, onToggle }: ExecutionLogProps) {
 
       {/* Log entries */}
       {!collapsed && (
-        <div style={{ flex: 1, overflowY: "auto", padding: "4px 10px" }}>
+        <div ref={logBodyRef} style={{ flex: 1, overflowY: "auto", padding: "4px 10px" }}>
           {executionLog.length === 0 ? (
             <div style={{ fontSize: 10, color: "var(--color-text-muted)", paddingTop: 8 }}>
-              No log entries yet. Run the flow to see execution output.
+              No editor activity yet.
             </div>
           ) : (
             [...executionLog].reverse().map((entry) => (
@@ -162,7 +156,6 @@ export function ExecutionLog({ collapsed, onToggle }: ExecutionLogProps) {
               </div>
             ))
           )}
-          <div ref={bottomRef} />
         </div>
       )}
     </div>

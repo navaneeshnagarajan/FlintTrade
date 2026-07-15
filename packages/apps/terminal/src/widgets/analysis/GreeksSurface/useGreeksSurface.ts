@@ -23,24 +23,30 @@ export interface GreeksSurfaceResult {
 }
 
 /**
- * True when the payload carries the backend's `is_sample_data: true` honesty
- * flag (propagated onto object payloads by the ftApi response unwrapper).
+ * Treat anything except an explicit backend `is_sample_data: false` as sample
+ * or otherwise untrusted provenance.
  */
 function carriesSampleFlag(payload: unknown): boolean {
-  return (
+  return !(
     typeof payload === "object" &&
     payload !== null &&
-    (payload as { is_sample_data?: unknown }).is_sample_data === true
+    (payload as { is_sample_data?: unknown }).is_sample_data === false
   );
 }
 
-function buildSurfaceFromIVSmile(
+export function buildSurfaceFromIVSmile(
   ivData: Awaited<ReturnType<typeof getFtIVSmile>>,
 ): GreeksSurfaceExpiry[] {
   if (!ivData?.curves?.length) return [];
 
-  return ivData.curves.map((curve) => {
+  return ivData.curves.flatMap((curve) => {
     const { expiry, days_to_expiry, atm_strike, points: ivPoints } = curve;
+    const completePoints = ivPoints.filter(
+      (point) => Number.isFinite(point.strike) && point.strike > 0
+        && Number.isFinite(point.call_iv) && point.call_iv > 0
+        && Number.isFinite(point.put_iv) && point.put_iv > 0,
+    );
+    if (!(days_to_expiry > 0) || !(atm_strike > 0) || completePoints.length === 0) return [];
 
     const surfacePoints: GreeksSurfacePoint[] = [];
     for (let i = 0; i < MONEYNESS_STEPS; i++) {
@@ -52,17 +58,16 @@ function buildSurfaceFromIVSmile(
       const targetStrike = Math.round(atm_strike * (1 + mv) / 50) * 50;
 
       // Find nearest strike in iv points
-      const nearest = ivPoints.reduce((best, p) => {
+      const nearest = completePoints.reduce((best, p) => {
         return Math.abs(p.strike - targetStrike) < Math.abs(best.strike - targetStrike)
           ? p : best;
-      }, ivPoints[0]);
+      }, completePoints[0]);
 
-      if (!nearest) continue;
-
-      const iv = ((nearest.call_iv + nearest.put_iv) / 2) * 100;
+      const ivDec = (nearest.call_iv + nearest.put_iv) / 2;
+      if (!(ivDec > 0) || !Number.isFinite(ivDec)) continue;
+      const iv = ivDec * 100;
       // Approximate greeks from IV and moneyness
       const T = days_to_expiry / 365;
-      const ivDec = iv / 100;
       const d1 = T > 0
         ? (-mv + 0.5 * ivDec * ivDec * T) / (ivDec * Math.sqrt(T))
         : (mv >= 0 ? 3 : -3);
@@ -84,12 +89,13 @@ function buildSurfaceFromIVSmile(
       });
     }
 
-    return {
+    if (surfacePoints.length === 0) return [];
+    return [{
       expiry,
       label: `${expiry} (${days_to_expiry}d)`,
       dte: days_to_expiry,
       points: surfacePoints,
-    };
+    }];
   });
 }
 

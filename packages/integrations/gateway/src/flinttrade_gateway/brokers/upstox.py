@@ -30,15 +30,17 @@ an unverified broker in the connect UI.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import functools
+import hashlib
 import json
 import logging
+import math
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import BrokerError
+from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
 from flinttrade_gateway.capabilities import (
     AuthModel,
     Capabilities,
@@ -49,7 +51,7 @@ from flinttrade_gateway.capabilities import (
 )
 
 from . import upstox_mapping as M
-from ._base import BrokerAdapter, Session
+from ._base import BrokerAdapter, Session, run_blocking_sdk_call
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -65,6 +67,11 @@ _PENDING = "Upstox {0} — streaming wave pending live SDK verification"
 # ``exp`` claim lies beyond this bound therefore cannot be a daily trading
 # token, and is classified read-only (fail-closed).
 _DAILY_TOKEN_MAX_LIFETIME_SECONDS = 36 * 3600.0
+_EMERGENCY_BATCH_LIMIT = 10
+_EMERGENCY_EXIT_TAG_PREFIX = "FTE-"
+_EMERGENCY_SUCCESSFUL_ORDER_STATUSES = frozenset({"complete", "completed", "filled"})
+_INSTRUMENT_SEARCH_RECORDS = 30
+_MAX_INSTRUMENT_SEARCH_PAGES = 100
 
 # Upstox error code for "APIs not permitted with this token" — raised when a
 # read-only (analytics/extended) token hits an order endpoint (errors doc).
@@ -374,7 +381,7 @@ class UpstoxClient:
     # ---- user / funds / charges ----
 
     def funds(self) -> dict[str, Any]:
-        return self._user.get_user_fund_margin(self._V).to_dict()
+        return self._user.get_user_fund_margin_v3().to_dict()
 
     def profile(self) -> dict[str, Any]:
         return self._user.get_profile(self._V).to_dict()
@@ -464,8 +471,18 @@ class UpstoxClient:
         kwargs = {"expiry_date": expiry_date} if expiry_date else {}
         return self._options.get_option_contracts(instrument_key, **kwargs).to_dict()
 
-    def search_instruments(self, query: str) -> dict[str, Any]:
-        return self._instruments.search_instrument(query).to_dict()
+    def search_instruments(
+        self,
+        query: str,
+        *,
+        page_number: int = 1,
+        records: int = _INSTRUMENT_SEARCH_RECORDS,
+    ) -> dict[str, Any]:
+        return self._instruments.search_instrument(
+            query,
+            page_number=page_number,
+            records=records,
+        ).to_dict()
 
     # ---- market information ----
 
@@ -561,25 +578,95 @@ class UpstoxAdapter(BrokerAdapter):
         expected_exchange = str(exchange).strip().upper()
         expected_segment = M.EXCHANGE_TO_UPSTOX.get(expected_exchange, expected_exchange)
         row_symbol = str(row.get("symbol") or row.get("trading_symbol") or "").strip().upper()
-        row_exchange = str(row.get("exchange") or "").strip().upper()
         row_segment = str(row.get("segment") or "").strip().upper()
         instrument_key = str(row.get("instrument_key") or row.get("instrument_token") or "").strip()
-        instrument_segment = instrument_key.partition("|")[0].strip().upper()
-        row_exchange_as_flint = M.UPSTOX_TO_EXCHANGE.get(row_exchange, row_exchange)
+        instrument_segment, separator, instrument_token = instrument_key.partition("|")
+        instrument_segment = instrument_segment.strip().upper()
         if row_symbol != expected_symbol:
             return False
-        return expected_exchange in {
-            row_exchange,
-            row_exchange_as_flint,
-            M.UPSTOX_TO_EXCHANGE.get(row_segment, row_segment),
-            M.UPSTOX_TO_EXCHANGE.get(instrument_segment, instrument_segment),
-        } or (
-            expected_segment in {row_exchange, row_segment, instrument_segment}
-        )
+        # The token prefix is the broker's routing identity. Descriptive row
+        # fields may supplement it, but may never override or contradict it.
+        if instrument_segment != expected_segment or separator != "|" or not instrument_token.strip():
+            return False
+        return not row_segment or row_segment == expected_segment
 
     @staticmethod
     def _search_row_instrument_key(row: dict[str, Any]) -> str:
         return str(row.get("instrument_key") or row.get("instrument_token") or "").strip()
+
+    @staticmethod
+    def _instrument_search_page(
+        resp: Any,
+        *,
+        expected_page: int,
+    ) -> tuple[list[dict[str, Any]], int, int]:
+        if not isinstance(resp, dict) or str(resp.get("status") or "").lower() != "success":
+            raise BrokerError("Upstox instrument search returned an invalid response")
+        meta_data = resp.get("meta_data")
+        page = meta_data.get("page") if isinstance(meta_data, dict) else None
+        page_number = page.get("page_number") if isinstance(page, dict) else None
+        total_pages = page.get("total_pages") if isinstance(page, dict) else None
+        records = page.get("records") if isinstance(page, dict) else None
+        total_records = page.get("total_records") if isinstance(page, dict) else None
+        if (
+            isinstance(page_number, bool)
+            or not isinstance(page_number, int)
+            or page_number != expected_page
+            or isinstance(total_pages, bool)
+            or not isinstance(total_pages, int)
+            or total_pages < 0
+            or total_pages > _MAX_INSTRUMENT_SEARCH_PAGES
+            or isinstance(records, bool)
+            or not isinstance(records, int)
+            or records != _INSTRUMENT_SEARCH_RECORDS
+            or isinstance(total_records, bool)
+            or not isinstance(total_records, int)
+            or total_records < 0
+            or (total_records == 0 and total_pages not in {0, 1})
+            or (total_records > 0 and total_pages != math.ceil(total_records / records))
+            or (total_pages > 0 and expected_page > total_pages)
+        ):
+            raise BrokerError("Upstox instrument search pagination is invalid")
+        raw_rows = resp.get("data")
+        if (
+            not isinstance(raw_rows, list)
+            or len(raw_rows) > _INSTRUMENT_SEARCH_RECORDS
+            or any(not isinstance(row, dict) for row in raw_rows)
+        ):
+            raise BrokerError("Upstox instrument search rows are invalid")
+        expected_rows = max(0, min(records, total_records - ((expected_page - 1) * records)))
+        if len(raw_rows) != expected_rows:
+            raise BrokerError("Upstox instrument search pagination is incomplete")
+        rows = M.from_upstox_instrument_rows(resp)
+        if len(rows) != len(raw_rows):
+            raise BrokerError("Upstox instrument search rows could not be normalised exactly")
+        return rows, total_pages, total_records
+
+    async def _search_all_instruments(self, session: Session, query: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        declared_total_pages: int | None = None
+        declared_total_records: int | None = None
+        client = self._client(session)
+        for page_number in range(1, _MAX_INSTRUMENT_SEARCH_PAGES + 1):
+            resp = await self._call(
+                client.search_instruments,
+                query,
+                page_number=page_number,
+                records=_INSTRUMENT_SEARCH_RECORDS,
+            )
+            page_rows, total_pages, total_records = self._instrument_search_page(
+                resp,
+                expected_page=page_number,
+            )
+            if declared_total_pages is None:
+                declared_total_pages = total_pages
+                declared_total_records = total_records
+            elif total_pages != declared_total_pages or total_records != declared_total_records:
+                raise BrokerError("Upstox instrument search pagination changed during resolution")
+            rows.extend(page_rows)
+            if page_number >= total_pages:
+                return rows
+        raise BrokerError("Upstox instrument search exceeded its pagination bound")
 
     async def _resolve_instrument(self, session: Session, symbol: str, exchange: str) -> str:
         cache_key = self._instrument_cache_key(symbol, exchange)
@@ -587,7 +674,15 @@ class UpstoxAdapter(BrokerAdapter):
         if cached:
             return cached
         if self._instrument_resolver is not None:
-            resolved = str(self._instrument_resolver(symbol, exchange))
+            resolved = str(self._instrument_resolver(symbol, exchange)).strip()
+            if not self._search_row_matches(
+                {"symbol": symbol, "instrument_key": resolved},
+                symbol,
+                exchange,
+            ):
+                raise BrokerError(
+                    f"Cannot resolve a unique Upstox instrument_token for {symbol}/{exchange}"
+                )
             self._instrument_cache[cache_key] = resolved
             return resolved
         message = (
@@ -595,25 +690,59 @@ class UpstoxAdapter(BrokerAdapter):
             "configure an instrument resolver or refresh the instruments master"
         )
         try:
-            rows = await self.search_instruments(session, str(symbol).strip())
+            rows = await self._search_all_instruments(session, str(symbol).strip())
         except Exception as exc:  # noqa: BLE001 - surface a single resolver-family error
             raise BrokerError(message) from exc
-        for row in rows:
-            if self._search_row_matches(row, symbol, exchange):
-                instrument_key = self._search_row_instrument_key(row)
-                if instrument_key:
-                    self._instrument_cache[cache_key] = instrument_key
-                    return instrument_key
-        raise BrokerError(message)
+        matches = [
+            self._search_row_instrument_key(row)
+            for row in rows
+            if self._search_row_matches(row, symbol, exchange)
+            and self._search_row_instrument_key(row)
+        ]
+        if len(matches) != 1:
+            raise BrokerError(
+                f"Cannot resolve a unique Upstox instrument_token for {symbol}/{exchange}"
+            )
+        instrument_key = matches[0]
+        self._instrument_cache[cache_key] = instrument_key
+        return instrument_key
 
     @staticmethod
     async def _call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        return await asyncio.to_thread(fn, *args, **kwargs)
+        return await run_blocking_sdk_call(fn, *args, **kwargs)
 
     @staticmethod
     def _rows(resp: Any) -> list[dict[str, Any]]:
         data = resp.get("data", []) if isinstance(resp, dict) else []
         return data if isinstance(data, list) else []
+
+    @staticmethod
+    def _emergency_rows(resp: Any, *, book: str) -> list[dict[str, Any]]:
+        """Decode a broker snapshot without treating unknown state as empty."""
+        if (
+            not isinstance(resp, dict)
+            or str(resp.get("status") or "").strip().lower() != "success"
+            or not isinstance(resp.get("data"), list)
+            or any(not isinstance(row, dict) for row in resp["data"])
+        ):
+            raise BrokerError(f"Upstox emergency {book} response is malformed")
+        return resp["data"]
+
+    @staticmethod
+    def _emergency_gtt_order_ids(rows: list[dict[str, Any]]) -> frozenset[str]:
+        """Return the canonical IDs from Upstox's active-only GTT book."""
+        order_ids: set[str] = set()
+        for row in rows:
+            try:
+                order_id = M.canonical_order_id(row.get("gtt_order_id"))
+            except M.UpstoxMappingError as exc:
+                raise BrokerError("Upstox emergency GTT order id is malformed") from exc
+            if not M.is_gtt_order_id(order_id):
+                raise BrokerError("Upstox emergency GTT order id is malformed")
+            if order_id in order_ids:
+                raise BrokerError("Upstox emergency GTT order book contains a duplicate id")
+            order_ids.add(order_id)
+        return frozenset(order_ids)
 
     # ---------- auth lifecycle ----------
 
@@ -773,6 +902,505 @@ class UpstoxAdapter(BrokerAdapter):
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         resp = await self._call(self._client(session).exit_positions, tag, segment)
         return M.from_upstox_cancel_exit(resp)
+
+    @staticmethod
+    def _emergency_position_accounting(position: dict[str, Any]) -> tuple[int, int, int, int, bool]:
+        try:
+            signed_quantity = int(str(position["quantity"]))
+            overnight_quantity = int(str(position.get("overnight_quantity") or "0"))
+            day_buy_quantity = int(str(position.get("day_buy_quantity") or "0"))
+            day_sell_quantity = int(str(position.get("day_sell_quantity") or "0"))
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise BrokerError("Upstox emergency position accounting is invalid") from exc
+        if day_buy_quantity < 0 or day_sell_quantity < 0:
+            raise BrokerError("Upstox emergency position accounting cannot be negative")
+        complete = bool(position.get("_emergency_accounting_complete", False))
+        if complete and signed_quantity != overnight_quantity + day_buy_quantity - day_sell_quantity:
+            raise BrokerError("Upstox emergency position accounting is inconsistent")
+        return signed_quantity, overnight_quantity, day_buy_quantity, day_sell_quantity, complete
+
+    @classmethod
+    def _emergency_exit_tag(cls, position: dict[str, Any]) -> str:
+        signed_quantity, overnight_quantity, day_buy_quantity, day_sell_quantity, complete = (
+            cls._emergency_position_accounting(position)
+        )
+        if signed_quantity == 0:
+            raise BrokerError("Upstox emergency position is flat")
+        opposite_action = "SELL" if signed_quantity > 0 else "BUY"
+        identity = "|".join(
+            (
+                str(position.get("symbol") or "").strip(),
+                str(position.get("exchange") or "").strip().upper(),
+                str(position.get("product") or "").strip().upper(),
+                opposite_action,
+                str(abs(signed_quantity)),
+                str(overnight_quantity),
+                str(day_buy_quantity),
+                str(day_sell_quantity),
+                "complete" if complete else "incomplete",
+            )
+        )
+        return f"{_EMERGENCY_EXIT_TAG_PREFIX}{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:16]}"
+
+    @staticmethod
+    def _exit_order_matches_position_identity(order: dict[str, Any], position: dict[str, Any]) -> bool:
+        """Whether an order names the same symbol, exchange, and product."""
+        try:
+            signed_quantity = int(str(position["quantity"]))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        if signed_quantity == 0:
+            return False
+        position_symbol = str(position.get("symbol") or "").strip()
+        position_exchange = str(position.get("exchange") or "").strip().upper()
+        position_product = str(position.get("product") or "").strip().upper()
+        order_symbol = str(order.get("symbol") or "").strip()
+        order_exchange = str(order.get("exchange") or "").strip().upper()
+        order_product = str(order.get("product") or "").strip().upper()
+        if not all(
+            (
+                position_symbol,
+                position_exchange,
+                position_product,
+                order_symbol,
+                order_exchange,
+                order_product,
+            )
+        ):
+            return False
+        return (
+            position_symbol,
+            position_exchange,
+            position_product,
+        ) == (
+            order_symbol,
+            order_exchange,
+            order_product,
+        )
+
+    @classmethod
+    def _exit_order_targets_position(cls, order: dict[str, Any], position: dict[str, Any]) -> bool:
+        """Whether an order has the exact identity and currently reducing side."""
+        if not cls._exit_order_matches_position_identity(order, position):
+            return False
+        try:
+            signed_quantity = int(str(position["quantity"]))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        expected_action = "SELL" if signed_quantity > 0 else "BUY"
+        return str(order.get("action") or "").strip().upper() == expected_action
+
+    @classmethod
+    def _completed_exit_matches_position(cls, order: dict[str, Any], position: dict[str, Any]) -> bool:
+        """Whether a completed FTE belongs to this exact exposure episode."""
+        if not cls._exit_order_targets_position(order, position):
+            return False
+        try:
+            signed_quantity = int(str(position["quantity"]))
+            requested_quantity = int(str(order.get("quantity") or "0"))
+            filled_quantity = int(str(order.get("filled_quantity") or "0"))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        return (
+            requested_quantity == abs(signed_quantity)
+            and requested_quantity > 0
+            and str(order.get("tag") or "") == cls._emergency_exit_tag(position)
+            and str(order.get("status") or "").strip().lower() in _EMERGENCY_SUCCESSFUL_ORDER_STATUSES
+            and filled_quantity == requested_quantity
+        )
+
+    @classmethod
+    def _active_exit_order_state(
+        cls,
+        order: dict[str, Any],
+        position: dict[str, Any],
+        *,
+        trusted_order_id: bool = False,
+    ) -> str:
+        """Classify one active emergency exit as exact, conflicting, unsettled, or unrelated."""
+        tag = str(order.get("tag") or "")
+        tagged = tag.startswith(_EMERGENCY_EXIT_TAG_PREFIX)
+        if not (tagged or trusted_order_id) or not cls._exit_order_matches_position_identity(order, position):
+            return "unrelated"
+        if not cls._exit_order_targets_position(order, position):
+            return "conflicting"
+        try:
+            requested_quantity = int(str(order.get("quantity") or "0"))
+            filled_quantity = int(str(order.get("filled_quantity") or "0"))
+            pending_quantity = int(str(order.get("pending_quantity") or "0"))
+        except (TypeError, ValueError, OverflowError):
+            return "unsettled"
+        if (
+            requested_quantity <= 0
+            or filled_quantity < 0
+            or pending_quantity < 0
+            or filled_quantity + pending_quantity != requested_quantity
+            or pending_quantity == 0
+        ):
+            return "unsettled"
+
+        signed_quantity, overnight_quantity, day_buy_quantity, day_sell_quantity, complete = (
+            cls._emergency_position_accounting(position)
+        )
+        original = dict(position)
+        if filled_quantity:
+            if not complete:
+                return "unsettled"
+            if signed_quantity > 0:
+                original["quantity"] = str(signed_quantity + filled_quantity)
+                original["day_sell_quantity"] = str(day_sell_quantity - filled_quantity)
+                if day_sell_quantity < filled_quantity:
+                    return "unsettled"
+            else:
+                original["quantity"] = str(signed_quantity - filled_quantity)
+                original["day_buy_quantity"] = str(day_buy_quantity - filled_quantity)
+                if day_buy_quantity < filled_quantity:
+                    return "unsettled"
+        try:
+            original_quantity = abs(int(str(original["quantity"])))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return "unsettled"
+        if requested_quantity != original_quantity:
+            return "conflicting"
+        if tagged and tag != cls._emergency_exit_tag(original):
+            return "conflicting"
+        return "exact" if pending_quantity == abs(signed_quantity) else "conflicting"
+
+    async def plan_emergency_reduction(
+        self,
+        session: Session,
+        *,
+        policy: EmergencyWritePolicy,
+        protected_order_ids: frozenset[str],
+        protected_exit_order_ids: frozenset[str] = frozenset(),
+        protected_exit_tags: frozenset[str],
+        unidentified_exit_inflight: bool = False,
+    ) -> EmergencyReductionPlan:
+        """Plan at most ten exact writes from one joint order/position snapshot."""
+        requested = frozenset(policy.verbs)
+        client = self._client(session)
+        order_response = await self._call(client.order_book)
+        order_rows = [
+            M.from_upstox_order(row)
+            for row in self._emergency_rows(order_response, book="order book")
+        ]
+        gtt_order_ids = frozenset()
+        if "cancel_all_orders" in requested:
+            gtt_response = await self._call(client.gtt_order_details, None)
+            gtt_rows = [
+                M.from_upstox_gtt_order(row)
+                for row in self._emergency_rows(gtt_response, book="GTT order book")
+            ]
+            gtt_order_ids = self._emergency_gtt_order_ids(gtt_rows)
+        regular_order_ids = M.emergency_order_ids(order_rows)
+        if regular_order_ids & gtt_order_ids:
+            raise BrokerError("Upstox emergency order and GTT books contain overlapping ids")
+        known_order_ids = regular_order_ids | gtt_order_ids
+        observed_exit_tags = {
+            str(row.get("tag") or "")
+            for row in order_rows
+            if isinstance(row, dict) and str(row.get("tag") or "").startswith(_EMERGENCY_EXIT_TAG_PREFIX)
+        }
+        completed_rows = tuple(
+            row
+            for row in order_rows
+            if isinstance(row, dict)
+            and str(row.get("status") or "").strip().lower() in _EMERGENCY_SUCCESSFUL_ORDER_STATUSES
+        )
+        orders = M.active_emergency_orders(order_rows)
+        position_response = await self._call(client.positions)
+        try:
+            position_rows = [
+                M.from_upstox_position(row)
+                for row in self._emergency_rows(position_response, book="position book")
+            ]
+        except M.UpstoxMappingError as exc:
+            raise BrokerError(str(exc)) from exc
+        positions = M.active_emergency_positions(position_rows)
+
+        def position_key(position: dict[str, Any]) -> tuple[str, str, str]:
+            return position["symbol"], position["exchange"], position["product"]
+
+        current_position_tags = {self._emergency_exit_tag(position) for position in positions}
+        completed_current_position_exit_tags: set[str] = set()
+        ambiguous_completed_position_keys: set[tuple[str, str, str]] = set()
+        for position in positions:
+            candidate_rows = tuple(
+                order
+                for order in completed_rows
+                if (
+                    str(order.get("tag") or "").startswith(_EMERGENCY_EXIT_TAG_PREFIX)
+                    or str(order.get("orderid") or "") in protected_exit_order_ids
+                )
+                and self._exit_order_matches_position_identity(order, position)
+            )
+            matching_rows = tuple(
+                order for order in candidate_rows if self._completed_exit_matches_position(order, position)
+            )
+            protected_untagged_rows = tuple(
+                order
+                for order in candidate_rows
+                if str(order.get("orderid") or "") in protected_exit_order_ids
+                and not str(order.get("tag") or "").startswith(_EMERGENCY_EXIT_TAG_PREFIX)
+            )
+            accounting_complete = bool(position.get("_emergency_accounting_complete", False))
+            if protected_untagged_rows:
+                ambiguous_completed_position_keys.add(position_key(position))
+            elif matching_rows and (
+                accounting_complete
+                or any(str(order.get("tag") or "") in protected_exit_tags for order in matching_rows)
+            ):
+                completed_current_position_exit_tags.add(self._emergency_exit_tag(position))
+            elif candidate_rows and not accounting_complete:
+                ambiguous_completed_position_keys.add(position_key(position))
+
+        active_exit_orders: dict[str, dict[str, Any]] = {}
+        grouped_active_exits: dict[
+            tuple[str, str, str],
+            list[tuple[dict[str, Any], str]],
+        ] = {}
+        active_current_position_exit_tags: set[str] = set()
+        exact_active_position_keys: set[tuple[str, str, str]] = set()
+        unsettled_active_position_keys: set[tuple[str, str, str]] = set()
+        conflicting_active_orders: dict[str, dict[str, Any]] = {}
+        for order in orders:
+            order_id = order["orderid"]
+            tagged = str(order.get("tag") or "").startswith(_EMERGENCY_EXIT_TAG_PREFIX)
+            trusted_order_id = order_id in protected_exit_order_ids
+            if not (tagged or trusted_order_id):
+                continue
+            active_exit_orders[order_id] = order
+            matched_position = False
+            for position in positions:
+                state = self._active_exit_order_state(
+                    order,
+                    position,
+                    trusted_order_id=trusted_order_id,
+                )
+                if state == "unrelated":
+                    continue
+                grouped_active_exits.setdefault(position_key(position), []).append((order, state))
+                matched_position = True
+                break
+            if not matched_position:
+                conflicting_active_orders[order_id] = order
+
+        for key, entries in grouped_active_exits.items():
+            if len(entries) > 1:
+                conflicting_active_orders.update((order["orderid"], order) for order, _state in entries)
+                continue
+            order, state = entries[0]
+            if state == "exact":
+                exact_active_position_keys.add(key)
+                tag = str(order.get("tag") or "")
+                if tag.startswith(_EMERGENCY_EXIT_TAG_PREFIX):
+                    active_current_position_exit_tags.add(tag)
+            elif state == "unsettled":
+                unsettled_active_position_keys.add(key)
+            else:
+                conflicting_active_orders[order["orderid"]] = order
+
+        blocked_position_keys = ambiguous_completed_position_keys | unsettled_active_position_keys
+        blocked_position_keys.update(
+            position_key(position)
+            for position in positions
+            if self._emergency_exit_tag(position)
+            in completed_current_position_exit_tags | active_current_position_exit_tags
+        )
+        blocked_position_keys.update(exact_active_position_keys)
+        blocked_position_keys.update(
+            position_key(position)
+            for position in positions
+            if any(
+                self._exit_order_matches_position_identity(order, position)
+                for order in conflicting_active_orders.values()
+            )
+        )
+        positions_requiring_exit = tuple(
+            position for position in positions if position_key(position) not in blocked_position_keys
+        )
+        protected = tuple(
+            order
+            for order in orders
+            if (
+                order["orderid"] in protected_order_ids
+                or order["orderid"] in protected_exit_order_ids
+                or order["orderid"] in active_exit_orders
+            )
+        )
+        protected_ids = {order["orderid"] for order in protected}
+        protected_non_exit = tuple(
+            order for order in protected if order["orderid"] not in active_exit_orders
+        )
+        protected_gtt_ids = gtt_order_ids & (protected_order_ids | protected_exit_order_ids)
+        cancellable_gtt_ids = tuple(sorted(gtt_order_ids - protected_gtt_ids))
+        missing_protected_exit_ids = protected_exit_order_ids - known_order_ids
+        protected_current_position_tags = protected_exit_tags & current_position_tags
+        exact_protected_exit_tags = protected_current_position_tags & (
+            completed_current_position_exit_tags | active_current_position_exit_tags
+        )
+        conflicting_protected_exit_tags = (
+            protected_current_position_tags & observed_exit_tags
+        ) - exact_protected_exit_tags
+        missing_protected_exit_tags = (
+            protected_current_position_tags
+            - exact_protected_exit_tags
+            - conflicting_protected_exit_tags
+        )
+        cancellable = tuple(order for order in orders if order["orderid"] not in protected_ids)
+        pending: set[str] = set()
+        if "cancel_all_orders" in requested and (cancellable or protected_non_exit or gtt_order_ids):
+            pending.add("cancel_all_orders")
+        if "exit_all_positions" in requested and (
+            positions or missing_protected_exit_ids or active_exit_orders
+        ):
+            pending.add("exit_all_positions")
+        if not pending:
+            return EmergencyReductionPlan(writes=(), pending_verbs=frozenset())
+
+        if unidentified_exit_inflight or missing_protected_exit_ids or missing_protected_exit_tags:
+            return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+
+        if "cancel_all_orders" in pending:
+            if not protected and not gtt_order_ids and len(cancellable) <= _EMERGENCY_BATCH_LIMIT:
+                writes = (
+                    EmergencyBrokerWrite(
+                        parent_verb="cancel_all_orders",
+                        verb="cancel_all_orders",
+                        payload={
+                            "_op": "cancel_all_orders",
+                            "_emergency_target_order_ids": sorted(
+                                str(order["orderid"]) for order in cancellable
+                            ),
+                        },
+                    ),
+                )
+            else:
+                cancellable_ids = tuple(str(order["orderid"]) for order in cancellable) + cancellable_gtt_ids
+                overflow = max(1, len(cancellable_ids) - _EMERGENCY_BATCH_LIMIT)
+                writes = tuple(
+                    EmergencyBrokerWrite(
+                        parent_verb="cancel_all_orders",
+                        verb="cancel_order",
+                        payload={"_op": "cancel_order", "order_id": order_id},
+                    )
+                    for order_id in cancellable_ids[: min(_EMERGENCY_BATCH_LIMIT, overflow)]
+                )
+            return EmergencyReductionPlan(writes=writes, pending_verbs=frozenset(pending))
+
+        if "exit_all_positions" in pending:
+            if (
+                protected_non_exit
+                or missing_protected_exit_ids
+                or missing_protected_exit_tags
+            ):
+                return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+            if conflicting_active_orders:
+                conflicting_cancellable_ids = tuple(
+                    order_id
+                    for order_id in conflicting_active_orders
+                    if order_id not in protected_order_ids
+                )
+                return EmergencyReductionPlan(
+                    writes=tuple(
+                        EmergencyBrokerWrite(
+                            parent_verb="exit_all_positions",
+                            verb="cancel_order",
+                            payload={"_op": "cancel_order", "order_id": order_id},
+                        )
+                        for order_id in conflicting_cancellable_ids[:_EMERGENCY_BATCH_LIMIT]
+                    ),
+                    pending_verbs=frozenset(pending),
+                )
+            if not positions_requiring_exit:
+                return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+            exact_positions = positions_requiring_exit[:_EMERGENCY_BATCH_LIMIT]
+            return EmergencyReductionPlan(
+                writes=tuple(
+                    EmergencyBrokerWrite(
+                        parent_verb="exit_all_positions",
+                        verb="place_reducing_order",
+                        payload=M.to_emergency_reducing_payload(
+                            position,
+                            tag=self._emergency_exit_tag(position),
+                        ),
+                    )
+                    for position in exact_positions
+                ),
+                pending_verbs=frozenset(pending),
+            )
+
+        return EmergencyReductionPlan(writes=(), pending_verbs=frozenset(pending))
+
+    async def place_reducing_order(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+        *,
+        _router_token: object | None = None,
+    ) -> str | dict[str, Any]:
+        """Place one opposite-side order after a final signed-position check."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        symbol = str(payload.get("symbol") or "")
+        exchange = str(payload.get("exchange") or "").upper()
+        product = str(payload.get("product") or "").upper()
+        try:
+            expected_quantity = int(str(payload.get("expected_position_quantity") or "0"))
+            reducing_quantity = int(str(payload.get("quantity") or "0"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise BrokerError("Upstox reducing position quantity is invalid") from exc
+        if not symbol or not exchange or not product or expected_quantity == 0 or reducing_quantity <= 0:
+            raise BrokerError("Upstox reducing position fingerprint is incomplete")
+
+        current_positions = M.active_emergency_positions(await self.positions(session))
+        current = next(
+            (
+                position
+                for position in current_positions
+                if (
+                    position["symbol"],
+                    position["exchange"],
+                    position["product"],
+                )
+                == (symbol, exchange, product)
+            ),
+            None,
+        )
+        if current is None:
+            return {"order_ids": [], "errors": [], "total": 0, "success": 0}
+        current_quantity = int(str(current["quantity"]))
+        expected_action = "SELL" if expected_quantity > 0 else "BUY"
+        if (
+            current_quantity * expected_quantity <= 0
+            or abs(current_quantity) < reducing_quantity
+            or reducing_quantity != abs(expected_quantity)
+            or str(payload.get("action") or "").upper() != expected_action
+        ):
+            raise BrokerError("Upstox position changed before the reducing write")
+        tag = str(payload.get("emergency_tag") or "")
+        if not tag.startswith(_EMERGENCY_EXIT_TAG_PREFIX) or tag != self._emergency_exit_tag(current):
+            raise BrokerError("Upstox reducing position episode changed before dispatch")
+
+        from flinttrade_core.models import Order  # noqa: PLC0415
+
+        order = Order(
+            symbol=symbol,
+            action=expected_action,
+            exchange=exchange,
+            pricetype="MARKET",
+            product=product,
+            quantity=str(reducing_quantity),
+            price="0",
+            trigger_price="0",
+            variety="regular",
+            strategy="Emergency",
+        )
+        instrument_token = await self._resolve_instrument(session, symbol, exchange)
+        response = await self._call(
+            self._client(session).place_order,
+            M.to_place_order_params(order, instrument_token, tag=tag),
+        )
+        return M.extract_order_id(response)
 
     async def convert_position(
         self, session: Session, req: dict, *, _router_token: object | None = None
@@ -973,6 +1601,25 @@ class UpstoxAdapter(BrokerAdapter):
             keys.append(await self._resolve_instrument(session, name, exchange))
         return keys
 
+    @staticmethod
+    def _exact_option_greeks(resp: Any, keys: list[str]) -> dict[str, dict[str, Any]]:
+        """Return one complete broker row for every requested instrument key."""
+        if any(not key for key in keys) or len(keys) != len(set(keys)):
+            raise BrokerError("Upstox option-Greek request lacks unique instrument tokens")
+        by_key: dict[str, dict[str, Any]] = {}
+        try:
+            rows = M.from_upstox_option_greeks(resp)
+        except (M.UpstoxMappingError, TypeError, ValueError, OverflowError) as exc:
+            raise BrokerError("Upstox option-Greek response is invalid") from exc
+        for row in rows:
+            key = str(row.get("instrument_token") or "").strip()
+            if not key or key in by_key:
+                raise BrokerError("Upstox option-Greek response has an invalid instrument token")
+            by_key[key] = row
+        if set(by_key) != set(keys):
+            raise BrokerError("Upstox option-Greek response is incomplete")
+        return by_key
+
     async def ohlc_quotes(self, session: Session, symbols: list[str], interval: str = "1d") -> list[dict]:
         """Bulk OHLC quotes, up to 500 instruments (``GET /v3/market-quote/ohlc``)."""
         keys = await self._resolve_keys(session, symbols)
@@ -987,9 +1634,71 @@ class UpstoxAdapter(BrokerAdapter):
 
     async def option_greeks(self, session: Session, symbols: list[str]) -> list[dict]:
         """Option Greeks + IV per contract (``GET /v3/market-quote/option-greek``)."""
-        keys = await self._resolve_keys(session, symbols)
+        identities: list[tuple[str, str, str]] = []
+        for raw in symbols:
+            exchange, symbol = _split_symbol(raw)
+            key = await self._resolve_instrument(session, symbol, exchange)
+            identities.append((symbol, exchange, key))
+        keys = [identity[2] for identity in identities]
         resp = await self._call(self._client(session).option_greeks_v3, ",".join(keys))
-        return M.from_upstox_option_greeks(resp)
+        by_key = self._exact_option_greeks(resp, keys)
+        results: list[dict[str, Any]] = []
+        for symbol, exchange, key in identities:
+            row = by_key[key]
+            values = [float(row[field]) for field in ("delta", "gamma", "theta", "vega", "iv")]
+            if not row.get("greeks_complete") or not all(math.isfinite(value) for value in values):
+                raise BrokerError("Upstox option-Greek response lacks complete Greek values")
+            results.append({
+                "symbol": symbol,
+                "instrument_id": key,
+                "exchange": exchange,
+                "ltp": float(row["ltp"]),
+                "iv": values[4],
+                "delta": values[0],
+                "gamma": values[1],
+                "theta": values[2],
+                "vega": values[3],
+                "oi": int(row["oi"]),
+            })
+        return results
+
+    async def portfolio_greeks(
+        self,
+        session: Session,
+        positions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Read complete Delta/Vega rows by the exact portfolio instrument tokens."""
+        keys: list[str] = []
+        for position in positions:
+            supplied_key = str(position.get("instrument_id") or "").strip()
+            symbol = str(position.get("symbol") or "").strip()
+            exchange = str(position.get("exchange") or "").strip().upper()
+            if not symbol or not exchange:
+                raise BrokerError("Upstox option position lacks a canonical symbol or exchange")
+            resolved_key = str(await self._resolve_instrument(session, symbol, exchange)).strip()
+            if not resolved_key:
+                raise BrokerError("Upstox option position lacks an authoritative instrument token")
+            if supplied_key and supplied_key != resolved_key:
+                raise BrokerError("Upstox option position conflicts with its authoritative instrument token")
+            keys.append(resolved_key)
+        resp = await self._call(self._client(session).option_greeks_v3, ",".join(keys))
+        by_key = self._exact_option_greeks(resp, keys)
+
+        results: list[dict[str, Any]] = []
+        for position, key in zip(positions, keys, strict=True):
+            row = by_key[key]
+            delta = float(row["delta"])
+            vega = float(row["vega"])
+            if not row.get("greeks_complete") or not math.isfinite(delta) or not math.isfinite(vega):
+                raise BrokerError("Upstox option-Greek response lacks complete Delta/Vega values")
+            results.append({
+                "symbol": str(position.get("symbol") or ""),
+                "instrument_id": key,
+                "exchange": str(position.get("exchange") or "").upper(),
+                "delta": delta,
+                "vega": vega,
+            })
+        return results
 
     async def historical(self, session: Session, req: dict) -> Candles:
         from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
@@ -1033,11 +1742,27 @@ class UpstoxAdapter(BrokerAdapter):
         underlying = str(req.get("symbol") or req.get("underlying") or "")
         exchange = str(req.get("exchange", "NSE_INDEX"))
         expiry = str(req.get("expiry") or req.get("expiry_date") or "")
-        instrument_key = str(req.get("instrument_key") or await self._resolve_instrument(session, underlying, exchange))
+        instrument_key = await self._resolve_instrument(session, underlying, exchange)
+        supplied_instrument_key = req.get("instrument_key")
+        if supplied_instrument_key is not None and (
+            not isinstance(supplied_instrument_key, str)
+            or supplied_instrument_key.strip() != instrument_key
+        ):
+            raise BrokerError("Upstox option-chain instrument_key does not match the requested underlying")
         resp = await self._call(self._client(session).option_chain, instrument_key, expiry)
-        oc = M.to_option_chain_dict(underlying, exchange, resp)
+        oc = M.to_option_chain_dict(
+            underlying,
+            exchange,
+            resp,
+            requested_expiry=expiry,
+            requested_instrument_key=instrument_key,
+        )
         return OptionChain(
-            underlying=oc["underlying"], exchange=oc["exchange"],
+            underlying=oc["underlying"],
+            underlying_key=oc["underlying_key"],
+            exchange=oc["exchange"],
+            expiry=oc["expiry"],
+            spot_price=oc["spot_price"],
             strikes=[OptionChainStrike(**s) for s in oc["strikes"]],
         )
 
@@ -1163,16 +1888,23 @@ class UpstoxAdapter(BrokerAdapter):
 
         Fetches the order book, positions and holdings through this adapter's
         own reads and diffs them against the injected ``local_state_provider``
-        snapshot (empty until the engine wave wires the journal-backed
-        provider). A broker fetch failure is captured on the report's
+        snapshot (the engine wires a durable selector-scoped provider). A
+        broker fetch failure is captured on the report's
         ``error`` field instead of raised, so the runner retries next cycle.
         """
-        from flinttrade_gateway.reconciliation import EMPTY_LOCAL_STATE, build_report  # noqa: PLC0415
+        from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
+            EMPTY_LOCAL_STATE,
+            build_report,
+            declare_unavailable_order_fields,
+        )
 
         generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
-            broker_orders = await self.order_book(session)
+            broker_orders = declare_unavailable_order_fields(
+                await self.order_book(session),
+                fields=("variety", "validity", "strategy"),
+            )
             broker_positions = await self.positions(session)
             broker_holdings = await self.holdings(session)
         except (BrokerError, ValueError) as exc:  # ValueError covers the mapping-error classes

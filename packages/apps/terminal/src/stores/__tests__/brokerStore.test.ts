@@ -24,6 +24,17 @@ describe("brokerStore", () => {
     expect(state.activeAccountId).toBeNull();
   });
 
+  it("clears principal-derived account state", () => {
+    const account = makeAccount({ source: "native" });
+    useBrokerStore.getState().setAccounts([account]);
+    useBrokerStore.getState().setActiveAccount(brokerAccountKey(account));
+
+    useBrokerStore.getState().resetSessionState();
+
+    expect(useBrokerStore.getState().accounts).toEqual([]);
+    expect(useBrokerStore.getState().activeAccountId).toBeNull();
+  });
+
   describe("migrateBrokerPersist", () => {
     it("drops a legacy v0 bare activeAccountId (prevents wrong-source first-match)", () => {
       const out = migrateBrokerPersist({ accounts: [], activeAccountId: "CLIENT123" }, 0) as {

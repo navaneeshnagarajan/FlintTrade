@@ -207,8 +207,8 @@ class TestAddTick:
 
     def test_add_tick_mixed_sides_at_same_level(self):
         agg = _make_agg(tick_size=50.0)
-        agg.add_tick("NIFTY", 24500.0, 200, "BUY",  timestamp=_BASE_TS)
-        agg.add_tick("NIFTY", 24500.0, 80,  "SELL", timestamp=_BASE_TS + 10)
+        agg.add_tick("NIFTY", 24500.0, 200, "BUY", timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24500.0, 80, "SELL", timestamp=_BASE_TS + 10)
         bins = agg.get_footprint("NIFTY")
         lvl = next(b for b in bins if b.price_level == 24500.0)
         assert lvl.buy_volume == 200
@@ -232,17 +232,17 @@ class TestAddTick:
 class TestPerSymbolIsolation:
     def test_different_symbols_do_not_interfere(self):
         agg = _make_agg(tick_size=50.0)
-        agg.add_tick("NIFTY",     24500.0, 100, "BUY", timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=_BASE_TS)
         agg.add_tick("BANKNIFTY", 52000.0, 200, "SELL", timestamp=_BASE_TS)
 
         nifty_bins = agg.get_footprint("NIFTY")
-        bn_bins    = agg.get_footprint("BANKNIFTY")
+        bn_bins = agg.get_footprint("BANKNIFTY")
 
-        nifty_buy_total  = sum(b.buy_volume  for b in nifty_bins)
-        bn_sell_total    = sum(b.sell_volume for b in bn_bins)
+        nifty_buy_total = sum(b.buy_volume for b in nifty_bins)
+        bn_sell_total = sum(b.sell_volume for b in bn_bins)
 
         assert nifty_buy_total == 100
-        assert bn_sell_total   == 200
+        assert bn_sell_total == 200
 
     def test_unknown_symbol_returns_empty_list(self):
         agg = _make_agg()
@@ -250,7 +250,7 @@ class TestPerSymbolIsolation:
 
     def test_reset_single_symbol_preserves_others(self):
         agg = _make_agg(tick_size=50.0)
-        agg.add_tick("NIFTY",     24500.0, 100, "BUY", timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=_BASE_TS)
         agg.add_tick("BANKNIFTY", 52000.0, 200, "BUY", timestamp=_BASE_TS)
 
         agg.reset("NIFTY")
@@ -260,7 +260,7 @@ class TestPerSymbolIsolation:
 
     def test_reset_all_clears_all_symbols(self):
         agg = _make_agg(tick_size=50.0)
-        agg.add_tick("NIFTY",     24500.0, 100, "BUY", timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24500.0, 100, "BUY", timestamp=_BASE_TS)
         agg.add_tick("BANKNIFTY", 52000.0, 200, "BUY", timestamp=_BASE_TS)
         agg.reset()
         assert agg.get_footprint("NIFTY") == []
@@ -445,9 +445,9 @@ class TestCumulativeDelta:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bins = [
-            FootprintBucket(24500.0, 200, 100, 100,  int(_BASE_TS)),
-            FootprintBucket(24550.0, 100, 150, -50,  int(_BASE_TS) + 300),
-            FootprintBucket(24500.0, 300, 100, 200,  int(_BASE_TS) + 600),
+            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),
+            FootprintBucket(24550.0, 100, 150, -50, int(_BASE_TS) + 300),
+            FootprintBucket(24500.0, 300, 100, 200, int(_BASE_TS) + 600),
         ]
         result = OrderFlowAggregator.cumulative_delta(bins)
         assert result == [100.0, 50.0, 250.0]
@@ -460,13 +460,13 @@ class TestCumulativeDelta:
         day2_ts = int(_BASE_TS) + 24 * 3600
 
         bins = [
-            FootprintBucket(24500.0, 200, 100, 100,  int(_BASE_TS)),
-            FootprintBucket(24500.0, 300, 100, 200,  day2_ts),
+            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),
+            FootprintBucket(24500.0, 300, 100, 200, day2_ts),
         ]
         result = OrderFlowAggregator.cumulative_delta(bins)
         # After the day boundary, the running total resets to 0 then adds day2 delta
         assert result[0] == 100.0
-        assert result[1] == 200.0   # reset: 0 + 200 = 200
+        assert result[1] == 200.0  # reset: 0 + 200 = 200
 
     def test_length_matches_input(self):
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
@@ -498,9 +498,9 @@ class TestDetectPoc:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bins = [
-            FootprintBucket(24400.0, 100, 50,  50,  int(_BASE_TS)),       # total = 150
-            FootprintBucket(24500.0, 300, 200, 100, int(_BASE_TS)),       # total = 500
-            FootprintBucket(24600.0, 80,  20,  60,  int(_BASE_TS)),       # total = 100
+            FootprintBucket(24400.0, 100, 50, 50, int(_BASE_TS)),  # total = 150
+            FootprintBucket(24500.0, 300, 200, 100, int(_BASE_TS)),  # total = 500
+            FootprintBucket(24600.0, 80, 20, 60, int(_BASE_TS)),  # total = 100
         ]
         assert OrderFlowAggregator.detect_poc(bins) == 24500.0
 
@@ -509,9 +509,9 @@ class TestDetectPoc:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bins = [
-            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),        # total = 300
-            FootprintBucket(24500.0, 100, 50,  50,  int(_BASE_TS) + 300),  # total = 150
-            FootprintBucket(24600.0, 400, 0,   400, int(_BASE_TS)),        # total = 400
+            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),  # total = 300
+            FootprintBucket(24500.0, 100, 50, 50, int(_BASE_TS) + 300),  # total = 150
+            FootprintBucket(24600.0, 400, 0, 400, int(_BASE_TS)),  # total = 400
         ]
         # 24500 cumulative total = 300+150 = 450 > 24600 = 400
         assert OrderFlowAggregator.detect_poc(bins) == 24500.0
@@ -521,8 +521,8 @@ class TestDetectPoc:
         from flinttrade_data.orderflow_aggregator import FootprintBucket, OrderFlowAggregator
 
         bins = [
-            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),   # total = 300
-            FootprintBucket(24600.0, 200, 100, 100, int(_BASE_TS)),   # total = 300
+            FootprintBucket(24500.0, 200, 100, 100, int(_BASE_TS)),  # total = 300
+            FootprintBucket(24600.0, 200, 100, 100, int(_BASE_TS)),  # total = 300
         ]
         assert OrderFlowAggregator.detect_poc(bins) == 24500.0
 
@@ -571,7 +571,7 @@ class TestIntegration:
 
         # Some activity at other levels
         agg.add_tick("NIFTY", 24550.0, 100, "SELL", timestamp=_BASE_TS)
-        agg.add_tick("NIFTY", 24450.0, 200, "BUY",  timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24450.0, 200, "BUY", timestamp=_BASE_TS)
 
         bins = agg.get_footprint("NIFTY")
         poc = agg.detect_poc(bins)
@@ -579,9 +579,9 @@ class TestIntegration:
 
     def test_cumulative_delta_after_session(self):
         agg = _make_agg(time_bin_seconds=300, tick_size=50.0)
-        agg.add_tick("NIFTY", 24500.0, 300, "BUY",  timestamp=_BASE_TS)
+        agg.add_tick("NIFTY", 24500.0, 300, "BUY", timestamp=_BASE_TS)
         agg.add_tick("NIFTY", 24500.0, 100, "SELL", timestamp=_BASE_TS + 10)
-        agg.add_tick("NIFTY", 24500.0, 200, "BUY",  timestamp=_BASE_TS + 300)
+        agg.add_tick("NIFTY", 24500.0, 200, "BUY", timestamp=_BASE_TS + 300)
 
         bins = agg.get_footprint("NIFTY")
         cd = agg.cumulative_delta(bins)
@@ -601,6 +601,20 @@ class TestFeedMarketTick:
         from flinttrade_data.orderflow_aggregator import OrderFlowAggregator
 
         return OrderFlowAggregator()
+
+    def test_failed_accumulation_does_not_advance_the_cumulative_baseline(self):
+        agg = self._agg()
+        agg.feed_market_tick("NIFTY", 100.0, 100, timestamp=self._TS)
+
+        with pytest.raises(OverflowError):
+            agg.feed_market_tick("NIFTY", 1e308, 200, timestamp=self._TS + 1)
+
+        [identity_state] = agg.export_state()["identities"]
+        assert identity_state["last_tick"]["volume"] == 100
+
+        agg.feed_market_tick("NIFTY", 102.0, 225, timestamp=self._TS + 2)
+
+        assert sum(bucket.total_volume for bucket in agg.get_footprint("NIFTY")) == 125
 
     def test_first_tick_is_a_baseline_noop(self):
         agg = self._agg()
@@ -1081,6 +1095,24 @@ class TestRestoreCurrentSession:
         assert {bucket.quality for bucket in buckets} == {"estimated"}
         assert {bucket.provenance for bucket in buckets} == {"cumulative_quote_delta"}
 
+    @pytest.mark.parametrize(
+        "replay_method",
+        ["restore_current_session", "replay_current_session_tail"],
+    )
+    def test_replay_preserves_committed_ingest_order_when_source_time_regresses(
+        self,
+        replay_method,
+    ):
+        agg = self._agg()
+        rows = [
+            {**self._row(self._TS + 2, 200, ltp=102.0), "ingest_seq": 1},
+            {**self._row(self._TS + 1, 100, ltp=101.0), "ingest_seq": 2},
+        ]
+
+        getattr(agg, replay_method)(rows, now=self._TS + 3, max_ticks=10)
+
+        assert agg.get_footprint("NIFTY", exchange="NFO") == []
+
     def test_restore_is_idempotent_for_the_represented_identities(self):
         agg = self._agg()
         rows = [
@@ -1200,9 +1232,7 @@ class TestRestoreCurrentSession:
             return original_feed(instance, *args, **kwargs)
 
         monkeypatch.setattr(OrderFlowAggregator, "feed_market_tick", paused_scratch_replay)
-        restore = threading.Thread(
-            target=lambda: agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10)
-        )
+        restore = threading.Thread(target=lambda: agg.restore_current_session(rows, now=self._TS + 2, max_ticks=10))
         writer = threading.Thread(
             target=lambda: (
                 agg.feed_market_tick(
@@ -1285,11 +1315,45 @@ class TestRestartStateContract:
         assert tail_summary["restored_ticks"] == 3
         assert sum(bucket.total_volume for bucket in buckets) == 150
         assert {bucket.provenance for bucket in buckets} == {"cumulative_quote_delta"}
-        assert restarted.get_market_freshness(
+        assert (
+            restarted.get_market_freshness(
+                "NIFTY",
+                exchange="NFO",
+                now=self._TS + 7,
+            )["last_tick_timestamp"]
+            == self._TS + 6
+        )
+
+    def test_checkpoint_tail_replays_rows_from_each_retained_session(self):
+        source = self._agg()
+        source.feed_market_tick(
             "NIFTY",
+            100.0,
+            100,
             exchange="NFO",
-            now=self._TS + 7,
-        )["last_tick_timestamp"] == self._TS + 6
+            timestamp=self._TS,
+        )
+        next_session = self._TS + 24 * 60 * 60
+        restarted = self._agg()
+        restarted.restore_state(source.export_state(), now=next_session + 2)
+
+        restarted.replay_current_session_tail(
+            [
+                self._row(self._TS + 1, 200, ltp=101.0),
+                self._row(next_session, 50, ltp=102.0),
+                self._row(next_session + 1, 75, ltp=103.0),
+            ],
+            now=next_session + 2,
+            max_ticks=10,
+        )
+
+        [identity_state] = restarted.export_state()["identities"]
+        represented_volume = sum(
+            level["buy_volume"] + level["sell_volume"]
+            for bin_state in identity_state["bins"]
+            for level in bin_state["levels"]
+        )
+        assert represented_volume == 125
 
     def test_checkpoint_round_trip_preserves_exact_source_time_and_provenance(self):
         source = self._agg()
@@ -1327,6 +1391,188 @@ class TestRestartStateContract:
 
         buckets = agg.get_footprint("EXISTING", exchange="NSE")
         assert sum(bucket.total_volume for bucket in buckets) == 7
+
+    def test_live_state_rejects_price_level_beyond_restore_limit_before_mutation(
+        self,
+        monkeypatch,
+    ):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 2)
+        agg = self._agg()
+        agg.add_tick("NIFTY", 100.0, 1, "BUY", exchange="NFO", timestamp=self._TS)
+        agg.add_tick("NIFTY", 100.05, 1, "BUY", exchange="NFO", timestamp=self._TS)
+        agg.add_tick("NIFTY", 100.0, 1, "SELL", exchange="NFO", timestamp=self._TS)
+        before = agg.export_state()
+
+        with pytest.raises(ValueError, match="too many price levels"):
+            agg.add_tick("NIFTY", 100.10, 1, "BUY", exchange="NFO", timestamp=self._TS)
+
+        assert agg.export_state() == before
+
+    def test_price_level_cap_accounts_for_lru_identity_eviction(self, monkeypatch):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 1)
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=1)
+        agg.add_tick("OLD", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+
+        agg.add_tick("NEW", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS + 1)
+
+        assert agg.get_footprint("OLD", exchange="NSE") == []
+        assert {bucket.price_level for bucket in agg.get_footprint("NEW", exchange="NSE")} == {200.0}
+
+    @pytest.mark.parametrize("next_timestamp", [_TS + 60, _TS + 24 * 60 * 60])
+    def test_price_level_cap_accounts_for_bin_and_session_eviction(
+        self,
+        monkeypatch,
+        next_timestamp,
+    ):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 1)
+        agg = aggregator_module.OrderFlowAggregator(
+            time_bin_seconds=60,
+            max_retained_sessions=1,
+            max_bins_per_session=1,
+        )
+        agg.add_tick("NIFTY", 100.0, 1, "BUY", exchange="NFO", timestamp=self._TS)
+
+        agg.add_tick(
+            "NIFTY",
+            101.0,
+            1,
+            "BUY",
+            exchange="NFO",
+            timestamp=next_timestamp,
+        )
+
+        assert {bucket.price_level for bucket in agg.get_footprint("NIFTY", exchange="NFO")} == {101.0}
+
+    def test_rejected_price_level_does_not_mutate_lru_or_state(self, monkeypatch):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 2)
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=3)
+        agg.add_tick("A", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        agg.add_tick("B", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        before_state = agg.export_state()
+        before_lru = tuple(agg._identity_recency)
+
+        with pytest.raises(ValueError, match="too many price levels"):
+            agg.add_tick("C", 300.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+
+        assert agg.export_state() == before_state
+        assert tuple(agg._identity_recency) == before_lru
+
+    def test_rejected_feed_tick_does_not_mutate_lru_or_state(self, monkeypatch):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 2)
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=3)
+        agg.feed_market_tick("A", 100.0, 10, exchange="NSE", timestamp=self._TS)
+        agg.add_tick("A", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        agg.add_tick("B", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        before_state = agg.export_state()
+        before_lru = tuple(agg._identity_recency)
+
+        with pytest.raises(ValueError, match="too many price levels"):
+            agg.feed_market_tick("A", 101.0, 11, exchange="NSE", timestamp=self._TS + 1)
+
+        assert agg.export_state() == before_state
+        assert tuple(agg._identity_recency) == before_lru
+
+    def test_rejected_volume_overflow_does_not_mutate_lru_or_state(self):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=3)
+        agg.add_tick(
+            "A",
+            100.0,
+            aggregator_module._MAX_SAFE_VOLUME,
+            "BUY",
+            exchange="NSE",
+            timestamp=self._TS,
+        )
+        agg.add_tick("B", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        before_state = agg.export_state()
+        before_lru = tuple(agg._identity_recency)
+
+        with pytest.raises(ValueError, match="safe integer range"):
+            agg.add_tick("A", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+
+        assert agg.export_state() == before_state
+        assert tuple(agg._identity_recency) == before_lru
+
+    def test_non_retained_late_ticks_do_not_mutate_state_lru_or_feed_baseline(self):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        agg = aggregator_module.OrderFlowAggregator(
+            time_bin_seconds=60,
+            max_retained_sessions=1,
+            max_bins_per_session=1,
+            max_instruments=3,
+        )
+        agg.add_tick("A", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        agg.add_tick("B", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        before_state = agg.export_state()
+        before_lru = tuple(agg._identity_recency)
+        late_timestamp = self._TS - 24 * 60 * 60
+
+        agg.add_tick("A", 99.0, 1, "SELL", exchange="NSE", timestamp=late_timestamp)
+        agg.feed_market_tick("A", 99.0, 100, exchange="NSE", timestamp=late_timestamp)
+
+        assert agg.export_state() == before_state
+        assert tuple(agg._identity_recency) == before_lru
+
+    def test_restore_cap_accounts_for_lru_eviction_without_partial_mutation(
+        self,
+        monkeypatch,
+    ):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 1)
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=1)
+        agg.add_tick("OLD", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        rows = [
+            self._row(self._TS + 1, 1000, ltp=200.0),
+            self._row(self._TS + 2, 1100, ltp=201.0),
+        ]
+
+        agg.restore_current_session(
+            rows,
+            now=self._TS + 3,
+            max_ticks=10,
+            history_complete=True,
+        )
+
+        assert agg.get_footprint("OLD", exchange="NSE") == []
+        assert len(agg.get_footprint("NIFTY", exchange="NFO")) == 1
+
+    def test_rejected_restore_does_not_mutate_live_state_or_lru(self, monkeypatch):
+        import flinttrade_data.orderflow_aggregator as aggregator_module
+
+        monkeypatch.setattr(aggregator_module, "_MAX_STATE_PRICE_LEVELS", 2)
+        agg = aggregator_module.OrderFlowAggregator(max_instruments=3)
+        agg.add_tick("A", 100.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        agg.add_tick("B", 200.0, 1, "BUY", exchange="NSE", timestamp=self._TS)
+        rows = [
+            self._row(self._TS + 1, 1000, ltp=300.0),
+            self._row(self._TS + 2, 1100, ltp=301.0),
+        ]
+        before_state = agg.export_state()
+        before_lru = tuple(agg._identity_recency)
+
+        with pytest.raises(ValueError, match="too many price levels"):
+            agg.restore_current_session(
+                rows,
+                now=self._TS + 3,
+                max_ticks=10,
+                history_complete=True,
+            )
+
+        assert agg.export_state() == before_state
+        assert tuple(agg._identity_recency) == before_lru
 
 
 class TestConcurrentAccess:

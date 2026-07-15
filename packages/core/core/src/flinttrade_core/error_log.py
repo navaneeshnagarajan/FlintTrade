@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import threading
 import traceback as _traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -159,6 +160,7 @@ class ErrorLog:
             self._db_path = str(db_path)
 
         self._conn = duckdb.connect(self._db_path)
+        self._lock = threading.RLock()
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -167,9 +169,10 @@ class ErrorLog:
 
     def _init_schema(self) -> None:
         """Create table and indexes if they do not already exist."""
-        self._conn.execute(_CREATE_TABLE_SQL)
-        for idx_sql in _INDEX_SQL:
-            self._conn.execute(idx_sql)
+        with self._lock:
+            self._conn.execute(_CREATE_TABLE_SQL)
+            for idx_sql in _INDEX_SQL:
+                self._conn.execute(idx_sql)
 
     # ------------------------------------------------------------------
     # Write
@@ -219,26 +222,27 @@ class ErrorLog:
         if err_tb and err_tb.strip() in ("NoneType: None", "None"):
             err_tb = None
 
-        self._conn.execute(
-            """
-            INSERT INTO error_log
-                (entry_id, timestamp, route, method, status_code,
-                 request_body, error_class, error_message, traceback, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                entry_id,
-                timestamp,
-                route,
-                method,
-                status_code,
-                body_json,
-                err_class,
-                err_msg,
-                err_tb,
-                user_id,
-            ],
-        )
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO error_log
+                    (entry_id, timestamp, route, method, status_code,
+                     request_body, error_class, error_message, traceback, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    entry_id,
+                    timestamp,
+                    route,
+                    method,
+                    status_code,
+                    body_json,
+                    err_class,
+                    err_msg,
+                    err_tb,
+                    user_id,
+                ],
+            )
         logger.debug(
             "Error logged: entry_id=%s route=%s status=%d", entry_id, route, status_code
         )
@@ -265,20 +269,23 @@ class ErrorLog:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
 
-        rows = self._conn.execute(
-            """
-            SELECT entry_id, timestamp, route, method, status_code,
-                   request_body, error_class, error_message, traceback, user_id
-            FROM error_log
-            ORDER BY timestamp DESC
-            LIMIT ? OFFSET ?
-            """,
-            [limit, offset],
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT entry_id, timestamp, route, method, status_code,
+                       request_body, error_class, error_message, traceback, user_id
+                FROM error_log
+                ORDER BY timestamp DESC
+                LIMIT ? OFFSET ?
+                """,
+                [limit, offset],
+            ).fetchall()
 
         result: list[dict[str, Any]] = []
         for row in rows:
             ts = row[1]
+            if isinstance(ts, datetime) and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=IST)
             ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
             body = None
             if row[5] is not None:
@@ -302,6 +309,42 @@ class ErrorLog:
             )
         return result
 
+    def recent_metadata(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """Return only the fields approved for aggregate support diagnostics.
+
+        This deliberately does not select request bodies, exception messages,
+        tracebacks, entry identifiers or user identifiers from DuckDB.
+        """
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT timestamp, route, method, status_code, error_class
+                FROM error_log
+                ORDER BY timestamp DESC
+                LIMIT ? OFFSET ?
+                """,
+                [limit, offset],
+            ).fetchall()
+        return [
+            {
+                "timestamp": (
+                    row[0].replace(tzinfo=IST).isoformat()
+                    if isinstance(row[0], datetime) and row[0].tzinfo is None
+                    else row[0].isoformat()
+                    if isinstance(row[0], datetime)
+                    else str(row[0])
+                ),
+                "route": row[1],
+                "method": row[2],
+                "status_code": row[3],
+                "error_class": row[4],
+            }
+            for row in rows
+        ]
+
     def count(self, since: datetime | None = None) -> int:
         """Count persisted error entries.
 
@@ -314,13 +357,15 @@ class ErrorLog:
             Integer count of matching rows.
         """
         if since is not None:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM error_log WHERE timestamp >= ?", [since]
-            ).fetchone()
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM error_log WHERE timestamp >= ?", [since]
+                ).fetchone()
         else:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM error_log"
-            ).fetchone()
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM error_log"
+                ).fetchone()
         return int(row[0]) if row else 0
 
     # ------------------------------------------------------------------
@@ -329,7 +374,8 @@ class ErrorLog:
 
     def close(self) -> None:
         """Close the underlying DuckDB connection."""
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def __enter__(self) -> "ErrorLog":
         return self

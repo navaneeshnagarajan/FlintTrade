@@ -8,6 +8,32 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Managed local AI with Ollama** — FlintTrade can install a pinned official
+  Ollama server archive on explicit operator confirmation, verify its SHA-256,
+  run it as a loopback-only owned child on an unpredictable high port, manage
+  model pulls, require explicit digest acceptance into a locked model alias,
+  verify the loaded digest before releasing inference, and stop only the process
+  it started. LM Studio is no longer a named dependency; every persisted
+  LM Studio configuration migrates one-way to managed Ollama, while explicitly
+  configured generic OpenAI-compatible hosts retain the `custom` provider.
+  Runtime and model downloads remain opt-in and no model is bundled. Runtime
+  update/rollback/uninstall, model reclamation and durable admission receipts
+  keep timed-out control requests idempotently reconcilable. An explicitly
+  confirmed acknowledgement can release a proved indeterminate receipt only by
+  its exact operation and original admission IDs; it never retries the action or
+  infers success. Cross-process lease paths and destructive-operation cancellation
+  are fail-closed, and the terminal validates action-specific responses before
+  releasing an admission lock.
+- **Live Ditto runtime** — the Account Manager now owns real mirror status,
+  start/stop, risk snapshots, and an all-account emergency flatten. Mirrored
+  writes and kill-all actions use dedicated immutable `BrokerRouter`
+  generations and mint a fresh `SafetyContext`; source state is primed before
+  callbacks and runtime shutdown drains Ditto before shared routing
+  dependencies are retired.
+- **Email-OTP password recovery in the login screen** — the existing
+  enumeration-resistant password-reset routes are now reachable from the
+  signed-out UI, with six-digit-code filtering, password confirmation, bounded
+  errors, and session invalidation retained on the backend.
 - **AI backends — six supported, OpenClaw removed** — the OpenClaw external-
   gateway bridge is gone (bridge, `/ai/openclaw/*` routes, widget, exports).
   In its place a `flinttrade_ai.agent_backends` registry catalogues the six
@@ -285,6 +311,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **AI consolidation and lifecycle ownership** — the componentised RAG,
+  tiered memory, reflection, sentiment, multi-agent, and signal pipelines are
+  the canonical implementations; duplicate modules were retired only after
+  their unique refinements moved. RAG domain filtering is opt-in for the docs
+  corpus, and scheduled training/agents now respect dated exchange sessions
+  and process-owned shutdown.
 - **Read-only (analytics-token) broker sessions are demoted from the live
   write default** — a connect or daily re-login that comes back read-only can
   no longer become or remain `brokers.execution.default` or the vault primary.
@@ -310,6 +342,26 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Safety-critical runtime wave** — emergency flattening is selector-bound,
+  gated, generation-leased, and journalled; a durable-journal storage outage
+  now degrades the already-latched cancel/flatten operation to a process-local
+  write-ahead journal instead of vetoing exposure reduction, while durable
+  latch reset remains fail-closed. Live-order owners, SSE streams, strategy
+  children, retrainers, tick capture, and desktop sidecars are quiesced before
+  dependency teardown and retained for retry when a drain cannot be proved.
+- **Managed local-AI transitions fail closed under races and teardown** — one
+  bounded deadline covers process verification and shutdown, inconclusive
+  ownership is refused, Windows state reads are reparse-safe, and failed boot
+  stops the child before dependent teardown. Configuration changes are
+  revision-bound and rollback-checked; the terminal waits for hydration,
+  handles stored credentials explicitly and keeps runtime Stop available during
+  long start or model-pull operations.
+- **Market-state and persistence integrity** — indexed legacy DuckDB tick
+  schemas migrate safely, order-flow checkpoints bind to committed cursors and
+  source provenance, spread arithmetic validates before parallel execution,
+  and an unreachable OpenAlgo calendar no longer disarms calendar-independent
+  cron or Practice scheduling. Empty/malformed calendar envelopes remain
+  non-authoritative.
 - **Intraday P&L now books partial-close realised from the tradebook** — the
   widget split realised from positionbook alone, so a position partially closed
   earlier in the session showed zero realised (the booked amount was buried in
@@ -439,8 +491,8 @@ Versioning: [Semantic Versioning](https://semver.org/).
 - Strategy runner wired (`STRATEGY_RUNNER`/`CRON_SCHEDULER`) — `/api/v1/strategies`
   no longer 503s in production.
 - RiskSection sent rupee MTM values into the backend's *percentage* daily-loss fields
-  (kill switch could never fire) and sent 0 for blank fields (kill on any loss) — now
-  percentages, blanks omitted.
+  (the Layer 4 hard stop could never latch) and sent 0 for blank fields (hard stop on
+  any loss) — now percentages, blanks omitted.
 - StrategyMonitor no longer renders fabricated live P&L when a broker is connected.
 - Sandbox virtual-capital panel works end-to-end (status/adjust/export/import contracts
   aligned).

@@ -118,7 +118,14 @@ export default function AutomateRoute() {
             id={`automate-tabpanel-${activeSection}`}
             aria-labelledby={`automate-tab-${activeSection}`}
           >
-            <TabTransition tabKey={activeSection} className="p-6 max-w-4xl mx-auto">
+            <TabTransition
+              tabKey={activeSection}
+              className={
+                activeSection === "flows"
+                  ? "h-[calc(100vh-8rem)] p-3"
+                  : "p-6 max-w-4xl mx-auto"
+              }
+            >
               {sectionContent[activeSection]}
             </TabTransition>
           </div>

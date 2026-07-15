@@ -4,12 +4,15 @@
  */
 import { useState, useEffect } from "react";
 
-export function useCountdown(targetMs: number): string {
+export function useCountdown(targetMs: number | null): string {
   const [label, setLabel] = useState("");
 
   useEffect(() => {
+    if (targetMs === null) return;
+    const deadlineMs = targetMs;
+
     function compute() {
-      const diff = targetMs - Date.now();
+      const diff = deadlineMs - Date.now();
       if (diff <= 0) {
         setLabel("Now");
         return;
@@ -28,5 +31,5 @@ export function useCountdown(targetMs: number): string {
     return () => clearInterval(id);
   }, [targetMs]);
 
-  return label;
+  return targetMs === null ? "—" : label;
 }

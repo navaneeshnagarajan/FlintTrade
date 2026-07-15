@@ -26,6 +26,9 @@ dependencies = [
     # runtime. Without it those checks early-return "skipped" and the
     # _thread_baseline never gets set — see test_baseline_set_on_first_call.
     "psutil>=5.9",
+    # Official Ollama Linux archives are .tar.zst. Keep decompression in-process
+    # so a first-run install does not depend on a system `zstd`/`tar` binary.
+    "zstandard>=0.23",
 ]
 
 [project.scripts]

@@ -177,4 +177,18 @@ describe("useWebSocket", () => {
     // getWsService returns null for empty URL, so connect is not called
     expect(mockConnect).not.toHaveBeenCalled();
   });
+
+  it("does not connect without a browser-held OpenAlgo API key", () => {
+    _apiKey = "";
+
+    renderHook(() => useWebSocket());
+
+    expect(mockConnect).not.toHaveBeenCalled();
+  });
+
+  it("does not connect when the caller disables live market data", () => {
+    renderHook(() => useWebSocket([], "ltp", false));
+
+    expect(mockConnect).not.toHaveBeenCalled();
+  });
 });

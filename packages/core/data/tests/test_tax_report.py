@@ -137,8 +137,8 @@ class TestComputeSTT:
             TaxableTransaction("2025-01-20", "NIFTY25JANFUT", "NFO", "SELL", 50, 21800.0, "futures", 0, 21500.0),
         ]
         stt = generator.compute_stt(trades)
-        # Only sell side: 50 * 21800 * 0.0005 = 545.0 (updated April 2026 per Finance Act)
-        assert stt == pytest.approx(545.0, abs=0.01)
+        # Only sell side: 50 * 21800 * 0.0002 = 218.0 for 1 October 2024 to 31 March 2026.
+        assert stt == pytest.approx(218.0, abs=0.01)
 
     def test_options_stt_sell_only(self, generator: TaxReportGenerator) -> None:
         trades = [
@@ -146,8 +146,40 @@ class TestComputeSTT:
             TaxableTransaction("2025-01-15", "NIFTY25JAN21500CE", "NFO", "SELL", 50, 380.0, "options", 0, 250.0),
         ]
         stt = generator.compute_stt(trades)
-        # Only sell side: 50 * 380 * 0.0015 = 28.5 (updated April 2026 per Finance Act)
-        assert stt == pytest.approx(28.5, abs=0.01)
+        # Only sell side: 50 * 380 * 0.001 = 19.0 for 1 October 2024 to 31 March 2026.
+        assert stt == pytest.approx(19.0, abs=0.01)
+
+    @pytest.mark.parametrize(
+        ("trade_date", "segment", "rate"),
+        [
+            ("2024-09-30", "futures", 0.000125),
+            ("2024-09-30", "options", 0.000625),
+            ("2024-10-01", "futures", 0.0002),
+            ("2024-10-01", "options", 0.001),
+            ("2026-03-31", "futures", 0.0002),
+            ("2026-03-31", "options", 0.001),
+            ("2026-04-01", "futures", 0.0005),
+            ("2026-04-01", "options", 0.0015),
+        ],
+    )
+    def test_derivative_stt_uses_rate_effective_on_trade_date(
+        self,
+        generator: TaxReportGenerator,
+        trade_date: str,
+        segment: str,
+        rate: float,
+    ) -> None:
+        trade = TaxableTransaction(
+            trade_date,
+            "TEST",
+            "NFO",
+            "SELL",
+            10,
+            10_000.0,
+            segment,
+        )
+
+        assert generator.compute_stt([trade]) == pytest.approx(100_000 * rate, abs=0.01)
 
     def test_commodity_ctt(self, generator: TaxReportGenerator) -> None:
         trades = [
@@ -316,6 +348,7 @@ class TestComputePnlBySegment:
         assert summary.turnover == 0.0
         assert summary.tax_liability_estimated == 0.0
         assert summary.needs_audit is False
+        assert summary.audit_assessment == "incomplete"
 
 
 # ── generate_report ──────────────────────────────────────────────────────────
@@ -333,6 +366,40 @@ class TestGenerateReport:
         assert "summary" in report
         assert "segments" in report
         assert report["summary"]["fy"] == "2025-26"
+
+    def test_report_exposes_incomplete_assessment_and_methodology(
+        self,
+        generator: TaxReportGenerator,
+    ) -> None:
+        report = generator.generate_report([], "2025-26")
+        summary = report["summary"]
+
+        assert summary["audit_assessment"] == "incomplete"
+        assert "taxpayer-specific" in summary["audit_assessment_reason"]
+        assert "illustrative 30%" in summary["tax_estimate_methodology"]
+        assert "transaction date" in summary["stt_methodology"]
+        assert "Finance (No. 2) Act, 2024" in summary["stt_rate_provenance"]
+        assert "Finance Act, 2026" in summary["stt_rate_provenance"]
+        assert summary["stt_rate_schedule"] == [
+            {
+                "effective_from": None,
+                "effective_to": "2024-09-30",
+                "options_sell_rate": 0.000625,
+                "futures_sell_rate": 0.000125,
+            },
+            {
+                "effective_from": "2024-10-01",
+                "effective_to": "2026-03-31",
+                "options_sell_rate": 0.001,
+                "futures_sell_rate": 0.0002,
+            },
+            {
+                "effective_from": "2026-04-01",
+                "effective_to": None,
+                "options_sell_rate": 0.0015,
+                "futures_sell_rate": 0.0005,
+            },
+        ]
 
     def test_segment_trade_details(self, generator: TaxReportGenerator) -> None:
         trades = [
