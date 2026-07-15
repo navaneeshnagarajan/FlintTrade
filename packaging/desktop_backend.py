@@ -1223,7 +1223,15 @@ def _read_linux_process_table() -> dict[int, _PosixProcess]:
             if exc.errno in {errno.ENOENT, errno.ESRCH}:
                 continue
             raise OSError(f"could not read /proc/{pid}/stat") from exc
-        processes[pid] = _parse_linux_process_stat(pid, stat)
+        try:
+            processes[pid] = _parse_linux_process_stat(pid, stat)
+        except OSError:
+            # Kernel threads (kthreadd and friends report pgid/sid 0) and other
+            # unparseable rows can never belong to the backend's owned tree; a
+            # single such row must not poison the whole containment snapshot.
+            # A TRACKED pid absent from the table is retained fail-closed by
+            # the refresh, so skipping here never loses an owned process.
+            continue
     return processes
 
 
