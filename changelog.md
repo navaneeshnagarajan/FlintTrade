@@ -353,6 +353,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Action Centre crash recovery** — an approval left in the `dispatching`
+  state by a process that died mid-dispatch is now reconciled on queue open:
+  it is terminally closed as failed with `outcome_uncertain` set (the broker
+  outcome is genuinely unknown), so it is never silently re-dispatched nor
+  marked approved, and it no longer lingers as a phantom in-flight intent that
+  the pending-order expiry sweep cannot touch.
+- **Ditto emergency-flatten fail-safe** — when the managed-account kill-all
+  declines because the mirror cannot be quiesced in time, the mirror is now
+  guaranteed deactivated before the refusal surfaces, and the operator-facing
+  error names the account-wide kill switch as the escalation path.
 - **Safety-critical runtime wave** — emergency flattening is selector-bound,
   gated, generation-leased, and journalled; a durable-journal storage outage
   now degrades the already-latched cancel/flatten operation to a process-local
@@ -560,6 +570,16 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- **Superseded emergency dispatcher** — the unreferenced
+  `_dispatch_legacy_target` was dropped from the safety engine after
+  `_dispatch_planned_target` (a strict superset that adds intent settle /
+  mark-unknown / coordinated-lease handling) became the live path
+  `dispatch_prepared` calls. Removing the dead path keeps it unambiguous which
+  dispatcher the safety file actually runs.
+- **Unused Ollama loopback-port helper** — `_allocate_loopback_port` was never
+  wired as `OllamaRuntime`'s port allocator (which defaults to binding port 0
+  for a race-free OS-assigned ephemeral port), so the abandoned
+  bind-probe-then-rebind scaffolding was removed.
 - **Multi-user backend** (`/api/v1/users/*` CRUD + the `admin`/`trader`/`viewer`
   account manager, previously opt-in behind `FLINTTRADE_MULTI_USER`) — removed as
   overscope. FlintTrade is a single-operator personal-use tool (operator == user ==
