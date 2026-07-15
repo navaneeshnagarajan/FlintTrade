@@ -34,6 +34,10 @@ Versioning: [Semantic Versioning](https://semver.org/).
   enumeration-resistant password-reset routes are now reachable from the
   signed-out UI, with six-digit-code filtering, password confirmation, bounded
   errors, and session invalidation retained on the backend.
+- **Operator support diagnostics** — `GET /v1/support/diagnostics`
+  (scope-guarded, `admin.errors.read`) returns a privacy-collapsed snapshot for
+  bug reports: app version, platform, and aggregated recent client errors with
+  routes, methods, and error classes sanitised before they leave the backend.
 - **AI backends — six supported, OpenClaw removed** — the OpenClaw external-
   gateway bridge is gone (bridge, `/ai/openclaw/*` routes, widget, exports).
   In its place a `flinttrade_ai.agent_backends` registry catalogues the six
@@ -317,6 +321,13 @@ Versioning: [Semantic Versioning](https://semver.org/).
   their unique refinements moved. RAG domain filtering is opt-in for the docs
   corpus, and scheduled training/agents now respect dated exchange sessions
   and process-owned shutdown.
+- **One Practice paper engine** — the engine-package `SandboxEngine` and its
+  `/v1/sandbox-config` blueprint were retired after their unique capabilities
+  (leverage-aware `SandboxConfig` and margin estimation, pending
+  LIMIT/SL/SL-M fills, trades ledger, daily P&L history, square-off) moved
+  into the canonical data-package `SandboxEngine` behind the existing
+  `/v1/sandbox` surface. Practice dispatch, the strategy sandbox, and the
+  terminal Practice controls now share the single engine.
 - **Read-only (analytics-token) broker sessions are demoted from the live
   write default** — a connect or daily re-login that comes back read-only can
   no longer become or remain `brokers.execution.default` or the vault primary.
@@ -378,8 +389,9 @@ Versioning: [Semantic Versioning](https://semver.org/).
   --maxWorkers=1 --no-file-parallelism`, fork-per-file isolation caps peak
   memory at the heaviest single file) with an 8 GB heap.
 - **Practice fills no longer fabricate a position at price 0.0** — both paper
-  engines (`flinttrade_data.SandboxEngine` — the Practice dispatch target — and
-  `flinttrade_engine.SandboxEngine` — the strategy/router sandbox) rejected
+  engines at the time (`flinttrade_data.SandboxEngine` — the Practice dispatch
+  target — and the since-retired `flinttrade_engine.SandboxEngine`, now folded
+  into the data engine) rejected
   nothing when a MARKET order arrived without a live price, so the fill booked
   at 0.0 (a zero-notional order that also skipped the capital check) and created
   a position at an average price of zero. Both engines now reject a
