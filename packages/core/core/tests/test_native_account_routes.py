@@ -109,7 +109,10 @@ def _wait_for_candidate_attempt_to_finish() -> None:
     with routes._CANDIDATE_RUNNER_LOCK:  # noqa: SLF001
         attempt = routes._ACTIVE_CANDIDATE_ATTEMPT  # noqa: SLF001
     if attempt is not None:
-        assert attempt.done.wait(2.0)
+        # Cleanup barrier only — the behavioural deadlines are asserted by the
+        # callers. The abandoned attempt's thread can be scheduled very late on
+        # a fully loaded CI runner, so give it a generous window.
+        assert attempt.done.wait(15.0)
 
 
 def test_disable_broker_routing_times_out_before_mutating_under_generation_contention(client):
