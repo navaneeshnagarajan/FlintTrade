@@ -8,6 +8,14 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Web UI as a first-class surface** — the backend already serves the built
+  terminal at `/`; `FLINTTRADE_BACKEND_HOST` now selects the bind interface for
+  the standalone serve path (for example a Tailscale tailnet IP) so a plain
+  browser on another machine is a full client. Non-loopback binds fail closed
+  until the operator account exists or `FLINTTRADE_API_KEY` is set — loopback's
+  unauthenticated trust never crosses the network — and the desktop sidecar
+  path stays loopback-locked. An authenticated GET may rehydrate the OpenAlgo
+  connection remotely; configuration writes remain loopback-only.
 - **Managed local AI with Ollama** — FlintTrade can install a pinned official
   Ollama server archive on explicit operator confirmation, verify its SHA-256,
   run it as a loopback-only owned child on an unpredictable high port, manage
