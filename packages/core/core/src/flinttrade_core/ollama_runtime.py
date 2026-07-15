@@ -2082,19 +2082,6 @@ def _managed_child_environment(
     return environment
 
 
-def _allocate_loopback_port() -> int:
-    """Select an unpredictable free high port for the private child endpoint."""
-    for _attempt in range(64):
-        port = 49152 + secrets.randbelow(65536 - 49152)
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
-                reservation.bind(("127.0.0.1", port))
-        except OSError:
-            continue
-        return port
-    raise OllamaRuntimeError("could not allocate a private Ollama endpoint")
-
-
 class OllamaRuntime:
     """Own the downloaded Ollama server and its child-process lifecycle."""
 
