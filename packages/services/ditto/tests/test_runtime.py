@@ -1457,6 +1457,31 @@ def test_kill_all_waits_for_in_flight_delta_and_blocks_callbacks_after_flatten()
     assert owners[0].router.calls == [("openalgo", "target", 2)]
 
 
+def test_kill_all_deactivates_the_mirror_when_quiesce_refuses() -> None:
+    accounts = [_account("master", is_master=True), _account("target")]
+    runtime = DittoRuntime(
+        account_provider=lambda: accounts,
+        watcher_factory=lambda _account: _FakeWatcher(accounts[0]),
+        router_owner_factory=lambda selected, actor: _FakeRouterOwner(selected, actor),
+    )
+
+    def _refuse(*, timeout: float) -> dict[str, Any]:
+        del timeout
+        raise DittoCapabilityUnavailable("mirror dispatch did not quiesce")
+
+    # Emulate a live mirror whose stop() refuses before flipping _active — the
+    # "starting"/"stopping" guards do exactly this. The flatten must still leave
+    # the mirror deactivated so it cannot keep issuing orders during escalation.
+    runtime._active = True  # noqa: SLF001 - emulate a live mirror
+    runtime.stop = _refuse  # type: ignore[assignment]
+
+    with pytest.raises(DittoCapabilityUnavailable, match="account-wide kill switch") as exc_info:
+        runtime.kill_all(actor_id="operator-1", jti="jwt-kill", reason="flatten")
+
+    assert "deactivated" in str(exc_info.value)
+    assert runtime._active is False  # noqa: SLF001
+
+
 def test_kill_all_includes_disabled_accounts_and_reports_partial_outcome() -> None:
     accounts = [_account("one"), _account("two", enabled=False), _account("three")]
     owners: list[_FakeRouterOwner] = []

@@ -1091,8 +1091,18 @@ class DittoRuntime:
         try:
             self.stop(timeout=max(0.0, deadline - time.monotonic()))
         except Exception as exc:
+            # The flatten is declined when the mirror cannot be drained in time:
+            # flattening around a still-racing mirror order could silently
+            # re-open a position the operator believes is closed. Guarantee the
+            # mirror is deactivated before surfacing the refusal — stop() flips
+            # this on the drain-timeout path, but its early "starting"/"stopping"
+            # guards raise beforehand — so it cannot keep issuing orders while
+            # the operator escalates to the account-wide kill switch.
+            with self._lock:
+                self._active = False
             raise DittoCapabilityUnavailable(
-                "active Ditto mirroring could not be quiesced before emergency flattening"
+                "active Ditto mirroring could not be quiesced before emergency flattening; "
+                "the mirror has been deactivated — escalate to the account-wide kill switch"
             ) from exc
         with self._one_shot_lock:
             if not self._retry_retained_router_owners(deadline=deadline):
