@@ -10,10 +10,21 @@ name: Desktop Release
 # Each job freezes the Python backend into a sidecar (PyInstaller), then bundles
 # it inside a Tauri 2 shell. See docs/DESKTOP.md and packaging/.
 #
-# Trigger: run manually (workflow_dispatch), optionally providing a release tag.
-# Version-tag pushes are intentionally not used here because the matrix includes
-# macOS and Windows runners; repo CI policy keeps expensive runners behind
-# manual or scheduled execution only.
+# Trigger: dispatched by release-please.yml with the new tag after a release
+# PR merges, or run manually (workflow_dispatch). Version-tag pushes are
+# intentionally not used here because tags created by release-please's
+# GITHUB_TOKEN cannot trigger tag-push workflows, and repo CI policy keeps
+# expensive runners behind explicit or scheduled execution only.
+#
+# Signing is secrets-gated and dormant until the secrets exist:
+#   • APPLE_CERTIFICATE (base64 .p12) + APPLE_CERTIFICATE_PASSWORD +
+#     APPLE_SIGNING_IDENTITY, and APPLE_ID + APPLE_PASSWORD + APPLE_TEAM_ID
+#     for notarisation — macOS ships unsigned without them (Gatekeeper:
+#     right-click → Open on first launch; documented in docs/DESKTOP.md).
+#   • TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) — the free minisign updater key,
+#     unrelated to Apple signing. When present, updater artifacts (.sig,
+#     .app.tar.gz) and latest.json are produced so tauri-plugin-updater can
+#     one-click update on every platform.
 
 on:
   workflow_dispatch:
@@ -168,30 +179,57 @@ jobs:
           TARGET_TRIPLE: ${{ matrix.target }}
         run: bash packaging/build-backend.sh
 
-      # --- Signing/notarisation hooks ------------------------------------
-      - name: Report signing mode
+      # --- Signing/notarisation (dormant until secrets exist) -------------
+      - name: Import Apple signing certificate
+        if: contains(matrix.target, 'apple')
         shell: bash
         env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          if [[ "${{ matrix.target }}" == *apple* && -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
-            echo "macOS signing identity is configured; Tauri may sign according to bundle settings."
-          elif [[ "${{ matrix.target }}" == *windows* && -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" ]]; then
-            echo "Windows signing certificate is configured; Tauri may sign according to bundle settings."
-          else
-            echo "No signing secret configured for ${{ matrix.label }}; continuing with an unsigned beta installer."
+          if [[ -z "${APPLE_CERTIFICATE:-}" ]]; then
+            echo "No Apple certificate secret; building an unsigned macOS bundle."
+            exit 0
           fi
+          KEYCHAIN_PATH="$RUNNER_TEMP/flinttrade-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          echo "Apple signing certificate imported."
 
       # --- Bundle the Tauri desktop app ----------------------------------
       - name: Build desktop installers
         shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          # Tauri reads the APPLE_*/TAURI_SIGNING_* env vars directly; an empty
+          # value must be absent, not empty, or it attempts signing with it.
+          for var in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
+                     TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [[ -z "${!var:-}" ]]; then unset "$var"; fi
+          done
           BUNDLE_ARGS=()
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             # WiX/MSI rejects beta SemVer like 0.6.0-beta.1; NSIS produces the
             # Windows .exe installer without flattening the public version.
             BUNDLE_ARGS+=(--bundles nsis)
+          fi
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            # Updater artifacts need the minisign key to produce .sig files.
+            BUNDLE_ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
           fi
           pnpm --filter @flinttrade/desktop tauri build --target ${{ matrix.target }} "${BUNDLE_ARGS[@]}"
 
@@ -203,10 +241,13 @@ jobs:
           OUT="dist-installers"
           mkdir -p "$OUT"
           BUNDLE="packages/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
-          # Copy every produced installer, ignoring missing per-OS types.
+          # Copy every produced installer plus updater artifacts (.sig
+          # signatures and the macOS .app.tar.gz updater bundle), ignoring
+          # missing per-OS types.
           find "$BUNDLE" -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.sig' -o -name '*.app.tar.gz' \) \
             -exec cp {} "$OUT/" \; 2>/dev/null || true
           COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
           if [ "$COUNT" -eq 0 ]; then
@@ -243,7 +284,8 @@ jobs:
           mkdir -p dist-installers
           find release-artifacts -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.sig' -o -name '*.app.tar.gz' \) \
             -exec cp {} dist-installers/ \;
           COUNT="$(find dist-installers -type f | wc -l | tr -d ' ')"
           if [ "$COUNT" -eq 0 ]; then
@@ -370,6 +412,53 @@ jobs:
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
+
+          # Tauri updater manifest (latest.json) — only when the build was
+          # updater-signed (a .sig exists per updatable platform artifact).
+          sig_files = {path.name: path.read_text(encoding="utf-8").strip() for path in root.glob("*.sig")}
+          if sig_files:
+              platform_kinds = {
+                  "darwin-aarch64": (".app.tar.gz", ("aarch64", "arm64"), None),
+                  "darwin-x86_64": (".app.tar.gz", ("x86_64", "x64"), None),
+                  "windows-x86_64": (".exe", ("x86_64", "x64", "setup"), "setup"),
+                  "linux-x86_64": (".appimage", ("x86_64", "amd64"), None),
+                  "linux-aarch64": (".appimage", ("aarch64", "arm64"), None),
+              }
+              platforms = {}
+              for platform_key, (suffix, arch_tokens, required_token) in platform_kinds.items():
+                  for path in sorted(root.iterdir()):
+                      lower = path.name.lower()
+                      if not lower.endswith(suffix.lower()):
+                          continue
+                      if required_token and required_token not in lower:
+                          continue
+                      if not any(token in lower for token in arch_tokens):
+                          continue
+                      signature = sig_files.get(path.name + ".sig")
+                      if signature is None:
+                          continue
+                      platforms[platform_key] = {
+                          "signature": signature,
+                          "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}",
+                      }
+                      break
+              missing_platforms = sorted(set(platform_kinds) - set(platforms))
+              if missing_platforms:
+                  raise SystemExit(
+                      "Updater signing is enabled but latest.json is missing platforms: "
+                      + ", ".join(missing_platforms)
+                  )
+              latest = {
+                  "version": version,
+                  "notes": f"FlintTrade {tag} — see {manifest['html_url']}",
+                  "pub_date": manifest["published_at"],
+                  "platforms": platforms,
+              }
+              (root / "latest.json").write_text(
+                  json.dumps(latest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+              )
+          else:
+              print("No updater signatures present; skipping latest.json (TAURI_SIGNING_PRIVATE_KEY unset).")
           PY
 
           cat dist-installers/flinttrade-desktop-manifest.json
@@ -379,7 +468,37 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: dist-installers/*
-          draft: true
+          draft: false
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           overwrite_files: true
           fail_on_unmatched_files: true
+
+      - name: Update the rolling channel manifest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          # Stable per-channel URLs that survive domain moves: the installer
+          # scripts and the in-app updater fetch
+          #   releases/download/updater-<channel>/flinttrade-desktop-manifest.json
+          #   releases/download/updater-<channel>/latest.json
+          # instead of any first-party web host. /releases/latest/download only
+          # resolves non-prerelease tags, so betas need this rolling release.
+          case "$TAG_NAME" in
+            *-*) CHANNEL="beta" ;;
+            *)   CHANNEL="stable" ;;
+          esac
+          ROLLING="updater-${CHANNEL}"
+          ASSETS=(dist-installers/flinttrade-desktop-manifest.json dist-installers/SHA256SUMS.txt)
+          if [[ -f dist-installers/latest.json ]]; then
+            ASSETS+=(dist-installers/latest.json)
+          fi
+          if ! gh release view "$ROLLING" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$ROLLING" --repo "$GITHUB_REPOSITORY" \
+              --title "FlintTrade ${CHANNEL} channel manifest" \
+              --notes "Rolling pointer to the newest ${CHANNEL} release. Do not download installers from here; they live on the versioned releases." \
+              --prerelease --latest=false
+          fi
+          gh release upload "$ROLLING" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Rolling ${ROLLING} manifest now points at ${TAG_NAME}."
