@@ -199,8 +199,8 @@ def test_openalgo_config_hot_reload_reconfigures_the_shared_client_in_place(monk
     assert shared_client._base == "https://openalgo.example:5443/api/v1"
 
 
-def test_openalgo_config_get_rejects_non_loopback_and_never_leaks_key(monkeypatch, tmp_path):
-    """An authenticated GET still refuses non-loopback callers before reading secrets."""
+def test_openalgo_config_unauthenticated_remote_get_rejected_without_leaking_key(monkeypatch, tmp_path):
+    """A non-loopback GET without credentials is refused before reading secrets."""
     monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
     (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
@@ -219,12 +219,61 @@ def test_openalgo_config_get_rejects_non_loopback_and_never_leaks_key(monkeypatc
 
     response = app.test_client().get(
         "/v1/config/openalgo",
-        headers={"X-API-Key": "unit-backend-key"},
         environ_overrides={"REMOTE_ADDR": "203.0.113.5"},
     )
 
     assert response.status_code == 403
     assert "secret-bridge-key" not in response.get_data(as_text=True)
+
+
+def test_openalgo_config_authenticated_remote_get_rehydrates_key(monkeypatch, tmp_path):
+    """A remote web terminal with a session JWT may rehydrate its OpenAlgo connection."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("FLINTTRADE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENALGO_API_KEY", raising=False)
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core import auth_routes
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+    app.config["AUTH_SERVICE"].is_setup = MagicMock(return_value=True)
+    Workspace().set("openalgo.api_key", "tailnet-session-secret")
+    monkeypatch.setattr(auth_routes, "decode_token", lambda _token: {"type": "session"})
+
+    response = app.test_client().get(
+        "/v1/config/openalgo",
+        headers={"Authorization": "Bearer signed-operator-session"},
+        environ_overrides={"REMOTE_ADDR": "100.64.0.5"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["api_key"] == "tailnet-session-secret"
+
+
+def test_openalgo_config_authenticated_remote_post_still_rejected(monkeypatch, tmp_path):
+    """Writes stay loopback-only even for an authenticated remote caller."""
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setenv("FLINTTRADE_API_KEY", "unit-backend-key")
+    (tmp_path / "master_password").write_text("pytest-master-password", encoding="utf-8")
+
+    from flinttrade_core.app import create_flask_app
+    from flinttrade_core.workspace import Workspace
+
+    app = create_flask_app()
+    app.config["TESTING"] = True
+
+    response = app.test_client().post(
+        "/v1/config/openalgo",
+        headers={"X-API-Key": "unit-backend-key"},
+        json={"api_key": "remote-write-attempt", "host": "http://127.0.0.1"},
+        environ_overrides={"REMOTE_ADDR": "100.64.0.5"},
+    )
+
+    assert response.status_code == 403
+    assert Workspace().get("openalgo.api_key", "") != "remote-write-attempt"
 
 
 def test_openalgo_config_endpoint_rejects_invalid_ports(monkeypatch, tmp_path):

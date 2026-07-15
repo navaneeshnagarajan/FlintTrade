@@ -76,6 +76,27 @@ cd packages/apps/terminal
 npm run dev      # Terminal on http://localhost:5173
 ```
 
+### Web UI (no desktop app)
+
+The backend serves the built terminal itself, so a plain browser is a full
+client. Build the terminal once (`cd packages/apps/terminal && npm run build`),
+then `make start` and open http://127.0.0.1:5100.
+
+To reach it from another machine (for example over Tailscale), bind the backend
+to that interface:
+
+```bash
+FLINTTRADE_BACKEND_HOST=<tailnet-ip> make start
+```
+
+Non-loopback binds fail closed: the backend refuses to start until the operator
+account exists (complete setup locally first) or `FLINTTRADE_API_KEY` is set,
+and every remote request must carry a session JWT or that API key. Settings
+writes such as OpenAlgo and LLM configuration stay loopback-only — change those
+at the machine that runs the backend. Live market data streams from OpenAlgo's
+WebSocket directly, so point the OpenAlgo host configuration at an address the
+remote browser can also reach.
+
 ## 6. Start Building
 
 Read [`contributing.md`](../../contributing.md) for the contribution flow, then check the [issue tracker](https://github.com/navaneeshnagarajan/FlintTrade/issues) — the `good first issue` label is a good place to land your first PR. If you use a CLAUDE-aware or AGENTS-aware coding agent (Claude Code, Cursor, Aider, Continue, Codex, etc.), run `bash scripts/setup-agent-context.sh` once to scaffold your machine-local agent context.

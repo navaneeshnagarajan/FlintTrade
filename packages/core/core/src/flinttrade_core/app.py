@@ -153,6 +153,17 @@ def _resolve_backend_port() -> int:
     return port
 
 
+def _resolve_backend_host() -> str:
+    """Resolve the standalone backend bind host from env, then loopback.
+
+    ``FLINTTRADE_BACKEND_HOST`` lets the operator expose the web surface on a
+    routable interface (for example a Tailscale tailnet IP) so a browser on
+    another machine is a full client. The desktop sidecar serve path
+    (``flinttrade_core.desktop``) does not read this and stays loopback-only.
+    """
+    return os.environ.get("FLINTTRADE_BACKEND_HOST", "").strip() or "127.0.0.1"
+
+
 class _RuntimeRequestAdmission:
     """One idempotently releasable request admitted by the runtime tracker."""
 
@@ -4412,11 +4423,13 @@ def create_flask_app(
     def _set_openalgo_config() -> Any:
         """Persist OpenAlgo connection settings from the UI.
 
-        Security: this setup-exempt route remains loopback-only. Before the
-        operator account exists, GET returns redacted metadata and POST must
-        carry an explicit OpenAlgo API key. After setup, both methods require
-        a session JWT or the configured backend/OpenAlgo API key; only an
-        authenticated GET may return the raw key for the local WebSocket.
+        Security: writes and unauthenticated status probes are loopback-only.
+        Before the operator account exists, GET returns redacted metadata and
+        POST must carry an explicit OpenAlgo API key. After setup, both
+        methods require a session JWT or the configured backend/OpenAlgo API
+        key. An authenticated GET may cross the network so a remote web
+        terminal (e.g. over Tailscale) can rehydrate its OpenAlgo connection;
+        it is the only shape that returns the raw key.
 
         Request JSON: ``{"api_key": "...", "host": "...", "port": 5000, "ws_port": 8765}``
         """
@@ -4431,15 +4444,16 @@ def create_flask_app(
             return port_value
 
         remote = request.remote_addr or ""
-        if remote not in ("127.0.0.1", "::1", "localhost"):
+        remote_is_loopback = remote in ("127.0.0.1", "::1", "localhost")
+        authenticated = _openalgo_config_request_authenticated()
+        if not remote_is_loopback and (request.method != "GET" or not authenticated):
             return jsonify(
                 {
                     "status": "error",
-                    "message": "This endpoint is only reachable from localhost",
+                    "message": "Only an authenticated GET may use this endpoint remotely",
                 }
             ), 403
 
-        authenticated = _openalgo_config_request_authenticated()
         auth_service = app.config.get("AUTH_SERVICE")
         try:
             operator_is_setup = bool(auth_service is None or auth_service.is_setup())
@@ -5077,7 +5091,7 @@ class _FlaskServerOwner:
         return True
 
 
-def _run_flask_server(app: Flask, port: int = 5100) -> _FlaskServerOwner:
+def _run_flask_server(app: Flask, port: int = 5100, host: str = "127.0.0.1") -> _FlaskServerOwner:
     """Bind and run the Flask API server under an explicit lifecycle owner.
 
     Uses Waitress — a pure-Python, cross-platform production WSGI server
@@ -5088,7 +5102,23 @@ def _run_flask_server(app: Flask, port: int = 5100) -> _FlaskServerOwner:
     Args:
         app: Flask application instance.
         port: Port to bind (default 5100).
+        host: Interface to bind (default loopback). Non-loopback binds are
+            refused unless operator authentication is configured, because
+            loopback requests are trusted unauthenticated when no API key is
+            set — that trust must never extend to a routable interface.
     """
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        auth_service = app.config.get("AUTH_SERVICE")
+        try:
+            operator_ready = bool(auth_service is not None and auth_service.is_setup())
+        except Exception:  # noqa: BLE001 - an unreadable auth store fails closed
+            operator_ready = False
+        if not operator_ready and not os.environ.get("FLINTTRADE_API_KEY", "").strip():
+            raise RuntimeError(
+                f"Refusing to bind FlintTrade to non-loopback host {host!r} without "
+                "authentication: create the operator account first (open the app on "
+                "this machine and complete setup) or set FLINTTRADE_API_KEY."
+            )
     try:
         from waitress.server import create_server  # noqa: PLC0415
     except ImportError:
@@ -5097,7 +5127,7 @@ def _run_flask_server(app: Flask, port: int = 5100) -> _FlaskServerOwner:
         logger.warning(
             "Waitress not installed; falling back to Werkzeug dev server. Install with: pip install waitress"
         )
-        server = make_server("127.0.0.1", port, app, threaded=True)
+        server = make_server(host, port, app, threaded=True)
 
         def close_werkzeug() -> None:
             server.shutdown()
@@ -5124,7 +5154,7 @@ def _run_flask_server(app: Flask, port: int = 5100) -> _FlaskServerOwner:
                 app,
                 map=socket_map,
                 _dispatcher=dispatcher,
-                host="127.0.0.1",
+                host=host,
                 port=port,
                 ident="FlintTrade",
                 threads=8,
@@ -5152,7 +5182,7 @@ def _run_flask_server(app: Flask, port: int = 5100) -> _FlaskServerOwner:
         )
 
     owner.start()
-    logger.info("FlintTrade API server started on http://127.0.0.1:%d", port)
+    logger.info("FlintTrade API server started on http://%s:%d", host, port)
 
     # Arm the daily session-refresh jobs (G5) on the serve path only, so
     # create_flask_app stays side-effect-light for tests.
@@ -5922,7 +5952,11 @@ class FlintTradeApp:
             startup_owners.acquire("Telegram", rollback_telegram)
         tick_capture_enabled = _tick_capture_enabled()
         _set_tick_capture_intent(flask_app, tick_capture_enabled)
-        flask_server_owner = _run_flask_server(flask_app, port=_resolve_backend_port())
+        flask_server_owner = _run_flask_server(
+            flask_app,
+            port=_resolve_backend_port(),
+            host=_resolve_backend_host(),
+        )
         self._flask_server_owner = flask_server_owner
         if flask_server_owner is not None:
             async def rollback_flask_listener(deadline: _LifecycleDeadline) -> bool:

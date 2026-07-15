@@ -37,6 +37,7 @@ endif
 
 OPENALGO_PORT ?= 5000
 FLINTTRADE_BACKEND_PORT ?= 5100
+FLINTTRADE_BACKEND_HOST ?= 127.0.0.1
 ifeq ($(OS),Windows_NT)
   OPENALGO_PID := $(TEMP)/flinttrade-openalgo.pid
 else
@@ -62,7 +63,7 @@ check-python: ## Verify Python >= 3.11 (required for StrEnum)
 
 start: ## Start FlintTrade backend API (standalone; OpenAlgo is optional)
 	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
-	@echo "  Backend: http://127.0.0.1:$(FLINTTRADE_BACKEND_PORT)"
+	@echo "  Backend: http://$(FLINTTRADE_BACKEND_HOST):$(FLINTTRADE_BACKEND_PORT)"
 	@echo ""
 	PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app
 
