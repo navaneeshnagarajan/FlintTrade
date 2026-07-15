@@ -15,6 +15,8 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
+
 from flinttrade_gateway.registry import BrokerRegistry
 from flinttrade_gateway.session import BrokerSession
 
@@ -2094,8 +2096,15 @@ def test_every_production_order_check_supplies_l1_and_l3_market_inputs() -> None
     assert not missing, "Production SafetySystem checks have inert market inputs:\n" + "\n".join(missing)
 
 
+@pytest.mark.timeout(300)
 def test_order_checks_never_pass_current_portfolio_greeks_as_prospective_risk() -> None:
-    """Layer 3 must consume ``admission_for`` outputs, including through helpers."""
+    """Layer 3 must consume ``admission_for`` outputs, including through helpers.
+
+    The whole-repo AST sweep takes ~65s alone on the CI runner; under the
+    4-way xdist load it reliably crosses CI's global ``--timeout=60``, whose
+    thread method kills the entire worker (reported as "worker crashed").
+    The override keeps the deep scan instead of trimming its coverage.
+    """
     offenders: list[str] = []
     for source_root in (_REPO_ROOT / "packages").glob("*/**/src"):
         for path in source_root.rglob("*.py"):
