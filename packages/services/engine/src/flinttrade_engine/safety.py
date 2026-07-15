@@ -940,6 +940,37 @@ class GatedEmergencyBrokerDispatcher:
         """Return the app-owned journal that remains authoritative for reset."""
         return getattr(self._intent_journal, "primary", self._intent_journal)
 
+    def ensure_degraded_episode(
+        self,
+        *,
+        source: str,
+        selector: str,
+        session_key: str,
+        reason_hash: str,
+    ) -> bool:
+        """Record an emergency episode in this dispatcher's intent journal.
+
+        The safety latches call this ONLY after the durable journal refused the
+        episode write. The dispatcher's wrapper journal records the episode
+        process-locally (degrading itself when the durable store is down) so an
+        already-latched cancel/flatten can still reserve and dispatch its
+        reducing writes instead of being vetoed. Returns ``False`` when even the
+        process-local write failed — the caller then keeps its fail-closed
+        veto. Durable latch reset never consults the fallback, so this cannot
+        clear or mask a durable episode.
+        """
+        try:
+            self._intent_journal.activate_episode(
+                source=source,
+                selector=selector,
+                session_key=session_key,
+                reason_hash=reason_hash,
+            )
+        except Exception:  # noqa: BLE001 - the caller keeps its fail-closed veto
+            logger.exception("emergency episode fallback write failed")
+            return False
+        return True
+
     def generation_lease(self) -> ContextManager[None]:
         """Return the parent-owned lease spanning target snapshot and dispatch.
 
@@ -3108,18 +3139,39 @@ class KillSwitch:
             if replace_scope:
                 self._latest_full_scope_sequence = activation_sequence
             journal = self._emergency_journal
+            dispatcher = emergency_dispatcher if emergency_dispatcher is not None else self._emergency_dispatcher
             journal_ready = True
             if journal is not None:
+                reason_hash = hashlib.sha256(str(reason).encode("utf-8")).hexdigest()
                 try:
                     journal.activate_episode(
                         source="l5",
                         selector="*",
                         session_key="manual",
-                        reason_hash=hashlib.sha256(str(reason).encode("utf-8")).hexdigest(),
+                        reason_hash=reason_hash,
                     )
                 except Exception as exc:  # noqa: BLE001 - the local latch remains active
-                    logger.error("Kill switch durable episode failed closed (%s)", type(exc).__name__)
-                    journal_ready = False
+                    # A dead durable store must not veto an already-latched
+                    # flatten: fall back to the dispatcher's process-local
+                    # intent journal so the reducing writes can still reserve
+                    # and dispatch. Durable reset authority is untouched.
+                    ensure = getattr(dispatcher, "ensure_degraded_episode", None)
+                    journal_ready = callable(ensure) and bool(
+                        ensure(
+                            source="l5",
+                            selector="*",
+                            session_key="manual",
+                            reason_hash=reason_hash,
+                        )
+                    )
+                    if journal_ready:
+                        logger.critical(
+                            "Kill switch durable episode failed (%s); continuing on the "
+                            "dispatcher's process-local intent journal",
+                            type(exc).__name__,
+                        )
+                    else:
+                        logger.error("Kill switch durable episode failed closed (%s)", type(exc).__name__)
             deadline = time.monotonic() + self._normal_write_drain_timeout
             normal_writes_drained = True
             while self._normal_writes_in_progress:
@@ -3128,7 +3180,6 @@ class KillSwitch:
                     normal_writes_drained = False
                     break
                 self._condition.wait(timeout=remaining)
-            dispatcher = emergency_dispatcher if emergency_dispatcher is not None else self._emergency_dispatcher
 
         logger.critical("KILL SWITCH ACTIVATED: %s", reason)
         owned_selectors: set[str] = set()
@@ -4708,27 +4759,50 @@ class MTMCircuitBreaker:
             if selector in self._dispatching_selectors:
                 return False
             journal = self._emergency_journal
+            dispatcher = self._emergency_dispatcher
             journal_ready = True
             if journal is not None:
+                session_key = self._current_session_key()
+                reason_hash = hashlib.sha256(
+                    f"{selector}:{daily_pnl:.2f}:{self._cfg.daily_loss_limit:.2f}".encode()
+                ).hexdigest()
                 try:
                     episode, _created = journal.activate_episode(
                         source="mtm",
                         selector=selector,
-                        session_key=self._current_session_key(),
-                        reason_hash=hashlib.sha256(
-                            f"{selector}:{daily_pnl:.2f}:{self._cfg.daily_loss_limit:.2f}".encode()
-                        ).hexdigest(),
+                        session_key=session_key,
+                        reason_hash=reason_hash,
                     )
                     self._triggered_session_keys[selector] = episode.session_key
                     self._triggered_episodes[selector] = episode
                 except Exception as exc:  # noqa: BLE001 - the local latch remains active
-                    logger.error("MTMCircuitBreaker: durable episode failed closed (%s)", type(exc).__name__)
-                    journal_ready = False
+                    # Mirror the L5 posture: a dead durable store must not veto
+                    # the account flatten — fall back to the dispatcher's
+                    # process-local intent journal. The durable episode map is
+                    # deliberately NOT populated, so latch reset stays bound to
+                    # the durable journal alone.
+                    ensure = getattr(dispatcher, "ensure_degraded_episode", None)
+                    journal_ready = callable(ensure) and bool(
+                        ensure(
+                            source="mtm",
+                            selector=selector,
+                            session_key=session_key,
+                            reason_hash=reason_hash,
+                        )
+                    )
+                    if journal_ready:
+                        self._triggered_session_keys[selector] = session_key
+                        logger.critical(
+                            "MTMCircuitBreaker: durable episode failed (%s); continuing on the "
+                            "dispatcher's process-local intent journal",
+                            type(exc).__name__,
+                        )
+                    else:
+                        logger.error("MTMCircuitBreaker: durable episode failed closed (%s)", type(exc).__name__)
             else:
                 self._triggered_session_keys[selector] = self._current_session_key()
             generation = self._reset_generation
             self._dispatching_selectors[selector] = generation
-            dispatcher = self._emergency_dispatcher
 
         log = activity_logger or logger
         log.critical(

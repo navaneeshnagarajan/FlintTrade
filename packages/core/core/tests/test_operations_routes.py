@@ -81,6 +81,7 @@ def isolated_emergency_journal(flask_app):
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 
     original_journal = flask_app.config.get("EMERGENCY_INTENT_JOURNAL")
+    original_wrapper = flask_app.config.get("EMERGENCY_INTENT_JOURNAL_WRAPPER")
     original_ready = flask_app.config.get("EMERGENCY_INTENT_JOURNAL_READY")
     original_daily_store = flask_app.config.get("DAILY_PNL_STATE_STORE")
     original_daily_ready = flask_app.config.get("DAILY_PNL_STATE_READY")
@@ -88,6 +89,10 @@ def isolated_emergency_journal(flask_app):
     daily_store = InMemoryDailyPnLStateStore()
     flask_app.config.update(
         EMERGENCY_INTENT_JOURNAL=journal,
+        # Null the app-built wrapper so route dispatchers fall back to the
+        # per-test journal above; tests that exercise the shared wrapper set
+        # their own.
+        EMERGENCY_INTENT_JOURNAL_WRAPPER=None,
         EMERGENCY_INTENT_JOURNAL_READY=True,
         DAILY_PNL_STATE_STORE=daily_store,
         DAILY_PNL_STATE_READY=True,
@@ -102,6 +107,7 @@ def isolated_emergency_journal(flask_app):
     yield
     flask_app.config.update(
         EMERGENCY_INTENT_JOURNAL=original_journal,
+        EMERGENCY_INTENT_JOURNAL_WRAPPER=original_wrapper,
         EMERGENCY_INTENT_JOURNAL_READY=original_ready,
         DAILY_PNL_STATE_STORE=original_daily_store,
         DAILY_PNL_STATE_READY=original_daily_ready,
@@ -744,7 +750,14 @@ class TestKillSwitchGatedWrites:
                 safety.l5_kill.reset()
             flask_app.config.update(original)
 
-    def test_generation_lease_timeout_does_not_latch_l5(self, flask_app, client, monkeypatch):
+    def test_generation_lease_timeout_latches_l5_and_defers_sweep(self, flask_app, client, monkeypatch):
+        """A busy router rebuild must not prevent the L5 LATCH.
+
+        Latch-before-lease: activation latches the kill switch first; only the
+        broker sweep needs the generation lease, so a busy rebuild degrades to
+        a bounded generation_lease_unavailable outcome (207 partial) with the
+        latch held and normal writes refused — never a 503 with no latch.
+        """
         from threading import Event, RLock, Thread
 
         from flinttrade_core import operations_routes
@@ -782,9 +795,13 @@ class TestKillSwitchGatedWrites:
                 headers=self._live_headers(),
             )
 
-            assert response.status_code == 503
-            assert safety.l5_kill.is_active is False
-            assert safety.l5_kill.last_emergency_result is None
+            assert response.status_code == 207
+            payload = response.get_json()
+            assert payload["status"] == "partial"
+            assert safety.l5_kill.is_active is True
+            result = safety.l5_kill.last_emergency_result
+            assert result is not None and not result.complete
+            assert "generation_lease_unavailable" in str(payload["data"]["emergency_actions"])
             assert adapter.calls == []
         finally:
             release_lock.set()

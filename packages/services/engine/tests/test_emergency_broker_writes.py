@@ -313,6 +313,69 @@ def test_l5_policy_mints_one_gate_per_verb_and_reaches_only_token_adapter() -> N
     assert provider_calls == 6, "planner reads and concrete writes must observe the current router generation"
 
 
+def test_l5_latch_time_journal_failure_degrades_to_dispatcher_fallback() -> None:
+    """A dead durable journal at LATCH time must not veto the flatten.
+
+    The kill switch previously returned ``intent_journal_unavailable`` without
+    ever invoking the dispatcher when the durable ``activate_episode`` write
+    failed — leaving the operator unable to flatten exactly when the journal
+    volume died. It now records the episode in the dispatcher's process-local
+    intent journal and dispatches the reducing writes; durable reset authority
+    is untouched (reset still requires the durable journal).
+    """
+    from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
+    from flinttrade_engine.safety import SafetySystem
+
+    class DeadEpisodeJournal(InMemoryEmergencyIntentJournal):
+        def activate_episode(self, **_kwargs):
+            raise OSError("durable journal volume unavailable")
+
+    adapter = _EmergencyAdapter()
+    router = _router(adapter)
+    safety = SafetySystem()
+    safety.bind_emergency_journal(DeadEpisodeJournal())
+    dispatcher = GatedEmergencyBrokerDispatcher(
+        router_provider=lambda: router,
+        target_provider=_target,
+        run_awaitable=asyncio.run,
+        planned_readback_attempts=4,
+        planned_quiet_reads=1,
+        planned_readback_delay_seconds=0,
+    )
+
+    result = safety.l5_kill.activate("latch during journal outage", emergency_dispatcher=dispatcher)
+
+    assert safety.l5_kill.is_active
+    assert result.complete, f"flatten was vetoed: {result.as_dict()}"
+    assert adapter.calls == ["cancel_all_orders", "exit_all_positions"]
+    assert "intent_journal_unavailable" not in str(result.as_dict())
+
+
+def test_l5_latch_time_journal_failure_still_fails_closed_without_a_fallback() -> None:
+    """No dispatcher fallback available → the pre-fix veto is preserved."""
+    from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
+    from flinttrade_engine.safety import SafetySystem
+
+    class DeadEpisodeJournal(InMemoryEmergencyIntentJournal):
+        def activate_episode(self, **_kwargs):
+            raise OSError("durable journal volume unavailable")
+
+    class NoFallbackDispatcher:
+        """Duck-typed dispatcher without ensure_degraded_episode."""
+
+        def dispatch(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("dispatch must not run when the episode was never recorded")
+
+    safety = SafetySystem()
+    safety.bind_emergency_journal(DeadEpisodeJournal())
+
+    result = safety.l5_kill.activate("outage without fallback", emergency_dispatcher=NoFallbackDispatcher())
+
+    assert safety.l5_kill.is_active
+    assert not result.complete
+    assert "intent_journal_unavailable" in str(result.as_dict())
+
+
 def test_emergency_flatten_uses_process_fallback_when_journal_storage_fails() -> None:
     from flinttrade_engine.emergency_intents import InMemoryEmergencyIntentJournal
 

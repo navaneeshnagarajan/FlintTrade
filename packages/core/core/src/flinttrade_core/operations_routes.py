@@ -767,7 +767,6 @@ def kill_switch_activate() -> tuple[Any, int]:
     from flinttrade_engine.safety import (  # noqa: PLC0415
         EmergencyBrokerTarget,
         GatedEmergencyBrokerDispatcher,
-        GenerationLeaseUnavailableError,
         SafetySystem,
         bounded_generation_lease,
     )
@@ -815,59 +814,65 @@ def kill_switch_activate() -> tuple[Any, int]:
             }
         ), 401
 
-    rebuild_lock = current_app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
+    app_obj = current_app._get_current_object()
+    rebuild_lock = app_obj.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())
     try:
-        # Global lock order: generation lease -> KillSwitch condition -> router
-        # generation condition. The selector ACL snapshot and every emergency
-        # mutation therefore belong to one immutable router generation.
-        with bounded_generation_lease(
-            rebuild_lock,
-            timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
-        ):
-            current_router = current_app.config.get("BROKER_ROUTER")
-            configured = getattr(current_router, "configured_selectors", ())
+        # Latch FIRST, lease for the sweep after: L5 must latch even while a
+        # router rebuild holds the generation lock (a busy rebuild previously
+        # returned 503 with NO latch, leaving normal writes flowing). activate()
+        # latches under the KillSwitch condition and the dispatcher then takes
+        # the generation lease around target snapshot + broker sweep, so the
+        # global lock order (generation lease -> KillSwitch condition -> router
+        # generation condition) is preserved and a busy lease degrades to a
+        # bounded generation_lease_unavailable outcome with the latch held.
+        def _generation_lease() -> Any:
+            return bounded_generation_lease(
+                rebuild_lock,
+                timeout_seconds=_ROUTER_GENERATION_LEASE_TIMEOUT_SECONDS,
+            )
+
+        def _targets_provider() -> tuple[EmergencyBrokerTarget, ...]:
+            router = app_obj.config.get("BROKER_ROUTER")
+            configured = getattr(router, "configured_selectors", ())
             selectors = tuple(configured) if isinstance(configured, tuple) else ()
-
-            def _targets_provider() -> tuple[EmergencyBrokerTarget, ...]:
-                if not selectors:
-                    raise ValueError("no configured emergency execution selectors")
-                targets: list[EmergencyBrokerTarget] = []
-                for selector in selectors:
-                    adapter_id, account_id = parse_selector(selector)
-                    request_ctx = RequestContext(
-                        jti=jti,
-                        actor_type="human",
-                        actor_id=actor_id,
-                        mode="live",
-                        selector=selector,
+            if not selectors:
+                raise ValueError("no configured emergency execution selectors")
+            targets: list[EmergencyBrokerTarget] = []
+            for selector in selectors:
+                adapter_id, account_id = parse_selector(selector)
+                request_ctx = RequestContext(
+                    jti=jti,
+                    actor_type="human",
+                    actor_id=actor_id,
+                    mode="live",
+                    selector=selector,
+                )
+                targets.append(
+                    EmergencyBrokerTarget(
+                        request_ctx=request_ctx,
+                        adapter_id=adapter_id,
+                        account_id=account_id,
                     )
-                    targets.append(
-                        EmergencyBrokerTarget(
-                            request_ctx=request_ctx,
-                            adapter_id=adapter_id,
-                            account_id=account_id,
-                        )
-                    )
-                return tuple(targets)
+                )
+            return tuple(targets)
 
-            dispatcher = GatedEmergencyBrokerDispatcher(
-                router_provider=lambda: current_router,
-                targets_provider=_targets_provider,
-                run_awaitable=_run_on_client_loop,
-                intent_journal=current_app.config.get("EMERGENCY_INTENT_JOURNAL"),
-            )
-            emergency_result = _safety.l5_kill.activate(
-                reason,
-                emergency_dispatcher=dispatcher,
-                replace_scope=True,
-            )
-    except GenerationLeaseUnavailableError:
-        return jsonify(
-            {
-                "status": "error",
-                "message": "Broker routing generation is busy; kill switch was not activated",
-            }
-        ), 503
+        dispatcher = GatedEmergencyBrokerDispatcher(
+            router_provider=lambda: app_obj.config.get("BROKER_ROUTER"),
+            targets_provider=_targets_provider,
+            run_awaitable=_run_on_client_loop,
+            generation_lease_provider=_generation_lease,
+            # The shared process-wide wrapper: fallback replay/acknowledgement
+            # continuity must span activations during a storage outage.
+            intent_journal=(
+                app_obj.config.get("EMERGENCY_INTENT_JOURNAL_WRAPPER")
+                or app_obj.config.get("EMERGENCY_INTENT_JOURNAL")
+            ),
+        )
+        emergency_result = _safety.l5_kill.activate(
+            reason,
+            emergency_dispatcher=dispatcher,
+            replace_scope=True,
+        )
     except Exception:
         logger.exception("kill_switch_activate error")
         return jsonify({"status": "error", "message": "Internal server error"}), 500

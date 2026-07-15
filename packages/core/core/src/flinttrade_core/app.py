@@ -2555,7 +2555,10 @@ def _bind_runtime_emergency_dispatcher(
         targets_provider=targets_provider,
         run_awaitable=run_sync,
         generation_lease_provider=generation_lease_provider,
-        intent_journal=app.config.get("EMERGENCY_INTENT_JOURNAL"),
+        intent_journal=(
+            app.config.get("EMERGENCY_INTENT_JOURNAL_WRAPPER")
+            or app.config.get("EMERGENCY_INTENT_JOURNAL")
+        ),
     )
     safety.bind_emergency_dispatcher(dispatcher)
     if telegram is not None:
@@ -3230,7 +3233,10 @@ def create_flask_app(
     # Emergency writes use a FULL-sync SQLite write-ahead journal. A concrete
     # mutation is reserved here before any broker call and remains unresolved
     # across process restarts until authoritative broker readback is quiet.
-    from flinttrade_engine.emergency_intents import EmergencyIntentJournal  # noqa: PLC0415
+    from flinttrade_engine.emergency_intents import (  # noqa: PLC0415
+        EmergencyDispatchIntentJournal,
+        EmergencyIntentJournal,
+    )
 
     emergency_journal = EmergencyIntentJournal(_workspace_dir() / "emergency_intents.sqlite")
     try:
@@ -3249,6 +3255,12 @@ def create_flask_app(
     else:
         app.config["EMERGENCY_INTENT_JOURNAL"] = emergency_journal
         app.config["EMERGENCY_INTENT_JOURNAL_READY"] = True
+        # ONE process-wide degrading wrapper shared by every emergency
+        # dispatcher (runtime singleton + per-request HTTP activations): the
+        # process-local fallback keeps replay/acknowledgement continuity
+        # across activations during a durable-storage outage. Latch reset
+        # stays bound to the raw durable journal above.
+        app.config["EMERGENCY_INTENT_JOURNAL_WRAPPER"] = EmergencyDispatchIntentJournal(emergency_journal)
 
     # Layer 4 freezes each execution selector's opening capital and latches its
     # daily-loss state in a separate FULL-sync store. Live routing is withheld

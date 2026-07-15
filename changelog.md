@@ -357,9 +357,23 @@ Versioning: [Semantic Versioning](https://semver.org/).
   gated, generation-leased, and journalled; a durable-journal storage outage
   now degrades the already-latched cancel/flatten operation to a process-local
   write-ahead journal instead of vetoing exposure reduction, while durable
-  latch reset remains fail-closed. Live-order owners, SSE streams, strategy
+  latch reset remains fail-closed. The degrade also covers the LATCH itself:
+  a failed durable episode write no longer vetoes the L5/MTM flatten — the
+  episode falls back to the dispatcher's process-local journal (reset still
+  requires the durable store). One process-wide fallback journal is shared by
+  the runtime and HTTP dispatchers so replay/acknowledgement continuity spans
+  activations during an outage, and HTTP kill-switch activation latches L5
+  BEFORE taking the router generation lease — a busy rebuild now degrades the
+  broker sweep to a bounded partial outcome with the latch held instead of
+  refusing to latch at all. Live-order owners, SSE streams, strategy
   children, retrainers, tick capture, and desktop sidecars are quiesced before
   dependency teardown and retained for retry when a drain cannot be proved.
+- **Ditto management writes require the operator session (G9)** — account
+  create/enable/disable/delete and mirror-stop were reachable with the API key
+  alone; all five now demand a valid session JWT in any mode (kill-all and
+  mirror-start keep their stronger live-operator guards). The terminal kill
+  switch also stays available when the safety-config refresh fails with a
+  last-known state on screen (emergency controls fail available).
 - **Managed local-AI transitions fail closed under races and teardown** — one
   bounded deadline covers process verification and shutdown, inconclusive
   ownership is refused, Windows state reads are reparse-safe, and failed boot
