@@ -1855,7 +1855,14 @@ def _native_account_statuses() -> list[dict[str, Any]]:
 
 @operations_bp.route("/ditto/accounts", methods=["POST"])
 def ditto_account_create() -> tuple[Any, int]:
-    """Create or update a Ditto managed OpenAlgo account."""
+    """Create or update a Ditto managed OpenAlgo account.
+
+    Broker-management write (G9): requires the operator's session JWT — this
+    route stores an OpenAlgo api_key into the Ditto vault.
+    """
+    _jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
     data = request.get_json(silent=True) or {}
     account_id = str(data.get("account_id", "")).strip()
     openalgo_host = str(data.get("openalgo_host", "")).strip()
@@ -1955,6 +1962,9 @@ def ditto_account_disable(account_id: str) -> tuple[Any, int]:
 
 
 def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int]:
+    _jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
     try:
         with _DITTO_CONTROL_LOCK:
             mgr = _ditto_manager()
@@ -1989,7 +1999,10 @@ def _ditto_account_set_enabled(account_id: str, enabled: bool) -> tuple[Any, int
 
 @operations_bp.route("/ditto/accounts/<account_id>", methods=["DELETE"])
 def ditto_account_delete(account_id: str) -> tuple[Any, int]:
-    """Remove a Ditto managed account."""
+    """Remove a Ditto managed account (G9: requires the operator's session JWT)."""
+    _jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
     try:
         with _DITTO_CONTROL_LOCK:
             mgr = _ditto_manager()
@@ -2076,7 +2089,14 @@ def ditto_mirror_start() -> tuple[Any, int]:
 
 @operations_bp.route("/ditto/mirror/stop", methods=["POST"])
 def ditto_mirror_stop() -> tuple[Any, int]:
-    """Stop position mirroring."""
+    """Stop position mirroring (G9: requires the operator's session JWT).
+
+    A valid session in any mode suffices — stopping the mirror reduces
+    activity, so it must not demand a live unlock the way start does.
+    """
+    _jwt_payload, auth_error = _authenticated_operator_identity()
+    if auth_error is not None:
+        return auth_error
     runtime = _ditto_runtime()
     if runtime is None:
         return _ditto_runtime_unavailable()

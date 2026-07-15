@@ -128,6 +128,19 @@ def _live_headers(*, unlocked: bool = True) -> dict[str, str]:
     return headers
 
 
+def _session_headers(mode: str = "explore") -> dict[str, str]:
+    """Headers carrying a valid any-mode session JWT.
+
+    Broker-management writes (G9) require the operator's session in any mode —
+    explore here proves a live unlock is deliberately NOT required for them.
+    """
+    from flinttrade_core.auth_routes import _create_token
+
+    headers = _auth_headers()
+    headers["Authorization"] = f"Bearer {_create_token('testuser', mode=mode)}"
+    return headers
+
+
 # ---------------------------------------------------------------------------
 # Safety config
 # ---------------------------------------------------------------------------
@@ -1884,7 +1897,7 @@ class TestDittoAccountCrud:
     def test_list_accounts_returns_configured_accounts(self, client, monkeypatch):
         self._patch_manager(monkeypatch, [self._FakeAccount("acc_1", name="Primary", enabled=True)])
 
-        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+        resp = client.get("/api/v1/ditto/accounts", headers=_session_headers())
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -1909,7 +1922,7 @@ class TestDittoAccountCrud:
     def test_list_accounts_returns_empty_list_when_none_configured(self, client, monkeypatch):
         self._patch_manager(monkeypatch)
 
-        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+        resp = client.get("/api/v1/ditto/accounts", headers=_session_headers())
 
         assert resp.status_code == 200
         data = resp.get_json()
@@ -1923,7 +1936,7 @@ class TestDittoAccountCrud:
 
         monkeypatch.setattr("flinttrade_ditto.account_manager.AccountManager", _BoomManager)
 
-        resp = client.get("/api/v1/ditto/accounts", headers=_auth_headers())
+        resp = client.get("/api/v1/ditto/accounts", headers=_session_headers())
 
         assert resp.status_code == 503
         data = resp.get_json()
@@ -1945,7 +1958,7 @@ class TestDittoAccountCrud:
                 "enabled": True,
                 "is_master": False,
             },
-            headers=_auth_headers(),
+            headers=_session_headers(),
         )
 
         assert resp.status_code == 201
@@ -1963,7 +1976,7 @@ class TestDittoAccountCrud:
                 "account_id": "missing_host",
                 "api_key": "secret-key",
             },
-            headers=_auth_headers(),
+            headers=_session_headers(),
         )
         assert resp.status_code == 400
 
@@ -1990,7 +2003,7 @@ class TestDittoAccountCrud:
         response = client.post(
             "/api/v1/ditto/accounts",
             json=payload,
-            headers=_auth_headers(),
+            headers=_session_headers(),
         )
 
         assert response.status_code == 400
@@ -2047,7 +2060,7 @@ class TestDittoAccountCrud:
                     "openalgo_host": "http://127.0.0.1:5002",
                     "api_key": "replacement-key",
                 },
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2091,7 +2104,7 @@ class TestDittoAccountCrud:
                     "openalgo_host": "http://127.0.0.1:5002",
                     "api_key": "replacement-key",
                 },
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2104,15 +2117,15 @@ class TestDittoAccountCrud:
         account = self._FakeAccount("acc_1", name="Primary", enabled=True)
         self._patch_manager(monkeypatch, [account])
 
-        disable_resp = client.post("/api/v1/ditto/accounts/acc_1/disable", headers=_auth_headers())
+        disable_resp = client.post("/api/v1/ditto/accounts/acc_1/disable", headers=_session_headers())
         assert disable_resp.status_code == 200
         assert disable_resp.get_json()["data"]["account"]["status"] == "disabled"
 
-        enable_resp = client.post("/api/v1/ditto/accounts/acc_1/enable", headers=_auth_headers())
+        enable_resp = client.post("/api/v1/ditto/accounts/acc_1/enable", headers=_session_headers())
         assert enable_resp.status_code == 200
         assert enable_resp.get_json()["data"]["account"]["status"] == "active"
 
-        delete_resp = client.delete("/api/v1/ditto/accounts/acc_1", headers=_auth_headers())
+        delete_resp = client.delete("/api/v1/ditto/accounts/acc_1", headers=_session_headers())
         assert delete_resp.status_code == 200
         assert delete_resp.get_json()["data"]["removed"] is True
 
@@ -2162,7 +2175,7 @@ class TestDittoAccountCrud:
         try:
             response = client.post(
                 "/api/v1/ditto/accounts/acc_1/disable",
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2222,7 +2235,7 @@ class TestDittoAccountCrud:
         try:
             response = client.delete(
                 "/api/v1/ditto/accounts/acc_2",
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2274,7 +2287,7 @@ class TestDittoAccountCrud:
             with caplog.at_level("WARNING", logger="flinttrade"):
                 response = client.post(
                     "/api/v1/ditto/accounts/acc_1/disable",
-                    headers=_auth_headers(),
+                    headers=_session_headers(),
                 )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2310,7 +2323,7 @@ class TestDittoAccountCrud:
         try:
             response = client.delete(
                 "/api/v1/ditto/accounts/acc_2",
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2341,7 +2354,7 @@ class TestDittoAccountCrud:
         try:
             response = client.post(
                 "/api/v1/ditto/accounts/acc_3/disable",
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2424,7 +2437,7 @@ class TestDittoAccountCrud:
         try:
             response = client.post(
                 "/api/v1/ditto/accounts/acc_3/disable",
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
         finally:
             flask_app.config["DITTO_RUNTIME"] = original_runtime
@@ -2484,7 +2497,7 @@ class TestDittoAccountCrud:
             with flask_app.test_client() as thread_client:
                 responses["disable"] = thread_client.post(
                     "/api/v1/ditto/accounts/acc_1/disable",
-                    headers=_auth_headers(),
+                    headers=_session_headers(),
                 ).status_code
 
         def start_request() -> None:
@@ -2538,7 +2551,7 @@ class TestDittoAccountCrud:
                     "openalgo_host": "http://127.0.0.1:5001",
                     "api_key": "secret-key",
                 },
-                headers=_auth_headers(),
+                headers=_session_headers(),
             )
 
         assert response.status_code == 503
@@ -2661,7 +2674,7 @@ class TestDittoRuntimeActions:
         original = flask_app.config.get("DITTO_RUNTIME")
         flask_app.config["DITTO_RUNTIME"] = runtime
         try:
-            resp = client.post("/api/v1/ditto/mirror/stop", headers=_auth_headers())
+            resp = client.post("/api/v1/ditto/mirror/stop", headers=_session_headers())
             assert resp.status_code == 200
             assert resp.get_json()["data"]["active"] is False
             assert runtime.stop_calls == [5.0]
@@ -2673,7 +2686,7 @@ class TestDittoRuntimeActions:
         original = flask_app.config.get("DITTO_RUNTIME")
         flask_app.config["DITTO_RUNTIME"] = runtime
         try:
-            resp = client.get("/api/v1/ditto/risk", headers=_auth_headers())
+            resp = client.get("/api/v1/ditto/risk", headers=_session_headers())
             assert resp.status_code == 200
             assert resp.get_json()["data"]["aggregate_pnl"] == 125.0
             assert resp.get_json()["data"]["complete"] is True
@@ -2705,6 +2718,35 @@ class TestDittoRuntimeActions:
             assert runtime.kill_calls[0]["jti"]
         finally:
             flask_app.config["DITTO_RUNTIME"] = original
+
+
+class TestDittoWriteAuthG9:
+    """G9 pin: every Ditto broker-management write requires a session JWT.
+
+    These routes mutate the Ditto vault, account registry, or mirror runtime;
+    an API key alone (no Authorization header) must be refused with 401 and
+    must never reach the account manager or runtime.
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("post", "/api/v1/ditto/accounts"),
+            ("post", "/api/v1/ditto/accounts/acc_1/enable"),
+            ("post", "/api/v1/ditto/accounts/acc_1/disable"),
+            ("delete", "/api/v1/ditto/accounts/acc_1"),
+            ("post", "/api/v1/ditto/mirror/stop"),
+        ],
+    )
+    def test_write_without_session_jwt_is_401(self, client, method, path):
+        response = getattr(client, method)(path, headers=_auth_headers())
+        assert response.status_code == 401
+        assert response.get_json()["status"] == "error"
+
+    def test_write_with_any_mode_session_passes_auth(self, client):
+        """An explore-mode session clears the G9 gate (later checks may still 4xx/5xx)."""
+        response = client.post("/api/v1/ditto/mirror/stop", headers=_session_headers())
+        assert response.status_code != 401
 
 
 class TestAccountsStatus:
