@@ -12,7 +12,14 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/navaneeshnagarajan/FlintTrade.git"
-MANIFEST_BASE_URL="${FLINTTRADE_DESKTOP_RELEASE_API:-https://flinttrade.vercel.app/api/desktop-release}"
+# Release metadata comes straight from the official GitHub release-download
+# path: every release ships a flinttrade-desktop-manifest.json asset, and the
+# rolling updater-beta / updater-stable releases always point at the newest
+# release of that channel. FLINTTRADE_DESKTOP_RELEASE_API is a test/advanced
+# override used verbatim as the manifest URL.
+RELEASE_DOWNLOAD_BASE="https://github.com/navaneeshnagarajan/FlintTrade/releases/download"
+MANIFEST_ASSET_NAME="flinttrade-desktop-manifest.json"
+MANIFEST_OVERRIDE_URL="${FLINTTRADE_DESKTOP_RELEASE_API:-}"
 PINNED_PNPM_VERSION="${FLINTTRADE_PNPM_VERSION:-9.15.0}"
 SRC_DIR="${FLINTTRADE_SRC_DIR:-$HOME/.flinttrade/src/FlintTrade}"
 REF="${FLINTTRADE_REF:-}"
@@ -225,26 +232,27 @@ select_asset_object() {
 
 manifest_url() {
   # The manifest is fetched over the network and drives which asset is
-  # installed, so require HTTPS (no plaintext http:// that a MITM could
-  # rewrite). A local file:// manifest is permitted only under the test hook.
-  case "$MANIFEST_BASE_URL" in
-    https://*) : ;;
-    file://*)
-      if [ "${FLINTTRADE_ALLOW_LOCAL_ASSET:-0}" = "1" ]; then
-        printf '%s' "$MANIFEST_BASE_URL"; return 0
-      fi
-      die "Refusing non-HTTPS release manifest URL: $MANIFEST_BASE_URL"
-      ;;
-    *) die "Refusing non-HTTPS release manifest URL: $MANIFEST_BASE_URL" ;;
-  esac
-  local sep="?"
-  case "$MANIFEST_BASE_URL" in
-    *\?*) sep="&" ;;
-  esac
+  # installed, so any override must be HTTPS (no plaintext http:// that a MITM
+  # could rewrite). A local file:// manifest is permitted only under the test
+  # hook. Without an override, the manifest is read from the official GitHub
+  # release-download path: the exact tag when --ref is given, otherwise the
+  # rolling updater-<channel> release for the selected channel.
+  if [ -n "$MANIFEST_OVERRIDE_URL" ]; then
+    case "$MANIFEST_OVERRIDE_URL" in
+      https://*) printf '%s' "$MANIFEST_OVERRIDE_URL"; return 0 ;;
+      file://*)
+        if [ "${FLINTTRADE_ALLOW_LOCAL_ASSET:-0}" = "1" ]; then
+          printf '%s' "$MANIFEST_OVERRIDE_URL"; return 0
+        fi
+        die "Refusing non-HTTPS release manifest URL: $MANIFEST_OVERRIDE_URL"
+        ;;
+      *) die "Refusing non-HTTPS release manifest URL: $MANIFEST_OVERRIDE_URL" ;;
+    esac
+  fi
   if [ -n "$REF" ]; then
-    printf '%s%stag=%s' "$MANIFEST_BASE_URL" "$sep" "$REF"
+    printf '%s/%s/%s' "$RELEASE_DOWNLOAD_BASE" "$REF" "$MANIFEST_ASSET_NAME"
   else
-    printf '%s%schannel=%s' "$MANIFEST_BASE_URL" "$sep" "$CHANNEL"
+    printf '%s/updater-%s/%s' "$RELEASE_DOWNLOAD_BASE" "$CHANNEL" "$MANIFEST_ASSET_NAME"
   fi
 }
 

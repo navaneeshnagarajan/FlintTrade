@@ -14,13 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 SH = ROOT / "scripts" / "install" / "flinttrade-install.sh"
 PS1 = ROOT / "scripts" / "install" / "flinttrade-install.ps1"
 
+# The scripts must resolve release metadata straight from the official GitHub
+# release-download path (no first-party site API in the loop).
+GITHUB_RELEASE_DOWNLOAD_BASE = "https://github.com/navaneeshnagarajan/FlintTrade/releases/download"
+MANIFEST_ASSET_NAME = "flinttrade-desktop-manifest.json"
+
 # PowerShell is absent on the Linux CI runner, so the Windows-script tests below
 # must SKIP (not silently pass) there rather than give false confidence.
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
 
 
-def _manifest(tmp_path: Path) -> str:
+def _manifest(tmp_path: Path) -> Path:
     path = tmp_path / "desktop-release.json"
     path.write_text(
         json.dumps(
@@ -76,7 +81,7 @@ def _manifest(tmp_path: Path) -> str:
             }
         )
     )
-    return path.as_uri()
+    return path
 
 
 def _fake_uname(tmp_path: Path, os_name: str, machine: str) -> str:
@@ -95,6 +100,18 @@ def _fake_uname(tmp_path: Path, os_name: str, machine: str) -> str:
     return f"{bin_dir}{os.pathsep}/usr/bin:/bin:/usr/sbin:/sbin"
 
 
+def _fake_curl(tmp_path: Path, manifest_path: Path) -> None:
+    """Install a curl shim into the fake bin dir (shared with ``_fake_uname``)
+    that ignores its arguments and emits ``manifest_path``, so the installer's
+    manifest fetch resolves offline while the URL it requested still appears in
+    the script's own "Resolving ..." output."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    curl = bin_dir / "curl"
+    curl.write_text(f"#!/bin/sh\ncat {str(manifest_path)!r}\n")
+    curl.chmod(0o755)
+
+
 def _run_unix_installer_dry_run(tmp_path: Path, *, os_name: str, machine: str, package: str = "appimage"):
     return subprocess.run(
         [
@@ -110,7 +127,7 @@ def _run_unix_installer_dry_run(tmp_path: Path, *, os_name: str, machine: str, p
         env={
             "PATH": _fake_uname(tmp_path, os_name, machine),
             "HOME": str(tmp_path),
-            "FLINTTRADE_DESKTOP_RELEASE_API": _manifest(tmp_path),
+            "FLINTTRADE_DESKTOP_RELEASE_API": _manifest(tmp_path).as_uri(),
             "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
         },
         text=True,
@@ -128,6 +145,37 @@ def test_unix_installer_binary_dry_run_uses_manifest_asset(tmp_path: Path) -> No
     assert "would download FlintTrade_9.9.9-beta.1_amd64.AppImage" in result.stdout
     assert "would install /tmp/FlintTrade_9.9.9-beta.1_amd64.AppImage" in result.stdout
     assert "uv sync" not in result.stdout
+
+
+@pytest.mark.unit
+def test_unix_installer_fetches_manifest_from_github_release_urls(tmp_path: Path) -> None:
+    """Release metadata must come from the stable GitHub release-download path:
+    the rolling updater-<channel> release by default, or the exact tag with
+    --ref — never a first-party site API."""
+    manifest_path = _manifest(tmp_path)
+    path_env = _fake_uname(tmp_path, "Linux", "x86_64")
+    _fake_curl(tmp_path, manifest_path)
+
+    def run(*extra: str) -> str:
+        result = subprocess.run(
+            ["bash", str(SH), "--dry-run", "--no-launch", *extra],
+            check=True,
+            cwd=ROOT,
+            env={"PATH": path_env, "HOME": str(tmp_path)},
+            text=True,
+            capture_output=True,
+        )
+        return result.stdout
+
+    beta = run()
+    assert f"{GITHUB_RELEASE_DOWNLOAD_BASE}/updater-beta/{MANIFEST_ASSET_NAME}" in beta
+    assert "would download FlintTrade_9.9.9-beta.1_amd64.AppImage" in beta
+
+    stable = run("--channel", "stable")
+    assert f"{GITHUB_RELEASE_DOWNLOAD_BASE}/updater-stable/{MANIFEST_ASSET_NAME}" in stable
+
+    ref = run("--ref", "v9.9.9-beta.1")
+    assert f"{GITHUB_RELEASE_DOWNLOAD_BASE}/v9.9.9-beta.1/{MANIFEST_ASSET_NAME}" in ref
 
 
 def test_unix_installer_binary_install_verifies_sha256(tmp_path: Path) -> None:
@@ -395,6 +443,66 @@ exit $LASTEXITCODE
 
     assert "would download FlintTrade_9.9.9-beta.1_x64-setup.exe" in result.stdout
     assert "would run" in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL, reason=NO_POWERSHELL_REASON)
+def test_windows_installer_fetches_manifest_from_github_release_urls_when_powershell_is_available(
+    tmp_path: Path,
+) -> None:
+    """Same pin as the Unix installer: release metadata must be requested from
+    the stable GitHub release-download URLs (rolling updater-<channel> tag by
+    default, exact tag with -Ref) — never a first-party site API."""
+    script_path = str(PS1).replace("'", "''")
+    cases = [
+        ("", f"{GITHUB_RELEASE_DOWNLOAD_BASE}/updater-beta/{MANIFEST_ASSET_NAME}"),
+        ("-Channel stable", f"{GITHUB_RELEASE_DOWNLOAD_BASE}/updater-stable/{MANIFEST_ASSET_NAME}"),
+        ("-Ref v9.9.9-beta.1", f"{GITHUB_RELEASE_DOWNLOAD_BASE}/v9.9.9-beta.1/{MANIFEST_ASSET_NAME}"),
+    ]
+    env = {
+        **os.environ,
+        # Neutralise operator overrides so the defaults under test apply.
+        "FLINTTRADE_DESKTOP_RELEASE_API": "",
+        "FLINTTRADE_CHANNEL": "",
+        "FLINTTRADE_REF": "",
+    }
+    for index, (extra_args, expected_url) in enumerate(cases):
+        harness = tmp_path / f"manifest-url-{index}.ps1"
+        harness.write_text(
+            f"""
+function Get-CimInstance {{
+    [pscustomobject]@{{ Architecture = 9 }}
+}}
+function Invoke-RestMethod {{
+    param($Uri, $Headers)
+    Write-Host "MANIFEST-URL: $Uri"
+    [pscustomobject]@{{
+        assets = @(
+            [pscustomobject]@{{
+                os = "windows"
+                arch = "x64"
+                kind = "nsis"
+                name = "FlintTrade_9.9.9-beta.1_x64-setup.exe"
+                url = "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.1/FlintTrade_9.9.9-beta.1_x64-setup.exe"
+            }}
+        )
+    }}
+}}
+& '{script_path}' -DryRun -NoLaunch {extra_args}
+exit $LASTEXITCODE
+""".strip()
+        )
+
+        result = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+            check=True,
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+        assert f"MANIFEST-URL: {expected_url}" in result.stdout
 
 
 def _appimage_manifest(tmp_path: Path, payload: Path) -> str:

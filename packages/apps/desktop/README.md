@@ -40,8 +40,10 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
 
-The scripts download the matching `.dmg`, `.exe`, `.AppImage`, `.deb`, or
-`.rpm` from `/api/desktop-release` by default. Source builds are an explicit
+The scripts resolve the `flinttrade-desktop-manifest.json` asset straight from
+the GitHub release-download URLs (the rolling `updater-beta` / `updater-stable`
+releases by default, or an exact tag via `--ref`) and download the matching
+`.dmg`, `.exe`, `.AppImage`, `.deb`, or `.rpm`. Source builds are an explicit
 advanced path via `--build-from-source` / `-BuildFromSource`.
 
 Contributors working in this package should install via the workspace from the repo root:

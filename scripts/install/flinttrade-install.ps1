@@ -22,11 +22,14 @@ $ProgressPreference = "SilentlyContinue"
 
 $RepoUrl = "https://github.com/navaneeshnagarajan/FlintTrade.git"
 $PinnedPnpmVersion = if ($env:FLINTTRADE_PNPM_VERSION) { $env:FLINTTRADE_PNPM_VERSION } else { "9.15.0" }
-$ManifestBaseUrl = if ($env:FLINTTRADE_DESKTOP_RELEASE_API) {
-    $env:FLINTTRADE_DESKTOP_RELEASE_API
-} else {
-    "https://flinttrade.vercel.app/api/desktop-release"
-}
+# Release metadata comes straight from the official GitHub release-download
+# path: every release ships a flinttrade-desktop-manifest.json asset, and the
+# rolling updater-beta / updater-stable releases always point at the newest
+# release of that channel. FLINTTRADE_DESKTOP_RELEASE_API is a test/advanced
+# override used verbatim as the manifest URL.
+$ReleaseDownloadBase = "https://github.com/navaneeshnagarajan/FlintTrade/releases/download"
+$ManifestAssetName = "flinttrade-desktop-manifest.json"
+$ManifestOverrideUrl = $env:FLINTTRADE_DESKTOP_RELEASE_API
 
 function Say([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Cyan }
 function Warn([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Yellow }
@@ -101,17 +104,13 @@ function Get-WindowsArch {
 }
 
 function Get-ManifestUrl {
-    if ($ManifestBaseUrl.StartsWith("file:", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $ManifestBaseUrl
-    }
-    $separator = "?"
-    if ($ManifestBaseUrl.Contains("?")) {
-        $separator = "&"
+    if ($ManifestOverrideUrl) {
+        return $ManifestOverrideUrl
     }
     if ($Ref) {
-        return "${ManifestBaseUrl}${separator}tag=$Ref"
+        return "$ReleaseDownloadBase/$Ref/$ManifestAssetName"
     }
-    return "${ManifestBaseUrl}${separator}channel=$Channel"
+    return "$ReleaseDownloadBase/updater-$Channel/$ManifestAssetName"
 }
 
 function Get-ReleaseAsset {
