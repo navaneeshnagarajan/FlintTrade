@@ -48,11 +48,11 @@ before piping to a shell if that is your policy (it should be).
 2. Pick the installer for your operating system and CPU architecture:
    `.dmg` for macOS, NSIS `.exe` for Windows, or `.AppImage`/`.deb`/`.rpm` for
    Linux.
-3. The `flinttrade-desktop-manifest.json` asset published with every release
-   (and with the rolling `updater-beta` / `updater-stable` releases, which
-   always point at the newest release of that channel) is the canonical
-   machine-readable source; the install scripts read it straight from the
-   GitHub release-download URLs.
+3. The desktop release manifest (`flinttrade-desktop-manifest.json`) published
+   with every release (and with the rolling `updater-beta` / `updater-stable`
+   releases, which always point at the newest release of that channel) is the
+   canonical machine-readable source; the install scripts read it straight
+   from the GitHub release-download URLs.
 4. Launch FlintTrade and complete the in-app Setup flow. You do not need a
    `.env` file for desktop use.
 
