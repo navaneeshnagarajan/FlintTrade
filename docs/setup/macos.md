@@ -7,7 +7,11 @@
 
 1. Download the `.dmg` from the release page.
 2. Install FlintTrade like any other macOS app.
-3. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
+3. Release builds are currently **unsigned**, so on first launch Gatekeeper
+   will block a normal double-click. Right-click (Control-click) FlintTrade in
+   Applications, choose **Open**, then **Open** again in the dialog — needed
+   once per install. Subsequent launches work normally.
+4. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
    in the app; no `.env` file is required.
 
 To build the installer locally:

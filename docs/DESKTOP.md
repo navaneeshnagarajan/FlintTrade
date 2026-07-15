@@ -48,19 +48,26 @@ before piping to a shell if that is your policy (it should be).
 2. Pick the installer for your operating system and CPU architecture:
    `.dmg` for macOS, NSIS `.exe` for Windows, or `.AppImage`/`.deb`/`.rpm` for
    Linux.
-3. The [desktop release manifest](/api/desktop-release) is the canonical
-   machine-readable source used by the install scripts and in-app updater.
+3. The `flinttrade-desktop-manifest.json` asset published with every release
+   (and with the rolling `updater-beta` / `updater-stable` releases, which
+   always point at the newest release of that channel) is the canonical
+   machine-readable source; the install scripts read it straight from the
+   GitHub release-download URLs.
 4. Launch FlintTrade and complete the in-app Setup flow. You do not need a
    `.env` file for desktop use.
 
 ### Updating
 
 The desktop app has a built-in updater at **Settings → Updates** (desktop
-builds only — the web terminal never shows it). "Check for updates" reads
-`/api/desktop-release?channel=beta` and only offers an update when that release
-has a matching installer for your current platform. **Download & install
-update** launches the bundled installer script in binary-update mode, so a
-source checkout is not required.
+builds only — the web terminal never shows it). "Check for updates" first asks
+Tauri's native updater (fed by the signed `latest.json` on the rolling
+`updater-beta` / `updater-stable` release); when an update is available a
+single **Update and restart** click downloads, verifies, installs, and
+restarts the app. On builds where the native updater is unavailable (for
+example a local unsigned build), it falls back to reading
+`flinttrade-desktop-manifest.json` from the same GitHub release URLs and
+launching the bundled installer script in binary-update mode — no source
+checkout required either way.
 
 If this machine also has a FlintTrade source workspace
 (`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`), Settings still shows
@@ -230,9 +237,10 @@ make desktop-backend    # freeze the backend sidecar only (current OS/arch)
 `.github/workflows/desktop-release.yml` builds the full matrix and attaches the
 installers to a GitHub Release.
 
-- **Trigger:** run the workflow manually
-  (**Actions → Desktop Release → Run workflow**), optionally entering a tag like
-  `v0.6.0-beta.1` to publish draft release assets.
+- **Trigger:** dispatched automatically by `release-please.yml` with the new
+  tag when a release PR merges; can also be run manually
+  (**Actions → Desktop Release → Run workflow**) with a tag like
+  `v0.6.0-beta.1`. Releases publish non-draft.
 - **Matrix:** macOS arm64 (`macos-14`), macOS x64 (`macos-15-intel`), Windows x64,
   Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`).
 - Each job freezes the backend, bundles the Tauri app, and uploads the
@@ -245,17 +253,25 @@ installers to a GitHub Release.
   because prerelease desktop installers can be newer than the stable tag.
 
 ### Code signing
-The default builds are **unsigned**. For distribution, configure signing via the
-standard Tauri mechanisms and CI secrets:
 
-- **macOS:** `APPLE_CERTIFICATE`, `APPLE_SIGNING_IDENTITY`, notarisation creds.
-- **Windows:** an Authenticode certificate (`tauri.conf.json → bundle.windows.certificateThumbprint`).
+Two independent signing systems are wired in CI; each activates automatically
+when its repository secrets exist and stays dormant otherwise:
+
+- **Updater signing (active):** `TAURI_SIGNING_PRIVATE_KEY` (+
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) — Tauri's free minisign key, unrelated
+  to Apple code signing. When present, CI emits updater artifacts (`.sig`,
+  macOS `.app.tar.gz`) and `latest.json`, which powers the one-click native
+  updater on every platform.
+- **macOS Gatekeeper signing/notarisation (dormant):** `APPLE_CERTIFICATE`
+  (base64 `.p12`) + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`,
+  and `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` for notarisation. Until
+  those exist, macOS builds ship **unsigned**: on first launch, right-click
+  (Control-click) the app in Finder and choose **Open**, then **Open** again in
+  the Gatekeeper dialog — needed once per install.
+- **Windows:** an Authenticode certificate
+  (`tauri.conf.json → bundle.windows.certificateThumbprint`) — not configured.
 
 See the [Tauri signing guide](https://tauri.app/distribute/sign/).
-
-FlintTrade does not enable Tauri's native updater for unsigned beta builds. The
-Tauri v2 updater requires signed update artifacts, so Settings → Updates uses
-the bundled installer script until release-signing keys exist.
 
 ---
 

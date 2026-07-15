@@ -8,6 +8,22 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **CI-owned release engineering** — release-please maintains the release PR
+  (version bumps from Conventional Commits, changelog generation), a
+  propagation script keeps the ~25-file version contract consistent, and
+  merging the PR builds all five installer targets in CI and publishes them
+  non-draft with `SHA256SUMS.txt` and the desktop manifest. Apple
+  signing/notarisation steps are wired but dormant until secrets exist;
+  updater artifacts are minisign-signed with the repository's Tauri updater
+  key.
+- **One-click native updates** — the desktop shell now carries
+  tauri-plugin-updater: Settings → Updates offers a single "Update and
+  restart" action fed by the signed `latest.json` on the rolling
+  `updater-beta`/`updater-stable` GitHub release, falling back to the bundled
+  installer-script flow where the native updater is unavailable. Install
+  scripts and the in-app updater read release metadata straight from
+  `github.com/…/releases/download/` URLs — no first-party web host in the
+  update path.
 - **Web UI as a first-class surface** — the backend already serves the built
   terminal at `/`; `FLINTTRADE_BACKEND_HOST` now selects the bind interface for
   the standalone serve path (for example a Tailscale tailnet IP) so a plain

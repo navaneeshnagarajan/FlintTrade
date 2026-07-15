@@ -254,7 +254,7 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
 
 
 def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
-    """Desktop release CI should be manual and fail if installers are missing."""
+    """Desktop release CI runs only on explicit dispatch and fails if installers are missing."""
     workflow = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
     desktop_docs = (ROOT / "docs" / "DESKTOP.md").read_text(encoding="utf-8")
     vuln_refresh = (ROOT / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
@@ -287,7 +287,8 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     assert "pip-audit did not write a usable snapshot" in vuln_refresh
     assert "exit 1" in vuln_refresh
     assert "pip-audit failed with status" in vuln_refresh
-    assert "`v0.6.0-beta.1` to publish draft release assets" in desktop_docs
+    assert "dispatched automatically by `release-please.yml`" in desktop_docs
+    assert "Releases publish non-draft" in desktop_docs
     assert "macOS x64 (`macos-15-intel`)" in desktop_docs
     assert "macOS x64 (`macos-13`)" not in desktop_docs
     assert "### Windows (`.exe`)" in desktop_docs
