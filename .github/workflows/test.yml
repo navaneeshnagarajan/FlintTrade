@@ -145,14 +145,16 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, "packages/core/core/src")
-          from flinttrade_core.workspace_migrations import run_migrations
+          from flinttrade_core.workspace_migrations import WORKSPACE_VERSION, run_migrations
 
           with tempfile.TemporaryDirectory() as d:
               Path(d, "workspace.json").write_text(json.dumps({"version": "0.5.2", "modules": {"ai": True}}))
               result = run_migrations(Path(d))
               on_disk = json.loads(Path(d, "workspace.json").read_text())
               assert result == on_disk, "atomic persist did not happen"
-              assert result["version"] == "1.0.0"
+              # Pin against the module constant, not a literal, so a workspace
+              # version bump cannot silently strand this inline check again.
+              assert result["version"] == WORKSPACE_VERSION
               assert result["brokers"]["execution"]["default"] == "openalgo:default"
           PY
       # --timeout-method=thread uses a watchdog thread + _thread.interrupt_main()
@@ -332,4 +334,12 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libgtk-3-dev
+      # tauri-build refuses to configure when the externalBin resource is
+      # absent. The real sidecar is a PyInstaller artefact built only in the
+      # release workflow; the unit tests never execute it (they use injected
+      # fake runners), so an empty executable placeholder satisfies the build.
+      - name: Stub the backend sidecar for tauri-build
+        run: |
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          install -m 0755 /dev/null "packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${triple}"
       - run: cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml
