@@ -600,10 +600,51 @@ class PendingOrderQueue:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = self._connect()
+        self._reconcile_interrupted_dispatches()
 
     # ------------------------------------------------------------------
     # Connection
     # ------------------------------------------------------------------
+
+    def _reconcile_interrupted_dispatches(self) -> int:
+        """Fail-close any dispatch left in flight by a previous process.
+
+        A ``dispatching`` row is written just before the broker call and cleared
+        only by :meth:`mark_approved`/:meth:`mark_failed`.  If the process dies
+        in between, the row is orphaned: ``_expire_stale`` only touches
+        ``pending`` rows, ``claim_for_dispatch`` will not re-claim it, and no
+        surviving context can finalise it — so it lingers as a phantom in-flight
+        intent forever.
+
+        The broker outcome for such a row is genuinely unknown, so recovery must
+        never silently re-dispatch (double-order risk) nor mark it approved.  We
+        terminally close it as ``failed`` with ``outcome_uncertain`` set, which
+        surfaces it to the operator through the existing uncertain-outcome
+        affordance.  Returns the number of rows reconciled.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                UPDATE approval_requests
+                   SET status = 'failed', resolved_at = ?,
+                       failure_reason = ?, outcome_uncertain = TRUE
+                 WHERE status = 'dispatching'
+                RETURNING id
+                """,
+                [
+                    _utc_now_iso(),
+                    "process restarted while the broker dispatch was in flight; outcome unknown",
+                ],
+            ).fetchall()
+        reconciled = len(rows)
+        if reconciled:
+            logger.warning(
+                "Reconciled %d interrupted Action Centre dispatch(es) to failed/outcome-uncertain "
+                "after a restart (broker outcome unknown): %s",
+                reconciled,
+                ", ".join(str(row[0]) for row in rows),
+            )
+        return reconciled
 
     def _connect(self):  # type: ignore[return]
         """Open DuckDB connection and ensure schema exists.

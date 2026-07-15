@@ -433,3 +433,53 @@ class TestApprovalRequestSerialisation:
         q = _make_queue(tmp_path)
         req = q.enqueue(_make_order(), reason="Test")
         assert req.to_dict()["status"] == "pending"
+
+
+# ---------------------------------------------------------------------------
+# Crash recovery — interrupted dispatches
+# ---------------------------------------------------------------------------
+
+
+class TestInterruptedDispatchRecovery:
+    """A dispatch left in flight by a crashed process must fail-close on restart."""
+
+    def test_reopen_fails_close_orphaned_dispatching_row(self, tmp_path: Path):
+        PendingOrderQueue, _err, _req = _queue_module()
+        db = tmp_path / "recover.duckdb"
+
+        q1 = PendingOrderQueue(db_path=db)
+        req = q1.enqueue(_make_order(), reason="Interrupted", request_id="stuck-1")
+        # Simulate the process reaching the broker call and then dying: the row
+        # is left in 'dispatching' with no surviving context to finalise it.
+        q1.claim_for_dispatch(req.id)
+        assert q1.get(req.id).status == "dispatching"
+        q1._conn.close()  # noqa: SLF001 - emulate an abrupt process exit
+
+        # Reopening the queue reconciles the orphaned row on startup.
+        q2 = PendingOrderQueue(db_path=db)
+        recovered = q2.get(req.id)
+        assert recovered.status == "failed"
+        assert recovered.outcome_uncertain is True
+        assert recovered.failure_reason
+        assert "in flight" in recovered.failure_reason
+
+    def test_reconcile_returns_count_and_leaves_terminal_rows_untouched(self, tmp_path: Path):
+        PendingOrderQueue, _err, _req = _queue_module()
+        db = tmp_path / "mixed.duckdb"
+
+        q1 = PendingOrderQueue(db_path=db)
+        stuck = q1.enqueue(_make_order("A"), reason="stuck", request_id="stuck")
+        approved = q1.enqueue(_make_order("B"), reason="approved", request_id="approved")
+        pending = q1.enqueue(_make_order("C"), reason="pending", request_id="pending")
+        q1.claim_for_dispatch(stuck.id)
+        q1.claim_for_dispatch(approved.id)
+        q1.mark_approved(approved.id, broker_order_id="OK-1")
+        q1._conn.close()  # noqa: SLF001
+
+        q2 = PendingOrderQueue(db_path=db)
+        assert q2.get(stuck.id).status == "failed"
+        assert q2.get(approved.id).status == "approved"  # terminal — untouched
+        assert q2.get(pending.id).status == "pending"  # still actionable
+        # A second reopen with nothing in flight reconciles zero rows.
+        q3 = PendingOrderQueue(db_path=db)
+        assert q3._reconcile_interrupted_dispatches() == 0  # noqa: SLF001
