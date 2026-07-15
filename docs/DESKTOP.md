@@ -69,6 +69,16 @@ example a local unsigned build), it falls back to reading
 launching the bundled installer script in binary-update mode — no source
 checkout required either way.
 
+Independently of the shell update, Settings → Updates also offers **Update
+backend** when a newer backend payload is published: the shell downloads the
+`flinttrade-payload-<triple>` release asset (the frozen backend, which embeds
+the terminal), verifies its SHA-256 against the release manifest, installs it
+under `<workspace>/runtime/backend/<version>/`, keeps the previous version for
+rollback, and restarts onto it. The thin Tauri shell itself rarely needs an
+installer cycle; day-to-day changes ship as payload updates. A payload that
+fails to start is automatically demoted and the app restarts onto the bundled
+backend.
+
 If this machine also has a FlintTrade source workspace
 (`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`), Settings still shows
 **Rebuild from source** as an advanced fallback. That path uses the same

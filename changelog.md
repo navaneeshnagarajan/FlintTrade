@@ -8,6 +8,15 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Payload updates without an installer cycle** — every release now ships
+  the frozen backend (terminal embedded) as a hash-verified
+  `flinttrade-payload-<triple>` asset, and the desktop shell manages it the
+  way it manages the Ollama runtime: staged download, streaming SHA-256
+  verification against the release manifest, durable swap under
+  `runtime/backend/<version>/` with the previous version retained for
+  rollback, and automatic demotion back to the bundled backend if a payload
+  fails to start. The thin shell rarely needs rebuilding; daily changes reach
+  users as one-click backend updates.
 - **CI-owned release engineering** — release-please maintains the release PR
   (version bumps from Conventional Commits, changelog generation), a
   propagation script keeps the ~25-file version contract consistent, and
