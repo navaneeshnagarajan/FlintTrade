@@ -3,9 +3,11 @@
  *
  * Covers: hidden on web builds, running version shown, the signed native
  * one-click update flow (preferred when the shell check succeeds, silent
- * fallback when it rejects), the binary installer update flow, the
- * source-rebuild fallback, missing-updater one-liner fallback, honest
- * rate-limit errors, and desktop-only section registration.
+ * fallback when it rejects), the managed backend payload flow (one-click
+ * apply, graceful silence when the check rejects, offered alongside the
+ * shell update), the binary installer update flow, the source-rebuild
+ * fallback, missing-updater one-liner fallback, honest rate-limit errors,
+ * and desktop-only section registration.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -103,6 +105,37 @@ function mockNativeShell(
     if (command === "check_native_update") return Promise.resolve(check);
     // A successful apply restarts the app, so its promise never resolves.
     if (command === "apply_native_update") return apply();
+    return Promise.resolve(undefined);
+  });
+}
+
+function mockPayloadShell(
+  options: {
+    native?: { available: boolean; version: string | null; notes: string | null };
+    payloadCheck: { available: boolean; version: string | null; size: number | null } | Error;
+    apply?: () => Promise<unknown>;
+  },
+) {
+  const native = options.native ?? { available: false, version: null, notes: null };
+  const apply = options.apply ?? (() => new Promise(() => {}));
+  mockInvoke.mockImplementation((command: string) => {
+    if (command === "updater_state") {
+      return Promise.resolve({
+        app_version: "0.6.0-beta.1",
+        platform_os: "windows",
+        platform_arch: "x64",
+        src_dir: null,
+        installer_script: null,
+      });
+    }
+    if (command === "check_native_update") return Promise.resolve(native);
+    if (command === "check_payload_update") {
+      return options.payloadCheck instanceof Error
+        ? Promise.reject(options.payloadCheck)
+        : Promise.resolve(options.payloadCheck);
+    }
+    // A successful apply restarts the app, so its promise never resolves.
+    if (command === "apply_payload_update") return apply();
     return Promise.resolve(undefined);
   });
 }
@@ -291,6 +324,75 @@ describe("UpdatesSection native one-click flow", () => {
     expect(await screen.findByText(/could not be downloaded and verified/i)).toBeInTheDocument();
     // The busy state clears so the operator can retry.
     expect(screen.getByRole("button", { name: /update and restart/i })).toBeInTheDocument();
+  });
+});
+
+describe("UpdatesSection managed backend payload flow", () => {
+  it("offers the one-click backend update and invokes apply_payload_update", async () => {
+    mockPayloadShell({ payloadCheck: { available: true, version: "0.7.1", size: 64 * 1024 * 1024 } });
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    const user = await checkForUpdates();
+
+    const updateBtn = await screen.findByRole("button", { name: /update backend \(v0\.7\.1\)/i });
+    // The shell itself is current — the payload path is offered alongside.
+    expect(await screen.findByText(/latest desktop release/i)).toBeInTheDocument();
+    expect(screen.getByText(/~64 MB/)).toBeInTheDocument();
+
+    await user.click(updateBtn);
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("apply_payload_update"));
+    // Busy state: the apply promise never resolves (the shell restarts the app).
+    expect(
+      await screen.findByText(/updating the backend — the app will restart itself\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /update backend/i })).not.toBeInTheDocument();
+  });
+
+  it("offers the shell update and the backend payload update together", async () => {
+    mockPayloadShell({
+      native: { available: true, version: "0.7.0", notes: null },
+      payloadCheck: { available: true, version: "0.7.1", size: null },
+    });
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    await checkForUpdates();
+
+    expect(await screen.findByRole("button", { name: /update and restart/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /update backend \(v0\.7\.1\)/i })).toBeInTheDocument();
+  });
+
+  it("ignores a rejected payload check gracefully", async () => {
+    mockPayloadShell({ payloadCheck: new Error("payload updater unavailable") });
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    await checkForUpdates();
+
+    // The native check still resolves the outcome; no payload UI, no error.
+    expect(await screen.findByText(/latest desktop release/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /update backend/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/payload updater unavailable/i)).not.toBeInTheDocument();
+  });
+
+  it("surfaces the shell's redacted message and re-offers the action when the payload apply fails", async () => {
+    mockPayloadShell({
+      payloadCheck: { available: true, version: "0.7.1", size: null },
+      apply: () =>
+        Promise.reject(
+          "The backend update could not be downloaded and verified — nothing was changed. Please try again.",
+        ),
+    });
+    render(<UpdatesSection />);
+    await screen.findByText("v0.6.0-beta.1");
+
+    const user = await checkForUpdates();
+    await user.click(await screen.findByRole("button", { name: /update backend/i }));
+
+    expect(await screen.findByText(/could not be downloaded and verified/i)).toBeInTheDocument();
+    // The busy state clears so the operator can retry.
+    expect(screen.getByRole("button", { name: /update backend/i })).toBeInTheDocument();
   });
 });
 

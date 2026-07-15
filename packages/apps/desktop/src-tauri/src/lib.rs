@@ -8,7 +8,12 @@
 //!    (the *shell* provides the secret; the backend never auto-generates one).
 //! 2. Spawns the ``flinttrade-backend`` sidecar on an OS-chosen loopback port
 //!    (``--port 0``) and waits for its ``FLINTTRADE_BACKEND_READY port=<n>``
-//!    handshake on stdout.
+//!    handshake on stdout. A managed backend payload staged under
+//!    ``<workspace>/runtime/backend/<version>/`` boots in the bundled
+//!    sidecar's place when its ``state.json`` sha256 pin still matches — so
+//!    daily backend+frontend updates need no installer cycle. Any
+//!    verification, spawn, or ready-handshake failure logs and falls back to
+//!    the bundled sidecar.
 //! 3. Opens the main window pointed at ``http://127.0.0.1:<n>`` — the backend
 //!    serves both the React terminal and the API from that one origin, so the
 //!    app's same-origin requests resolve without any in-app configuration.
@@ -72,7 +77,7 @@ use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_shell::process::{Command as ShellCommand, CommandEvent, TerminatedPayload};
+use tauri_plugin_shell::process::{CommandEvent, TerminatedPayload};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -771,15 +776,6 @@ fn spawn_contained_std_command(
     ))
 }
 
-fn spawn_contained_shell_command(
-    command: ShellCommand,
-) -> std::io::Result<(
-    tauri::async_runtime::Receiver<CommandEvent>,
-    ContainedCommandChild,
-)> {
-    spawn_contained_std_command(command.into())
-}
-
 struct ManagedSidecar {
     child: ContainedCommandChild,
     record: SidecarRecord,
@@ -1080,6 +1076,516 @@ async fn apply_native_update(app: AppHandle) -> Result<(), String> {
         })?;
     mark_quit_requested(&app);
     app.restart()
+}
+
+// ---------------------------------------------------------------------------
+// Managed backend payload runtime.
+//
+// Daily releases publish one frozen backend payload (which embeds the built
+// terminal) per target triple next to the rolling channel manifest. The shell
+// stages a downloaded payload under ``<workspace>/runtime/backend/<version>/``,
+// pins its sha256 in ``state.json``, and prefers that binary over the bundled
+// sidecar on the next boot — so routine backend+frontend updates need no
+// installer cycle. Verification fails open towards the bundle: any mismatch,
+// spawn failure, or pre-ready exit falls back to the bundled sidecar so a bad
+// payload can never brick the app.
+// ---------------------------------------------------------------------------
+
+/// Target triple this shell was compiled for, as emitted by ``tauri-build``.
+/// The channel manifest keys its backend payloads by exactly this string.
+const PAYLOAD_TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
+
+/// State file inside the payload runtime dir pinning the active version and
+/// the sha256 its binary must still hash to at boot.
+const PAYLOAD_STATE_FILE: &str = "state.json";
+
+/// Staging directory (inside the payload runtime dir) for in-flight
+/// downloads, so a torn download can never be mistaken for an installed
+/// payload.
+const PAYLOAD_STAGING_DIR: &str = ".staging";
+
+/// File name of the frozen backend binary inside a per-version payload dir.
+#[cfg(windows)]
+const PAYLOAD_BINARY_NAME: &str = "flinttrade-backend.exe";
+#[cfg(not(windows))]
+const PAYLOAD_BINARY_NAME: &str = "flinttrade-backend";
+
+/// Pinned managed-payload state (``runtime/backend/state.json``).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct PayloadState {
+    active_version: String,
+    sha256: String,
+}
+
+/// One per-triple backend payload entry from the channel release manifest.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct PayloadManifestEntry {
+    name: String,
+    size: u64,
+    url: String,
+    sha256: String,
+}
+
+/// The slice of ``flinttrade-desktop-manifest.json`` the payload updater
+/// reads (unknown fields are ignored).
+#[derive(Debug, serde::Deserialize)]
+struct PayloadManifest {
+    version: String,
+    #[serde(default)]
+    payloads: std::collections::HashMap<String, PayloadManifestEntry>,
+}
+
+/// Payload of the ``check_payload_update`` command.
+#[derive(serde::Serialize)]
+struct PayloadUpdateCheck {
+    /// Whether the channel manifest offers a payload differing from the
+    /// currently active backend version.
+    available: bool,
+    /// Version offered by the channel, when an update is available.
+    version: Option<String>,
+    /// Download size in bytes, when an update is available.
+    size: Option<u64>,
+}
+
+/// Accept only version strings safe to use as a payload directory name (the
+/// manifest version, e.g. ``0.7.0`` or ``0.7.0-beta.2``). Rejects anything
+/// that could traverse out of the runtime dir or hide as a dotfile.
+fn valid_payload_version(version: &str) -> bool {
+    !version.is_empty()
+        && version.len() <= 64
+        && !version.starts_with('.')
+        && !version.starts_with('-')
+        && version
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+')
+}
+
+/// Accept only a 64-character hex sha256 digest.
+fn valid_payload_sha256(digest: &str) -> bool {
+    digest.len() == 64 && digest.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Root of the managed payload runtime inside the workspace dir.
+fn payload_runtime_dir() -> Option<PathBuf> {
+    flinttrade_home().map(|d| d.join("runtime").join("backend"))
+}
+
+/// Parse and validate ``state.json`` contents. ``None`` covers both malformed
+/// JSON and a version/digest that fails the directory-safety pins.
+fn parse_payload_state(contents: &str) -> Option<PayloadState> {
+    let state: PayloadState = serde_json::from_str(contents).ok()?;
+    if !valid_payload_version(&state.active_version) || !valid_payload_sha256(&state.sha256) {
+        return None;
+    }
+    Some(state)
+}
+
+/// The payload version currently pinned active, if a valid pin exists.
+fn active_payload_version() -> Option<String> {
+    let runtime_dir = payload_runtime_dir()?;
+    let contents = std::fs::read_to_string(runtime_dir.join(PAYLOAD_STATE_FILE)).ok()?;
+    parse_payload_state(&contents).map(|state| state.active_version)
+}
+
+/// Streaming sha256 of a file, hex-encoded lowercase.
+fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(to_hex(hasher.finalize().as_slice()))
+}
+
+/// Resolve the staged payload binary named by ``state.json`` after verifying
+/// its on-disk sha256 still matches the pinned digest.
+///
+/// ``Ok(None)`` means no managed payload is installed (the normal bundled
+/// boot); ``Err`` means a payload was pinned but failed verification, which
+/// the caller logs before falling back to the bundled sidecar.
+fn verified_active_payload_binary_at(
+    runtime_dir: &Path,
+) -> std::io::Result<Option<(String, PathBuf)>> {
+    let state_path = runtime_dir.join(PAYLOAD_STATE_FILE);
+    if !state_path.is_file() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(&state_path)?;
+    let Some(state) = parse_payload_state(&contents) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "managed payload state is invalid",
+        ));
+    };
+    let binary = runtime_dir
+        .join(&state.active_version)
+        .join(PAYLOAD_BINARY_NAME);
+    if !binary.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "managed payload binary for v{} is missing",
+                state.active_version
+            ),
+        ));
+    }
+    let digest = sha256_file(&binary)?;
+    if !digest.eq_ignore_ascii_case(&state.sha256) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "managed payload binary for v{} failed its sha256 pin",
+                state.active_version
+            ),
+        ));
+    }
+    Ok(Some((state.active_version, binary)))
+}
+
+/// [`verified_active_payload_binary_at`] rooted at the workspace runtime dir.
+fn verified_active_payload_binary() -> std::io::Result<Option<(String, PathBuf)>> {
+    let Some(runtime_dir) = payload_runtime_dir() else {
+        return Ok(None);
+    };
+    verified_active_payload_binary_at(&runtime_dir)
+}
+
+/// Remove the managed-payload pin so every later boot uses the bundled
+/// backend. Returns whether a pin was actually removed.
+fn demote_active_payload() -> bool {
+    let Some(runtime_dir) = payload_runtime_dir() else {
+        return false;
+    };
+    match std::fs::remove_file(runtime_dir.join(PAYLOAD_STATE_FILE)) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            eprintln!("[flinttrade] could not demote the managed backend payload: {error}");
+            false
+        }
+    }
+}
+
+/// Atomically publish ``state.json``: write a temp file, flush it to disk,
+/// then rename over the previous state so a crash can never leave a torn pin.
+fn write_payload_state_at(runtime_dir: &Path, state: &PayloadState) -> std::io::Result<()> {
+    let serialised = serde_json::to_string_pretty(state).map_err(std::io::Error::other)?;
+    let temp_path = runtime_dir.join(format!("{PAYLOAD_STATE_FILE}.tmp"));
+    {
+        let mut file = std::fs::File::create(&temp_path)?;
+        file.write_all(serialised.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&temp_path, runtime_dir.join(PAYLOAD_STATE_FILE))
+}
+
+/// Remove every directory under the runtime dir except the retained versions
+/// (this also clears the staging dir). Failures are logged, never fatal —
+/// pruning is housekeeping, not correctness.
+fn prune_payload_versions_at(runtime_dir: &Path, retained: &[&str]) {
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if retained.contains(&name) {
+            continue;
+        }
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if let Err(error) = std::fs::remove_dir_all(&path) {
+            eprintln!("[flinttrade] could not prune old backend payload {name}: {error}");
+        }
+    }
+}
+
+/// Rolling channel manifest URL for this build's release channel — the same
+/// beta/stable split as the native updater feed.
+fn payload_manifest_endpoint() -> String {
+    let channel = if env!("CARGO_PKG_VERSION").contains('-') {
+        "beta"
+    } else {
+        "stable"
+    };
+    format!(
+        "https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-{channel}/flinttrade-desktop-manifest.json"
+    )
+}
+
+fn parse_payload_manifest(contents: &str) -> Result<PayloadManifest, serde_json::Error> {
+    serde_json::from_str(contents)
+}
+
+/// HTTP client for payload downloads, sharing the rustls stack (and its ring
+/// crypto-provider bootstrap) with the updater plugin already in this binary.
+fn payload_http_client() -> Result<reqwest::Client, String> {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        // Failure means a provider was installed concurrently, which is fine.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+    reqwest::Client::builder()
+        .user_agent(concat!("flinttrade-desktop/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(30))
+        .read_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| {
+            eprintln!("[flinttrade] payload HTTP client unavailable: {e}");
+            "The backend payload updater is unavailable in this build.".to_string()
+        })
+}
+
+/// Fetch and parse the rolling channel manifest. Errors are logged in full
+/// but returned redacted, matching the native updater commands.
+async fn fetch_payload_manifest(client: &reqwest::Client) -> Result<PayloadManifest, String> {
+    let unreachable = || {
+        "Could not check for a backend update — the update feed is unreachable or returned an unexpected response."
+            .to_string()
+    };
+    let response = client
+        .get(payload_manifest_endpoint())
+        .send()
+        .await
+        .map_err(|e| {
+            eprintln!("[flinttrade] payload manifest fetch failed: {e}");
+            unreachable()
+        })?;
+    if !response.status().is_success() {
+        eprintln!(
+            "[flinttrade] payload manifest fetch returned HTTP {}",
+            response.status()
+        );
+        return Err(unreachable());
+    }
+    let body = response.text().await.map_err(|e| {
+        eprintln!("[flinttrade] payload manifest read failed: {e}");
+        unreachable()
+    })?;
+    parse_payload_manifest(&body).map_err(|e| {
+        eprintln!("[flinttrade] payload manifest parse failed: {e}");
+        unreachable()
+    })
+}
+
+/// Download a payload entry into a fresh staging dir with a streaming sha256
+/// check. Returns the staged file path; any failure removes the staging dir.
+async fn stage_payload_download(
+    client: &reqwest::Client,
+    runtime_dir: &Path,
+    entry: &PayloadManifestEntry,
+) -> Result<PathBuf, String> {
+    use sha2::{Digest, Sha256};
+
+    let failed = || {
+        "The backend update could not be downloaded and verified — nothing was changed. Please try again."
+            .to_string()
+    };
+    let staging_dir = runtime_dir.join(PAYLOAD_STAGING_DIR);
+    // A fresh staging dir per attempt: a torn earlier download must never
+    // contaminate this one.
+    if staging_dir.exists() {
+        std::fs::remove_dir_all(&staging_dir).map_err(|e| {
+            eprintln!("[flinttrade] could not clear the payload staging dir: {e}");
+            failed()
+        })?;
+    }
+    std::fs::create_dir_all(&staging_dir).map_err(|e| {
+        eprintln!("[flinttrade] could not create the payload staging dir: {e}");
+        failed()
+    })?;
+    let staged = staging_dir.join(PAYLOAD_BINARY_NAME);
+    let result = async {
+        let mut response = client.get(&entry.url).send().await.map_err(|e| {
+            eprintln!("[flinttrade] payload download failed to start: {e}");
+            failed()
+        })?;
+        if !response.status().is_success() {
+            eprintln!(
+                "[flinttrade] payload download returned HTTP {}",
+                response.status()
+            );
+            return Err(failed());
+        }
+        let mut file = std::fs::File::create(&staged).map_err(|e| {
+            eprintln!("[flinttrade] could not create the staged payload file: {e}");
+            failed()
+        })?;
+        let mut hasher = Sha256::new();
+        let mut downloaded: u64 = 0;
+        while let Some(chunk) = response.chunk().await.map_err(|e| {
+            eprintln!("[flinttrade] payload download stream failed: {e}");
+            failed()
+        })? {
+            downloaded = downloaded.saturating_add(chunk.len() as u64);
+            if downloaded > entry.size {
+                eprintln!(
+                    "[flinttrade] payload download exceeded its declared size of {} bytes",
+                    entry.size
+                );
+                return Err(failed());
+            }
+            hasher.update(&chunk);
+            file.write_all(&chunk).map_err(|e| {
+                eprintln!("[flinttrade] could not write the staged payload: {e}");
+                failed()
+            })?;
+        }
+        if downloaded != entry.size {
+            eprintln!(
+                "[flinttrade] payload download was {downloaded} bytes, expected {}",
+                entry.size
+            );
+            return Err(failed());
+        }
+        let digest = to_hex(hasher.finalize().as_slice());
+        if !digest.eq_ignore_ascii_case(&entry.sha256) {
+            eprintln!("[flinttrade] payload {} failed its sha256 pin", entry.name);
+            return Err(failed());
+        }
+        file.sync_all().map_err(|e| {
+            eprintln!("[flinttrade] could not flush the staged payload: {e}");
+            failed()
+        })?;
+        Ok(staged.clone())
+    }
+    .await;
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+    }
+    result
+}
+
+/// Move a verified staged payload into its per-version dir, make it
+/// executable, pin it in ``state.json``, and prune superseded versions —
+/// keeping exactly the new payload and its immediate predecessor.
+fn install_staged_payload(
+    runtime_dir: &Path,
+    version: &str,
+    staged: &Path,
+    sha256: &str,
+    previous_version: Option<&str>,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let version_dir = runtime_dir.join(version);
+    std::fs::create_dir_all(&version_dir)?;
+    let binary = version_dir.join(PAYLOAD_BINARY_NAME);
+    // Windows cannot rename over an existing file; a same-version reinstall
+    // replaces the previous binary explicitly.
+    if binary.exists() {
+        std::fs::remove_file(&binary)?;
+    }
+    std::fs::rename(staged, &binary)?;
+    write_payload_state_at(
+        runtime_dir,
+        &PayloadState {
+            active_version: version.to_string(),
+            sha256: sha256.to_ascii_lowercase(),
+        },
+    )?;
+    let mut retained = vec![version, PAYLOAD_STATE_FILE];
+    if let Some(previous) = previous_version {
+        retained.push(previous);
+    }
+    prune_payload_versions_at(runtime_dir, &retained);
+    Ok(())
+}
+
+/// Check the rolling channel manifest for a backend payload differing from
+/// the currently active one (the pinned managed payload, else this build's
+/// own bundled version).
+#[tauri::command]
+async fn check_payload_update(app: AppHandle) -> Result<PayloadUpdateCheck, String> {
+    let client = payload_http_client()?;
+    let manifest = fetch_payload_manifest(&client).await?;
+    let none = PayloadUpdateCheck {
+        available: false,
+        version: None,
+        size: None,
+    };
+    let Some(entry) = manifest.payloads.get(PAYLOAD_TARGET_TRIPLE) else {
+        eprintln!(
+            "[flinttrade] channel manifest carries no backend payload for {PAYLOAD_TARGET_TRIPLE}"
+        );
+        return Ok(none);
+    };
+    let active = active_payload_version().unwrap_or_else(|| app.package_info().version.to_string());
+    if manifest.version == active {
+        return Ok(none);
+    }
+    Ok(PayloadUpdateCheck {
+        available: true,
+        version: Some(manifest.version),
+        size: Some(entry.size),
+    })
+}
+
+/// Download, hash-verify, and stage the channel's backend payload, pin it in
+/// ``state.json``, prune superseded versions, then restart the app onto it.
+/// ``restart`` marks the quit as deliberate first (mirroring
+/// ``apply_native_update``) so close-to-tray cannot intercept the swap; it
+/// never returns.
+#[tauri::command]
+async fn apply_payload_update(app: AppHandle) -> Result<(), String> {
+    let client = payload_http_client()?;
+    let manifest = fetch_payload_manifest(&client).await?;
+    let Some(entry) = manifest.payloads.get(PAYLOAD_TARGET_TRIPLE) else {
+        return Err("No backend payload is published for this platform.".to_string());
+    };
+    let version = manifest.version.clone();
+    if !valid_payload_version(&version) || !valid_payload_sha256(&entry.sha256) {
+        eprintln!("[flinttrade] channel manifest payload entry is malformed (version {version:?})");
+        return Err(
+            "The published backend payload is malformed — nothing was changed.".to_string(),
+        );
+    }
+    let previous = active_payload_version();
+    let active = previous
+        .clone()
+        .unwrap_or_else(|| app.package_info().version.to_string());
+    if version == active {
+        return Err("No backend update is available.".to_string());
+    }
+    let runtime_dir = payload_runtime_dir()
+        .ok_or_else(|| "Could not resolve the FlintTrade workspace directory.".to_string())?;
+    let staged = stage_payload_download(&client, &runtime_dir, entry).await?;
+    install_staged_payload(
+        &runtime_dir,
+        &version,
+        &staged,
+        &entry.sha256,
+        previous.as_deref(),
+    )
+    .map_err(|e| {
+        eprintln!("[flinttrade] managed payload install failed: {e}");
+        "The backend update could not be installed — nothing was changed. Please try again."
+            .to_string()
+    })?;
+    mark_quit_requested(&app);
+    app.restart()
+}
+
+/// Restart the app after a managed payload has been demoted, so this very
+/// launch recovers onto the bundled backend instead of stranding the operator
+/// on the recovery page. Only called once the terminated launch's recovery
+/// record has been removed; ``restart`` never returns.
+fn restart_onto_bundled_backend(app: &AppHandle) {
+    eprintln!("[flinttrade] restarting on the bundled backend");
+    mark_quit_requested(app);
+    app.restart();
 }
 
 fn schedule_update_exit(app: &AppHandle) {
@@ -1457,6 +1963,31 @@ fn stage_updater_script_in_temp(script: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((dest, dir))
 }
 
+/// Apply the backend launch arguments and environment shared by the bundled
+/// sidecar and a managed payload binary. Both spawn paths must stay identical
+/// apart from the executable itself. ``FLINTTRADE_DESKTOP=1`` tells the
+/// backend it is running under the desktop shell, so it may emit
+/// ``FLINTTRADE_NOTIFY`` stdout lines for native notifications (a no-op under
+/// plain CLI/`make start`).
+fn configure_backend_command(
+    command: &mut StdCommand,
+    sidecar_record_path: &Path,
+    boot_id: &str,
+    launch_token: &str,
+) {
+    command
+        .args(["--port", "0"])
+        .env("FLINTTRADE_DESKTOP", "1")
+        // The sidecar entry script watches this PID and exits cleanly when
+        // the shell dies.
+        .env("FLINTTRADE_PARENT_PID", std::process::id().to_string())
+        // Python promotes this exact tokenised pending record itself before
+        // announcing its real application PID on stdout.
+        .env("FLINTTRADE_SIDECAR_RECORD_PATH", sidecar_record_path)
+        .env(BOOT_ID_ENV, boot_id)
+        .env("FLINTTRADE_LAUNCH_TOKEN", launch_token);
+}
+
 /// Build and run the FlintTrade desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1477,7 +2008,8 @@ pub fn run() {
         // the remote main window only reaches these via the explicit
         // ``allow-updater-state`` / ``allow-run-binary-update`` /
         // ``allow-run-self-update`` / ``allow-check-native-update`` /
-        // ``allow-apply-native-update`` entries in
+        // ``allow-apply-native-update`` / ``allow-check-payload-update`` /
+        // ``allow-apply-payload-update`` entries in
         // ``capabilities/main-remote.json`` (autogenerated by build.rs).
         .invoke_handler(tauri::generate_handler![
             updater_state,
@@ -1485,6 +2017,8 @@ pub fn run() {
             run_self_update,
             check_native_update,
             apply_native_update,
+            check_payload_update,
+            apply_payload_update,
             quit_after_backend_failure
         ])
         .manage(BackendState(Mutex::new(None)))
@@ -1544,27 +2078,57 @@ pub fn run() {
                     )
                 })?;
 
-            // Spawn the backend sidecar on an OS-chosen loopback port so the app
-            // never collides with another local FlintTrade or service.
-            // FLINTTRADE_DESKTOP=1 tells the backend it is running under the
-            // desktop shell, so it may emit FLINTTRADE_NOTIFY stdout lines for
-            // native notifications (a no-op under plain CLI/`make start`).
-            let command = app
-                .shell()
-                .sidecar("flinttrade-backend")?
-                .args(["--port", "0"])
-                .env("FLINTTRADE_DESKTOP", "1")
-                // The sidecar entry script watches this PID and exits cleanly
-                // when the shell dies.
-                .env("FLINTTRADE_PARENT_PID", std::process::id().to_string())
-                // Python promotes this exact tokenised pending record itself
-                // before announcing its real application PID on stdout.
-                .env("FLINTTRADE_SIDECAR_RECORD_PATH", &sidecar_record_path)
-                .env(BOOT_ID_ENV, &boot_id)
-                .env("FLINTTRADE_LAUNCH_TOKEN", &launch_token);
-            #[cfg(unix)]
-            let command = command.env(PARENT_IDENTITY_ENV, parent_identity);
-            let (mut rx, mut child) = spawn_contained_shell_command(command)?;
+            // Spawn the backend on an OS-chosen loopback port so the app never
+            // collides with another local FlintTrade or service. A verified
+            // managed backend payload (staged by ``apply_payload_update``)
+            // boots in the bundled sidecar's place; any verification or spawn
+            // failure logs and falls back to the bundle so a bad payload can
+            // never brick the app.
+            let mut managed_payload_version: Option<String> = None;
+            let mut spawned = None;
+            match verified_active_payload_binary() {
+                Ok(Some((version, binary))) => {
+                    let mut command = StdCommand::new(&binary);
+                    configure_backend_command(
+                        &mut command,
+                        &sidecar_record_path,
+                        &boot_id,
+                        &launch_token,
+                    );
+                    #[cfg(unix)]
+                    command.env(PARENT_IDENTITY_ENV, &parent_identity);
+                    match spawn_contained_std_command(command) {
+                        Ok(pair) => {
+                            eprintln!("[flinttrade] booting managed backend payload v{version}");
+                            managed_payload_version = Some(version);
+                            spawned = Some(pair);
+                        }
+                        Err(error) => eprintln!(
+                            "[flinttrade] managed backend payload v{version} failed to spawn: {error}; falling back to the bundled backend"
+                        ),
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "[flinttrade] managed backend payload verification failed: {error}; falling back to the bundled backend"
+                ),
+            }
+            let (mut rx, mut child) = match spawned {
+                Some(spawned) => spawned,
+                None => {
+                    let mut command: StdCommand =
+                        app.shell().sidecar("flinttrade-backend")?.into();
+                    configure_backend_command(
+                        &mut command,
+                        &sidecar_record_path,
+                        &boot_id,
+                        &launch_token,
+                    );
+                    #[cfg(unix)]
+                    command.env(PARENT_IDENTITY_ENV, &parent_identity);
+                    spawn_contained_std_command(command)?
+                }
+            };
             let sidecar_pid = child.pid();
             let sidecar_record = SidecarRecord {
                 sidecar_pid,
@@ -1704,6 +2268,24 @@ pub fn run() {
                         }
                         CommandEvent::Terminated(payload) => {
                             eprintln!("[flinttrade] backend terminated: {payload:?}");
+                            // A managed payload that dies before its ready
+                            // handshake is demoted on the spot: the pin is
+                            // removed so every later boot uses the bundled
+                            // backend, and once this launch's record is
+                            // confirmed clean the app restarts itself onto
+                            // that bundle instead of stranding the operator.
+                            let payload_reverted = managed_payload_version
+                                .as_ref()
+                                .filter(|_| {
+                                    ready_port.is_none() && !quit_was_requested(&handle)
+                                })
+                                .map(|version| {
+                                    eprintln!(
+                                        "[flinttrade] managed backend payload v{version} exited before its ready handshake; reverting to the bundled backend"
+                                    );
+                                    demote_active_payload()
+                                })
+                                .unwrap_or(false);
                             if pending_record_cleanup_allowed(
                                 &sidecar_record,
                                 if pending_exit_acknowledged.load(Ordering::Acquire) {
@@ -1715,6 +2297,9 @@ pub fn run() {
                             ) {
                                 clear_terminated_backend(&handle, &sidecar_record);
                                 let _ = remove_sidecar_record(&sidecar_record);
+                                if payload_reverted {
+                                    restart_onto_bundled_backend(&handle);
+                                }
                                 surface_backend_recovery(&handle);
                                 break;
                             }
@@ -1727,6 +2312,9 @@ pub fn run() {
                                         &sidecar_record,
                                         cleanup_acknowledged,
                                     );
+                                    if payload_reverted {
+                                        restart_onto_bundled_backend(&handle);
+                                    }
                                 }
                                 ProcessLiveness::Alive => {
                                     eprintln!(
@@ -6615,6 +7203,176 @@ mod tests {
         assert!(!valid_release_tag("v1.2"));
         assert!(!valid_release_tag("v1.2.3 && open /Applications"));
         assert!(!valid_release_tag("v1.2.3/beta"));
+    }
+
+    #[test]
+    fn payload_version_strings_are_validated_for_directory_safety() {
+        assert!(valid_payload_version("0.7.0"));
+        assert!(valid_payload_version("0.7.0-beta.2"));
+        assert!(valid_payload_version("1.2.3+build.5"));
+
+        assert!(!valid_payload_version(""));
+        assert!(!valid_payload_version("."));
+        assert!(!valid_payload_version(".."));
+        assert!(!valid_payload_version("../escape"));
+        assert!(!valid_payload_version("0.7.0/evil"));
+        assert!(!valid_payload_version("0.7.0\\evil"));
+        assert!(!valid_payload_version(".hidden"));
+        assert!(!valid_payload_version("-flag"));
+        assert!(!valid_payload_version(&"9".repeat(65)));
+    }
+
+    #[test]
+    fn payload_state_parsing_rejects_malformed_pins() {
+        let sha = "a".repeat(64);
+        let state = parse_payload_state(&format!(
+            r#"{{"active_version": "0.7.0", "sha256": "{sha}"}}"#
+        ))
+        .unwrap();
+        assert_eq!(state.active_version, "0.7.0");
+        assert_eq!(state.sha256, sha);
+
+        assert!(parse_payload_state("").is_none());
+        assert!(parse_payload_state("not json").is_none());
+        assert!(parse_payload_state(r#"{"active_version": "0.7.0"}"#).is_none());
+        assert!(parse_payload_state(&format!(
+            r#"{{"active_version": "../up", "sha256": "{sha}"}}"#
+        ))
+        .is_none());
+        assert!(parse_payload_state(r#"{"active_version": "0.7.0", "sha256": "short"}"#).is_none());
+    }
+
+    #[test]
+    fn payload_manifest_parses_the_published_shape() {
+        let manifest = parse_payload_manifest(
+            r#"{
+                "tag": "v0.7.0",
+                "version": "0.7.0",
+                "channel": "beta",
+                "prerelease": true,
+                "assets": [],
+                "payloads": {
+                    "aarch64-apple-darwin": {
+                        "name": "flinttrade-payload-aarch64-apple-darwin",
+                        "size": 123,
+                        "url": "https://example.invalid/payload",
+                        "sha256": "aaaa"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.version, "0.7.0");
+        let entry = manifest.payloads.get("aarch64-apple-darwin").unwrap();
+        assert_eq!(entry.name, "flinttrade-payload-aarch64-apple-darwin");
+        assert_eq!(entry.size, 123);
+        assert_eq!(entry.url, "https://example.invalid/payload");
+        assert_eq!(entry.sha256, "aaaa");
+        assert!(manifest.payloads.get("x86_64-pc-windows-msvc").is_none());
+
+        assert!(parse_payload_manifest("not json").is_err());
+        assert!(parse_payload_manifest(r#"{"payloads": {}}"#).is_err());
+    }
+
+    #[test]
+    fn payload_endpoint_follows_the_compiled_release_channel() {
+        let endpoint = payload_manifest_endpoint();
+        let expected_channel = if env!("CARGO_PKG_VERSION").contains('-') {
+            "updater-beta"
+        } else {
+            "updater-stable"
+        };
+        assert!(endpoint.contains(expected_channel));
+        assert!(endpoint.ends_with("flinttrade-desktop-manifest.json"));
+        assert!(!PAYLOAD_TARGET_TRIPLE.is_empty());
+    }
+
+    #[test]
+    fn sha256_file_matches_the_reference_digest() {
+        let path = std::env::temp_dir().join(format!(
+            "flinttrade-payload-sha-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"abc").unwrap();
+        assert_eq!(
+            sha256_file(&path).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn verified_payload_boot_requires_a_matching_sha256_pin() {
+        let dir = std::env::temp_dir().join(format!(
+            "flinttrade-payload-verify-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // No state file: no managed payload, so the bundled sidecar boots.
+        assert!(matches!(verified_active_payload_binary_at(&dir), Ok(None)));
+
+        // A valid pin over the exact staged binary resolves it for boot.
+        let version_dir = dir.join("0.7.0");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        let binary = version_dir.join(PAYLOAD_BINARY_NAME);
+        std::fs::write(&binary, b"payload-bytes").unwrap();
+        let digest = sha256_file(&binary).unwrap();
+        write_payload_state_at(
+            &dir,
+            &PayloadState {
+                active_version: "0.7.0".to_string(),
+                sha256: digest,
+            },
+        )
+        .unwrap();
+        let (version, path) = verified_active_payload_binary_at(&dir).unwrap().unwrap();
+        assert_eq!(version, "0.7.0");
+        assert_eq!(path, binary);
+
+        // Tampering with the staged binary invalidates the pin.
+        std::fs::write(&binary, b"tampered").unwrap();
+        assert!(verified_active_payload_binary_at(&dir).is_err());
+
+        // A missing binary and a malformed state file are errors (logged and
+        // fallen back from), never a silent managed boot.
+        std::fs::remove_file(&binary).unwrap();
+        assert!(verified_active_payload_binary_at(&dir).is_err());
+        std::fs::write(dir.join(PAYLOAD_STATE_FILE), "not json").unwrap();
+        assert!(verified_active_payload_binary_at(&dir).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pruning_retains_only_the_named_payload_versions() {
+        let dir = std::env::temp_dir().join(format!(
+            "flinttrade-payload-prune-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for version in ["0.5.0", "0.6.0", "0.7.0", PAYLOAD_STAGING_DIR] {
+            std::fs::create_dir_all(dir.join(version)).unwrap();
+        }
+        std::fs::write(dir.join(PAYLOAD_STATE_FILE), "{}").unwrap();
+
+        prune_payload_versions_at(&dir, &["0.7.0", PAYLOAD_STATE_FILE, "0.6.0"]);
+
+        assert!(!dir.join("0.5.0").exists());
+        assert!(!dir.join(PAYLOAD_STAGING_DIR).exists());
+        assert!(dir.join("0.6.0").is_dir());
+        assert!(dir.join("0.7.0").is_dir());
+        assert!(dir.join(PAYLOAD_STATE_FILE).is_file());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

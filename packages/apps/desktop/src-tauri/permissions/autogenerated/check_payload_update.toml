@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-payload-update"
+description = "Enables the check_payload_update command without any pre-configured scope."
+commands.allow = ["check_payload_update"]
+
+[[permission]]
+identifier = "deny-check-payload-update"
+description = "Denies the check_payload_update command without any pre-configured scope."
+commands.deny = ["check_payload_update"]

@@ -35,6 +35,19 @@ tauri-plugin-opener = "2"
 # the plugin directly — it reaches it only through the check_native_update /
 # apply_native_update commands granted in capabilities/main-remote.json.
 tauri-plugin-updater = "2"
+# Managed backend-payload downloads (check_payload_update /
+# apply_payload_update): streams the frozen backend from the rolling channel
+# release into <workspace>/runtime/backend/. The feature mirrors
+# tauri-plugin-updater's reqwest configuration, so both share the one
+# reqwest/rustls build already resolved in the lockfile.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+# The no-provider rustls stack needs a process-wide crypto provider; ring is
+# the provider the updater plugin already uses (installed lazily in
+# ``payload_http_client`` exactly as the plugin does).
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Streaming sha256 pin for downloaded backend payloads plus the boot-time
+# re-verification of the staged binary against ``state.json``.
+sha2 = "0.10"
 # Cross-platform CSPRNG for provisioning the credential-vault master password
 # on first launch (loopback, single-user desktop).
 getrandom = "0.2"

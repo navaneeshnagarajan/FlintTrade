@@ -11,6 +11,8 @@ fn main() {
             "run_self_update",
             "check_native_update",
             "apply_native_update",
+            "check_payload_update",
+            "apply_payload_update",
             "quit_after_backend_failure",
         ]),
     ))

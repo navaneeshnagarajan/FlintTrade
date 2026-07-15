@@ -7,6 +7,13 @@
  * fails (unsigned or dev builds, older shells, unsupported package formats)
  * the section falls back to the release manifest + bundled installer script,
  * and source rebuilds remain available when a source workspace exists.
+ *
+ * Independently of the shell update, the managed backend payload channel
+ * (check_payload_update / apply_payload_update) offers the daily
+ * backend+frontend payload: the shell downloads it into the workspace
+ * runtime, verifies its sha256, and restarts onto it — no installer cycle. A
+ * rejected payload check (older shell, offline, no payload for this
+ * platform) is ignored; the payload path is additive, never blocking.
  */
 
 import { useEffect, useState } from "react";
@@ -78,6 +85,13 @@ interface NativeUpdateCheck {
   available: boolean;
   version: string | null;
   notes: string | null;
+}
+
+/** Payload of the shell's `check_payload_update` command. */
+interface PayloadUpdateCheck {
+  available: boolean;
+  version: string | null;
+  size: number | null;
 }
 
 type CheckState =
@@ -202,6 +216,9 @@ function DesktopUpdatesSection() {
   const [updateStarted, setUpdateStarted] = useState<UpdateKind | null>(null);
   const [nativeApplying, setNativeApplying] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [payload, setPayload] = useState<PayloadUpdateCheck | null>(null);
+  const [payloadApplying, setPayloadApplying] = useState(false);
+  const [payloadError, setPayloadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -225,6 +242,8 @@ function DesktopUpdatesSection() {
   async function checkForUpdates(): Promise<void> {
     setCheck({ phase: "checking" });
     setUpdateError(null);
+    setPayload(null);
+    setPayloadError(null);
 
     // Preferred path: the shell's signed native updater. When the check
     // rejects (unsigned or dev build, older shell without the command,
@@ -236,6 +255,19 @@ function DesktopUpdatesSection() {
     } catch {
       native = null;
     }
+
+    // Independent of the shell update: the managed backend payload channel.
+    // A rejection (older shell without the command, offline, no payload for
+    // this platform) is ignored gracefully — the payload path is additive
+    // and both updates may be offered at once.
+    try {
+      const payloadCheck =
+        (await invokeDesktopCommand<PayloadUpdateCheck | undefined>("check_payload_update")) ?? null;
+      setPayload(payloadCheck?.available ? payloadCheck : null);
+    } catch {
+      setPayload(null);
+    }
+
     if (native) {
       if (native.available) {
         setCheck({ phase: "native", version: native.version, notes: native.notes });
@@ -315,6 +347,20 @@ function DesktopUpdatesSection() {
     } catch (error) {
       setNativeApplying(false);
       setUpdateError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function applyPayloadUpdate(): Promise<void> {
+    setPayloadError(null);
+    setPayloadApplying(true);
+    try {
+      // The shell restarts the app once the payload is staged and pinned, so
+      // this promise normally never resolves — the busy state holds until
+      // the window is torn down.
+      await invokeDesktopCommand<void>("apply_payload_update");
+    } catch (error) {
+      setPayloadApplying(false);
+      setPayloadError(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -417,6 +463,46 @@ function DesktopUpdatesSection() {
           )}
 
           {updateError && <p className="text-xs text-loss">{updateError}</p>}
+        </div>
+      )}
+
+      {payload?.available && (
+        <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
+          <p className="text-xs text-text-primary">
+            {payload.version ? (
+              <>
+                Backend update{" "}
+                <span className="font-mono font-semibold">v{payload.version.replace(/^v/, "")}</span>{" "}
+                is available for the managed runtime.
+              </>
+            ) : (
+              <>A backend update is available for the managed runtime.</>
+            )}
+          </p>
+
+          {payloadApplying ? (
+            <p className="flex items-center gap-2 text-xs text-text-secondary" role="status">
+              <Loader2 size={13} className="animate-spin" />
+              Updating the backend — the app will restart itself.
+            </p>
+          ) : (
+            <>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                The backend payload
+                {payload.size != null
+                  ? ` (~${Math.max(1, Math.round(payload.size / (1024 * 1024)))} MB)`
+                  : ""}{" "}
+                downloads in the background, its checksum is verified, and the app restarts onto
+                the updated backend and terminal — no installer required.
+              </p>
+              <Button type="button" size="sm" className="text-xs" onClick={() => void applyPayloadUpdate()}>
+                <Download size={13} />
+                {payload.version ? `Update backend (v${payload.version.replace(/^v/, "")})` : "Update backend"}
+              </Button>
+            </>
+          )}
+
+          {payloadError && <p className="text-xs text-loss">{payloadError}</p>}
         </div>
       )}
 
