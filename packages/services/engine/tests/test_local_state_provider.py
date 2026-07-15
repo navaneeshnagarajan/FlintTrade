@@ -2770,7 +2770,10 @@ def test_unversioned_draft_rows_migrate_without_dropping_absent_nonterminal_orde
     connection.commit()
     connection.close()
 
-    provider = OrderLifecycleLedger(ledger_path=path)
+    # Pin the clock to the migrated rows' business date — __call__ scopes the
+    # snapshot to the current business date, so a real-time clock would drop
+    # these 2026-07-15 rows on any later calendar day (a date-rollover flake).
+    provider = OrderLifecycleLedger(ledger_path=path, clock=lambda: OBSERVED_AT)
 
     assert provider(_Session()).orders[0]["orderid"] == "LEGACY-1"
     assert (
