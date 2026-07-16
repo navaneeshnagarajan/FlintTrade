@@ -272,6 +272,21 @@ jobs:
             exit 1
           fi
           echo "installer_count=$COUNT" >> "$GITHUB_OUTPUT"
+          # Arch-qualify the macOS updater bundle: Tauri names it
+          # FlintTrade.app.tar.gz with no architecture, so the two macOS jobs
+          # would collide in the flattened release assets and the updater
+          # manifest could not attribute either arch (its platform mapping
+          # requires an arch token in the filename).
+          if [[ "${{ matrix.target }}" == *apple* ]]; then
+            for f in "$OUT"/*.app.tar.gz; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f" .app.tar.gz)"
+              mv "$f" "$OUT/${base}_${{ matrix.target }}.app.tar.gz"
+              if [ -f "$f.sig" ]; then
+                mv "$f.sig" "$OUT/${base}_${{ matrix.target }}.app.tar.gz.sig"
+              fi
+            done
+          fi
           # Stage the frozen backend itself as the fast-moving payload asset:
           # the shell can fetch and hash-verify it for daily backend+frontend
           # updates without an installer cycle (Ollama-runtime pattern).
