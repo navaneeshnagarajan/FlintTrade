@@ -237,6 +237,16 @@ jobs:
                      TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [[ -z "${!var:-}" ]]; then unset "$var"; fi
           done
+          if [[ "${{ matrix.target }}" == *apple* && -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+            # Ad-hoc seal ("-" is codesign's ad-hoc identity). Without ANY
+            # signature the bundle ships with a broken seal (_CodeSignature
+            # missing while the binary's linker signature references it) and
+            # Apple Silicon refuses to launch it as "damaged" — right-click →
+            # Open cannot bypass a broken seal, only an unsigned-but-sealed
+            # one. Tauri signs the .app before the DMG and updater tarball
+            # are created, so both ship with a valid seal.
+            export APPLE_SIGNING_IDENTITY="-"
+          fi
           BUNDLE_ARGS=()
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             # WiX/MSI rejects beta SemVer like 0.6.0-beta.1; NSIS produces the
@@ -272,6 +282,23 @@ jobs:
             exit 1
           fi
           echo "installer_count=$COUNT" >> "$GITHUB_OUTPUT"
+          # Thin-shell size guard: the installers must never regress to
+          # embedding the backend payload again. The shell alone is ~5 MB;
+          # AppImage additionally carries the webkit/gtk runtime.
+          for f in "$OUT"/*; do
+            name="$(basename "$f")"
+            size_mb=$(( $(wc -c < "$f") / 1048576 ))
+            limit=40
+            case "$name" in
+              *.AppImage) limit=170 ;;
+              flinttrade-payload-*) continue ;;
+              *.sig|*.app.tar.gz) continue ;;
+            esac
+            if (( size_mb > limit )); then
+              echo "Installer $name is ${size_mb}MB (limit ${limit}MB) — the backend payload leaked back into the bundle." >&2
+              exit 1
+            fi
+          done
           # Arch-qualify the macOS updater bundle: Tauri names it
           # FlintTrade.app.tar.gz with no architecture, so the two macOS jobs
           # would collide in the flattened release assets and the updater

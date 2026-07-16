@@ -338,12 +338,4 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libgtk-3-dev
-      # tauri-build refuses to configure when the externalBin resource is
-      # absent. The real sidecar is a PyInstaller artefact built only in the
-      # release workflow; the unit tests never execute it (they use injected
-      # fake runners), so an empty executable placeholder satisfies the build.
-      - name: Stub the backend sidecar for tauri-build
-        run: |
-          triple="$(rustc -vV | sed -n 's/^host: //p')"
-          install -m 0755 /dev/null "packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${triple}"
       - run: cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml
