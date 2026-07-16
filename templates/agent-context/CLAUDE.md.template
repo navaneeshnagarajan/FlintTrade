@@ -175,7 +175,7 @@ Two-tier config. No exceptions.
 
 ## Monorepo Structure
 
-18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and shipped in v0.6.0-beta.3.
+18 package surfaces in a four-way nest under `packages/`: **13 Python + 1 Rust + 1 TS design-system + 3 apps** (terminal, desktop, site). Python source for each package lives under `src/flinttrade_<pkg>/` (never a bare `src/<file>.py`). The `chrome-extension` package was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and shipped in v0.6.0-beta.4.
 
 #### `packages/core/` — runtime foundation (4 Python + 1 Rust + 1 TS)
 
@@ -225,7 +225,7 @@ Two-tier config. No exceptions.
 
 ## Current State
 
-- **Version:** 0.6.0-beta.3 (tag `v0.6.0-beta.3`, 2026-07-02) — beta restructure snapshot. Not production ready; see `disclaimer.md`, `changelog.md`, and `docs/releases/v0.6.0-beta.3.md`.
+- **Version:** 0.6.0-beta.4 (tag `v0.6.0-beta.4`, 2026-07-02) — beta restructure snapshot. Not production ready; see `disclaimer.md`, `changelog.md`, and `docs/releases/v0.6.0-beta.4.md`.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total. Counts measured 2026-05-19 via `pytest --collect-only` + grep of `it/test/describe` declarations.
 - **CI:** 7 per-push Ubuntu jobs in `test.yml` (python-tests, node-core-tests, node-widget-tests-{1,2a,2b,3}, secrets-check) + weekly nightly-cross-platform.yml for macOS/Windows. Per-push has `paths-ignore` (doc-only commits skip the matrix), `cancel-in-progress` concurrency, and a draft-PR guard. See `docs/CI.md` for the contract.
 - **Terminal:** ≈90 widgets (TSX, run the registry for the exact count) + 7 tools + 12 public routes (+ DEV-only /admin + 404) + 13 workspace presets in Dockview v5.1 shell
