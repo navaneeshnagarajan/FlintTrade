@@ -81,6 +81,7 @@ export const DEFAULT_DESKTOP_RELEASE: DesktopReleaseManifest = {
   version: APP_VERSION,
   channel: 'beta',
   prerelease: true,
+  published_at: '',
   html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases',
   assets: [],
 };

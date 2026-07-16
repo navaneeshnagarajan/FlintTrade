@@ -57,7 +57,7 @@ INSTALLER_POLICY_FILES = [
 RETIRED_NAMES = ["OpenClaw", "LM Studio"]
 RETIRED_NAME_FILES = [
     "security.md",
-    "README.md",
+    "readme.md",
     "docs/DESKTOP.md",
     "docs/USER_GUIDE.md",
     "docs/ARCHITECTURE.md",
