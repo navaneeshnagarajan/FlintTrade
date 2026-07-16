@@ -142,7 +142,14 @@ def main() -> int:
     note = ROOT / f"docs/releases/{new_tag}.md"
     if not note.exists():
         body = _changelog_section(new_bare) or "_Release notes pending._"
-        note.write_text(f"# FlintTrade {new_tag}\n\n{body}\n", encoding="utf-8")
+        # The stability disclaimer is part of the release contract:
+        # tests/test_restructure_goals.py pins "not production ready" in every
+        # current release note while the project is pre-1.0.
+        disclaimer = (
+            f"FlintTrade `{new_tag}` is a beta prerelease. It is not production ready; "
+            "use Explore and Practice modes before connecting any live broker workflow.\n"
+        )
+        note.write_text(f"# FlintTrade {new_tag}\n\n{disclaimer}\n{body}\n", encoding="utf-8")
 
     generator = ROOT / "packages/apps/site/scripts/generate-content.mjs"
     gen_text = generator.read_text(encoding="utf-8")
