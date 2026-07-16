@@ -55,12 +55,17 @@ def _isolate_workspace() -> None:
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / worker
+        # mkdtemp, NOT a deterministic per-worker path: a stable directory is
+        # reused by every subsequent suite invocation, so encrypted stores
+        # (webhook_secrets.db) written under one run's cached master password
+        # poison later runs with InvalidTag failures. A fresh dir per run also
+        # mirrors core/core's conftest, which this override used to defeat.
+        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         _clean_legacy_scratch_dbs(Path(existing))
         return
     else:
-        base = Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main"
+        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # Per-package runs (uv run pytest packages/core/data/tests …) resolve
