@@ -1,15 +1,16 @@
+import { FIXTURE_DESKTOP_RELEASE } from '../../../lib/desktop-release.fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_DESKTOP_RELEASE, DESKTOP_RELEASE_MANIFEST_ASSET } from '../../../lib/desktop-release';
+import {  DESKTOP_RELEASE_MANIFEST_ASSET } from '../../../lib/desktop-release';
 import { GET, OPTIONS } from './route';
 
 const betaRelease = {
-  tag_name: DEFAULT_DESKTOP_RELEASE.tag,
+  tag_name: FIXTURE_DESKTOP_RELEASE.tag,
   prerelease: true,
   draft: false,
-  published_at: DEFAULT_DESKTOP_RELEASE.published_at,
-  html_url: DEFAULT_DESKTOP_RELEASE.html_url,
-  assets: DEFAULT_DESKTOP_RELEASE.assets.map((asset) => ({
+  published_at: FIXTURE_DESKTOP_RELEASE.published_at,
+  html_url: FIXTURE_DESKTOP_RELEASE.html_url,
+  assets: FIXTURE_DESKTOP_RELEASE.assets.map((asset) => ({
     name: asset.name,
     size: asset.size,
     browser_download_url: asset.url,
@@ -41,7 +42,7 @@ describe('/api/desktop-release', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
-    expect(manifest.tag).toBe(DEFAULT_DESKTOP_RELEASE.tag);
+    expect(manifest.tag).toBe(FIXTURE_DESKTOP_RELEASE.tag);
     expect(manifest.assets).toHaveLength(9);
     expect(manifest.assets).toEqual(
       expect.arrayContaining([
@@ -55,8 +56,8 @@ describe('/api/desktop-release', () => {
   it('uses the uploaded desktop manifest when present so checksums reach clients', async () => {
     const manifestAssetUrl = 'https://downloads.example.invalid/flinttrade-desktop-manifest.json';
     const manifestWithChecksums = {
-      ...DEFAULT_DESKTOP_RELEASE,
-      assets: DEFAULT_DESKTOP_RELEASE.assets.map((asset, index) => ({
+      ...FIXTURE_DESKTOP_RELEASE,
+      assets: FIXTURE_DESKTOP_RELEASE.assets.map((asset, index) => ({
         ...asset,
         sha256: `${index}`.repeat(64).slice(0, 64).padEnd(64, 'a'),
       })),
@@ -94,7 +95,7 @@ describe('/api/desktop-release', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input) === manifestAssetUrl) return Response.json({ tag: DEFAULT_DESKTOP_RELEASE.tag, assets: [] });
+        if (String(input) === manifestAssetUrl) return Response.json({ tag: FIXTURE_DESKTOP_RELEASE.tag, assets: [] });
         return Response.json([
           {
             ...betaRelease,

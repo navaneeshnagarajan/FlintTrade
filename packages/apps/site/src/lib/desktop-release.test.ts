@@ -1,7 +1,8 @@
+import { FIXTURE_DESKTOP_RELEASE } from './desktop-release.fixtures';
 import { describe, expect, it } from 'vitest';
 
 import {
-  DEFAULT_DESKTOP_RELEASE,
+  
   TRUSTED_ASSET_URL_PREFIX,
   assetForPlatform,
   formatBytes,
@@ -15,7 +16,7 @@ import {
 
 const REPO_RELEASE = `${TRUSTED_ASSET_URL_PREFIX}v0.6.0-beta.1`;
 
-const betaAssets = DEFAULT_DESKTOP_RELEASE.assets.map((asset) => ({
+const betaAssets = FIXTURE_DESKTOP_RELEASE.assets.map((asset) => ({
   name: asset.name,
   size: asset.size,
   browser_download_url: asset.url,
@@ -104,11 +105,11 @@ describe('trusted asset URL pinning', () => {
   });
 
   it('rejects a manifest carrying an untrusted asset URL', () => {
-    const good = { ...DEFAULT_DESKTOP_RELEASE };
+    const good = { ...FIXTURE_DESKTOP_RELEASE };
     expect(isDesktopReleaseManifest(good)).toBe(true);
     const tampered = {
-      ...DEFAULT_DESKTOP_RELEASE,
-      assets: DEFAULT_DESKTOP_RELEASE.assets.map((a, i) =>
+      ...FIXTURE_DESKTOP_RELEASE,
+      assets: FIXTURE_DESKTOP_RELEASE.assets.map((a, i) =>
         i === 0 ? { ...a, url: 'https://evil.example/setup.exe' } : a,
       ),
     };
@@ -163,12 +164,12 @@ describe('desktop release selection', () => {
 
 describe('desktop release platform lookup', () => {
   it('prefers AppImage for Linux script installs', () => {
-    expect(assetForPlatform(DEFAULT_DESKTOP_RELEASE, 'linux', 'x64')?.kind).toBe('appimage');
+    expect(assetForPlatform(FIXTURE_DESKTOP_RELEASE, 'linux', 'x64')?.kind).toBe('appimage');
   });
 
   it('can request native Linux packages explicitly', () => {
-    expect(assetForPlatform(DEFAULT_DESKTOP_RELEASE, 'linux', 'arm64', ['deb'])?.name).toMatch(/arm64\.deb$/);
-    expect(assetForPlatform(DEFAULT_DESKTOP_RELEASE, 'linux', 'x64', ['rpm'])?.name).toMatch(/x86_64\.rpm$/);
+    expect(assetForPlatform(FIXTURE_DESKTOP_RELEASE, 'linux', 'arm64', ['deb'])?.name).toMatch(/arm64\.deb$/);
+    expect(assetForPlatform(FIXTURE_DESKTOP_RELEASE, 'linux', 'x64', ['rpm'])?.name).toMatch(/x86_64\.rpm$/);
   });
 
   it('formats asset sizes for UI labels', () => {

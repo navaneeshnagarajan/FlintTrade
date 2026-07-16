@@ -1,0 +1,86 @@
+// Test-only manifest fixture. Uses a deliberately unreal version so the
+// fixture can never be mistaken for (or drift against) a live release.
+import type { DesktopReleaseManifest } from './desktop-release';
+
+export const FIXTURE_DESKTOP_RELEASE: DesktopReleaseManifest = {
+  tag: 'v9.9.9-test',
+  version: '9.9.9-test',
+  channel: 'beta',
+  prerelease: true,
+  published_at: '2026-01-01T00:00:00Z',
+  html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/tag/v9.9.9-test',
+  assets: [
+    {
+      os: 'linux',
+      arch: 'arm64',
+      kind: 'rpm',
+      name: 'FlintTrade-9.9.9-test-1.aarch64.rpm',
+      size: 240093625,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade-9.9.9-test-1.aarch64.rpm',
+    },
+    {
+      os: 'linux',
+      arch: 'x64',
+      kind: 'rpm',
+      name: 'FlintTrade-9.9.9-test-1.x86_64.rpm',
+      size: 248806540,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade-9.9.9-test-1.x86_64.rpm',
+    },
+    {
+      os: 'linux',
+      arch: 'arm64',
+      kind: 'appimage',
+      name: 'FlintTrade_9.9.9-test_aarch64.AppImage',
+      size: 316230152,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_aarch64.AppImage',
+    },
+    {
+      os: 'macos',
+      arch: 'arm64',
+      kind: 'dmg',
+      name: 'FlintTrade_9.9.9-test_aarch64.dmg',
+      size: 106866441,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_aarch64.dmg',
+    },
+    {
+      os: 'linux',
+      arch: 'x64',
+      kind: 'appimage',
+      name: 'FlintTrade_9.9.9-test_amd64.AppImage',
+      size: 326593016,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_amd64.AppImage',
+    },
+    {
+      os: 'linux',
+      arch: 'x64',
+      kind: 'deb',
+      name: 'FlintTrade_9.9.9-test_amd64.deb',
+      size: 248805568,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_amd64.deb',
+    },
+    {
+      os: 'linux',
+      arch: 'arm64',
+      kind: 'deb',
+      name: 'FlintTrade_9.9.9-test_arm64.deb',
+      size: 240089914,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_arm64.deb',
+    },
+    {
+      os: 'windows',
+      arch: 'x64',
+      kind: 'nsis',
+      name: 'FlintTrade_9.9.9-test_x64-setup.exe',
+      size: 208530715,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_x64-setup.exe',
+    },
+    {
+      os: 'macos',
+      arch: 'x64',
+      kind: 'dmg',
+      name: 'FlintTrade_9.9.9-test_x64.dmg',
+      size: 115796291,
+      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_x64.dmg',
+    },
+  ],
+};

@@ -127,6 +127,16 @@ export default async function DownloadPage() {
           .
         </p>
 
+        {primaryDownloads.length === 0 && (
+          <p>
+            Live release data is momentarily unavailable — grab the installer for your
+            platform straight from the{' '}
+            <a href={manifest.html_url} target="_blank" rel="noopener noreferrer">
+              GitHub releases page
+            </a>
+            .
+          </p>
+        )}
         <div className="feature-grid">
           {primaryDownloads.map((entry) => (
             <article className="feature-card" key={entry.asset.name}>

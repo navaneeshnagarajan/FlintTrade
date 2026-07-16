@@ -69,87 +69,20 @@ export const GITHUB_RELEASES_URL =
 export const DESKTOP_RELEASE_REVALIDATE_SECONDS = 300;
 export const DESKTOP_RELEASE_MANIFEST_ASSET = 'flinttrade-desktop-manifest.json';
 
+import { APP_VERSION, APP_VERSION_TAG } from './version';
+
+// Tag-agnostic fallback used only when the GitHub releases API is
+// unreachable at request time. It intentionally pins NO asset links —
+// hardcoded assets drift the moment a release ships (this block once served
+// two-releases-stale downloads). The download page renders a "browse the
+// release page" card when assets are empty.
 export const DEFAULT_DESKTOP_RELEASE: DesktopReleaseManifest = {
-  tag: 'v0.6.0-beta.1',
-  version: '0.6.0-beta.1',
+  tag: APP_VERSION_TAG,
+  version: APP_VERSION,
   channel: 'beta',
   prerelease: true,
-  published_at: '2026-07-02T19:43:54Z',
-  html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/tag/v0.6.0-beta.1',
-  assets: [
-    {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'rpm',
-      name: 'FlintTrade-0.6.0-beta.1-1.aarch64.rpm',
-      size: 240093625,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade-0.6.0-beta.1-1.aarch64.rpm',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'rpm',
-      name: 'FlintTrade-0.6.0-beta.1-1.x86_64.rpm',
-      size: 248806540,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade-0.6.0-beta.1-1.x86_64.rpm',
-    },
-    {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'appimage',
-      name: 'FlintTrade_0.6.0-beta.1_aarch64.AppImage',
-      size: 316230152,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_aarch64.AppImage',
-    },
-    {
-      os: 'macos',
-      arch: 'arm64',
-      kind: 'dmg',
-      name: 'FlintTrade_0.6.0-beta.1_aarch64.dmg',
-      size: 106866441,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_aarch64.dmg',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'appimage',
-      name: 'FlintTrade_0.6.0-beta.1_amd64.AppImage',
-      size: 326593016,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_amd64.AppImage',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'deb',
-      name: 'FlintTrade_0.6.0-beta.1_amd64.deb',
-      size: 248805568,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_amd64.deb',
-    },
-    {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'deb',
-      name: 'FlintTrade_0.6.0-beta.1_arm64.deb',
-      size: 240089914,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_arm64.deb',
-    },
-    {
-      os: 'windows',
-      arch: 'x64',
-      kind: 'nsis',
-      name: 'FlintTrade_0.6.0-beta.1_x64-setup.exe',
-      size: 208530715,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_x64-setup.exe',
-    },
-    {
-      os: 'macos',
-      arch: 'x64',
-      kind: 'dmg',
-      name: 'FlintTrade_0.6.0-beta.1_x64.dmg',
-      size: 115796291,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v0.6.0-beta.1/FlintTrade_0.6.0-beta.1_x64.dmg',
-    },
-  ],
+  html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases',
+  assets: [],
 };
 
 export function parseDesktopReleaseAsset(asset: GitHubReleaseAsset): DesktopReleaseAsset | null {
