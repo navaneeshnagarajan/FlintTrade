@@ -91,9 +91,22 @@ jobs:
 
           TAG_COMMIT="$(git rev-parse "$RELEASE_TAG^{commit}" 2>/dev/null || true)"
           if [[ -n "$TAG_COMMIT" && "$TAG_COMMIT" != "$GITHUB_SHA" ]]; then
-            echo "Release tag $RELEASE_TAG points at $TAG_COMMIT, not this workflow run's commit $GITHUB_SHA." >&2
-            echo "Create a fresh tag on the current main head before publishing installers." >&2
-            exit 1
+            # Re-dispatch escape hatch: rebuilding the CURRENT release after a
+            # workflow-only fix is legitimate — the installers are built from
+            # the tag checkout, not from GITHUB_SHA. Allow it only when the tag
+            # is an ancestor of the dispatch commit (main moved forward, never
+            # a divergent or rewritten tag) AND it is still the newest version
+            # tag (rebuilding an older release must never regress the rolling
+            # updater-channel manifest).
+            NEWEST_TAG="$(git tag -l 'v*' | sort -V | tail -n 1)"
+            if git merge-base --is-ancestor "$TAG_COMMIT" "$GITHUB_SHA" \
+               && [[ "$RELEASE_TAG" == "$NEWEST_TAG" ]]; then
+              echo "Rebuilding current release $RELEASE_TAG from its tag checkout ($TAG_COMMIT); dispatch commit $GITHUB_SHA carries only post-tag changes."
+            else
+              echo "Release tag $RELEASE_TAG points at $TAG_COMMIT, not this workflow run's commit $GITHUB_SHA." >&2
+              echo "Create a fresh tag on the current main head before publishing installers." >&2
+              exit 1
+            fi
           fi
 
           VERSION="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' package.json | head -n 1)"
@@ -145,6 +158,8 @@ jobs:
         if: startsWith(matrix.runner, 'ubuntu')
         run: |
           sudo apt-get update
+          # xdg-utils: the AppImage bundler needs /usr/bin/xdg-open; the x64
+          # runner image ships it but ubuntu-22.04-arm does not.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
@@ -153,7 +168,8 @@ jobs:
             libsoup-3.0-dev \
             libgtk-3-dev \
             build-essential \
-            file
+            file \
+            xdg-utils
 
       # --- Python backend deps + PyInstaller -----------------------------
       - name: Install Python dependencies
