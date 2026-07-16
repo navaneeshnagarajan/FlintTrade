@@ -87,11 +87,11 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | TradingView/ChartInk/GoCharting/custom webhooks + flow builder (n8n + WhatsApp bridges actually live in `automation`) |
-| `terminal` | apps | TS/React | SPA: Dockview workspace, 101 widgets, routes — single source of truth for UI |
+| `terminal` | apps | TS/React | SPA: Dockview workspace, 102 widgets, routes — single source of truth for UI |
 | `desktop` | apps | TS/Rust | Tauri 2 native shell — bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
-(`chrome-extension` was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and shipped in v0.6.0-beta.3 — see [docs/DESKTOP.md](docs/DESKTOP.md).)
+(`chrome-extension` was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and first shipped in the v0.6.0 beta line — see [docs/DESKTOP.md](docs/DESKTOP.md).)
 
 ## House rules that bite
 

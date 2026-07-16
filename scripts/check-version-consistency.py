@@ -52,6 +52,17 @@ INSTALLER_POLICY_FILES = [
     ".github/workflows/desktop-release.yml",
 ]
 
+# Subsystems that no longer exist; docs describing the CURRENT system must not
+# name them (LM Studio → managed Ollama; OpenClaw → agent_backends).
+RETIRED_NAMES = ["OpenClaw", "LM Studio"]
+RETIRED_NAME_FILES = [
+    "security.md",
+    "README.md",
+    "docs/DESKTOP.md",
+    "docs/USER_GUIDE.md",
+    "docs/ARCHITECTURE.md",
+]
+
 STALE_INSTALLER_PHRASES = [
     "`.dmg`, `.app`",
     "`.dmg` or `.app`",
@@ -158,6 +169,15 @@ def main() -> int:
         for phrase in STALE_INSTALLER_PHRASES:
             if phrase in text:
                 failures.append(f"{path} still advertises unsupported beta installer artefact phrase {phrase!r}")
+
+    # Retired subsystem names must not resurface as current-state claims in the
+    # policy/docs surfaces (migration code, credits, and changelog history are
+    # exempt by not being listed here).
+    for path in RETIRED_NAME_FILES:
+        text = (ROOT / path).read_text(encoding="utf-8")
+        for name in RETIRED_NAMES:
+            if name in text:
+                failures.append(f"{path} still names retired subsystem {name!r}")
 
     if failures:
         print("Version consistency check failed:")

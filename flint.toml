@@ -8,7 +8,7 @@ version = "v0.6.0-beta.3"
 description = "Open-source self-hosted trading software with native backend and optional OpenAlgo-compatible integration"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
-python_requires = ">=3.12,<3.14"
+python_requires = ">=3.12"
 node_requires = ">=22.0.0"
 
 [packages]

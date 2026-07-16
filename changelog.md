@@ -350,6 +350,12 @@ Versioning: [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0-beta.1 → 0.6.0-beta.3] — consolidated feature notes
+
+Hand-written notes for everything shipped across the beta.1→beta.3 line;
+release-please now generates the per-release sections above from
+Conventional Commits, so this block is historical narrative, not pending work.
+
 ### Added
 
 - **Payload updates without an installer cycle** — every release now ships

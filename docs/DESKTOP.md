@@ -3,9 +3,12 @@
 FlintTrade ships as a **native desktop application** for Linux, Windows, and
 macOS. Install it, launch it, then start in Explore or Practice mode.
 
-The app bundles the FlintTrade backend and the React terminal into a single
-installable package — there is no separate server to run and **no `.env` to
-configure**.
+The installer is a **small native shell** (a few MB): on first launch it
+downloads the hash-verified FlintTrade backend (which embeds the React
+terminal) with a progress bar, then starts it — there is no separate server
+to run and **no `.env` to configure**. Day-to-day updates replace only that
+downloaded payload, so neither installs nor updates ever ship the ~100 MB
+runtime inside the installer.
 
 - **macOS** — `.dmg` (drag-to-install) — Apple Silicon (arm64) and Intel (x64)
 - **Windows** — `.exe` (NSIS) installer — x64
@@ -96,11 +99,13 @@ real FlintTrade backend:
 │                                                                       │
 │  Tauri shell (Rust)                                                   │
 │   1. provisions the credential-vault master password (first run)      │
-│   2. spawns the backend sidecar on a free loopback port (--port 0)    │
-│   3. waits for "FLINTTRADE_BACKEND_READY port=<n>" on stdout          │
-│   4. opens a native window at http://127.0.0.1:<n>                    │
+│   2. first run: downloads + SHA-256-verifies the backend payload      │
+│      (progress on the splash; retry on failure — never a crash loop)  │
+│   3. spawns the managed backend on a free loopback port (--port 0)    │
+│   4. waits for "FLINTTRADE_BACKEND_READY port=<n>" on stdout          │
+│   5. opens a native window at http://127.0.0.1:<n>                    │
 │                                                                       │
-│   ┌─────────────────── flinttrade-backend (sidecar) ──────────────┐  │
+│   ┌──────────── flinttrade-backend (managed payload) ────────────┐  │
 │   │  PyInstaller-frozen Python — Flask + Waitress                  │  │
 │   │  • serves the built React terminal (embedded)                  │  │
 │   │  • serves the full API + gated order path on the same origin   │  │
@@ -111,6 +116,13 @@ real FlintTrade backend:
 
 Because the backend serves *both* the terminal and the API from one loopback
 origin, the app's same-origin requests resolve with no in-app URL configuration.
+
+**One app, one port.** In production (desktop and `make start` alike) the
+FlintTrade backend serves the terminal UI and the API on a single port — the
+same single-origin model Paperclip and OpenAlgo use. You only ever see two
+ports in *development* (Vite's dev server proxying to the backend for hot
+reload) or when running the optional external OpenAlgo bridge, which is a
+separate product with its own port by design.
 
 ### Background runtime (the AI-trading shell)
 

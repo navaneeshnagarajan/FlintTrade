@@ -49,7 +49,7 @@ The mode system (Explore / Practice / Live), the authentication layer (JWT plus 
 
 ## Out of scope
 
-- Issues in upstream projects FlintTrade depends on or talks to over the network — [OpenAlgo](https://github.com/marketcalls/openalgo), OpenClaw, or any third-party broker integration shipped by those projects. Report those to their respective maintainers.
+- Issues in upstream projects FlintTrade depends on or talks to over the network — [OpenAlgo](https://github.com/marketcalls/openalgo) or any third-party broker integration shipped by those projects. Report those to their respective maintainers.
 - Issues in third-party Python or Node dependencies. Report those upstream (the corresponding `pyproject.toml` or `package.json` is the source of truth).
 - Issues caused by user misconfiguration — for example, committing `.env` files with live credentials, exposing the FlintTrade backend port to the public internet, or running the broker gateway without TLS.
 - Self-inflicted issues from running modified forks. We can only support unmodified FlintTrade.
