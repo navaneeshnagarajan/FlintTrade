@@ -80,6 +80,7 @@ const setupDocs = [
 ];
 
 const releaseDocs = [
+  ['docs/releases/v0.6.0-beta.2.md', 'releases/v0.6.0-beta.2', 'Releases', 'FlintTrade v0.6.0-beta.2 release notes'],
   ['docs/releases/v0.6.0-beta.1.md', 'releases/v0.6.0-beta.1', 'Releases', 'FlintTrade v0.6.0-beta.1 release notes'],
   ['docs/releases/v0.6.0-beta.md', 'releases/v0.6.0-beta', 'Releases', 'FlintTrade v0.6.0 beta release notes'],
   ['docs/releases/v0.6.0-alpha.md', 'releases/v0.6.0-alpha', 'Releases', 'FlintTrade v0.6.0 alpha release notes'],
