@@ -98,18 +98,19 @@ jobs:
           set -euo pipefail
           branch="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headBranchName"])')"
           number="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')"
-          # The propagation job may have just pushed a new head; runs for it
-          # are created asynchronously, so poll briefly.
+          # The gated runs are created asynchronously and NOT all at once
+          # (observed: Supply Chain appeared seconds before Site/Test), so
+          # sweep for the whole window — never exit on the first approval.
+          total=0
           for attempt in $(seq 1 8); do
             head_sha="$(gh api "repos/$REPO/pulls/$number" --jq '.head.sha')"
             runs="$(gh api "repos/$REPO/actions/runs?branch=$branch&status=action_required&per_page=50" \
               --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')"
-            approved=0
             while read -r run_id run_sha; do
               [ -n "$run_id" ] || continue
               if [ "$run_sha" = "$head_sha" ]; then
                 gh api -X POST "repos/$REPO/actions/runs/$run_id/approve" >/dev/null \
-                  && approved=$((approved+1)) \
+                  && { total=$((total+1)); echo "approved run $run_id on $run_sha"; } \
                   || echo "could not approve run $run_id (needs a manual click)"
               else
                 gh api -X DELETE "repos/$REPO/actions/runs/$run_id" >/dev/null \
@@ -117,13 +118,9 @@ jobs:
                   || echo "could not delete stub $run_id"
               fi
             done <<< "$runs"
-            if [ "$approved" -gt 0 ]; then
-              echo "Approved $approved run(s) on $head_sha."
-              exit 0
-            fi
             sleep 15
           done
-          echo "No approval-gated runs appeared for $branch@$head_sha (nothing to do)."
+          echo "Sweep complete: approved $total run(s) for $branch."
 
   dispatch-installers:
     needs: release-please
