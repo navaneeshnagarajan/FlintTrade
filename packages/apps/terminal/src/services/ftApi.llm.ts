@@ -1,4 +1,4 @@
-import { buildHeaders } from "./ftApi.helpers";
+import { buildHeaders, getBase } from "./ftApi.helpers";
 
 export interface LlmConfigData {
   provider?: string;
@@ -48,7 +48,7 @@ export function isAcceptedLlmConfigStatus(status?: string): boolean {
 }
 
 export async function readLlmConfig(): Promise<LlmConfigResponse> {
-  const response = await fetch("/ft-api/v1/config/llm", {
+  const response = await fetch(`${getBase()}/v1/config/llm`, {
     headers: buildHeaders(false),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -58,7 +58,7 @@ export async function readLlmConfig(): Promise<LlmConfigResponse> {
 export async function persistLlmConfigPatch(
   patch: Partial<LlmConfigPatch>,
 ): Promise<LlmConfigResponse> {
-  const response = await fetch("/ft-api/v1/config/llm", {
+  const response = await fetch(`${getBase()}/v1/config/llm`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(toLlmConfigPayload(patch)),
@@ -73,7 +73,7 @@ export async function persistLlmConfigPatch(
 export async function testLlmConnection(
   config: Partial<LlmConfigPatch>,
 ): Promise<LlmConnectionTestResponse> {
-  const response = await fetch("/ft-api/v1/config/llm/test", {
+  const response = await fetch(`${getBase()}/v1/config/llm/test`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(toLlmConfigPayload(config, { omitEmptyApiKey: true })),

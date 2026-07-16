@@ -1,3 +1,4 @@
+import { getBase } from "./ftApi.helpers";
 /**
  * errorReporter — sends frontend errors to the FlintTrade backend.
  *
@@ -11,7 +12,7 @@ export async function reportError(
   context?: Record<string, unknown>,
 ): Promise<void> {
   try {
-    await fetch("/ft-api/v1/errors", {
+    await fetch(`${getBase()}/v1/errors`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -1,4 +1,4 @@
-import { buildHeaders } from "./ftApi.helpers";
+import { buildHeaders, getBase } from "./ftApi.helpers";
 
 export interface OpenAlgoConfigData {
   /**
@@ -61,7 +61,7 @@ function toOpenAlgoConfigPayload(connection: Partial<OpenAlgoConnectionPatch>): 
 }
 
 export async function readOpenAlgoConfig(): Promise<OpenAlgoConfigResponse> {
-  const response = await fetch("/ft-api/v1/config/openalgo", {
+  const response = await fetch(`${getBase()}/v1/config/openalgo`, {
     headers: buildHeaders(false),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -71,7 +71,7 @@ export async function readOpenAlgoConfig(): Promise<OpenAlgoConfigResponse> {
 export async function persistOpenAlgoConfigPatch(
   connection: Partial<OpenAlgoConnectionPatch>,
 ): Promise<OpenAlgoConfigResponse> {
-  const response = await fetch("/ft-api/v1/config/openalgo", {
+  const response = await fetch(`${getBase()}/v1/config/openalgo`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify(toOpenAlgoConfigPayload(connection)),
@@ -87,7 +87,7 @@ export async function testOpenAlgoConnection(input: {
   host: string;
   apiKey: string;
 }): Promise<OpenAlgoConnectionTestResult> {
-  const response = await fetch("/ft-api/v1/test-connection", {
+  const response = await fetch(`${getBase()}/v1/test-connection`, {
     method: "POST",
     headers: buildHeaders(true),
     body: JSON.stringify({
