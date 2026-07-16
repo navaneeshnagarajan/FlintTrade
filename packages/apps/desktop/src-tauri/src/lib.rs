@@ -5214,6 +5214,36 @@ fn harden_file(_path: &Path) {
 mod tests {
     use super::*;
 
+    /// Claim an instance lock that this process has just released.
+    ///
+    /// flock ownership belongs to the open file description, and a child
+    /// forked by ANY concurrent test thread while the fd was open briefly
+    /// inherits a reference to it until exec's O_CLOEXEC sweep — so for a few
+    /// milliseconds after `drop` the kernel can still report the lock as
+    /// held. Production never re-acquires after a same-process release (the
+    /// shell claims once at startup and holds for life), so this transient
+    /// window is a test-only concern; every acquire-after-release site must
+    /// tolerate it with this bounded retry.
+    fn acquire_released_instance_lock(
+        path: &Path,
+        shell_pid: u32,
+        launch_token: String,
+    ) -> DesktopInstanceLock {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match DesktopInstanceLock::acquire_at(path, shell_pid, launch_token.clone()) {
+                Ok(lock) => return lock,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => panic!("could not claim released instance lock: {error}"),
+            }
+        }
+    }
+
     #[test]
     fn parses_ready_handshake() {
         let buf = "starting...\nFLINTTRADE_BACKEND_READY port=56576\nmore logs\n";
@@ -5795,19 +5825,7 @@ mod tests {
         assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
 
         drop(first);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        let successor = loop {
-            match DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)) {
-                Ok(lock) => break lock,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::WouldBlock
-                        && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("successor could not claim released instance lock: {error}"),
-            }
-        };
+        let successor = acquire_released_instance_lock(&path, 99, "b".repeat(64));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "99\n");
         drop(successor);
 
@@ -5844,7 +5862,7 @@ mod tests {
             std::io::ErrorKind::WouldBlock
         );
         drop(owner);
-        let successor = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap();
+        let successor = acquire_released_instance_lock(&path, 99, "b".repeat(64));
         drop(successor);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -5873,7 +5891,7 @@ mod tests {
         drop(stale);
 
         std::fs::write(&path, "").unwrap();
-        let empty = DesktopInstanceLock::acquire_at(&path, 100, "b".repeat(64)).unwrap();
+        let empty = acquire_released_instance_lock(&path, 100, "b".repeat(64));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "100\n");
         drop(empty);
 
