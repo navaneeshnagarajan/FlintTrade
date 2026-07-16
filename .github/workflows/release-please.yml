@@ -54,11 +54,17 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
       - name: Propagate the bumped version across the release contract
         run: |
           set -euo pipefail
           version="$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
           python3 scripts/apply-version.py "v${version}"
+          # The pyproject bumps change every workspace member's recorded
+          # version in uv.lock; refresh it here or the first post-merge
+          # `uv sync` drifts the lock on the developer machine instead.
+          uv lock
+          uv run python scripts/generate-notice.py
       - name: Commit the propagation into the release PR
         run: |
           set -euo pipefail
