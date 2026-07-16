@@ -317,6 +317,10 @@ jobs:
   # weekly cross-platform workflow where hosted-runner cost is bounded.
   rust-desktop-tests:
     if: github.event.pull_request.draft != true
+    # Pinned to 22.04 deliberately: this compiles the same Tauri crate the
+    # release matrix builds on ubuntu-22.04 (the glibc/webkit support floor),
+    # so the frequent gate exercises the release toolchain environment.
+    # Move both together when the release floor moves.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:

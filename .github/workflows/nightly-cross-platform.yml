@@ -63,15 +63,48 @@ jobs:
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
 
+  # Canary for the newest-Ubuntu user base (maintainer develops on 26.04).
+  # The ubuntu-26.04 hosted runner is still a GitHub preview image, so this
+  # leg is fail-soft; promote test.yml only when ubuntu-latest moves.
+  python-tests-ubuntu-2604:
+    runs-on: ubuntu-26.04
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen          # SC-07: hash-verified install
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
+
   desktop-rust-tests:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
+    # The ubuntu-26.04 leg doubles as the webkit/glibc drift canary for the
+    # preview runner image; failures there must not fail the weekly run.
+    continue-on-error: ${{ matrix.os == 'ubuntu-26.04' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - name: Install Tauri system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev
+      - name: Stub the backend sidecar for tauri-build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          install -m 0755 /dev/null "packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${triple}"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
