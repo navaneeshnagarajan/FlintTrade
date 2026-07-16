@@ -4,6 +4,15 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.3](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.2...v0.6.0-beta.3) (2026-07-16)
+
+
+### Fixed
+
+* **ci:** arch-qualify the macOS updater bundle before publishing ([b513941](https://github.com/navaneeshnagarajan/FlintTrade/commit/b513941ccc3d2ec455bdb2015d077028ae1bb904))
+* **ci:** unblock installer rebuilds for the current release tag ([5d9b66c](https://github.com/navaneeshnagarajan/FlintTrade/commit/5d9b66c50234761fbc17abd9d83d227b81aa1a5e))
+* **release:** keep uv.lock and NOTICE in step with version propagation ([3f8721a](https://github.com/navaneeshnagarajan/FlintTrade/commit/3f8721a84911473a2f5a38289065f2b2b5c7f64f))
+
 ## [0.6.0-beta.2](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.1...v0.6.0-beta.2) (2026-07-16)
 
 
