@@ -4,6 +4,25 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.4](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.3...v0.6.0-beta.4) (2026-07-16)
+
+
+### Added
+
+* **desktop:** thin-shell installers with first-run payload bootstrap ([fc6c716](https://github.com/navaneeshnagarajan/FlintTrade/commit/fc6c716ec1238d0f7126dd1883f19792be539ab1))
+
+
+### Fixed
+
+* **ci:** seal macOS bundles, guard installer sizes, drop sidecar stubs ([4539607](https://github.com/navaneeshnagarajan/FlintTrade/commit/4539607679945123d7095e146a268c4298ce3a0a))
+* **release,site:** case-correct readme guard path and complete the fallback shape ([370319f](https://github.com/navaneeshnagarajan/FlintTrade/commit/370319f3366dd0b4e58669f8b6b4505cc9ece3b7))
+* **site:** tag-agnostic download fallback and thin-shell copy ([38f8008](https://github.com/navaneeshnagarajan/FlintTrade/commit/38f800896f414ac297026bb52540052d71b2a042))
+
+
+### Changed
+
+* **terminal:** route the last hardcoded /ft-api fetches through getBase ([a6ee786](https://github.com/navaneeshnagarajan/FlintTrade/commit/a6ee786e721b316fe0a130a6ff860873ba52d6d4))
+
 ## [0.6.0-beta.3](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.2...v0.6.0-beta.3) (2026-07-16)
 
 
