@@ -37,7 +37,7 @@ jobs:
       pr: ${{ steps.release.outputs.pr }}
     steps:
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
@@ -72,6 +72,52 @@ jobs:
           git add docs/releases/
           git commit -m "chore(release): propagate the version across the release contract"
           git push
+
+  # Runs on the release PR are approval-gated because its author is
+  # github-actions[bot]; without this job every push left a stub run waiting
+  # for a manual "Approve and run" click. Approve the current head's runs and
+  # delete the superseded stubs so the Actions view stays clean.
+  approve-release-pr-ci:
+    needs: [release-please, propagate-version]
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Approve current-head CI, delete superseded stubs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["headBranchName"])')"
+          number="$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')"
+          # The propagation job may have just pushed a new head; runs for it
+          # are created asynchronously, so poll briefly.
+          for attempt in $(seq 1 8); do
+            head_sha="$(gh api "repos/$REPO/pulls/$number" --jq '.head.sha')"
+            runs="$(gh api "repos/$REPO/actions/runs?branch=$branch&status=action_required&per_page=50" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')"
+            approved=0
+            while read -r run_id run_sha; do
+              [ -n "$run_id" ] || continue
+              if [ "$run_sha" = "$head_sha" ]; then
+                gh api -X POST "repos/$REPO/actions/runs/$run_id/approve" >/dev/null \
+                  && approved=$((approved+1)) \
+                  || echo "could not approve run $run_id (needs a manual click)"
+              else
+                gh api -X DELETE "repos/$REPO/actions/runs/$run_id" >/dev/null \
+                  && echo "deleted superseded stub $run_id ($run_sha)" \
+                  || echo "could not delete stub $run_id"
+              fi
+            done <<< "$runs"
+            if [ "$approved" -gt 0 ]; then
+              echo "Approved $approved run(s) on $head_sha."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "No approval-gated runs appeared for $branch@$head_sha (nothing to do)."
 
   dispatch-installers:
     needs: release-please

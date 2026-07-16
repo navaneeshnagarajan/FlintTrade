@@ -301,7 +301,7 @@ jobs:
           echo "Installers staged:"; ls -lah "$OUT" || true
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: flinttrade-desktop-${{ matrix.label }}
           path: dist-installers/*
@@ -316,7 +316,7 @@ jobs:
 
     steps:
       - name: Download installer artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: release-artifacts
 
@@ -532,7 +532,7 @@ jobs:
           cat dist-installers/flinttrade-desktop-manifest.json
 
       - name: Publish to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: dist-installers/*

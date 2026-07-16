@@ -49,7 +49,7 @@ jobs:
           # prune all but the newest two snapshots
           ls -1 supply-chain/vuln-snapshot-*.json | sort | head -n -2 | xargs -r git rm -f
       - name: Open PR with refreshed snapshot
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore(supply-chain): refresh OSV vuln snapshot"
           title: "chore(supply-chain): refresh OSV vuln snapshot"

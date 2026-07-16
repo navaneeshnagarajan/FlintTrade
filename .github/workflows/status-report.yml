@@ -39,7 +39,7 @@ jobs:
           fi
           uv run python scripts/audit_repos.py --format markdown > .local/STATUS.md
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: status-report
           path: .local/STATUS.md

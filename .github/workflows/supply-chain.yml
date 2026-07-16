@@ -105,7 +105,7 @@ jobs:
           FLINTTRADE_PIP_AUDIT_REPORT: ${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: python scripts/pip-audit-with-allowlist.py
       - name: Upload newly generated pip-audit evidence
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: ${{ always() && steps.pip_audit.outcome != 'skipped' }}
         with:
           name: pip-audit-report
@@ -145,7 +145,7 @@ jobs:
         run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/core/ticks --report packages/core/ticks/cargo-audit-report.json
       - name: cargo audit (desktop app)
         run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/apps/desktop/src-tauri --report packages/apps/desktop/src-tauri/cargo-audit-report.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: cargo-audit-reports
@@ -172,7 +172,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: pnpm audit (allowlist)
         run: python scripts/pnpm-audit-with-allowlist.py
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: always()
         with: { name: pnpm-audit-report, path: pnpm-audit-report.json }
 
@@ -191,7 +191,7 @@ jobs:
       - run: pip-licenses --from=mixed --order=license --format=json --output-file=supply-chain/transitive-licences.json
       - run: python scripts/check-transitive-licences.py
         continue-on-error: true
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: always()
         with: { name: transitive-licences-report, path: supply-chain/transitive-licences.json }
 
