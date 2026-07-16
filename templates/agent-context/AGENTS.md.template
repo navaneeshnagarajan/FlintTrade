@@ -8,7 +8,7 @@
 
 Open-source self-hosted trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
 FlintTrade owns its backend and supports OpenAlgo as an optional external integration. 18 package surfaces (13 Python + 3 apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine), monorepo, AGPL-3.0.
-Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta.2
+Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta.3
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Repo: https://github.com/navaneeshnagarajan/FlintTrade | Version: 0.6.0-beta.2
 **React apps (2):** terminal (5173), site (3000)
 **Shared UI (1):** design-system (tokens, layers, brand primitives, reusable React components)
 
-## Current State (v0.6.0-beta.2 — beta restructure snapshot)
+## Current State (v0.6.0-beta.3 — beta restructure snapshot)
 
 - ~12,062 tests collected (9,089 Python + ~2,973 terminal) — verified 2026-05-19
 - Latest stable release: none after the beta restructure; treat all pre-1.0 releases as experimental unless the release notes say otherwise.
