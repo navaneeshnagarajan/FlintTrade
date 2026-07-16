@@ -1,6 +1,6 @@
 # FlintTrade on macOS
 
-> FlintTrade `v0.6.0-beta.2` is not production ready; use Explore and Practice
+> FlintTrade `v0.6.0-beta.3` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
 ## Option A — Native Desktop (Recommended)
