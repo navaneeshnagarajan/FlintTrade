@@ -1,19 +1,21 @@
-//! FlintTrade Desktop — Tauri 2 shell.
+//! FlintTrade Desktop — Tauri 2 thin shell.
 //!
-//! The desktop app is a thin native window around the bundled FlintTrade
-//! backend. On launch it:
+//! The desktop app is a thin native window around the managed FlintTrade
+//! backend payload. On launch it:
 //!
 //! 1. Provisions the credential-vault master password (first run only) into the
 //!    hardened at-rest file the backend reads — honouring locked decision #13
 //!    (the *shell* provides the secret; the backend never auto-generates one).
-//! 2. Spawns the ``flinttrade-backend`` sidecar on an OS-chosen loopback port
+//! 2. Boots the managed ``flinttrade-backend`` payload staged under
+//!    ``<workspace>/runtime/backend/<version>/`` on an OS-chosen loopback port
 //!    (``--port 0``) and waits for its ``FLINTTRADE_BACKEND_READY port=<n>``
-//!    handshake on stdout. A managed backend payload staged under
-//!    ``<workspace>/runtime/backend/<version>/`` boots in the bundled
-//!    sidecar's place when its ``state.json`` sha256 pin still matches — so
-//!    daily backend+frontend updates need no installer cycle. Any
-//!    verification, spawn, or ready-handshake failure logs and falls back to
-//!    the bundled sidecar.
+//!    handshake on stdout. The payload is the *only* backend source — the
+//!    installer bundles no sidecar. When no payload verifies against its
+//!    ``state.json`` sha256 pin (first run, or a demoted broken pin), the
+//!    splash phase downloads the hash-verified payload from the rolling
+//!    channel release with progress reporting, and any failure lands on the
+//!    splash error surface with an explicit Retry — never a crash loop.
+//!    Routine daily backend+frontend updates need no installer cycle.
 //! 3. Opens the main window pointed at ``http://127.0.0.1:<n>`` — the backend
 //!    serves both the React terminal and the API from that one origin, so the
 //!    app's same-origin requests resolve without any in-app configuration.
@@ -47,7 +49,8 @@
 //!   tick capture, and close DuckDB. If that wedges, a second command on the
 //!   same inherited pipe asks containment to hard-stop the complete tree.
 //!
-//! A small splash window covers steps 1–2 so the user sees immediate feedback.
+//! A small splash window covers steps 1–2 (including the first-run payload
+//! download, whose progress it renders) so the user sees immediate feedback.
 //!
 //! ## Background runtime (AI-trading desktop)
 //!
@@ -75,11 +78,25 @@ use std::process::ExitStatus;
 use fs2::FileExt;
 use tauri::menu::{Menu, MenuEvent, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
-use tauri_plugin_shell::process::{CommandEvent, TerminatedPayload};
-use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
+
+/// Exit status of the contained backend process, mirroring the shape the
+/// shell-plugin sidecar API used to report before the bundled sidecar (and
+/// with it ``tauri-plugin-shell``) was removed.
+struct BackendExit {
+    code: Option<i32>,
+    signal: Option<i32>,
+}
+
+/// Events surfaced by the contained backend's stdio pipes and exit watcher.
+enum BackendProcessEvent {
+    Stdout(Vec<u8>),
+    Stderr(Vec<u8>),
+    Terminated(BackendExit),
+    Error(String),
+}
 
 /// Stdout line the backend prints once its listening socket is bound.
 const READY_SENTINEL: &str = "FLINTTRADE_BACKEND_READY";
@@ -502,12 +519,12 @@ fn signal_unreaped_posix_group(child: &Child, pgid: u32, signal: i32) -> std::io
 
 fn spawn_pipe_event_reader<R, F>(
     reader: R,
-    sender: tauri::async_runtime::Sender<CommandEvent>,
+    sender: tauri::async_runtime::Sender<BackendProcessEvent>,
     event: F,
 ) -> std::thread::JoinHandle<()>
 where
     R: Read + Send + 'static,
-    F: Fn(Vec<u8>) -> CommandEvent + Send + 'static,
+    F: Fn(Vec<u8>) -> BackendProcessEvent + Send + 'static,
 {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(reader);
@@ -521,7 +538,7 @@ where
                     }
                 }
                 Err(error) => {
-                    let _ = sender.blocking_send(CommandEvent::Error(error.to_string()));
+                    let _ = sender.blocking_send(BackendProcessEvent::Error(error.to_string()));
                     return;
                 }
             }
@@ -630,7 +647,7 @@ fn terminate_unrecorded_sidecar(child: &mut ContainedCommandChild) -> bool {
 fn spawn_contained_std_command(
     mut command: StdCommand,
 ) -> std::io::Result<(
-    tauri::async_runtime::Receiver<CommandEvent>,
+    tauri::async_runtime::Receiver<BackendProcessEvent>,
     ContainedCommandChild,
 )> {
     command
@@ -724,8 +741,10 @@ fn spawn_contained_std_command(
     let child = Arc::new(Mutex::new(child));
     let leader_reaped = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = tauri::async_runtime::channel(64);
-    let stdout_reader = spawn_pipe_event_reader(stdout, sender.clone(), CommandEvent::Stdout);
-    let stderr_reader = spawn_pipe_event_reader(stderr, sender.clone(), CommandEvent::Stderr);
+    let stdout_reader =
+        spawn_pipe_event_reader(stdout, sender.clone(), BackendProcessEvent::Stdout);
+    let stderr_reader =
+        spawn_pipe_event_reader(stderr, sender.clone(), BackendProcessEvent::Stderr);
     let wait_child = Arc::clone(&child);
     let wait_leader_reaped = Arc::clone(&leader_reaped);
     std::thread::spawn(move || {
@@ -749,7 +768,7 @@ fn spawn_contained_std_command(
         let _ = stdout_reader.join();
         let _ = stderr_reader.join();
         let event = match status {
-            Ok(status) => CommandEvent::Terminated(TerminatedPayload {
+            Ok(status) => BackendProcessEvent::Terminated(BackendExit {
                 code: status.code(),
                 #[cfg(unix)]
                 signal: {
@@ -759,7 +778,7 @@ fn spawn_contained_std_command(
                 #[cfg(windows)]
                 signal: None,
             }),
-            Err(error) => CommandEvent::Error(error.to_string()),
+            Err(error) => BackendProcessEvent::Error(error.to_string()),
         };
         let _ = sender.blocking_send(event);
     });
@@ -1084,11 +1103,13 @@ async fn apply_native_update(app: AppHandle) -> Result<(), String> {
 // Daily releases publish one frozen backend payload (which embeds the built
 // terminal) per target triple next to the rolling channel manifest. The shell
 // stages a downloaded payload under ``<workspace>/runtime/backend/<version>/``,
-// pins its sha256 in ``state.json``, and prefers that binary over the bundled
-// sidecar on the next boot — so routine backend+frontend updates need no
-// installer cycle. Verification fails open towards the bundle: any mismatch,
-// spawn failure, or pre-ready exit falls back to the bundled sidecar so a bad
-// payload can never brick the app.
+// pins its sha256 in ``state.json``, and boots that binary — it is the ONLY
+// backend source; the installer bundles no sidecar. Routine backend+frontend
+// updates therefore need no installer cycle. When nothing verifies at boot
+// (first run, or a broken pin that gets demoted), the splash-phase bootstrap
+// below downloads a fresh payload with progress reporting. A bad payload can
+// never crash-loop the app: any mismatch, spawn failure, or pre-ready exit
+// demotes the pin and lands on the splash error surface with a Retry action.
 // ---------------------------------------------------------------------------
 
 /// Target triple this shell was compiled for, as emitted by ``tauri-build``.
@@ -1207,9 +1228,9 @@ fn sha256_file(path: &Path) -> std::io::Result<String> {
 /// Resolve the staged payload binary named by ``state.json`` after verifying
 /// its on-disk sha256 still matches the pinned digest.
 ///
-/// ``Ok(None)`` means no managed payload is installed (the normal bundled
-/// boot); ``Err`` means a payload was pinned but failed verification, which
-/// the caller logs before falling back to the bundled sidecar.
+/// ``Ok(None)`` means no managed payload is installed (first run — the
+/// splash bootstrap downloads one); ``Err`` means a payload was pinned but
+/// failed verification, which the caller demotes before re-downloading.
 fn verified_active_payload_binary_at(
     runtime_dir: &Path,
 ) -> std::io::Result<Option<(String, PathBuf)>> {
@@ -1257,8 +1278,9 @@ fn verified_active_payload_binary() -> std::io::Result<Option<(String, PathBuf)>
     verified_active_payload_binary_at(&runtime_dir)
 }
 
-/// Remove the managed-payload pin so every later boot uses the bundled
-/// backend. Returns whether a pin was actually removed.
+/// Remove the managed-payload pin so the next boot attempt re-runs the
+/// splash bootstrap and downloads a fresh channel payload. Returns whether a
+/// pin was actually removed.
 fn demote_active_payload() -> bool {
     let Some(runtime_dir) = payload_runtime_dir() else {
         return false;
@@ -1377,12 +1399,39 @@ async fn fetch_payload_manifest(client: &reqwest::Client) -> Result<PayloadManif
     })
 }
 
+/// Select and validate this build's target-triple payload entry from a
+/// channel manifest. Shared by the Settings updater (``apply_payload_update``)
+/// and the first-run splash bootstrap.
+fn resolve_manifest_payload(
+    manifest: &PayloadManifest,
+) -> Result<(String, &PayloadManifestEntry), String> {
+    let Some(entry) = manifest.payloads.get(PAYLOAD_TARGET_TRIPLE) else {
+        eprintln!(
+            "[flinttrade] channel manifest carries no backend payload for {PAYLOAD_TARGET_TRIPLE}"
+        );
+        return Err("No backend payload is published for this platform.".to_string());
+    };
+    if !valid_payload_version(&manifest.version) || !valid_payload_sha256(&entry.sha256) {
+        eprintln!(
+            "[flinttrade] channel manifest payload entry is malformed (version {:?})",
+            manifest.version
+        );
+        return Err(
+            "The published backend payload is malformed — nothing was changed.".to_string(),
+        );
+    }
+    Ok((manifest.version.clone(), entry))
+}
+
 /// Download a payload entry into a fresh staging dir with a streaming sha256
 /// check. Returns the staged file path; any failure removes the staging dir.
+/// ``on_progress`` is called with the running byte count after every accepted
+/// chunk so callers can render download progress.
 async fn stage_payload_download(
     client: &reqwest::Client,
     runtime_dir: &Path,
     entry: &PayloadManifestEntry,
+    mut on_progress: impl FnMut(u64),
 ) -> Result<PathBuf, String> {
     use sha2::{Digest, Sha256};
 
@@ -1439,6 +1488,7 @@ async fn stage_payload_download(
                 eprintln!("[flinttrade] could not write the staged payload: {e}");
                 failed()
             })?;
+            on_progress(downloaded);
         }
         if downloaded != entry.size {
             eprintln!(
@@ -1505,8 +1555,8 @@ fn install_staged_payload(
 }
 
 /// Check the rolling channel manifest for a backend payload differing from
-/// the currently active one (the pinned managed payload, else this build's
-/// own bundled version).
+/// the currently active one (the pinned managed payload, else this shell's
+/// own version while no payload is installed yet).
 #[tauri::command]
 async fn check_payload_update(app: AppHandle) -> Result<PayloadUpdateCheck, String> {
     let client = payload_http_client()?;
@@ -1542,16 +1592,7 @@ async fn check_payload_update(app: AppHandle) -> Result<PayloadUpdateCheck, Stri
 async fn apply_payload_update(app: AppHandle) -> Result<(), String> {
     let client = payload_http_client()?;
     let manifest = fetch_payload_manifest(&client).await?;
-    let Some(entry) = manifest.payloads.get(PAYLOAD_TARGET_TRIPLE) else {
-        return Err("No backend payload is published for this platform.".to_string());
-    };
-    let version = manifest.version.clone();
-    if !valid_payload_version(&version) || !valid_payload_sha256(&entry.sha256) {
-        eprintln!("[flinttrade] channel manifest payload entry is malformed (version {version:?})");
-        return Err(
-            "The published backend payload is malformed — nothing was changed.".to_string(),
-        );
-    }
+    let (version, entry) = resolve_manifest_payload(&manifest)?;
     let previous = active_payload_version();
     let active = previous
         .clone()
@@ -1561,7 +1602,7 @@ async fn apply_payload_update(app: AppHandle) -> Result<(), String> {
     }
     let runtime_dir = payload_runtime_dir()
         .ok_or_else(|| "Could not resolve the FlintTrade workspace directory.".to_string())?;
-    let staged = stage_payload_download(&client, &runtime_dir, entry).await?;
+    let staged = stage_payload_download(&client, &runtime_dir, entry, |_| {}).await?;
     install_staged_payload(
         &runtime_dir,
         &version,
@@ -1578,14 +1619,271 @@ async fn apply_payload_update(app: AppHandle) -> Result<(), String> {
     app.restart()
 }
 
-/// Restart the app after a managed payload has been demoted, so this very
-/// launch recovers onto the bundled backend instead of stranding the operator
-/// on the recovery page. Only called once the terminated launch's recovery
-/// record has been removed; ``restart`` never returns.
-fn restart_onto_bundled_backend(app: &AppHandle) {
-    eprintln!("[flinttrade] restarting on the bundled backend");
-    mark_quit_requested(app);
-    app.restart();
+// ---------------------------------------------------------------------------
+// First-run bootstrap.
+//
+// The installer ships only this shell. The first boot (and any boot whose
+// payload no longer verifies) downloads the channel's hash-verified backend
+// payload INSIDE the splash phase, streaming ``bootstrap://status`` progress
+// events to the splash webview. Every failure — offline, HTTP error, hash
+// mismatch, spawn failure, pre-ready exit — parks the app on the splash
+// error surface with a Retry action; nothing here can crash-loop.
+// ---------------------------------------------------------------------------
+
+/// Splash event channel carrying bootstrap progress and errors.
+const BOOTSTRAP_STATUS_EVENT: &str = "bootstrap://status";
+
+/// One ``bootstrap://status`` event payload rendered by the splash page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct BootstrapStatus {
+    /// ``resolving-manifest`` → ``downloading`` → ``verifying`` →
+    /// ``installing`` → ``starting``, or ``error``.
+    phase: &'static str,
+    /// Percentage complete, present only while it is meaningful
+    /// (the downloading/verifying phases with a known total).
+    pct: Option<u8>,
+    /// Human-readable status line (British English) for the splash.
+    message: String,
+}
+
+/// Coarse bootstrap lifecycle guarding the splash Retry action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapStage {
+    /// A bootstrap attempt (payload download and/or backend start) is in
+    /// flight.
+    Running,
+    /// The last attempt failed; the splash Retry action may begin another.
+    Failed,
+    /// A backend spawned and its supervision task owns the lifecycle.
+    Started,
+}
+
+/// Bootstrap lifecycle stage plus the most recent status event, kept so the
+/// splash can pull a status it missed (events emitted before its listener
+/// registered are otherwise lost).
+struct BootstrapState {
+    stage: Mutex<BootstrapStage>,
+    last_status: Mutex<Option<BootstrapStatus>>,
+}
+
+impl BootstrapState {
+    fn new() -> Self {
+        Self {
+            stage: Mutex::new(BootstrapStage::Running),
+            last_status: Mutex::new(None),
+        }
+    }
+}
+
+/// The only admissible Retry transition is ``Failed -> Running``: a retry
+/// during a live attempt would race the download, and one after a successful
+/// start would spawn a second backend.
+fn bootstrap_retry_transition(current: BootstrapStage) -> Result<BootstrapStage, &'static str> {
+    match current {
+        BootstrapStage::Failed => Ok(BootstrapStage::Running),
+        BootstrapStage::Running => Err("a bootstrap attempt is already running"),
+        BootstrapStage::Started => Err("the backend has already started"),
+    }
+}
+
+fn set_bootstrap_stage(app: &AppHandle, stage: BootstrapStage) {
+    if let Some(state) = app.try_state::<BootstrapState>() {
+        *state.stage.lock().unwrap() = stage;
+    }
+}
+
+/// Admit (or refuse) a splash Retry request.
+fn begin_bootstrap_retry(app: &AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<BootstrapState>()
+        .ok_or_else(|| "bootstrap state is unavailable".to_string())?;
+    let mut stage = state.stage.lock().unwrap();
+    *stage = bootstrap_retry_transition(*stage).map_err(str::to_string)?;
+    Ok(())
+}
+
+/// Record and emit one bootstrap status event to the splash webview.
+fn emit_bootstrap_status(app: &AppHandle, status: BootstrapStatus) {
+    if let Some(state) = app.try_state::<BootstrapState>() {
+        *state.last_status.lock().unwrap() = Some(status.clone());
+    }
+    let _ = app.emit_to("splash", BOOTSTRAP_STATUS_EVENT, status);
+}
+
+/// One-decimal-place decimal-megabyte label for download progress.
+fn format_megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+/// Shape the downloading-phase splash status for ``downloaded`` of ``total``
+/// bytes. ``pct`` is ``None`` when the total is unknown (zero).
+fn download_progress_status(downloaded: u64, total: u64) -> BootstrapStatus {
+    if total == 0 {
+        return BootstrapStatus {
+            phase: "downloading",
+            pct: None,
+            message: format!(
+                "Downloading the trading engine — {}",
+                format_megabytes(downloaded)
+            ),
+        };
+    }
+    let capped = downloaded.min(total);
+    let pct = ((capped as u128 * 100) / total as u128) as u8;
+    BootstrapStatus {
+        phase: "downloading",
+        pct: Some(pct),
+        message: format!(
+            "Downloading the trading engine — {} of {}",
+            format_megabytes(capped),
+            format_megabytes(total)
+        ),
+    }
+}
+
+/// Ensure a verified managed backend payload is installed, downloading this
+/// channel's payload when none is (first run) or when the installed one no
+/// longer verifies (broken pin, demoted first). Streams progress to the
+/// splash while it works; reuses the exact manifest/download/verify/install
+/// helpers behind Settings → ``apply_payload_update``.
+async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
+    match verified_active_payload_binary() {
+        Ok(Some(_)) => return Ok(()),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!(
+                "[flinttrade] managed backend payload verification failed: {error}; downloading a fresh payload"
+            );
+            demote_active_payload();
+        }
+    }
+    emit_bootstrap_status(
+        app,
+        BootstrapStatus {
+            phase: "resolving-manifest",
+            pct: None,
+            message: "Finding the latest trading engine...".to_string(),
+        },
+    );
+    let client = payload_http_client()?;
+    let manifest = fetch_payload_manifest(&client).await?;
+    let (version, entry) = resolve_manifest_payload(&manifest)?;
+    let runtime_dir = payload_runtime_dir()
+        .ok_or_else(|| "Could not resolve the FlintTrade workspace directory.".to_string())?;
+    emit_bootstrap_status(app, download_progress_status(0, entry.size));
+    let progress_app = app.clone();
+    let total = entry.size;
+    // Re-emit only when the rendered percentage moves, so a large download
+    // does not flood the splash with per-chunk IPC events.
+    let mut last_key: Option<(&'static str, Option<u8>)> = None;
+    let staged = stage_payload_download(&client, &runtime_dir, entry, move |downloaded| {
+        let status = if total > 0 && downloaded >= total {
+            // The final digest comparison and flush are all that remain
+            // inside the staging helper once the last chunk has landed.
+            BootstrapStatus {
+                phase: "verifying",
+                pct: Some(100),
+                message: "Verifying the download...".to_string(),
+            }
+        } else {
+            download_progress_status(downloaded, total)
+        };
+        let key = (status.phase, status.pct);
+        if last_key != Some(key) {
+            last_key = Some(key);
+            emit_bootstrap_status(&progress_app, status);
+        }
+    })
+    .await?;
+    emit_bootstrap_status(
+        app,
+        BootstrapStatus {
+            phase: "installing",
+            pct: None,
+            message: format!("Installing engine v{version}..."),
+        },
+    );
+    install_staged_payload(
+        &runtime_dir,
+        &version,
+        &staged,
+        &entry.sha256,
+        active_payload_version().as_deref(),
+    )
+    .map_err(|e| {
+        eprintln!("[flinttrade] managed payload install failed: {e}");
+        "The trading engine could not be installed — nothing was changed. Please try again."
+            .to_string()
+    })?;
+    Ok(())
+}
+
+/// Drive one boot attempt end-to-end: install the payload if missing (with
+/// splash progress), then spawn and supervise it. Failures land in the
+/// splash error state — never a crash loop; the operator retries explicitly.
+async fn run_bootstrap(app: AppHandle) {
+    let result = match ensure_bootstrap_payload(&app).await {
+        Ok(()) => {
+            emit_bootstrap_status(
+                &app,
+                BootstrapStatus {
+                    phase: "starting",
+                    pct: None,
+                    message: "Starting the trading engine...".to_string(),
+                },
+            );
+            start_managed_backend(&app)
+        }
+        Err(message) => Err(message),
+    };
+    if let Err(message) = result {
+        fail_bootstrap(&app, message);
+    }
+}
+
+/// Park the bootstrap in its failed state and surface the splash error UI.
+fn fail_bootstrap(app: &AppHandle, message: String) {
+    set_bootstrap_stage(app, BootstrapStage::Failed);
+    emit_bootstrap_status(
+        app,
+        BootstrapStatus {
+            phase: "error",
+            pct: None,
+            message,
+        },
+    );
+}
+
+/// Return the splash to its actionable error state after a freshly booted
+/// payload died before its ready handshake. The main window only exists after
+/// the handshake, so the splash is still on screen; its pin has already been
+/// demoted, so a Retry downloads a fresh payload instead of relaunching the
+/// broken one (there is no bundled backend to restart onto).
+fn surface_bootstrap_retry(app: &AppHandle) {
+    if quit_was_requested(app) {
+        return;
+    }
+    fail_bootstrap(
+        app,
+        "The trading engine stopped before it finished starting. Retry to download a fresh copy."
+            .to_string(),
+    );
+}
+
+/// Splash Retry action: re-run the bootstrap after a failed attempt.
+#[tauri::command]
+async fn retry_bootstrap(app: AppHandle) -> Result<(), String> {
+    begin_bootstrap_retry(&app)?;
+    run_bootstrap(app).await;
+    Ok(())
+}
+
+/// Splash pull of the latest bootstrap status, covering the race where a
+/// status event fired before the splash page registered its listener.
+#[tauri::command]
+fn bootstrap_status(app: AppHandle) -> Option<BootstrapStatus> {
+    app.try_state::<BootstrapState>()
+        .and_then(|state| state.last_status.lock().unwrap().clone())
 }
 
 fn schedule_update_exit(app: &AppHandle) {
@@ -1963,12 +2261,12 @@ fn stage_updater_script_in_temp(script: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((dest, dir))
 }
 
-/// Apply the backend launch arguments and environment shared by the bundled
-/// sidecar and a managed payload binary. Both spawn paths must stay identical
-/// apart from the executable itself. ``FLINTTRADE_DESKTOP=1`` tells the
-/// backend it is running under the desktop shell, so it may emit
-/// ``FLINTTRADE_NOTIFY`` stdout lines for native notifications (a no-op under
-/// plain CLI/`make start`).
+/// Apply the backend launch arguments and environment shared by every
+/// managed payload spawn attempt (the initial boot and bootstrap retries).
+/// All spawn paths must stay identical apart from the executable itself.
+/// ``FLINTTRADE_DESKTOP=1`` tells the backend it is running under the desktop
+/// shell, so it may emit ``FLINTTRADE_NOTIFY`` stdout lines for native
+/// notifications (a no-op under plain CLI/`make start`).
 fn configure_backend_command(
     command: &mut StdCommand,
     sidecar_record_path: &Path,
@@ -1988,11 +2286,325 @@ fn configure_backend_command(
         .env("FLINTTRADE_LAUNCH_TOKEN", launch_token);
 }
 
+/// Boot inputs captured once at setup and reused by every backend spawn
+/// attempt (the initial boot and splash bootstrap retries).
+struct BootContext {
+    /// Workspace path of the sidecar recovery record.
+    sidecar_record_path: PathBuf,
+    /// OS boot-session identity persisted into every recovery record.
+    boot_id: String,
+    /// This desktop shell's PID (the recovery record's owner column).
+    shell_pid: u32,
+    /// The instance lock's launch token, consumed by the first spawn attempt.
+    /// Retries mint a fresh token instead: cleanup-complete proofs are keyed
+    /// by launch token, so reusing one across attempts could let an earlier
+    /// attempt's guardian proof vouch for a later attempt's process tree.
+    initial_launch_token: Mutex<Option<String>>,
+    /// Stable POSIX shell identity handed to the sidecar watchdog.
+    #[cfg(unix)]
+    parent_identity: String,
+}
+
+/// Take the instance lock's token for the first spawn attempt; mint a fresh
+/// one for every retry (see [`BootContext::initial_launch_token`]).
+fn next_launch_token(context: &BootContext) -> std::io::Result<String> {
+    if let Some(token) = context.initial_launch_token.lock().unwrap().take() {
+        return Ok(token);
+    }
+    generate_launch_token()
+}
+
+/// Spawn the verified managed backend payload on an OS-chosen loopback port
+/// and hand its pipes to the supervision task. ``Err`` leaves the splash
+/// bootstrap surface in charge — the thin shell has no bundled fallback, so
+/// an unusable payload is demoted and the operator retries the download.
+fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
+    let context = app.state::<BootContext>();
+    let (version, binary) = match verified_active_payload_binary() {
+        Ok(Some(pair)) => pair,
+        Ok(None) => {
+            return Err("No trading engine is installed yet. Retry to download it.".to_string());
+        }
+        Err(error) => {
+            eprintln!("[flinttrade] managed backend payload verification failed: {error}");
+            demote_active_payload();
+            return Err(
+                "The installed engine failed its integrity check. Retry to download a fresh copy."
+                    .to_string(),
+            );
+        }
+    };
+    let launch_token = next_launch_token(&context).map_err(|error| {
+        eprintln!("[flinttrade] could not mint a backend launch token: {error}");
+        "Could not prepare a secure engine launch. Please retry.".to_string()
+    })?;
+    let mut command = StdCommand::new(&binary);
+    configure_backend_command(
+        &mut command,
+        &context.sidecar_record_path,
+        &context.boot_id,
+        &launch_token,
+    );
+    #[cfg(unix)]
+    command.env(PARENT_IDENTITY_ENV, &context.parent_identity);
+    let (rx, mut child) = spawn_contained_std_command(command).map_err(|error| {
+        eprintln!("[flinttrade] managed backend payload v{version} failed to spawn: {error}");
+        demote_active_payload();
+        "The trading engine could not be started. Retry to download a fresh copy.".to_string()
+    })?;
+    eprintln!("[flinttrade] booting managed backend payload v{version}");
+    let sidecar_pid = child.pid();
+    let sidecar_record = SidecarRecord {
+        sidecar_pid,
+        application_pid: None,
+        shell_pid: context.shell_pid,
+        boot_id: context.boot_id.clone(),
+        launch_token,
+    };
+    let pending_exit_acknowledged = Arc::new(AtomicBool::new(false));
+    let cleanup_complete_acknowledged = Arc::new(AtomicBool::new(false));
+    // Record the sidecar identity so the *next* launch can reap it if this
+    // shell dies without running its kill-on-exit cleanup.
+    if let Err(error) = write_sidecar_record(&sidecar_record) {
+        retain_unpublished_cleanup_authority(
+            || terminate_unrecorded_sidecar(&mut child),
+            || std::thread::sleep(Duration::from_millis(100)),
+        );
+        eprintln!("[flinttrade] could not atomically record the backend sidecar: {error}");
+        return Err(
+            "Could not record the engine for crash recovery — nothing was started. Please retry."
+                .to_string(),
+        );
+    }
+    if let Some(state) = app.try_state::<BackendState>() {
+        *state.0.lock().unwrap() = Some(ManagedSidecar {
+            child,
+            record: sidecar_record.clone(),
+            pending_exit_acknowledged: Arc::clone(&pending_exit_acknowledged),
+            cleanup_complete_acknowledged: Arc::clone(&cleanup_complete_acknowledged),
+            shutdown_identity_tracker: ShutdownProcessIdentityTracker::default(),
+        });
+    }
+    // Mark the stage BEFORE supervision starts so a near-instant termination
+    // event cannot have its Failed transition clobbered by this Started one.
+    set_bootstrap_stage(app, BootstrapStage::Started);
+    spawn_backend_supervision(
+        app.clone(),
+        rx,
+        sidecar_record,
+        version,
+        pending_exit_acknowledged,
+        cleanup_complete_acknowledged,
+    );
+    Ok(())
+}
+
+/// Supervise a spawned backend: parse the ready handshake, surface failures,
+/// relay native notifications, and keep draining the pipes so they never
+/// block the backend's own logging. On a pre-handshake exit the payload pin
+/// is demoted and the splash Retry surface takes over; a post-handshake exit
+/// keeps the existing recovery-window flow.
+fn spawn_backend_supervision(
+    handle: AppHandle,
+    mut rx: tauri::async_runtime::Receiver<BackendProcessEvent>,
+    sidecar_record: SidecarRecord,
+    payload_version: String,
+    pending_exit_acknowledged: Arc<AtomicBool>,
+    cleanup_complete_acknowledged: Arc<AtomicBool>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut buffer = String::new();
+        let mut pid_buffer = String::new();
+        let mut cleanup_buffer = String::new();
+        let mut sidecar_record = sidecar_record;
+        let mut application_identity = None;
+        let mut ready_port = None;
+        let mut shown = false;
+        while let Some(event) = rx.recv().await {
+            match event {
+                BackendProcessEvent::Stdout(bytes) => {
+                    let chunk = String::from_utf8_lossy(&bytes);
+                    if !cleanup_complete_acknowledged.load(Ordering::Acquire) {
+                        append_bounded_handshake_output(&mut cleanup_buffer, &chunk);
+                        if output_has_cleanup_complete_ack(
+                            &cleanup_buffer,
+                            &sidecar_record.launch_token,
+                        ) {
+                            cleanup_complete_acknowledged.store(true, Ordering::Release);
+                            cleanup_buffer.clear();
+                        }
+                    }
+                    if sidecar_record.application_pid.is_none() {
+                        append_bounded_handshake_output(&mut pid_buffer, &chunk);
+                        if output_has_pending_record_exit_ack(
+                            &pid_buffer,
+                            &sidecar_record.launch_token,
+                        ) {
+                            pending_exit_acknowledged.store(true, Ordering::Release);
+                        }
+                        if let Some(application_pid) = parse_application_pid(&pid_buffer) {
+                            match confirm_application_process(application_pid).and_then(
+                                |identity| {
+                                    promote_sidecar_record(&sidecar_record, application_pid)
+                                        .map(|promoted| (promoted, identity))
+                                },
+                            ) {
+                                Ok((promoted, identity)) => {
+                                    if let Some(state) = handle.try_state::<BackendState>() {
+                                        let mut active = state.0.lock().unwrap();
+                                        if let Some(managed) = active.as_mut() {
+                                            if managed.record == sidecar_record {
+                                                managed.record = promoted.clone();
+                                                managed
+                                                    .shutdown_identity_tracker
+                                                    .application
+                                                    .bind(application_pid, identity.clone());
+                                                if application_pid == sidecar_record.sidecar_pid {
+                                                    managed
+                                                        .shutdown_identity_tracker
+                                                        .launcher
+                                                        .bind(application_pid, identity.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+                                    sidecar_record = promoted;
+                                    application_identity = Some(identity);
+                                    pid_buffer.clear();
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "[flinttrade] could not confirm backend application pid {application_pid}: {error}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    // Backend-emitted native notifications (fills, safety
+                    // blocks, agent turns) — dispatched even while the
+                    // window is hidden in the tray.
+                    for line in chunk.lines() {
+                        if let Some((title, body)) = parse_notify_line(line) {
+                            raise_notification(&handle, &title, &body);
+                        }
+                    }
+                    if !shown {
+                        if ready_port.is_none() {
+                            append_bounded_handshake_output(&mut buffer, &chunk);
+                            ready_port = parse_ready_port(&buffer);
+                            if ready_port.is_some() {
+                                buffer.clear();
+                            }
+                        }
+                        if let (Some(port), Some(_)) = (ready_port, sidecar_record.application_pid)
+                        {
+                            shown = true;
+                            let h = handle.clone();
+                            let _ = handle.run_on_main_thread(move || show_main_window(&h, port));
+                        }
+                    }
+                }
+                BackendProcessEvent::Stderr(bytes) => {
+                    eprint!("{}", String::from_utf8_lossy(&bytes));
+                }
+                BackendProcessEvent::Terminated(exit) => {
+                    eprintln!(
+                        "[flinttrade] backend terminated: code={:?} signal={:?}",
+                        exit.code, exit.signal
+                    );
+                    // A payload that dies before its ready handshake is
+                    // demoted on the spot, and — once this launch's record is
+                    // confirmed clean — the splash switches to its Retry
+                    // surface so the operator can download a fresh payload.
+                    // There is no bundled backend to restart onto.
+                    let bootstrap_failed = ready_port.is_none() && !quit_was_requested(&handle);
+                    if bootstrap_failed {
+                        eprintln!(
+                            "[flinttrade] managed backend payload v{payload_version} exited before its ready handshake; demoting it"
+                        );
+                        demote_active_payload();
+                    }
+                    if pending_record_cleanup_allowed(
+                        &sidecar_record,
+                        if pending_exit_acknowledged.load(Ordering::Acquire) {
+                            PendingRecordExitProof::ApplicationAcknowledged
+                        } else {
+                            PendingRecordExitProof::None
+                        },
+                        ProcessLiveness::Dead,
+                    ) {
+                        clear_terminated_backend(&handle, &sidecar_record);
+                        let _ = remove_sidecar_record(&sidecar_record);
+                        if bootstrap_failed {
+                            surface_bootstrap_retry(&handle);
+                        } else {
+                            surface_backend_recovery(&handle);
+                        }
+                        break;
+                    }
+                    let cleanup_acknowledged =
+                        cleanup_complete_acknowledged.load(Ordering::Acquire);
+                    match process_tree_liveness(&sidecar_record) {
+                        ProcessLiveness::Dead => {
+                            if bootstrap_failed {
+                                clear_terminated_backend(&handle, &sidecar_record);
+                                let _ = remove_sidecar_record_after_cleanup(
+                                    &sidecar_record,
+                                    cleanup_acknowledged,
+                                );
+                                surface_bootstrap_retry(&handle);
+                            } else {
+                                finalise_terminated_backend(
+                                    &handle,
+                                    &sidecar_record,
+                                    cleanup_acknowledged,
+                                );
+                            }
+                        }
+                        ProcessLiveness::Alive => {
+                            // Even after a pre-handshake demotion, a live
+                            // process tree must fully resolve before any
+                            // retry could spawn over it — keep supervising
+                            // and fail closed to the recovery surface.
+                            eprintln!(
+                                "[flinttrade] sidecar launcher exited while the Python application remains alive; continuing supervision"
+                            );
+                            supervise_terminated_application(
+                                &handle,
+                                &sidecar_record,
+                                Arc::clone(&cleanup_complete_acknowledged),
+                                application_identity.clone(),
+                            );
+                        }
+                        ProcessLiveness::Unknown => {
+                            eprintln!(
+                                "[flinttrade] sidecar launcher exited with unresolved process-tree ownership; retaining recovery state"
+                            );
+                            surface_backend_recovery(&handle);
+                            if sidecar_record.application_pid.is_some() {
+                                supervise_terminated_application(
+                                    &handle,
+                                    &sidecar_record,
+                                    Arc::clone(&cleanup_complete_acknowledged),
+                                    application_identity.clone(),
+                                );
+                            }
+                        }
+                    }
+                    break;
+                }
+                BackendProcessEvent::Error(err) => {
+                    eprintln!("[flinttrade] backend error: {err}");
+                }
+            }
+        }
+    });
+}
+
 /// Build and run the FlintTrade desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         // System-browser opener for broker OAuth approval pages — the main
         // window's remote (loopback HTTP) origin is granted exactly the
@@ -2010,7 +2622,9 @@ pub fn run() {
         // ``allow-run-self-update`` / ``allow-check-native-update`` /
         // ``allow-apply-native-update`` / ``allow-check-payload-update`` /
         // ``allow-apply-payload-update`` entries in
-        // ``capabilities/main-remote.json`` (autogenerated by build.rs).
+        // ``capabilities/main-remote.json`` (autogenerated by build.rs). The
+        // splash window reaches only ``retry_bootstrap`` / ``bootstrap_status``
+        // via ``capabilities/default.json``.
         .invoke_handler(tauri::generate_handler![
             updater_state,
             run_binary_update,
@@ -2019,6 +2633,8 @@ pub fn run() {
             apply_native_update,
             check_payload_update,
             apply_payload_update,
+            retry_bootstrap,
+            bootstrap_status,
             quit_after_backend_failure
         ])
         .manage(BackendState(Mutex::new(None)))
@@ -2062,7 +2678,6 @@ pub fn run() {
             }
             register_toggle_shortcut(app.handle());
 
-            let handle = app.handle().clone();
             let sidecar_record_path = sidecar_pid_file().ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -2070,287 +2685,30 @@ pub fn run() {
                 )
             })?;
             #[cfg(unix)]
-            let parent_identity =
-                required_parent_identity_with(shell_pid, process_command_line).map_err(|error| {
+            let parent_identity = required_parent_identity_with(shell_pid, process_command_line)
+                .map_err(|error| {
                     std::io::Error::new(
                         error.kind(),
                         format!("could not confirm desktop shell identity for watchdog: {error}"),
                     )
                 })?;
 
-            // Spawn the backend on an OS-chosen loopback port so the app never
-            // collides with another local FlintTrade or service. A verified
-            // managed backend payload (staged by ``apply_payload_update``)
-            // boots in the bundled sidecar's place; any verification or spawn
-            // failure logs and falls back to the bundle so a bad payload can
-            // never brick the app.
-            let mut managed_payload_version: Option<String> = None;
-            let mut spawned = None;
-            match verified_active_payload_binary() {
-                Ok(Some((version, binary))) => {
-                    let mut command = StdCommand::new(&binary);
-                    configure_backend_command(
-                        &mut command,
-                        &sidecar_record_path,
-                        &boot_id,
-                        &launch_token,
-                    );
-                    #[cfg(unix)]
-                    command.env(PARENT_IDENTITY_ENV, &parent_identity);
-                    match spawn_contained_std_command(command) {
-                        Ok(pair) => {
-                            eprintln!("[flinttrade] booting managed backend payload v{version}");
-                            managed_payload_version = Some(version);
-                            spawned = Some(pair);
-                        }
-                        Err(error) => eprintln!(
-                            "[flinttrade] managed backend payload v{version} failed to spawn: {error}; falling back to the bundled backend"
-                        ),
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => eprintln!(
-                    "[flinttrade] managed backend payload verification failed: {error}; falling back to the bundled backend"
-                ),
-            }
-            let (mut rx, mut child) = match spawned {
-                Some(spawned) => spawned,
-                None => {
-                    let mut command: StdCommand =
-                        app.shell().sidecar("flinttrade-backend")?.into();
-                    configure_backend_command(
-                        &mut command,
-                        &sidecar_record_path,
-                        &boot_id,
-                        &launch_token,
-                    );
-                    #[cfg(unix)]
-                    command.env(PARENT_IDENTITY_ENV, &parent_identity);
-                    spawn_contained_std_command(command)?
-                }
-            };
-            let sidecar_pid = child.pid();
-            let sidecar_record = SidecarRecord {
-                sidecar_pid,
-                application_pid: None,
-                shell_pid,
+            app.manage(BootContext {
+                sidecar_record_path,
                 boot_id,
-                launch_token,
-            };
-            let pending_exit_acknowledged = Arc::new(AtomicBool::new(false));
-            let cleanup_complete_acknowledged = Arc::new(AtomicBool::new(false));
-            // Record the sidecar identity so the *next* launch can reap it if
-            // this shell dies without running its kill-on-exit cleanup.
-            if let Err(error) = write_sidecar_record(&sidecar_record) {
-                retain_unpublished_cleanup_authority(
-                    || terminate_unrecorded_sidecar(&mut child),
-                    || std::thread::sleep(Duration::from_millis(100)),
-                );
-                return Err(std::io::Error::other(format!(
-                    "could not atomically record the backend sidecar; launch aborted: {error}"
-                ))
-                .into());
-            }
-            if let Some(state) = app.try_state::<BackendState>() {
-                *state.0.lock().unwrap() = Some(ManagedSidecar {
-                    child,
-                    record: sidecar_record.clone(),
-                    pending_exit_acknowledged: Arc::clone(&pending_exit_acknowledged),
-                    cleanup_complete_acknowledged: Arc::clone(&cleanup_complete_acknowledged),
-                    shutdown_identity_tracker: ShutdownProcessIdentityTracker::default(),
-                });
-            }
-
-            // Drain the sidecar's output: parse the ready handshake, surface
-            // failures, and keep reading afterwards so the pipe never blocks the
-            // backend's own logging.
-            tauri::async_runtime::spawn(async move {
-                let mut buffer = String::new();
-                let mut pid_buffer = String::new();
-                let mut cleanup_buffer = String::new();
-                let mut sidecar_record = sidecar_record;
-                let mut application_identity = None;
-                let mut ready_port = None;
-                let mut shown = false;
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(bytes) => {
-                            let chunk = String::from_utf8_lossy(&bytes);
-                            if !cleanup_complete_acknowledged.load(Ordering::Acquire) {
-                                append_bounded_handshake_output(&mut cleanup_buffer, &chunk);
-                                if output_has_cleanup_complete_ack(
-                                    &cleanup_buffer,
-                                    &sidecar_record.launch_token,
-                                ) {
-                                    cleanup_complete_acknowledged.store(true, Ordering::Release);
-                                    cleanup_buffer.clear();
-                                }
-                            }
-                            if sidecar_record.application_pid.is_none() {
-                                append_bounded_handshake_output(&mut pid_buffer, &chunk);
-                                if output_has_pending_record_exit_ack(
-                                    &pid_buffer,
-                                    &sidecar_record.launch_token,
-                                ) {
-                                    pending_exit_acknowledged.store(true, Ordering::Release);
-                                }
-                                if let Some(application_pid) = parse_application_pid(&pid_buffer) {
-                                    match confirm_application_process(application_pid).and_then(
-                                        |identity| {
-                                            promote_sidecar_record(
-                                                &sidecar_record,
-                                                application_pid,
-                                            )
-                                            .map(|promoted| (promoted, identity))
-                                        },
-                                    ) {
-                                        Ok((promoted, identity)) => {
-                                            if let Some(state) = handle.try_state::<BackendState>() {
-                                                let mut active = state.0.lock().unwrap();
-                                                if let Some(managed) = active.as_mut() {
-                                                    if managed.record == sidecar_record {
-                                                        managed.record = promoted.clone();
-                                                        managed
-                                                            .shutdown_identity_tracker
-                                                            .application
-                                                            .bind(application_pid, identity.clone());
-                                                        if application_pid
-                                                            == sidecar_record.sidecar_pid
-                                                        {
-                                                            managed
-                                                                .shutdown_identity_tracker
-                                                                .launcher
-                                                                .bind(application_pid, identity.clone());
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            sidecar_record = promoted;
-                                            application_identity = Some(identity);
-                                            pid_buffer.clear();
-                                        }
-                                        Err(error) => {
-                                            eprintln!(
-                                                "[flinttrade] could not confirm backend application pid {application_pid}: {error}"
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            // Backend-emitted native notifications (fills, safety
-                            // blocks, agent turns) — dispatched even while the
-                            // window is hidden in the tray.
-                            for line in chunk.lines() {
-                                if let Some((title, body)) = parse_notify_line(line) {
-                                    raise_notification(&handle, &title, &body);
-                                }
-                            }
-                            if !shown {
-                                if ready_port.is_none() {
-                                    append_bounded_handshake_output(&mut buffer, &chunk);
-                                    ready_port = parse_ready_port(&buffer);
-                                    if ready_port.is_some() {
-                                        buffer.clear();
-                                    }
-                                }
-                                if let (Some(port), Some(_)) =
-                                    (ready_port, sidecar_record.application_pid)
-                                {
-                                    shown = true;
-                                    let h = handle.clone();
-                                    let _ = handle
-                                        .run_on_main_thread(move || show_main_window(&h, port));
-                                }
-                            }
-                        }
-                        CommandEvent::Stderr(bytes) => {
-                            eprint!("{}", String::from_utf8_lossy(&bytes));
-                        }
-                        CommandEvent::Terminated(payload) => {
-                            eprintln!("[flinttrade] backend terminated: {payload:?}");
-                            // A managed payload that dies before its ready
-                            // handshake is demoted on the spot: the pin is
-                            // removed so every later boot uses the bundled
-                            // backend, and once this launch's record is
-                            // confirmed clean the app restarts itself onto
-                            // that bundle instead of stranding the operator.
-                            let payload_reverted = managed_payload_version
-                                .as_ref()
-                                .filter(|_| {
-                                    ready_port.is_none() && !quit_was_requested(&handle)
-                                })
-                                .map(|version| {
-                                    eprintln!(
-                                        "[flinttrade] managed backend payload v{version} exited before its ready handshake; reverting to the bundled backend"
-                                    );
-                                    demote_active_payload()
-                                })
-                                .unwrap_or(false);
-                            if pending_record_cleanup_allowed(
-                                &sidecar_record,
-                                if pending_exit_acknowledged.load(Ordering::Acquire) {
-                                    PendingRecordExitProof::ApplicationAcknowledged
-                                } else {
-                                    PendingRecordExitProof::None
-                                },
-                                ProcessLiveness::Dead,
-                            ) {
-                                clear_terminated_backend(&handle, &sidecar_record);
-                                let _ = remove_sidecar_record(&sidecar_record);
-                                if payload_reverted {
-                                    restart_onto_bundled_backend(&handle);
-                                }
-                                surface_backend_recovery(&handle);
-                                break;
-                            }
-                            let cleanup_acknowledged =
-                                cleanup_complete_acknowledged.load(Ordering::Acquire);
-                            match process_tree_liveness(&sidecar_record) {
-                                ProcessLiveness::Dead => {
-                                    finalise_terminated_backend(
-                                        &handle,
-                                        &sidecar_record,
-                                        cleanup_acknowledged,
-                                    );
-                                    if payload_reverted {
-                                        restart_onto_bundled_backend(&handle);
-                                    }
-                                }
-                                ProcessLiveness::Alive => {
-                                    eprintln!(
-                                        "[flinttrade] sidecar launcher exited while the Python application remains alive; continuing supervision"
-                                    );
-                                    supervise_terminated_application(
-                                        &handle,
-                                        &sidecar_record,
-                                        Arc::clone(&cleanup_complete_acknowledged),
-                                        application_identity.clone(),
-                                    );
-                                }
-                                ProcessLiveness::Unknown => {
-                                    eprintln!(
-                                        "[flinttrade] sidecar launcher exited with unresolved process-tree ownership; retaining recovery state"
-                                    );
-                                    surface_backend_recovery(&handle);
-                                    if sidecar_record.application_pid.is_some() {
-                                        supervise_terminated_application(
-                                            &handle,
-                                            &sidecar_record,
-                                            Arc::clone(&cleanup_complete_acknowledged),
-                                            application_identity.clone(),
-                                        );
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        CommandEvent::Error(err) => {
-                            eprintln!("[flinttrade] backend error: {err}");
-                        }
-                        _ => {}
-                    }
-                }
+                shell_pid,
+                initial_launch_token: Mutex::new(Some(launch_token)),
+                #[cfg(unix)]
+                parent_identity,
             });
+            app.manage(BootstrapState::new());
+
+            // Boot the managed backend payload — downloading it first on a
+            // fresh install — without blocking setup, so the splash window
+            // paints immediately and can render bootstrap progress. Any
+            // failure lands on the splash Retry surface, never in a crash
+            // loop or a setup abort.
+            tauri::async_runtime::spawn(run_bootstrap(app.handle().clone()));
 
             Ok(())
         })
@@ -7293,6 +7651,119 @@ mod tests {
     }
 
     #[test]
+    fn manifest_payload_resolution_pins_the_target_triple_and_validates_shape() {
+        let good = parse_payload_manifest(&format!(
+            r#"{{
+                "version": "0.7.0",
+                "payloads": {{
+                    "{PAYLOAD_TARGET_TRIPLE}": {{
+                        "name": "flinttrade-payload",
+                        "size": 123,
+                        "url": "https://example.invalid/payload",
+                        "sha256": "{}"
+                    }}
+                }}
+            }}"#,
+            "a".repeat(64)
+        ))
+        .unwrap();
+        let (version, entry) = resolve_manifest_payload(&good).unwrap();
+        assert_eq!(version, "0.7.0");
+        assert_eq!(entry.size, 123);
+
+        // No entry for this build's triple.
+        let missing = parse_payload_manifest(
+            r#"{"version": "0.7.0", "payloads": {"made-up-triple": {
+                "name": "n", "size": 1, "url": "u", "sha256": "aaaa"}}}"#,
+        )
+        .unwrap();
+        assert!(resolve_manifest_payload(&missing)
+            .unwrap_err()
+            .contains("this platform"));
+
+        // Malformed version and digest are both refused.
+        let bad_version = parse_payload_manifest(&format!(
+            r#"{{"version": "../escape", "payloads": {{"{PAYLOAD_TARGET_TRIPLE}": {{
+                "name": "n", "size": 1, "url": "u", "sha256": "{}"}}}}}}"#,
+            "a".repeat(64)
+        ))
+        .unwrap();
+        assert!(resolve_manifest_payload(&bad_version)
+            .unwrap_err()
+            .contains("malformed"));
+        let bad_digest = parse_payload_manifest(&format!(
+            r#"{{"version": "0.7.0", "payloads": {{"{PAYLOAD_TARGET_TRIPLE}": {{
+                "name": "n", "size": 1, "url": "u", "sha256": "short"}}}}}}"#,
+        ))
+        .unwrap();
+        assert!(resolve_manifest_payload(&bad_digest)
+            .unwrap_err()
+            .contains("malformed"));
+    }
+
+    #[test]
+    fn bootstrap_retry_is_admissible_only_from_the_failed_stage() {
+        assert_eq!(
+            bootstrap_retry_transition(BootstrapStage::Failed),
+            Ok(BootstrapStage::Running)
+        );
+        assert!(bootstrap_retry_transition(BootstrapStage::Running).is_err());
+        assert!(bootstrap_retry_transition(BootstrapStage::Started).is_err());
+    }
+
+    #[test]
+    fn download_progress_status_shapes_percentages_and_megabyte_counts() {
+        let status = download_progress_status(12_300_000, 48_600_000);
+        assert_eq!(status.phase, "downloading");
+        assert_eq!(status.pct, Some(25));
+        assert_eq!(
+            status.message,
+            "Downloading the trading engine — 12.3 MB of 48.6 MB"
+        );
+
+        // Progress is capped at the declared total.
+        let capped = download_progress_status(50_000_000, 48_600_000);
+        assert_eq!(capped.pct, Some(100));
+        assert_eq!(
+            capped.message,
+            "Downloading the trading engine — 48.6 MB of 48.6 MB"
+        );
+
+        // Unknown total: no percentage, running byte count only.
+        let unknown = download_progress_status(1_000_000, 0);
+        assert_eq!(unknown.pct, None);
+        assert_eq!(unknown.message, "Downloading the trading engine — 1.0 MB");
+
+        assert_eq!(download_progress_status(0, 48_600_000).pct, Some(0));
+        assert_eq!(format_megabytes(0), "0.0 MB");
+        assert_eq!(format_megabytes(48_600_000), "48.6 MB");
+    }
+
+    #[test]
+    fn bootstrap_status_serialises_the_splash_event_contract() {
+        let status = BootstrapStatus {
+            phase: "downloading",
+            pct: Some(42),
+            message: "Downloading the trading engine — 1.0 MB of 2.0 MB".to_string(),
+        };
+        let value = serde_json::to_value(&status).unwrap();
+        assert_eq!(value["phase"], "downloading");
+        assert_eq!(value["pct"], 42);
+        assert_eq!(
+            value["message"],
+            "Downloading the trading engine — 1.0 MB of 2.0 MB"
+        );
+
+        let error = BootstrapStatus {
+            phase: "error",
+            pct: None,
+            message: "The update feed is unreachable.".to_string(),
+        };
+        let value = serde_json::to_value(&error).unwrap();
+        assert_eq!(value["pct"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn payload_endpoint_follows_the_compiled_release_channel() {
         let endpoint = payload_manifest_endpoint();
         let expected_channel = if env!("CARGO_PKG_VERSION").contains('-') {
@@ -7333,7 +7804,8 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
 
-        // No state file: no managed payload, so the bundled sidecar boots.
+        // No state file: no managed payload, so the first-run bootstrap
+        // downloads one.
         assert!(matches!(verified_active_payload_binary_at(&dir), Ok(None)));
 
         // A valid pin over the exact staged binary resolves it for boot.
@@ -7475,7 +7947,7 @@ mod tests {
 
     #[test]
     fn sidecar_identity_matches_only_our_binary() {
-        // macOS/Linux `ps -o args=` output for the bundled sidecar.
+        // macOS/Linux `ps -o args=` output for the managed backend payload.
         assert!(looks_like_backend_sidecar(
             "/Applications/FlintTrade.app/Contents/MacOS/flinttrade-backend --port 0"
         ));

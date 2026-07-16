@@ -13,6 +13,8 @@ fn main() {
             "apply_native_update",
             "check_payload_update",
             "apply_payload_update",
+            "retry_bootstrap",
+            "bootstrap_status",
             "quit_after_backend_failure",
         ]),
     ))

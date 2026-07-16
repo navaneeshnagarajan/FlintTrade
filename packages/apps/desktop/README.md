@@ -1,6 +1,6 @@
 # Desktop
 
-> Tauri 2 native shell — bundles the PyInstaller-frozen FlintTrade backend as a sidecar with the built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin.
+> Tauri 2 native thin shell — the cross-OS installer (Linux/Windows/macOS) ships only the shell; on first run it downloads the hash-verified PyInstaller-frozen FlintTrade backend payload (which embeds the built terminal) and serves it from a single loopback origin.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -8,10 +8,10 @@
 
 ## Public surface
 
-- `src-tauri/src/lib.rs — shell runtime: sidecar spawn + ready-port handshake, close-to-tray background runtime, tray menu, global hotkey (Cmd/Ctrl+Shift+F), native notification consumer (FLINTTRADE_NOTIFY stdout protocol)`
+- `src-tauri/src/lib.rs — shell runtime: managed payload bootstrap (first-run download with progress + retry), backend spawn + ready-port handshake, close-to-tray background runtime, tray menu, global hotkey (Cmd/Ctrl+Shift+F), native notification consumer (FLINTTRADE_NOTIFY stdout protocol)`
 - `src-tauri/src/main.rs — Tauri entry point`
 - `src-tauri/tauri.conf.json — window, bundle, and plugin configuration`
-- `splash/ — boot splash shown while the backend sidecar starts`
+- `splash/ — boot splash shown while the backend payload downloads (first run) and starts`
 
 (See the source for the full surface.)
 
@@ -19,8 +19,11 @@
 
 - **Close-to-tray:** closing the window hides it — the backend, autonomous
   agent and position monitoring keep running. Quit fully via the tray menu.
+- **First-run bootstrap:** the installer bundles no backend. The splash phase
+  downloads the sha256-pinned backend payload from the rolling channel
+  release, with a progress bar and an explicit Retry on failure.
 - **Single loopback origin:** the shell serves the built terminal and proxies
-  to the sidecar backend on localhost only; nothing listens externally.
+  to the managed backend on localhost only; nothing listens externally.
 - **Native notifications:** the backend emits `FLINTTRADE_NOTIFY` lines
   (order dispatched, safety-gate block) that surface as OS notifications.
 
@@ -52,13 +55,14 @@ Contributors working in this package should install via the workspace from the r
 pnpm install
 ```
 
-Build the installers (frontend + backend sidecar + Tauri bundle):
+Build the installers (thin shell — the backend payload is published separately
+and downloaded on first run):
 
 ```bash
 make desktop-build
 ```
 
-Run in dev (builds the sidecar first):
+Run in dev (builds the backend payload first):
 
 ```bash
 make desktop-dev

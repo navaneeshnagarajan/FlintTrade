@@ -19,7 +19,6 @@ tauri-build = { version = "2", features = [] }
 # ``tray-icon`` powers the background-runtime tray (close-to-tray keeps the
 # backend + autonomous agent alive when the window is closed).
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-shell = "2"
 # Global hotkey to summon/hide the window from anywhere (trader quick-access).
 tauri-plugin-global-shortcut = "2"
 # Native OS notifications for backend-emitted events (trade fills, safety-gate

@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Core permissions for the splash window. The backend sidecar is spawned from Rust (not from JS), so no shell-execute permission is exposed to the webview. The main window loads the loopback backend over HTTP, where Tauri IPC is disabled by default.",
+  "description": "Core permissions for the splash window. The backend payload is spawned from Rust (not from JS), so no process-execute permission is exposed to the webview. The splash may listen for bootstrap://status progress events (core:event:default, within core:default), pull the latest status via bootstrap_status, and invoke the narrowly scoped retry_bootstrap command after a failed first-run payload download. The main window loads the loopback backend over HTTP, where Tauri IPC is disabled by default.",
   "windows": ["splash"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-retry-bootstrap",
+    "allow-bootstrap-status"
+  ]
 }
