@@ -79,8 +79,9 @@ the terminal), verifies its SHA-256 against the release manifest, installs it
 under `<workspace>/runtime/backend/<version>/`, keeps the previous version for
 rollback, and restarts onto it. The thin Tauri shell itself rarely needs an
 installer cycle; day-to-day changes ship as payload updates. A payload that
-fails to start is automatically demoted and the app restarts onto the bundled
-backend.
+fails to start is rolled back to the retained previous payload if it still
+verifies; otherwise the splash shows an actionable error with Retry — never a
+crash loop.
 
 If this machine also has a FlintTrade source workspace
 (`~/.flinttrade/src/FlintTrade`, or `FLINTTRADE_SRC_DIR`), Settings still shows
