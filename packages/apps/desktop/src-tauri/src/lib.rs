@@ -1815,6 +1815,51 @@ fn set_bootstrap_stage(app: &AppHandle, stage: BootstrapStage) {
     }
 }
 
+fn current_bootstrap_stage(app: &AppHandle) -> Option<BootstrapStage> {
+    app.try_state::<BootstrapState>()
+        .map(|state| *state.stage.lock().unwrap())
+}
+
+/// Keep the splash visibly alive while the backend boots.
+///
+/// A first launch on a large existing workspace runs a one-off migration
+/// (directory move + DuckDB schema) that can take a minute before the backend
+/// binds and reports ready. Without this, the splash sits on a single static
+/// "Starting…" line and reads as hung — the exact thing that makes an operator
+/// force-quit, which then leaves stale lock/record state for the next launch.
+/// The heartbeat emits an elapsed-time status every few seconds until the main
+/// window appears, the stage leaves `Started` (a failure), or the start
+/// watchdog deadline is reached.
+fn spawn_start_heartbeat(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let start = Instant::now();
+        loop {
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            if app.get_webview_window("main").is_some() {
+                break;
+            }
+            if current_bootstrap_stage(&app) != Some(BootstrapStage::Started) {
+                break;
+            }
+            if start.elapsed() >= BACKEND_START_WATCHDOG_TIMEOUT {
+                break;
+            }
+            let secs = start.elapsed().as_secs();
+            emit_bootstrap_status(
+                &app,
+                BootstrapStatus {
+                    phase: "starting",
+                    pct: None,
+                    message: format!(
+                        "Starting the trading engine… ({secs}s — the first launch after an update can take a minute)"
+                    ),
+                },
+            );
+        }
+    });
+}
+
 /// Admit (or refuse) a splash Retry request.
 fn begin_bootstrap_retry(app: &AppHandle) -> Result<(), String> {
     let state = app
@@ -2596,6 +2641,8 @@ fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
         pending_exit_acknowledged,
         cleanup_complete_acknowledged,
     );
+    // Reassure during a slow first boot so the splash never reads as hung.
+    spawn_start_heartbeat(app);
     Ok(())
 }
 
