@@ -5,7 +5,7 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 — every section builds on the one before it. If you already have FlintTrade running, jump to the
 [Workspace tour](#workspace-tour) or use the section list in the sidebar.
 
-> **Beta software.** FlintTrade `v0.6.0-beta.3` is not production ready and
+> **Beta software.** FlintTrade `v0.6.0-beta.4` is not production ready and
 > does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
 > before connecting a broker or switching to Live mode.
 
