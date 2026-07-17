@@ -1,6 +1,6 @@
 # FlintTrade Disclaimer
 
-FlintTrade `v0.6.0-beta.4` is a beta-stage open-source project. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
+FlintTrade `v0.6.0-beta.5` is a beta-stage open-source project. It is **not production ready**, not a registered investment advisory product, and not a managed trading service.
 
 Use FlintTrade for learning, research, paper trading, local automation experiments, and contributor development first. Do not place live orders until you have reviewed the source, configured broker-side safeguards, verified the backend and terminal locally, and accepted the operational risk yourself.
 
