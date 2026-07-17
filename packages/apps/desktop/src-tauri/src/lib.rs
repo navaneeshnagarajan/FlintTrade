@@ -3174,7 +3174,23 @@ pub fn run() {
         .setup(|app| {
             let instance_lock = claim_desktop_instance().map_err(|error| {
                 let message = if error.kind() == std::io::ErrorKind::WouldBlock {
-                    "another FlintTrade desktop instance owns this workspace".to_string()
+                    // A second launch while the app runs hidden-to-tray is a
+                    // NORMAL user action (double-clicking the icon again).
+                    // Propagating the error panicked a windowless process
+                    // with no visible feedback at all — tell the user where
+                    // the running instance lives, then exit cleanly.
+                    eprintln!(
+                        "[flinttrade] another FlintTrade desktop instance owns this workspace; exiting"
+                    );
+                    raise_notification(
+                        &app.handle().clone(),
+                        "FlintTrade is already running",
+                        "Look for its tray icon (or dock icon) to open the window.",
+                    );
+                    // Give the notification IPC a moment to deliver before the
+                    // process goes away.
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    std::process::exit(0);
                 } else {
                     format!("could not claim the FlintTrade desktop instance lock: {error}")
                 };
@@ -3243,7 +3259,13 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building the FlintTrade desktop app")
+        // A build failure in a windowless GUI process must not die by silent
+        // panic — log it where a terminal launch can see it and exit with a
+        // real failure code.
+        .unwrap_or_else(|error| {
+            eprintln!("[flinttrade] error while building the FlintTrade desktop app: {error}");
+            std::process::exit(1);
+        })
         .run(|app_handle, event| match event {
             RunEvent::ExitRequested { api, .. } => {
                 // Mark OS/app-menu exits before stopping the sidecar so its
@@ -6134,14 +6156,25 @@ fn remove_sidecar_record_after_cleanup(expected: &SidecarRecord, acknowledged: b
 /// backend looks for it.
 fn flinttrade_home() -> Option<PathBuf> {
     if let Some(d) = env_nonempty("FLINTTRADE_WORKSPACE_DIR") {
-        return Some(PathBuf::from(d));
+        return Some(expand_home_prefix(&d));
     }
     if let Some(d) = env_nonempty("FLINTTRADE_HOME") {
-        return Some(PathBuf::from(d));
+        return Some(expand_home_prefix(&d));
     }
     #[cfg(target_os = "windows")]
     {
-        return env_nonempty("APPDATA").map(|a| PathBuf::from(a).join("flinttrade"));
+        // Python's workspace.py falls back to ~/AppData/Roaming when APPDATA
+        // is unset; mirror it so the shell and backend agree on one dir.
+        return env_nonempty("APPDATA")
+            .map(|a| PathBuf::from(a).join("flinttrade"))
+            .or_else(|| {
+                std::env::var_os("USERPROFILE").map(|profile| {
+                    PathBuf::from(profile)
+                        .join("AppData")
+                        .join("Roaming")
+                        .join("flinttrade")
+                })
+            });
     }
     #[cfg(target_os = "macos")]
     {
@@ -6166,6 +6199,32 @@ fn env_nonempty(key: &str) -> Option<String> {
         Ok(v) if !v.is_empty() => Some(v),
         _ => None,
     }
+}
+
+/// Expand a leading ``~`` (bare or ``~/…``) against the user's home directory,
+/// matching Python's ``Path.expanduser`` in ``workspace.py``. Without this the
+/// shell treated ``FLINTTRADE_HOME=~/trading`` as a literal relative path —
+/// provisioning secrets and locks into a directory named ``~`` while the
+/// backend used ``$HOME/trading``, a split brain that broke first-run setup.
+fn expand_home_prefix(raw: &str) -> PathBuf {
+    let home = || {
+        std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+    };
+    if raw == "~" {
+        if let Some(home) = home() {
+            return home;
+        }
+    }
+    for separator in ["~/", "~\\"] {
+        if let Some(rest) = raw.strip_prefix(separator) {
+            if let Some(home) = home() {
+                return home.join(rest);
+            }
+        }
+    }
+    PathBuf::from(raw)
 }
 
 /// Provision the credential-vault master password on first run.
@@ -6531,6 +6590,24 @@ mod tests {
         assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn home_prefix_expansion_matches_python_expanduser() {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .expect("test environment has a home directory");
+        assert_eq!(expand_home_prefix("~"), home);
+        assert_eq!(expand_home_prefix("~/trading"), home.join("trading"));
+        assert_eq!(
+            expand_home_prefix("/absolute/path"),
+            PathBuf::from("/absolute/path")
+        );
+        assert_eq!(
+            expand_home_prefix("relative/path"),
+            PathBuf::from("relative/path")
+        );
     }
 
     #[test]
