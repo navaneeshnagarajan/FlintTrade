@@ -1003,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "flinttrade-desktop"
-version = "0.6.0-beta.7"
+version = "0.6.0-beta.8"
 dependencies = [
  "fs2",
  "getrandom 0.2.17",
