@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "flinttrade-ticks"
-version = "0.6.0-beta.8"
+version = "0.6.0-beta.9"
 requires-python = ">=3.12"
 description = "High-performance tick-level backtesting simulator for FlintTrade (Rust/PyO3)"
 license = { text = "AGPL-3.0" }
