@@ -65,10 +65,14 @@ const BASE_PRICES: Record<string, number> = {
   NIFTY:    24150,
   BANKNIFTY: 51200,
   SENSEX:   79800,
-  // India VIX + MCX gold so the dashboard WatchlistCard's VIX and GOLD rows
-  // also tick in Explore/demo mode (they previously sat on a static dash).
+  // India VIX + the full MCX commodity set the ticker bar requests, so
+  // SILVER/CRUDEOIL/NATURALGAS also show sample prices in Explore/demo mode
+  // instead of a "no data" chip (they previously sat empty — only GOLD ticked).
   INDIAVIX:  13.5,
   GOLD:     72000,
+  SILVER:   90000,
+  CRUDEOIL:  6400,
+  NATURALGAS: 250,
   RELIANCE:  2850,
   TCS:       3720,
   HDFCBANK:  1680,
@@ -85,6 +89,9 @@ const EXCHANGES: Record<string, string> = {
   SENSEX:   "BSE_INDEX",
   INDIAVIX: "NSE_INDEX",
   GOLD:     "MCX",
+  SILVER:   "MCX",
+  CRUDEOIL: "MCX",
+  NATURALGAS: "MCX",
   RELIANCE:  "NSE",
   TCS:       "NSE",
   HDFCBANK:  "NSE",
