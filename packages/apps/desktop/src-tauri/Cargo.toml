@@ -48,6 +48,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Streaming sha256 pin for downloaded backend payloads plus the boot-time
 # re-verification of the staged binary against ``state.json``.
 sha2 = "0.10"
+# Prerelease-aware version ordering so the boot path can tell when the
+# installed backend payload predates this shell (DMG upgraded, payload not)
+# and upgrade it from the channel manifest. Already resolved in the lockfile
+# via tauri.
+semver = "1"
 # Cross-platform CSPRNG for provisioning the credential-vault master password
 # on first launch (loopback, single-user desktop).
 getrandom = "0.2"

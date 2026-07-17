@@ -1925,14 +1925,46 @@ fn download_progress_status(downloaded: u64, total: u64) -> BootstrapStatus {
     }
 }
 
+/// Prerelease-aware "is `installed` strictly older than `candidate`?".
+/// ``None`` when either string fails semver parsing — callers treat that as
+/// "no upgrade decision" and keep the installed payload (boot never blocks on
+/// a malformed version string).
+fn payload_version_older_than(installed: &str, candidate: &str) -> Option<bool> {
+    let installed = semver::Version::parse(installed).ok()?;
+    let candidate = semver::Version::parse(candidate).ok()?;
+    Some(installed < candidate)
+}
+
 /// Ensure a verified managed backend payload is installed, downloading this
-/// channel's payload when none is (first run) or when the installed one no
-/// longer verifies (broken pin, demoted first). Streams progress to the
-/// splash while it works; reuses the exact manifest/download/verify/install
-/// helpers behind Settings → ``apply_payload_update``.
+/// channel's payload when none is (first run), when the installed one no
+/// longer verifies (broken pin, demoted first), or when it predates this
+/// shell (the operator installed a newer app over an older payload — without
+/// the upgrade they would keep running the old engine and its old UI while
+/// believing they run the release they just installed). Streams progress to
+/// the splash while it works; reuses the exact manifest/download/verify/
+/// install helpers behind Settings → ``apply_payload_update``.
 async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
     match verified_active_payload_binary() {
-        Ok(Some(_)) => return Ok(()),
+        Ok(Some((installed, _))) => {
+            let shell = app.package_info().version.to_string();
+            if payload_version_older_than(&installed, &shell) == Some(true) {
+                eprintln!(
+                    "[flinttrade] installed backend payload v{installed} predates this app \
+                     v{shell}; upgrading from the channel manifest"
+                );
+                // A failed upgrade must never block the boot: the installed
+                // payload still verifies, so fall back to it and log why.
+                if let Err(error) =
+                    download_and_install_channel_payload(app, Some(&installed)).await
+                {
+                    eprintln!(
+                        "[flinttrade] backend payload upgrade failed ({error}); \
+                         booting the installed v{installed} payload"
+                    );
+                }
+            }
+            return Ok(());
+        }
         Ok(None) => {}
         Err(error) => {
             eprintln!("[flinttrade] managed backend payload verification failed: {error}");
@@ -1944,6 +1976,17 @@ async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
             eprintln!("[flinttrade] no retained predecessor verified; downloading a fresh payload");
         }
     }
+    download_and_install_channel_payload(app, None).await
+}
+
+/// Resolve this channel's manifest and download/verify/install its payload,
+/// streaming splash progress. When ``installed`` is given, the manifest must
+/// offer a strictly newer version, otherwise the installed payload is kept
+/// (the manifest can lag the shell right after a release is cut).
+async fn download_and_install_channel_payload(
+    app: &AppHandle,
+    installed: Option<&str>,
+) -> Result<(), String> {
     emit_bootstrap_status(
         app,
         BootstrapStatus {
@@ -1955,6 +1998,15 @@ async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
     let client = payload_http_client()?;
     let manifest = fetch_payload_manifest(&client).await?;
     let (version, entry) = resolve_manifest_payload(&manifest)?;
+    if let Some(installed) = installed {
+        if payload_version_older_than(installed, &version) != Some(true) {
+            eprintln!(
+                "[flinttrade] channel manifest offers v{version}, which is not newer than \
+                 the installed v{installed}; keeping the installed payload"
+            );
+            return Ok(());
+        }
+    }
     let runtime_dir = payload_runtime_dir()
         .ok_or_else(|| "Could not resolve the FlintTrade workspace directory.".to_string())?;
     emit_bootstrap_status(app, download_progress_status(0, entry.size));
@@ -4993,7 +5045,6 @@ enum ReapError {
     SidecarIdentityLookupFailed { pid: u32 },
     SidecarIdentityUnconfirmed { pid: u32 },
     SidecarStillAlive { pid: u32 },
-    CleanupUnconfirmed,
     RecordChanged,
     RecordRemoval { message: String },
 }
@@ -5049,10 +5100,6 @@ impl std::fmt::Display for ReapError {
             Self::SidecarStillAlive { pid } => write!(
                 formatter,
                 "sidecar pid {pid} is still a FlintTrade backend after watchdog grace"
-            ),
-            Self::CleanupUnconfirmed => write!(
-                formatter,
-                "backend processes appear gone but guardian cleanup completion is unproven"
             ),
             Self::RecordChanged => write!(formatter, "sidecar recovery record changed during reap"),
             Self::RecordRemoval { message } => {
@@ -5271,9 +5318,7 @@ where
                     launcher,
                     spawn_containment_liveness(record.sidecar_pid),
                 ) {
-                    if !current_cleanup_confirmed {
-                        return Err(ReapError::CleanupUnconfirmed);
-                    }
+                    warn_if_cleanup_unproven(current_cleanup_confirmed);
                     return remove_reaped_record(
                         path,
                         &contents,
@@ -5332,10 +5377,28 @@ where
         }
     }
 
-    if !current_cleanup_confirmed {
-        return Err(ReapError::CleanupUnconfirmed);
-    }
+    warn_if_cleanup_unproven(current_cleanup_confirmed);
     remove_reaped_record(path, &contents, outcome)
+}
+
+/// A missing guardian cleanup proof must not wedge the boot once every
+/// recorded process is confirmed dead or reused. The proof is only written on
+/// GRACEFUL guardian exit, so a force-quit or crash never produces one — and
+/// treating its absence as fatal permanently blocked every later launch in
+/// the same OS boot until the operator hand-deleted the record (the recurring
+/// "app opens and sits stuck" report). Process safety does not depend on it:
+/// the reap above has already proven the recorded PIDs (and, when contained,
+/// the whole spawn process group) dead, and the backend re-checks single-
+/// instance ownership at spawn via the kernel flock lease, which cannot go
+/// stale. The worst case of skipping the proof is leftover temp files.
+fn warn_if_cleanup_unproven(cleanup_confirmed: bool) {
+    if !cleanup_confirmed {
+        eprintln!(
+            "[flinttrade] guardian cleanup proof is missing but every recorded backend \
+             process is confirmed gone; reclaiming the stale record (leftover temporary \
+             files may remain)"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -7264,7 +7327,11 @@ mod tests {
     }
 
     #[test]
-    fn current_boot_recovery_retains_a_dead_tree_without_guardian_cleanup_proof() {
+    fn current_boot_recovery_reclaims_a_dead_tree_even_without_guardian_cleanup_proof() {
+        // A force-quit or crash never writes the guardian's cleanup proof, so
+        // its absence must not wedge later launches once every recorded
+        // process is confirmed dead or reused (the recurring "app opens and
+        // sits stuck" report). The reap reclaims the record either way.
         let root = std::env::temp_dir().join(format!(
             "flinttrade-reap-cleanup-proof-{}",
             generate_launch_token().unwrap()
@@ -7295,10 +7362,13 @@ mod tests {
                 |_| false,
                 |_| false,
             ),
-            Err(ReapError::CleanupUnconfirmed)
+            Ok(ReapOutcome::RemovedConfirmedReused)
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        assert!(!path.exists());
 
+        // With the graceful-exit proof present, the reap also removes the
+        // consumed proof file alongside the record.
+        std::fs::write(&path, &contents).unwrap();
         let proof_path = cleanup_complete_proof_path(&path).unwrap();
         std::fs::write(
             &proof_path,
@@ -7333,7 +7403,7 @@ mod tests {
     }
 
     #[test]
-    fn same_boot_legacy_record_without_guardian_proof_is_retained() {
+    fn same_boot_legacy_record_without_guardian_proof_is_reclaimed() {
         let root = std::env::temp_dir().join(format!(
             "flinttrade-reap-legacy-proof-{}",
             generate_launch_token().unwrap()
@@ -7354,9 +7424,9 @@ mod tests {
                 |_| false,
                 |_| false,
             ),
-            Err(ReapError::CleanupUnconfirmed)
+            Ok(ReapOutcome::RemovedConfirmedDead)
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), contents);
+        assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -7917,6 +7987,28 @@ mod tests {
         assert!(!valid_release_tag("v1.2"));
         assert!(!valid_release_tag("v1.2.3 && open /Applications"));
         assert!(!valid_release_tag("v1.2.3/beta"));
+    }
+
+    #[test]
+    fn payload_version_ordering_is_prerelease_aware_and_fails_open() {
+        // The DMG-over-old-payload upgrade decision: beta.6 < beta.7 < stable.
+        assert_eq!(
+            payload_version_older_than("0.6.0-beta.6", "0.6.0-beta.7"),
+            Some(true)
+        );
+        assert_eq!(
+            payload_version_older_than("0.6.0-beta.7", "0.6.0-beta.7"),
+            Some(false)
+        );
+        assert_eq!(
+            payload_version_older_than("0.6.0-beta.10", "0.6.0-beta.9"),
+            Some(false)
+        );
+        assert_eq!(payload_version_older_than("0.6.0-beta.7", "0.6.0"), Some(true));
+        // Malformed versions yield no decision: the boot keeps the installed
+        // payload instead of blocking or downloading blindly.
+        assert_eq!(payload_version_older_than("not-a-version", "0.6.0"), None);
+        assert_eq!(payload_version_older_than("0.6.0", ""), None);
     }
 
     #[test]
