@@ -8,9 +8,18 @@
 1. Download the `.dmg` from the release page.
 2. Install FlintTrade like any other macOS app.
 3. Release builds are currently **unsigned**, so on first launch Gatekeeper
-   will block a normal double-click. Right-click (Control-click) FlintTrade in
-   Applications, choose **Open**, then **Open** again in the dialog — needed
-   once per install. Subsequent launches work normally.
+   will block the app. The bypass depends on your macOS version:
+   - **macOS 15 (Sequoia) and later**: Apple removed the right-click → Open
+     override for unnotarised apps. Double-click FlintTrade once (it will be
+     blocked — choose **Done**, not "Move to Trash"), then open
+     **System Settings → Privacy & Security**, scroll to the message about
+     FlintTrade, and click **Open Anyway**; confirm with **Open Anyway**
+     again in the dialog. Needed once per install.
+   - **macOS 13/14**: Right-click (Control-click) FlintTrade in Applications,
+     choose **Open**, then **Open** again in the dialog — needed once per
+     install.
+
+   Subsequent launches work normally either way.
 4. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
    in the app; no `.env` file is required.
 

@@ -288,9 +288,12 @@ when its repository secrets exist and stays dormant otherwise:
 - **macOS Gatekeeper signing/notarisation (dormant):** `APPLE_CERTIFICATE`
   (base64 `.p12`) + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`,
   and `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` for notarisation. Until
-  those exist, macOS builds ship **unsigned**: on first launch, right-click
-  (Control-click) the app in Finder and choose **Open**, then **Open** again in
-  the Gatekeeper dialog — needed once per install.
+  those exist, macOS builds ship **unsigned**: on macOS 15 (Sequoia) and
+  later, open the app once (blocked — choose **Done**), then
+  **System Settings → Privacy & Security → Open Anyway** (Apple removed the
+  right-click override for unnotarised apps); on macOS 13/14, right-click
+  (Control-click) the app in Finder and choose **Open**, then **Open** again
+  in the Gatekeeper dialog. Needed once per install either way.
 - **Windows:** an Authenticode certificate
   (`tauri.conf.json → bundle.windows.certificateThumbprint`) — not configured.
 

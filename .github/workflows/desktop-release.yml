@@ -581,19 +581,25 @@ jobs:
           # instead of any first-party web host. /releases/latest/download only
           # resolves non-prerelease tags, so betas need this rolling release.
           case "$TAG_NAME" in
-            *-*) CHANNEL="beta" ;;
-            *)   CHANNEL="stable" ;;
+            *-*) CHANNELS=("beta") ;;
+            # A stable release outranks any beta, and every existing install
+            # compiled from a prerelease version polls ONLY updater-beta —
+            # without refreshing that channel too, all beta installs would be
+            # permanently stranded the day the first stable ships.
+            *)   CHANNELS=("stable" "beta") ;;
           esac
-          ROLLING="updater-${CHANNEL}"
           ASSETS=(dist-installers/flinttrade-desktop-manifest.json dist-installers/SHA256SUMS.txt)
           if [[ -f dist-installers/latest.json ]]; then
             ASSETS+=(dist-installers/latest.json)
           fi
-          if ! gh release view "$ROLLING" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$ROLLING" --repo "$GITHUB_REPOSITORY" \
-              --title "FlintTrade ${CHANNEL} channel manifest" \
-              --notes "Rolling pointer to the newest ${CHANNEL} release. Do not download installers from here; they live on the versioned releases." \
-              --prerelease --latest=false
-          fi
-          gh release upload "$ROLLING" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
-          echo "Rolling ${ROLLING} manifest now points at ${TAG_NAME}."
+          for CHANNEL in "${CHANNELS[@]}"; do
+            ROLLING="updater-${CHANNEL}"
+            if ! gh release view "$ROLLING" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release create "$ROLLING" --repo "$GITHUB_REPOSITORY" \
+                --title "FlintTrade ${CHANNEL} channel manifest" \
+                --notes "Rolling pointer to the newest ${CHANNEL} release. Do not download installers from here; they live on the versioned releases." \
+                --prerelease --latest=false
+            fi
+            gh release upload "$ROLLING" "${ASSETS[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            echo "Rolling ${ROLLING} manifest now points at ${TAG_NAME}."
+          done

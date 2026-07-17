@@ -60,6 +60,14 @@
           "libayatana-appindicator3-1",
           "librsvg2-2"
         ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3",
+          "librsvg2"
+        ]
       }
     },
     "macOS": {
