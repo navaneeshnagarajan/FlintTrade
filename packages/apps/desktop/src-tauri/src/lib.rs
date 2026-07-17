@@ -4511,11 +4511,40 @@ fn unix_process_command(_pid: u32) -> std::io::Result<Option<String>> {
     ))
 }
 
+/// Identity string returned for a PID that provably belongs to another
+/// security context. Never matches ``looks_like_backend_sidecar`` or
+/// ``looks_like_desktop_shell``, so callers classify the PID as recycled
+/// rather than wedging on it.
+fn foreign_context_identity(pid: u32) -> String {
+    format!("<process {pid} belongs to another security context>\t{pid}\tforeign")
+}
+
+/// True when a probe error proves the PID belongs to another security
+/// context (EPERM/EACCES on Unix, ERROR_ACCESS_DENIED on Windows — all map
+/// to ``PermissionDenied``). Our shell and backend always run as the
+/// invoking user, so a PID we lack permission to inspect cannot be ours.
+/// Treating the error as fatal previously wedged startup on a recycled PID
+/// until the unrelated root/other-user process exited or the machine
+/// rebooted.
+fn probe_denied(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied
+}
+
 /// Return a stable native command + PID + kernel process-start identity, or
 /// ``None`` when no such process exists. Probe errors remain distinct from
-/// absence so startup and shutdown retain recovery state on uncertainty.
-#[cfg(unix)]
+/// absence so startup and shutdown retain recovery state on uncertainty —
+/// except permission-denied, which proves the PID was recycled into another
+/// security context and yields a foreign-identity string instead.
+#[cfg(any(unix, windows))]
 fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
+    match process_command_line_probed(pid) {
+        Err(error) if probe_denied(&error) => Ok(Some(foreign_context_identity(pid))),
+        other => other,
+    }
+}
+
+#[cfg(unix)]
+fn process_command_line_probed(pid: u32) -> std::io::Result<Option<String>> {
     let Some(before) = unix_process_start_token(pid)? else {
         return Ok(None);
     };
@@ -4618,7 +4647,7 @@ impl Drop for WindowsProcessHandle {
 /// Return a stable image + PID + native creation-time identity for a Windows
 /// process, or ``None`` when that process has exited.
 #[cfg(windows)]
-fn process_command_line(pid: u32) -> std::io::Result<Option<String>> {
+fn process_command_line_probed(pid: u32) -> std::io::Result<Option<String>> {
     use std::ffi::c_void;
 
     #[repr(C)]
@@ -5002,7 +5031,17 @@ fn pending_record_repair_allowed(
     launcher: LiveSidecarIdentity,
     containment: ProcessLiveness,
 ) -> bool {
-    spawn_contained && launcher == LiveSidecarIdentity::Dead && containment == ProcessLiveness::Dead
+    // A Reused launcher PID proves the original launcher is gone exactly as
+    // strongly as ESRCH does (the confirmed-PID path already accepts it); the
+    // dead spawn-group probe still rules out surviving children either way.
+    // Refusing Reused here wedged every launch behind an unrelated long-lived
+    // process that happened to recycle the launcher PID.
+    spawn_contained
+        && matches!(
+            launcher,
+            LiveSidecarIdentity::Dead | LiveSidecarIdentity::Reused
+        )
+        && containment == ProcessLiveness::Dead
 }
 
 #[cfg(unix)]
@@ -5018,7 +5057,13 @@ fn spawn_containment_liveness(pgid: u32) -> ProcessLiveness {
     }
     match std::io::Error::last_os_error().raw_os_error() {
         Some(3) => ProcessLiveness::Dead,
-        Some(1) => ProcessLiveness::Alive,
+        // EPERM on a GROUP probe means the group is non-empty but no member
+        // accepts our signal — every remaining member belongs to another
+        // security context. Our contained spawn group is entirely same-user,
+        // so a foreign-only group proves the pgid was recycled and our
+        // processes are gone. Treating this as Alive wedged startup on an
+        // unrelated root daemon until reboot.
+        Some(1) => ProcessLiveness::Dead,
         _ => ProcessLiveness::Unknown,
     }
 }
@@ -5318,6 +5363,26 @@ where
                     launcher,
                     spawn_containment_liveness(record.sidecar_pid),
                 ) {
+                    warn_if_cleanup_unproven(current_cleanup_confirmed);
+                    return remove_reaped_record(
+                        path,
+                        &contents,
+                        ReapOutcome::RemovedConfirmedDead,
+                    );
+                }
+                if record.boot_id.is_none() {
+                    // Pre-containment legacy records (v1/v2/bare) have no
+                    // boot id to expire on reboot and no spawn group to
+                    // probe, so no stronger proof of death will ever arrive
+                    // — retaining them wedged every launch permanently. A
+                    // confirmed-gone launcher is the best proof available,
+                    // and the backend's kernel flock lease still refuses a
+                    // duplicate at spawn should anything have survived.
+                    eprintln!(
+                        "[flinttrade] reclaiming a legacy pending sidecar record whose \
+                         launcher pid {} is confirmed gone",
+                        record.sidecar_pid
+                    );
                     warn_if_cleanup_unproven(current_cleanup_confirmed);
                     return remove_reaped_record(
                         path,
@@ -6280,10 +6345,34 @@ mod tests {
     }
 
     #[test]
+    fn foreign_context_identity_never_matches_our_processes() {
+        // A permission-denied probe maps to this identity so a recycled PID
+        // owned by root/another user classifies as Reused instead of wedging
+        // the reap; it must never read as our backend or shell.
+        let identity = foreign_context_identity(4242);
+        assert!(!looks_like_backend_sidecar(&identity));
+        assert!(!looks_like_desktop_shell(&identity));
+        assert!(probe_denied(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
+        assert!(!probe_denied(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+    }
+
+    #[test]
     fn pending_record_repair_requires_dead_spawn_containment() {
         assert!(pending_record_repair_allowed(
             true,
             LiveSidecarIdentity::Dead,
+            ProcessLiveness::Dead,
+        ));
+        // A Reused launcher PID proves the original launcher is gone just as
+        // strongly as ESRCH (the confirmed-PID path already accepts it) —
+        // refusing it wedged every launch behind an unrelated PID squatter.
+        assert!(pending_record_repair_allowed(
+            true,
+            LiveSidecarIdentity::Reused,
             ProcessLiveness::Dead,
         ));
         assert!(!pending_record_repair_allowed(
@@ -6299,7 +6388,7 @@ mod tests {
         assert!(!pending_record_repair_allowed(
             true,
             LiveSidecarIdentity::Reused,
-            ProcessLiveness::Dead,
+            ProcessLiveness::Alive,
         ));
     }
 
@@ -6450,7 +6539,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_record_without_application_pid_stays_fail_closed() {
+    fn legacy_record_without_application_pid_is_reclaimed_once_dead() {
+        // Pre-containment legacy records have no boot id to expire and no
+        // spawn group to probe, so a confirmed-gone launcher is the strongest
+        // proof that will ever arrive — retaining the record wedged every
+        // launch permanently, across reboots.
         let root = std::env::temp_dir().join(format!(
             "flinttrade-reap-legacy-dead-{}",
             std::time::SystemTime::now()
@@ -6469,9 +6562,9 @@ mod tests {
                 |_| ProcessLiveness::Dead,
                 |_| panic!("identity lookup must not run for dead processes"),
             ),
-            Err(ReapError::ApplicationPidPending { launcher_pid: 1234 })
+            Ok(ReapOutcome::RemovedConfirmedDead)
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "1234\n77\n");
+        assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -6523,7 +6616,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_record_pid_reuse_still_cannot_prove_application_absence() {
+    fn legacy_record_pid_reuse_is_reclaimed_like_a_dead_launcher() {
+        // A reused launcher PID proves the legacy launcher is gone as
+        // strongly as ESRCH; with no boot id and no spawn group, retaining
+        // the record wedged every launch behind the unrelated PID squatter.
         let root = std::env::temp_dir().join(format!(
             "flinttrade-reap-legacy-reused-{}",
             std::time::SystemTime::now()
@@ -6560,9 +6656,9 @@ mod tests {
                     false
                 },
             ),
-            Err(ReapError::ApplicationPidPending { launcher_pid: 1234 })
+            Ok(ReapOutcome::RemovedConfirmedDead)
         );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "1234\n77\n");
+        assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }
