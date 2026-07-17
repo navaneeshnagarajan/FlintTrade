@@ -4,6 +4,13 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.7](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.6...v0.6.0-beta.7) (2026-07-17)
+
+
+### Fixed
+
+* **desktop:** heartbeat the splash during a slow first-boot migration ([fce0027](https://github.com/navaneeshnagarajan/FlintTrade/commit/fce0027404ad5825f55eb575af91d14a1753ac10))
+
 ## [0.6.0-beta.6](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.5...v0.6.0-beta.6) (2026-07-17)
 
 
