@@ -40,9 +40,9 @@ matrix.
 
 ## Quickstart (native desktop)
 
-For normal use, install FlintTrade like any other desktop app. The installer
-bundles the backend sidecar and terminal UI, creates the OS workspace on first
-launch, and lets you configure the recommended OpenAlgo bridge or verified
+For normal use, install FlintTrade like any other desktop app. The small installer
+downloads the hash-verified backend (which embeds the terminal) on first
+launch, creates the OS workspace, and lets you configure the recommended OpenAlgo bridge or verified
 native brokers from Setup and Settings — no `.env` file or browser dev server
 required.
 
@@ -136,7 +136,7 @@ and 1 Rust/PyO3 tick engine.
 |---|---|---|
 | `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
-| `packages/apps/desktop` | Tauri 2 (TS + Rust) | Native desktop shell — bundles the backend sidecar + terminal into one cross-OS installer (Linux/Windows/macOS) |
+| `packages/apps/desktop` | Tauri 2 (TS + Rust) | Thin Tauri shell — downloads the PyInstaller-frozen backend (which embeds the terminal) on first run, served from a single loopback origin (Linux/Windows/macOS) |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |

@@ -15,7 +15,7 @@ node_requires = ">=22.0.0"
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }
 data = { path = "packages/core/data", lang = "python", description = "Real-time tick capture, WebSocket storage, audit logs, sandbox state" }
 historical = { path = "packages/core/historical", lang = "python", description = "Historical data download, merge, DuckDB/Parquet, free NSE data" }
-indicators = { path = "packages/core/indicators", lang = "python", description = "TA-Lib (batch, 150+ indicators) + Numba (streaming) + PineTS (Pine Script conversion)" }
+indicators = { path = "packages/core/indicators", lang = "python", description = "Pure-NumPy batch indicators (110 exports) + pure-Python streaming classes (optional Numba on 3 kernels) + Pine Script conversion" }
 ticks = { path = "packages/core/ticks", lang = "rust", description = "High-performance tick processing engine — Rust core with Python bindings via PyO3" }
 design-system = { path = "packages/core/design-system", lang = "typescript", description = "Shared FlintTrade design tokens, primitives, motion helpers, and UI kit" }
 engine = { path = "packages/services/engine", lang = "python", description = "Strategy execution, order routing, safety layers, kill switches" }

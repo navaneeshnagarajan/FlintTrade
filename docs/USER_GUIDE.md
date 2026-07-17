@@ -19,9 +19,9 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 ## 1. Installation
 
 FlintTrade runs on Windows, macOS, and Linux (including Raspberry Pi). The
-normal path is the native desktop installer. It bundles the backend sidecar and
-terminal UI, creates the OS workspace on first launch, and opens Setup without
-requiring `.env` or a browser dev server.
+normal path is the native desktop installer — a small shell that downloads the
+hash-verified backend (which embeds the terminal) on first launch, creates the
+OS workspace, and opens Setup without requiring `.env` or a browser dev server.
 
 ### Native desktop
 
@@ -252,7 +252,7 @@ count:
 
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
-### The 13 workspace presets
+### The 14 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
 palette (Ctrl + K → "preset"). Built-in presets include:
@@ -264,7 +264,7 @@ palette (Ctrl + K → "preset"). Built-in presets include:
   matrix.
 - **Risk Monitor** — P&L dashboard, exposure, kill-switch status, funds.
 - **Investor View** — holdings, SIPs, net worth, mutual-fund tracker.
-- … plus seven more.
+- … plus eight more.
 
 Presets are serialised via the Dockview API. You can save your own custom
 preset from Settings → Workspace.

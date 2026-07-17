@@ -380,16 +380,20 @@ deliberately picks 5100 to avoid that range. Do not propose
 consolidating onto a single port; it would clash with multi-instance
 OpenAlgo setups.
 
-### No TOTP auto-login
+### Broker authentication
 
-OpenAlgo handles broker authentication (TOTP, OAuth, OTP, biometric
-flows). FlintTrade only knows about the OpenAlgo API key. Do not add
-broker-credential storage or TOTP automation to FlintTrade.
+The OpenAlgo bridge handles its own broker authentication (TOTP, OAuth,
+OTP, biometric flows) — FlintTrade only holds the OpenAlgo API key for that
+path. The native broker gateway, by contrast, stores broker credentials in
+the encrypted vault (`gateway/credentials.py`, Fernet + PBKDF2) and performs
+credential-replay / OAuth / TOTP login itself via
+`flinttrade_gateway/native_login.py`. New native adapters follow that vault +
+gated-session model; never add plaintext credential storage.
 
-### 5-layer safety system in `packages/services/engine/`
+### Safety layers
 
-Every order placed through FlintTrade passes five safety layers in
-order:
+The 5-layer safety system lives in `packages/services/engine/`. Every order
+placed through FlintTrade passes five safety layers in order:
 
 1. **Order validation** — price within ±5 % of LTP, quantity within
    lot-multiple bounds.

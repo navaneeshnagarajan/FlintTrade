@@ -5542,7 +5542,7 @@ class FlintTradeApp:
             and after_generation > before_generation
         )
         if not fresh_generation or loaded_year != calendar_year:
-            if self._calendar_unauthoritative_warned:
+            if getattr(self, "_calendar_unauthoritative_warned", False):
                 logger.debug(
                     "Market calendar refresh still not authoritative; retaining a fail-closed year"
                 )
