@@ -172,10 +172,13 @@ const SIDECAR_TOTAL_SHUTDOWN_TIMEOUT: Duration =
 const SIDECAR_PENDING_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Initial grace before stale-sidecar recovery fails closed. Python may take
-/// almost 2s to observe parent death, waits 12s before its complete-tree orphan
-/// fallback, then may spend 5s confirming descendants are gone. Twenty-two
-/// seconds covers every stage plus scheduling margin.
-const SIDECAR_WATCHDOG_GRACE_TIMEOUT: Duration = Duration::from_secs(22);
+/// almost 2s to observe parent death, allows up to 75s of graceful drain
+/// (``ORPHAN_GRACE_SECONDS`` in ``packaging/desktop_backend.py`` — sized to
+/// the backend's 60s shutdown budget) before its complete-tree orphan
+/// fallback, then may spend 5s confirming descendants are gone. Eighty-five
+/// seconds covers every stage plus scheduling margin; the splash's preparing
+/// heartbeat keeps the wait visibly alive.
+const SIDECAR_WATCHDOG_GRACE_TIMEOUT: Duration = Duration::from_secs(85);
 
 /// Brief confirmation window after a hard kill before retaining recovery data.
 const SIDECAR_KILL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
@@ -2173,7 +2176,32 @@ async fn reap_stale_sidecar_before_boot(app: &AppHandle) -> Result<(), String> {
             message: "Checking for a previous trading engine...".to_string(),
         },
     );
-    match tauri::async_runtime::spawn_blocking(move || reap_stale_sidecar(&boot_id)).await {
+    // Keep the splash visibly alive while the reap waits out a prior
+    // session's shutdown: the watchdog grace can run to ~85s (a crashed
+    // shell's backend gets its full graceful drain), and a static line for
+    // that long reads as hung — the force-quit trigger this whole path
+    // exists to absorb.
+    let ticker_app = app.clone();
+    let ticker = tauri::async_runtime::spawn(async move {
+        let start = Instant::now();
+        loop {
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            let secs = start.elapsed().as_secs();
+            emit_bootstrap_status(
+                &ticker_app,
+                BootstrapStatus {
+                    phase: "preparing",
+                    pct: None,
+                    message: format!(
+                        "Checking for a previous trading engine… ({secs}s — an earlier session may still be saving its data)"
+                    ),
+                },
+            );
+        }
+    });
+    let outcome = tauri::async_runtime::spawn_blocking(move || reap_stale_sidecar(&boot_id)).await;
+    ticker.abort();
+    match outcome {
         Ok(result) => bootstrap_reap_decision(result),
         Err(join_error) => {
             eprintln!("[flinttrade] stale-sidecar reap task failed to run: {join_error}");

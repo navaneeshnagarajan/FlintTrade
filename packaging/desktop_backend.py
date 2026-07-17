@@ -96,7 +96,19 @@ PENDING_RECORD_EXIT_ACK_SENTINEL = "FLINTTRADE_BACKEND_PENDING_EXIT_ACK"
 CLEANUP_COMPLETE_SENTINEL = "FLINTTRADE_BACKEND_CLEANUP_COMPLETE"
 
 #: Last-resort orphan timeout if graceful unwinding is unable to stop Waitress.
-ORPHAN_GRACE_SECONDS = 12.0
+#: Must cover the backend's own sequential shutdown budget
+#: (``flinttrade_core.desktop._DESKTOP_SHUTDOWN_TIMEOUT`` = 60s) plus margin —
+#: at the previous 12s the guardian SIGKILLed a mid-unwind trading backend
+#: (open-order handling, journal writes) whenever the shell crashed. The Rust
+#: shell's ``SIDECAR_WATCHDOG_GRACE_TIMEOUT`` derives from this value; keep
+#: them in step.
+ORPHAN_GRACE_SECONDS = 75.0
+
+#: Grace between the guardian's escalation SIGTERM and its final SIGKILL of
+#: the application leader. A session-wide SIGTERM (Linux logout/shutdown)
+#: reaches the guardian and the application simultaneously; killing the
+#: application instantly denied it any graceful shutdown at all.
+FORCE_KILL_ESCALATION_SECONDS = 5.0
 
 #: Poll interval for forwarding a lock-free SIGTERM flag outside the handler.
 SIGNAL_RELAY_POLL_SECONDS = 0.05
@@ -1964,6 +1976,31 @@ def _run_posix_containment_guardian(
             break
         time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
 
+    if force_requested and status is None:
+        # SIGTERM first: a session-wide SIGTERM (logout, system shutdown)
+        # lands on the guardian and the application at the same instant, and
+        # an immediate SIGKILL here denied the application its graceful
+        # shutdown entirely. The bounded escalation still guarantees death.
+        try:
+            os.kill(application_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            print(
+                f"[desktop-sidecar] backend leader SIGTERM failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+        escalation_deadline = time.monotonic() + FORCE_KILL_ESCALATION_SECONDS
+        while time.monotonic() < escalation_deadline:
+            try:
+                waited_pid, waited_status = os.waitpid(application_pid, os.WNOHANG)
+            except ChildProcessError:
+                waited_pid, waited_status = application_pid, 1 << 8
+            if waited_pid == application_pid:
+                status = waited_status
+                break
+            time.sleep(POSIX_GUARDIAN_POLL_SECONDS)
     if force_requested and status is None:
         try:
             # The application remains this guardian's unreaped direct child, so
