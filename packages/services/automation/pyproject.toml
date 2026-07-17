@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-automation"
-version = "0.6.0-beta.7"
+version = "0.6.0-beta.8"
 description = "Cron manager, Telegram bot with kill switch, n8n bridge, post-market analysis, WhatsApp alerter"
 requires-python = ">=3.12"
 dependencies = [
