@@ -1,6 +1,6 @@
 [package]
 name = "tick-engine"
-version = "0.6.0-beta.4"
+version = "0.6.0-beta.5"
 edition = "2021"
 description = "High-performance tick-level backtesting simulator for FlintTrade"
 license = "AGPL-3.0"
