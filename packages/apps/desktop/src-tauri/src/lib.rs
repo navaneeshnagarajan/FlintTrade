@@ -822,6 +822,26 @@ struct BackendState(Mutex<Option<ManagedSidecar>>);
 /// own live process.
 struct LastReadyPort(Mutex<Option<u16>>);
 
+/// Tracks the quit-time backend drain. ``ExitRequested`` used to run
+/// ``kill_backend`` synchronously on the event loop, freezing every window,
+/// the tray, and the dock icon for up to the full shutdown budget (~320s) —
+/// which read as a hang and generated the force-quits whose stale state then
+/// wedged the next launch. The drain now runs on a worker thread while the
+/// loop stays responsive; the app exits when the backend is down.
+struct BackendShutdownDrain {
+    started: AtomicBool,
+    finished: AtomicBool,
+}
+
+impl BackendShutdownDrain {
+    fn new() -> Self {
+        Self {
+            started: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // In-app updater.
 //
@@ -3148,6 +3168,7 @@ pub fn run() {
         ])
         .manage(BackendState(Mutex::new(None)))
         .manage(LastReadyPort(Mutex::new(None)))
+        .manage(BackendShutdownDrain::new())
         .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackendFailed(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
@@ -3224,11 +3245,47 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the FlintTrade desktop app")
         .run(|app_handle, event| match event {
-            RunEvent::ExitRequested { .. } => {
+            RunEvent::ExitRequested { api, .. } => {
                 // Mark OS/app-menu exits before stopping the sidecar so its
                 // termination event cannot be mistaken for a crash.
                 mark_quit_requested(app_handle);
-                kill_backend(app_handle);
+                // Drain the backend on a WORKER thread. Running kill_backend
+                // here froze the event loop for the whole shutdown budget
+                // (~320s worst case): windows dead, tray unresponsive, dock
+                // 'not responding' — the exact look of a hang that pushes
+                // users to force-quit mid-cleanup. The loop stays live; the
+                // drain worker exits the app once the backend is down.
+                let drain = app_handle.state::<BackendShutdownDrain>();
+                if !drain.finished.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    if !drain.started.swap(true, Ordering::SeqCst) {
+                        let worker = app_handle.clone();
+                        std::thread::spawn(move || {
+                            kill_backend(&worker);
+                            if let Some(state) = worker.try_state::<BackendShutdownDrain>() {
+                                state.finished.store(true, Ordering::SeqCst);
+                            }
+                            let exit_handle = worker.clone();
+                            let _ = worker
+                                .run_on_main_thread(move || exit_handle.exit(0));
+                        });
+                        let notifier = app_handle.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(3));
+                            let still_draining = notifier
+                                .try_state::<BackendShutdownDrain>()
+                                .is_some_and(|state| !state.finished.load(Ordering::SeqCst));
+                            if still_draining {
+                                raise_notification(
+                                    &notifier,
+                                    "FlintTrade is shutting down",
+                                    "Stopping the trading engine and saving your data — \
+                                     this can take a little while. Please do not force-quit.",
+                                );
+                            }
+                        });
+                    }
+                }
             }
             // macOS: clicking the dock icon while the window is hidden in the
             // tray brings it back, matching close-to-tray expectations.
