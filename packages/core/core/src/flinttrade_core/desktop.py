@@ -1965,6 +1965,11 @@ def serve(
     try:
         backend_lease = acquire_backend_instance_lease()
     except BackendInstanceAlreadyRunning:
+        # The Tauri shell reads this sentinel to tell "another backend owns
+        # the workspace" apart from a broken payload. Without it, a lease
+        # conflict (a ``make start`` shell, an earlier session) demoted the
+        # healthy payload pin and each Retry re-downloaded the engine.
+        print("FLINTTRADE_BACKEND_BLOCKED reason=instance-lease", flush=True)
         raise
     except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
         lease_failure_context = _external_exception_context(exc)

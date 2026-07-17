@@ -816,6 +816,12 @@ struct ManagedSidecar {
 /// cannot remove a replacement process's record.
 struct BackendState(Mutex<Option<ManagedSidecar>>);
 
+/// The port of the last backend that completed its ready handshake. Lets a
+/// splash Retry re-attempt the main-window build against a healthy running
+/// backend (webview-runtime hiccup) instead of failing the reap against our
+/// own live process.
+struct LastReadyPort(Mutex<Option<u16>>);
+
 // ---------------------------------------------------------------------------
 // In-app updater.
 //
@@ -1787,6 +1793,12 @@ enum BootstrapStage {
 struct BootstrapState {
     stage: Mutex<BootstrapStage>,
     last_status: Mutex<Option<BootstrapStatus>>,
+    /// Monotonic bootstrap-attempt counter. Each ``run_bootstrap`` entry
+    /// bumps it; a supervision task captures its attempt at spawn and treats
+    /// a mismatch as "superseded by a Retry" — a late Terminated event from
+    /// the old tree must not demote the payload pin the new attempt is
+    /// booting or clobber the new attempt's splash stage.
+    attempt: std::sync::atomic::AtomicU64,
 }
 
 impl BootstrapState {
@@ -1794,6 +1806,7 @@ impl BootstrapState {
         Self {
             stage: Mutex::new(BootstrapStage::Running),
             last_status: Mutex::new(None),
+            attempt: std::sync::atomic::AtomicU64::new(0),
         }
     }
 }
@@ -1818,6 +1831,21 @@ fn set_bootstrap_stage(app: &AppHandle, stage: BootstrapStage) {
 fn current_bootstrap_stage(app: &AppHandle) -> Option<BootstrapStage> {
     app.try_state::<BootstrapState>()
         .map(|state| *state.stage.lock().unwrap())
+}
+
+/// Bump the attempt counter for a fresh bootstrap run; returns the attempt id.
+fn begin_bootstrap_attempt(app: &AppHandle) -> Option<u64> {
+    app.try_state::<BootstrapState>().map(|state| {
+        state
+            .attempt
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    })
+}
+
+fn current_bootstrap_attempt(app: &AppHandle) -> Option<u64> {
+    app.try_state::<BootstrapState>()
+        .map(|state| state.attempt.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 /// Keep the splash visibly alive while the backend boots.
@@ -2061,6 +2089,7 @@ async fn download_and_install_channel_payload(
 /// splash progress), then spawn and supervise it. Failures land in the
 /// splash error state — never a crash loop; the operator retries explicitly.
 async fn run_bootstrap(app: AppHandle) {
+    let _ = begin_bootstrap_attempt(&app);
     let result = async {
         // Resolve any stale sidecar from a crashed prior run BEFORE spawning a
         // new backend. This runs here (off the Tauri ``setup`` critical path)
@@ -2162,10 +2191,63 @@ fn surface_bootstrap_retry(app: &AppHandle) {
     );
 }
 
+/// Parse the payload's "FLINTTRADE_BACKEND_BLOCKED reason=<token>" stdout
+/// sentinel, printed when the backend refuses to start for an environmental
+/// reason (not a broken payload).
+fn parse_backend_blocked_line(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("FLINTTRADE_BACKEND_BLOCKED")?;
+        let reason = rest.trim().strip_prefix("reason=").unwrap_or("").trim();
+        Some(if reason.is_empty() {
+            "unspecified".to_string()
+        } else {
+            reason.to_string()
+        })
+    })
+}
+
+/// Splash failure surface that distinguishes an environmentally blocked
+/// backend (another instance owns the workspace lease) from a broken payload.
+fn surface_bootstrap_failure(app: &AppHandle, blocked_reason: Option<&str>) {
+    if quit_was_requested(app) {
+        return;
+    }
+    match blocked_reason {
+        Some("instance-lease") => fail_bootstrap(
+            app,
+            "Another FlintTrade backend is already running for this workspace — stop it \
+             (for example a `make start` shell or an earlier FlintTrade session), then Retry."
+                .to_string(),
+        ),
+        _ => surface_bootstrap_retry(app),
+    }
+}
+
 /// Splash Retry action: re-run the bootstrap after a failed attempt.
+///
+/// When a managed backend is already serving (only the main-window build
+/// failed — a webview runtime hiccup), the retry re-attempts the window
+/// against the recorded ready port instead of re-running the bootstrap: a
+/// full re-run would fail its reap against our own healthy live backend.
 #[tauri::command]
 async fn retry_bootstrap(app: AppHandle) -> Result<(), String> {
     begin_bootstrap_retry(&app)?;
+    let healthy_port = app.try_state::<LastReadyPort>().and_then(|port| {
+        let port = *port.0.lock().unwrap();
+        let backend_running = app
+            .try_state::<BackendState>()
+            .is_some_and(|state| state.0.lock().unwrap().is_some());
+        port.filter(|_| backend_running && app.get_webview_window("main").is_none())
+    });
+    if let Some(port) = healthy_port {
+        eprintln!(
+            "[flinttrade] backend already serving on port {port}; retrying the main window build"
+        );
+        set_bootstrap_stage(&app, BootstrapStage::Started);
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || show_main_window(&handle, port));
+        return Ok(());
+    }
     run_bootstrap(app).await;
     Ok(())
 }
@@ -2776,6 +2858,10 @@ fn spawn_backend_supervision(
     pending_exit_acknowledged: Arc<AtomicBool>,
     cleanup_complete_acknowledged: Arc<AtomicBool>,
 ) {
+    // Capture which bootstrap attempt owns this supervision BEFORE spawning:
+    // a later Retry bumps the counter, and this task must then keep its hands
+    // off the payload pin and the splash stage (see the Terminated arm).
+    let my_attempt = current_bootstrap_attempt(&handle);
     tauri::async_runtime::spawn(async move {
         let mut buffer = String::new();
         let mut pid_buffer = String::new();
@@ -2889,6 +2975,9 @@ fn spawn_backend_supervision(
                         if let (Some(port), Some(_)) = (ready_port, sidecar_record.application_pid)
                         {
                             shown = true;
+                            if let Some(state) = handle.try_state::<LastReadyPort>() {
+                                *state.0.lock().unwrap() = Some(port);
+                            }
                             let h = handle.clone();
                             let _ = handle.run_on_main_thread(move || show_main_window(&h, port));
                         }
@@ -2908,12 +2997,35 @@ fn spawn_backend_supervision(
                     // record is confirmed clean — the splash switches to its
                     // Retry surface so the operator can recover. There is no
                     // bundled backend to restart onto.
+                    //
+                    // Superseded attempts (a Retry has bumped the counter and
+                    // a NEW attempt owns the splash and payload pin) still do
+                    // their record cleanup, but must not demote the pin the
+                    // new attempt is booting or clobber its splash stage.
+                    let superseded = my_attempt.is_some()
+                        && current_bootstrap_attempt(&handle) != my_attempt;
                     let bootstrap_failed = ready_port.is_none() && !quit_was_requested(&handle);
-                    if bootstrap_failed {
+                    // An environmentally blocked backend (another instance
+                    // owns the workspace lease) announced itself on stdout;
+                    // the payload is healthy, so demoting it — and looping
+                    // Retry into a fresh download — would be wrong.
+                    let blocked_reason = parse_backend_blocked_line(&buffer);
+                    if bootstrap_failed && superseded {
                         eprintln!(
-                            "[flinttrade] managed backend payload v{payload_version} exited before its ready handshake; rolling back or demoting it"
+                            "[flinttrade] managed backend payload v{payload_version} from a superseded bootstrap attempt exited; leaving the payload pin and splash to the current attempt"
                         );
-                        demote_or_rollback_active_payload();
+                    }
+                    if bootstrap_failed && !superseded {
+                        if let Some(reason) = blocked_reason.as_deref() {
+                            eprintln!(
+                                "[flinttrade] managed backend payload v{payload_version} refused to start ({reason}); keeping the verified payload pin"
+                            );
+                        } else {
+                            eprintln!(
+                                "[flinttrade] managed backend payload v{payload_version} exited before its ready handshake; rolling back or demoting it"
+                            );
+                            demote_or_rollback_active_payload();
+                        }
                     }
                     if pending_record_cleanup_allowed(
                         &sidecar_record,
@@ -2926,10 +3038,12 @@ fn spawn_backend_supervision(
                     ) {
                         clear_terminated_backend(&handle, &sidecar_record);
                         let _ = remove_sidecar_record(&sidecar_record);
-                        if bootstrap_failed {
-                            surface_bootstrap_retry(&handle);
-                        } else {
-                            surface_backend_recovery(&handle);
+                        if !superseded {
+                            if bootstrap_failed {
+                                surface_bootstrap_failure(&handle, blocked_reason.as_deref());
+                            } else {
+                                surface_backend_recovery(&handle);
+                            }
                         }
                         break;
                     }
@@ -2943,7 +3057,9 @@ fn spawn_backend_supervision(
                                     &sidecar_record,
                                     cleanup_acknowledged,
                                 );
-                                surface_bootstrap_retry(&handle);
+                                if !superseded {
+                                    surface_bootstrap_failure(&handle, blocked_reason.as_deref());
+                                }
                             } else {
                                 finalise_terminated_backend(
                                     &handle,
@@ -2971,7 +3087,9 @@ fn spawn_backend_supervision(
                             eprintln!(
                                 "[flinttrade] sidecar launcher exited with unresolved process-tree ownership; retaining recovery state"
                             );
-                            surface_backend_recovery(&handle);
+                            if !superseded {
+                                surface_backend_recovery(&handle);
+                            }
                             if sidecar_record.application_pid.is_some() {
                                 supervise_terminated_application(
                                     &handle,
@@ -3029,6 +3147,7 @@ pub fn run() {
             quit_after_backend_failure
         ])
         .manage(BackendState(Mutex::new(None)))
+        .manage(LastReadyPort(Mutex::new(None)))
         .manage(QuitRequested(std::sync::atomic::AtomicBool::new(false)))
         .manage(BackendFailed(std::sync::atomic::AtomicBool::new(false)))
         .setup(|app| {
@@ -3324,7 +3443,20 @@ fn show_main_window(app: &AppHandle, port: u16) {
                 let _ = splash.close();
             }
         }
-        Err(e) => eprintln!("[flinttrade] failed to create main window: {e}"),
+        Err(e) => {
+            // The backend is fully serving at this point — silently eating
+            // the error left the splash spinning forever with a healthy
+            // engine behind it. Park the splash on its Retry surface
+            // instead; retry_bootstrap re-attempts the window build against
+            // the recorded ready port rather than re-running the bootstrap.
+            eprintln!("[flinttrade] failed to create main window: {e}");
+            fail_bootstrap(
+                app,
+                "The trading engine is running, but its window could not be created \
+                 (a webview runtime error). Retry to open it again."
+                    .to_string(),
+            );
+        }
     }
 }
 
@@ -6342,6 +6474,21 @@ mod tests {
         assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backend_blocked_sentinel_parses_reason_tokens() {
+        assert_eq!(
+            parse_backend_blocked_line(
+                "starting\nFLINTTRADE_BACKEND_BLOCKED reason=instance-lease\n"
+            ),
+            Some("instance-lease".to_string())
+        );
+        assert_eq!(
+            parse_backend_blocked_line("FLINTTRADE_BACKEND_BLOCKED"),
+            Some("unspecified".to_string())
+        );
+        assert_eq!(parse_backend_blocked_line("all good\nready\n"), None);
     }
 
     #[test]

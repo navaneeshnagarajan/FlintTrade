@@ -156,6 +156,35 @@ def test_ready_sentinel_constant() -> None:
 
 
 @pytest.mark.unit
+def test_desktop_lease_conflict_prints_the_blocked_sentinel(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A lease conflict announces itself so the shell keeps the payload pin.
+
+    Without the sentinel the Tauri shell treats the pre-ready exit as a broken
+    payload, demotes it, and each Retry re-downloads the engine.
+    """
+    from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning
+
+    monkeypatch.setattr(
+        desktop,
+        "acquire_backend_instance_lease",
+        MagicMock(side_effect=BackendInstanceAlreadyRunning("held elsewhere")),
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_serve_owned",
+        MagicMock(side_effect=AssertionError("serve must not start without a lease")),
+    )
+
+    with pytest.raises(BackendInstanceAlreadyRunning):
+        desktop.serve(5100)
+
+    assert "FLINTTRADE_BACKEND_BLOCKED reason=instance-lease" in capsys.readouterr().out
+
+
+@pytest.mark.unit
 def test_desktop_lease_acquisition_failure_exposes_only_exception_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
