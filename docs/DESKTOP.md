@@ -194,7 +194,7 @@ environment variable.
 ### Windows (`.exe`)
 - **Install:** run the NSIS `.exe` installer. The beta release does not publish
   MSI assets because WiX requires numeric product versions and rejects
-  prerelease SemVer like `0.6.0-beta.6`.
+  prerelease SemVer like `0.6.0-beta.7`.
 - **Uninstall:** **Settings → Apps → Installed apps → FlintTrade → Uninstall**,
   or **Control Panel → Programs and Features**. To also remove data: delete
   `%APPDATA%\flinttrade\`.
@@ -263,7 +263,7 @@ installers to a GitHub Release.
 - **Trigger:** dispatched automatically by `release-please.yml` with the new
   tag when a release PR merges; can also be run manually
   (**Actions → Desktop Release → Run workflow**) with a tag like
-  `v0.6.0-beta.6`. Releases publish non-draft.
+  `v0.6.0-beta.7`. Releases publish non-draft.
 - **Matrix:** macOS arm64 (`macos-14`), macOS x64 (`macos-15-intel`), Windows x64,
   Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`).
 - Each job freezes the backend, bundles the Tauri app, and uploads the
