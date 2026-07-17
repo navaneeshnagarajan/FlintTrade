@@ -73,7 +73,18 @@ export type CreateNotificationPayload = Omit<Notification, "id" | "timestamp" | 
 
 function load(): Notification[] {
   const raw = localStorage.getItem(LS_KEY);
-  return safeParse(raw, z.array(notificationSchema)) ?? [];
+  const items = safeParse(raw, z.array(notificationSchema)) ?? [];
+  // One-time cleanup of debris from the Explore ping bug (fixed): the demo
+  // ping flapped the connection status, persisting an identical "Broker
+  // gateway connected" entry every poll. Collapse those to the newest one; a
+  // genuine reconnect keeps its most recent notification.
+  let seenGatewayConnected = false;
+  return items.filter((item) => {
+    if (item.title !== "Broker gateway connected") return true;
+    if (seenGatewayConnected) return false;
+    seenGatewayConnected = true;
+    return true;
+  });
 }
 
 function save(items: Notification[]): void {
