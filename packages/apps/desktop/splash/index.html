@@ -227,18 +227,31 @@
               render(event && event.payload);
             })
           })
-          .then(function () {
-            // Catch up on any status emitted before this listener existed.
-            return internals.invoke("bootstrap_status");
-          })
-          .then(function (status) {
-            if (status && !sawLiveEvent) {
-              render(status);
-            }
-          })
           .catch(function () {
-            // Leave the default "Starting engine..." status in place.
+            // The poll below is the ground truth; the listener is only the
+            // low-latency fast path.
           });
+
+        // Ground-truth poll. v0.6.0-beta.4 relied on events alone and a
+        // label-targeted emit never reached this page's Any-target listener,
+        // so the splash froze on "Starting engine..." for the entire payload
+        // download. Polling bootstrap_status renders progress no matter what
+        // the event plumbing does.
+        var lastRendered = "";
+        setInterval(function () {
+          internals
+            .invoke("bootstrap_status")
+            .then(function (status) {
+              if (!status || sawLiveEvent) return;
+              var key = JSON.stringify(status);
+              if (key === lastRendered) return;
+              lastRendered = key;
+              render(status);
+            })
+            .catch(function () {
+              // Keep whatever is on screen; the next tick retries.
+            });
+        }, 700);
       })();
     </script>
   </body>

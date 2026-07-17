@@ -1471,10 +1471,20 @@ async fn stage_payload_download(
         })?;
         let mut hasher = Sha256::new();
         let mut downloaded: u64 = 0;
-        while let Some(chunk) = response.chunk().await.map_err(|e| {
-            eprintln!("[flinttrade] payload download stream failed: {e}");
-            failed()
-        })? {
+        // Stall watchdog: a network that goes dead mid-stream must surface as
+        // a retryable failure, never an eternally-spinning splash.
+        while let Some(chunk) =
+            tokio::time::timeout(std::time::Duration::from_secs(75), response.chunk())
+                .await
+                .map_err(|_| {
+                    eprintln!("[flinttrade] payload download stalled (no bytes for 75s)");
+                    failed()
+                })?
+                .map_err(|e| {
+                    eprintln!("[flinttrade] payload download stream failed: {e}");
+                    failed()
+                })?
+        {
             downloaded = downloaded.saturating_add(chunk.len() as u64);
             if downloaded > entry.size {
                 eprintln!(
@@ -1703,11 +1713,27 @@ fn begin_bootstrap_retry(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Record and emit one bootstrap status event to the splash webview.
+///
+/// Broadcast (`emit`), NOT `emit_to("splash")`: a label-targeted emit is only
+/// delivered to listeners registered against that label, and Tauri's
+/// `filter_target` rejects listeners registered with `EventTarget::Any` for
+/// label-targeted events — the splash's raw-internals listener never received
+/// a single event in v0.6.0-beta.4, which froze the first-run screen on the
+/// initial status for the entire payload download. The splash additionally
+/// polls `bootstrap_status`, so progress rendering no longer depends on event
+/// delivery at all. The stdout line makes every transition verifiable from a
+/// terminal launch.
 fn emit_bootstrap_status(app: &AppHandle, status: BootstrapStatus) {
+    println!(
+        "[flinttrade] bootstrap {} {}% {}",
+        status.phase,
+        status.pct.map(|p| p.to_string()).unwrap_or_default(),
+        status.message
+    );
     if let Some(state) = app.try_state::<BootstrapState>() {
         *state.last_status.lock().unwrap() = Some(status.clone());
     }
-    let _ = app.emit_to("splash", BOOTSTRAP_STATUS_EVENT, status);
+    let _ = app.emit(BOOTSTRAP_STATUS_EVENT, status);
 }
 
 /// One-decimal-place decimal-megabyte label for download progress.
