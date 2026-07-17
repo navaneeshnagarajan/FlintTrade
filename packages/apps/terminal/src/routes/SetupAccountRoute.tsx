@@ -141,6 +141,23 @@ const EMPTY_PROGRESS: SetupProgress = {
   currentStep: 0,
 };
 
+// Module-scoped, in-memory-only cache of the step-2 recovery material (TOTP
+// URI + backup codes). Recovery material is deliberately NEVER written to
+// browser storage, but the wizard's component state is lost when the route
+// remounts — and installing the explore-mode session token right after
+// account creation flips the auth store and remounts the tree. Without this
+// cache a brand-new account landed on step 2 with the QR button disabled and
+// a misleading "closed or refreshed" recovery message. Module scope survives
+// remounts within this JS session and dies on a real refresh or close,
+// exactly matching that message; it is cleared on start-over, account
+// deletion, and setup completion.
+let sessionRecoveryMaterial: { totpUri: string; backupCodes: string[] } | null = null;
+
+/** Test-only: drop the in-memory recovery-material cache between tests. */
+export function clearSessionRecoveryMaterialForTests(): void {
+  sessionRecoveryMaterial = null;
+}
+
 // Persisted in `localStorage` (not sessionStorage) so progress survives
 // tab close, browser restart, and accidental refreshes. The only auto-clear
 // paths are: (a) user clicks "Finish setup" on the final step, or (b)
@@ -537,6 +554,16 @@ function TotpDisplay({
   onAccountDeleted,
 }: TotpDisplayProps) {
   const hasRecoveryMaterial = Boolean(totpUri && backupCodes.length > 0);
+  // The base32 secret from the otpauth URI, shown as a selectable manual
+  // entry key alongside the QR (an authenticator on this same machine cannot
+  // scan its own screen).
+  const manualTotpKey = useMemo(() => {
+    try {
+      return new URL(totpUri).searchParams.get("secret") ?? "";
+    } catch {
+      return "";
+    }
+  }, [totpUri]);
   const [phase, setPhase] = useState<"warning" | "qr">("warning");
   const [downloaded, setDownloaded] = useState(false);
   const [qrVisible, setQrVisible] = useState(false);
@@ -797,6 +824,23 @@ function TotpDisplay({
                 </p>
               </div>
             )}
+            {qrVisible && manualTotpKey && (
+              // The intro copy promises manual entry, and an authenticator on
+              // THIS machine (desktop password managers, browser extensions)
+              // cannot scan its own screen — without this key those users had
+              // no path through 2FA at all.
+              <div className="w-full space-y-1">
+                <p className="text-[11px] uppercase tracking-wide text-text-muted text-center">
+                  Manual entry key
+                </p>
+                <p
+                  className="select-all break-all text-center font-mono text-xs text-text-secondary rounded-lg border border-border-default bg-surface-card px-3 py-2"
+                  aria-label="Manual TOTP entry key"
+                >
+                  {manualTotpKey}
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-xs text-text-muted italic">2FA QR code not available — configure later in Settings.</p>
@@ -910,8 +954,16 @@ export default function SetupAccountRoute() {
     [currentStep],
   );
   const [accountCreated, setAccountCreated] = useState(initialProgress.accountCreated);
-  const [totpUri, setTotpUri] = useState(initialProgress.totpUri);
-  const [backupCodes, setBackupCodes] = useState<string[]>(initialProgress.backupCodes);
+  // Storage never carries recovery material, so a remount recovers it from
+  // the in-memory session cache (see sessionRecoveryMaterial above).
+  const [totpUri, setTotpUri] = useState(
+    initialProgress.totpUri || sessionRecoveryMaterial?.totpUri || "",
+  );
+  const [backupCodes, setBackupCodes] = useState<string[]>(
+    initialProgress.backupCodes.length > 0
+      ? initialProgress.backupCodes
+      : sessionRecoveryMaterial?.backupCodes ?? [],
+  );
   const [persona, setPersona] = useState<Persona | null>(initialProgress.persona);
   const [connection, setConnection] = useState<Partial<ConnectionFormValues> | null>(
     initialProgress.connection,
@@ -952,6 +1004,7 @@ export default function SetupAccountRoute() {
   // server-side and wants to sign in instead.
   function handleStartOver() {
     clearProgress();
+    sessionRecoveryMaterial = null;
     setAccountCreated(false);
     setCurrentStep(0);
     setTotpUri("");
@@ -981,6 +1034,7 @@ export default function SetupAccountRoute() {
       displayName: values.username,
       currentStep: 1,
     });
+    sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
     setAccountCreated(true);
     setTotpUri(uri);
     setBackupCodes(codes);
@@ -991,6 +1045,7 @@ export default function SetupAccountRoute() {
   function handleTotpConfirmed() { setCurrentStep(2); }
 
   function handleTotpRegenerated(uri: string, codes: string[]) {
+    sessionRecoveryMaterial = { totpUri: uri, backupCodes: codes };
     setTotpUri(uri);
     setBackupCodes(codes);
     // The persist effect picks this up automatically; no need to save inline.
@@ -1001,6 +1056,7 @@ export default function SetupAccountRoute() {
     // localStorage, flip the auth store back to setup-required, bounce to
     // /welcome which will render the "Get Started" CTA again.
     clearProgress();
+    sessionRecoveryMaterial = null;
     setAccountCreated(false);
     setTotpUri("");
     setBackupCodes([]);
@@ -1086,11 +1142,13 @@ export default function SetupAccountRoute() {
     });
     if (mode === "live") {
       clearProgress();
+      sessionRecoveryMaterial = null;
       navigate(landingRoute, { replace: true });
       return;
     }
     // Setup finished — clear persisted progress and route to sign-in.
     clearProgress();
+    sessionRecoveryMaterial = null;
     navigate("/welcome", { replace: true });
   }
 

@@ -71,7 +71,7 @@ vi.mock("@/routes/ModeSelectRoute", () => ({
   ),
 }));
 
-import SetupAccountRoute from "../SetupAccountRoute";
+import SetupAccountRoute, { clearSessionRecoveryMaterialForTests } from "../SetupAccountRoute";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 
@@ -121,6 +121,7 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    clearSessionRecoveryMaterialForTests();
     mocks.navigate.mockReset();
     mocks.downgradeMode.mockReset();
     mocks.persistSetupChoices.mockClear();
@@ -269,6 +270,32 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     expect(useModeStore.getState().mode).toBe("explore");
     expect(mocks.navigate).not.toHaveBeenCalled();
     expect(localStorage.getItem(PROGRESS_KEY)).not.toBeNull();
+  });
+
+  it("keeps the fresh QR seed through a route remount after account creation", async () => {
+    // Installing the session token right after account creation flips the
+    // auth store and remounts the route. Recovery material is never written
+    // to browser storage, so before the in-memory session cache a brand-new
+    // account landed on step 2 with the QR button disabled and the
+    // misleading "closed or refreshed" message.
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+    mocks.setupFlintTradeAccount.mockResolvedValue({
+      token: "fresh-setup-token",
+      totpUri: "otpauth://totp/FlintTrade:alice?secret=FRESHSEED",
+      backupCodes: ["FRESH001", "FRESH002"],
+    });
+    const first = render(<SetupAccountRoute />);
+    submitAccountCreation();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled(),
+    );
+
+    first.unmount();
+    render(<SetupAccountRoute />);
+
+    expect(screen.getByRole("button", { name: /show QR code/i })).toBeEnabled();
+    expect(screen.queryByText(/not retained/i)).not.toBeInTheDocument();
   });
 
   it("does not install a late account-setup session or advance the wizard", async () => {
