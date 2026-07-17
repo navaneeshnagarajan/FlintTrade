@@ -317,6 +317,49 @@ def _request_integer(
     return int(number)
 
 
+def _parse_adjustment_legs(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse the Straddle P&L widget's optional ``adjustments`` legs.
+
+    Each leg is ``{strike, type, action, premium, lots}``; the list is capped
+    at 10 legs and every field is validated so a malformed body raises
+    ``ValueError`` (surfaced as a clean 400) rather than a 500.
+    """
+    raw = body.get("adjustments")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("adjustments must be a list of option legs")
+    if len(raw) > 10:
+        raise ValueError("adjustments supports at most 10 legs")
+    legs: list[dict[str, Any]] = []
+    for index, candidate in enumerate(raw):
+        if not isinstance(candidate, dict):
+            raise ValueError(f"adjustments[{index}] must be an object")
+        leg_strike = _finite_number(candidate.get("strike"))
+        if leg_strike is None or leg_strike <= 0 or leg_strike > _MAX_MARKET_VALUE:
+            raise ValueError(f"adjustments[{index}].strike must be a positive market value")
+        leg_premium = _finite_number(candidate.get("premium"))
+        if leg_premium is None or leg_premium < 0 or leg_premium > _MAX_MARKET_VALUE:
+            raise ValueError(f"adjustments[{index}].premium must be a non-negative market value")
+        leg_type = candidate.get("type")
+        if leg_type not in ("CE", "PE"):
+            raise ValueError(f"adjustments[{index}].type must be CE or PE")
+        leg_action = candidate.get("action")
+        if leg_action not in ("BUY", "SELL"):
+            raise ValueError(f"adjustments[{index}].action must be BUY or SELL")
+        leg_lots = _finite_number(candidate.get("lots", 1))
+        if leg_lots is None or not float(leg_lots).is_integer() or not 1 <= leg_lots <= 100:
+            raise ValueError(f"adjustments[{index}].lots must be an integer between 1 and 100")
+        legs.append({
+            "strike": float(leg_strike),
+            "type": leg_type,
+            "action": leg_action,
+            "premium": float(leg_premium),
+            "lots": int(leg_lots),
+        })
+    return legs
+
+
 def _normalise_identity(value: Any) -> str | None:
     """Conservatively normalise a supplied chain identity token."""
     if value is None:
@@ -1364,6 +1407,9 @@ def straddle_pnl_endpoint() -> Any:
         strike (float, optional): Straddle strike. Default: ATM.
         ce_premium (float, optional): CE premium. Default: synthetic.
         pe_premium (float, optional): PE premium. Default: synthetic.
+        adjustments (list, optional): Extra option legs the widget lets the
+            user add — each ``{strike, type, action, premium, lots}``. Folded
+            into the payoff curve, break-evens, max loss, and echoed ``legs``.
 
     Returns:
         JSON with P&L series, adjustments, and summary stats.
@@ -1383,6 +1429,7 @@ def straddle_pnl_endpoint() -> Any:
         strike = _request_number(body, "strike", 24000.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
         ce_premium = _request_number(body, "ce_premium", 0.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
         pe_premium = _request_number(body, "pe_premium", 0.0, minimum=0.0, maximum=_MAX_MARKET_VALUE)
+        adjustment_legs = _parse_adjustment_legs(body)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
     lot_size = LOT_SIZES.get(symbol.upper(), 50)
@@ -1432,33 +1479,59 @@ def straddle_pnl_endpoint() -> Any:
     )
 
     # Augment with the terminal's StraddlePnLData contract. The widget plots a
-    # long-straddle PAYOFF DIAGRAM (P&L at expiry vs underlying price) — a
-    # different object from the dataclass's intraday P&L time series, which is
-    # retained for any other consumer. The payoff is analytic from the legs:
-    # per unit at expiry, pnl(S) = |S - strike| - (ce_premium + pe_premium).
+    # PAYOFF DIAGRAM (P&L at expiry vs underlying price) — a different object
+    # from the dataclass's intraday P&L time series, which is retained for any
+    # other consumer. The payoff is analytic from ALL legs: the base long
+    # straddle plus any user-added adjustment legs from the widget.
     total_premium = ce_premium + pe_premium
-    lo, hi, steps = strike * 0.9, strike * 1.1, 41
+    legs = [
+        {"strike": strike, "type": "CE", "action": "BUY", "premium": ce_premium, "lots": 1},
+        {"strike": strike, "type": "PE", "action": "BUY", "premium": pe_premium, "lots": 1},
+        *adjustment_legs,
+    ]
+
+    def payoff_at(s: float) -> float:
+        total = 0.0
+        for leg in legs:
+            intrinsic = max(s - leg["strike"], 0.0) if leg["type"] == "CE" else max(leg["strike"] - s, 0.0)
+            per_unit = intrinsic - leg["premium"]
+            if leg["action"] == "SELL":
+                per_unit = -per_unit
+            total += per_unit * leg["lots"] * lot_size
+        return total
+
+    # Widen the sampled range to cover every leg's strike, then derive
+    # break-evens from the combined curve's zero crossings (the analytic
+    # strike ± premium shortcut only holds for the bare straddle).
+    strikes = [leg["strike"] for leg in legs]
+    lo, hi, steps = min(strikes) * 0.9, max(strikes) * 1.1, 41
     payoff_curve = []
+    crossings: list[float] = []
+    prev_s: float | None = None
+    prev_pnl: float | None = None
     for i in range(steps):
         s = lo + (hi - lo) * i / (steps - 1)
-        payoff_curve.append({
-            "spot_price": round(s, 2),
-            "pnl": round(lot_size * (abs(s - strike) - total_premium), 2),
-        })
+        pnl = payoff_at(s)
+        payoff_curve.append({"spot_price": round(s, 2), "pnl": round(pnl, 2)})
+        if prev_pnl is not None and prev_s is not None and (prev_pnl <= 0 < pnl or pnl <= 0 < prev_pnl):
+            span = pnl - prev_pnl
+            crossings.append(prev_s if span == 0 else prev_s + (0 - prev_pnl) * (s - prev_s) / span)
+        prev_s, prev_pnl = s, pnl
+
+    break_even_low = min(crossings) if crossings else strike - total_premium
+    break_even_high = max(crossings) if crossings else strike + total_premium
+    max_loss = min(point["pnl"] for point in payoff_curve)
     data = _dataclass_to_dict(result)
     data.update({
         "underlying": symbol,
         "atm_strike": strike,
         "call_premium": ce_premium,
         "put_premium": pe_premium,
-        "break_even_low": strike - total_premium,
-        "break_even_high": strike + total_premium,
-        "max_loss": -total_premium * lot_size,
+        "break_even_low": round(break_even_low, 2),
+        "break_even_high": round(break_even_high, 2),
+        "max_loss": max_loss,
         "curve": payoff_curve,
-        "legs": [
-            {"strike": strike, "type": "CE", "action": "BUY", "premium": ce_premium, "lots": 1},
-            {"strike": strike, "type": "PE", "action": "BUY", "premium": pe_premium, "lots": 1},
-        ],
+        "legs": legs,
     })
 
     return jsonify({
