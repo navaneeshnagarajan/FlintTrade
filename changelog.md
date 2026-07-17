@@ -4,6 +4,13 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.5](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.4...v0.6.0-beta.5) (2026-07-17)
+
+
+### Fixed
+
+* **desktop:** make first-run progress actually reach the splash ([4760224](https://github.com/navaneeshnagarajan/FlintTrade/commit/47602249d5965d8e1ba420fa8398b9a3f1e70e9e))
+
 ## [0.6.0-beta.4](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.3...v0.6.0-beta.4) (2026-07-16)
 
 
