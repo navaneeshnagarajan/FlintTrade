@@ -204,7 +204,10 @@ def test_runtime_admission_closure_does_not_wait_for_generation_lease() -> None:
         release_holder.set()
         holder.join(timeout=1.0)
 
-    assert elapsed < 0.1
+    # Non-blocking is the contract: the holder keeps the rebuild lock for
+    # 2.0s, so any wait on it dwarfs this bound. Kept well above scheduler
+    # noise — a 0.1s bound flaked on loaded CI runners.
+    assert elapsed < 0.5
     tracker.stop_admitting.assert_called_once_with()
     assert app.config["RUNTIME_ACCEPTING_REQUESTS"] is False
 
@@ -1820,7 +1823,13 @@ async def test_shutdown_uses_one_deadline_and_retains_each_blocking_owner_worker
         with pytest.raises(RuntimeError):
             await runtime.stop(timeout=0.01)
         elapsed = time.monotonic() - started
-        assert elapsed < 0.1
+        # stop() must honour its single 0.01s deadline instead of waiting on
+        # the blocked owners (failsafe release fires at 0.5s; each worker
+        # blocks up to 1.0s). The per-owner deadline propagation is pinned by
+        # the observed_timeouts assertion below; this wall-clock bound only
+        # needs to sit clearly below the failsafe while tolerating loaded-CI
+        # scheduler noise — a 0.1s bound flaked at 0.17s on shared runners.
+        assert elapsed < 0.35
 
         first_attempt = runtime._shutdown_task
         if first_attempt is not None:
