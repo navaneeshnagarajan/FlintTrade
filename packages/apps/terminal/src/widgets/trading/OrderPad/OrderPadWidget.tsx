@@ -65,6 +65,19 @@ const DEBOUNCE_MS = 300;
 /** Exchanges that have option strikes (NFO = NSE F&O, BFO = BSE F&O). */
 const OPTIONS_EXCHANGES = new Set(["NFO", "BFO"]);
 
+// Index symbols tick under their *_INDEX exchange in every price source (WS
+// bridge, demo feed, REST fallback), while the order form's exchange stays a
+// tradeable one ("NSE"). Without this mapping the default NIFTY looked up
+// "NSE:NIFTY", which nothing writes, so its LTP read 0 and the capital→qty
+// calculator stayed inert until the user re-picked a symbol.
+const INDEX_TICK_EXCHANGES: Record<string, string> = {
+  NIFTY: "NSE_INDEX",
+  BANKNIFTY: "NSE_INDEX",
+  FINNIFTY: "NSE_INDEX",
+  INDIAVIX: "NSE_INDEX",
+  SENSEX: "BSE_INDEX",
+};
+
 /**
  * Derivative exchanges where quantity MUST be a positive multiple of the
  * instrument's lot size. Submissions fail closed when the lot size is
@@ -393,8 +406,9 @@ function OrderPadWidget(props: WidgetProps) {
   const isBuy = action === "BUY";
 
   // Live LTP for the selected symbol — used by the capital-to-quantity calculator.
-  // Key format: "{exchange}:{symbol}" — matches the WS bridge and REST fallback atom keys.
-  const tickKey = `${exchange}:${symbol}`;
+  // Key format: "{exchange}:{symbol}" — matches the WS bridge and REST fallback
+  // atom keys, with bare index names normalised to their *_INDEX exchange.
+  const tickKey = `${INDEX_TICK_EXCHANGES[symbol] ?? exchange}:${symbol}`;
   const tick = useAtomValue(tickAtomFamily(tickKey));
   const ltp = tick?.ltp ?? 0;
 
