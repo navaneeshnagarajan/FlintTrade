@@ -64,6 +64,9 @@ export function useNotificationFeed(): void {
     const prev = prevStatus.current;
     prevStatus.current = status;
     if (prev === null || prev === status) return;
+    // Explore mode has no broker gateway, so a status change there is never a
+    // real broker connect/disconnect worth notifying — suppress it.
+    if (mode === "explore") return;
 
     if (status === "connected") {
       addNotification({

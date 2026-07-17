@@ -28,21 +28,29 @@ describe("useNotificationFeed", () => {
     expect(store.getSnapshot()).toHaveLength(0);
   });
 
-  it("notifies when the broker gateway connects", () => {
+  it("notifies when the broker gateway connects (real mode)", () => {
+    act(() => useModeStore.setState({ mode: "live" }));
     renderHook(() => useNotificationFeed());
     act(() => useConnectionStore.setState({ status: "connected" }));
     const snap = store.getSnapshot();
-    expect(snap.length).toBeGreaterThanOrEqual(1);
-    expect(snap[0].title).toMatch(/connected/i);
-    expect(snap[0].category).toBe("system");
+    expect(snap.some((n) => /connected/i.test(n.title) && n.category === "system")).toBe(true);
   });
 
-  it("notifies when the broker gateway disconnects after being connected", () => {
+  it("notifies when the broker gateway disconnects after being connected (real mode)", () => {
+    act(() => useModeStore.setState({ mode: "live" }));
     renderHook(() => useNotificationFeed());
     act(() => useConnectionStore.setState({ status: "connected" }));
     act(() => useConnectionStore.setState({ status: "disconnected" }));
-    const snap = store.getSnapshot();
-    expect(snap[0].title).toMatch(/disconnected/i);
+    expect(store.getSnapshot().some((n) => /disconnected/i.test(n.title))).toBe(true);
+  });
+
+  it("does NOT notify broker gateway transitions in Explore mode", () => {
+    // Explore has no broker; ping there returns a demo mock so status can be
+    // set to connected/disconnected without a real broker event.
+    renderHook(() => useNotificationFeed());
+    act(() => useConnectionStore.setState({ status: "connected" }));
+    act(() => useConnectionStore.setState({ status: "disconnected" }));
+    expect(store.getSnapshot().some((n) => /gateway (connected|disconnected)/i.test(n.title))).toBe(false);
   });
 
   it("notifies when switching to live mode", () => {

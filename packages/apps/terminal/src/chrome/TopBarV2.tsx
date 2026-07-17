@@ -27,6 +27,7 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useModeStore } from "@/stores/modeStore";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import { useTimings } from "@/hooks/useMarketStatus";
@@ -291,6 +292,7 @@ export interface TopBarV2Props {
 
 export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) {
   const setStatus = useConnectionStore((s) => s.setStatus);
+  const mode = useModeStore((s) => s.mode);
   const directBrokerConnected = useDirectBrokerConnected();
   const storedTickerMode = useSettingsStore((s) => s.tickerMode);
   const tickerMode: TickerMode = tickerModeProp ?? storedTickerMode;
@@ -302,7 +304,18 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
   // Maintain broker connection status from either OpenAlgo bridge ping or a
   // live native/gateway broker session. This store still drives older widgets.
+  //
+  // Explore mode has NO broker: ping() there returns a demo mock that always
+  // resolves, so treating a resolved ping as "connected" reported the gateway
+  // as connected and fired a repeating "Broker gateway connected — live market
+  // data and order routing are available" notification every poll. In Explore
+  // the status is purely whatever real broker is connected (none), never the
+  // demo ping.
   useEffect(() => {
+    if (mode === "explore") {
+      setStatus(directBrokerConnected ? "connected" : "disconnected");
+      return;
+    }
     const check = async () => {
       try {
         await ping();
@@ -314,7 +327,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     check();
     const id = setInterval(check, 10_000);
     return () => clearInterval(id);
-  }, [directBrokerConnected, setStatus]);
+  }, [mode, directBrokerConnected, setStatus]);
 
   // Close QuickAccessPanel on outside click
   useEffect(() => {
