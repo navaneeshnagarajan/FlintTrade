@@ -124,6 +124,16 @@ describe("authStore", () => {
       expect(state.expiresAt).toBe("2026-04-09T02:30:00Z");
     });
 
+    it("clears a lingering demo session for a real login but keeps it for the demo user", () => {
+      window.localStorage.setItem("flinttrade:demo-session", "active");
+      useAuthStore.getState().setLoggedIn("real-jwt", "alice", "2026-04-09T02:30:00Z");
+      expect(window.localStorage.getItem("flinttrade:demo-session")).toBeNull();
+
+      window.localStorage.setItem("flinttrade:demo-session", "active");
+      useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+      expect(window.localStorage.getItem("flinttrade:demo-session")).toBe("active");
+    });
+
     it("updates lastActivity on login", () => {
       const before = Date.now();
       useAuthStore

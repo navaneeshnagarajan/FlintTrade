@@ -125,6 +125,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
     const current = get();
     if (expectedFence && !authStateMatchesFence(current, expectedFence)) return false;
 
+    // A real login/account-creation must retire any lingering demo session, or
+    // the useAuthGuard rehydration path re-installs "demo-user" on the next
+    // reload (the token is memory-only) and shows the Explore banner + sample
+    // data over the genuine account. The demo entrypoint installs the literal
+    // "demo-user" token, so this preserves the demo flow untouched.
+    if (token !== "demo-user") clearDemoSession();
+
     const previousPrincipal = normalisePrincipal(current.username);
     const nextGeneration = current.sessionGeneration + 1;
     set({
