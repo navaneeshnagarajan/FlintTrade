@@ -4,6 +4,14 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.9](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.8...v0.6.0-beta.9) (2026-07-17)
+
+
+### Fixed
+
+* **desktop:** stop a broken shell pipe from killing the orphan watchdog ([d11add2](https://github.com/navaneeshnagarajan/FlintTrade/commit/d11add24df7e01941eb844d277394b35f159d89e))
+* **terminal:** keep the fresh 2FA QR seed through setup and show a manual key ([af60bcd](https://github.com/navaneeshnagarajan/FlintTrade/commit/af60bcd8c58f84c3fc0c13eb7390eea9b64ed694))
+
 ## [0.6.0-beta.8](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.7...v0.6.0-beta.8) (2026-07-17)
 
 
