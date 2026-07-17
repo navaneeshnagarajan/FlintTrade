@@ -22,6 +22,7 @@ import { useState, useMemo, useCallback, useEffect, memo } from "react";
 import { useAtomValue } from "jotai";
 import { ArrowUpDown, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { tickKeyFor } from "@/lib/market";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -241,7 +242,9 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   );
   const { ticks: wsTicks } = useWebSocket(wsInstruments, "quote", !isExplore);
   const wsTick = wsTicks[`${exchange}:${symbol}`];
-  const atomTick = useAtomValue(tickAtomFamily(`${exchange}:${symbol}`));
+  // Shared-atom fallback: bare index names tick under their *_INDEX exchange
+  // (the default NIFTY/NSE otherwise read an atom nothing writes → no centre).
+  const atomTick = useAtomValue(tickAtomFamily(tickKeyFor(symbol, exchange)));
   const tick = wsTick ?? atomTick;
   const liveLtp = tick?.ltp && tick.ltp > 0 ? tick.ltp : null;
 

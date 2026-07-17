@@ -33,7 +33,8 @@ vi.mock("@/stores/modeStore", () => ({
     selector({ mode: "practice" }),
 }));
 
-vi.mock("@/lib/market", () => ({
+vi.mock("@/lib/market", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/market")>()),
   isMarketHours: () => false,
 }));
 

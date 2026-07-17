@@ -234,5 +234,26 @@ export function getExchangeStatus(target: MarketHoursTarget): MCXMarketStatusInf
 }
 
 /** Exported for tests and widgets that need raw hours data. */
+// ---------------------------------------------------------------------------
+// Tick-atom keys for bare index symbols
+// ---------------------------------------------------------------------------
+
+// Index symbols tick under their *_INDEX exchange in every price source (WS
+// bridge, demo feed, REST fallback), while order forms default to a tradeable
+// exchange ("NSE"). Composing a tick key straight from the form exchange
+// ("NSE:NIFTY") therefore reads an atom nothing writes, and the LTP sits at 0.
+const INDEX_TICK_EXCHANGES: Record<string, string> = {
+  NIFTY: "NSE_INDEX",
+  BANKNIFTY: "NSE_INDEX",
+  FINNIFTY: "NSE_INDEX",
+  INDIAVIX: "NSE_INDEX",
+  SENSEX: "BSE_INDEX",
+};
+
+/** Tick-atom key for an instrument, normalising bare index names to their *_INDEX exchange. */
+export function tickKeyFor(symbol: string, exchange: string): string {
+  return `${INDEX_TICK_EXCHANGES[symbol] ?? exchange}:${symbol}`;
+}
+
 export { EXCHANGE_HOURS };
 export type { ExchangeHours };
