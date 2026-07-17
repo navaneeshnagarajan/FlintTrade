@@ -617,6 +617,31 @@ class TestLoadHolidays:
         result = asyncio.run(load_holidays_from_client(mock_client))
         assert result == set()
 
+    def test_unauthenticated_403_logs_info_not_warning(self, caplog):
+        import asyncio
+        import logging
+        from flinttrade_core.exceptions import APIError
+        from flinttrade_automation.cron_manager import load_holidays_from_client
+
+        async def _forbidden(**_kwargs):
+            raise APIError(403, "Authentication failed", "market/holidays")
+
+        with caplog.at_level(logging.INFO, logger="flinttrade.automation.cron"):
+            result = asyncio.run(load_holidays_from_client(MagicMock(holidays=_forbidden)))
+
+        assert result == set()
+        records = [r for r in caplog.records if "market calendar" in r.message.lower()]
+        assert records and all(r.levelno == logging.INFO for r in records)
+        # A genuine failure still warns.
+        caplog.clear()
+
+        async def _boom(**_kwargs):
+            raise APIError(500, "boom", "market/holidays")
+
+        with caplog.at_level(logging.INFO, logger="flinttrade.automation.cron"):
+            asyncio.run(load_holidays_from_client(MagicMock(holidays=_boom)))
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+
     def test_returns_empty_when_no_client(self):
         import asyncio
         from flinttrade_automation.cron_manager import CronManager

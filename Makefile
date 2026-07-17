@@ -65,6 +65,7 @@ start: ## Start FlintTrade backend API (standalone; OpenAlgo is optional)
 	@echo -e "$(CYAN)=== Starting FlintTrade ===$(RESET)"
 	@echo "  Backend: http://$(FLINTTRADE_BACKEND_HOST):$(FLINTTRADE_BACKEND_PORT)"
 	@echo ""
+	@PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.cli init --provision-master-password >/dev/null
 	PYTHONPATH="$(FLINTTRADE_PYTHONPATH):$${PYTHONPATH:-}" $(PYTHON) -m flinttrade_core.app
 
 # --- Gateway mode (v0.2.0+) — single process, no separate OpenAlgo ---

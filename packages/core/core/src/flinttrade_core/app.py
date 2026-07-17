@@ -5483,6 +5483,11 @@ class FlintTradeApp:
         self._calendar_loaded = False
         self._calendar_runtime_ready = False
         self._calendar_schedulers_started = False
+        # The refresh runs every few minutes; in no-broker mode it can never
+        # produce an authoritative calendar, so warn once on entry to that
+        # state and log subsequent unchanged repeats at DEBUG (avoids flooding
+        # the log while a user runs in Explore).
+        self._calendar_unauthoritative_warned = False
         self._strategy_cron_started = False
         self._cron_jobs_registered = False
         self._cron_started = False
@@ -5537,9 +5542,15 @@ class FlintTradeApp:
             and after_generation > before_generation
         )
         if not fresh_generation or loaded_year != calendar_year:
-            logger.warning(
-                "Market calendar refresh did not produce current-year authority; retaining a fail-closed year"
-            )
+            if self._calendar_unauthoritative_warned:
+                logger.debug(
+                    "Market calendar refresh still not authoritative; retaining a fail-closed year"
+                )
+            else:
+                logger.warning(
+                    "Market calendar refresh did not produce current-year authority; retaining a fail-closed year"
+                )
+                self._calendar_unauthoritative_warned = True
             if fail_closed and not calendar_invalidated:
                 self._fail_closed_calendar_year(calendar_year)
             return False
@@ -5558,6 +5569,9 @@ class FlintTradeApp:
             self._fail_closed_calendar_year(calendar_year)
             return False
         self._calendar_loaded = True
+        # Re-arm the one-shot warning so a later fall back to unauthoritative
+        # (e.g. a broker disconnect) warns again on the state change.
+        self._calendar_unauthoritative_warned = False
         if self._calendar_runtime_ready:
             self._start_calendar_schedulers()
         return True

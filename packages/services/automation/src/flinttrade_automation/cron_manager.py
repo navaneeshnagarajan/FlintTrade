@@ -544,7 +544,17 @@ async def load_holidays_from_client(
         else:
             logger.warning("Failed to load holidays: %s", exc)
     except Exception as exc:
-        logger.warning("Failed to load holidays: %s", exc)
+        # A 401/403 is the expected steady state with no broker authenticated
+        # (Explore/no-broker mode). The refresh runs every few minutes, so
+        # logging it at WARNING floods the log; keep it at INFO like the
+        # empty-body case above and reserve WARNING for genuine failures.
+        if getattr(exc, "status_code", None) in (401, 403):
+            logger.info(
+                "Market calendar unavailable — no broker authenticated yet; "
+                "continuing with empty holiday list"
+            )
+        else:
+            logger.warning("Failed to load holidays: %s", exc)
     return set()
 
 
