@@ -4735,11 +4735,11 @@ _ORDER_WRITE_URL_RE = re.compile(
 )
 
 # Modules that legitimately mention order-write endpoint paths: the canonical
-# OpenAlgo client (docstrings on the single sanctioned path in) and the v1
-# compatibility route TABLE (inbound route mapping, not an outbound POST).
+# OpenAlgo client (docstrings on the single sanctioned path in). The retired
+# v1_compat route table (.local/specs/preserved/v1_compat.md) no longer needs
+# an entry.
 _ORDER_WRITE_URL_ALLOWLIST = {
     "packages/core/core/src/flinttrade_core/openalgo_client.py",
-    "packages/core/core/src/flinttrade_core/v1_compat.py",
 }
 
 

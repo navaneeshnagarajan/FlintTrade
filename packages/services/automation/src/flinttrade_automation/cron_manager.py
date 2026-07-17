@@ -5,10 +5,11 @@ Built-in jobs:
 2. square_off_warning_job: 3:20 PM IST (warn before square-off)
 3. eod_logout_job: 11:45 PM IST (SEBI session logout)
 4. holiday_check: on startup (load holidays from OpenAlgo)
+5. post_market_analysis: 3:45 PM IST (daily trade report; lazy trade-store
+   resolve, Telegram summary, optional DuckDB persistence)
 
 Additional optional jobs:
-5. backup: 12:00 AM daily
-6. post_market_analysis: 3:45 PM IST
+6. backup: 12:00 AM daily
 7. mcx_close_check: 11:55 PM IST
 
 Note: Broker login (TOTP) is NOT handled by FlintTrade.
@@ -397,6 +398,85 @@ def make_eod_sync_job(
     return eod_sync_job
 
 
+def make_post_market_analysis_job(
+    provider: Callable[[], tuple[Any, Any, str | None]],
+    telegram_bot: Any = None,
+    holidays: set[str] | None = None,
+) -> Callable[[], None]:
+    """Create the post_market_analysis handler — daily report at 3:45 PM IST.
+
+    ``provider`` is resolved at FIRE time and returns ``(storage, lock,
+    report_db)`` — the shared trade ``StorageManager``, the lock serialising
+    access to its DuckDB connection, and an optional SEPARATE DuckDB file for
+    persisted daily reports (never the trade store's own file — DuckDB allows
+    only one read-write connection per file). Reads today's trades under the
+    lock, runs :class:`flinttrade_automation.post_market.PostMarketAnalysis`
+    (report build + optional persistence + Telegram summary), and never
+    raises: a missing trade store logs-and-skips honestly and any failure is
+    logged rather than crashing the scheduler.
+
+    Args:
+        provider: Zero-arg callable returning ``(storage, lock, report_db)``.
+        telegram_bot: Optional Telegram bot for the daily summary message.
+        holidays: Market holiday dates (ISO strings) to skip.
+    """
+
+    def post_market_analysis() -> None:
+        if _is_market_holiday(holidays):
+            logger.info("post_market_analysis: market holiday — skipping")
+            return
+        try:
+            storage, lock, report_db = provider()
+        except Exception as exc:  # a bad provider must not crash the scheduler
+            logger.error("post_market_analysis: trade-store provider failed — %s", exc)
+            return
+        if storage is None:
+            logger.info("post_market_analysis: no trade store configured — skipping")
+            return
+
+        today = datetime.now(IST).strftime("%Y-%m-%d")
+        try:
+            if lock is not None:
+                with lock:
+                    rows = storage.get_trades_by_date(today)
+            else:
+                rows = storage.get_trades_by_date(today)
+        except Exception as exc:
+            logger.error("post_market_analysis: could not read today's trades — %s", exc)
+            return
+
+        # Lazy import keeps APScheduler-only deployments light and mirrors the
+        # other built-in handlers.
+        from flinttrade_automation.post_market import PostMarketAnalysis, TradeEntry  # noqa: PLC0415
+
+        try:
+            trades = [
+                TradeEntry(
+                    symbol=str(row.get("symbol") or ""),
+                    exchange=str(row.get("exchange") or ""),
+                    action=str(row.get("action") or ""),
+                    quantity=int(row.get("quantity") or 0),
+                    entry_price=float(row.get("entry_price") or 0.0),
+                    exit_price=float(row.get("exit_price") or 0.0),
+                    pnl=float(row.get("pnl") or 0.0),
+                    strategy=str(row.get("strategy") or ""),
+                )
+                for row in rows
+            ]
+            engine = PostMarketAnalysis(telegram_bot=telegram_bot, duckdb_path=report_db)
+            report = engine.run(trades, report_date=today)
+            logger.info(
+                "post_market_analysis: report built for %s — %d trades, net P&L %+.0f",
+                report.report_date,
+                report.total_trades,
+                report.net_pnl,
+            )
+        except Exception as exc:
+            logger.error("post_market_analysis: report generation failed — %s", exc)
+
+    return post_market_analysis
+
+
 def make_overnight_optimise_job(optimiser: Callable[[], Any]) -> Callable[[], None]:
     """Create the overnight strategy-optimisation handler.
 
@@ -519,6 +599,11 @@ class CronManager:
         self.tick_storage_lock = None
         # Days of ticks to keep; 0 disables pruning. Set after construction.
         self.tick_retention_days = 0
+        # Optional SEPARATE DuckDB file for persisted post-market daily
+        # reports (never the trade store's own file — one read-write
+        # connection per DuckDB file). Set after construction; None keeps the
+        # report log-and-Telegram only.
+        self.post_market_report_db: str | None = None
         # Injected overnight strategy optimiser (a zero-arg callable). When set,
         # register_builtin_jobs schedules the "optimise overnight" trigger.
         self.overnight_optimiser: Callable[[], Any] | None = None
@@ -663,6 +748,19 @@ class CronManager:
                 handler=make_webhook_nonce_gc_job(self.webhook_nonce_gc),
                 **DEFAULT_JOBS["webhook_nonce_gc_job"],
             )
+
+        # Post-market daily report at 3:45 PM IST. The trade store is resolved
+        # lazily (like tick_retention_job) so a store wired after registration
+        # is still picked up; without one the handler logs-and-skips honestly.
+        self.register(
+            "post_market_analysis",
+            handler=make_post_market_analysis_job(
+                lambda: (self.trade_storage, self.trade_storage_lock, self.post_market_report_db),
+                telegram_bot=self.telegram_bot,
+                holidays=self._holidays,
+            ),
+            **DEFAULT_JOBS["post_market_analysis"],
+        )
 
         # Overnight strategy optimisation — only when an optimiser is injected.
         if self.overnight_optimiser is not None:

@@ -3789,6 +3789,30 @@ def create_flask_app(
         from .backup_routes import create_backup_blueprint  # noqa: PLC0415
 
         app.register_blueprint(create_backup_blueprint(workspace_dir=_workspace_dir()))
+        # Runtime analyser toggle + retention clear (/v1/admin/analyzer/
+        # {enable,disable,status,clear}) — the write-side companion to
+        # infra_bp's read-only /v1/admin/analyzer/{calls,replay} above. Only
+        # meaningful when ENABLE_ANALYZER created the capture hook + instance.
+        _api_analyzer_instance = app.config.get("API_ANALYZER")
+        if _api_analyzer_instance is not None:
+            from .analyzer_admin_routes import create_analyzer_admin_blueprint  # noqa: PLC0415
+
+            app.register_blueprint(
+                create_analyzer_admin_blueprint(_api_analyzer_instance),
+                url_prefix="/v1",
+            )
+        # Per-user rate-limit override management (/v1/admin/rate-limits/
+        # overrides) over the shared token-bucket RateLimiter consulted by
+        # @rate_limit on the order routes. Mounted under /v1 so the whole
+        # dev-mode admin surface stays in ONE prefix family (/v1/admin/*).
+        _rate_limiter_instance = app.config.get("RATE_LIMITER")
+        if _rate_limiter_instance is not None:
+            from .rate_limit_admin_routes import create_rate_limit_admin_blueprint  # noqa: PLC0415
+
+            app.register_blueprint(
+                create_rate_limit_admin_blueprint(_rate_limiter_instance),
+                url_prefix="/v1",
+            )
         logger.info("Admin endpoints registered (dev mode)")
 
     # Register Activity Log blueprint (/api/v1/admin/activity)
@@ -5998,6 +6022,9 @@ class FlintTradeApp:
         # ANALYZE the same connection under its lock.
         self.cron.trade_storage = flask_app.config.get("TRADE_STORAGE")
         self.cron.trade_storage_lock = flask_app.config.get("TRADE_STORAGE_LOCK")
+        # Post-market daily reports persist to their own DuckDB file — never
+        # the trade store's (one read-write connection per DuckDB file).
+        self.cron.post_market_report_db = str(_workspace_dir() / "post_market_reports.duckdb")
         webhook_secret_store = flask_app.config.get("WEBHOOK_SECRET_STORE")
         self.cron.webhook_nonce_gc = getattr(webhook_secret_store, "gc_nonces", None)
 
