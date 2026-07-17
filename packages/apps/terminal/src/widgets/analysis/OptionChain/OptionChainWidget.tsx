@@ -37,6 +37,7 @@ import {
 import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
+import { useModeStore } from "@/stores/modeStore";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
@@ -63,6 +64,7 @@ import type { IDockviewPanelProps } from "dockview-react";
 
 function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
   const glideTheme = useGlideTheme();
+  const isExplore = useModeStore((s) => s.mode === "explore");
   // Honour a pinned symbol from the Dockview panel params (e.g. the options-
   // scalper preset pins `{ symbol: "NIFTY" }`). Falls back to the first known
   // underlying. Previously the widget ignored params and only worked for the
@@ -492,6 +494,16 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
 
         {/* Row 2: Spot LTP + change% + PCR badge */}
         <div className="flex items-center gap-3 flex-wrap">
+          {isExplore && (
+            <span
+              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+              role="status"
+              aria-label="Showing demo data, not a live option chain"
+              title="Demo data — fabricated sample values, not a live option chain."
+            >
+              Demo data
+            </span>
+          )}
           {spotLtp != null ? (
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-text-muted uppercase tracking-wide">Spot</span>

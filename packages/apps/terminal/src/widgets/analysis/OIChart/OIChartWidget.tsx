@@ -19,6 +19,7 @@ import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
 import { getExpiry, getOptionChain, getQuotes, getMaxPain } from "@/services/api";
 import type { Quote } from "@/types/api";
 import { isMarketHours } from "@/lib/market";
+import { useModeStore } from "@/stores/modeStore";
 import type { Data, Layout } from "plotly.js";
 
 const PlotlyChart = lazy(() =>
@@ -215,6 +216,7 @@ function Selector({ value, options, onChange, className = "" }: SelectorProps) {
 // ---------------------------------------------------------------------------
 
 function OIChartWidget() {
+  const isExplore = useModeStore((s) => s.mode === "explore");
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiryValue, setSelectedExpiry] = useState<string | null>(null);
@@ -653,6 +655,16 @@ function OIChartWidget() {
 
         {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          {isExplore && (
+            <span
+              className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+              role="status"
+              aria-label="Showing demo data, not live open interest"
+              title="Demo data — fabricated sample values, not a live option chain."
+            >
+              Demo data
+            </span>
+          )}
           <Selector
             value={symDef.label}
             options={SYMBOLS.map((s) => s.label)}

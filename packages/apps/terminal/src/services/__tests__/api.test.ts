@@ -2156,6 +2156,33 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("serves sample expiries and a sample option chain in Explore instead of erroring", async () => {
+    // Regression: expiry/optionchain had no Explore fallback, so the Option
+    // Chain and OI Chart widgets errored with "OpenAlgo API key is not
+    // configured" in demo mode instead of rendering sample data.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "explore";
+
+    const expiries = await getExpiry("NIFTY", "NFO");
+    expect(expiries.expiry.length).toBeGreaterThan(0);
+    expect(expiries.expiry[0]).toMatch(/^\d{2}-[A-Z]{3}-\d{2}$/);
+
+    const chain = await getOptionChain("NIFTY", "NFO", expiries.expiry[0]) as unknown as {
+      chain: Array<{ strike: number; ce: { ltp: number; oi: number }; pe: { ltp: number; oi: number } }>;
+      atm_strike: number;
+      underlying_ltp: number;
+      is_sample_data: boolean;
+    };
+    expect(chain.is_sample_data).toBe(true);
+    expect(chain.chain.length).toBeGreaterThan(10);
+    expect(chain.atm_strike).toBeGreaterThan(0);
+    for (const row of chain.chain) {
+      expect(row.ce.ltp).toBeGreaterThanOrEqual(0);
+      expect(row.pe.oi).toBeGreaterThan(0);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("reads Practice funds from the order-execution sandbox, never a real account", async () => {
     mockConnectionState.apiKey = "configured-live-key";
     mockModeState.mode = "practice";

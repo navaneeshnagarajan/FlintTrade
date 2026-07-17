@@ -1438,6 +1438,64 @@ function makeMockHistory(symbol?: string, exchange?: string): OHLCVBar[] {
   });
 }
 
+/** Upcoming weekly Thursday expiries in OpenAlgo's "DD-MMM-YY" format. */
+function makeMockExpiries(count = 4): string[] {
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const expiries: string[] = [];
+  const cursor = new Date();
+  cursor.setDate(cursor.getDate() + ((4 - cursor.getDay() + 7) % 7 || 7)); // next Thursday
+  for (let i = 0; i < count; i++) {
+    const dd = String(cursor.getDate()).padStart(2, "0");
+    expiries.push(`${dd}-${months[cursor.getMonth()]}-${String(cursor.getFullYear()).slice(-2)}`);
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  return expiries;
+}
+
+/**
+ * Synthetic option chain around the mock spot (OpenAlgo v2 shape), so the
+ * Option Chain and OI Chart widgets render sample data in Explore instead of
+ * erroring with "OpenAlgo API key is not configured". Values are derived
+ * deterministically from the strike distance (no randomness), so re-fetches
+ * agree with each other.
+ */
+function makeMockOptionChain(symbol = "NIFTY", exchange = "NSE_INDEX"): Record<string, unknown> {
+  const spot = findMockQuote(symbol, exchange).ltp || 24_150;
+  const step = spot > 40_000 ? 100 : spot > 8_000 ? 50 : Math.max(2.5, Math.round(spot * 0.01));
+  const atm = Math.round(spot / step) * step;
+  const chain = Array.from({ length: 21 }, (_, index) => {
+    const offset = index - 10;
+    const strike = atm + offset * step;
+    const distance = Math.abs(offset);
+    const timeValue = step * 0.9 * Math.exp(-distance / 5);
+    const makeLeg = (intrinsic: number, oiBias: number) => ({
+      ltp: Math.round((Math.max(intrinsic, 0) + timeValue) * 100) / 100,
+      oi: Math.round((120_000 - distance * 8_000 + oiBias) * (1 + (distance % 3) * 0.1)),
+      volume: Math.max(500, 40_000 - distance * 3_200),
+      iv: Math.round((12 + distance * distance * 0.18 + (oiBias > 0 ? 0.6 : 0)) * 100) / 100,
+      delta: null,
+      gamma: null,
+      theta: null,
+      vega: null,
+    });
+    return {
+      strike,
+      ce: makeLeg(spot - strike, offset > 0 ? 15_000 : 0),
+      pe: makeLeg(strike - spot, offset < 0 ? 15_000 : 0),
+    };
+  });
+  const totalCallOi = chain.reduce((sum, row) => sum + row.ce.oi, 0);
+  const totalPutOi = chain.reduce((sum, row) => sum + row.pe.oi, 0);
+  return {
+    chain,
+    atm_strike: atm,
+    underlying_ltp: spot,
+    underlying_prev_close: spot,
+    pcr: totalCallOi > 0 ? Math.round((totalPutOi / totalCallOi) * 100) / 100 : null,
+    is_sample_data: true,
+  };
+}
+
 function mockOrders(): Order[] {
   return mockDataEngine.getMockOrders().map((order) => ({
     orderId: order.orderId,
@@ -1633,6 +1691,12 @@ function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefin
     }
     case "history":
       return makeMockHistory(symbol, exchange) as T;
+    case "expiry":
+      return { expiry: makeMockExpiries() } as T;
+    case "optionchain": {
+      const underlying = typeof params.underlying === "string" ? params.underlying : symbol;
+      return makeMockOptionChain(underlying, exchange) as T;
+    }
     case "symbol":
       return {
         symbol: symbol ?? "NIFTY",
