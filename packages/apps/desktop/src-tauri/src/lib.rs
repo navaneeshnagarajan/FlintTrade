@@ -188,6 +188,15 @@ const SIDECAR_FORCE_EXIT_TIMEOUT: Duration = Duration::from_secs(7);
 /// is retained for the next explicit startup repair instead of polling forever.
 const SIDECAR_SUPERVISOR_UNKNOWN_POLLS: usize = 50;
 
+/// Upper bound on how long a freshly spawned backend may take to print its
+/// ``FLINTTRADE_BACKEND_READY`` handshake before the supervisor treats the boot
+/// as wedged. Deliberately generous — a legitimate first boot does workspace
+/// init plus a DuckDB schema build on a possibly-slow disk — so it never kills a
+/// merely-slow start; it only rescues a genuine pre-handshake deadlock (which
+/// would otherwise spin the splash forever with no Retry). On expiry the child
+/// is stopped through the contained-kill path and the splash gains its Retry.
+const BACKEND_START_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(180);
+
 #[cfg(any(windows, test))]
 const WINDOWS_JOB_OBJECT_LIMIT_BREAKAWAY_OK: u32 = 0x0000_0800;
 #[cfg(any(windows, test))]
@@ -1132,10 +1141,19 @@ const PAYLOAD_BINARY_NAME: &str = "flinttrade-backend.exe";
 const PAYLOAD_BINARY_NAME: &str = "flinttrade-backend";
 
 /// Pinned managed-payload state (``runtime/backend/state.json``).
+///
+/// ``previous_version`` / ``previous_sha256`` record the immediately
+/// preceding payload (whose binary the prune step deliberately retains) so a
+/// crashed or unstartable active payload can roll back to a still-verifying
+/// predecessor instead of re-downloading the same broken channel version.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct PayloadState {
     active_version: String,
     sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_sha256: Option<String>,
 }
 
 /// One per-triple backend payload entry from the channel release manifest.
@@ -1194,9 +1212,19 @@ fn payload_runtime_dir() -> Option<PathBuf> {
 /// Parse and validate ``state.json`` contents. ``None`` covers both malformed
 /// JSON and a version/digest that fails the directory-safety pins.
 fn parse_payload_state(contents: &str) -> Option<PayloadState> {
-    let state: PayloadState = serde_json::from_str(contents).ok()?;
+    let mut state: PayloadState = serde_json::from_str(contents).ok()?;
     if !valid_payload_version(&state.active_version) || !valid_payload_sha256(&state.sha256) {
         return None;
+    }
+    // A malformed or half-written predecessor record must never brick the
+    // active pin; drop it so verification falls back to a fresh download.
+    let predecessor_valid = matches!(
+        (state.previous_version.as_deref(), state.previous_sha256.as_deref()),
+        (Some(version), Some(sha)) if valid_payload_version(version) && valid_payload_sha256(sha)
+    );
+    if !predecessor_valid {
+        state.previous_version = None;
+        state.previous_sha256 = None;
     }
     Some(state)
 }
@@ -1293,6 +1321,77 @@ fn demote_active_payload() -> bool {
             false
         }
     }
+}
+
+/// Roll the managed-payload pin back to its retained predecessor when that
+/// predecessor's binary still verifies against the sha recorded in the pin.
+/// Returns the predecessor version on success and leaves ``state.json`` pinning
+/// it (with no further predecessor — the prune keeps at most the active plus
+/// one previous). Used in place of a plain demote when a payload crashes or
+/// fails to start, so a Retry boots the last known-good backend instead of
+/// re-downloading the same broken channel version.
+fn rollback_to_verified_predecessor_at(runtime_dir: &Path) -> Option<String> {
+    let contents = std::fs::read_to_string(runtime_dir.join(PAYLOAD_STATE_FILE)).ok()?;
+    let state = parse_payload_state(&contents)?;
+    let previous_version = state.previous_version?;
+    let previous_sha256 = state.previous_sha256?;
+    let binary = runtime_dir
+        .join(&previous_version)
+        .join(PAYLOAD_BINARY_NAME);
+    if !binary.is_file() {
+        eprintln!(
+            "[flinttrade] retained predecessor payload v{previous_version} binary is missing; not rolling back"
+        );
+        return None;
+    }
+    match sha256_file(&binary) {
+        Ok(digest) if digest.eq_ignore_ascii_case(&previous_sha256) => {}
+        Ok(_) => {
+            eprintln!(
+                "[flinttrade] retained predecessor payload v{previous_version} failed its recorded sha; not rolling back"
+            );
+            return None;
+        }
+        Err(error) => {
+            eprintln!(
+                "[flinttrade] could not hash retained predecessor payload v{previous_version}: {error}; not rolling back"
+            );
+            return None;
+        }
+    }
+    if let Err(error) = write_payload_state_at(
+        runtime_dir,
+        &PayloadState {
+            active_version: previous_version.clone(),
+            sha256: previous_sha256,
+            previous_version: None,
+            previous_sha256: None,
+        },
+    ) {
+        eprintln!(
+            "[flinttrade] could not re-pin retained predecessor payload v{previous_version}: {error}; not rolling back"
+        );
+        return None;
+    }
+    Some(previous_version)
+}
+
+/// Replace a crashed or unstartable payload pin: roll the pin back to its
+/// retained, still-verifying predecessor when one exists (so a Retry boots the
+/// last known-good backend), else demote the pin (so a Retry re-downloads a
+/// fresh channel payload). Returns ``true`` when a rollback re-pinned a
+/// verified predecessor.
+fn demote_or_rollback_active_payload() -> bool {
+    if let Some(runtime_dir) = payload_runtime_dir() {
+        if let Some(version) = rollback_to_verified_predecessor_at(&runtime_dir) {
+            eprintln!(
+                "[flinttrade] rolled the managed backend payload back to retained v{version}"
+            );
+            return true;
+        }
+    }
+    demote_active_payload();
+    false
 }
 
 /// Atomically publish ``state.json``: write a temp file, flush it to disk,
@@ -1549,15 +1648,29 @@ fn install_staged_payload(
         std::fs::remove_file(&binary)?;
     }
     std::fs::rename(staged, &binary)?;
+    // Capture the outgoing pin as the new pin's predecessor: its binary is
+    // retained by the prune below and its sha is recorded so a future crash of
+    // the incoming version can roll back to it (see [`demote_or_rollback_active_payload`]).
+    let outgoing = std::fs::read_to_string(runtime_dir.join(PAYLOAD_STATE_FILE))
+        .ok()
+        .and_then(|contents| parse_payload_state(&contents));
+    let (predecessor_version, predecessor_sha256) = match outgoing {
+        Some(state) if state.active_version != version => {
+            (Some(state.active_version), Some(state.sha256))
+        }
+        _ => (None, None),
+    };
     write_payload_state_at(
         runtime_dir,
         &PayloadState {
             active_version: version.to_string(),
             sha256: sha256.to_ascii_lowercase(),
+            previous_version: predecessor_version.clone(),
+            previous_sha256: predecessor_sha256,
         },
     )?;
     let mut retained = vec![version, PAYLOAD_STATE_FILE];
-    if let Some(previous) = previous_version {
+    if let Some(previous) = predecessor_version.as_deref().or(previous_version) {
         retained.push(previous);
     }
     prune_payload_versions_at(runtime_dir, &retained);
@@ -1777,10 +1890,13 @@ async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
         Ok(Some(_)) => return Ok(()),
         Ok(None) => {}
         Err(error) => {
-            eprintln!(
-                "[flinttrade] managed backend payload verification failed: {error}; downloading a fresh payload"
-            );
-            demote_active_payload();
+            eprintln!("[flinttrade] managed backend payload verification failed: {error}");
+            // Prefer a verified retained predecessor over re-downloading the
+            // same (broken) channel version; only download when none verifies.
+            if demote_or_rollback_active_payload() {
+                return Ok(());
+            }
+            eprintln!("[flinttrade] no retained predecessor verified; downloading a fresh payload");
         }
     }
     emit_bootstrap_status(
@@ -1848,22 +1964,75 @@ async fn ensure_bootstrap_payload(app: &AppHandle) -> Result<(), String> {
 /// splash progress), then spawn and supervise it. Failures land in the
 /// splash error state — never a crash loop; the operator retries explicitly.
 async fn run_bootstrap(app: AppHandle) {
-    let result = match ensure_bootstrap_payload(&app).await {
-        Ok(()) => {
-            emit_bootstrap_status(
-                &app,
-                BootstrapStatus {
-                    phase: "starting",
-                    pct: None,
-                    message: "Starting the trading engine...".to_string(),
-                },
-            );
-            start_managed_backend(&app)
-        }
-        Err(message) => Err(message),
-    };
+    let result = async {
+        // Resolve any stale sidecar from a crashed prior run BEFORE spawning a
+        // new backend. This runs here (off the Tauri ``setup`` critical path)
+        // so the splash paints immediately; an unresolved reap surfaces the
+        // splash Retry surface instead of aborting the process at launch.
+        reap_stale_sidecar_before_boot(&app).await?;
+        ensure_bootstrap_payload(&app).await?;
+        emit_bootstrap_status(
+            &app,
+            BootstrapStatus {
+                phase: "starting",
+                pct: None,
+                message: "Starting the trading engine...".to_string(),
+            },
+        );
+        start_managed_backend(&app)
+    }
+    .await;
     if let Err(message) = result {
         fail_bootstrap(&app, message);
+    }
+}
+
+/// Actionable, British-English splash message for a stale-sidecar reap that
+/// could not be resolved — a live prior backend that must fully exit before a
+/// new one can safely spawn (fail-closed; never a second backend).
+fn stale_sidecar_reap_failure_message(error: &ReapError) -> String {
+    format!(
+        "A previous FlintTrade session has not fully shut down yet ({error}). \
+         Retry once it has exited."
+    )
+}
+
+/// Decide whether a completed reap lets the boot proceed. Kept free of
+/// ``AppHandle`` so it is unit-testable: ``Ok(())`` continues to
+/// ``start_managed_backend``; ``Err`` parks the splash on its Retry surface via
+/// ``fail_bootstrap`` — never a ``?``-propagated setup abort.
+fn bootstrap_reap_decision(result: Result<ReapOutcome, ReapError>) -> Result<(), String> {
+    match result {
+        Ok(_outcome) => Ok(()),
+        Err(error) => {
+            eprintln!(
+                "[flinttrade] refusing to spawn a backend while stale sidecar state is unresolved: {error}"
+            );
+            Err(stale_sidecar_reap_failure_message(&error))
+        }
+    }
+}
+
+/// Run the (blocking, watchdog-grace-bounded) stale-sidecar reap off the async
+/// executor, so a live prior sidecar cannot wedge the bootstrap task. On any
+/// failure the fail-closed contract holds: no second backend is spawned; the
+/// caller surfaces the Retry surface and the operator re-attempts.
+async fn reap_stale_sidecar_before_boot(app: &AppHandle) -> Result<(), String> {
+    let boot_id = app.state::<BootContext>().boot_id.clone();
+    emit_bootstrap_status(
+        app,
+        BootstrapStatus {
+            phase: "preparing",
+            pct: None,
+            message: "Checking for a previous trading engine...".to_string(),
+        },
+    );
+    match tauri::async_runtime::spawn_blocking(move || reap_stale_sidecar(&boot_id)).await {
+        Ok(result) => bootstrap_reap_decision(result),
+        Err(join_error) => {
+            eprintln!("[flinttrade] stale-sidecar reap task failed to run: {join_error}");
+            Err("FlintTrade could not check for a previous session. Please retry.".to_string())
+        }
     }
 }
 
@@ -1882,17 +2051,17 @@ fn fail_bootstrap(app: &AppHandle, message: String) {
 
 /// Return the splash to its actionable error state after a freshly booted
 /// payload died before its ready handshake. The main window only exists after
-/// the handshake, so the splash is still on screen; its pin has already been
-/// demoted, so a Retry downloads a fresh payload instead of relaunching the
-/// broken one (there is no bundled backend to restart onto).
+/// the handshake, so the splash is still on screen; its pin has already rolled
+/// back to a retained predecessor (or been demoted), so a Retry boots the
+/// previous engine or downloads a fresh payload — never relaunches the broken
+/// one (there is no bundled backend to restart onto).
 fn surface_bootstrap_retry(app: &AppHandle) {
     if quit_was_requested(app) {
         return;
     }
     fail_bootstrap(
         app,
-        "The trading engine stopped before it finished starting. Retry to download a fresh copy."
-            .to_string(),
+        "The trading engine stopped before it finished starting. Retry to recover.".to_string(),
     );
 }
 
@@ -2353,11 +2522,12 @@ fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
         }
         Err(error) => {
             eprintln!("[flinttrade] managed backend payload verification failed: {error}");
-            demote_active_payload();
-            return Err(
+            let message = if demote_or_rollback_active_payload() {
+                "The installed engine failed its integrity check. Retry to start the previous engine."
+            } else {
                 "The installed engine failed its integrity check. Retry to download a fresh copy."
-                    .to_string(),
-            );
+            };
+            return Err(message.to_string());
         }
     };
     let launch_token = next_launch_token(&context).map_err(|error| {
@@ -2375,8 +2545,12 @@ fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
     command.env(PARENT_IDENTITY_ENV, &context.parent_identity);
     let (rx, mut child) = spawn_contained_std_command(command).map_err(|error| {
         eprintln!("[flinttrade] managed backend payload v{version} failed to spawn: {error}");
-        demote_active_payload();
-        "The trading engine could not be started. Retry to download a fresh copy.".to_string()
+        if demote_or_rollback_active_payload() {
+            "The trading engine could not be started. Retry to start the previous engine."
+                .to_string()
+        } else {
+            "The trading engine could not be started. Retry to download a fresh copy.".to_string()
+        }
     })?;
     eprintln!("[flinttrade] booting managed backend payload v{version}");
     let sidecar_pid = child.pid();
@@ -2425,11 +2599,76 @@ fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// One iteration's outcome for the supervision loop, so the start-phase
+/// watchdog is a testable seam rather than an inline ``select``.
+enum SupervisionStep {
+    /// A process event arrived and should be handled.
+    Event(BackendProcessEvent),
+    /// The backend's stdio channel closed (its waiter thread is gone).
+    Closed,
+    /// The start watchdog expired before either the ready handshake or a
+    /// termination arrived — the boot is wedged.
+    StartTimedOut,
+}
+
+/// Await the next supervision event, applying the start-phase watchdog only
+/// while it is ``armed`` (i.e. before the ready handshake). Once the main
+/// window is shown the watchdog disarms and this simply blocks on the channel,
+/// since a healthy running backend legitimately emits events only sporadically.
+async fn next_supervision_step(
+    rx: &mut tauri::async_runtime::Receiver<BackendProcessEvent>,
+    armed: bool,
+    deadline: Instant,
+) -> SupervisionStep {
+    if !armed {
+        return match rx.recv().await {
+            Some(event) => SupervisionStep::Event(event),
+            None => SupervisionStep::Closed,
+        };
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    match tokio::time::timeout(remaining, rx.recv()).await {
+        Ok(Some(event)) => SupervisionStep::Event(event),
+        Ok(None) => SupervisionStep::Closed,
+        Err(_) => SupervisionStep::StartTimedOut,
+    }
+}
+
+/// Actionable, British-English splash message when a freshly spawned backend
+/// neither reports its ready handshake nor exits within the start watchdog.
+fn backend_start_timeout_message() -> String {
+    "The trading engine did not finish starting in time. Retry to attempt a fresh start."
+        .to_string()
+}
+
+/// Ask the currently managed backend to stop through the existing contained
+/// path — the exact-pipe force-exit request followed by the token-verified
+/// SIGTERM-to-guardian / kill-on-close Job — never a blind PID kill. Guarded by
+/// record identity so a replacement backend is never touched.
+fn request_contained_backend_stop(app: &AppHandle, record: &SidecarRecord) {
+    let Some(state) = app.try_state::<BackendState>() else {
+        return;
+    };
+    let mut active = state.0.lock().unwrap();
+    if let Some(managed) = active.as_mut() {
+        if &managed.record == record {
+            // Ask Python's guardian to unwind its contained tree first; the
+            // contained kill is the fallback if that request is not consumed.
+            let _ = managed.child.write(SIDECAR_FORCE_EXIT_COMMAND);
+            if let Err(error) = managed.child.kill() {
+                eprintln!("[flinttrade] start-phase watchdog contained stop failed: {error}");
+            }
+        }
+    }
+}
+
 /// Supervise a spawned backend: parse the ready handshake, surface failures,
 /// relay native notifications, and keep draining the pipes so they never
-/// block the backend's own logging. On a pre-handshake exit the payload pin
-/// is demoted and the splash Retry surface takes over; a post-handshake exit
-/// keeps the existing recovery-window flow.
+/// block the backend's own logging. A start-phase watchdog bounds the wait for
+/// the ready handshake so a wedged boot cannot spin the splash forever. On a
+/// pre-handshake exit the payload pin rolls back (or is demoted) and the splash
+/// Retry surface takes over; a post-handshake exit keeps the existing
+/// recovery-window flow.
 fn spawn_backend_supervision(
     handle: AppHandle,
     mut rx: tauri::async_runtime::Receiver<BackendProcessEvent>,
@@ -2446,7 +2685,33 @@ fn spawn_backend_supervision(
         let mut application_identity = None;
         let mut ready_port = None;
         let mut shown = false;
-        while let Some(event) = rx.recv().await {
+        // Start-phase watchdog: bound the wait for the ready handshake so a boot
+        // that deadlocks before it (workspace / DuckDB init) cannot leave the
+        // splash spinning with no Retry. It disarms once the window is shown or
+        // once it has fired (after which we keep draining until the contained
+        // stop delivers a Terminated event, or a Retry — which fails closed on
+        // the still-live tree — supersedes this attempt).
+        let start_deadline = Instant::now() + BACKEND_START_WATCHDOG_TIMEOUT;
+        let mut start_watchdog_fired = false;
+        loop {
+            let armed = !shown && !start_watchdog_fired;
+            let event = match next_supervision_step(&mut rx, armed, start_deadline).await {
+                SupervisionStep::Event(event) => event,
+                SupervisionStep::Closed => break,
+                SupervisionStep::StartTimedOut => {
+                    start_watchdog_fired = true;
+                    eprintln!(
+                        "[flinttrade] managed backend payload v{payload_version} did not report its ready handshake within {}s; stopping it",
+                        BACKEND_START_WATCHDOG_TIMEOUT.as_secs()
+                    );
+                    // Surface the actionable error immediately: the contained
+                    // stop and its Terminated cleanup may take time (or wedge),
+                    // and a Retry must find a Retry surface, not a frozen splash.
+                    fail_bootstrap(&handle, backend_start_timeout_message());
+                    request_contained_backend_stop(&handle, &sidecar_record);
+                    continue;
+                }
+            };
             match event {
                 BackendProcessEvent::Stdout(bytes) => {
                     let chunk = String::from_utf8_lossy(&bytes);
@@ -2538,17 +2803,18 @@ fn spawn_backend_supervision(
                         "[flinttrade] backend terminated: code={:?} signal={:?}",
                         exit.code, exit.signal
                     );
-                    // A payload that dies before its ready handshake is
-                    // demoted on the spot, and — once this launch's record is
-                    // confirmed clean — the splash switches to its Retry
-                    // surface so the operator can download a fresh payload.
-                    // There is no bundled backend to restart onto.
+                    // A payload that dies before its ready handshake rolls back
+                    // to a retained, still-verifying predecessor (or, failing
+                    // that, is demoted) on the spot, and — once this launch's
+                    // record is confirmed clean — the splash switches to its
+                    // Retry surface so the operator can recover. There is no
+                    // bundled backend to restart onto.
                     let bootstrap_failed = ready_port.is_none() && !quit_was_requested(&handle);
                     if bootstrap_failed {
                         eprintln!(
-                            "[flinttrade] managed backend payload v{payload_version} exited before its ready handshake; demoting it"
+                            "[flinttrade] managed backend payload v{payload_version} exited before its ready handshake; rolling back or demoting it"
                         );
-                        demote_active_payload();
+                        demote_or_rollback_active_payload();
                     }
                     if pending_record_cleanup_allowed(
                         &sidecar_record,
@@ -2688,14 +2954,13 @@ pub fn run() {
             // First-run secret provisioning (best-effort; never blocks launch).
             provision_master_password();
 
-            // Give a stale sidecar time to finish its own watchdog shutdown.
-            // Recovery never signals a PID loaded from disk: if the process
-            // remains live, startup fails closed instead of risking PID reuse.
-            reap_stale_sidecar(&boot_id).map_err(|error| {
-                std::io::Error::other(format!(
-                    "refusing to spawn a backend while stale sidecar state is unresolved: {error}"
-                ))
-            })?;
+            // The stale-sidecar reap (which can block up to the watchdog grace
+            // timeout while a prior backend finishes its own shutdown) runs
+            // inside ``run_bootstrap`` below — OFF this setup critical path — so
+            // the splash paints immediately and an unresolved reap surfaces the
+            // splash Retry surface instead of aborting the app at launch. The
+            // fail-closed guarantee is unchanged: no second backend spawns while
+            // a live prior sidecar remains unresolved.
 
             // Tray + global hotkey: the app lives in the background (agent +
             // monitoring keep running) and the operator can summon it anytime.
@@ -7845,6 +8110,8 @@ mod tests {
             &PayloadState {
                 active_version: "0.7.0".to_string(),
                 sha256: digest,
+                previous_version: None,
+                previous_sha256: None,
             },
         )
         .unwrap();
@@ -8116,5 +8383,145 @@ mod tests {
         assert!(allow("about:blank"));
         assert!(allow("data:text/html,hello"));
         assert!(allow("blob:http://127.0.0.1:56576/uuid"));
+    }
+
+    // Finding A: the stale-sidecar reap runs off the setup critical path, so an
+    // unresolved reap surfaces the splash Retry surface (fail-closed, no second
+    // backend) instead of aborting the app at launch.
+    #[test]
+    fn stale_sidecar_reap_failure_surfaces_a_retry_not_an_abort() {
+        // A clean reap lets the boot proceed to start_managed_backend.
+        assert!(bootstrap_reap_decision(Ok(ReapOutcome::NoRecord)).is_ok());
+        assert!(bootstrap_reap_decision(Ok(ReapOutcome::RemovedConfirmedDead)).is_ok());
+
+        // An unresolved reap (a live prior sidecar that must exit first) is
+        // surfaced as an actionable splash message — NOT propagated as a setup
+        // abort. Fail-closed: the boot does not proceed, so no second backend
+        // spawns.
+        let decision = bootstrap_reap_decision(Err(ReapError::SidecarStillAlive { pid: 4321 }));
+        let message = decision.expect_err("an unresolved reap must not let the boot proceed");
+        assert!(message.to_ascii_lowercase().contains("retry"));
+        assert_eq!(
+            message,
+            stale_sidecar_reap_failure_message(&ReapError::SidecarStillAlive { pid: 4321 })
+        );
+    }
+
+    // Finding B: a boot that never prints its ready handshake (and never exits)
+    // trips the start-phase watchdog instead of spinning the splash forever.
+    #[test]
+    fn start_watchdog_fires_when_no_handshake_arrives() {
+        tauri::async_runtime::block_on(async {
+            let (sender, mut rx) = tauri::async_runtime::channel::<BackendProcessEvent>(1);
+
+            // Armed, with an already-elapsed deadline over an idle channel
+            // (neither a ready handshake nor a Terminated event): the watchdog
+            // must fire rather than await forever.
+            let elapsed = Instant::now();
+            assert!(matches!(
+                next_supervision_step(&mut rx, true, elapsed).await,
+                SupervisionStep::StartTimedOut
+            ));
+
+            // A pending event before the deadline is delivered, never dropped
+            // for a spurious timeout (so a merely-slow-but-alive boot survives).
+            sender
+                .send(BackendProcessEvent::Stdout(b"log line\n".to_vec()))
+                .await
+                .unwrap();
+            let far = Instant::now() + Duration::from_secs(120);
+            assert!(matches!(
+                next_supervision_step(&mut rx, true, far).await,
+                SupervisionStep::Event(BackendProcessEvent::Stdout(_))
+            ));
+
+            // Once the window is shown the watchdog disarms: even a past
+            // deadline no longer fires; the next event is returned normally.
+            sender
+                .send(BackendProcessEvent::Terminated(BackendExit {
+                    code: Some(0),
+                    signal: None,
+                }))
+                .await
+                .unwrap();
+            assert!(matches!(
+                next_supervision_step(&mut rx, false, elapsed).await,
+                SupervisionStep::Event(BackendProcessEvent::Terminated(_))
+            ));
+        });
+    }
+
+    // Finding C: a crashed/failed payload rolls back to a retained, verified
+    // predecessor rather than re-downloading the same broken channel version.
+    #[test]
+    fn rollback_prefers_a_verified_predecessor_over_redownload() {
+        let dir = std::env::temp_dir().join(format!(
+            "flinttrade-payload-rollback-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A retained, still-verifying predecessor (v0.6.0) recorded in the pin
+        // of a now-broken active version (v0.7.0).
+        let good_dir = dir.join("0.6.0");
+        std::fs::create_dir_all(&good_dir).unwrap();
+        let good_binary = good_dir.join(PAYLOAD_BINARY_NAME);
+        std::fs::write(&good_binary, b"good-payload-bytes").unwrap();
+        let good_sha = sha256_file(&good_binary).unwrap();
+        write_payload_state_at(
+            &dir,
+            &PayloadState {
+                active_version: "0.7.0".to_string(),
+                sha256: "b".repeat(64),
+                previous_version: Some("0.6.0".to_string()),
+                previous_sha256: Some(good_sha.clone()),
+            },
+        )
+        .unwrap();
+
+        // Rollback re-pins the verified predecessor (never a re-download).
+        assert_eq!(
+            rollback_to_verified_predecessor_at(&dir).as_deref(),
+            Some("0.6.0")
+        );
+        let repinned =
+            parse_payload_state(&std::fs::read_to_string(dir.join(PAYLOAD_STATE_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(repinned.active_version, "0.6.0");
+        assert_eq!(repinned.sha256, good_sha);
+        // The re-pinned predecessor carries no further fallback of its own.
+        assert!(repinned.previous_version.is_none());
+
+        // A predecessor whose binary no longer matches its recorded sha is NOT a
+        // rollback target — the caller must fall through to a fresh download.
+        write_payload_state_at(
+            &dir,
+            &PayloadState {
+                active_version: "0.7.0".to_string(),
+                sha256: "b".repeat(64),
+                previous_version: Some("0.6.0".to_string()),
+                previous_sha256: Some("c".repeat(64)),
+            },
+        )
+        .unwrap();
+        assert!(rollback_to_verified_predecessor_at(&dir).is_none());
+
+        // No recorded predecessor at all: nothing to roll back to.
+        write_payload_state_at(
+            &dir,
+            &PayloadState {
+                active_version: "0.7.0".to_string(),
+                sha256: "b".repeat(64),
+                previous_version: None,
+                previous_sha256: None,
+            },
+        )
+        .unwrap();
+        assert!(rollback_to_verified_predecessor_at(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
