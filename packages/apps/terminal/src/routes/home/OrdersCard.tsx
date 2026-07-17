@@ -7,6 +7,7 @@ import { useOrders } from "@/hooks/useOrders";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoOrders } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
+import { DemoBadge } from "./DemoBadge";
 import { ClipboardList, Loader2 } from "lucide-react";
 
 export function OrdersCard() {
@@ -19,6 +20,7 @@ export function OrdersCard() {
 
   return (
     <BentoCard size="default" label="Recent Orders" data-testid="orders-card">
+      {isExplore && <DemoBadge />}
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <ClipboardList size={13} className="text-text-muted" aria-hidden="true" />

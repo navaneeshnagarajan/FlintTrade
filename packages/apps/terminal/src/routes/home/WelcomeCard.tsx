@@ -9,6 +9,7 @@ import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { BentoCard } from "@/components/bento/BentoCard";
+import { DemoBadge } from "./DemoBadge";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -37,6 +38,7 @@ export function WelcomeCard() {
 
   return (
     <BentoCard size="wide" label="Welcome" data-testid="welcome-card">
+      {isExplore && <DemoBadge />}
       <div className="p-5 h-full flex flex-col justify-between gap-4">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted mb-1">

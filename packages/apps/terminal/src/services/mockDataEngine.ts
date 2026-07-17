@@ -64,6 +64,7 @@ export interface MockHolding {
 const BASE_PRICES: Record<string, number> = {
   NIFTY:    24150,
   BANKNIFTY: 51200,
+  FINNIFTY: 23200,
   SENSEX:   79800,
   // India VIX + the full MCX commodity set the ticker bar requests, so
   // SILVER/CRUDEOIL/NATURALGAS also show sample prices in Explore/demo mode
@@ -86,6 +87,7 @@ const BASE_PRICES: Record<string, number> = {
 const EXCHANGES: Record<string, string> = {
   NIFTY:    "NSE_INDEX",
   BANKNIFTY: "NSE_INDEX",
+  FINNIFTY: "NSE_INDEX",
   SENSEX:   "BSE_INDEX",
   INDIAVIX: "NSE_INDEX",
   GOLD:     "MCX",
@@ -130,6 +132,25 @@ function round2(n: number): number {
 /** Generate a simple numeric order id string. */
 function fakeOrderId(index: number): string {
   return `OA${Date.now().toString().slice(-8)}${String(index).padStart(2, "0")}`;
+}
+
+/**
+ * Deterministic per-symbol pseudo-random in [0, 1).
+ *
+ * The demo position/holding/order generators must NOT draw fresh Math.random()
+ * values per call: multiple cards call them independently (WelcomeCard and
+ * PositionsCard both derive a P&L total), and per-call randomness made the
+ * "same" demo portfolio show contradictory totals that changed on every
+ * re-render. A symbol-seeded value keeps avg price/qty stable across calls
+ * while the ticking `prices` map still moves the LTP (and therefore P&L).
+ */
+function symbolSeed(symbol: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < symbol.length; i++) {
+    hash ^= symbol.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 10_000) / 10_000;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,8 +255,10 @@ export class MockDataEngine {
       const ltp   = round2(this.prices.get(symbol) ?? BASE_PRICES[symbol]);
       const side: "BUY" | "SELL" = i % 2 === 0 ? "BUY" : "SELL";
       const qty   = (i + 1) * 25;
-      const drift = (Math.random() - 0.5) * 0.02; // ±1% from current price
-      const avg   = round2(ltp * (1 + drift));
+      // Stable avg from the base price (±1%) so every consumer computes the
+      // same P&L for the same demo portfolio; only the ticking ltp moves it.
+      const drift = (symbolSeed(symbol) - 0.5) * 0.02;
+      const avg   = round2(BASE_PRICES[symbol] * (1 + drift));
       const pnl   = round2(side === "BUY" ? (ltp - avg) * qty : (avg - ltp) * qty);
       return {
         symbol,
@@ -269,7 +292,7 @@ export class MockDataEngine {
 
     return configs.map(({ symbol, side, status }, i) => {
       const base  = BASE_PRICES[symbol] ?? 1000;
-      const price = round2(base * (1 + (Math.random() - 0.5) * 0.01));
+      const price = round2(base * (1 + (symbolSeed(symbol) - 0.5) * 0.01));
       const qty   = (i + 1) * 10;
       const now   = new Date();
       now.setMinutes(now.getMinutes() - i * 15); // stagger by 15 min
@@ -297,9 +320,11 @@ export class MockDataEngine {
 
     return symbols.map((symbol) => {
       const ltp  = round2(this.prices.get(symbol) ?? BASE_PRICES[symbol]);
-      const qty  = Math.floor(Math.random() * 50) + 5;
-      const drift = (Math.random() - 0.5) * 0.15; // ±7.5% buy price spread
-      const avg  = round2(ltp / (1 + drift));
+      // Stable qty and buy price (±7.5% spread off the base price) so repeated
+      // calls agree; only the ticking ltp moves current value and P&L.
+      const qty  = Math.floor(symbolSeed(`${symbol}:qty`) * 50) + 5;
+      const drift = (symbolSeed(`${symbol}:avg`) - 0.5) * 0.15;
+      const avg  = round2(BASE_PRICES[symbol] / (1 + drift));
       const cv   = round2(ltp * qty);
       const pnl  = round2((ltp - avg) * qty);
       const pnlPct = round2(((ltp - avg) / avg) * 100);

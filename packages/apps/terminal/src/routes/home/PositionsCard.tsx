@@ -8,6 +8,7 @@ import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoPositions } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
+import { DemoBadge } from "./DemoBadge";
 import { Loader2 } from "lucide-react";
 
 export function PositionsCard() {
@@ -28,8 +29,11 @@ export function PositionsCard() {
 
   return (
     <BentoCard size="tall" label="Open Positions" data-testid="positions-card">
+      {isExplore && <DemoBadge />}
       <div className="p-4 h-full flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+        {/* In Explore the absolute DemoBadge occupies the top-right corner, so
+            clear it — this is the only home card with header content there. */}
+        <div className={`flex items-center justify-between ${isExplore ? "pr-12" : ""}`}>
           <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
             Positions
           </p>

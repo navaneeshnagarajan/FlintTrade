@@ -8,6 +8,7 @@ import { useHoldings } from "@/hooks/useHoldings";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
+import { DemoBadge } from "./DemoBadge";
 
 interface AllocationSlice {
   label: string;
@@ -40,6 +41,7 @@ export function PortfolioCard() {
 
   return (
     <BentoCard size="default" label="Portfolio" data-testid="portfolio-card">
+      {isExplore && <DemoBadge />}
       <div className="p-4 h-full flex flex-col gap-3">
         <p className="text-[10px] font-medium uppercase tracking-widest text-text-muted">
           {isExplore || accountReadsEnabled ? "Portfolio" : "Portfolio (Broker required)"}
