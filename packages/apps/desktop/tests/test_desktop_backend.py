@@ -1999,6 +1999,46 @@ def test_stdin_eof_requests_graceful_exit_for_a_dead_parent(entry: ModuleType) -
 
 
 @pytest.mark.unit
+def test_exit_orphaned_survives_a_broken_shell_stdio_pipe(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead shell's broken stderr pipe must never abort the orphan shutdown.
+
+    The announcement print at the top of ``_exit_orphaned`` used to raise
+    ``BrokenPipeError`` (the shell owned the pipe's read end), killing the
+    watchdog thread before the graceful request or force-exit timer were
+    armed — the backend tree then outlived its shell indefinitely.
+    """
+
+    class BrokenPipe(io.TextIOBase):
+        def write(self, _text: str) -> int:
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self) -> None:
+            raise BrokenPipeError(32, "Broken pipe")
+
+    # Keep the test's own stdio intact: neutralise the fd-level detach and
+    # poison only the module's view of stderr.
+    monkeypatch.setattr(entry, "_detach_broken_shell_stdio", lambda: None)
+    monkeypatch.setattr(entry.sys, "stderr", BrokenPipe())
+    armed: list[str] = []
+    monkeypatch.setattr(
+        entry.threading,
+        "Thread",
+        lambda *args, **kwargs: type(
+            "T", (), {"start": lambda self: armed.append(kwargs.get("name", ""))}
+        )(),
+    )
+
+    requested: list[bool] = []
+    entry._exit_orphaned(lambda: requested.append(True), lambda: True)
+
+    assert requested == [True]
+    assert armed == ["flinttrade-orphan-shutdown-fallback"]
+
+
+@pytest.mark.unit
 def test_stdin_eof_uses_orphan_tree_fallback(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

@@ -2343,12 +2343,47 @@ def _handle_force_exit(
     return False
 
 
+def _detach_broken_shell_stdio() -> None:
+    """Point this process's stdout/stderr at ``/dev/null`` once the shell dies.
+
+    The dead shell owned the read end of our stdio pipes, so ANY later
+    diagnostic print in the shutdown path raises ``BrokenPipeError``. That
+    exception previously escaped from the announcement print at the top of
+    ``_exit_orphaned`` and killed the orphan watchdog thread before the
+    graceful shutdown request or the force-exit timer were armed — the whole
+    backend tree then survived its shell indefinitely, serving on loopback
+    with nobody attached (the recurring zombie-backend reports).
+    """
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    for fd in (1, 2):
+        try:
+            os.dup2(devnull_fd, fd)
+        except OSError:
+            pass
+    try:
+        os.close(devnull_fd)
+    except OSError:
+        pass
+
+
 def _exit_orphaned(
     request_shutdown: Callable[[], object] | None = None,
     terminate_owned_tree: Callable[[], bool] | None = None,
 ) -> None:
     """Gracefully unwind the sidecar because the desktop shell is gone."""
-    print("[desktop-sidecar] desktop shell exited; shutting down backend", file=sys.stderr, flush=True)
+    _detach_broken_shell_stdio()
+    try:
+        print(
+            "[desktop-sidecar] desktop shell exited; shutting down backend",
+            file=sys.stderr,
+            flush=True,
+        )
+    except OSError:
+        # A failed diagnostic must never abort the shutdown itself.
+        pass
     if request_shutdown is None:
         _handle_force_exit(terminate_owned_tree)
         return
