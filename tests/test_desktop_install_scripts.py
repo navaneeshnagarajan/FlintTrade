@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -227,6 +228,97 @@ def test_unix_installer_binary_install_verifies_sha256(tmp_path: Path) -> None:
 
     assert "Verified SHA-256 checksum" in result.stdout
     assert (tmp_path / ".local" / "bin" / "flinttrade.AppImage").exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="installs to the real writable /Applications on macOS; runs on Linux CI where it lands in HOME/Applications",
+)
+def test_macos_installer_accepts_sla_dmg_and_installs(tmp_path: Path) -> None:
+    """The macOS path must mount an SLA-bearing DMG and install the app.
+
+    Regression: the released DMG carries an AGPL licence agreement. With
+    ``hdiutil attach -quiet`` the SLA prompt is suppressed and the mount
+    fails; and ``yes | hdiutil`` under ``set -o pipefail`` reports a non-zero
+    pipeline status (yes takes SIGPIPE) on a fully successful mount, tripping
+    the failure branch. This shims hdiutil to enforce BOTH invariants:
+    ``-quiet`` is rejected, and the mount only succeeds once it has read the
+    licence acceptance from stdin.
+    """
+    dmg = tmp_path / "FlintTrade_9.9.9-beta.1_aarch64.dmg"
+    dmg.write_bytes(b"fake dmg payload")
+    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    manifest = tmp_path / "desktop-release-macos.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "tag": "v9.9.9-beta.1",
+                "version": "9.9.9-beta.1",
+                "channel": "beta",
+                "prerelease": True,
+                "published_at": "2026-07-08T00:00:00Z",
+                "html_url": "https://example.invalid/release",
+                "assets": [
+                    {
+                        "os": "macos",
+                        "arch": "arm64",
+                        "kind": "dmg",
+                        "name": dmg.name,
+                        "size": dmg.stat().st_size,
+                        "url": dmg.as_uri(),
+                        "sha256": digest,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    # hdiutil shim: reject -quiet (proves the script dropped it), require the
+    # SLA acceptance byte on stdin before an attach succeeds, and populate the
+    # mountpoint with a FlintTrade.app on success.
+    (bin_dir / "hdiutil").write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do [ "$a" = "-quiet" ] && exit 9; done\n'
+        'verb="$1"; shift\n'
+        'if [ "$verb" = "attach" ]; then\n'
+        "  mp=\"\"; while [ $# -gt 0 ]; do [ \"$1\" = \"-mountpoint\" ] && { mp=\"$2\"; shift; }; shift; done\n"
+        '  head -c1 >/dev/null 2>&1 || true\n'
+        '  [ -n "$mp" ] || exit 3\n'
+        '  mkdir -p "$mp/FlintTrade.app/Contents/MacOS"\n'
+        '  printf marker > "$mp/FlintTrade.app/Contents/MacOS/flinttrade-desktop"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "$verb" = "detach" ]; then exit 0; fi\n'
+        "exit 0\n"
+    )
+    (bin_dir / "hdiutil").chmod(0o755)
+    # ditto shim: plain recursive copy (the real ditto is macOS-only).
+    (bin_dir / "ditto").write_text('#!/bin/sh\ncp -R "$1" "$2"\n')
+    (bin_dir / "ditto").chmod(0o755)
+    (bin_dir / "open").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "open").chmod(0o755)
+
+    result = subprocess.run(
+        ["bash", str(SH), "--no-launch"],
+        check=True,
+        cwd=ROOT,
+        env={
+            "PATH": _fake_uname(tmp_path, "Darwin", "arm64"),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_DESKTOP_RELEASE_API": manifest.as_uri(),
+            "FLINTTRADE_ALLOW_LOCAL_ASSET": "1",
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert "Verified SHA-256 checksum" in result.stdout
+    assert "Installing FlintTrade.app" in result.stdout
+    installed = tmp_path / "Applications" / "FlintTrade.app" / "Contents" / "MacOS" / "flinttrade-desktop"
+    assert installed.exists(), result.stdout + result.stderr
 
 
 def test_unix_installer_aborts_on_checksum_mismatch(tmp_path: Path) -> None:
