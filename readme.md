@@ -11,7 +11,7 @@ services, and developer documentation.
 
 ## Beta disclaimer
 
-FlintTrade `v0.6.0-beta.9` is **not production ready**. It is educational,
+FlintTrade `v0.6.0-beta.10` is **not production ready**. It is educational,
 self-hosted software for research, sandbox workflows, and contributor
 development first. Nothing in this repository is financial, investment, tax,
 legal, or regulatory advice. Read [disclaimer.md](disclaimer.md) before

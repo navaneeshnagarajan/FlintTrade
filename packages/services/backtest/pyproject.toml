@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-backtest"
-version = "0.6.0-beta.9"
+version = "0.6.0-beta.10"
 description = "Simulator, performance metrics (Sharpe/Sortino/DD), walk-forward, Monte Carlo, 101 strategies"
 requires-python = ">=3.12"
 dependencies = [
