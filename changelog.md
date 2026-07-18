@@ -4,6 +4,20 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.10](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.9...v0.6.0-beta.10) (2026-07-18)
+
+
+### Added
+
+* **infra:** one installer per OS — universal macOS DMG, per-user Windows exe, AppImage-backed Linux command ([ac918f8](https://github.com/navaneeshnagarajan/FlintTrade/commit/ac918f8d4604a6a555efaeb80098e7990c55e4bf))
+* **site:** web-first download page with one installer per OS ([f11e86e](https://github.com/navaneeshnagarajan/FlintTrade/commit/f11e86e2a0ed84bb494944f99ea482fd4ac0a2fa))
+
+
+### Fixed
+
+* **desktop:** default the Linux DMA-BUF workaround, name antivirus blocks, honour system proxies ([cab251a](https://github.com/navaneeshnagarajan/FlintTrade/commit/cab251af56c741309b5a4601c03d4d0e25cf0066))
+* **infra:** make the one-command installs survive real machines ([74add58](https://github.com/navaneeshnagarajan/FlintTrade/commit/74add582603ab9c54ad00621975c689ae148ecdd))
+
 ## [0.6.0-beta.9](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.8...v0.6.0-beta.9) (2026-07-17)
 
 
