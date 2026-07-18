@@ -50,12 +50,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macos-arm64
+          # One installer per OS (the Hermes shape): a single UNIVERSAL macOS
+          # DMG (both CPU slices in one app), a single Windows NSIS exe, and
+          # AppImages that back the one-command Linux install script. The
+          # backend payload stays per-triple — a universal shell slice
+          # resolves its own arch's payload at runtime.
+          - label: macos-universal
             runner: macos-14
-            target: aarch64-apple-darwin
-          - label: macos-x64
+            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            payload_target: aarch64-apple-darwin
+          # PyInstaller cannot cross-freeze, so the Intel payload needs an
+          # Intel runner — but the installer itself is the universal DMG
+          # above, so this job builds ONLY the payload asset.
+          - label: macos-x64-payload
             runner: macos-15-intel
             target: x86_64-apple-darwin
+            payload_only: 'true'
           - label: windows-x64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
@@ -133,7 +144,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          # A universal macOS build compiles both CPU slices, so it needs
+          # both Apple targets; every other job needs exactly its own.
+          targets: ${{ matrix.rust_targets || matrix.target }}
 
       - name: Cache Cargo build
         uses: Swatinem/rust-cache@v2
@@ -192,12 +205,15 @@ jobs:
         shell: bash
         env:
           SKIP_FRONTEND: '1'
-          TARGET_TRIPLE: ${{ matrix.target }}
+          # PyInstaller freezes for the RUNNER's native arch; the universal
+          # shell job runs on Apple Silicon and contributes the arm64 payload
+          # (the Intel payload comes from the payload-only Intel job).
+          TARGET_TRIPLE: ${{ matrix.payload_target || matrix.target }}
         run: bash packaging/build-backend.sh
 
       # --- Signing/notarisation (dormant until secrets exist) -------------
       - name: Import Apple signing certificate
-        if: contains(matrix.target, 'apple')
+        if: contains(matrix.target, 'apple') && matrix.payload_only != 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -222,6 +238,7 @@ jobs:
 
       # --- Bundle the Tauri desktop app ----------------------------------
       - name: Build desktop installers
+        if: matrix.payload_only != 'true'
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -253,6 +270,12 @@ jobs:
             # Windows .exe installer without flattening the public version.
             BUNDLE_ARGS+=(--bundles nsis)
           fi
+          if [[ "${{ matrix.target }}" == *linux* ]]; then
+            # Linux is command-first (curl | bash): the install script
+            # downloads the AppImage, so deb/rpm packaging is retired — one
+            # installer story per OS instead of a format zoo.
+            BUNDLE_ARGS+=(--bundles appimage)
+          fi
           if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
             # Updater artifacts need the minisign key to produce .sig files.
             BUNDLE_ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
@@ -263,68 +286,75 @@ jobs:
       - name: Stage installers
         id: stage
         shell: bash
+        env:
+          PAYLOAD_TARGET: ${{ matrix.payload_target || matrix.target }}
+          PAYLOAD_ONLY: ${{ matrix.payload_only || 'false' }}
         run: |
           OUT="dist-installers"
           mkdir -p "$OUT"
-          BUNDLE="packages/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
-          # Copy every produced installer plus updater artifacts (.sig
-          # signatures and the macOS .app.tar.gz updater bundle), ignoring
-          # missing per-OS types.
-          find "$BUNDLE" -type f \
-            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
-               -o -name '*.sig' -o -name '*.app.tar.gz' \) \
-            -exec cp {} "$OUT/" \; 2>/dev/null || true
-          COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
-          if [ "$COUNT" -eq 0 ]; then
-            echo "No installers were produced for ${{ matrix.label }} at $BUNDLE" >&2
-            find "packages/apps/desktop/src-tauri/target" -maxdepth 5 -type f | sort >&2 || true
-            exit 1
-          fi
-          echo "installer_count=$COUNT" >> "$GITHUB_OUTPUT"
-          # Thin-shell size guard: the installers must never regress to
-          # embedding the backend payload again. The shell alone is ~5 MB;
-          # AppImage additionally carries the webkit/gtk runtime.
-          for f in "$OUT"/*; do
-            name="$(basename "$f")"
-            size_mb=$(( $(wc -c < "$f") / 1048576 ))
-            limit=40
-            case "$name" in
-              *.AppImage) limit=170 ;;
-              flinttrade-payload-*) continue ;;
-              *.sig|*.app.tar.gz) continue ;;
-            esac
-            if (( size_mb > limit )); then
-              echo "Installer $name is ${size_mb}MB (limit ${limit}MB) — the backend payload leaked back into the bundle." >&2
+          if [[ "$PAYLOAD_ONLY" != "true" ]]; then
+            BUNDLE="packages/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+            # Copy every produced installer plus updater artifacts (.sig
+            # signatures and the macOS .app.tar.gz updater bundle), ignoring
+            # missing per-OS types.
+            find "$BUNDLE" -type f \
+              \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' \
+                 -o -name '*.sig' -o -name '*.app.tar.gz' \) \
+              -exec cp {} "$OUT/" \; 2>/dev/null || true
+            COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
+            if [ "$COUNT" -eq 0 ]; then
+              echo "No installers were produced for ${{ matrix.label }} at $BUNDLE" >&2
+              find "packages/apps/desktop/src-tauri/target" -maxdepth 5 -type f | sort >&2 || true
               exit 1
             fi
-          done
-          # Arch-qualify the macOS updater bundle: Tauri names it
-          # FlintTrade.app.tar.gz with no architecture, so the two macOS jobs
-          # would collide in the flattened release assets and the updater
-          # manifest could not attribute either arch (its platform mapping
-          # requires an arch token in the filename).
-          if [[ "${{ matrix.target }}" == *apple* ]]; then
-            for f in "$OUT"/*.app.tar.gz; do
-              [ -f "$f" ] || continue
-              base="$(basename "$f" .app.tar.gz)"
-              mv "$f" "$OUT/${base}_${{ matrix.target }}.app.tar.gz"
-              if [ -f "$f.sig" ]; then
-                mv "$f.sig" "$OUT/${base}_${{ matrix.target }}.app.tar.gz.sig"
+            echo "installer_count=$COUNT" >> "$GITHUB_OUTPUT"
+            # Thin-shell size guard: the installers must never regress to
+            # embedding the backend payload again. The shell alone is ~5 MB
+            # (both slices of the universal DMG still fit comfortably);
+            # AppImage additionally carries the webkit/gtk runtime.
+            for f in "$OUT"/*; do
+              name="$(basename "$f")"
+              size_mb=$(( $(wc -c < "$f") / 1048576 ))
+              limit=40
+              case "$name" in
+                *.AppImage) limit=170 ;;
+                flinttrade-payload-*) continue ;;
+                *.sig|*.app.tar.gz) continue ;;
+              esac
+              if (( size_mb > limit )); then
+                echo "Installer $name is ${size_mb}MB (limit ${limit}MB) — the backend payload leaked back into the bundle." >&2
+                exit 1
               fi
             done
+            # Target-qualify the macOS updater bundle: Tauri names it
+            # FlintTrade.app.tar.gz with no target token, and the updater
+            # manifest's platform mapping needs one in the filename. The
+            # universal bundle serves BOTH darwin platform keys.
+            if [[ "${{ matrix.target }}" == *apple* ]]; then
+              for f in "$OUT"/*.app.tar.gz; do
+                [ -f "$f" ] || continue
+                base="$(basename "$f" .app.tar.gz)"
+                mv "$f" "$OUT/${base}_${{ matrix.target }}.app.tar.gz"
+                if [ -f "$f.sig" ]; then
+                  mv "$f.sig" "$OUT/${base}_${{ matrix.target }}.app.tar.gz.sig"
+                fi
+              done
+            fi
+          else
+            echo "installer_count=0" >> "$GITHUB_OUTPUT"
+            echo "Payload-only job: staging just the frozen backend for $PAYLOAD_TARGET."
           fi
           # Stage the frozen backend itself as the fast-moving payload asset:
           # the shell can fetch and hash-verify it for daily backend+frontend
           # updates without an installer cycle (Ollama-runtime pattern).
           EXE_SUFFIX=""
-          if [[ "${{ matrix.target }}" == *windows* ]]; then EXE_SUFFIX=".exe"; fi
-          SIDECAR="packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${{ matrix.target }}${EXE_SUFFIX}"
+          if [[ "$PAYLOAD_TARGET" == *windows* ]]; then EXE_SUFFIX=".exe"; fi
+          SIDECAR="packages/apps/desktop/src-tauri/binaries/flinttrade-backend-${PAYLOAD_TARGET}${EXE_SUFFIX}"
           if [[ ! -f "$SIDECAR" ]]; then
             echo "Frozen backend sidecar missing at $SIDECAR" >&2
             exit 1
           fi
-          cp "$SIDECAR" "$OUT/flinttrade-payload-${{ matrix.target }}${EXE_SUFFIX}"
+          cp "$SIDECAR" "$OUT/flinttrade-payload-${PAYLOAD_TARGET}${EXE_SUFFIX}"
           echo "Installers staged:"; ls -lah "$OUT" || true
 
       - name: Upload build artifacts
@@ -394,27 +424,34 @@ jobs:
                       digest.update(chunk)
               return digest.hexdigest()
 
-          def asset_kind(name: str) -> tuple[str, str, str] | None:
+          def asset_kinds(name: str) -> list[tuple[str, str, str]]:
               lower = name.lower()
               arch = None
-              if any(token in lower for token in ("aarch64", "arm64")):
+              if "universal" in lower:
+                  arch = "universal"
+              elif any(token in lower for token in ("aarch64", "arm64")):
                   arch = "arm64"
               elif any(token in lower for token in ("x86_64", "amd64", "x64")):
                   arch = "x64"
               if arch is None:
-                  return None
+                  return []
 
               if lower.endswith(".dmg"):
-                  return ("macos", arch, "dmg")
+                  if arch == "universal":
+                      # The universal DMG serves every macOS machine — list it
+                      # under both per-arch keys too, so older install scripts
+                      # and the site's arch-keyed pickers keep resolving.
+                      return [
+                          ("macos", "universal", "dmg"),
+                          ("macos", "arm64", "dmg"),
+                          ("macos", "x64", "dmg"),
+                      ]
+                  return [("macos", arch, "dmg")]
               if lower.endswith(".exe") and "setup" in lower:
-                  return ("windows", arch, "nsis")
+                  return [("windows", arch, "nsis")]
               if lower.endswith(".appimage"):
-                  return ("linux", arch, "appimage")
-              if lower.endswith(".deb"):
-                  return ("linux", arch, "deb")
-              if lower.endswith(".rpm"):
-                  return ("linux", arch, "rpm")
-              return None
+                  return [("linux", arch, "appimage")]
+              return []
 
           assets = []
           sums = []
@@ -423,35 +460,32 @@ jobs:
                   continue
               digest = sha256(path)
               sums.append(f"{digest}  {path.name}\n")
-              parsed = asset_kind(path.name)
-              if parsed is None:
-                  continue
-              os_name, arch, kind = parsed
-              assets.append(
-                  {
-                      "os": os_name,
-                      "arch": arch,
-                      "kind": kind,
-                      "name": path.name,
-                      "size": path.stat().st_size,
-                      "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}",
-                      "sha256": digest,
-                  }
-              )
+              for os_name, arch, kind in asset_kinds(path.name):
+                  assets.append(
+                      {
+                          "os": os_name,
+                          "arch": arch,
+                          "kind": kind,
+                          "name": path.name,
+                          "size": path.stat().st_size,
+                          "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(path.name)}",
+                          "sha256": digest,
+                      }
+                  )
 
           if not assets:
               raise SystemExit("No desktop installer assets could be parsed for the release manifest.")
 
+          # One installer per OS: a universal macOS DMG (also projected onto
+          # both per-arch keys for older pickers), one Windows NSIS exe, and
+          # the AppImages the Linux install command downloads.
           expected = {
+              ("macos", "universal", "dmg"),
               ("macos", "arm64", "dmg"),
               ("macos", "x64", "dmg"),
               ("windows", "x64", "nsis"),
               ("linux", "x64", "appimage"),
               ("linux", "arm64", "appimage"),
-              ("linux", "x64", "deb"),
-              ("linux", "arm64", "deb"),
-              ("linux", "x64", "rpm"),
-              ("linux", "arm64", "rpm"),
           }
           seen: dict[tuple[str, str, str], str] = {}
           duplicates = []
@@ -512,9 +546,12 @@ jobs:
           # updater-signed (a .sig exists per updatable platform artifact).
           sig_files = {path.name: path.read_text(encoding="utf-8").strip() for path in root.glob("*.sig")}
           if sig_files:
+              # The universal macOS updater bundle serves BOTH darwin
+              # platform keys, so per-arch installs from earlier releases
+              # keep updating onto the universal build.
               platform_kinds = {
-                  "darwin-aarch64": (".app.tar.gz", ("aarch64", "arm64"), None),
-                  "darwin-x86_64": (".app.tar.gz", ("x86_64", "x64"), None),
+                  "darwin-aarch64": (".app.tar.gz", ("universal", "aarch64", "arm64"), None),
+                  "darwin-x86_64": (".app.tar.gz", ("universal", "x86_64", "x64"), None),
                   "windows-x86_64": (".exe", ("x86_64", "x64", "setup"), "setup"),
                   "linux-x86_64": (".appimage", ("x86_64", "amd64"), None),
                   "linux-aarch64": (".appimage", ("aarch64", "arm64"), None),
