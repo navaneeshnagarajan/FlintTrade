@@ -260,7 +260,8 @@ function ActionCenterWidget(_props: WidgetProps) {
           <CheckCheck size={22} className="text-profit/50" aria-hidden="true" />
           <span className="text-xs text-text-muted">No pending orders.</span>
           <span className="text-xxs text-text-muted">
-            Orders queued for approval will appear here.
+            Entry orders proposed by a running autonomous-agent session are
+            held here for your approval before anything reaches a broker.
           </span>
         </div>
       )}

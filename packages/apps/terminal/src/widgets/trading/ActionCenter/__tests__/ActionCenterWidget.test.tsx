@@ -90,7 +90,7 @@ describe("ActionCenterWidget", () => {
     });
     expect(
       await screen.findByText(
-        "Orders queued for approval will appear here.",
+        /held here for your approval/,
       ),
     ).toBeInTheDocument();
   });
