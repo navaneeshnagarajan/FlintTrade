@@ -61,6 +61,7 @@ def make_agent(
     market_session_provider: Any | None = None,
     clock: Any | None = None,
     entry_intent_sink: Any | None = None,
+    memory: Any | None = None,
 ) -> AutonomousTrader:
     """Build an AutonomousTrader with fully mocked LLM, broker, and executor."""
     symbols = symbols or ["RELIANCE"]
@@ -121,6 +122,7 @@ def make_agent(
         entry_intent_sink=entry_intent_sink,
         market_session_provider=market_session_provider,
         clock=clock,
+        memory=memory,
     )
 
 
@@ -1161,3 +1163,175 @@ def test_journal_decision_swallows_a_raising_available_property() -> None:
     agent._journal_decision(
         "RELIANCE", "BUY", RiskAssessment(allowed=True, reason="ok"), {"status": "success"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Learning loop — closed-trade recording, post-session reflection, prompt
+# context. Pure learning I/O: every test also proves the fail-safe posture.
+# ---------------------------------------------------------------------------
+
+
+class StubMemory:
+    """Minimal MemoryBackend double recording adds and serving context."""
+
+    def __init__(self, context: str = "") -> None:
+        self.added: list[dict[str, Any]] = []
+        self.context = context
+
+    def add(self, content: str, category: str, importance=None, metadata=None, *, symbol: str = "") -> str:
+        self.added.append({
+            "content": content,
+            "category": category,
+            "metadata": metadata or {},
+            "symbol": symbol,
+        })
+        return f"mem-{len(self.added)}"
+
+    def retrieve(self, query: str, top_k: int = 5, *, symbol=None):
+        return []
+
+    def summarise_context(self, symbol: str, query: str, max_tokens: int = 2000) -> str:
+        return self.context
+
+    def clear(self, symbol=None) -> None:
+        self.added.clear()
+
+
+@pytest.mark.asyncio
+async def test_monitor_records_a_closed_trade_on_sl_exit() -> None:
+    agent = make_agent(quotes_ltp=95.0)  # LTP below the SL below
+    agent.state.active_positions["RELIANCE"] = 100.0
+    position = {
+        "symbol": "RELIANCE",
+        "entry_price": 100.0,
+        "stop_loss": 98.0,
+        "take_profit": 104.0,
+        "action": "BUY",
+        "quantity": 2,
+    }
+
+    await agent.monitor(position)
+
+    assert len(agent.state.closed_trades) == 1
+    record = agent.state.closed_trades[0]
+    assert record["symbol"] == "RELIANCE"
+    assert record["action"] == "BUY"
+    assert record["entry_price"] == 100.0
+    assert record["exit_price"] == 95.0
+    assert record["quantity"] == 2
+    assert record["pnl"] == pytest.approx(-10.0)
+    assert record["pnl_pct"] == pytest.approx(-5.0)
+    assert record["exit_reason"] == "sl_tp"
+
+
+@pytest.mark.asyncio
+async def test_square_off_all_records_closed_trades_with_estimated_exit() -> None:
+    agent = make_agent(quotes_ltp=110.0)
+    agent.state.active_positions["RELIANCE"] = 100.0
+    agent.state.position_details["RELIANCE"] = {
+        "entry_price": 100.0,
+        "action": "BUY",
+        "quantity": 3,
+        "stop_loss": 90.0,
+        "take_profit": 120.0,
+    }
+
+    flat = await agent._square_off_all()
+
+    assert flat is True
+    assert len(agent.state.closed_trades) == 1
+    record = agent.state.closed_trades[0]
+    assert record["exit_reason"] == "square_off"
+    assert record["exit_price_estimated"] is True
+    assert record["exit_price"] == 110.0
+    assert record["pnl"] == pytest.approx(30.0)
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_persists_rule_based_lessons() -> None:
+    memory = StubMemory()
+    agent = make_agent(memory=memory)
+    agent.llm = None  # rule-based fallback — the loop needs no LLM at all
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 2, "pnl": -10.0, "pnl_pct": -5.0},
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 108.0, "quantity": 1, "pnl": 8.0, "pnl_pct": 8.0},
+    ]
+
+    await agent._run_post_session_learning()
+
+    assert memory.added, "reflection lessons were not persisted"
+    for entry in memory.added:
+        assert entry["category"] == "reflection"
+        assert entry["metadata"]["source"] == "autonomous-agent-session"
+        assert entry["metadata"]["trades_analysed"] == 2
+        assert entry["symbol"] == "RELIANCE"
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_skips_without_memory_or_trades() -> None:
+    # No memory backend: nothing happens even with trades.
+    agent = make_agent()
+    agent.state.closed_trades = [{"symbol": "X", "pnl": 1.0}]
+    await agent._run_post_session_learning()
+
+    # Memory but no trades: nothing persisted.
+    memory = StubMemory()
+    agent2 = make_agent(memory=memory)
+    await agent2._run_post_session_learning()
+    assert memory.added == []
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_never_raises() -> None:
+    class ExplodingMemory(StubMemory):
+        def add(self, *args: Any, **kwargs: Any) -> str:
+            raise RuntimeError("memory backend down")
+
+    agent = make_agent(memory=ExplodingMemory())
+    agent.llm = None
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 1, "pnl": -5.0, "pnl_pct": -5.0},
+    ]
+
+    # Must not raise — learning can never disrupt session shutdown.
+    await agent._run_post_session_learning()
+
+
+@pytest.mark.asyncio
+async def test_decide_includes_memory_lessons_in_the_prompt() -> None:
+    memory = StubMemory(context="- Avoid chasing gap-ups after 10:30 IST")
+    agent = make_agent(llm_response="HOLD", memory=memory)
+
+    signal = await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+
+    assert signal in ("BUY", "SELL", "HOLD")
+    prompt = agent.llm.chat.call_args.args[0][1].content
+    assert "Lessons from previous sessions" in prompt
+    assert "Avoid chasing gap-ups" in prompt
+
+
+@pytest.mark.asyncio
+async def test_decide_without_memory_omits_the_lessons_block() -> None:
+    agent = make_agent(llm_response="HOLD")
+
+    await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+
+    prompt = agent.llm.chat.call_args.args[0][1].content
+    assert "Lessons from previous sessions" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_memory_failure_never_breaks_a_decision() -> None:
+    class ExplodingContext(StubMemory):
+        def summarise_context(self, symbol: str, query: str, max_tokens: int = 2000) -> str:
+            raise RuntimeError("chroma offline")
+
+    agent = make_agent(llm_response="HOLD", memory=ExplodingContext())
+
+    signal = await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+
+    assert signal in ("BUY", "SELL", "HOLD")
+    assert "Lessons from previous sessions" not in agent.llm.chat.call_args.args[0][1].content

@@ -253,6 +253,10 @@ class AgentState:
         squared_off:     True if all positions squared off for the day.
         last_signals:    Most recent signal per symbol.
         cycle_count:     Number of analysis cycles completed.
+        closed_trades:   Round trips closed this session (entry/exit/P&L
+            dicts) — the input to the post-session reflection step. The
+            durable audit record stays with the journal; this list only
+            avoids a read-back query over the same fills.
     """
 
     daily_pnl: float = 0.0
@@ -263,6 +267,7 @@ class AgentState:
     squared_off: bool = False
     last_signals: dict[str, str] = field(default_factory=dict)
     cycle_count: int = 0
+    closed_trades: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +324,7 @@ class AutonomousTrader:
         entry_intent_sink: Any | None = None,
         market_session_provider: MarketSessionProvider | None = None,
         clock: Callable[[], datetime] | None = None,
+        memory: Any | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
@@ -349,11 +355,20 @@ class AutonomousTrader:
                 lookups fail closed, so hard-coded exchange hours are never used.
             clock: Timezone-aware runtime clock. Defaults to current UTC and is
                 converted to IST before session resolution.
+            memory: Optional learning-memory backend (the shared
+                ``MemoryBackend`` surface: ``add``/``retrieve``/
+                ``summarise_context``). When supplied, the session's closed
+                trades are reflected over after square-off and the lessons
+                persisted; ``decide()`` reads them back as prompt context.
+                Pure learning I/O — NEVER on the order path, and no lesson
+                mutates safety limits or order parameters. Any memory error
+                degrades to "no lessons" rather than disrupting trading.
         """
         self.llm = llm_client
         self.broker = openalgo_client
         self.config = config or AgentConfig()
         self.vault = vault
+        self.memory = memory
         self.order_executor = order_executor
         self.entry_intent_sink = entry_intent_sink
         self._market_session_provider = market_session_provider
@@ -624,8 +639,10 @@ class AutonomousTrader:
             return TradeSignal.HOLD
 
         vault_notes = self._vault_context(market_data.symbol)
+        memory_lessons = self._memory_context(market_data.symbol)
         prompt = _build_signal_prompt(
             market_data, self.state, self.config, vault_notes=vault_notes,
+            memory_lessons=memory_lessons,
         )
 
         try:
@@ -949,6 +966,137 @@ class AutonomousTrader:
     # Step 6: Monitor open positions
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Learning loop — closed-trade recording, post-session reflection,
+    # lesson persistence, and next-session prompt context.
+    #
+    # ALL of it is pure learning I/O and NEVER on the order path: recording
+    # happens after an exit already dispatched through the gated executor,
+    # reflection runs strictly after square-off, and lessons only ever feed
+    # the decision PROMPT — no lesson mutates safety limits, quantities, or
+    # order parameters. Every step degrades to "no lessons" on error.
+    # ------------------------------------------------------------------
+
+    def _closed_trade_record(
+        self,
+        *,
+        symbol: str,
+        action: str,
+        entry_price: float,
+        exit_price: float,
+        quantity: int,
+        pnl: float,
+        exit_reason: str,
+        exit_price_estimated: bool = False,
+    ) -> dict[str, Any]:
+        """Build one closed-round-trip dict in the reflector's tolerated shape."""
+        notional = abs(entry_price) * max(quantity, 1)
+        pnl_pct = (pnl / notional * 100.0) if notional > 0 else 0.0
+        return {
+            "symbol": symbol,
+            "exchange": self.config.exchange,
+            "action": action,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "quantity": quantity,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "exit_reason": exit_reason,
+            "exit_price_estimated": exit_price_estimated,
+            "timestamp": self._ist_now().isoformat(),
+        }
+
+    async def _best_effort_exit_price(
+        self, symbol: str, details: dict[str, Any]
+    ) -> tuple[float, bool]:
+        """LTP at square-off time, falling back to the entry price (flagged).
+
+        The square-off MARKET order's actual fill price is not observable
+        here; the current LTP is an honest estimate for the learning record
+        (never for accounting — realised P&L stays with the journal/tradebook).
+        """
+        try:
+            quotes_resp = await self.broker.quotes(symbol=symbol, exchange=self.config.exchange)
+            q = _as_quote_fields(quotes_resp)
+            ltp = float((q or {}).get("ltp", 0) or 0)
+            if ltp > 0:
+                return ltp, True
+        except Exception as exc:
+            logger.debug("Exit-price read failed for %s: %s", symbol, exc)
+        return float(details.get("entry_price", 0) or 0), True
+
+    def _memory_context(self, symbol: str) -> str:
+        """Return a bounded lessons block for the decision prompt, or ``""``.
+
+        Fully guarded — a memory backend must never break a decision.
+        """
+        memory = self.memory
+        if memory is None:
+            return ""
+        try:
+            summary = memory.summarise_context(symbol, "trading lessons", max_tokens=400)
+        except Exception as exc:
+            logger.debug("Memory context lookup failed for %s: %s", symbol, exc)
+            return ""
+        return str(summary or "").strip()
+
+    async def _run_post_session_learning(self) -> None:
+        """Reflect over this session's closed trades and persist the lessons.
+
+        Runs strictly AFTER square-off. Never raises: any failure logs and
+        the session ends exactly as it would have without a learning tier.
+        """
+        if self.memory is None:
+            return
+        trades = list(self.state.closed_trades)
+        if not trades:
+            return
+        try:
+            from .trade_reflection import ReflectionConfig, TradeReflector  # noqa: PLC0415
+
+            reflector = TradeReflector(
+                config=ReflectionConfig(
+                    trigger_every_n_trades=1,
+                    min_trades_for_reflection=1,
+                ),
+                llm_client=self.llm,
+            )
+            result = await reflector.reflect_batch(trades)
+            if result is None:
+                return
+            session_date = self._ist_now().date().isoformat()
+            symbols = sorted({str(t.get("symbol", "")) for t in trades if t.get("symbol")})
+            lessons: list[tuple[str, str]] = (
+                [("recommendation", r) for r in result.recommendations]
+                + [("losing_pattern", p) for p in result.losing_patterns]
+                + [("winning_pattern", p) for p in result.winning_patterns]
+            )
+            stored = 0
+            for kind, text in lessons:
+                content = str(text or "").strip()
+                if not content:
+                    continue
+                self.memory.add(
+                    content,
+                    category="reflection",
+                    metadata={
+                        "kind": kind,
+                        "session_date": session_date,
+                        "symbols": ",".join(symbols),
+                        "trades_analysed": result.trades_analysed,
+                        "win_rate": result.win_rate,
+                        "source": "autonomous-agent-session",
+                    },
+                    symbol=symbols[0] if len(symbols) == 1 else "",
+                )
+                stored += 1
+            logger.info(
+                "Post-session reflection stored %d lessons (%d trades, win_rate=%.0f%%)",
+                stored, result.trades_analysed, result.win_rate * 100,
+            )
+        except Exception:
+            logger.exception("Post-session reflection failed — no lessons recorded")
+
     async def monitor(self, position: dict[str, Any]) -> None:
         """Check an open position against stop-loss and take-profit levels.
 
@@ -1031,6 +1179,17 @@ class AutonomousTrader:
                     self.state.active_positions.pop(symbol, None)
                     self.state.position_details.pop(symbol, None)
                     self.state.daily_pnl += pnl
+                    self.state.closed_trades.append(
+                        self._closed_trade_record(
+                            symbol=symbol,
+                            action=action,
+                            entry_price=entry,
+                            exit_price=ltp,
+                            quantity=qty,
+                            pnl=pnl,
+                            exit_reason="sl_tp",
+                        )
+                    )
 
                     if self.state.daily_pnl <= self.config.daily_stop_loss:
                         self.state.stop_loss_hit = True
@@ -1206,6 +1365,11 @@ class AutonomousTrader:
             elif self._status not in {AgentStatus.ERROR, AgentStatus.STOP_FAILED}:
                 self._status = AgentStatus.STOPPED
 
+            # Learning tier: reflect over the session's closed trades and
+            # persist the lessons. Strictly after square-off, fully guarded —
+            # skipped on the error/cancellation paths above.
+            await self._run_post_session_learning()
+
         except asyncio.CancelledError:
             self.request_stop(square_off=True)
             await self._finish_square_off("Session cancelled")
@@ -1268,9 +1432,27 @@ class AutonomousTrader:
                         symbol, getattr(decision, "error", "") or "order refused",
                     )
                     continue
+                exit_price, exit_estimated = await self._best_effort_exit_price(symbol, details)
+                entry_price = float(details.get("entry_price", 0) or 0)
+                pnl = 0.0
+                if entry_price > 0 and exit_price > 0:
+                    direction = 1.0 if str(details.get("action", "BUY")) == "BUY" else -1.0
+                    pnl = (exit_price - entry_price) * qty * direction
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
                     self.state.position_details.pop(symbol, None)
+                    self.state.closed_trades.append(
+                        self._closed_trade_record(
+                            symbol=symbol,
+                            action=str(details.get("action", "BUY")),
+                            entry_price=entry_price,
+                            exit_price=exit_price,
+                            quantity=qty,
+                            pnl=pnl,
+                            exit_reason="square_off",
+                            exit_price_estimated=exit_estimated,
+                        )
+                    )
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
                 # A SmartRouteAbort (session revoked mid-square-off) stops the
@@ -1306,13 +1488,15 @@ def _build_signal_prompt(
     state: AgentState,
     config: AgentConfig,
     vault_notes: str = "",
+    memory_lessons: str = "",
 ) -> str:
     """Build a structured LLM prompt from market data and agent state.
 
     Produces a compact, token-efficient prompt suitable for a local LLM with
     a 4096-token context window. Includes all 7 indicators. When ``vault_notes``
     is supplied (operator notes pulled from the Obsidian vault) they are added
-    as an extra context block ahead of the question.
+    as an extra context block ahead of the question, and ``memory_lessons``
+    (reflection lessons from previous sessions) likewise.
     """
     lines = [
         f"Symbol: {data.symbol} | Exchange: {config.exchange}",
@@ -1334,6 +1518,8 @@ def _build_signal_prompt(
     ]
     if vault_notes:
         lines += ["", "Operator notes (from your Obsidian vault):", vault_notes]
+    if memory_lessons:
+        lines += ["", "Lessons from previous sessions (self-reflection):", memory_lessons]
     lines += ["", "Based on the above, should I BUY, SELL, or HOLD this instrument?"]
     return "\n".join(lines)
 
