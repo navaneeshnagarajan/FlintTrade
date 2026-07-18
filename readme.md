@@ -1,10 +1,13 @@
 # FlintTrade
 
 FlintTrade is an AGPL-3.0, self-hosted trading software project for local
-manual, automated, algorithmic, and AI-assisted workflows. The repository is a
-Python, React, TypeScript, and Rust monorepo with a Flask backend, Dockview
-terminal, broker-gateway integration layer, sandbox mode, data services, and
-developer documentation.
+manual, automated, algorithmic, and AI-assisted workflows. It is a **web app
+first**: the FlintTrade backend serves the full terminal UI and API from a
+single origin (port 5100), usable from any browser, with optional native
+desktop apps as convenience wrappers around the same backend. The repository
+is a Python, React, TypeScript, and Rust monorepo with a Flask backend,
+Dockview terminal, broker-gateway integration layer, sandbox mode, data
+services, and developer documentation.
 
 ## Beta disclaimer
 
@@ -38,21 +41,54 @@ that require local credentials and live-read evidence before they are exposed as
 connectable. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current
 matrix.
 
-## Quickstart (native desktop)
+## Quickstart
 
-For normal use, install FlintTrade like any other desktop app. The small installer
-downloads the hash-verified backend (which embeds the terminal) on first
-launch, creates the OS workspace, and lets you configure the recommended OpenAlgo bridge or verified
-native brokers from Setup and Settings — no `.env` file or browser dev server
-required.
+### Self-hosted web app (the primary path)
 
-| OS | Packages | Architectures |
+FlintTrade runs as a self-hosted web app: one backend process serves the
+terminal UI and the API on a single origin, and you use it from any browser.
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+uv sync && pnpm install
+make start        # backend + terminal UI on http://127.0.0.1:5100
+```
+
+Or run it in Docker with `make docker-up`. Either way, open the printed URL in
+a browser and complete the in-app Setup flow — no `.env` file is required.
+
+### Desktop apps (convenience installs)
+
+The desktop apps are thin native wrappers around the same backend for people
+who want ease of installation, not a separate product surface. Releases ship
+**one installer per OS**, and the one-command installs are the recommended way
+to get them (the beta builds are unsigned, and the scripts verify the download
+and avoid the Gatekeeper/SmartScreen walls that manual downloads hit):
+
+```bash
+# macOS
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+
+# Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+| OS | Installer | Architectures |
 |---|---|---|
-| macOS | `.dmg` | Apple Silicon (arm64) + Intel (x64) |
-| Windows | `.exe` (NSIS) | x64 |
-| Linux | `.deb`, `.rpm`, `.AppImage` | x64 + arm64 |
+| macOS | universal `.dmg` (one app for both chips) | Apple Silicon (arm64) + Intel (x64) |
+| Windows | `.exe` (NSIS, per-user — no admin needed) | x64 (Windows 11 on ARM runs it via emulation) |
+| Linux | `.AppImage` via the install script | x64 + arm64 |
 
-Download an installer from the repository releases page, or build it yourself:
+`.deb`/`.rpm` packages are no longer published from the current release
+onward; older releases still carry them (install with `--ref <tag>`). You can
+also download an installer manually from the releases page, or build one
+yourself:
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -63,7 +99,9 @@ make desktop-build
 
 Install the generated package from
 `packages/apps/desktop/src-tauri/target/release/bundle/`, launch FlintTrade,
-and follow the welcome wizard.
+and follow the welcome wizard. Per-OS install steps (including the unsigned-
+build caveats for manual downloads) live in [docs/DESKTOP.md](docs/DESKTOP.md)
+and [docs/setup/](docs/setup/).
 
 > OpenAlgo is optional. Configure it from the app only if you want the
 > OpenAlgo-compatible integration path; FlintTrade's native gateway and sandbox
@@ -87,11 +125,11 @@ The root `Makefile` is the main entry point:
 
 ### Advanced server and Docker modes
 
-Docker, Nginx, and systemd assets remain for contributors and advanced
-self-host/server deployments. They are not the native desktop install path. In
-those modes, `.env.example` is a dev/server fallback template only; in-app
-Setup and Settings remain the preferred way to configure OpenAlgo for local
-desktop use.
+Docker, Nginx, and systemd assets support long-running self-host/server
+deployments of the web app (beyond the simple `make start`/`make docker-up`
+quickstart). In those modes, `.env.example` is a dev/server fallback template
+only; in-app Setup and Settings remain the preferred way to configure
+OpenAlgo.
 
 Architecture, per-OS install/uninstall, and the CI release matrix are documented
 in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
@@ -164,7 +202,7 @@ and 1 Rust/PyO3 tick engine.
 
 ### Three ways in
 
-- **Try it locally** — install or build the [native desktop app](#quickstart-native-desktop) and explore in sandbox mode.
+- **Try it locally** — run the [self-hosted web app or a desktop convenience install](#quickstart) and explore in sandbox mode.
 - **Build with it** — read the [Developer Guide](docs/DEVELOPER_GUIDE.md) for repo layout, adding widgets, and adding broker adapters.
 - **Contribute** — see [contributing.md](contributing.md) for branch strategy, commit conventions, and good-first-issues.
 

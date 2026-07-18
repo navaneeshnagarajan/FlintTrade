@@ -18,15 +18,48 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 
 ## 1. Installation
 
-FlintTrade runs on Windows, macOS, and Linux (including Raspberry Pi). The
-normal path is the native desktop installer — a small shell that downloads the
-hash-verified backend (which embeds the terminal) on first launch, creates the
-OS workspace, and opens Setup without requiring `.env` or a browser dev server.
+FlintTrade runs on Windows, macOS, and Linux (including Raspberry Pi). It is
+a **self-hosted web app first**: one backend process serves the full terminal
+UI and API on a single origin (port 5100), usable from any browser. The
+desktop apps are convenience wrappers around that same backend for people who
+prefer a one-click install.
 
-### Native desktop
+### Self-hosted web app (the primary path)
 
-Download an installer from the repository releases page. Advanced users can
-build the installer from source:
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+uv sync && pnpm install
+make start        # backend + terminal UI on http://127.0.0.1:5100
+```
+
+Or run it in Docker with `make docker-up`. Open the printed URL in a browser
+and follow the first-time Setup flow — no `.env` file is required.
+
+### Native desktop (convenience installs)
+
+Releases ship one installer per OS: a universal macOS `.dmg` (Apple Silicon
+and Intel in one app), a Windows NSIS `x64-setup.exe` (per-user, no admin
+needed), and a Linux `.AppImage` delivered by the install script. The
+one-command installs are the recommended way in, because the beta builds are
+unsigned and the scripts avoid the Gatekeeper/SmartScreen walls that manual
+downloads hit:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+The installed shell downloads the hash-verified engine payload on first
+launch (progress on the splash; needs internet), creates the OS workspace,
+and opens Setup. Manual downloads and per-OS caveats are covered in the
+platform guides below and in [docs/DESKTOP.md](DESKTOP.md). Advanced users
+can build the installer from source:
 
 ```bash
 uv sync && uv pip install pyinstaller && pnpm install

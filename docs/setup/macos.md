@@ -3,12 +3,32 @@
 > FlintTrade `v0.6.0-beta.9` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
-## Option A — Native Desktop (Recommended)
+## Option A — One-command install (Recommended)
 
-1. Download the `.dmg` from the release page.
+```bash
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+This is the recommended path because release builds are currently
+**unsigned**: the script's download carries no quarantine attribute, so
+Gatekeeper never blocks the app — no "Open Anyway" dance, even on macOS 15+
+where Apple removed the right-click → Open override for unnotarised apps. The
+script installs the single **universal** `.dmg` build (one app for both Apple
+Silicon and Intel) and launches it. The script lives at
+[`scripts/install/`](../../scripts/install/) — read it before piping to a
+shell if that is your policy (it should be).
+
+Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
+in the app; no `.env` file is required.
+
+## Option B — Manual `.dmg` download
+
+1. Download the universal `.dmg` (`FlintTrade_<version>_universal.dmg` — one
+   file for both Apple Silicon and Intel) from the release page.
 2. Install FlintTrade like any other macOS app.
 3. Release builds are currently **unsigned**, so on first launch Gatekeeper
-   will block the app. The bypass depends on your macOS version:
+   will block a manually downloaded app. The bypass depends on your macOS
+   version:
    - **macOS 15 (Sequoia) and later**: Apple removed the right-click → Open
      override for unnotarised apps. Double-click FlintTrade once (it will be
      blocked — choose **Done**, not "Move to Trash"), then open
@@ -30,7 +50,7 @@ uv sync && uv pip install pyinstaller && pnpm install
 make desktop-build
 ```
 
-## Option B — Source Development
+## Option C — Source Development
 
 Requires: Python 3.12, Node.js 22+, Git, and optionally Rust.
 
@@ -43,7 +63,7 @@ make dev
 
 Open http://localhost:5173.
 
-## Option C — Docker/Server (Advanced)
+## Option D — Docker/Server (Advanced)
 
 Docker is retained for advanced self-hosting and contributor testing, not for
 the normal desktop app.

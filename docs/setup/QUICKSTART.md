@@ -4,11 +4,25 @@
 > FlintTrade `v0.6.0-beta.9` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
-## 1. Install the Native App
+## 1. Run FlintTrade
 
-For normal use, download the macOS, Windows, or Linux installer from the
-release page and launch FlintTrade like any other app. The first run creates
-your OS workspace and opens the Setup flow. No `.env` file is required.
+FlintTrade is a self-hosted web app: run the backend and open it in your
+browser (`make start` from a source checkout, or `make docker-up`). For ease
+of installation, the desktop apps wrap the same backend in a native window —
+install with one command:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+The first run creates your OS workspace and opens the Setup flow. No `.env`
+file is required.
 
 To build the installer yourself:
 

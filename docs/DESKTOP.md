@@ -1,18 +1,31 @@
 # FlintTrade Desktop
 
-FlintTrade ships as a **native desktop application** for Linux, Windows, and
-macOS. Install it, launch it, then start in Explore or Practice mode.
+FlintTrade is a **self-hosted web app first**: the backend (port 5100, via
+`make start` or Docker) serves the full terminal UI and API on one origin,
+usable from any browser. The desktop apps documented here are **convenience
+wrappers** — a thin Tauri shell around that same backend — for people who
+want ease of installation rather than running a server themselves. Install
+one, launch it, then start in Explore or Practice mode.
+
+Each release ships **one installer per OS**:
+
+- **macOS** — a single **universal** `.dmg`
+  (`FlintTrade_<version>_universal.dmg`) — Apple Silicon and Intel in one app
+- **Windows** — a single NSIS `x64-setup.exe` — per-user install, no admin
+  rights needed; Windows 11 on ARM runs it via emulation
+- **Linux** — the **one-command install script** is the story: it downloads
+  and verifies the right `.AppImage` for your architecture (x64 and arm64),
+  with an automatic FUSE-less self-extraction fallback because modern distros
+  lack `libfuse2`. `.deb`/`.rpm` are no longer published from this release
+  onward; older releases still carry them (install via `--ref <tag>`).
 
 The installer is a **small native shell** (a few MB): on first launch it
-downloads the hash-verified FlintTrade backend (which embeds the React
-terminal) with a progress bar, then starts it — there is no separate server
-to run and **no `.env` to configure**. Day-to-day updates replace only that
-downloaded payload, so neither installs nor updates ever ship the ~100 MB
-runtime inside the installer.
-
-- **macOS** — `.dmg` (drag-to-install) — Apple Silicon (arm64) and Intel (x64)
-- **Windows** — `.exe` (NSIS) installer — x64
-- **Linux** — `.deb`, `.rpm`, and `.AppImage` — x64 and arm64
+downloads the hash-verified FlintTrade engine payload (~110–250 MB — the
+frozen backend, which embeds the React terminal) with progress on the splash,
+then starts it. The first-run download needs an internet connection and
+honours OS proxy settings. There is no separate server to run and **no `.env`
+to configure**. Day-to-day updates replace only that downloaded payload, so
+neither installs nor updates ever ship the full runtime inside the installer.
 
 ## Download, install, or build
 
@@ -20,13 +33,7 @@ The public website links to this guide from the homepage and primary
 navigation. Start here when you want to run FlintTrade as an end-user desktop
 app rather than as a contributor checkout.
 
-### One-command install (recommended)
-
-The bootstrap installer now downloads the **published desktop release asset**
-for your OS and CPU architecture, installs it, and launches FlintTrade. It does
-not require Rust, Node, Python, uv, pnpm, PyInstaller, Xcode, Visual Studio
-Build Tools, or Linux Tauri development headers unless you explicitly choose
-the source-build fallback.
+### One-command install (recommended on every OS)
 
 ```bash
 # macOS / Linux
@@ -38,19 +45,46 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
 
+The bootstrap installer downloads the **published desktop release asset** for
+your OS and CPU architecture, verifies it, installs it, and launches
+FlintTrade. It does not require Rust, Node, Python, uv, pnpm, PyInstaller,
+Xcode, Visual Studio Build Tools, or Linux Tauri development headers unless
+you explicitly choose the source-build fallback.
+
+The one-command path is recommended because the beta builds are **unsigned**,
+and the script sidesteps the OS walls that manual downloads hit:
+
+- **macOS** — the script's `curl` download carries no quarantine attribute, so
+  Gatekeeper never blocks the app. This is the genuine fix for "the app won't
+  open" on macOS 15+, where Apple removed the right-click → Open override for
+  unnotarised apps.
+- **Windows** — the script verifies the installer's SHA-256 against the
+  release manifest and then clears the Mark-of-the-Web, so SmartScreen does
+  not wall the verified installer.
+- **Linux** — the script picks the right `.AppImage` per architecture,
+  verifies it, falls back to FUSE-less self-extraction automatically when
+  `libfuse2` is absent, installs an app icon plus a `flinttrade` command in
+  `~/.local/bin`, and checks the app survives launch (log at
+  `~/.local/state/flinttrade/desktop-launch.log`).
+
 The default channel is `beta` while `v0.6` is a prerelease. Use
 `--channel stable` for stable-only installs, `--ref <tag>` for an exact
-version, `--no-launch` to install without opening the app, and
+version (including older releases that still carry `.deb`/`.rpm`),
+`--no-launch` to install without opening the app, and
 `--build-from-source` only when you intentionally want the contributor build
 path. The scripts live at [`scripts/install/`](../scripts/install/) — read them
 before piping to a shell if that is your policy (it should be).
 
-### Pre-built installers
+### Pre-built installers (manual download — secondary path)
+
+Manual downloads remain possible, but because the beta builds are unsigned
+you will hit the OS trust walls the one-command install avoids — the honest
+trade-offs are listed under [Installing & uninstalling](#installing--uninstalling).
 
 1. Open [/download](/download) for direct macOS, Windows, and Linux links.
-2. Pick the installer for your operating system and CPU architecture:
-   `.dmg` for macOS, NSIS `.exe` for Windows, or `.AppImage`/`.deb`/`.rpm` for
-   Linux.
+2. Pick the installer for your operating system: the universal `.dmg` for
+   macOS (one file for both Apple Silicon and Intel), the NSIS `x64-setup.exe`
+   for Windows, or the `.AppImage` for your architecture on Linux.
 3. The desktop release manifest (`flinttrade-desktop-manifest.json`) published
    with every release (and with the rolling `updater-beta` / `updater-stable`
    releases, which always point at the newest release of that channel) is the
@@ -185,34 +219,58 @@ environment variable.
 ## Installing & uninstalling
 
 ### macOS (`.dmg`)
-- **Install:** open the `.dmg`, drag **FlintTrade** to **Applications**.
+- **Recommended:** `curl -fsSL https://flinttrade.vercel.app/install.sh | bash`
+  — the script's download carries no quarantine attribute, so Gatekeeper never
+  blocks the app.
+- **Manual install:** open the universal `.dmg`
+  (`FlintTrade_<version>_universal.dmg` — one file for both Apple Silicon and
+  Intel), drag **FlintTrade** to **Applications**. Because the build is
+  unsigned, a manually downloaded app is quarantined: on macOS 15 (Sequoia)
+  and later, open it once (blocked — choose **Done**), then
+  **System Settings → Privacy & Security → Open Anyway**; on macOS 13/14,
+  right-click (Control-click) the app and choose **Open**, then **Open**
+  again. Needed once per install.
 - **Uninstall:** drag **FlintTrade** from **Applications** to the Trash. To also
   remove data: delete `~/Library/Application Support/flinttrade/`.
-- The build is unsigned by default; on first launch use **right-click → Open**
-  (or **System Settings → Privacy & Security → Open Anyway**).
 
 ### Windows (`.exe`)
-- **Install:** run the NSIS `.exe` installer. The beta release does not publish
+- **Recommended:** `irm https://flinttrade.vercel.app/install.ps1 | iex` — the
+  script verifies the SHA-256 against the release manifest and clears the
+  Mark-of-the-Web, so SmartScreen does not block the verified installer.
+- **Manual install:** run the NSIS `x64-setup.exe` installer. It installs
+  per-user — no admin rights needed. A manually downloaded installer triggers
+  SmartScreen (**More info → Run anyway**). The beta release does not publish
   MSI assets because WiX requires numeric product versions and rejects
   prerelease SemVer like `0.6.0-beta.9`.
+- The installer fetches the WebView2 runtime during install if it is missing
+  (needs internet). Windows 11 on ARM runs the x64 build via emulation.
+- Windows Defender may flag the unsigned engine payload under
+  `%APPDATA%\flinttrade\runtime\backend`. If the app reports the engine
+  "disappeared", restore it from Defender's protection history or add an
+  exclusion for that folder.
 - **Uninstall:** **Settings → Apps → Installed apps → FlintTrade → Uninstall**,
   or **Control Panel → Programs and Features**. To also remove data: delete
   `%APPDATA%\flinttrade\`.
 
 ### Linux
-- **Recommended default:** use the AppImage via the installer script. It
-  installs under `~/.local/bin/flinttrade.AppImage` and writes a desktop entry
-  without sudo.
-- **`.deb`** (Debian/Ubuntu): `sudo apt install ./FlintTrade_*.deb` —
-  uninstall with `sudo apt remove flinttrade`.
-- **`.rpm`** (Fedora/RHEL): `sudo dnf install ./FlintTrade-*.rpm` —
-  uninstall with `sudo dnf remove flinttrade`.
-- **`.AppImage`** (portable, no install): `chmod +x FlintTrade_*.AppImage && ./FlintTrade_*.AppImage`.
-  Nothing to uninstall — just delete the file.
-- Some distributions require FUSE for AppImage execution, and every desktop
-  package still depends on the platform WebKitGTK/GTK runtime libraries Tauri
-  uses. If AppImage does not run cleanly on your distro, install the `.deb` or
-  `.rpm` package instead.
+- **Recommended:** `curl -fsSL https://flinttrade.vercel.app/install.sh | bash`
+  — it downloads and verifies the right `.AppImage` for your architecture,
+  installs it under `~/.local/bin/flinttrade.AppImage` with a desktop entry,
+  icon, and `flinttrade` command (no sudo), falls back to FUSE-less
+  self-extraction automatically when `libfuse2` is absent, and verifies the
+  app survives launch (log: `~/.local/state/flinttrade/desktop-launch.log`).
+- **Manual `.AppImage`** (portable, no install):
+  `chmod +x FlintTrade_*.AppImage && ./FlintTrade_*.AppImage`. Requires
+  `libfuse2`, which modern distros no longer ship — either install it or run
+  `./FlintTrade_*.AppImage --appimage-extract-and-run`. Nothing to uninstall —
+  just delete the file.
+- **`.deb`/`.rpm` are retired** from the current release onward — the
+  AppImage (via the script) is the single Linux artefact. Older releases still
+  carry `.deb`/`.rpm`; install one with `--ref <tag>` or fetch it from that
+  release's assets.
+- The desktop app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` internally by
+  default, which fixes the blank-window issue on NVIDIA and virtual-machine
+  graphics stacks.
 - To also remove data: delete `~/.flinttrade/`.
 
 ---
@@ -264,8 +322,12 @@ installers to a GitHub Release.
   tag when a release PR merges; can also be run manually
   (**Actions → Desktop Release → Run workflow**) with a tag like
   `v0.6.0-beta.9`. Releases publish non-draft.
-- **Matrix:** macOS arm64 (`macos-14`), macOS x64 (`macos-15-intel`), Windows x64,
-  Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`).
+- **Matrix:** macOS universal (`macos-14`, `--target universal-apple-darwin`) + macOS x64 payload-only (`macos-15-intel`), Windows x64,
+  Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`) — AppImage only.
+- macOS x64 (`macos-15-intel`) builds only the Intel engine payload — kept
+  because PyInstaller cannot cross-freeze and macOS Intel has no compatible
+  llvmlite wheel; the `macos-14` job bundles the single universal shell that
+  serves both chips.
 - Each job freezes the backend, bundles the Tauri app, and uploads the
   per-platform installers as workflow artifacts and, when a release tag is
   supplied, draft release assets.
@@ -288,7 +350,11 @@ when its repository secrets exist and stays dormant otherwise:
 - **macOS Gatekeeper signing/notarisation (dormant):** `APPLE_CERTIFICATE`
   (base64 `.p12`) + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`,
   and `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` for notarisation. Until
-  those exist, macOS builds ship **unsigned**: on macOS 15 (Sequoia) and
+  those exist, macOS builds ship **unsigned**. The recommended way to avoid
+  Gatekeeper entirely is the one-command install
+  (`curl -fsSL https://flinttrade.vercel.app/install.sh | bash`) — its
+  download carries no quarantine attribute, so the app is never blocked. For
+  a manually downloaded `.dmg`: on macOS 15 (Sequoia) and
   later, open the app once (blocked — choose **Done**), then
   **System Settings → Privacy & Security → Open Anyway** (Apple removed the
   right-click override for unnotarised apps); on macOS 13/14, right-click
