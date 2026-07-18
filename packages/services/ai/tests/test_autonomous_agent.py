@@ -1335,3 +1335,57 @@ async def test_memory_failure_never_breaks_a_decision() -> None:
 
     assert signal in ("BUY", "SELL", "HOLD")
     assert "Lessons from previous sessions" not in agent.llm.chat.call_args.args[0][1].content
+
+
+# ---------------------------------------------------------------------------
+# Compressed full-session proof (Phase 4): pre-open → cycles → square-off →
+# post-session reflection, with the gated executor as the only order path.
+# The real wall-clock Practice-day run remains a separate market-day check;
+# this pins the runtime chain end-to-end on a synthetic clock.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compressed_full_session_trades_squares_off_and_learns() -> None:
+    import asyncio
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    # Synthetic clock: starts mid-session, advances ~95 minutes per completed
+    # cycle so the session crosses the close after a handful of cycles.
+    current = {"now": datetime(2026, 7, 20, 10, 0, tzinfo=ist)}
+
+    def clock() -> datetime:
+        return current["now"]
+
+    def session_for(exchange: str, symbol: str, on: date):
+        return time(9, 15), time(15, 30)
+
+    memory = StubMemory()
+    agent = make_agent(
+        llm_response="BUY",
+        market_session_provider=session_for,
+        clock=clock,
+        memory=memory,
+    )
+    original_run_cycle = agent.run_cycle
+
+    async def advancing_cycle() -> dict[str, Any]:
+        result = await original_run_cycle()
+        current["now"] = current["now"] + timedelta(minutes=95)
+        return result
+
+    agent.run_cycle = advancing_cycle  # type: ignore[method-assign]
+
+    await asyncio.wait_for(agent.run_session(), timeout=30)
+
+    # Session ended flat with an explicit terminal state.
+    assert agent.state.squared_off is True
+    assert agent.status == AgentStatus.STOPPED
+    # The BUY entry opened through the gated executor and was closed at the
+    # session end, so the learning tier had a round trip to reflect over.
+    assert agent.state.closed_trades
+    assert agent.state.closed_trades[0]["exit_reason"] == "square_off"
+    assert memory.added, "post-session reflection persisted no lessons"
+    # The gated executor was the ONLY order path: one entry + one exit.
+    assert agent.order_executor.route_order.await_count >= 2
