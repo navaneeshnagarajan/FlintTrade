@@ -1,10 +1,10 @@
 /**
- * Tests for useScannerData — mode-aware scanner data hook.
+ * Tests for useSectorMovers — mode-aware sector-mover hook.
  *
  * Verifies that:
- *   1. Explore mode returns sample data without API calls
- *   2. Live mode fetches multi-quotes and derives scanner tables
- *   3. Live mode with no data falls back to sample data
+ *   1. Explore mode returns sample rows without API calls (isLive false)
+ *   2. Live mode fetches multi-quotes and derives sector movers (isLive true)
+ *   3. A failed fetch falls back to sample rows and NEVER reports isLive
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -60,18 +60,16 @@ const mockQuotes = [
   },
 ];
 
-const getMultiQuotesMock = vi.fn((_symbols: string[]) => Promise.resolve(mockQuotes));
+const getMultiQuotesMock = vi.fn((_symbols: unknown) => Promise.resolve(mockQuotes));
 
 vi.mock("@/services/api", () => ({
-  getMultiQuotes: (symbols: string[]) => getMultiQuotesMock(symbols),
+  getMultiQuotes: (symbols: unknown) => getMultiQuotesMock(symbols),
   normaliseMultiQuotes: (raw: unknown) => (Array.isArray(raw) ? raw : []),
 }));
 
 // Mock sample data
 vi.mock("@/widgets/utility/Scanner/sampleData", () => ({
-  SAMPLE_GAP_SCANS: [{ symbol: "SAMPLE_GAP", gapPercent: 2.5 }],
   SAMPLE_OI_CHANGES: [{ symbol: "SAMPLE_OI", oiChange: 1000 }],
-  SAMPLE_VOLUME_SPIKES: [{ symbol: "SAMPLE_VOL", volumeRatio: 3.2 }],
   SAMPLE_SECTOR_MOVERS: [{ sector: "SAMPLE_SECTOR", avgChange: 1.1 }],
 }));
 
@@ -79,7 +77,8 @@ vi.mock("@/widgets/utility/Scanner/sampleData", () => ({
 // Import hook after mocks
 // ---------------------------------------------------------------------------
 
-import { useScannerData } from "../useScannerData";
+import { useSectorMovers, deriveSectorMovers } from "../useSectorMovers";
+import type { Quote } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Wrapper
@@ -102,56 +101,87 @@ beforeEach(() => {
   currentMode = "explore";
   modeListeners.clear();
   vi.clearAllMocks();
+  getMultiQuotesMock.mockImplementation(() => Promise.resolve(mockQuotes));
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("useScannerData", () => {
-  it("returns sample data in explore mode without API calls", () => {
-    const { result } = renderHook(() => useScannerData(), {
+describe("useSectorMovers", () => {
+  it("returns sample rows in explore mode without API calls", () => {
+    const { result } = renderHook(() => useSectorMovers(), {
       wrapper: createWrapper(),
     });
 
     expect(result.current.isLive).toBe(false);
     expect(result.current.isLoading).toBe(false);
     expect(result.current.error).toBeNull();
-    expect(result.current.data.gapScans).toEqual([{ symbol: "SAMPLE_GAP", gapPercent: 2.5 }]);
-    expect(result.current.data.oiChanges).toEqual([{ symbol: "SAMPLE_OI", oiChange: 1000 }]);
+    expect(result.current.data).toEqual([{ sector: "SAMPLE_SECTOR", avgChange: 1.1 }]);
     expect(getMultiQuotesMock).not.toHaveBeenCalled();
   });
 
-  it("fetches multi-quotes in live mode and derives scanner data", async () => {
+  it("fetches multi-quotes in live mode and derives sector movers", async () => {
     currentMode = "live";
 
-    const { result } = renderHook(() => useScannerData(), {
+    const { result } = renderHook(() => useSectorMovers(), {
       wrapper: createWrapper(),
     });
 
-    expect(result.current.isLive).toBe(true);
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.isLive).toBe(true));
 
     expect(getMultiQuotesMock).toHaveBeenCalled();
-    // Derived gap scans should come from the mock quotes (TATAMOTORS and HDFCBANK)
-    expect(result.current.data.gapScans.length).toBeGreaterThan(0);
-    expect(result.current.data.gapScans[0].symbol).toBeDefined();
-    // OI changes always use sample data
-    expect(result.current.data.oiChanges).toEqual([{ symbol: "SAMPLE_OI", oiChange: 1000 }]);
+    const sectors = result.current.data.map((row) => row.sector);
+    expect(sectors).toContain("Auto"); // TATAMOTORS
+    expect(sectors).toContain("Banking"); // HDFCBANK
+    expect(sectors).not.toContain("SAMPLE_SECTOR");
+  });
+
+  it("falls back to sample rows on fetch failure and never claims live", { timeout: 15000 }, async () => {
+    currentMode = "live";
+    getMultiQuotesMock.mockImplementation(() => Promise.reject(new Error("OpenAlgo down")));
+
+    const { result } = renderHook(() => useSectorMovers(), {
+      wrapper: createWrapper(),
+    });
+
+    // The hook retries twice with backoff before surfacing the error — allow
+    // the full retry window before asserting.
+    await waitFor(() => expect(result.current.error).not.toBeNull(), { timeout: 9000 });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isLive).toBe(false);
+    expect(result.current.data).toEqual([{ sector: "SAMPLE_SECTOR", avgChange: 1.1 }]);
   });
 
   it("provides a refetch function", async () => {
     currentMode = "live";
 
-    const { result } = renderHook(() => useScannerData(), {
+    const { result } = renderHook(() => useSectorMovers(), {
       wrapper: createWrapper(),
     });
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.isLive).toBe(true));
 
     expect(typeof result.current.refetch).toBe("function");
     // Should not throw
     result.current.refetch();
+  });
+});
+
+describe("deriveSectorMovers", () => {
+  it("groups quotes into sector aggregates with top gainer/loser", () => {
+    const rows = deriveSectorMovers(mockQuotes as unknown as Quote[]);
+    const auto = rows.find((r) => r.sector === "Auto");
+    expect(auto).toBeDefined();
+    expect(auto?.advancers).toBe(1);
+    expect(auto?.topGainer).toBe("TATAMOTORS");
+  });
+
+  it("skips quotes without a usable previous close", () => {
+    const rows = deriveSectorMovers([
+      { symbol: "TATAMOTORS", exchange: "NSE", ltp: 510, prev_close: 0, close: 0 },
+    ] as unknown as Quote[]);
+    expect(rows).toEqual([]);
   });
 });

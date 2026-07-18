@@ -1,14 +1,19 @@
 /**
- * useScannerData — Mode-aware data hook for the Scanner widget.
+ * useSectorMovers — mode-aware sector-mover data for the Scanner widget.
  *
- * - explore mode:  returns static sample data (no broker needed)
- * - practice/live: fetches multi-quotes from OpenAlgo for NIFTY 50 stocks,
- *   then derives gap scan, volume spike, and sector mover tables.
- *   OI Change tab still uses sample data (requires option chain API calls
- *   that are too heavy for a polling scanner — will be wired separately).
+ * - explore mode:  returns disclosed sample rows (no broker needed)
+ * - practice/live: fetches multi-quotes for a curated NIFTY 50 universe and
+ *   derives per-sector advancers/decliners, average change, top gainer/loser
+ *   and a strength signal.
  *
- * Refreshes every 60 seconds in live modes. Returns a unified shape so the
- * widget doesn't need to branch on mode for rendering.
+ * `isLive` is true only when real quote data actually backs the rows — a
+ * failed or pending fetch falls back to sample rows and reports `isLive:
+ * false`, so the widget can never badge sample data as live.
+ *
+ * (The gap/volume halves of the old useScannerData hook were superseded by
+ * the backend `/v1/scanner/run` prebuilt scans, which scan real OHLCV history
+ * server-side; the client-side volume "ratio" here was a fabricated baseline
+ * and was dropped rather than wired.)
  */
 
 import { useMemo } from "react";
@@ -17,13 +22,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { getMultiQuotes, normaliseMultiQuotes } from "@/services/api";
 import type { Quote } from "@/types/api";
 import {
-  SAMPLE_GAP_SCANS,
-  SAMPLE_OI_CHANGES,
-  SAMPLE_VOLUME_SPIKES,
   SAMPLE_SECTOR_MOVERS,
-  type GapScanEntry,
-  type OIChangeEntry,
-  type VolumeSpikeEntry,
   type SectorMoverEntry,
 } from "@/widgets/utility/Scanner/sampleData";
 
@@ -90,59 +89,11 @@ const SECTOR_MAP = new Map(
 );
 
 // ---------------------------------------------------------------------------
-// Derivation: Quote[] → Scanner tables
+// Derivation: Quote[] → sector movers
 // ---------------------------------------------------------------------------
 
-/** Derive gap scan entries from quotes. Sorted by absolute gap %. */
-function deriveGapScans(quotes: Quote[]): GapScanEntry[] {
-  return quotes
-    .filter((q) => q.prev_close && q.prev_close > 0 && q.open > 0)
-    .map((q) => {
-      const prevClose = q.prev_close ?? q.close;
-      const gapPct = ((q.open - prevClose) / prevClose) * 100;
-      return {
-        symbol: q.symbol,
-        exchange: q.exchange,
-        prevClose,
-        openPrice: q.open,
-        gapPercent: Math.round(gapPct * 100) / 100,
-        gapType: gapPct >= 0 ? ("up" as const) : ("down" as const),
-        volume: q.volume,
-        sector: SECTOR_MAP.get(q.symbol) ?? "Other",
-      };
-    })
-    .sort((a, b) => Math.abs(b.gapPercent) - Math.abs(a.gapPercent));
-}
-
-/** Derive volume spike entries. Uses a rough heuristic: volume / 1_000_000 as "avg"
- *  baseline when we don't have historical avg volume. Sorted by volume ratio. */
-function deriveVolumeSpikes(quotes: Quote[]): VolumeSpikeEntry[] {
-  return quotes
-    .filter((q) => q.volume > 0 && q.prev_close && q.prev_close > 0)
-    .map((q) => {
-      const prevClose = q.prev_close ?? q.close;
-      const changePct = ((q.ltp - prevClose) / prevClose) * 100;
-      // Without historical avg volume, estimate a baseline.
-      // Large-cap NSE stocks typically trade 1-5M shares/day.
-      // Use a conservative estimate of volume / 1.5 as a proxy so
-      // we always show meaningful ratios rather than dividing by zero.
-      const estimatedAvg = Math.max(q.volume / 1.5, 100_000);
-      return {
-        symbol: q.symbol,
-        exchange: q.exchange,
-        preMarketVolume: q.volume,
-        avgVolume: Math.round(estimatedAvg),
-        volumeRatio: Math.round((q.volume / estimatedAvg) * 100) / 100,
-        price: q.ltp,
-        changePercent: Math.round(changePct * 100) / 100,
-        sector: SECTOR_MAP.get(q.symbol) ?? "Other",
-      };
-    })
-    .sort((a, b) => b.volumeRatio - a.volumeRatio);
-}
-
 /** Derive sector movers by grouping quotes by sector. */
-function deriveSectorMovers(quotes: Quote[]): SectorMoverEntry[] {
+export function deriveSectorMovers(quotes: Quote[]): SectorMoverEntry[] {
   const sectors = new Map<
     string,
     { changes: number[]; symbols: Array<{ symbol: string; change: number }> }
@@ -200,66 +151,45 @@ function deriveSectorMovers(quotes: Quote[]): SectorMoverEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// Return type
+// Hook
 // ---------------------------------------------------------------------------
 
-export interface ScannerData {
-  gapScans: GapScanEntry[];
-  oiChanges: OIChangeEntry[];
-  volumeSpikes: VolumeSpikeEntry[];
-  sectorMovers: SectorMoverEntry[];
-}
-
-export interface UseScannerDataResult {
-  data: ScannerData;
+export interface UseSectorMoversResult {
+  data: SectorMoverEntry[];
   isLoading: boolean;
+  /** True only when real quote data backs the rows — never for the sample fallback. */
   isLive: boolean;
   error: Error | null;
   refetch: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
-export function useScannerData(): UseScannerDataResult {
+export function useSectorMovers(): UseSectorMoversResult {
   const mode = useModeStore((s) => s.mode);
-  const isLive = mode !== "explore";
+  const wantsLive = mode !== "explore";
 
   const query = useQuery({
     queryKey: ["scanner", "multiquotes"],
     queryFn: () => getMultiQuotes(SYMBOLS_FOR_QUOTES).then(normaliseMultiQuotes),
-    enabled: isLive,
+    enabled: wantsLive,
     refetchInterval: 60_000, // auto-refresh every 60s
     staleTime: 30_000,
     retry: 2,
   });
 
-  const data = useMemo<ScannerData>(() => {
-    if (!isLive || !query.data) {
-      return {
-        gapScans: SAMPLE_GAP_SCANS,
-        oiChanges: SAMPLE_OI_CHANGES,
-        volumeSpikes: SAMPLE_VOLUME_SPIKES,
-        sectorMovers: SAMPLE_SECTOR_MOVERS,
-      };
-    }
+  const hasLiveData = wantsLive && query.data !== undefined && query.data.length > 0;
 
-    const quotes = query.data;
-    return {
-      gapScans: deriveGapScans(quotes),
-      // OI Change requires option chain data — keep sample for now
-      oiChanges: SAMPLE_OI_CHANGES,
-      volumeSpikes: deriveVolumeSpikes(quotes),
-      sectorMovers: deriveSectorMovers(quotes),
-    };
-  }, [isLive, query.data]);
+  const data = useMemo<SectorMoverEntry[]>(() => {
+    if (!hasLiveData || !query.data) return SAMPLE_SECTOR_MOVERS;
+    return deriveSectorMovers(query.data);
+  }, [hasLiveData, query.data]);
 
   return {
     data,
-    isLoading: isLive && query.isLoading,
-    isLive,
-    error: isLive ? (query.error as Error | null) : null,
-    refetch: query.refetch,
+    isLoading: wantsLive && query.isLoading,
+    isLive: hasLiveData,
+    error: wantsLive ? (query.error as Error | null) : null,
+    refetch: () => {
+      void query.refetch();
+    },
   };
 }

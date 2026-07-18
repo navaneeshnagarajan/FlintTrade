@@ -1,22 +1,12 @@
 /**
- * sampleData.ts — Realistic Indian market sample data for the Pre-Market Scanner.
+ * sampleData.ts — sample rows for the Pre-Market Scanner's OI Change and
+ * Sectors tabs, which have no live scan source yet (disclosed per-tab).
  *
- * Seeded with NIFTY 50 stocks and realistic pre-market patterns.
- * Will be replaced with real OpenAlgo data when pre-market API is available.
+ * The Gap Scan and Volume tabs no longer read from here — they run real
+ * backend prebuilt scans whose sample fallback lives server-side.
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
-
-export interface GapScanEntry {
-  symbol: string;
-  exchange: string;
-  prevClose: number;
-  openPrice: number;
-  gapPercent: number;
-  gapType: "up" | "down";
-  volume: number;
-  sector: string;
-}
 
 export interface OIChangeEntry {
   symbol: string;
@@ -28,17 +18,6 @@ export interface OIChangeEntry {
   signal: "bullish" | "bearish" | "neutral";
   price: number;
   priceChange: number;
-}
-
-export interface VolumeSpikeEntry {
-  symbol: string;
-  exchange: string;
-  preMarketVolume: number;
-  avgVolume: number;
-  volumeRatio: number;
-  price: number;
-  changePercent: number;
-  sector: string;
 }
 
 export interface SectorMoverEntry {
@@ -54,21 +33,6 @@ export interface SectorMoverEntry {
 
 // ─── Sample Data ────────────────────────────────────────────────────────────────
 
-export const SAMPLE_GAP_SCANS: GapScanEntry[] = [
-  { symbol: "TATAMOTORS", exchange: "NSE", prevClose: 985.45, openPrice: 1012.30, gapPercent: 2.73, gapType: "up", volume: 2_450_000, sector: "Auto" },
-  { symbol: "BAJFINANCE", exchange: "NSE", prevClose: 7245.00, openPrice: 7412.50, gapPercent: 2.31, gapType: "up", volume: 1_125_000, sector: "Finance" },
-  { symbol: "INFY", exchange: "NSE", prevClose: 1842.00, openPrice: 1875.60, gapPercent: 1.82, gapType: "up", volume: 3_200_000, sector: "IT" },
-  { symbol: "SUNPHARMA", exchange: "NSE", prevClose: 1625.30, openPrice: 1650.80, gapPercent: 1.57, gapType: "up", volume: 980_000, sector: "Pharma" },
-  { symbol: "ADANIENT", exchange: "NSE", prevClose: 2840.00, openPrice: 2878.50, gapPercent: 1.36, gapType: "up", volume: 1_560_000, sector: "Infra" },
-  { symbol: "HDFCBANK", exchange: "NSE", prevClose: 1685.20, openPrice: 1698.40, gapPercent: 0.78, gapType: "up", volume: 4_100_000, sector: "Banking" },
-  { symbol: "WIPRO", exchange: "NSE", prevClose: 542.80, openPrice: 535.20, gapPercent: -1.40, gapType: "down", volume: 2_800_000, sector: "IT" },
-  { symbol: "COALINDIA", exchange: "NSE", prevClose: 478.90, openPrice: 470.15, gapPercent: -1.83, gapType: "down", volume: 1_950_000, sector: "Metals" },
-  { symbol: "ONGC", exchange: "NSE", prevClose: 265.40, openPrice: 259.80, gapPercent: -2.11, gapType: "down", volume: 3_400_000, sector: "Energy" },
-  { symbol: "TATASTEEL", exchange: "NSE", prevClose: 145.60, openPrice: 141.85, gapPercent: -2.58, gapType: "down", volume: 5_200_000, sector: "Metals" },
-  { symbol: "RELIANCE", exchange: "NSE", prevClose: 2945.00, openPrice: 2870.30, gapPercent: -2.54, gapType: "down", volume: 6_100_000, sector: "Energy" },
-  { symbol: "SBIN", exchange: "NSE", prevClose: 815.30, openPrice: 793.40, gapPercent: -2.68, gapType: "down", volume: 7_800_000, sector: "Banking" },
-];
-
 export const SAMPLE_OI_CHANGES: OIChangeEntry[] = [
   { symbol: "NIFTY 24200 CE", exchange: "NFO", prevOI: 12_50_000, currentOI: 15_80_000, oiChange: 3_30_000, oiChangePct: 26.4, signal: "bullish", price: 245.50, priceChange: 12.5 },
   { symbol: "BANKNIFTY 51000 PE", exchange: "NFO", prevOI: 8_40_000, currentOI: 10_50_000, oiChange: 2_10_000, oiChangePct: 25.0, signal: "bearish", price: 310.20, priceChange: 45.8 },
@@ -80,19 +44,6 @@ export const SAMPLE_OI_CHANGES: OIChangeEntry[] = [
   { symbol: "BANKNIFTY 51500 CE", exchange: "NFO", prevOI: 6_10_000, currentOI: 6_90_000, oiChange: 80_000, oiChangePct: 13.1, signal: "bearish", price: 185.40, priceChange: -24.6 },
   { symbol: "INFY 1850 CE", exchange: "NFO", prevOI: 2_90_000, currentOI: 3_25_000, oiChange: 35_000, oiChangePct: 12.1, signal: "bullish", price: 35.70, priceChange: 9.1 },
   { symbol: "SBIN 820 PE", exchange: "NFO", prevOI: 7_50_000, currentOI: 8_30_000, oiChange: 80_000, oiChangePct: 10.7, signal: "bearish", price: 18.90, priceChange: 4.8 },
-];
-
-export const SAMPLE_VOLUME_SPIKES: VolumeSpikeEntry[] = [
-  { symbol: "TATAMOTORS", exchange: "NSE", preMarketVolume: 2_450_000, avgVolume: 850_000, volumeRatio: 2.88, price: 1012.30, changePercent: 2.73, sector: "Auto" },
-  { symbol: "SBIN", exchange: "NSE", preMarketVolume: 7_800_000, avgVolume: 3_100_000, volumeRatio: 2.52, price: 793.40, changePercent: -2.68, sector: "Banking" },
-  { symbol: "RELIANCE", exchange: "NSE", preMarketVolume: 6_100_000, avgVolume: 2_800_000, volumeRatio: 2.18, price: 2870.30, changePercent: -2.54, sector: "Energy" },
-  { symbol: "TATASTEEL", exchange: "NSE", preMarketVolume: 5_200_000, avgVolume: 2_500_000, volumeRatio: 2.08, price: 141.85, changePercent: -2.58, sector: "Metals" },
-  { symbol: "INFY", exchange: "NSE", preMarketVolume: 3_200_000, avgVolume: 1_600_000, volumeRatio: 2.00, price: 1875.60, changePercent: 1.82, sector: "IT" },
-  { symbol: "WIPRO", exchange: "NSE", preMarketVolume: 2_800_000, avgVolume: 1_500_000, volumeRatio: 1.87, price: 535.20, changePercent: -1.40, sector: "IT" },
-  { symbol: "ONGC", exchange: "NSE", preMarketVolume: 3_400_000, avgVolume: 1_900_000, volumeRatio: 1.79, price: 259.80, changePercent: -2.11, sector: "Energy" },
-  { symbol: "BAJFINANCE", exchange: "NSE", preMarketVolume: 1_125_000, avgVolume: 650_000, volumeRatio: 1.73, price: 7412.50, changePercent: 2.31, sector: "Finance" },
-  { symbol: "ADANIENT", exchange: "NSE", preMarketVolume: 1_560_000, avgVolume: 920_000, volumeRatio: 1.70, price: 2878.50, changePercent: 1.36, sector: "Infra" },
-  { symbol: "HDFCBANK", exchange: "NSE", preMarketVolume: 4_100_000, avgVolume: 2_600_000, volumeRatio: 1.58, price: 1698.40, changePercent: 0.78, sector: "Banking" },
 ];
 
 export const SAMPLE_SECTOR_MOVERS: SectorMoverEntry[] = [

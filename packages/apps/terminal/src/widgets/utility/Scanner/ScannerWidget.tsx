@@ -3,16 +3,20 @@
  *
  * Features:
  *   - 4 tabs: Gap Scan | OI Change | Volume | Sectors
- *   - Sortable TanStack Tables per tab
- *   - Color-coded bullish (green) / bearish (red) signals
- *   - Auto-refresh indicator (simulated, ready for real data)
- *   - "Add to Watchlist" action per row
- *   - Sample data seeded with realistic NIFTY 50 patterns
- *
- * Ready to wire to OpenAlgo pre-market data when available.
+ *   - Gap Scan and Volume run REAL backend scans (`/v1/scanner/run` prebuilt
+ *     `pre_market_movers` / `volume_breakout` over the NIFTY 50 universe) —
+ *     the response's own `is_sample_data` flag drives the Live / Sample badge,
+ *     live when a broker read account is connected, deterministic sample bars
+ *     otherwise.
+ *   - Sectors derives live per-sector movers from NIFTY 50 multi-quotes
+ *     outside Explore (useSectorMovers); sample rows, disclosed, otherwise.
+ *   - OI Change remains a seeded sample table (disclosed per-tab) until an
+ *     OI-delta scan source exists server-side.
+ *   - Sortable TanStack Tables per tab.
  */
 
 import { useState, useMemo, useCallback, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   useReactTable,
   getCoreRowModel,
@@ -29,6 +33,8 @@ import {
   Activity,
   Map,
   Plus,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,19 +51,22 @@ import { cn } from "@/lib/utils";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import {
-  SAMPLE_GAP_SCANS,
   SAMPLE_OI_CHANGES,
-  SAMPLE_VOLUME_SPIKES,
-  SAMPLE_SECTOR_MOVERS,
-  type GapScanEntry,
   type OIChangeEntry,
-  type VolumeSpikeEntry,
   type SectorMoverEntry,
 } from "./sampleData";
+import { runPrebuiltScan, type ScannerResultRow } from "@/services/ftApi";
+import { useSectorMovers } from "@/hooks/useSectorMovers";
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
 type ScannerTab = "gap" | "oi" | "volume" | "sectors";
+
+/** Backend prebuilt-scan key backing each live tab. */
+const LIVE_TAB_SCANS: Partial<Record<ScannerTab, string>> = {
+  gap: "pre_market_movers",
+  volume: "volume_breakout",
+};
 
 interface TabDef {
   id: ScannerTab;
@@ -217,14 +226,14 @@ function AddToWatchlistBtn({ symbol, exchange }: { symbol: string; exchange: str
 
 // ─── Column definitions ─────────────────────────────────────────────────────────
 
-function gapColumns(): ColumnDef<GapScanEntry, unknown>[] {
+function scanColumns(): ColumnDef<ScannerResultRow, unknown>[] {
   return [
     {
       accessorKey: "symbol",
       header: "Symbol",
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
-          {row.original.gapType === "up" ? (
+          {row.original.change_pct >= 0 ? (
             <TrendingUp className="size-3 text-profit shrink-0" />
           ) : (
             <TrendingDown className="size-3 text-loss shrink-0" />
@@ -233,23 +242,14 @@ function gapColumns(): ColumnDef<GapScanEntry, unknown>[] {
             <div className="text-xs font-semibold text-text-primary font-mono">
               {row.original.symbol}
             </div>
-            <div className="text-xxs text-text-muted">{row.original.sector}</div>
+            <div className="text-xxs text-text-muted">{row.original.exchange}</div>
           </div>
         </div>
       ),
     },
     {
-      accessorKey: "prevClose",
-      header: () => <span className="block text-right">Prev Close</span>,
-      cell: ({ getValue }) => (
-        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
-          {fmtPrice(getValue() as number)}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "openPrice",
-      header: () => <span className="block text-right">Open</span>,
+      accessorKey: "ltp",
+      header: () => <span className="block text-right">LTP</span>,
       cell: ({ getValue }) => (
         <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
           {fmtPrice(getValue() as number)}
@@ -257,10 +257,10 @@ function gapColumns(): ColumnDef<GapScanEntry, unknown>[] {
       ),
     },
     {
-      accessorKey: "gapPercent",
-      header: () => <span className="block text-right">Gap %</span>,
+      accessorKey: "change_pct",
+      header: () => <span className="block text-right">Chg %</span>,
       cell: ({ row }) => {
-        const v = row.original.gapPercent;
+        const v = row.original.change_pct;
         return (
           <div
             className={cn(
@@ -274,13 +274,31 @@ function gapColumns(): ColumnDef<GapScanEntry, unknown>[] {
       },
     },
     {
-      accessorKey: "volume",
-      header: () => <span className="block text-right">Volume</span>,
+      accessorKey: "score",
+      header: () => <span className="block text-right">Score</span>,
       cell: ({ getValue }) => (
         <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
-          {fmtVolume(getValue() as number)}
+          {(getValue() as number).toFixed(0)}
         </div>
       ),
+    },
+    {
+      accessorKey: "matched_conditions",
+      header: "Matched",
+      cell: ({ row }) => (
+        <div className="flex flex-wrap gap-1">
+          {row.original.matched_conditions.map((label) => (
+            <Badge
+              key={label}
+              variant="outline"
+              className="text-xxs h-4 px-1 text-text-secondary border-border-default"
+            >
+              {label}
+            </Badge>
+          ))}
+        </div>
+      ),
+      enableSorting: false,
     },
     {
       id: "actions",
@@ -356,85 +374,6 @@ function oiColumns(): ColumnDef<OIChangeEntry, unknown>[] {
           >
             {s}
           </Badge>
-        );
-      },
-    },
-    {
-      id: "actions",
-      header: "",
-      cell: ({ row }) => (
-        <div className="flex justify-end">
-          <AddToWatchlistBtn symbol={row.original.symbol} exchange={row.original.exchange} />
-        </div>
-      ),
-      enableSorting: false,
-    },
-  ];
-}
-
-function volumeColumns(): ColumnDef<VolumeSpikeEntry, unknown>[] {
-  return [
-    {
-      accessorKey: "symbol",
-      header: "Symbol",
-      cell: ({ row }) => (
-        <div>
-          <div className="text-xs font-semibold text-text-primary font-mono">
-            {row.original.symbol}
-          </div>
-          <div className="text-xxs text-text-muted">{row.original.sector}</div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "volumeRatio",
-      header: () => <span className="block text-right">Vol Ratio</span>,
-      cell: ({ row }) => {
-        const v = row.original.volumeRatio;
-        return (
-          <div
-            className={cn(
-              "text-right font-mono tabular-nums text-xs font-semibold",
-              v >= 2 ? "text-profit" : v >= 1.5 ? "text-warning" : "text-text-secondary",
-            )}
-          >
-            {v.toFixed(2)}x
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "preMarketVolume",
-      header: () => <span className="block text-right">Pre-Mkt Vol</span>,
-      cell: ({ getValue }) => (
-        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
-          {fmtVolume(getValue() as number)}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "avgVolume",
-      header: () => <span className="block text-right">Avg Vol</span>,
-      cell: ({ getValue }) => (
-        <div className="text-right font-mono tabular-nums text-xs text-text-muted">
-          {fmtVolume(getValue() as number)}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "changePercent",
-      header: () => <span className="block text-right">Change %</span>,
-      cell: ({ row }) => {
-        const v = row.original.changePercent;
-        return (
-          <div
-            className={cn(
-              "text-right font-mono tabular-nums text-xs font-semibold",
-              v >= 0 ? "text-profit" : "text-loss",
-            )}
-          >
-            {fmtPct(v)}
-          </div>
         );
       },
     },
@@ -532,16 +471,24 @@ function ScannerWidget() {
   const [activeTab, setActiveTab] = useState<ScannerTab>("gap");
 
   // Memoize columns
-  const gapCols = useMemo(() => gapColumns(), []);
+  const liveCols = useMemo(() => scanColumns(), []);
   const oiCols = useMemo(() => oiColumns(), []);
-  const volumeCols = useMemo(() => volumeColumns(), []);
   const sectorCols = useMemo(() => sectorColumns(), []);
 
-  // NOTE: there is no live scanner feed yet — the rows come from static
-  // sampleData (disclosed by the "Sample data" notice below). A "last
-  // refreshed" clock + manual-refresh spinner were removed because they only
-  // bumped a timestamp / slept 500ms over unchanging data, implying a live
-  // refresh that never happens. Wire a real fetch before reintroducing them.
+  // Gap and Volume run real backend scans; the response's own is_sample_data
+  // flag drives the badge, so the widget never guesses connection state.
+  const liveScanKey = LIVE_TAB_SCANS[activeTab];
+  const scanQuery = useQuery({
+    queryKey: ["scannerPrebuiltRun", liveScanKey],
+    queryFn: () => runPrebuiltScan(liveScanKey ?? ""),
+    enabled: liveScanKey !== undefined,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  // Sectors derive from live multi-quotes outside Explore; isLive is true only
+  // when real quote data actually backs the rows.
+  const sectorMovers = useSectorMovers();
 
   return (
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden">
@@ -553,6 +500,29 @@ function ScannerWidget() {
         </span>
 
         <div className="flex-1" />
+        {liveScanKey !== undefined && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-text-muted hover:text-accent"
+            onClick={() => void scanQuery.refetch()}
+            disabled={scanQuery.isFetching}
+            aria-label="Re-run scan"
+          >
+            <RefreshCw className={cn("size-3", scanQuery.isFetching && "animate-spin")} />
+          </Button>
+        )}
+        {activeTab === "sectors" && sectorMovers.isLive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-text-muted hover:text-accent"
+            onClick={() => sectorMovers.refetch()}
+            aria-label="Refresh sector movers"
+          >
+            <RefreshCw className="size-3" />
+          </Button>
+        )}
       </div>
 
       {/* Tab bar */}
@@ -582,26 +552,78 @@ function ScannerWidget() {
         })}
       </nav>
 
-      {/* Sample data notice */}
-      <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
-        <span className="text-xxs text-warning">
-          Sample data — connect broker for live pre-market data
-        </span>
-      </div>
+      {/* Provenance notice — per-tab, honest */}
+      {liveScanKey !== undefined ? (
+        scanQuery.data && (
+          scanQuery.data.is_sample_data ? (
+            <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
+              <span className="text-xxs text-warning" role="status">
+                Sample scan — connect a broker read account to scan live prices
+              </span>
+            </div>
+          ) : (
+            <div className="px-2 py-1 bg-profit/5 border-b border-profit/20 shrink-0">
+              <span className="text-xxs text-profit" role="status">
+                Live scan — {scanQuery.data.scan_name} · {scanQuery.data.matched_count} of{" "}
+                {scanQuery.data.total_universe} matched
+              </span>
+            </div>
+          )
+        )
+      ) : activeTab === "sectors" ? (
+        sectorMovers.isLive ? (
+          <div className="px-2 py-1 bg-profit/5 border-b border-profit/20 shrink-0">
+            <span className="text-xxs text-profit" role="status">
+              Live sectors — derived from NIFTY 50 quotes, refreshed every minute
+            </span>
+          </div>
+        ) : (
+          <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
+            <span className="text-xxs text-warning" role="status">
+              Sample data — connect OpenAlgo outside Explore for live sector movers
+            </span>
+          </div>
+        )
+      ) : (
+        <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
+          <span className="text-xxs text-warning">
+            Sample data — no live source exists for this scan yet
+          </span>
+        </div>
+      )}
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
-        {activeTab === "gap" && (
-          <SortableTable data={SAMPLE_GAP_SCANS} columns={gapCols} />
+        {liveScanKey !== undefined && (
+          scanQuery.isLoading ? (
+            <div className="flex items-center justify-center h-full gap-2 text-text-muted">
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              <span className="text-xs">Scanning the NIFTY 50 universe…</span>
+            </div>
+          ) : scanQuery.isError ? (
+            <div className="flex flex-col items-center justify-center h-full gap-1 text-center px-4">
+              <span className="text-loss text-xs">Scan failed.</span>
+              <span className="text-text-muted text-xxs">
+                {scanQuery.error instanceof Error
+                  ? scanQuery.error.message
+                  : "Backend may be offline."}
+              </span>
+            </div>
+          ) : (scanQuery.data?.results.length ?? 0) === 0 ? (
+            <div className="flex items-center justify-center h-full px-4 text-center">
+              <span className="text-xs text-text-muted">
+                No matches in the scan universe right now.
+              </span>
+            </div>
+          ) : (
+            <SortableTable data={scanQuery.data?.results ?? []} columns={liveCols} />
+          )
         )}
         {activeTab === "oi" && (
           <SortableTable data={SAMPLE_OI_CHANGES} columns={oiCols} />
         )}
-        {activeTab === "volume" && (
-          <SortableTable data={SAMPLE_VOLUME_SPIKES} columns={volumeCols} />
-        )}
         {activeTab === "sectors" && (
-          <SortableTable data={SAMPLE_SECTOR_MOVERS} columns={sectorCols} />
+          <SortableTable data={sectorMovers.data} columns={sectorCols} />
         )}
       </div>
     </div>
