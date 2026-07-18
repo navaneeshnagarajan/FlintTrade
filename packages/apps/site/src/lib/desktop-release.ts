@@ -1,6 +1,8 @@
 export type DesktopReleaseChannel = 'beta' | 'stable';
 export type DesktopOs = 'macos' | 'windows' | 'linux';
-export type DesktopArch = 'x64' | 'arm64';
+// 'universal' — the single macOS DMG carrying both CPU slices (the manifest
+// also projects it onto the per-arch keys for older pickers).
+export type DesktopArch = 'x64' | 'arm64' | 'universal';
 export type DesktopAssetKind = 'dmg' | 'nsis' | 'appimage' | 'deb' | 'rpm';
 
 export interface DesktopReleaseAsset {
@@ -98,7 +100,11 @@ export function parseDesktopReleaseAsset(asset: GitHubReleaseAsset): DesktopRele
   const withDigest = <T extends DesktopReleaseAsset>(base: T): T =>
     sha256 ? { ...base, sha256 } : base;
   if (/\.dmg$/i.test(name)) {
-    const arch = /_(?:aarch64|arm64)\.dmg$/i.test(name) ? 'arm64' : 'x64';
+    const arch = /universal/i.test(name)
+      ? 'universal'
+      : /_(?:aarch64|arm64)\.dmg$/i.test(name)
+        ? 'arm64'
+        : 'x64';
     return withDigest({ os: 'macos', arch, kind: 'dmg', name, size, url });
   }
   if (/_x64-setup\.exe$/i.test(name)) {
@@ -139,7 +145,7 @@ export function isDesktopReleaseManifest(value: unknown): value is DesktopReleas
     const candidate = asset as Partial<DesktopReleaseAsset>;
     return (
       (candidate.os === 'macos' || candidate.os === 'windows' || candidate.os === 'linux') &&
-      (candidate.arch === 'x64' || candidate.arch === 'arm64') &&
+      (candidate.arch === 'x64' || candidate.arch === 'arm64' || candidate.arch === 'universal') &&
       (candidate.kind === 'dmg' ||
         candidate.kind === 'nsis' ||
         candidate.kind === 'appimage' ||

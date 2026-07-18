@@ -42,7 +42,7 @@ const guarantees = [
   {
     icon: ShieldCheck,
     title: 'Honest beta',
-    copy: 'Current beta installers are unsigned. macOS may require right-click → Open; Windows may show SmartScreen.',
+    copy: 'Current beta installers are unsigned. The install commands avoid the OS warnings entirely; manual downloads need Privacy & Security → Open Anyway on macOS and More info → Run anyway on Windows.',
   },
 ];
 
@@ -55,7 +55,7 @@ const platforms = [
   {
     platform: 'Linux (x64 & arm64)',
     command: 'curl -fsSL https://flinttrade.vercel.app/install.sh | bash',
-    needs: 'Downloads the matching AppImage by default; pass --package deb or --package rpm for native packages.',
+    needs: 'The Linux install path: verifies and installs the right AppImage for your machine, with an automatic no-FUSE fallback.',
   },
   {
     platform: 'Windows 10/11 (x64)',
@@ -67,25 +67,20 @@ const platforms = [
 function primaryDownloadsFor(manifest: DesktopReleaseManifest) {
   return [
     {
-      title: 'macOS Apple Silicon',
-      asset: assetForPlatform(manifest, 'macos', 'arm64'),
-    },
-    {
-      title: 'macOS Intel',
-      asset: assetForPlatform(manifest, 'macos', 'x64'),
+      // One universal DMG per release (both CPU generations in one app);
+      // per-arch fallbacks only match releases older than the restructure.
+      title: 'macOS (Universal)',
+      asset:
+        assetForPlatform(manifest, 'macos', 'universal') ??
+        assetForPlatform(manifest, 'macos', 'arm64') ??
+        assetForPlatform(manifest, 'macos', 'x64'),
     },
     {
       title: 'Windows 10/11',
       asset: assetForPlatform(manifest, 'windows', 'x64'),
     },
-    {
-      title: 'Linux x64 AppImage',
-      asset: assetForPlatform(manifest, 'linux', 'x64', ['appimage']),
-    },
-    {
-      title: 'Linux ARM64 AppImage',
-      asset: assetForPlatform(manifest, 'linux', 'arm64', ['appimage']),
-    },
+    // Linux is command-first: the install command below picks and verifies
+    // the right AppImage for the machine, so no direct links are listed.
   ].filter((entry): entry is { title: string; asset: DesktopReleaseAsset } => entry.asset != null);
 }
 
