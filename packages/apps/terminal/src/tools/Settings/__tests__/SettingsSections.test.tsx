@@ -108,6 +108,10 @@ vi.mock("@/services/api", () => ({
   getLeverageSettings: vi.fn(),
 }));
 vi.mock("@/services/ftApi.automation", () => ({ testWhatsAppAlert: vi.fn() }));
+vi.mock("@/services/ftApi.telegram", () => ({
+  readTelegramConfig: vi.fn(),
+  persistTelegramConfig: vi.fn(),
+}));
 
 // Store/hook deps for the heavier sections.
 vi.mock("@/hooks/useBrokerCapabilities", () => ({

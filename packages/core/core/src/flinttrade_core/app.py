@@ -2920,6 +2920,7 @@ def create_flask_app(
     cron_strategy_scheduler: Any | None = None,
     time_scheduler: Any | None = None,
     safety_config_ready: bool | None = None,
+    telegram: Any | None = None,
 ) -> Flask:
     """Create the Flask app with FlintTrade API routes.
 
@@ -3220,6 +3221,9 @@ def create_flask_app(
     app.config["CRON"] = cron
     app.config["AUDIT"] = audit
     app.config["CLIENT"] = client
+    # The runtime-owned Telegram bot (may be None in tests) — the settings
+    # route uses it to apply a saved config without a full backend restart.
+    app.config["TELEGRAM_BOT"] = telegram
     # Read-only OpenAlgo consumers must remain available even when this process
     # has no emergency runtime and live BrokerRouter publication fails closed.
     app.config["OPENALGO_CLIENT"] = client
@@ -4849,6 +4853,84 @@ def create_flask_app(
             logger.warning("LLM connection test failed (%s)", type(exc).__name__)
             return jsonify({"status": "error", "message": "LLM connection test failed"}), 500
 
+    @app.route("/v1/config/telegram", methods=["GET", "POST"])
+    @limiter.limit("10 per minute")
+    def _telegram_config() -> Any:
+        """Read or persist redacted Telegram bot settings from the UI.
+
+        Mirrors ``/v1/config/llm``: localhost-only, authenticated session,
+        secret token stored in a hardened owner-only file (never in
+        ``workspace.json`` or any response). A successful save is applied to
+        the running bot in a background thread so the kill-switch bot follows
+        the new settings without a backend restart.
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "This endpoint is only reachable from localhost",
+                }
+            ), 403
+
+        from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
+
+        denied = require_local_control_auth(
+            message="Telegram configuration requires an authenticated session"
+        )
+        if denied is not None:
+            return denied
+
+        from .telegram_config import persist_telegram_config, read_telegram_config  # noqa: PLC0415
+
+        if request.method == "GET":
+            return jsonify({"status": "success", "data": read_telegram_config()}), 200
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            data = persist_telegram_config(payload)
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 400
+        except Exception as exc:  # noqa: BLE001 - never surface secret material
+            logger.error("Failed to persist Telegram config (%s)", type(exc).__name__)
+            return jsonify({"status": "error", "message": "Could not persist Telegram config"}), 500
+
+        bot = app.config.get("TELEGRAM_BOT")
+        applying = False
+        if bot is not None:
+            # stop() joins the polling thread (bounded but potentially tens of
+            # seconds), so the restart runs off-request. The saved state is
+            # durable either way; a failed apply only means the new settings
+            # take effect on the next backend start.
+            def _apply_saved_telegram_config() -> None:
+                from flinttrade_automation.telegram_bot import BotConfig  # noqa: PLC0415
+
+                try:
+                    bot.stop()
+                except Exception:  # noqa: BLE001 - the poller may be wedged; config stays durable
+                    logger.exception("Telegram bot did not stop cleanly while applying new settings")
+                    return
+                try:
+                    bot.config = BotConfig.from_env()
+                    bot.start_background()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Telegram bot restart failed after config save")
+
+            threading.Thread(
+                target=_apply_saved_telegram_config,
+                name="telegram-config-apply",
+                daemon=True,
+            ).start()
+            applying = True
+
+        return jsonify(
+            {
+                "status": "ok",
+                "message": "Telegram settings saved" + (" — applying to the running bot" if applying else ""),
+                "data": data,
+            }
+        ), 200
+
     # ------------------------------------------------------------------
     # Connection-test endpoint — /ft-api/v1/test-connection
     # Used by the Setup wizard + Settings › Connection. The browser cannot
@@ -5953,6 +6035,7 @@ class FlintTradeApp:
             rag=self.rag,
             cron_strategy_scheduler=self.strategy_cron_scheduler,
             time_scheduler=self.time_scheduler,
+            telegram=self.telegram,
         )
         self._flask_app = flask_app
         from .local_ai_routes import (  # noqa: PLC0415

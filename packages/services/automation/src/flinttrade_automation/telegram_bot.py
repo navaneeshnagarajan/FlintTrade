@@ -101,22 +101,34 @@ class BotConfig:
 
     @classmethod
     def from_env(cls) -> BotConfig:
-        """Load from env vars, falling back to workspace.json."""
+        """Load from env vars, falling back to the UI-persisted workspace settings.
+
+        The workspace stores only a ``secret://`` *reference*; the actual token
+        lives in the hardened secret file resolved via
+        ``flinttrade_core.telegram_config``. A bare reference string is never
+        used as a token (the pre-fix behaviour would have sent the literal
+        ``secret://telegram/bot_token`` text to Telegram's API).
+        """
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         enabled = os.getenv("TELEGRAM_ENABLED", "")
 
         if not token:
             try:
+                from flinttrade_core.telegram_config import resolve_telegram_bot_token
                 from flinttrade_core.workspace import Workspace
 
                 ws = Workspace()
-                token = token or ws.get("notifications.telegram_bot_token_ref", "")
-                chat_id = chat_id or ws.get("notifications.telegram_chat_id", "")
+                token = resolve_telegram_bot_token(ws)
+                chat_id = chat_id or str(ws.get("notifications.telegram_chat_id", "") or "")
                 if not enabled:
                     enabled = "true" if ws.get("notifications.telegram_enabled", False) else "false"
             except Exception as exc:
                 logger.exception("suppressed: %s", exc)
+
+        if token.startswith("secret://"):
+            # Fail closed on a reference that was never resolved.
+            token = ""
 
         return cls(
             token=token,
