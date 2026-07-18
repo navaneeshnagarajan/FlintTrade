@@ -4,6 +4,13 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.11](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.10...v0.6.0-beta.11) (2026-07-18)
+
+
+### Fixed
+
+* **infra:** make the macOS one-command install actually mount and install the DMG ([d071860](https://github.com/navaneeshnagarajan/FlintTrade/commit/d071860b74459ed185e3df5d1abfe25faece957c))
+
 ## [0.6.0-beta.10](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.9...v0.6.0-beta.10) (2026-07-18)
 
 
