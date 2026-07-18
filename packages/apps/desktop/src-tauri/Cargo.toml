@@ -39,7 +39,11 @@ tauri-plugin-updater = "2"
 # release into <workspace>/runtime/backend/. The feature mirrors
 # tauri-plugin-updater's reqwest configuration, so both share the one
 # reqwest/rustls build already resolved in the lockfile.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+# system-proxy: GUI-launched apps never inherit HTTP(S)_PROXY env vars, so
+# without it the first-run payload download fails on every machine whose
+# proxy lives in OS settings (WinINET/macOS network config) while the user's
+# browser works fine — "installed, but the engine download never starts".
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
 tokio = { version = "1", features = ["time"] }        # stall watchdog on the payload download stream
 # The no-provider rustls stack needs a process-wide crypto provider; ring is
 # the provider the updater plugin already uses (installed lazily in

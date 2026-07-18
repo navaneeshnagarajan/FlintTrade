@@ -1150,9 +1150,24 @@ async fn apply_native_update(app: AppHandle) -> Result<(), String> {
 // demotes the pin and lands on the splash error surface with a Retry action.
 // ---------------------------------------------------------------------------
 
-/// Target triple this shell was compiled for, as emitted by ``tauri-build``.
-/// The channel manifest keys its backend payloads by exactly this string.
-const PAYLOAD_TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
+/// Target triple of THIS compiled slice. The channel manifest keys its
+/// backend payloads by exactly this string.
+///
+/// Derived from ``cfg`` rather than tauri-build's ``TAURI_ENV_TARGET_TRIPLE``
+/// so the universal macOS binary is guaranteed correct by construction: each
+/// slice of a ``universal-apple-darwin`` build embeds its own arch's triple,
+/// and the slice the OS chooses at launch downloads the matching payload
+/// (PyInstaller payloads stay per-arch — there is no universal payload).
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const PAYLOAD_TARGET_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const PAYLOAD_TARGET_TRIPLE: &str = "x86_64-apple-darwin";
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const PAYLOAD_TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const PAYLOAD_TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const PAYLOAD_TARGET_TRIPLE: &str = "aarch64-unknown-linux-gnu";
 
 /// State file inside the payload runtime dir pinning the active version and
 /// the sha256 its binary must still hash to at boot.
@@ -2740,12 +2755,38 @@ fn next_launch_token(context: &BootContext) -> std::io::Result<String> {
 /// and hand its pipes to the supervision task. ``Err`` leaves the splash
 /// bootstrap surface in charge — the thin shell has no bundled fallback, so
 /// an unusable payload is demoted and the operator retries the download.
+/// True when a spawn/verify error looks like antivirus interference: access
+/// denied (5) or ERROR_VIRUS_INFECTED (225) on Windows. Defender quarantining
+/// the unsigned payload previously surfaced as a generic integrity/start
+/// failure whose Retry re-downloaded the engine straight back into
+/// quarantine — an endless loop that never named the real culprit.
+#[cfg(windows)]
+fn looks_like_antivirus_block(error: &std::io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(5) | Some(225))
+}
+
+#[cfg(not(windows))]
+fn looks_like_antivirus_block(_error: &std::io::Error) -> bool {
+    false
+}
+
 fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
     let context = app.state::<BootContext>();
     let (version, binary) = match verified_active_payload_binary() {
         Ok(Some(pair)) => pair,
         Ok(None) => {
             return Err("No trading engine is installed yet. Retry to download it.".to_string());
+        }
+        Err(error) if cfg!(windows) && error.kind() == std::io::ErrorKind::NotFound => {
+            // A previously installed payload vanishing from disk on Windows
+            // is the signature of an antivirus quarantine, not corruption.
+            eprintln!("[flinttrade] installed payload binary is missing: {error}");
+            return Err(
+                "The trading engine file has disappeared — antivirus software (for example \
+                 Windows Defender) may have quarantined it. Restore it or add an exclusion \
+                 for the FlintTrade folder in %APPDATA%, then Retry."
+                    .to_string(),
+            );
         }
         Err(error) => {
             eprintln!("[flinttrade] managed backend payload verification failed: {error}");
@@ -2772,6 +2813,14 @@ fn start_managed_backend(app: &AppHandle) -> Result<(), String> {
     command.env(PARENT_IDENTITY_ENV, &context.parent_identity);
     let (rx, mut child) = spawn_contained_std_command(command).map_err(|error| {
         eprintln!("[flinttrade] managed backend payload v{version} failed to spawn: {error}");
+        if looks_like_antivirus_block(&error) {
+            // Do NOT demote the pin: the payload verifies, the OS refused to
+            // run it. A demote-and-redownload loop cannot fix a quarantine.
+            return "Windows blocked the trading engine from starting — antivirus software \
+                    (for example Windows Defender) is likely interfering. Add an exclusion \
+                    for the FlintTrade folder in %APPDATA%, then Retry."
+                .to_string();
+        }
         if demote_or_rollback_active_payload() {
             "The trading engine could not be started. Retry to start the previous engine."
                 .to_string()
@@ -3161,6 +3210,15 @@ fn spawn_backend_supervision(
 /// Build and run the FlintTrade desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK's DMA-BUF renderer blanks or crashes the window on NVIDIA
+    // proprietary drivers and most VMs — the single biggest "installed fine,
+    // launches to a white screen" cause on Linux. Default it off unless the
+    // operator has expressed ANY explicit preference (setting the variable —
+    // to any value, including "0" — wins).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         // System-browser opener for broker OAuth approval pages — the main
