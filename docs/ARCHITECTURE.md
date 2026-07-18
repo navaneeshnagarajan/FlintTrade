@@ -300,6 +300,15 @@ FlintTrade's backend is a single Flask application registered as
 blueprints behind `/v1/*`, and exposes them externally under
 `/ft-api/v1/*` thanks to the WSGI prefix-strip middleware (see §6).
 
+**One backend process per workspace.** In-memory job/runner state (scheduler
+jobs, download queues, sandbox runtime, session registries) assumes a single
+authoritative process. That constraint is enforced, not assumed:
+`backend_instance.py` acquires a kernel-backed workspace lock before the
+runtime starts (both the `run()` and WSGI entrypoints), and a second launch
+against the same workspace fails fast with `BackendInstanceAlreadyRunning`.
+The HTTP server (waitress) is single-process/threaded, so no multi-worker
+deployment can split that state.
+
 ### Safety layers
 
 Every order placed through FlintTrade passes five safety layers in order

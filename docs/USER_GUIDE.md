@@ -180,7 +180,7 @@ claim — switching to Live requires a deliberate confirmation step.
 6. Click **Place Order**. The order appears in the **Positions** widget
    immediately; the **Orderbook** widget shows it as filled (simulated).
 7. Close the position from the Positions widget. Confirm your simulated
-   P&L is recorded in the **P&L Dashboard** tool.
+   P&L is recorded in the **Intraday P&L** widget.
 
 You have just exercised the full FlintTrade order path — front-end → JWT
 guard → mode guard → FlintTrade sandbox → simulated fill →
@@ -292,11 +292,11 @@ palette (Ctrl + K → "preset"). Built-in presets include:
 
 - **Scalper Zone** — chart, level-2 depth, order pad, recent trades.
 - **Options Desk** — option chain, payoff diagram, Greeks, straddle P&L.
-- **Market Watch** — multi-symbol watchlist, heatmap, news ticker.
-- **Analysis** — chart with multiple indicators, regime detector, correlation
-  matrix.
-- **Risk Monitor** — P&L dashboard, exposure, kill-switch status, funds.
-- **Investor View** — holdings, SIPs, net worth, mutual-fund tracker.
+- **Market Watch** — multi-symbol watchlist, chart, price ticker, dashboard.
+- **Analysis** — chart with indicators, OI chart, depth, positions, news.
+- **Risk Monitor** — dashboard, risk panel, MTM monitor, positions, orders.
+- **Investor View** — chart, watchlist, holdings, dashboard (SIPs, net worth
+  and mutual funds live on the Invest page).
 - … plus eight more.
 
 Presets are serialised via the Dockview API. You can save your own custom

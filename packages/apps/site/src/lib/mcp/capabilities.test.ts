@@ -67,7 +67,8 @@ describe('docs index generation', () => {
   it('keeps homepage facts aligned with the audited gateway and widget state', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
-    expect(pageSource).toContain('<strong>101</strong>');
+    expect(pageSource).toContain('<strong>102</strong>');
+    expect(pageSource).not.toContain('<strong>101</strong>');
     expect(pageSource).toContain('Native broker contract and routing are safety-gated');
     expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
     expect(pageSource).not.toContain('<strong>82</strong>');

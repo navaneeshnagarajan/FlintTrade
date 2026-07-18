@@ -24,9 +24,9 @@ workflow YAML should read this once.
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
 
-### The eight per-push Ubuntu jobs
+### The nine per-push Ubuntu jobs
 
-`test.yml` splits the Python, TypeScript, and Rust test suites across eight
+`test.yml` splits the Python, TypeScript, and Rust test suites across nine
 parallel jobs to keep wall-clock time low:
 
 1. `python-tests` — full pytest suite.
@@ -46,8 +46,12 @@ parallel jobs to keep wall-clock time low:
    unit tests; `cargo audit` in `supply-chain.yml` checks advisories, not
    behaviour. Cached via `Swatinem/rust-cache` so the per-push compile stays
    cheap.
+9. `rust-desktop-tests` — `cargo test` on the Tauri desktop shell crate
+   (`packages/apps/desktop/src-tauri`). Pinned to `ubuntu-22.04` deliberately
+   so the frequent gate compiles in the same glibc/webkit environment the
+   release matrix uses; move both together when the release floor moves.
 
-All eight must be green for the workflow to be reported as passing. The shard
+All nine must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
 (in `python-tests`) fails CI if any terminal `*.test.ts(x)` file runs in no
 shard — so coverage stays complete apart from the allowlisted `TradeIdea`.
@@ -143,8 +147,8 @@ workflow log. It is the single most useful CI command — bookmark it.
 
 ### Step 3 — reproduce locally
 
-The seven per-push jobs are designed to be reproducible without a
-runner. Map the failed job to its local command:
+The per-push jobs are designed to be reproducible without a runner. Map the
+failed job to its local command:
 
 | Job | Local command |
 |---|---|
@@ -155,6 +159,8 @@ runner. Map the failed job to its local command:
 | `node-widget-tests-2b` | `... npx vitest run` over `src/widgets/utility/{StrategyTemplates,TickSpeed,Ticker,Watchlist,AIBackends,AITeam,Obsidian,TradeJournal}/` (one dir per invocation; `TradeIdea` excluded) |
 | `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
+| `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`) |
+| `rust-desktop-tests` | `cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml` |
 
 The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
 as the source of truth (the shard-coverage guard keeps it complete).
