@@ -467,16 +467,16 @@ describe("ModeIndicator", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /live trading/i }));
 
-      await waitFor(() => {
-        expect(globalThis.fetch).toHaveBeenCalledOnce();
-      });
+      // The error message is surfaced to the user once the failed request
+      // settles — await it so the async rejection has fully propagated
+      // before asserting the state stayed put.
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
       // Stayed in live — the UI must never claim Practice while the
       // backend still has a live-unlocked JWT in its blocklist's good
       // standing.
       expect(useModeStore.getState().mode).toBe("live");
       expect(useAuthStore.getState().token).toBe("stale-live-jwt");
-      // The error message is surfaced to the user.
-      expect(screen.getByRole("alert")).toBeInTheDocument();
     });
 
     it("does not open a PIN dialog when switching to practice", async () => {
