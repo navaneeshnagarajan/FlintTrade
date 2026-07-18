@@ -24,6 +24,8 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
 import { getAdvisorBase } from "@/services/advisorApi";
+import { placeOrder } from "@/services/api";
+import type { PlaceOrderParams } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,11 +33,23 @@ import { getAdvisorBase } from "@/services/advisorApi";
 
 const TOOL_CALL_PATTERN = /\[TOOL_CALL:([\s\S]*?)\]/;
 
+/**
+ * Endpoint spellings (normalised: prefix-stripped, lowercased) the approval
+ * card may execute. Only gated order placement is approvable — the widget
+ * must never POST an arbitrary model-chosen endpoint with the operator's
+ * session, so anything outside this set is refused with the endpoint named.
+ */
+const APPROVABLE_ORDER_ENDPOINTS = new Set(["orders/place", "placeorder", "place-order"]);
+
+const ORDER_ACTIONS = new Set(["BUY", "SELL"]);
+const ORDER_TYPES = new Set(["MARKET", "LIMIT", "SL", "SL-M"]);
+const ORDER_PRODUCTS = new Set(["MIS", "CNC", "NRML"]);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface ToolCall {
+export interface ToolCall {
   endpoint: string;
   method: string;
   description: string;
@@ -118,6 +132,110 @@ function parseToolCall(content: string): ToolCall | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Strip host/prefix noise from a model-emitted endpoint so it can be compared
+ * against the approvable allowlist (`/api/v1/orders/place`, `orders/place`,
+ * `placeorder`… all normalise to the same key).
+ */
+export function normaliseToolEndpoint(endpoint: string): string {
+  return endpoint
+    .replace(/^https?:\/\/[^/]+/i, "")
+    .replace(/^\/?(ft-api\/)?(api\/)?v1\//i, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Validate a model-emitted payload into complete PlaceOrderParams.
+ *
+ * Every core field must be explicit — an AI-proposed order gets no silent
+ * defaults. Returns null (→ honest refusal) when anything is missing or
+ * malformed; deep validation (price bands, lot size) stays with the backend
+ * safety layers.
+ */
+export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrderParams | null {
+  const symbol = typeof payload["symbol"] === "string" ? payload["symbol"].trim() : "";
+  const exchange = typeof payload["exchange"] === "string" ? payload["exchange"].trim().toUpperCase() : "";
+  const action = typeof payload["action"] === "string" ? payload["action"].trim().toUpperCase() : "";
+  const rawOrderType = payload["orderType"] ?? payload["order_type"] ?? payload["pricetype"];
+  const orderType = typeof rawOrderType === "string" ? rawOrderType.trim().toUpperCase() : "";
+  const rawProduct = payload["product"];
+  const product = typeof rawProduct === "string" ? rawProduct.trim().toUpperCase() : "";
+  const quantity = Number(payload["quantity"]);
+
+  if (!symbol || !exchange) return null;
+  if (!ORDER_ACTIONS.has(action)) return null;
+  if (!ORDER_TYPES.has(orderType)) return null;
+  if (!ORDER_PRODUCTS.has(product)) return null;
+  if (!Number.isInteger(quantity) || quantity <= 0) return null;
+
+  const params: PlaceOrderParams = {
+    symbol,
+    exchange,
+    action: action as PlaceOrderParams["action"],
+    quantity,
+    orderType: orderType as PlaceOrderParams["orderType"],
+    product: product as PlaceOrderParams["product"],
+    strategy: "AIAdvisor",
+  };
+
+  const rawPrice = payload["price"];
+  if (rawPrice !== undefined && rawPrice !== null && rawPrice !== "") {
+    const price = Number(rawPrice);
+    if (!Number.isFinite(price) || price < 0) return null;
+    params.price = price;
+  }
+  const rawTrigger = payload["triggerPrice"] ?? payload["trigger_price"];
+  if (rawTrigger !== undefined && rawTrigger !== null && rawTrigger !== "") {
+    const triggerPrice = Number(rawTrigger);
+    if (!Number.isFinite(triggerPrice) || triggerPrice < 0) return null;
+    params.triggerPrice = triggerPrice;
+  }
+  return params;
+}
+
+/**
+ * Execute an operator-approved tool call and return the chat message that
+ * reports the outcome.
+ *
+ * Only gated order placement is executable. Everything routes through the
+ * shared placeOrder client (auth headers, order rate limit, fail-closed
+ * native write-target assertion, actionable backend errors) or is refused
+ * with the endpoint named — the widget must never POST an arbitrary
+ * model-chosen endpoint with the operator's session, and must never report
+ * success for a failed request.
+ */
+export async function executeApprovedToolCall(toolCall: ToolCall): Promise<string> {
+  const endpointKey = normaliseToolEndpoint(toolCall.endpoint);
+  if (!APPROVABLE_ORDER_ENDPOINTS.has(endpointKey)) {
+    return (
+      `Action not executed: "${toolCall.endpoint}" is not an approvable action. ` +
+      "Only order placement through the gated order path can be approved here."
+    );
+  }
+
+  const params = toPlaceOrderParams(toolCall.payload);
+  if (!params) {
+    return (
+      "Action not executed: the proposed order is missing or malforms a required field " +
+      "(symbol, exchange, action, quantity, orderType, product). Nothing was sent to the broker."
+    );
+  }
+
+  try {
+    const result = await placeOrder(params);
+    return (
+      `Order submitted through the gated order path — order ID ${result.orderId}.\n\n` +
+      `\`${params.action} ${params.quantity} × ${params.symbol} (${params.exchange}) ` +
+      `${params.orderType} ${params.product}\``
+    );
+  } catch (err: unknown) {
+    const errText = err instanceof Error ? err.message : String(err);
+    return `Order failed: ${errText}`;
+  }
 }
 
 /**
@@ -441,26 +559,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         return next;
       });
 
-      const base = getAdvisorBase();
-      const endpoint = msg.toolCall.endpoint.startsWith("/")
-        ? msg.toolCall.endpoint
-        : `/api/v1/${msg.toolCall.endpoint}`;
-
-      try {
-        const resp = await fetch(`${base}${endpoint}`, {
-          method: msg.toolCall.method || "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(msg.toolCall.payload),
-        });
-        const json = (await resp.json()) as Record<string, unknown>;
-        addMessage(
-          "assistant",
-          `Action executed successfully.\n\n\`\`\`json\n${JSON.stringify(json, null, 2)}\n\`\`\``,
-        );
-      } catch (err: unknown) {
-        const errText = err instanceof Error ? err.message : String(err);
-        addMessage("assistant", `Action failed: ${errText}`);
-      }
+      addMessage("assistant", await executeApprovedToolCall(msg.toolCall));
     },
     [addMessage],
   );

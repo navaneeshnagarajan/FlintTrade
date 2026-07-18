@@ -39,6 +39,13 @@ vi.mock("@/services/advisorApi", () => ({
   getAdvisorBase: () => "",
 }));
 
+// Mock the shared gated order client — approvals must dispatch through it,
+// never through a raw fetch of a model-chosen endpoint.
+const mockPlaceOrder = vi.fn();
+vi.mock("@/services/api", () => ({
+  placeOrder: (params: unknown) => mockPlaceOrder(params) as Promise<{ orderId: string }>,
+}));
+
 // Mock fetch to prevent real network calls (fetchAdvisorStatus on mount)
 vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
 
@@ -46,7 +53,11 @@ vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import AIAdvisorWidget from "../AIAdvisorWidget";
+import AIAdvisorWidget, {
+  executeApprovedToolCall,
+  normaliseToolEndpoint,
+  toPlaceOrderParams,
+} from "../AIAdvisorWidget";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -80,5 +91,116 @@ describe("AIAdvisorWidget", () => {
   it("has a send button", () => {
     render(<AIAdvisorWidget />);
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
+  });
+});
+
+describe("normaliseToolEndpoint", () => {
+  it("normalises every place-order spelling to the same key", () => {
+    expect(normaliseToolEndpoint("/api/v1/orders/place")).toBe("orders/place");
+    expect(normaliseToolEndpoint("orders/place")).toBe("orders/place");
+    expect(normaliseToolEndpoint("/ft-api/api/v1/orders/place/")).toBe("orders/place");
+    expect(normaliseToolEndpoint("http://127.0.0.1:5100/api/v1/orders/place")).toBe("orders/place");
+    expect(normaliseToolEndpoint("PLACEORDER")).toBe("placeorder");
+  });
+
+  it("leaves non-order endpoints distinguishable", () => {
+    expect(normaliseToolEndpoint("/api/v1/native/accounts")).toBe("native/accounts");
+    expect(normaliseToolEndpoint("/v1/auth/pin")).toBe("auth/pin");
+  });
+});
+
+describe("toPlaceOrderParams", () => {
+  const valid = {
+    symbol: "NIFTY24JUL25000CE",
+    exchange: "nfo",
+    action: "buy",
+    quantity: 75,
+    orderType: "LIMIT",
+    product: "NRML",
+    price: 12.5,
+  };
+
+  it("accepts a complete explicit order and stamps the AIAdvisor strategy", () => {
+    const params = toPlaceOrderParams(valid);
+    expect(params).toMatchObject({
+      symbol: "NIFTY24JUL25000CE",
+      exchange: "NFO",
+      action: "BUY",
+      quantity: 75,
+      orderType: "LIMIT",
+      product: "NRML",
+      price: 12.5,
+      strategy: "AIAdvisor",
+    });
+  });
+
+  it.each([
+    ["missing symbol", { ...valid, symbol: "" }],
+    ["missing exchange", { ...valid, exchange: undefined }],
+    ["bad action", { ...valid, action: "HOLD" }],
+    ["zero quantity", { ...valid, quantity: 0 }],
+    ["fractional quantity", { ...valid, quantity: 7.5 }],
+    ["missing orderType", { ...valid, orderType: undefined }],
+    ["bad product", { ...valid, product: "SUPER" }],
+    ["negative price", { ...valid, price: -1 }],
+    ["non-numeric trigger", { ...valid, triggerPrice: "abc" }],
+  ])("refuses an order with %s — no silent defaults", (_label, payload) => {
+    expect(toPlaceOrderParams(payload as Record<string, unknown>)).toBeNull();
+  });
+});
+
+describe("executeApprovedToolCall", () => {
+  beforeEach(() => {
+    mockPlaceOrder.mockReset();
+  });
+
+  const orderCall = {
+    description: "Buy NIFTY call",
+    endpoint: "/api/v1/orders/place",
+    method: "POST",
+    payload: {
+      symbol: "NIFTY24JUL25000CE",
+      exchange: "NFO",
+      action: "BUY",
+      quantity: 75,
+      orderType: "MARKET",
+      product: "NRML",
+    },
+  };
+
+  it("dispatches an approvable order through the shared gated client", async () => {
+    mockPlaceOrder.mockResolvedValueOnce({ orderId: "FT-123" });
+    const msg = await executeApprovedToolCall(orderCall);
+    expect(mockPlaceOrder).toHaveBeenCalledOnce();
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY24JUL25000CE", strategy: "AIAdvisor" }),
+    );
+    expect(msg).toContain("FT-123");
+  });
+
+  it("refuses a non-allowlisted endpoint without any dispatch", async () => {
+    const msg = await executeApprovedToolCall({
+      ...orderCall,
+      endpoint: "/api/v1/native/accounts",
+    });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(msg).toContain("not an approvable action");
+    expect(msg).toContain("/api/v1/native/accounts");
+  });
+
+  it("refuses an incomplete order payload without any dispatch", async () => {
+    const msg = await executeApprovedToolCall({
+      ...orderCall,
+      payload: { symbol: "NIFTY", action: "BUY" },
+    });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(msg).toContain("Nothing was sent to the broker");
+  });
+
+  it("reports a failed placement honestly — never 'executed successfully'", async () => {
+    mockPlaceOrder.mockRejectedValueOnce(new Error("Live order blocked: mode_blocked"));
+    const msg = await executeApprovedToolCall(orderCall);
+    expect(msg).toContain("Order failed: Live order blocked: mode_blocked");
+    expect(msg).not.toContain("submitted");
   });
 });
