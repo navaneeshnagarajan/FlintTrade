@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-indicators"
-version = "0.6.0-beta.10"
+version = "0.6.0-beta.11"
 description = "Technical analysis indicators — pure-NumPy batch (110 exports), streaming classes, Pine Script conversion"
 requires-python = ">=3.12"
 dependencies = [
