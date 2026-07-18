@@ -204,7 +204,16 @@ verify_sha256() {
   local file="$1"
   local expected="$2"
   local actual
-  [ -n "$expected" ] || return 0
+  if [ -z "$expected" ]; then
+    # Every official release manifest carries a sha256 per asset. A missing
+    # checksum for a network-fetched installer means stale/tampered metadata
+    # — refuse rather than run an unverified binary. (The local-asset test
+    # hook keeps the historical skip for offline fixtures.)
+    if [ "${FLINTTRADE_ALLOW_LOCAL_ASSET:-0}" = "1" ]; then
+      return 0
+    fi
+    die "Release manifest has no sha256 for $(basename "$file"); refusing to install an unverified binary."
+  fi
   if need sha256sum; then
     actual="$(sha256sum "$file" | awk '{print $1}')"
   elif need shasum; then
@@ -268,7 +277,10 @@ download_release_asset() {
   need curl || die "curl is required to download the FlintTrade installer."
 
   local os="$1"
-  local arch="$2"
+  # Space-separated architecture preference list: newer releases ship ONE
+  # universal macOS DMG, older ones shipped per-arch DMGs, so the macOS
+  # caller passes "universal <arch>" and the first match wins.
+  local arch_candidates="$2"
   local kind="$3"
   local url
   url="$(manifest_url)"
@@ -283,9 +295,12 @@ download_release_asset() {
     die "The release manifest endpoint returned an error; refusing to install."
   fi
 
-  local object
-  object="$(select_asset_object "$manifest" "$os" "$arch" "$kind")"
-  [ -n "$object" ] || die "No $os/$arch/$kind installer was found in the selected release."
+  local object="" candidate_arch
+  for candidate_arch in $arch_candidates; do
+    object="$(select_asset_object "$manifest" "$os" "$candidate_arch" "$kind")"
+    [ -n "$object" ] && break
+  done
+  [ -n "$object" ] || die "No $os/{$arch_candidates}/$kind installer was found in the selected release."
 
   local asset_url asset_name asset_sha
   asset_url="$(json_object_field "$object" url)"
@@ -370,6 +385,109 @@ install_macos_dmg() {
   if [ "$NO_LAUNCH" != "1" ]; then open "$dest/FlintTrade.app"; fi
 }
 
+# True when this distro can mount type-2 AppImages directly: it needs the
+# fuse device, a fusermount binary, AND libfuse2. Modern Ubuntu (22.04+) and
+# Fedora ship without libfuse2 by default — the classic "double-click the
+# AppImage and nothing happens" wall.
+linux_fuse_available() {
+  [ -e /dev/fuse ] || return 1
+  command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1 || return 1
+  if command -v ldconfig >/dev/null 2>&1; then
+    ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2' && return 0
+  fi
+  for lib in /usr/lib/*/libfuse.so.2 /usr/lib/libfuse.so.2 /usr/lib64/libfuse.so.2; do
+    [ -e "$lib" ] && return 0
+  done
+  return 1
+}
+
+# Install the app icon and a `flinttrade` command so the desktop entry shows
+# a real icon and "command-first" actually yields a command on PATH.
+install_linux_launcher_extras() {
+  local exec_target="$1"
+  local dest_bin="$2"
+  local icon_source="$3"
+  local icon_dir="$HOME/.local/share/icons/hicolor/128x128/apps"
+  if [ -n "$icon_source" ] && [ -f "$icon_source" ]; then
+    mkdir -p "$icon_dir"
+    cp "$icon_source" "$icon_dir/flinttrade.png" 2>/dev/null || true
+  fi
+  if [ "$exec_target" != "$dest_bin/flinttrade" ]; then
+    cat > "$dest_bin/flinttrade" <<WRAPPER
+#!/bin/sh
+exec "$exec_target" "\$@"
+WRAPPER
+    chmod 0755 "$dest_bin/flinttrade"
+  fi
+  case ":$PATH:" in
+    *":$dest_bin:"*) : ;;
+    *) warn "$dest_bin is not on your PATH — add it to run 'flinttrade' from a terminal." ;;
+  esac
+}
+
+# Launch the installed app and verify it actually survives its first seconds,
+# capturing output — "install worked, nothing happened" must never be silent.
+launch_linux_app() {
+  local exec_target="$1"
+  local log_dir="$HOME/.local/state/flinttrade"
+  mkdir -p "$log_dir"
+  local log="$log_dir/desktop-launch.log"
+  nohup "$exec_target" > "$log" 2>&1 &
+  local pid=$!
+  sleep 3
+  if ! kill -0 "$pid" 2>/dev/null; then
+    warn "FlintTrade exited immediately after launch. Last output:"
+    tail -20 "$log" >&2 || true
+    die "Launch failed — full log: $log"
+  fi
+  say "FlintTrade is starting (log: $log)."
+}
+
+# FUSE-less install: the AppImage runtime can self-extract WITHOUT FUSE, so
+# unpack it under ~/.local/opt and launch through AppRun via a small wrapper.
+install_linux_appimage_extracted() {
+  local appimage="$1"
+  local dest_bin="$2"
+  local desktop_dir="$3"
+  local opt_dir="$HOME/.local/opt/flinttrade"
+
+  say "FUSE is not available — using the AppImage self-extraction install instead."
+  rm -rf "$opt_dir.new"
+  mkdir -p "$opt_dir.new"
+  if ! ( cd "$opt_dir.new" && "$appimage" --appimage-extract >/dev/null 2>&1 ) \
+      || [ ! -x "$opt_dir.new/squashfs-root/AppRun" ]; then
+    rm -rf "$opt_dir.new"
+    warn "AppImage self-extraction failed — falling back to the direct AppImage install (installing libfuse2 may be required to launch it)."
+    return 1
+  fi
+  rm -rf "$opt_dir"
+  mv "$opt_dir.new" "$opt_dir"
+
+  local wrapper="$dest_bin/flinttrade"
+  cat > "$wrapper" <<WRAPPER
+#!/bin/sh
+exec "$opt_dir/squashfs-root/AppRun" "\$@"
+WRAPPER
+  chmod 0755 "$wrapper"
+  local icon
+  icon="$(find "$opt_dir/squashfs-root" -maxdepth 4 -name '*.png' 2>/dev/null | head -1 || true)"
+  install_linux_launcher_extras "$wrapper" "$dest_bin" "$icon"
+  cat > "$desktop_dir/flinttrade.desktop" <<DESKTOP
+[Desktop Entry]
+Name=FlintTrade
+Exec=$wrapper
+Icon=flinttrade
+Type=Application
+Categories=Office;Finance;
+Comment=Open-source self-hosted trading software
+StartupWMClass=FlintTrade
+DESKTOP
+  say "Installed: $opt_dir (launcher: $wrapper)"
+  if [ "$NO_LAUNCH" != "1" ]; then
+    launch_linux_app "$wrapper"
+  fi
+}
+
 install_linux_appimage() {
   local appimage="$1"
   local dest_bin="$HOME/.local/bin"
@@ -393,6 +511,13 @@ install_linux_appimage() {
     say "DRY-RUN: would install $appimage to $dest"
   else
     signal_update_handoff
+    if ! linux_fuse_available; then
+      chmod 0755 "$appimage"
+      if install_linux_appimage_extracted "$appimage" "$dest_bin" "$desktop_dir"; then
+        return 0
+      fi
+      # Extraction failed — fall through to the direct AppImage install.
+    fi
     # Write-new-then-rename: overwriting a running AppImage in place with a
     # truncating copy would fail with ETXTBSY, so stage the new image beside the
     # target and atomically rename over it. The old inode stays valid for the
@@ -400,19 +525,29 @@ install_linux_appimage() {
     local staged="$dest.new.$$"
     install -m 0755 "$appimage" "$staged"
     mv -f "$staged" "$dest"
+    # Pull the icon out of the image once so the menu entry is not a
+    # generic gear (extraction works without FUSE).
+    local icon_tmp
+    icon_tmp="$(mktemp -d "${TMPDIR:-/tmp}/flinttrade-icon.XXXXXX")"
+    TMP_DIRS+=("$icon_tmp")
+    ( cd "$icon_tmp" && "$dest" --appimage-extract '*.png' >/dev/null 2>&1 ) || true
+    local icon
+    icon="$(find "$icon_tmp/squashfs-root" -maxdepth 4 -name '*.png' 2>/dev/null | head -1 || true)"
+    install_linux_launcher_extras "$dest" "$dest_bin" "$icon"
     cat > "$desktop_dir/flinttrade.desktop" <<DESKTOP
 [Desktop Entry]
 Name=FlintTrade
 Exec=$dest
+Icon=flinttrade
 Type=Application
 Categories=Office;Finance;
 Comment=Open-source self-hosted trading software
+StartupWMClass=FlintTrade
 DESKTOP
   fi
   say "Installed: $dest"
-  warn "If this distro cannot run AppImage files, install FUSE or rerun with --package deb/rpm."
   if [ "$NO_LAUNCH" != "1" ] && [ "$DRY_RUN" != "1" ]; then
-    nohup "$dest" >/dev/null 2>&1 &
+    launch_linux_app "$dest"
   fi
 }
 
@@ -422,16 +557,18 @@ install_linux_native_package() {
     say "DRY-RUN: would install $package as a .$LINUX_PACKAGE package"
     return 0
   fi
+  # -y: under `curl | bash` stdin is at EOF, so an interactive apt/dnf
+  # confirmation prompt aborts the install instead of asking.
   case "$LINUX_PACKAGE" in
     deb)
       need apt || die "apt was not found. Use --package appimage or install the .deb manually: $package"
       say "Installing .deb package with apt..."
-      run_or_echo sudo apt install "$package"
+      run_or_echo sudo apt install -y "$package"
       ;;
     rpm)
       if need dnf; then
         say "Installing .rpm package with dnf..."
-        run_or_echo sudo dnf install "$package"
+        run_or_echo sudo dnf install -y "$package"
       elif need rpm; then
         say "Installing .rpm package with rpm..."
         run_or_echo sudo rpm -Uvh "$package"
@@ -451,7 +588,9 @@ install_binary_release() {
   case "$os_name" in
     Darwin)
       local dmg
-      download_release_asset macos "$arch" dmg
+      # One universal DMG per release (both CPU slices); per-arch DMGs only
+      # exist on older releases reached via --ref.
+      download_release_asset macos "universal $arch" dmg
       dmg="$DOWNLOADED_ASSET_PATH"
       install_macos_dmg "$dmg"
       ;;

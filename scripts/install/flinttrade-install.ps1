@@ -33,7 +33,9 @@ $ManifestOverrideUrl = $env:FLINTTRADE_DESKTOP_RELEASE_API
 
 function Say([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Cyan }
 function Warn([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Yellow }
-function Fail([string]$Message) { Write-Host "[flinttrade] ERROR: $Message" -ForegroundColor Red; exit 1 }
+# throw, not exit: under `irm | iex` an exit terminates the user's whole
+# PowerShell session and takes the error message with it.
+function Fail([string]$Message) { Write-Host "[flinttrade] ERROR: $Message" -ForegroundColor Red; throw "[flinttrade] $Message" }
 function Have([string]$Command) { $null -ne (Get-Command $Command -ErrorAction SilentlyContinue) }
 
 function Invoke-Pnpm {
@@ -115,6 +117,12 @@ function Get-ManifestUrl {
 
 function Get-ReleaseAsset {
     $arch = Get-WindowsArch
+    if ($arch -eq "arm64") {
+        # Windows 11 on ARM runs x64 binaries via emulation — install the
+        # x64 build with a note instead of stranding Snapdragon machines.
+        Say "No native ARM64 build yet; installing the x64 build (Windows runs it via emulation)."
+        $arch = "x64"
+    }
     if ($arch -ne "x64") {
         Fail "The current release publishes Windows x64 installers only. Detected: $arch."
     }
@@ -161,6 +169,9 @@ function Install-BinaryRelease {
     }
     Say "Downloading $($asset.name)..."
     Invoke-WebRequest -Uri $asset.url -OutFile $installer -UseBasicParsing
+    if (-not $asset.sha256) {
+        Fail "Release manifest entry for $($asset.name) has no sha256; refusing to run an unverified installer."
+    }
     if ($asset.sha256) {
         $actualHash = (Get-FileHash -Algorithm SHA256 -Path $installer).Hash.ToLowerInvariant()
         $expectedHash = ([string]$asset.sha256).ToLowerInvariant()
@@ -168,6 +179,11 @@ function Install-BinaryRelease {
             Fail "Checksum mismatch for $($asset.name). Expected $expectedHash, got $actualHash."
         }
         Say "Verified SHA-256 checksum."
+        # The download carries the Mark-of-the-Web, so SmartScreen would wall
+        # the (unsigned) installer even though we just pinned its hash to the
+        # release manifest. The hash IS the integrity check — clear the mark
+        # so setup runs without the "Windows protected your PC" dead end.
+        Unblock-File -Path $installer -ErrorAction SilentlyContinue
     }
     Say "Running FlintTrade setup..."
     if ($NoLaunch) {
