@@ -51,7 +51,6 @@
       "../../../../scripts/install/flinttrade-install.ps1": "scripts/install/flinttrade-install.ps1"
     },
     "copyright": "Copyright © FlintTrade contributors. Licensed AGPL-3.0.",
-    "licenseFile": "../../../../LICENSE",
     "linux": {
       "deb": {
         "depends": [

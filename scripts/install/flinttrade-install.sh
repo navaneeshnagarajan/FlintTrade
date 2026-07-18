@@ -43,14 +43,37 @@ cleanup_tmp_dirs() {
   return 0
 }
 
-# Detach a mounted DMG (macOS). Cleared after detaching so the EXIT trap does
-# not try again. A no-op on Linux / when nothing is mounted.
+# Detach a mounted DMG (macOS). Cleared only after the volume is actually
+# gone so the caller never rm's a still-mounted read-only image. A no-op on
+# Linux / when nothing is mounted.
 detach_dmg_mount() {
-  if [ -n "$DMG_MOUNT_DIR" ]; then
-    hdiutil detach "$DMG_MOUNT_DIR" -quiet >/dev/null 2>&1 || true
-    DMG_MOUNT_DIR=""
-  fi
+  [ -n "$DMG_MOUNT_DIR" ] || return 0
+  local target="$DMG_MOUNT_DIR"
+  local i
+  # ditto can leave the volume briefly busy (Spotlight/fsevents); retry, then
+  # force as a last resort so the mountpoint dir is safe to remove.
+  for i in 1 2 3 4 5; do
+    if hdiutil detach "$target" -quiet >/dev/null 2>&1; then
+      DMG_MOUNT_DIR=""
+      return 0
+    fi
+    sleep 1
+  done
+  hdiutil detach "$target" -force -quiet >/dev/null 2>&1 || true
+  DMG_MOUNT_DIR=""
   return 0
+}
+
+# Remove a former mountpoint dir only once nothing is mounted there, so a
+# failed detach can never delete into a read-only DMG.
+remove_mount_dir() {
+  local dir="$1"
+  [ -n "$dir" ] || return 0
+  if mount | grep -q " on $dir "; then
+    warn "Leaving $dir in place — a disk image is still mounted there."
+    return 0
+  fi
+  rm -rf "$dir" 2>/dev/null || true
 }
 
 # Single EXIT handler: always detach any DMG left mounted (e.g. an interrupt
@@ -358,7 +381,21 @@ install_macos_dmg() {
   signal_update_handoff
 
   mkdir -p "$mount_dir" "$dest"
-  hdiutil attach "$dmg" -nobrowse -quiet -mountpoint "$mount_dir"
+  # `yes` accepts the DMG's embedded licence agreement (older releases carry an
+  # AGPL SLA); `-quiet` is deliberately OMITTED because it suppresses the SLA
+  # interaction and makes the mount fail outright on an SLA image. `yes` takes
+  # SIGPIPE (exit 141) the instant hdiutil closes the pipe, so errexit +
+  # pipefail must be lifted around the pipeline and hdiutil's OWN status read
+  # from PIPESTATUS — otherwise a fully successful mount aborts the script.
+  local attach_status=0
+  set +e +o pipefail
+  yes 2>/dev/null | hdiutil attach "$dmg" -nobrowse -mountpoint "$mount_dir" >/dev/null 2>&1
+  attach_status=${PIPESTATUS[1]}
+  set -e -o pipefail
+  if [ "$attach_status" -ne 0 ]; then
+    rm -rf "$mount_dir"
+    die "Could not mount $dmg (the disk image may require accepting a licence). Try downloading and opening it manually."
+  fi
   # Register the mount so the EXIT trap always detaches it, even if we are
   # interrupted (Ctrl-C / SIGTERM) between attach and detach.
   DMG_MOUNT_DIR="$mount_dir"
@@ -367,7 +404,7 @@ install_macos_dmg() {
   app_path="$(find "$mount_dir" -maxdepth 2 -name 'FlintTrade.app' -type d | head -1)"
   if [ -z "$app_path" ]; then
     detach_dmg_mount
-    rm -rf "$mount_dir"
+    remove_mount_dir "$mount_dir"
     die "No FlintTrade.app found in $dmg"
   fi
 
@@ -375,11 +412,11 @@ install_macos_dmg() {
   rm -rf "$dest/FlintTrade.app"
   if ! ditto "$app_path" "$dest/FlintTrade.app"; then
     detach_dmg_mount
-    rm -rf "$mount_dir"
+    remove_mount_dir "$mount_dir"
     die "Could not copy FlintTrade.app to $dest"
   fi
   detach_dmg_mount
-  rm -rf "$mount_dir"
+  remove_mount_dir "$mount_dir"
 
   say "Installed: $dest/FlintTrade.app"
   if [ "$NO_LAUNCH" != "1" ]; then open "$dest/FlintTrade.app"; fi
