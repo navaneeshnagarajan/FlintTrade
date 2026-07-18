@@ -1024,17 +1024,24 @@ def _dispatch_live_order(
         if not admitted:
             return outcome
         result = outcome
-        # Feed the latency monitor (audit H5) — without this producer the order
-        # latency stats were empty forever. Best-effort: never let monitoring
-        # affect the order result.
+        # Feed the latency monitors (audit H5) — without this producer the
+        # order latency stats were empty forever. ONE producer site, both
+        # sinks: the in-memory tracker serves the session stats surface
+        # (/api/v1/latency/*) and the DuckDB LatencyMonitor persists the
+        # admin history (/v1/admin/latency/*), which previously had NO
+        # producer at all and reported empty forever (U12). Best-effort:
+        # never let monitoring affect the order result.
         try:
             from .monitoring_routes import get_latency_tracker  # noqa: PLC0415
 
-            get_latency_tracker().record_order_latency(
-                adapter_id,
-                getattr(typed_order, "symbol", "") or "",
-                (time.perf_counter() - _t0) * 1000.0,
-            )
+            _latency_ms = (time.perf_counter() - _t0) * 1000.0
+            _symbol = getattr(typed_order, "symbol", "") or ""
+            get_latency_tracker().record_order_latency(adapter_id, _symbol, _latency_ms)
+            _persistent_monitor = current_app.config.get("LATENCY_MONITOR")
+            if _persistent_monitor is not None:
+                _persistent_monitor.record(
+                    adapter_id, "PLACE", _latency_ms, symbol=_symbol
+                )
         except Exception:  # pragma: no cover - monitoring must never break orders
             logger.debug("order latency record failed", exc_info=True)
     except SafetyBypassError as exc:

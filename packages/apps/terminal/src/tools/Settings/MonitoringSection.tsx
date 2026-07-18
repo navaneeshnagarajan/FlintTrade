@@ -327,7 +327,7 @@ export function MonitoringSection() {
       {/* Traffic panel */}
       <section className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          Traffic
+          Traffic (this backend session)
         </p>
         {trafficQuery.isLoading && <LoadingRow label="traffic" />}
         {trafficQuery.isError   && <ErrorRow   label="traffic" />}
@@ -337,7 +337,7 @@ export function MonitoringSection() {
       {/* Latency panel */}
       <section className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          Latency
+          Latency (this backend session)
         </p>
         {latencyQuery.isLoading && <LoadingRow label="latency" />}
         {latencyQuery.isError   && <ErrorRow   label="latency" />}

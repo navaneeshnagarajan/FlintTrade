@@ -726,6 +726,37 @@ def test_routed_happy_path_feeds_latency_monitor(monkeypatch: pytest.MonkeyPatch
     assert isinstance(args[2], float) and args[2] >= 0.0  # latency_ms
 
 
+def test_routed_happy_path_feeds_the_persistent_latency_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """U12: the same producer feeds the DuckDB-backed admin history.
+
+    The persistent LatencyMonitor previously had NO producer — the
+    /v1/admin latency surface reported empty forever while the in-memory
+    session tracker had real data. One producer site now feeds both sinks.
+    """
+    import flinttrade_core.monitoring_routes as mon
+
+    monkeypatch.setattr(mon, "get_latency_tracker", lambda: MagicMock())
+
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="OA-999")
+    app = _app(broker_router=router, safety=_passing_safety())
+    persistent = MagicMock()
+    app.config["LATENCY_MONITOR"] = persistent
+    resp = app.test_client().post(
+        "/api/v1/orders/openalgo/place", json=_LIVE_BODY, headers=_live_headers()
+    )
+
+    assert resp.status_code == 200
+    persistent.record.assert_called_once()
+    args, kwargs = persistent.record.call_args
+    assert args[0] == "openalgo"
+    assert args[1] == "PLACE"
+    assert isinstance(args[2], float) and args[2] >= 0.0
+    assert kwargs.get("symbol") == "RELIANCE"
+
+
 def test_latency_recording_failure_never_breaks_the_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """H5: monitoring is strictly best-effort — a tracker blow-up still 200s."""
     import flinttrade_core.monitoring_routes as mon
