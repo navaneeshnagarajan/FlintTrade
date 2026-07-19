@@ -69,7 +69,7 @@ import {
   selectNativeReadAccount,
 } from "@/services/brokerAccountsApi";
 import { z } from "zod";
-import { get as getFtApi, getV1 as getFtV1, post as postFtApi } from "./ftApi.helpers";
+import { get as getFtApi, getBase as getFtBase, getV1 as getFtV1, post as postFtApi } from "./ftApi.helpers";
 
 // Endpoints subject to the 10/s order rate limit (excludes placesmartorder which has its own)
 const ORDER_ENDPOINTS = new Set([
@@ -140,11 +140,6 @@ function getBase(): string {
 /** Base URL for the FlintTrade Python backend.
  *  In dev mode the Vite proxy maps /ft-api → localhost:5100.
  *  In production the backend shares the same origin. */
-function getFtBase(): string {
-  if (import.meta.env.DEV) return "/ft-api";
-  return "";
-}
-
 function getApiKey(): string {
   return useConnectionStore.getState().apiKey;
 }
