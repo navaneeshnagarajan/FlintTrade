@@ -1,7 +1,8 @@
 """FlintTrade indicators — technical analysis library.
 
-Uses TA-Lib when available (C speed), falls back to pure Python/NumPy.
-Designed for both batch processing and streaming calculations.
+Pure-NumPy batch implementations (no TA-Lib dependency); the optional
+``numba`` extra accelerates three batch kernels. Designed for both batch
+processing and streaming calculations.
 
 All functions:
 - Accept numpy arrays as input

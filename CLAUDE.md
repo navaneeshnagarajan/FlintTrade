@@ -75,7 +75,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `core` | core | Py | Flask app + blueprint registration, OpenAlgo client (45+ endpoints), config, workspace, auth/JWT, models, WSGI strip |
 | `data` | core | Py | Tick capture (opt-in via `FLINTTRADE_TICK_CAPTURE`), append-only JSONL audit log, Practice-mode sandbox engine, tax/P&L routes, DuckDB (QuestDB client exists but is dormant) |
 | `historical` | core | Py | OHLCV downloader (OpenChart/yfinance), DuckDB/Parquet pipeline, expiry tracker |
-| `indicators` | core | Py | Pure-NumPy batch indicators (110 exports; no TA-Lib import despite the optional extra) + pure-Python streaming classes (numba accelerates only 3 batch kernels, optional) + Pine Script convert |
+| `indicators` | core | Py | Pure-NumPy batch indicators (110 exports; no TA-Lib — the unused extra was removed) + pure-Python streaming classes (numba accelerates only 3 batch kernels, optional) + Pine Script convert |
 | `ticks` | core | Rust+PyO3 | Tick-level backtesting simulator (was `tick-engine`) — builds and imports, but currently has zero production consumers |
 | `design-system` | core | TS | Shared tokens/glass/cinematic CSS, charts module (Flint* components), brand, layer scale — the consumed surface; the UI-kit/forms/motion exports are unconsumed scaffolding |
 | `engine` | services | Py | 5-layer `SafetySystem`, `gate_order`, order router, scheduler, mode guard, sandbox executor, strategies |

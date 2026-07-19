@@ -10,7 +10,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-talib = ["TA-Lib>=0.4"]
 numba = ["numba>=0.59"]
 
 [build-system]
