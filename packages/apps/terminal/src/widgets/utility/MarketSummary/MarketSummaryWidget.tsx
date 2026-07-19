@@ -8,15 +8,17 @@
  *   - Top 5 gainers and losers
  *   - Sector performance bars (colour-coded)
  *
- * HONESTY NOTE: every section renders from the SAMPLE_* constants below. No
- * backend endpoint feeds this widget yet, so the data is identical whether or
- * not a broker is connected. The "Sample data" badge is therefore shown at all
- * times (it must NOT be gated on connection state) and there is no auto-refresh
- * or "live updating" affordance — nothing here should imply the figures are
- * live. Wiring a real market-overview endpoint is a separate future task.
+ * PROVENANCE: breadth (/v1/breadth/current), FII/DII (/screener/fii-dii),
+ * and movers/sectors (the NIFTY 50 quote sweep via useSectorMovers) are
+ * live-backed with PER-SECTION Sample/Live chips driven by each source's own
+ * flag. The index cards remain sample-only (chipped) until an index-quote
+ * source is verified. SAMPLE_* constants stay as the disclosed fallbacks.
  */
 
 import { useEffect, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getBreadthCurrent, getFiiDiiData } from "@/services/ftApi.screener";
+import { useSectorMovers } from "@/hooks/useSectorMovers";
 import { LayoutDashboard, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
@@ -238,6 +240,22 @@ function SectionHeading({ id, children }: { id: string; children: React.ReactNod
   );
 }
 
+function ProvChip({ live }: { live: boolean }) {
+  return (
+    <span
+      role="status"
+      className={cn(
+        "ml-1.5 px-1 py-0.5 text-xxs rounded border align-middle",
+        live
+          ? "text-profit bg-profit/10 border-profit/30"
+          : "text-warning bg-warning/10 border-warning/30",
+      )}
+    >
+      {live ? "Live" : "Sample"}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
@@ -249,8 +267,57 @@ function MarketSummaryWidget() {
     track("trade", "widget_view_market_summary");
   }, [track]);
 
-  const fiiPositive = SAMPLE_FII_DII.fii >= 0;
-  const diiPositive = SAMPLE_FII_DII.dii >= 0;
+  const breadthQuery = useQuery({
+    queryKey: ["marketSummary", "breadth"],
+    queryFn: getBreadthCurrent,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const fiiDiiQuery = useQuery({
+    queryKey: ["marketSummary", "fiiDii"],
+    queryFn: () => getFiiDiiData(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const sectorMovers = useSectorMovers();
+
+  const breadthLive =
+    breadthQuery.isSuccess && breadthQuery.data.is_sample_data === false;
+  const breadth: BreadthData = breadthLive
+    ? {
+        advances: breadthQuery.data!.advances,
+        declines: breadthQuery.data!.declines,
+        unchanged: breadthQuery.data!.unchanged,
+      }
+    : SAMPLE_BREADTH;
+
+  const fiiDiiLive =
+    fiiDiiQuery.isSuccess && fiiDiiQuery.data.is_sample_data === false;
+  const fiiDii: FiiDiiData = fiiDiiLive
+    ? {
+        fii: fiiDiiQuery.data!.latest.fii_net,
+        dii: fiiDiiQuery.data!.latest.dii_net,
+        date: fiiDiiQuery.data!.latest.trade_date,
+      }
+    : SAMPLE_FII_DII;
+
+  const moversLive = sectorMovers.isLive
+    && sectorMovers.movers.gainers.length + sectorMovers.movers.losers.length > 0;
+  const gainers: MoverData[] = moversLive
+    ? sectorMovers.movers.gainers.map((m) => ({ symbol: m.symbol, changePct: m.changePct }))
+    : SAMPLE_GAINERS;
+  const losers: MoverData[] = moversLive
+    ? sectorMovers.movers.losers.map((m) => ({ symbol: m.symbol, changePct: m.changePct }))
+    : SAMPLE_LOSERS;
+
+  const sectorsLive = sectorMovers.isLive;
+  const sectors: SectorData[] = sectorsLive
+    ? sectorMovers.data.map((s) => ({ name: s.sector, changePct: s.avgChange }))
+    : SAMPLE_SECTORS;
+
+  const anyLive = breadthLive || fiiDiiLive || moversLive || sectorsLive;
+  const fiiPositive = fiiDii.fii >= 0;
+  const diiPositive = fiiDii.dii >= 0;
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden" aria-label="Market Summary widget">
@@ -259,20 +326,21 @@ function MarketSummaryWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <LayoutDashboard size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Market Summary</span>
-        {/* Honest disclosure — every section reads from the SAMPLE_* constants
-            above; no backend market-overview endpoint is wired yet. The badge
-            was previously hidden once a broker connected (`!isConnected`),
-            which masked the fact that the figures stayed sample even on a live
-            connection. Keep it visible at all times. There is deliberately no
-            timestamp or refresh control here: a "last updated" clock or a
-            spinning refresh button would falsely imply the data is live. */}
+        {/* Per-section provenance chips carry the detail; the header badge
+            summarises. It reads "Sample data" only when EVERY section is on
+            its disclosed fallback — a partially-live view is labelled Mixed
+            so nothing implies the whole board is live. */}
         <span
-          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          className={cn(
+            "px-1.5 py-0.5 text-xxs rounded border",
+            anyLive
+              ? "bg-accent/10 text-accent border-accent/30"
+              : "bg-warning/10 text-warning border-warning/30",
+          )}
           role="status"
-          aria-label="Showing sample data; no live market-overview source is wired yet"
-          title="No live data wired yet — showing a sample market overview so the widget is usable in explore mode."
+          aria-label={anyLive ? "Some sections show live data; see per-section chips" : "Showing sample data in every section"}
         >
-          Sample data
+          {anyLive ? "Mixed — see section chips" : "Sample data"}
         </span>
         <div className="flex-1" />
       </div>
@@ -282,7 +350,7 @@ function MarketSummaryWidget() {
 
         {/* Indices */}
         <section aria-labelledby="ms-indices">
-          <SectionHeading id="ms-indices">Indices</SectionHeading>
+          <SectionHeading id="ms-indices">Indices<ProvChip live={false} /></SectionHeading>
           <div className="flex gap-2 flex-wrap">
             {SAMPLE_INDICES.map((d) => <IndexCard key={d.symbol} d={d} />)}
           </div>
@@ -290,24 +358,24 @@ function MarketSummaryWidget() {
 
         {/* Market breadth */}
         <section aria-labelledby="ms-breadth">
-          <SectionHeading id="ms-breadth">Market Breadth (NSE)</SectionHeading>
-          <BreadthBar b={SAMPLE_BREADTH} />
+          <SectionHeading id="ms-breadth">Market Breadth (NSE)<ProvChip live={breadthLive} /></SectionHeading>
+          <BreadthBar b={breadth} />
         </section>
 
         {/* FII / DII */}
         <section aria-labelledby="ms-fiidii">
-          <SectionHeading id="ms-fiidii">FII / DII — {SAMPLE_FII_DII.date}</SectionHeading>
+          <SectionHeading id="ms-fiidii">FII / DII — {fiiDii.date}<ProvChip live={fiiDiiLive} /></SectionHeading>
           <div className="flex gap-4">
             <div className="flex flex-col gap-0.5">
               <span className="text-xxs text-text-muted">FII Net</span>
               <span className={cn("text-xs font-semibold font-mono tabular-nums", fiiPositive ? "text-profit" : "text-loss")}>
-                {fmtCr(SAMPLE_FII_DII.fii)}
+                {fmtCr(fiiDii.fii)}
               </span>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-xxs text-text-muted">DII Net</span>
               <span className={cn("text-xs font-semibold font-mono tabular-nums", diiPositive ? "text-profit" : "text-loss")}>
-                {fmtCr(SAMPLE_FII_DII.dii)}
+                {fmtCr(fiiDii.dii)}
               </span>
             </div>
           </div>
@@ -315,17 +383,17 @@ function MarketSummaryWidget() {
 
         {/* Gainers & Losers */}
         <section aria-labelledby="ms-movers">
-          <SectionHeading id="ms-movers">Top Movers</SectionHeading>
+          <SectionHeading id="ms-movers">Top Movers<ProvChip live={moversLive} /></SectionHeading>
           <div className="grid grid-cols-2 gap-3">
-            <MoversList movers={SAMPLE_GAINERS} title="Gainers" isGainer />
-            <MoversList movers={SAMPLE_LOSERS}  title="Losers"  isGainer={false} />
+            <MoversList movers={gainers} title="Gainers" isGainer />
+            <MoversList movers={losers}  title="Losers"  isGainer={false} />
           </div>
         </section>
 
         {/* Sectors */}
         <section aria-labelledby="ms-sectors">
-          <SectionHeading id="ms-sectors">Sector Performance</SectionHeading>
-          <SectorBars sectors={SAMPLE_SECTORS} />
+          <SectionHeading id="ms-sectors">Sector Performance<ProvChip live={sectorsLive} /></SectionHeading>
+          <SectorBars sectors={sectors} />
         </section>
       </div>
     </div>

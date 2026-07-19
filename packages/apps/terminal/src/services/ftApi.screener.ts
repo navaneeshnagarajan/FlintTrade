@@ -67,6 +67,23 @@ export interface RRGResponse {
   sectors: SectorRRG[];
 }
 
+/** Market-breadth snapshot (bare /v1 family; the sample flag propagates). */
+export interface BreadthCurrentData {
+  is_sample_data?: boolean;
+  date: string;
+  advances: number;
+  declines: number;
+  unchanged: number;
+  new_highs: number;
+  new_lows: number;
+  ad_ratio: number;
+  ad_line: number;
+  mcclellan_oscillator: number;
+  breadth_thrust: number;
+}
+
+export const getBreadthCurrent = () => getV1<BreadthCurrentData>("breadth/current");
+
 export const getFiiDiiData = (days?: number, refresh?: boolean) => {
   const params = new URLSearchParams();
   if (days !== undefined) params.set("days", String(days));

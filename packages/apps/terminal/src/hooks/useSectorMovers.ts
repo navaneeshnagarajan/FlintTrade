@@ -150,12 +150,44 @@ export function deriveSectorMovers(quotes: Quote[]): SectorMoverEntry[] {
   return result.sort((a, b) => Math.abs(b.avgChange) - Math.abs(a.avgChange));
 }
 
+/** One top gainer/loser row derived from the quote sweep. */
+export interface TopMover {
+  symbol: string;
+  ltp: number;
+  changePct: number;
+}
+
+/** Top-N gainers and losers by percentage change from the quote sweep. */
+export function deriveTopMovers(quotes: Quote[], topN = 5): {
+  gainers: TopMover[];
+  losers: TopMover[];
+} {
+  const rows: TopMover[] = [];
+  for (const q of quotes) {
+    const prevClose = q.prev_close ?? q.close;
+    if (!prevClose || prevClose <= 0) continue;
+    rows.push({
+      symbol: q.symbol,
+      ltp: q.ltp,
+      changePct: ((q.ltp - prevClose) / prevClose) * 100,
+    });
+  }
+  rows.sort((a, b) => b.changePct - a.changePct);
+  return {
+    gainers: rows.slice(0, topN).filter((r) => r.changePct > 0),
+    losers: rows.slice(-topN).reverse().filter((r) => r.changePct < 0),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
 export interface UseSectorMoversResult {
   data: SectorMoverEntry[];
+  /** Top gainers/losers from the same quote sweep (empty in sample mode —
+   *  consumers supply their own disclosed samples). */
+  movers: { gainers: TopMover[]; losers: TopMover[] };
   isLoading: boolean;
   /** True only when a HEALTHY live fetch backs the rows — never for the
    *  sample fallback, and never once the feed has gone into error (frozen
@@ -191,8 +223,17 @@ export function useSectorMovers(): UseSectorMoversResult {
     return deriveSectorMovers(query.data);
   }, [hasLiveData, query.data]);
 
+  const movers = useMemo(
+    () =>
+      hasLiveData && query.data
+        ? deriveTopMovers(query.data)
+        : { gainers: [], losers: [] },
+    [hasLiveData, query.data],
+  );
+
   return {
     data,
+    movers,
     isLoading: wantsLive && query.isLoading,
     isLive: hasLiveData,
     wantsLive,
