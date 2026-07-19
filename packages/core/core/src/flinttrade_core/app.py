@@ -4914,6 +4914,62 @@ def create_flask_app(
             }
         ), 200
 
+    @app.route("/v1/config/whatsapp", methods=["GET", "POST"])
+    @limiter.limit("10 per minute")
+    def _whatsapp_config() -> Any:
+        """Read or persist redacted WhatsApp alert settings from the UI.
+
+        Mirrors ``/v1/config/telegram``: localhost-only, authenticated
+        session, the webhook URL stored in a hardened owner-only secret file
+        (URLs routinely embed tokens). A save drops the cached alerter so the
+        next send uses the new settings.
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "This endpoint is only reachable from localhost",
+                }
+            ), 403
+
+        from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
+
+        denied = require_local_control_auth(
+            message="WhatsApp configuration requires an authenticated session"
+        )
+        if denied is not None:
+            return denied
+
+        from .whatsapp_config import persist_whatsapp_config, read_whatsapp_config  # noqa: PLC0415
+
+        if request.method == "GET":
+            return jsonify({"status": "success", "data": read_whatsapp_config()}), 200
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            data = persist_whatsapp_config(payload)
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 400
+        except Exception as exc:  # noqa: BLE001 - never surface secret material
+            logger.error("Failed to persist WhatsApp config (%s)", type(exc).__name__)
+            return jsonify({"status": "error", "message": "Could not persist WhatsApp config"}), 500
+
+        try:
+            from flinttrade_automation.whatsapp_routes import reset_whatsapp_alerter  # noqa: PLC0415
+
+            reset_whatsapp_alerter()
+        except Exception:  # noqa: BLE001 - config is durable either way
+            logger.warning("Could not reset the WhatsApp alerter after config save", exc_info=True)
+
+        return jsonify(
+            {
+                "status": "ok",
+                "message": "WhatsApp settings saved",
+                "data": data,
+            }
+        ), 200
+
     # ------------------------------------------------------------------
     # Connection-test endpoint — /ft-api/v1/test-connection
     # Used by the Setup wizard + Settings › Connection. The browser cannot

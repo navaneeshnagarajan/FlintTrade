@@ -36,19 +36,30 @@ class WhatsAppConfig:
 
     @classmethod
     def from_env(cls) -> WhatsAppConfig:
-        """Load from env vars, falling back to workspace.json."""
+        """Load from env vars, falling back to the UI-persisted settings.
+
+        The workspace stores only a ``secret://`` reference; the URL itself is
+        resolved through ``flinttrade_core.whatsapp_config`` (secret file, with
+        the legacy plaintext key as fallback). A bare reference string is never
+        used as a URL.
+        """
         webhook_url = os.getenv("WHATSAPP_WEBHOOK_URL", "")
         enabled = os.getenv("WHATSAPP_ENABLED", "")
 
         if not webhook_url:
             try:
+                from flinttrade_core.whatsapp_config import resolve_whatsapp_webhook_url
                 from flinttrade_core.workspace import Workspace
+
                 ws = Workspace()
-                webhook_url = webhook_url or ws.get("whatsapp.webhook_url", "")
+                webhook_url = resolve_whatsapp_webhook_url(ws)
                 if not enabled:
                     enabled = "true" if ws.get("whatsapp.enabled", False) else "false"
             except Exception:
                 logger.warning("Failed to load WhatsApp config from workspace", exc_info=True)
+
+        if webhook_url.startswith("secret://"):
+            webhook_url = ""
 
         return cls(
             webhook_url=webhook_url,

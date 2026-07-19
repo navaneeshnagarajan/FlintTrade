@@ -42,6 +42,18 @@ def init_whatsapp_routes(alerter: WhatsAppAlerter) -> None:
     logger.info("WhatsAppAlerter singleton injected into whatsapp_routes")
 
 
+def reset_whatsapp_alerter() -> None:
+    """Drop the cached alerter so the next send rebuilds from fresh config.
+
+    Called by the settings route after a save — the singleton captured the
+    config at construction, and a stale webhook URL/enabled flag must not
+    outlive the operator's change.
+    """
+    global _alerter  # noqa: PLW0603
+    _alerter = None
+    logger.info("WhatsAppAlerter singleton reset — next send reloads config")
+
+
 @whatsapp_bp.route("/alerts/whatsapp/test", methods=["POST"])
 def test_whatsapp() -> tuple[Any, int]:
     """Send a test message to verify WhatsApp webhook configuration.

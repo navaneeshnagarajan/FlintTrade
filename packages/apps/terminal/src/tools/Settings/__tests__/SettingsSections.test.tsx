@@ -112,6 +112,10 @@ vi.mock("@/services/ftApi.telegram", () => ({
   readTelegramConfig: vi.fn(),
   persistTelegramConfig: vi.fn(),
 }));
+vi.mock("@/services/ftApi.whatsapp", () => ({
+  readWhatsAppConfig: vi.fn(),
+  persistWhatsAppConfig: vi.fn(),
+}));
 
 // Store/hook deps for the heavier sections.
 vi.mock("@/hooks/useBrokerCapabilities", () => ({
