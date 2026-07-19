@@ -9,7 +9,7 @@
  */
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookText, Search, ChevronLeft, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
   getObsidianStatus,
   listObsidianNotes,
   readObsidianNote,
+  saveObsidianVaultPath,
   searchObsidianNotes,
 } from "@/services/ftApi.ai";
 
@@ -24,11 +25,25 @@ export default function ObsidianWidget() {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [vaultPathDraft, setVaultPathDraft] = useState("");
+  const [savePathError, setSavePathError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const statusQuery = useQuery({
     queryKey: ["obsidian", "status"],
     queryFn: getObsidianStatus,
     refetchInterval: 60_000,
+  });
+
+  const savePathMutation = useMutation({
+    mutationFn: () => saveObsidianVaultPath(vaultPathDraft.trim()),
+    onSuccess: () => {
+      setSavePathError(null);
+      void queryClient.invalidateQueries({ queryKey: ["obsidian"] });
+    },
+    onError: (err) => {
+      setSavePathError(err instanceof Error ? err.message : "Could not save the path");
+    },
   });
   const available = statusQuery.data?.available ?? false;
 
@@ -64,8 +79,32 @@ export default function ObsidianWidget() {
         <BookText size={20} className="text-text-muted" aria-hidden="true" />
         <p className="text-xs text-text-secondary">Obsidian vault not configured.</p>
         <p className="text-xxs text-text-muted">
-          Set <code className="font-mono">FLINTTRADE_OBSIDIAN_VAULT</code> to your vault path and restart the backend.
+          Enter the absolute path of your vault folder — it persists in the
+          workspace (no restart needed).
         </p>
+        <div className="flex w-full max-w-xs items-center gap-2">
+          <Input
+            value={vaultPathDraft}
+            onChange={(e) => setVaultPathDraft(e.target.value)}
+            placeholder="/path/to/your/vault"
+            aria-label="Obsidian vault path"
+            className="h-7 text-xxs"
+          />
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 px-2 text-xxs"
+            onClick={() => savePathMutation.mutate()}
+            disabled={savePathMutation.isPending || !vaultPathDraft.trim()}
+          >
+            {savePathMutation.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+        {savePathError && (
+          <p role="alert" className="text-xxs text-loss">
+            {savePathError}
+          </p>
+        )}
       </div>
     );
   }

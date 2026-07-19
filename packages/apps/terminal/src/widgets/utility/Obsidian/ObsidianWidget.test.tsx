@@ -8,11 +8,13 @@ vi.mock("@/services/ftApi.ai", () => ({
   listObsidianNotes: vi.fn(),
   readObsidianNote: vi.fn(),
   searchObsidianNotes: vi.fn(),
+  saveObsidianVaultPath: vi.fn(),
 }));
 import {
   getObsidianStatus,
   listObsidianNotes,
   readObsidianNote,
+  saveObsidianVaultPath,
   searchObsidianNotes,
 } from "@/services/ftApi.ai";
 import ObsidianWidget from "./ObsidianWidget";
@@ -21,6 +23,7 @@ const mockStatus = getObsidianStatus as unknown as ReturnType<typeof vi.fn>;
 const mockNotes = listObsidianNotes as unknown as ReturnType<typeof vi.fn>;
 const mockRead = readObsidianNote as unknown as ReturnType<typeof vi.fn>;
 const mockSearch = searchObsidianNotes as unknown as ReturnType<typeof vi.fn>;
+const mockSavePath = saveObsidianVaultPath as unknown as ReturnType<typeof vi.fn>;
 
 function renderWidget() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -74,5 +77,42 @@ describe("ObsidianWidget", () => {
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
     expect(await screen.findByText(/Buy the dip/i)).toBeInTheDocument();
     expect(mockSearch).toHaveBeenCalledWith("dip");
+  });
+});
+
+
+describe("ObsidianWidget vault-path setup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatus.mockResolvedValue({ configured: false, available: false, vault_path: "" });
+  });
+
+  it("saves the vault path from the unconfigured state and refreshes", async () => {
+    mockSavePath.mockResolvedValue({ vault_path: "/my/vault", env_override: false });
+    renderWidget();
+    await screen.findByText(/Obsidian vault not configured/i);
+
+    fireEvent.change(screen.getByLabelText("Obsidian vault path"), {
+      target: { value: "/my/vault" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    await screen.findByText(/Connecting to vault|Obsidian vault not configured/i);
+    expect(mockSavePath).toHaveBeenCalledWith("/my/vault");
+  });
+
+  it("surfaces a rejected path save honestly", async () => {
+    mockSavePath.mockRejectedValue(new Error("vault_path is not an existing directory"));
+    renderWidget();
+    await screen.findByText(/Obsidian vault not configured/i);
+
+    fireEvent.change(screen.getByLabelText("Obsidian vault path"), {
+      target: { value: "/nope" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    expect(
+      await screen.findByText(/not an existing directory/i),
+    ).toBeInTheDocument();
   });
 });

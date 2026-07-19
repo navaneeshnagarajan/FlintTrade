@@ -646,6 +646,16 @@ export interface ObsidianSearchHit {
 export const getObsidianStatus = () =>
   get<ObsidianStatus>("ai/obsidian/status");
 
+/**
+ * Persist the vault path (workspace-backed; the FLINTTRADE_OBSIDIAN_VAULT
+ * environment variable, when set, overrides it and the backend says so).
+ * An empty string clears the stored path.
+ */
+export const saveObsidianVaultPath = (vaultPath: string) =>
+  post<{ vault_path: string; env_override: boolean }>("ai/obsidian/config", {
+    vault_path: vaultPath,
+  });
+
 /** Every note's vault-relative path (sorted). */
 export const listObsidianNotes = () =>
   get<string[]>("ai/obsidian/notes");
