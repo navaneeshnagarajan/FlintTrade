@@ -6,8 +6,12 @@
  * and per-strategy breakdown.
  *
  * Data source:
- *   - Polls getPositionbook() every 5 seconds during market hours (60s off-hours)
- *   - Tracks P&L snapshots for the equity curve using local state + setInterval
+ *   - The SHARED usePositions()/useTradebook() TanStack caches (U10: one
+ *     ingress per data shape — no widget-owned poll that could drift from
+ *     the positions every other widget shows). Their cadences match the
+ *     old self-poll (positions 5s market hours / 60s off; tradebook 30s).
+ *   - P&L snapshots for the equity curve accumulate on each positions
+ *     update in widget-local state.
  *   - Shared Flint baseline sparkline for the compact curve
  *
  * Architecture:
@@ -20,17 +24,16 @@ import {
   useEffect,
   useRef,
   useState,
-  useCallback,
   useMemo,
   memo,
 } from "react";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { FlintBaselineSparkline } from "@flinttrade/design-system";
-import { getPositionbook, getTradebook } from "@/services/api";
-import { isMarketHours } from "@/lib/market";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { usePositions } from "@/hooks/usePositions";
+import { useTradebook } from "@/hooks/useTradebook";
 import { realisedBySymbol } from "@/lib/pnl";
-import type { Position, Trade } from "@/types/api";
+import type { Position } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -233,95 +236,88 @@ function IntradayPnLWidget() {
     error:         null,
   });
 
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Stable refs to avoid closing over stale state in the async callback
+  // Stable refs to avoid closing over stale state in the update effect
   const peakRef      = useRef<number>(0);
   const drawdownRef  = useRef<number>(0);
 
-  const fetchAndUpdate = useCallback(async () => {
-    try {
-      const positions: Position[] = await getPositionbook();
+  // Shared caches — the same positions/tradebook entries every other widget
+  // consumes, on the shared refetch cadence. Invalidating the shared keys
+  // (e.g. after an order) updates this widget too.
+  const positionsQuery = usePositions();
+  const tradebookQuery = useTradebook();
 
-      // Booked realised P&L per symbol from today's tradebook (partial + full
-      // closes). If the tradebook is unavailable the map is empty and realised
-      // falls back to the closed-position pnl below — the prior behaviour.
-      let trades: Trade[] = [];
-      try {
-        trades = await getTradebook();
-      } catch {
-        trades = [];
-      }
-      const realisedForSymbol = realisedBySymbol(trades);
-
-      let realisedPnL   = 0;
-      let unrealisedPnL = 0;
-      for (const pos of positions) {
-        if (quantityOf(pos) === 0) {
-          // Fully closed: the broker/computed pnl is the accurate realised,
-          // including a position carried over from a prior day (which the
-          // tradebook alone would miss).
-          realisedPnL += effectivePnL(pos);
-        } else {
-          // Open: unrealised MTM on the remaining qty, plus any realised already
-          // booked by partial closes earlier in the session (from the tradebook).
-          unrealisedPnL += effectivePnL(pos);
-          realisedPnL   += realisedForSymbol.get(symbolOf(pos)) ?? 0;
-        }
-      }
-      const netPnL = realisedPnL + unrealisedPnL;
-
-      // Peak and max drawdown tracking (ref-stable)
-      if (netPnL > peakRef.current) {
-        peakRef.current = netPnL;
-      }
-      const dd = peakRef.current - netPnL;
-      if (dd > drawdownRef.current) {
-        drawdownRef.current = dd;
-      }
-
-      const byStrategy = buildStrategyPnL(positions);
-      const now = Math.floor(Date.now() / 1000);
-
-      setState((prev) => ({
-        netPnL,
-        realisedPnL,
-        unrealisedPnL,
-        peakPnL:     peakRef.current,
-        maxDrawdown: drawdownRef.current,
-        byStrategy,
-        snapshots: [
-          ...prev.snapshots.slice(-(MAX_SNAPSHOTS - 1)),
-          { time: now, value: netPnL },
-        ],
-        loading: false,
-        error:   null,
-      }));
-    } catch (err) {
+  useEffect(() => {
+    if (positionsQuery.isError) {
       setState((prev) => ({
         ...prev,
         loading: false,
-        error:   err instanceof Error ? err.message : "Fetch failed",
+        error:
+          positionsQuery.error instanceof Error
+            ? positionsQuery.error.message
+            : "Fetch failed",
       }));
+      return;
     }
-  }, []);
+    const positions: Position[] | undefined = positionsQuery.data;
+    if (!positions) return;
 
-  useEffect(() => {
-    void fetchAndUpdate();
+    // Booked realised P&L per symbol from today's tradebook (partial + full
+    // closes). If the tradebook is unavailable the map is empty and realised
+    // falls back to the closed-position pnl below — the prior behaviour.
+    const realisedForSymbol = realisedBySymbol(tradebookQuery.data ?? []);
 
-    function schedule() {
-      const delay = isMarketHours() ? 5000 : 60000;
-      pollRef.current = setTimeout(() => {
-        void fetchAndUpdate();
-        schedule();
-      }, delay);
+    let realisedPnL   = 0;
+    let unrealisedPnL = 0;
+    for (const pos of positions) {
+      if (quantityOf(pos) === 0) {
+        // Fully closed: the broker/computed pnl is the accurate realised,
+        // including a position carried over from a prior day (which the
+        // tradebook alone would miss).
+        realisedPnL += effectivePnL(pos);
+      } else {
+        // Open: unrealised MTM on the remaining qty, plus any realised already
+        // booked by partial closes earlier in the session (from the tradebook).
+        unrealisedPnL += effectivePnL(pos);
+        realisedPnL   += realisedForSymbol.get(symbolOf(pos)) ?? 0;
+      }
+    }
+    const netPnL = realisedPnL + unrealisedPnL;
+
+    // Peak and max drawdown tracking (ref-stable)
+    if (netPnL > peakRef.current) {
+      peakRef.current = netPnL;
+    }
+    const dd = peakRef.current - netPnL;
+    if (dd > drawdownRef.current) {
+      drawdownRef.current = dd;
     }
 
-    schedule();
-    return () => {
-      if (pollRef.current) clearTimeout(pollRef.current);
-    };
-  }, [fetchAndUpdate]);
+    const byStrategy = buildStrategyPnL(positions);
+    const now = Math.floor(Date.now() / 1000);
+
+    setState((prev) => ({
+      netPnL,
+      realisedPnL,
+      unrealisedPnL,
+      peakPnL:     peakRef.current,
+      maxDrawdown: drawdownRef.current,
+      byStrategy,
+      snapshots: [
+        ...prev.snapshots.slice(-(MAX_SNAPSHOTS - 1)),
+        { time: now, value: netPnL },
+      ],
+      loading: false,
+      error:   null,
+    }));
+    // dataUpdatedAt keys one snapshot per positions REFRESH — reacting to
+    // object identity alone would also fire on unrelated re-renders.
+  }, [
+    positionsQuery.dataUpdatedAt,
+    positionsQuery.isError,
+    positionsQuery.error,
+    positionsQuery.data,
+    tradebookQuery.data,
+  ]);
 
   const { netPnL, realisedPnL, unrealisedPnL, peakPnL, maxDrawdown, byStrategy, snapshots } = state;
 
