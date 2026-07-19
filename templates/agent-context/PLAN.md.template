@@ -10,7 +10,7 @@
 
 ## Current State (updated 2026-05-19)
 
-- **Version:** v0.6.0-beta.11 (tag `v0.6.0-beta.11`, 2026-07-02) — beta restructure snapshot. Not production ready; see `disclaimer.md` and CHANGELOG for release boundaries.
+- **Version:** v0.6.0-beta.12 (tag `v0.6.0-beta.12`, 2026-07-02) — beta restructure snapshot. Not production ready; see `disclaimer.md` and CHANGELOG for release boundaries.
 - **Tests:** ~2,973 terminal (Vitest, 264 files) + 9,089 Python (pytest, 313 files) = ~12,062 total — verified 2026-05-19
 - **Packages:** 17 surfaces (13 Python + 2 React apps + 1 shared TypeScript design system + 1 Rust/PyO3 tick engine)
 - **Widgets:** 82 (22 trading + 38 analysis + 22 utility)

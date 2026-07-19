@@ -241,7 +241,7 @@ environment variable.
   per-user — no admin rights needed. A manually downloaded installer triggers
   SmartScreen (**More info → Run anyway**). The beta release does not publish
   MSI assets because WiX requires numeric product versions and rejects
-  prerelease SemVer like `0.6.0-beta.11`.
+  prerelease SemVer like `0.6.0-beta.12`.
 - The installer fetches the WebView2 runtime during install if it is missing
   (needs internet). Windows 11 on ARM runs the x64 build via emulation.
 - Windows Defender may flag the unsigned engine payload under
@@ -321,7 +321,7 @@ installers to a GitHub Release.
 - **Trigger:** dispatched automatically by `release-please.yml` with the new
   tag when a release PR merges; can also be run manually
   (**Actions → Desktop Release → Run workflow**) with a tag like
-  `v0.6.0-beta.11`. Releases publish non-draft.
+  `v0.6.0-beta.12`. Releases publish non-draft.
 - **Matrix:** macOS universal (`macos-14`, `--target universal-apple-darwin`) + macOS x64 payload-only (`macos-15-intel`), Windows x64,
   Linux x64 (`ubuntu-22.04`), Linux arm64 (`ubuntu-22.04-arm`) — AppImage only.
 - macOS x64 (`macos-15-intel`) builds only the Intel engine payload — kept
