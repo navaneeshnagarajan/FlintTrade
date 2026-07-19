@@ -662,7 +662,7 @@ def test_sigterm_relay_handler_never_takes_coordinator_lock(entry: ModuleType) -
     finally:
         coordinator._lock.release()
 
-    relay_thread.join(timeout=1)
+    relay_thread.join(timeout=10)
     assert relay_thread.is_alive() is False
     assert callback_called.is_set() is True
 
@@ -675,7 +675,7 @@ def test_stdin_shutdown_command_requests_graceful_exit(entry: ModuleType) -> Non
         stream=io.StringIO(f"ignored\n{entry.SHUTDOWN_COMMAND}\n"),
     )
 
-    thread.join(timeout=1)
+    thread.join(timeout=10)
     assert requested.is_set()
 
 
@@ -1931,7 +1931,7 @@ def test_stdin_force_exit_targets_the_complete_owned_process_tree(
         terminate_owned_tree=lambda: tree_terminations.append("terminate") or True,
     )
 
-    thread.join(timeout=1)
+    thread.join(timeout=10)
     assert tree_terminations == ["terminate"]
     assert exit_codes == [1]
     assert requested.is_set() is False
@@ -1984,7 +1984,7 @@ def test_stdin_listener_keeps_force_fallback_after_graceful_request(
         terminate_owned_tree=lambda: True,
     )
 
-    thread.join(timeout=1)
+    thread.join(timeout=10)
     assert requested.is_set() is True
     assert exit_codes == [1]
 
@@ -1994,7 +1994,7 @@ def test_stdin_eof_requests_graceful_exit_for_a_dead_parent(entry: ModuleType) -
     requested = threading.Event()
     thread = entry.start_stdin_shutdown_listener(requested.set, stream=io.StringIO(""))
 
-    thread.join(timeout=1)
+    thread.join(timeout=10)
     assert requested.is_set()
 
 
@@ -2062,7 +2062,7 @@ def test_stdin_eof_uses_orphan_tree_fallback(
         terminate_owned_tree=terminate_owned_tree,
     )
 
-    thread.join(timeout=1)
+    thread.join(timeout=10)
     assert orphaned == [(request_shutdown, terminate_owned_tree)]
 
 

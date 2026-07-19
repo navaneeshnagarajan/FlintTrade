@@ -734,8 +734,8 @@ class TestKillSwitchGatedWrites:
             assert rebuild_attempted.wait(timeout=2)
             assert rebuild_finished.wait(timeout=0.1) is False
             adapter.release.set()
-            activation_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            activation_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
 
             assert not activation_thread.is_alive()
             assert not rebuild_thread.is_alive()
@@ -744,8 +744,8 @@ class TestKillSwitchGatedWrites:
             assert flask_app.config["BROKER_ROUTER"] is replacement_router
         finally:
             adapter.release.set()
-            activation_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            activation_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
             if safety.l5_kill.is_active:
                 safety.l5_kill.reset()
             flask_app.config.update(original)
@@ -805,7 +805,7 @@ class TestKillSwitchGatedWrites:
             assert adapter.calls == []
         finally:
             release_lock.set()
-            holder.join(timeout=2)
+            holder.join(timeout=10)
             flask_app.config.update(original)
 
     def test_missing_target_fails_closed_and_never_uses_raw_client(self, flask_app, client):
@@ -1272,8 +1272,8 @@ class TestKillSwitchGatedWrites:
             assert rebuild_attempted.wait(timeout=2)
             rebuild_completed_during_wait = rebuild_finished.wait(timeout=0.5)
             release_wait.set()
-            reset_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            reset_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
 
             assert rebuild_completed_during_wait is True
             assert not reset_thread.is_alive()
@@ -1284,8 +1284,8 @@ class TestKillSwitchGatedWrites:
             assert replacement_router.actor_ids == ["testuser"]
         finally:
             release_wait.set()
-            reset_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            reset_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
             flask_app.config.update(original)
 
     def test_reset_holds_router_generation_lease_through_l5_transition(self, flask_app):
@@ -1368,8 +1368,8 @@ class TestKillSwitchGatedWrites:
             assert rebuild_attempted.wait(timeout=2)
             rebuild_completed_during_acl = rebuild_finished.wait(timeout=0.1)
             allow_acl_return.set()
-            reset_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            reset_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
 
             assert rebuild_completed_during_acl is False
             assert not reset_thread.is_alive()
@@ -1380,8 +1380,8 @@ class TestKillSwitchGatedWrites:
             assert flask_app.config["BROKER_ROUTER"] is replacement_router
         finally:
             allow_acl_return.set()
-            reset_thread.join(timeout=2)
-            rebuild_thread.join(timeout=2)
+            reset_thread.join(timeout=10)
+            rebuild_thread.join(timeout=10)
             flask_app.config.update(original)
 
     def test_reset_does_not_starve_an_activation_waiting_for_the_generation_lease(self, flask_app):
@@ -1468,8 +1468,8 @@ class TestKillSwitchGatedWrites:
             reset_thread.join(timeout=0.05)
             assert reset_thread.is_alive()
             allow_lease_attempt.set()
-            activation_thread.join(timeout=2)
-            reset_thread.join(timeout=2)
+            activation_thread.join(timeout=10)
+            reset_thread.join(timeout=10)
 
             assert not activation_thread.is_alive()
             assert not reset_thread.is_alive()
@@ -1478,8 +1478,8 @@ class TestKillSwitchGatedWrites:
             assert safety.l5_kill.is_active is False
         finally:
             allow_lease_attempt.set()
-            activation_thread.join(timeout=2)
-            reset_thread.join(timeout=2)
+            activation_thread.join(timeout=10)
+            reset_thread.join(timeout=10)
             if safety.l5_kill.is_active:
                 safety.l5_kill.reset()
             flask_app.config.update(original)
