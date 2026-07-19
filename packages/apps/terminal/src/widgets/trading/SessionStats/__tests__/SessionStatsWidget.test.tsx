@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
@@ -13,6 +13,16 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+// Live sources: default to empty (→ disclosed sample fallback).
+const mockTradebook = vi.fn();
+const mockOrders = vi.fn();
+vi.mock("@/hooks/useTradebook", () => ({
+  useTradebook: () => mockTradebook() as unknown,
+}));
+vi.mock("@/hooks/useOrders", () => ({
+  useOrders: () => mockOrders() as unknown,
+}));
+
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import SessionStatsWidget from "../SessionStatsWidget";
 import {
@@ -21,6 +31,13 @@ import {
 } from "../SessionStatsWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  mockTradebook.mockReset();
+  mockOrders.mockReset();
+  mockTradebook.mockReturnValue({ data: [] });
+  mockOrders.mockReturnValue({ data: [] });
+});
 
 beforeAll(() => {
   global.ResizeObserver = class {
@@ -183,5 +200,41 @@ describe("SAMPLE_ORDER_SUMMARY", () => {
     const { filled, rejected, pending } = SAMPLE_ORDER_SUMMARY;
     expect(filled).toBeGreaterThan(rejected);
     expect(filled).toBeGreaterThan(pending);
+  });
+});
+
+
+describe("SessionStatsWidget live mode", () => {
+  it("computes stats from real closed round trips and badges Live", () => {
+    mockTradebook.mockReturnValue({
+      data: [
+        { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "BUY", quantity: 75, price: 100, timestamp: "2026-07-19T09:20:00" },
+        { tradeId: "t2", orderId: "o2", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "SELL", quantity: 75, price: 110, timestamp: "2026-07-19T09:50:00" },
+      ],
+    });
+    mockOrders.mockReturnValue({
+      data: [
+        { status: "complete" }, { status: "complete" }, { status: "rejected" }, { status: "open" },
+      ],
+    });
+    render(<SessionStatsWidget />);
+    expect(screen.getByText("Live")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).toBeNull();
+    // One winning round trip: 75 × ₹10 = ₹750 (appears in header + tiles).
+    expect(screen.getAllByText(/750/).length).toBeGreaterThan(0);
+    expect(screen.getByText("1W / 0L")).toBeTruthy();
+  });
+
+  it("stays on the disclosed sample when fills exist but nothing closed", () => {
+    mockTradebook.mockReturnValue({
+      data: [
+        { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "BUY", quantity: 75, price: 100, timestamp: "2026-07-19T09:20:00" },
+      ],
+    });
+    render(<SessionStatsWidget />);
+    expect(screen.getByText("Sample data")).toBeTruthy();
   });
 });

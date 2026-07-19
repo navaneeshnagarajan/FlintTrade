@@ -70,3 +70,95 @@ export function realisedBySymbol(trades: Trade[]): Map<string, number> {
   }
   return out;
 }
+
+/**
+ * One closed round trip reconstructed from FIFO-paired fills.
+ *
+ * Aggregated per symbol from the first pairing fill to the moment the FIFO
+ * queues exhaust one side — good enough for session statistics (win rate,
+ * average hold, equity progression), not an accounting record.
+ */
+export interface RoundTrip {
+  symbol: string;
+  pnl: number;
+  isWin: boolean;
+  entryTime: string;
+  exitTime: string;
+  holdMinutes: number;
+}
+
+function timeLabel(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function minutesBetween(fromIso: string, toIso: string): number {
+  const from = new Date(fromIso).getTime();
+  const to = new Date(toIso).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return 0;
+  return Math.round((to - from) / 60_000);
+}
+
+/**
+ * Reconstruct closed round trips from a session's fills.
+ *
+ * Same FIFO pairing as {@link realisedFromTrades}, one {@link RoundTrip} per
+ * symbol whose fills produced at least one matched close-out. Symbols with
+ * only opens (still-running positions) contribute nothing — this reports
+ * CLOSED trades only.
+ *
+ * @param trades - Executed fills (any order; sorted internally by timestamp).
+ * @returns Closed round trips ordered by exit time.
+ */
+export function roundTripsFromTrades(trades: Trade[]): RoundTrip[] {
+  const bySymbol: Record<string, Trade[]> = {};
+  for (const t of trades) {
+    (bySymbol[t.symbol] ??= []).push(t);
+  }
+
+  const roundTrips: RoundTrip[] = [];
+  for (const [symbol, legs] of Object.entries(bySymbol)) {
+    const sorted = [...legs].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const buys = sorted
+      .filter((t) => t.action === "BUY")
+      .map((t) => ({ qty: t.quantity, price: t.price, ts: t.timestamp }));
+    const sells = sorted
+      .filter((t) => t.action === "SELL")
+      .map((t) => ({ qty: t.quantity, price: t.price, ts: t.timestamp }));
+
+    let pnl = 0;
+    let matchedAny = false;
+    let entryTs = "";
+    let exitTs = "";
+    let bi = 0;
+    let si = 0;
+    while (bi < buys.length && si < sells.length) {
+      const matched = Math.min(buys[bi].qty, sells[si].qty);
+      pnl += (sells[si].price - buys[bi].price) * matched;
+      if (!matchedAny) {
+        entryTs = buys[bi].ts < sells[si].ts ? buys[bi].ts : sells[si].ts;
+        matchedAny = true;
+      }
+      exitTs = buys[bi].ts > sells[si].ts ? buys[bi].ts : sells[si].ts;
+      buys[bi] = { ...buys[bi], qty: buys[bi].qty - matched };
+      sells[si] = { ...sells[si], qty: sells[si].qty - matched };
+      if (buys[bi].qty === 0) bi++;
+      if (sells[si].qty === 0) si++;
+    }
+
+    if (matchedAny) {
+      roundTrips.push({
+        symbol,
+        pnl,
+        isWin: pnl > 0,
+        entryTime: timeLabel(entryTs),
+        exitTime: timeLabel(exitTs),
+        holdMinutes: minutesBetween(entryTs, exitTs),
+      });
+    }
+  }
+
+  roundTrips.sort((a, b) => a.exitTime.localeCompare(b.exitTime));
+  return roundTrips;
+}

@@ -18,6 +18,9 @@ import { Clock } from "lucide-react";
 import { FlintBaselineSparkline } from "@flinttrade/design-system";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { useTradebook } from "@/hooks/useTradebook";
+import { useOrders } from "@/hooks/useOrders";
+import { roundTripsFromTrades } from "@/lib/pnl";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -226,7 +229,45 @@ function SessionStatsWidget() {
     track("trade", "widget_view_session_stats");
   }, [track]);
 
-  const metrics = useMemo(() => computeSessionMetrics(SAMPLE_SESSION_TRADES), []);
+  // Live sources: today's fills (round trips via the shared FIFO pairing)
+  // and the order book (status summary). The disclosed samples remain the
+  // fallback when no real closed trades exist yet.
+  const tradebookQuery = useTradebook();
+  const ordersQuery = useOrders();
+
+  const liveTrades = useMemo(() => {
+    const fills = tradebookQuery.data ?? [];
+    if (fills.length === 0) return null;
+    const trips = roundTripsFromTrades(fills);
+    if (trips.length === 0) return null;
+    return trips.map((t, index) => ({
+      id: `RT${index + 1}`,
+      symbol: t.symbol,
+      pnl: t.pnl,
+      holdMinutes: t.holdMinutes,
+      isWin: t.isWin,
+      entryTime: t.entryTime,
+      exitTime: t.exitTime,
+    }));
+  }, [tradebookQuery.data]);
+
+  const liveOrderSummary = useMemo(() => {
+    const orders = ordersQuery.data ?? [];
+    if (orders.length === 0) return null;
+    const status = (o: { status: string }) => o.status.toLowerCase();
+    return {
+      placed: orders.length,
+      filled: orders.filter((o) => status(o).includes("complete") || status(o).includes("filled")).length,
+      rejected: orders.filter((o) => status(o).includes("reject")).length,
+      pending: orders.filter((o) => status(o).includes("open") || status(o).includes("pending") || status(o).includes("trigger")).length,
+    };
+  }, [ordersQuery.data]);
+
+  const isLive = liveTrades !== null;
+  const sessionTrades = liveTrades ?? SAMPLE_SESSION_TRADES;
+  const orderSummary = liveOrderSummary ?? SAMPLE_ORDER_SUMMARY;
+
+  const metrics = useMemo(() => computeSessionMetrics(sessionTrades), [sessionTrades]);
   const idleMinutes = Math.max(0, metrics.sessionMinutes - metrics.activeMinutes);
 
   return (
@@ -236,18 +277,22 @@ function SessionStatsWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Clock size={13} className="text-text-muted shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Session Stats</span>
-        {/* Honest disclosure — `computeSessionMetrics(SAMPLE_SESSION_TRADES)`
-            is the only data source today; no backend session-aggregation
-            endpoint exists. The badge previously hid in `isConnected` mode,
-            which masked the fact that we were still showing sample data
-            even after a broker connection. Keep visible at all times. */}
+        {/* Provenance: Live only when today's tradebook produced at least
+            one CLOSED round trip; the disclosed sample renders otherwise
+            (fresh session, explore mode, or no fills yet). */}
         <span
-          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          className={cn(
+            "px-1.5 py-0.5 text-xxs rounded border",
+            isLive
+              ? "bg-profit/10 text-profit border-profit/30"
+              : "bg-warning/10 text-warning border-warning/30",
+          )}
           role="status"
-          aria-label="Showing sample data; no live backend endpoint yet"
-          title="No live data wired yet — showing sample session statistics so the widget is usable in explore mode."
+          aria-label={isLive
+            ? "Showing statistics computed from today's real closed trades"
+            : "Showing sample data — no closed trades in today's tradebook yet"}
         >
-          Sample data
+          {isLive ? "Live" : "Sample data"}
         </span>
         <div className="flex-1" />
         <span className={cn("text-sm font-bold font-mono tabular-nums", metrics.totalPnl >= 0 ? "text-profit" : "text-loss")}>
@@ -262,7 +307,7 @@ function SessionStatsWidget() {
           <p id="ss-equity" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1">
             Session Equity
           </p>
-          <MiniEquity trades={SAMPLE_SESSION_TRADES} />
+          <MiniEquity trades={sessionTrades} />
         </section>
 
         {/* Orders */}
@@ -270,7 +315,7 @@ function SessionStatsWidget() {
           <p id="ss-orders" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1">
             Orders
           </p>
-          <OrderBar summary={SAMPLE_ORDER_SUMMARY} />
+          <OrderBar summary={orderSummary} />
         </section>
 
         {/* Key stats grid */}
