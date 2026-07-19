@@ -342,7 +342,16 @@ async def test_forever_modify_cancel_and_list() -> None:
     await adapter.modify_forever(
         session,
         "GTT1",
-        {"pricetype": "LIMIT", "quantity": 10, "price": 1430, "trigger_price": 1429},
+        {
+            "order_flag": "SINGLE",
+            "leg_name": "TARGET_LEG",
+            "pricetype": "LIMIT",
+            "quantity": 10,
+            "price": 1430,
+            "trigger_price": 1429,
+            "disclosed_quantity": 0,
+            "validity": "DAY",
+        },
         _router_token=_ROUTER_TOKEN,
     )
     kind, kw = mock.calls[0]

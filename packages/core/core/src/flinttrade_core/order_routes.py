@@ -308,10 +308,11 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         body: Decoded JSON request body.
         variety: When set (e.g. ``"gtt"`` for the forever route), the built order
             carries this variety plus the variety-specific pass-throughs from the
-            body (``validity``, the OCO second-leg trio ``price1`` /
-            ``trigger_price1`` / ``quantity1`` and broker-specific GTT
-            ``*_trigger_type`` fields). ``None`` (the default) keeps the legacy
-            regular-order shape so the existing ``/place`` behaviour is
+            body (``validity``, the Dhan OCO second-leg trio ``price1`` /
+            ``trigger_price1`` / ``quantity1``, the Upstox protective
+            ``target_price`` / ``stop_loss_price`` fields, and broker-specific
+            GTT ``*_trigger_type`` fields). ``None`` (the default) keeps the
+            legacy regular-order shape so the existing ``/place`` behaviour is
             byte-identical.
     """
     from flinttrade_core.models import (  # noqa: PLC0415
@@ -340,6 +341,7 @@ def _body_to_order(body: dict[str, Any], *, variety: str | None = None) -> Any:
         # SafetyContext canonical hash covers them.
         for key in (
             "validity", "price1", "trigger_price1", "quantity1",
+            "target_price", "stop_loss_price",
             "entry_trigger_type", "stop_loss_trigger_type", "target_trigger_type",
         ):
             value = body.get(key)
@@ -2560,6 +2562,74 @@ def _changes_from_body(body: dict[str, Any]) -> dict[str, Any] | None:
     return changes
 
 
+def _forever_contract_error(
+    values: dict[str, Any],
+    adapter_id: str,
+    *,
+    modifying: bool = False,
+) -> str | None:
+    """Reject protective-leg fields that the selected GTT broker would ignore."""
+    broker = adapter_id.lower()
+    supplied = {key for key, value in values.items() if value is not None and value != ""}
+    if broker == "upstox":
+        dhan_only = {"price1", "trigger_price1", "quantity1"}
+        if modifying:
+            dhan_only.update({"order_flag", "leg_name"})
+        ignored = sorted(supplied & dhan_only)
+        if ignored:
+            return (
+                "Upstox GTT does not accept Dhan forever-order fields "
+                f"{ignored}; use target_price and/or stop_loss_price rules."
+            )
+        if modifying:
+            required = {
+                "type",
+                "quantity",
+                "trigger_price",
+                "entry_trigger_type",
+                "stop_loss_price",
+                "target_price",
+                "stop_loss_trigger_type",
+                "target_trigger_type",
+                "stop_loss_trailing_gap",
+            }
+            missing = sorted(required - supplied)
+            if missing:
+                return f"Upstox GTT modify requires a complete replacement; missing fields {missing}."
+    if broker == "dhan":
+        upstox_only = {
+            "type",
+            "target_price",
+            "stop_loss_price",
+            "entry_trigger_type",
+            "target_trigger_type",
+            "stop_loss_trigger_type",
+            "stop_loss_trailing_gap",
+        }
+        ignored = sorted(supplied & upstox_only)
+        if ignored:
+            return (
+                "Dhan forever orders do not accept Upstox GTT rule fields "
+                f"{ignored}; use the price1/trigger_price1/quantity1 OCO trio."
+            )
+        if modifying:
+            required = {
+                "order_flag",
+                "leg_name",
+                "quantity",
+                "price",
+                "trigger_price",
+                "disclosed_quantity",
+                "validity",
+            }
+            missing = sorted(required - supplied)
+            if not ({"pricetype", "order_type"} & supplied):
+                missing.append("pricetype")
+            if missing:
+                return f"Dhan forever modify requires a complete replacement; missing fields {sorted(missing)}."
+    return None
+
+
 def _trigger_legs_from_body(body: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
     """Validate + build ``(condition, typed order legs)`` for a conditional trigger.
 
@@ -2670,7 +2740,7 @@ def _check_legs_through_safety(
     return None, exposure_positions
 
 
-# --- Forever (GTT) orders — Dhan-native; placed via the gated trio path ----
+# --- Forever (GTT) orders — native Dhan/Upstox; gated router path ----------
 
 
 @orders_bp.route("/forever", methods=["POST"])
@@ -2678,22 +2748,25 @@ def _check_legs_through_safety(
 def forever_place() -> tuple[Any, int]:
     """Place a forever (GTT) order through the gated place path (live only).
 
-    Builds a typed ``Order`` with ``variety="gtt"`` — including optional
-    OCO second-leg fields, ``validity``, and broker-specific GTT trigger-type
-    fields — and dispatches it through the SAME channel as a regular placement:
+    Builds a typed ``Order`` with ``variety="gtt"`` — including Dhan OCO fields
+    or Upstox TARGET/STOPLOSS rules — and dispatches it through the SAME channel
+    as a regular placement:
     SafetySystem L1–L5 → ``gate_order`` → ``BrokerRouter.place_order``. The
     variety and leg fields live on the Order, so the SafetyContext HMAC covers
     them.
 
     Request JSON: standard order fields plus ``trigger_price`` (required by the
-    broker), optional OCO trio, optional ``broker`` and ``account_id``. With no
-    target fields, ``brokers.execution.default`` is used.
+    broker), broker-specific protective fields, and optional ``broker`` and
+    ``account_id``. With no target fields, ``brokers.execution.default`` is used.
     """
     payload, err = _require_live_payload(require_unlock=True)
     if err is not None:
         return err
     body = request.get_json(silent=True) or {}
     adapter_id, account_id = _gated_target(body)
+    contract_error = _forever_contract_error(body, adapter_id)
+    if contract_error is not None:
+        return jsonify({"status": "error", "message": contract_error}), 400
     return _dispatch_live_order(
         "forever-place", body, payload,
         adapter_id=adapter_id, account_id=account_id, variety="gtt",
@@ -2717,6 +2790,9 @@ def forever_modify(order_id: str) -> tuple[Any, int]:
     if changes is None:
         return jsonify({"status": "error", "message": "Modify requires a non-empty 'changes' object"}), 400
     adapter_id, account_id = _gated_target(body)
+    contract_error = _forever_contract_error(changes, adapter_id, modifying=True)
+    if contract_error is not None:
+        return jsonify({"status": "error", "message": contract_error}), 400
     try:
         safety = _require_live_safety()
     except Exception as exc:  # noqa: BLE001 - readiness failures are admission refusals

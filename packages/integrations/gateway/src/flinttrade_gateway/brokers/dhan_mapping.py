@@ -164,7 +164,11 @@ def _optional_bool(value: Any, *, field: str) -> bool | None:
 
 def _norm_pricetype(pricetype: str) -> str:
     # FlintTrade uses "SL-M"; the canonical ORDER_TYPE_MAP key is "SLM".
-    return str(pricetype).upper().replace("-", "")
+    normalised = str(pricetype).upper().replace("-", "")
+    return {
+        "STOP_LOSS": "SL",
+        "STOP_LOSS_MARKET": "SLM",
+    }.get(normalised, normalised)
 
 
 # Order validity accepted by Dhan's place/slice endpoints (orders.md): DAY or
@@ -418,6 +422,9 @@ def to_forever_kwargs(order: Any, security_id: str, *, tag: str | None = None) -
         "price": core["price"],
         "trigger_Price": trigger,
         "order_flag": "SINGLE",
+        "disclosed_quantity": int(_num(getattr(order, "disclosed_quantity", 0), 0)),
+        "validity": _norm_place_validity(getattr(order, "validity", None)),
+        "symbol": str(getattr(order, "symbol", "")),
     }
     price1 = _num(getattr(order, "price1", None) or 0)
     trigger1 = _num(getattr(order, "trigger_price1", None) or 0)
@@ -531,23 +538,51 @@ def to_modify_forever_kwargs(order_id: str, changes: dict[str, Any]) -> dict[str
     (SINGLE / first OCO leg) or ``STOP_LOSS_LEG`` (second OCO leg) — ENTRY_LEG is
     a super-order concept and is rejected by the broker (DH-905).
     """
-    flag = str(changes.get("order_flag", "SINGLE")).upper()
+    required = {
+        "order_flag",
+        "leg_name",
+        "quantity",
+        "price",
+        "trigger_price",
+        "disclosed_quantity",
+        "validity",
+    }
+    missing = sorted(key for key in required if key not in changes or changes[key] in (None, ""))
+    if "pricetype" not in changes and "order_type" not in changes:
+        missing.append("pricetype")
+    if missing:
+        raise DhanMappingError(f"Forever modify needs a complete replacement; missing fields {sorted(missing)}")
+
+    flag = str(changes["order_flag"]).upper()
     if flag not in FOREVER_ORDER_FLAGS:
         raise DhanMappingError(f"Forever order_flag must be SINGLE or OCO, got {flag!r}")
-    leg = str(changes.get("leg_name", "TARGET_LEG")).upper()
+    leg = str(changes["leg_name"]).upper()
     if leg not in FOREVER_ORDER_LEGS:
         raise DhanMappingError(f"Forever leg_name must be one of {FOREVER_ORDER_LEGS}, got {leg!r}")
-    ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type", "LIMIT")))
+    if flag != "OCO" and leg == "STOP_LOSS_LEG":
+        raise DhanMappingError("STOP_LOSS_LEG requires an OCO forever order")
+    ptype = _norm_pricetype(changes.get("pricetype", changes.get("order_type")))
+    if ptype not in ORDER_TYPE_MAP:
+        raise DhanMappingError(f"Unsupported forever order type {ptype!r}")
+    quantity = int(_num(changes["quantity"], 0))
+    price = _num(changes["price"], -1)
+    trigger_price = _num(changes["trigger_price"], 0)
+    disclosed_quantity = int(_num(changes["disclosed_quantity"], -1))
+    validity = str(changes["validity"]).upper()
+    if quantity <= 0 or price < 0 or trigger_price <= 0 or disclosed_quantity < 0:
+        raise DhanMappingError("Forever modify quantities and prices are invalid")
+    if validity not in PLACE_ORDER_VALIDITIES:
+        raise DhanMappingError(f"Dhan supports only DAY/IOC validity, got {validity!r}")
     return {
         "order_id": str(order_id),
         "order_flag": flag,
-        "order_type": ORDER_TYPE_MAP.get(ptype, str(changes.get("order_type", "LIMIT"))),
+        "order_type": ORDER_TYPE_MAP[ptype],
         "leg_name": leg,
-        "quantity": int(_num(changes.get("quantity", 0), 0)),
-        "price": _num(changes.get("price", 0)),
-        "trigger_price": _num(changes.get("trigger_price", 0)),
-        "disclosed_quantity": int(_num(changes.get("disclosed_quantity", 0), 0)),
-        "validity": VALIDITY_MAP.get(str(changes.get("validity", "DAY")).upper(), "DAY"),
+        "quantity": quantity,
+        "price": price,
+        "trigger_price": trigger_price,
+        "disclosed_quantity": disclosed_quantity,
+        "validity": validity,
     }
 
 
@@ -571,6 +606,8 @@ def from_dhan_forever_order(d: dict[str, Any]) -> dict[str, Any]:
         "filled_quantity": _optional_text(d, "filledQty", "tradedQty"),
         "price": str(d.get("price", 0)),
         "trigger_price": str(d.get("triggerPrice", 0)),
+        "disclosed_quantity": str(d.get("disclosedQuantity", 0)),
+        "validity": d.get("validity", "DAY"),
         "quantity1": str(d.get("quantity1", 0)),
         "price1": str(d.get("price1", 0)),
         "trigger_price1": str(d.get("triggerPrice1", 0)),

@@ -1054,6 +1054,7 @@ _ACTIVE_ORDER_STATUSES = frozenset({
     "ACTIVE",
     "AFTER MARKET ORDER REQ RECEIVED",
     "AMO REQ RECEIVED",
+    "CONFIRM",
     "MODIFY PENDING",
     "MODIFY VALIDATION PENDING",
     "OPEN",
@@ -1061,6 +1062,7 @@ _ACTIVE_ORDER_STATUSES = frozenset({
     "PARTIALLY FILLED",
     "PENDING",
     "PUT ORDER REQ RECEIVED",
+    "SCHEDULED",
     "TRANSIT",
     "TRIGGER PENDING",
     "TRIGGER_PENDING",
@@ -1096,6 +1098,7 @@ def _order_record_id(row: Any) -> str:
             "order_id",
             "orderId",
             "trigger_id",
+            "gtt_order_id",
             "alert_id",
             "id",
         )
@@ -1124,6 +1127,31 @@ def _select_super_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any
     if len(matched) != 1:
         raise PortfolioSafetyStateError("Authoritative super-order leg is unavailable")
     return matched[0], parent
+
+
+def _select_forever_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, Any]:
+    """Select the authoritative Dhan forever leg named by a replacement."""
+    leg_name = _text(changes.get("leg_name") or "TARGET_LEG").upper()
+    order_flag = _text(_field(parent, "order_flag", "orderFlag")).upper()
+    requested_flag = _text(changes.get("order_flag")).upper()
+    if order_flag and requested_flag and requested_flag != order_flag:
+        raise PortfolioSafetyStateError("Forever-order flag cannot be changed during modification")
+    if leg_name == "TARGET_LEG":
+        return parent, None
+    if leg_name != "STOP_LOSS_LEG":
+        raise PortfolioSafetyStateError("Forever-order modify has an invalid leg name")
+    if order_flag != "OCO":
+        raise PortfolioSafetyStateError("Authoritative OCO stop-loss leg is unavailable")
+    second_leg = {
+        "status": _field(parent, "status", "order_status", "orderStatus"),
+        "quantity": _field(parent, "quantity1"),
+        "filled_quantity": 0,
+        "price": _field(parent, "price1"),
+        "trigger_price": _field(parent, "trigger_price1", "triggerPrice1"),
+    }
+    if any(second_leg[field] in (None, "") for field in ("quantity", "price", "trigger_price")):
+        raise PortfolioSafetyStateError("Authoritative OCO stop-loss leg is incomplete")
+    return second_leg, parent
 
 
 def _normalise_authoritative_order(row: Any, fallback: Any = None) -> dict[str, Any]:
@@ -1414,17 +1442,34 @@ async def classify_modify_intent(
     if len(matches) != 1:
         raise PortfolioSafetyStateError("Authoritative open order is unavailable")
 
-    selected, fallback = (
-        _select_super_leg(matches[0], changes)
-        if family == "super"
-        else (matches[0], None)
-    )
+    if family == "super":
+        selected, fallback = _select_super_leg(matches[0], changes)
+    elif family == "forever" and str(adapter_id).lower() == "dhan":
+        selected, fallback = _select_forever_leg(matches[0], changes)
+    else:
+        selected, fallback = matches[0], None
     current = _normalise_authoritative_order(selected, fallback)
     if current["status"] not in _ACTIVE_ORDER_STATUSES:
         raise PortfolioSafetyStateError("Authoritative order is not active and modifiable")
+    if (
+        family == "forever"
+        and current["filled_quantity"] in (None, "")
+        and current["status"] in {"CONFIRM", "PENDING", "SCHEDULED", "TRIGGER PENDING", "TRIGGER_PENDING"}
+    ):
+        # Broker GTT detail rows omit filled quantity before an exchange order
+        # exists. In these pre-trigger states, zero is implied by the state.
+        current["filled_quantity"] = 0
     required = ("symbol", "exchange", "action", "product", "quantity", "pricetype")
     if any(current[field] in (None, "") for field in required):
         raise PortfolioSafetyStateError("Authoritative open order is incomplete")
+
+    if family == "forever" and str(adapter_id).lower() == "upstox" and current["status"] == "OPEN":
+        current_quantity = _finite_number(current["quantity"], "authoritative order quantity")
+        proposed_quantity = _finite_number(changes.get("quantity"), "replacement order quantity")
+        if proposed_quantity != current_quantity:
+            raise PortfolioSafetyStateError("An OPEN Upstox GTT order cannot change quantity")
+        if _text(changes.get("entry_trigger_type")).upper() != "IMMEDIATE":
+            raise PortfolioSafetyStateError("An OPEN Upstox GTT ENTRY rule must use IMMEDIATE")
 
     try:
         current_order = Order(**_replacement_order_fields(current, {}))
@@ -1450,7 +1495,9 @@ async def classify_modify_intent(
     )
     return ModifySafetyIntent(
         proposed_order=proposed_order,
-        risk_increasing=not no_increase,
+        # A GTT replacement can weaken or remove a protective rule without
+        # changing entry quantity/margin. Always run complete admission.
+        risk_increasing=family == "forever" or not no_increase,
         margin_delta=max(proposed_margin - current_margin, 0.0),
     )
 

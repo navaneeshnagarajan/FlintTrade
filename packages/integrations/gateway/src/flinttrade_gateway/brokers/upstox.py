@@ -859,6 +859,26 @@ class UpstoxAdapter(BrokerAdapter):
             return
         await self._call(client.cancel_order, str(order_id))
 
+    async def modify_forever(
+        self, session: Session, order_id: str, changes: dict, *, _router_token: object | None = None
+    ) -> None:
+        """Fully replace one Upstox GTT order through the routed write contract."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        await self._call(
+            self._client(session).modify_gtt_order,
+            M.to_gtt_modify_params(str(order_id), changes),
+        )
+
+    async def cancel_forever(
+        self, session: Session, order_id: str, *, _router_token: object | None = None
+    ) -> None:
+        """Cancel one Upstox GTT order through the routed write contract."""
+        self._require_router_token(_router_token, _ROUTER_TOKEN)
+        await self._call(
+            self._client(session).cancel_gtt_order,
+            M.to_gtt_cancel_params(str(order_id)),
+        )
+
     async def place_multi_order(
         self, session: Session, orders: list[Order], *, _router_token: object | None = None
     ) -> dict:
@@ -1446,6 +1466,10 @@ class UpstoxAdapter(BrokerAdapter):
         """Active GTT orders, optionally narrowed to one id (``GET /v3/order/gtt``)."""
         resp = await self._call(self._client(session).gtt_order_details, gtt_order_id)
         return [M.from_upstox_gtt_order(r) for r in self._rows(resp)]
+
+    async def forever_orders(self, session: Session) -> list[dict]:
+        """List active Upstox GTT orders through the canonical forever-order verb."""
+        return await self.gtt_orders(session)
 
     async def trade_book(self, session: Session) -> list[Trade]:
         resp = await self._call(self._client(session).trade_book)

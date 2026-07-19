@@ -206,10 +206,13 @@ def test_slice_order_mirrors_place_order():
 
 def test_forever_gtt_kwargs():
     order = Order(symbol="RELIANCE", action="BUY", exchange="NSE", pricetype="LIMIT",
-                  product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt")
+                  product="CNC", quantity="5", price="2900", trigger_price="2890", variety="gtt",
+                  disclosed_quantity="2", validity="IOC")
     kw = to_forever_kwargs(order, "11536", tag="G1")
     assert kw["order_flag"] == "SINGLE" and kw["trigger_Price"] == 2890.0
     assert kw["price"] == 2900.0 and kw["product_type"] == "CNC" and kw["tag"] == "G1"
+    assert kw["disclosed_quantity"] == 2 and kw["validity"] == "IOC"
+    assert kw["symbol"] == "RELIANCE"
 
 
 def test_forever_without_trigger_raises():

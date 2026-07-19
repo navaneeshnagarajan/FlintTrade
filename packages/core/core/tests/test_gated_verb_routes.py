@@ -75,8 +75,12 @@ def _app(broker_router: object | None = None, safety: object | None = None) -> F
         "quantity": "5",
         "filled_quantity": "0",
         "price": "2900",
+        "trigger_price": "2890",
         "pricetype": "LIMIT",
         "product": "MIS",
+        "order_flag": "SINGLE",
+        "validity": "DAY",
+        "disclosed_quantity": "0",
     }
     super_order = {
         "orderid": "SUP-1",
@@ -181,6 +185,37 @@ def _gated_router(result: Any = {"status": "ok"}) -> MagicMock:
     return router
 
 
+def _dhan_forever_changes(**overrides: Any) -> dict[str, Any]:
+    changes: dict[str, Any] = {
+        "order_flag": "SINGLE",
+        "leg_name": "TARGET_LEG",
+        "pricetype": "LIMIT",
+        "quantity": 5,
+        "price": 2900,
+        "trigger_price": 2890,
+        "disclosed_quantity": 0,
+        "validity": "DAY",
+    }
+    changes.update(overrides)
+    return changes
+
+
+def _upstox_forever_changes(**overrides: Any) -> dict[str, Any]:
+    changes: dict[str, Any] = {
+        "type": "MULTIPLE",
+        "quantity": 2,
+        "trigger_price": 100,
+        "entry_trigger_type": "ABOVE",
+        "stop_loss_price": 90,
+        "stop_loss_trailing_gap": 0,
+        "target_price": 110,
+        "stop_loss_trigger_type": "IMMEDIATE",
+        "target_trigger_type": "IMMEDIATE",
+    }
+    changes.update(overrides)
+    return changes
+
+
 def _app_with_native_state(
     router: object | None,
     safety: object | None,
@@ -260,8 +295,6 @@ def test_forever_place_routes_variety_gtt_with_oco_fields() -> None:
         "symbol": "RELIANCE", "exchange": "NSE", "action": "BUY", "quantity": 1,
         "pricetype": "LIMIT", "price": "2900", "trigger_price": "2890",
         "product": "CNC", "validity": "DAY",
-        "entry_trigger_type": "BELOW", "stop_loss_trigger_type": "IMMEDIATE",
-        "target_trigger_type": "IMMEDIATE",
         "price1": "2800", "trigger_price1": "2805", "quantity1": "5",
         "broker": "dhan",
     }
@@ -273,10 +306,69 @@ def test_forever_place_routes_variety_gtt_with_oco_fields() -> None:
     assert order.variety == "gtt"
     assert order.validity == "DAY"
     assert (order.price1, order.trigger_price1, order.quantity1) == ("2800", "2805", "5")
-    assert order.entry_trigger_type == "BELOW"
-    assert order.stop_loss_trigger_type == "IMMEDIATE"
-    assert order.target_trigger_type == "IMMEDIATE"
     assert kw["hint"].adapter_id == "dhan"
+
+
+def test_forever_place_keeps_upstox_protective_rules_inside_gated_order() -> None:
+    """Upstox TARGET/STOPLOSS prices survive typing and SafetyContext minting."""
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="GTT-88")
+    safety = _passing_safety()
+    client = _app(broker_router=router, safety=safety).test_client()
+    body = {
+        "symbol": "RELIANCE",
+        "exchange": "NSE",
+        "action": "BUY",
+        "quantity": 2,
+        "trigger_price": "2890",
+        "target_price": "3100",
+        "stop_loss_price": "2800",
+        "entry_trigger_type": "ABOVE",
+        "target_trigger_type": "IMMEDIATE",
+        "stop_loss_trigger_type": "IMMEDIATE",
+        "product": "CNC",
+        "broker": "upstox",
+        "account_id": "U1",
+    }
+
+    resp = client.post("/api/v1/orders/forever", json=body, headers=_live_headers())
+
+    assert resp.status_code == 200
+    kw = router.place_order.await_args.kwargs
+    order = kw["order"]
+    assert order.variety == "gtt"
+    assert order.target_price == "3100"
+    assert order.stop_loss_price == "2800"
+    assert order.entry_trigger_type == "ABOVE"
+    assert order.target_trigger_type == "IMMEDIATE"
+    assert order.stop_loss_trigger_type == "IMMEDIATE"
+    assert kw["hint"].adapter_id == "upstox"
+    assert kw["hint"].account_id == "U1"
+    safety.check_order.assert_called_once()
+
+
+def test_forever_place_rejects_dhan_oco_fields_for_upstox() -> None:
+    router = MagicMock()
+    router.place_order = AsyncMock(return_value="GTT-88")
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+
+    resp = client.post(
+        "/api/v1/orders/forever",
+        json={
+            "symbol": "RELIANCE",
+            "action": "BUY",
+            "trigger_price": "2890",
+            "price1": "2800",
+            "trigger_price1": "2805",
+            "quantity1": "1",
+            "broker": "upstox",
+        },
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert "Dhan forever-order fields" in resp.get_json()["message"]
+    router.place_order.assert_not_called()
 
 
 def test_forever_place_practice_jwt_rejected() -> None:
@@ -328,9 +420,10 @@ def test_forever_modify_happy_path_mints_and_dispatches() -> None:
     router = _gated_router()
     safety = _passing_safety()
     client = _app(broker_router=router, safety=safety).test_client()
+    changes = _dhan_forever_changes()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
-        json={"changes": {"price": "2900"}, "broker": "dhan", "account_id": "personal"},
+        json={"changes": changes, "broker": "dhan", "account_id": "personal"},
         headers=_live_headers(),
     )
     assert resp.status_code == 200
@@ -341,12 +434,12 @@ def test_forever_modify_happy_path_mints_and_dispatches() -> None:
     assert kw["verb"] == "modify_forever"
     assert kw["payload"]["_op"] == "modify_forever"
     assert kw["payload"]["order_id"] == "GTT-1"
-    assert kw["payload"]["changes"] == {"price": "2900"}
+    assert kw["payload"]["changes"] == changes
     assert kw["hint"].adapter_id == "dhan"
     assert kw["hint"].account_id == "personal"
     # The minted context is bound to the SAME payload object the router gets.
     assert kw["safety_ctx"] is not None
-    safety.check_order.assert_not_called()
+    safety.check_order.assert_called_once()
 
 
 def test_forever_modify_missing_changes_returns_400() -> None:
@@ -356,6 +449,186 @@ def test_forever_modify_missing_changes_returns_400() -> None:
         "/api/v1/orders/forever/GTT-1", json={"broker": "dhan"}, headers=_live_headers()
     )
     assert resp.status_code == 400
+    router.execute_gated.assert_not_called()
+
+
+def test_forever_modify_rejects_partial_dhan_replacement() -> None:
+    router = _gated_router()
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+
+    resp = client.put(
+        "/api/v1/orders/forever/GTT-1",
+        json={"changes": {"price": 2900}, "broker": "dhan"},
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert "complete replacement" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
+
+
+def test_forever_modify_rejects_upstox_rules_for_dhan() -> None:
+    router = _gated_router()
+    client = _app(broker_router=router, safety=_passing_safety()).test_client()
+
+    resp = client.put(
+        "/api/v1/orders/forever/GTT-1",
+        json={
+            "changes": {"quantity": 1, "trigger_price": 100, "target_price": 110},
+            "broker": "dhan",
+        },
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 400
+    assert "Upstox GTT rule fields" in resp.get_json()["message"]
+    router.execute_gated.assert_not_called()
+
+
+def test_upstox_forever_modify_uses_official_gtt_row_for_full_admission() -> None:
+    from flinttrade_gateway.brokers.upstox_mapping import from_upstox_gtt_order
+
+    router = _gated_router()
+    safety = _passing_safety()
+    app = _app(broker_router=router, safety=safety)
+    app.config["NATIVE_ADAPTERS"]["upstox"].forever_orders = AsyncMock(
+        return_value=[
+            from_upstox_gtt_order(
+                {
+                    "type": "MULTIPLE",
+                    "exchange": "NSE_EQ",
+                    "quantity": 1,
+                    "product": "D",
+                    "rules": [
+                        {
+                            "strategy": "ENTRY",
+                            "status": "SCHEDULED",
+                            "trigger_type": "ABOVE",
+                            "trigger_price": 100,
+                            "transaction_type": "BUY",
+                            "order_id": None,
+                        },
+                        {
+                            "strategy": "STOPLOSS",
+                            "status": "SCHEDULED",
+                            "trigger_type": "IMMEDIATE",
+                            "trigger_price": 90,
+                            "transaction_type": "SELL",
+                            "order_id": None,
+                        },
+                        {
+                            "strategy": "TARGET",
+                            "status": "SCHEDULED",
+                            "trigger_type": "IMMEDIATE",
+                            "trigger_price": 110,
+                            "transaction_type": "SELL",
+                            "order_id": None,
+                        },
+                    ],
+                    "trading_symbol": "RELIANCE",
+                    "instrument_token": "NSE_EQ|INE002A01018",
+                    "gtt_order_id": "GTT-CU100",
+                }
+            )
+        ]
+    )
+
+    resp = app.test_client().put(
+        "/api/v1/orders/forever/GTT-CU100",
+        json={"changes": _upstox_forever_changes(), "broker": "upstox"},
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    safety.check_order.assert_called_once()
+    assert router.execute_gated.await_args.kwargs["payload"]["changes"]["quantity"] == 2
+
+
+def test_dhan_oco_stop_leg_increase_runs_full_admission() -> None:
+    router = _gated_router()
+    safety = _passing_safety()
+    app = _app(broker_router=router, safety=safety)
+    app.config["NATIVE_ADAPTERS"]["dhan"].forever_orders = AsyncMock(
+        return_value=[
+            {
+                "orderid": "GTT-1",
+                "status": "PENDING",
+                "order_flag": "OCO",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "product": "CNC",
+                "pricetype": "LIMIT",
+                "quantity": "10",
+                "filled_quantity": "0",
+                "price": "100",
+                "trigger_price": "99",
+                "quantity1": "2",
+                "price1": "90",
+                "trigger_price1": "91",
+            }
+        ]
+    )
+
+    resp = app.test_client().put(
+        "/api/v1/orders/forever/GTT-1",
+        json={
+            "changes": _dhan_forever_changes(
+                order_flag="OCO",
+                leg_name="STOP_LOSS_LEG",
+                quantity=3,
+                price=90,
+                trigger_price=91,
+            ),
+            "broker": "dhan",
+        },
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 200, resp.get_json()
+    safety.check_order.assert_called_once()
+    proposed = safety.check_order.call_args.args[0]
+    assert proposed.quantity == "3"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"quantity": 2, "entry_trigger_type": "IMMEDIATE"},
+        {"quantity": 1, "entry_trigger_type": "ABOVE"},
+    ],
+)
+def test_open_upstox_gtt_rejects_quantity_or_non_immediate_entry_changes(
+    overrides: dict[str, Any],
+) -> None:
+    router = _gated_router()
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["NATIVE_ADAPTERS"]["upstox"].forever_orders = AsyncMock(
+        return_value=[
+            {
+                "orderid": "GTT-CU100",
+                "gtt_order_id": "GTT-CU100",
+                "status": "OPEN",
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "product": "CNC",
+                "quantity": "1",
+                "filled_quantity": "1",
+                "pricetype": "LIMIT",
+                "price": "100",
+                "trigger_price": "100",
+            }
+        ]
+    )
+
+    resp = app.test_client().put(
+        "/api/v1/orders/forever/GTT-CU100",
+        json={"changes": _upstox_forever_changes(**overrides), "broker": "upstox"},
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 503
     router.execute_gated.assert_not_called()
 
 
@@ -379,7 +652,7 @@ def test_forever_modify_kill_switch_blocks() -> None:
     client = _app(broker_router=router, safety=safety).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
-        json={"changes": {"price": "2900"}, "broker": "dhan"},
+        json={"changes": _dhan_forever_changes(), "broker": "dhan"},
         headers=_live_headers(),
     )
     assert resp.status_code == 403
@@ -431,8 +704,9 @@ def test_forever_unsupported_broker_returns_501() -> None:
                 "action": "BUY",
                 "quantity": "5",
                 "filled_quantity": "0",
-                "price": "2900",
-                "pricetype": "LIMIT",
+                "price": "0",
+                "trigger_price": "2890",
+                "pricetype": "MARKET",
                 "product": "MIS",
             }
         ]
@@ -441,7 +715,10 @@ def test_forever_unsupported_broker_returns_501() -> None:
     client = app.test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
-        json={"changes": {"price": "2900"}, "broker": "kotakneo"},
+        json={
+            "changes": _dhan_forever_changes(pricetype="MARKET", price=0),
+            "broker": "kotakneo",
+        },
         headers=_live_headers(),
     )
     assert resp.status_code == 501
@@ -611,9 +888,18 @@ def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
         "quantity": "1",
         "filled_quantity": "0",
         "price": "0",
+        "trigger_price": "1",
         "pricetype": "MARKET",
         "product": "MIS",
     }
+    if reader_name == "forever_orders":
+        current.update(
+            {
+                "order_flag": "SINGLE",
+                "validity": "DAY",
+                "disclosed_quantity": "0",
+            }
+        )
     setattr(adapter, reader_name, AsyncMock(return_value=[current]))
     adapter.margin_calculator = AsyncMock(
         side_effect=[
@@ -623,9 +909,19 @@ def test_advanced_modify_quantity_increase_runs_full_safety_before_gate(
         ]
     )
 
+    changes = (
+        _dhan_forever_changes(
+            pricetype="MARKET",
+            quantity=2,
+            price=0,
+            trigger_price=1,
+        )
+        if reader_name == "forever_orders"
+        else {"quantity": 2}
+    )
     response = app.test_client().put(
         path,
-        json={"changes": {"quantity": 2}, "broker": "dhan", "account_id": "D1"},
+        json={"changes": changes, "broker": "dhan", "account_id": "D1"},
         headers=_live_headers(),
     )
 
@@ -882,7 +1178,7 @@ def test_gated_verb_bounds_mapping_value_error_message() -> None:
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
-        json={"changes": {"price": "2900"}, "broker": "dhan"},
+        json={"changes": _dhan_forever_changes(), "broker": "dhan"},
         headers=_live_headers(),
     )
     assert resp.status_code == 502
@@ -1508,11 +1804,11 @@ def test_route_minted_context_verifies_against_real_router() -> None:
     client = _app(broker_router=router, safety=_passing_safety()).test_client()
     resp = client.put(
         "/api/v1/orders/forever/GTT-1",
-        json={"changes": {"price": "2900"}, "broker": "dhan"},
+        json={"changes": _dhan_forever_changes(), "broker": "dhan"},
         headers=_live_headers(),
     )
     assert resp.status_code == 200, resp.get_json()
-    assert calls == [("GTT-1", {"price": "2900"})]
+    assert calls == [("GTT-1", _dhan_forever_changes())]
 
 
 def test_gated_verb_algo_tag_limit_returns_429() -> None:

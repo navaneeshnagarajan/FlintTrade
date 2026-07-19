@@ -32,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useBrokerStore } from "@/stores/brokerStore";
+import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { pickNativeBrokerOrderTargetFromState } from "@/services/brokerTargets";
 import {
@@ -143,7 +143,7 @@ export const DEFAULT_BROKER_TARGET: Required<BrokerTarget> = {
 type BrokerOrderAccount = ReturnType<typeof useBrokerStore.getState>["accounts"][number];
 
 export function isBrokerOrderTargetableAccount(account: BrokerOrderAccount): boolean {
-  return account.status === "connected";
+  return account.status === "connected" && account.read_only !== true;
 }
 
 export function brokerOrderTargetExists(
@@ -207,32 +207,132 @@ export function useBrokerOrderTarget(
   return [target, chooseTarget];
 }
 
-export function BrokerTargetSelect({
-  value,
-  onChange,
-}: {
-  value: Required<BrokerTarget>;
-  onChange: (target: Required<BrokerTarget>) => void;
-}) {
-  const accounts = useBrokerStore(useShallow((s) => s.accounts));
+/**
+ * Select a connected native account from an explicit broker allow-list.
+ *
+ * Some management surfaces have no OpenAlgo equivalent and are implemented by
+ * only a subset of native adapters. Returning `null` when none is connected
+ * keeps their queries and write controls fail closed.
+ */
+export function useSupportedNativeBrokerOrderTarget(
+  supportedBrokers: readonly string[],
+): [Required<BrokerTarget> | null, (target: Required<BrokerTarget>) => void] {
+  const { accounts, activeAccountId } = useBrokerStore(
+    useShallow((s) => ({ accounts: s.accounts, activeAccountId: s.activeAccountId })),
+  );
+  const supportedKey = supportedBrokers.map((broker) => broker.toLowerCase()).sort().join("|");
+  const candidates = useMemo(
+    () =>
+      accounts.filter(
+        (account) =>
+          account.source === "native" &&
+          isBrokerOrderTargetableAccount(account) &&
+          supportedKey.split("|").includes(account.broker.toLowerCase()),
+      ),
+    [accounts, supportedKey],
+  );
+  const automaticTarget = useMemo<Required<BrokerTarget> | null>(() => {
+    const account =
+      findBrokerAccountMatch(candidates, activeAccountId) ??
+      candidates.find((candidate) => candidate.is_primary) ??
+      candidates[0];
+    return account
+      ? { broker: account.broker, account_id: account.account_id }
+      : null;
+  }, [activeAccountId, candidates]);
+  const [target, setTarget] = useState<Required<BrokerTarget> | null>(automaticTarget);
+  const [manualTarget, setManualTarget] = useState(false);
 
-  const options: { target: Required<BrokerTarget>; label: string }[] = [
-    { target: DEFAULT_BROKER_TARGET, label: "OpenAlgo · default" },
-  ];
+  const chooseTarget = useCallback((next: Required<BrokerTarget>) => {
+    setManualTarget(true);
+    setTarget(next);
+  }, []);
+
+  useEffect(() => {
+    const currentTargetExists =
+      target !== null &&
+      candidates.some(
+        (account) =>
+          account.broker === target.broker && account.account_id === target.account_id,
+      );
+    if (!manualTarget || !currentTargetExists) {
+      setTarget((current) => {
+        if (current === null || automaticTarget === null) {
+          return current === automaticTarget ? current : automaticTarget;
+        }
+        return encodeTarget(current) === encodeTarget(automaticTarget)
+          ? current
+          : automaticTarget;
+      });
+      if (!currentTargetExists) setManualTarget(false);
+    }
+  }, [automaticTarget, candidates, manualTarget, target]);
+
+  return [target, chooseTarget];
+}
+
+interface BrokerTargetSelectPolicy {
+  includeOpenAlgo?: boolean;
+  nativeOnly?: boolean;
+  supportedBrokers?: readonly string[];
+}
+
+export function brokerOrderTargetOptions(
+  accounts: BrokerOrderAccount[],
+  policy: BrokerTargetSelectPolicy = {},
+): { target: Required<BrokerTarget>; label: string }[] {
+  const {
+    includeOpenAlgo = true,
+    nativeOnly = false,
+    supportedBrokers,
+  } = policy;
+  const allowed = supportedBrokers?.map((broker) => broker.toLowerCase());
+  const options: { target: Required<BrokerTarget>; label: string }[] = [];
+  if (includeOpenAlgo) {
+    options.push({ target: DEFAULT_BROKER_TARGET, label: "OpenAlgo · default" });
+  }
   for (const account of accounts) {
     if (!isBrokerOrderTargetableAccount(account)) continue;
+    if (nativeOnly && account.source !== "native") continue;
+    if (allowed && !allowed.includes(account.broker.toLowerCase())) continue;
     const target = { broker: account.broker, account_id: account.account_id };
-    if (options.some((o) => encodeTarget(o.target) === encodeTarget(target))) continue;
+    if (options.some((option) => encodeTarget(option.target) === encodeTarget(target))) continue;
     options.push({
       target,
       label: `${account.broker.toUpperCase()} · ${account.label || account.account_id}`,
     });
   }
+  return options;
+}
+
+export function BrokerTargetSelect({
+  value,
+  onChange,
+  includeOpenAlgo = true,
+  nativeOnly = false,
+  supportedBrokers,
+}: {
+  value: Required<BrokerTarget> | null;
+  onChange: (target: Required<BrokerTarget>) => void;
+  includeOpenAlgo?: boolean;
+  nativeOnly?: boolean;
+  supportedBrokers?: readonly string[];
+}) {
+  const accounts = useBrokerStore(useShallow((s) => s.accounts));
+  const options = brokerOrderTargetOptions(accounts, {
+    includeOpenAlgo,
+    nativeOnly,
+    supportedBrokers,
+  });
 
   return (
-    <Select value={encodeTarget(value)} onValueChange={(v) => onChange(decodeTarget(v))}>
+    <Select
+      value={value === null ? undefined : encodeTarget(value)}
+      onValueChange={(v) => onChange(decodeTarget(v))}
+      disabled={options.length === 0}
+    >
       <SelectTrigger className="h-7 w-44 text-xs" aria-label="Broker account">
-        <SelectValue />
+        <SelectValue placeholder="No compatible account" />
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (

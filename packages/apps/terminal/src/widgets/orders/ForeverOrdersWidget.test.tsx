@@ -18,6 +18,8 @@ beforeAll(() => {
     unobserve() {}
     disconnect() {}
   };
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+  window.HTMLElement.prototype.hasPointerCapture = vi.fn();
 });
 
 let mockMode = "live";
@@ -92,6 +94,10 @@ const LIST_ROW = {
   quantity: 10,
   trigger_price: 2895,
   price: 2900,
+  order_flag: "SINGLE",
+  pricetype: "LIMIT",
+  validity: "DAY",
+  disclosed_quantity: 0,
   status: "ACTIVE",
 };
 
@@ -136,8 +142,16 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockMode = "live";
   mockConnectionState.apiKey = "test-openalgo-key";
-  mockBrokerState.accounts = [];
-  mockBrokerState.activeAccountId = null;
+  mockBrokerState.accounts = [
+    {
+      account_id: "D1",
+      broker: "dhan",
+      label: "Dhan Live",
+      source: "native",
+      status: "connected",
+    },
+  ];
+  mockBrokerState.activeAccountId = "native:dhan:D1";
   listRows = [LIST_ROW];
   listStatus = 200;
   listMessage = "";
@@ -162,13 +176,33 @@ describe("ForeverOrdersWidget", () => {
     expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
   });
 
+  it("fails closed when no supported native GTT account is connected", () => {
+    mockBrokerState.accounts = [
+      {
+        account_id: "G1",
+        broker: "groww",
+        label: "Groww",
+        source: "native",
+        status: "connected",
+      },
+    ];
+    mockBrokerState.activeAccountId = "native:groww:G1";
+
+    renderWidget();
+
+    expect(screen.getByText(/connect a writable Dhan or Upstox account/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("lists real resting forever orders in Live mode", async () => {
     renderWidget();
     await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
     expect(screen.getByText("ACTIVE")).toBeInTheDocument();
     const [url] = callsByMethod("GET")[0];
     expect(url).toContain("/api/v1/orders/forever");
-    expect(url).toContain("broker=openalgo");
+    expect(url).toContain("broker=dhan");
+    expect(url).toContain("account_id=D1");
   });
 
   it("defaults to the active native account in live native-only mode", async () => {
@@ -210,7 +244,7 @@ describe("ForeverOrdersWidget", () => {
     expect(body.action).toBe("BUY");
     expect(body.quantity).toBe(10);
     expect(body.trigger_price).toBe(2895);
-    expect(body.entry_trigger_type).toBe("ABOVE");
+    expect(body.entry_trigger_type).toBeUndefined();
     expect(body.price).toBe(2900);
     expect(body.product).toBe("CNC");
     expect(body.pricetype).toBe("LIMIT");
@@ -242,6 +276,47 @@ describe("ForeverOrdersWidget", () => {
     expect(body.quantity1).toBe(5);
   });
 
+  it("places Upstox GTT ENTRY, STOPLOSS, and TARGET rules without Dhan fields", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      {
+        account_id: "U1",
+        broker: "upstox",
+        label: "Upstox Live",
+        source: "native",
+        status: "connected",
+      },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    renderWidget();
+
+    fireEvent.change(screen.getByLabelText("GTT symbol"), { target: { value: "reliance" } });
+    fireEvent.change(screen.getByLabelText("GTT quantity"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("GTT trigger price"), { target: { value: "2895" } });
+    fireEvent.click(screen.getByRole("switch", { name: "Stop-loss rule" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Target rule" }));
+    fireEvent.change(screen.getByLabelText("Stop-loss trigger price"), { target: { value: "2800" } });
+    fireEvent.change(screen.getByLabelText("Target trigger price"), { target: { value: "3100" } });
+    fireEvent.click(screen.getByRole("button", { name: /place gtt/i }));
+
+    await waitFor(() => expect(callsByMethod("POST").length).toBe(1));
+    const [, init] = callsByMethod("POST")[0];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      broker: "upstox",
+      account_id: "U1",
+      trigger_price: 2895,
+      entry_trigger_type: "ABOVE",
+      stop_loss_price: 2800,
+      stop_loss_trigger_type: "IMMEDIATE",
+      target_price: 3100,
+      target_trigger_type: "IMMEDIATE",
+    });
+    expect(body.price1).toBeUndefined();
+    expect(body.trigger_price1).toBeUndefined();
+    expect(body.quantity1).toBeUndefined();
+  });
+
   it("cancels a row via the gated DELETE", async () => {
     renderWidget();
     await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
@@ -250,10 +325,11 @@ describe("ForeverOrdersWidget", () => {
     await waitFor(() => expect(callsByMethod("DELETE").length).toBe(1));
     const [url] = callsByMethod("DELETE")[0];
     expect(url).toContain("/api/v1/orders/forever/GTT-1");
-    expect(url).toContain("broker=openalgo");
+    expect(url).toContain("broker=dhan");
+    expect(url).toContain("account_id=D1");
   });
 
-  it("modifies a row via the gated PUT with a changes object", async () => {
+  it("modifies a Dhan row with the complete selected-leg replacement", async () => {
     renderWidget();
     await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /modify/i }));
@@ -264,7 +340,161 @@ describe("ForeverOrdersWidget", () => {
     const [url, init] = callsByMethod("PUT")[0];
     expect(url).toContain("/api/v1/orders/forever/GTT-1");
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(body.changes).toStrictEqual({ trigger_price: 2950 });
+    expect(body.changes).toStrictEqual({
+      order_flag: "SINGLE",
+      leg_name: "TARGET_LEG",
+      pricetype: "LIMIT",
+      validity: "DAY",
+      quantity: 10,
+      price: 2900,
+      trigger_price: 2950,
+      disclosed_quantity: 0,
+    });
+  });
+
+  it.each([
+    ["STOP_LOSS", "SL"],
+    ["STOP_LOSS_MARKET", "SLM"],
+  ])("offers Dhan's %s forever-modify order type", async (label, expectedValue) => {
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    fireEvent.click(screen.getByLabelText("New price type"));
+    fireEvent.click(await screen.findByRole("option", { name: label }));
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+
+    await waitFor(() => expect(callsByMethod("PUT").length).toBe(1));
+    const [, init] = callsByMethod("PUT")[0];
+    const body = JSON.parse(init.body as string) as { changes: Record<string, unknown> };
+    expect(body.changes.pricetype).toBe(expectedValue);
+  });
+
+  it("modifies the selected Dhan OCO stop-loss leg instead of the first leg", async () => {
+    listRows = [
+      {
+        ...LIST_ROW,
+        order_flag: "OCO",
+        quantity1: 10,
+        price1: 2750,
+        trigger_price1: 2755,
+      },
+    ];
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    fireEvent.click(screen.getByLabelText("Forever order leg"));
+    fireEvent.click(await screen.findByRole("option", { name: "Stop-loss leg" }));
+    fireEvent.change(screen.getByLabelText("New trigger price"), { target: { value: "2760" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+
+    await waitFor(() => expect(callsByMethod("PUT").length).toBe(1));
+    const [, init] = callsByMethod("PUT")[0];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.changes).toStrictEqual({
+      order_flag: "OCO",
+      leg_name: "STOP_LOSS_LEG",
+      pricetype: "LIMIT",
+      validity: "DAY",
+      quantity: 10,
+      price: 2750,
+      trigger_price: 2760,
+      disclosed_quantity: 0,
+    });
+  });
+
+  it("modifies an Upstox row by resending its complete rule set", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      {
+        account_id: "U1",
+        broker: "upstox",
+        label: "Upstox Live",
+        source: "native",
+        status: "connected",
+      },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    listRows = [
+      {
+        gtt_order_id: "GTT-CU100",
+        symbol: "RELIANCE",
+        quantity: "2",
+        rules: [
+          { strategy: "ENTRY", status: "SCHEDULED", trigger_type: "BELOW", trigger_price: "2895" },
+          {
+            strategy: "STOPLOSS",
+            status: "SCHEDULED",
+            trigger_type: "IMMEDIATE",
+            trigger_price: "2800",
+            trailing_gap: "0.5",
+          },
+          { strategy: "TARGET", status: "SCHEDULED", trigger_type: "IMMEDIATE", trigger_price: "3100" },
+        ],
+      },
+    ];
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    fireEvent.change(screen.getByLabelText("New target trigger price"), { target: { value: "3150" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+
+    await waitFor(() => expect(callsByMethod("PUT").length).toBe(1));
+    const [url, init] = callsByMethod("PUT")[0];
+    expect(url).toContain("/api/v1/orders/forever/GTT-CU100");
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body.changes).toStrictEqual({
+      type: "MULTIPLE",
+      quantity: 2,
+      trigger_price: 2895,
+      entry_trigger_type: "BELOW",
+      stop_loss_price: 2800,
+      stop_loss_trailing_gap: 0.5,
+      target_price: 3150,
+      stop_loss_trigger_type: "IMMEDIATE",
+      target_trigger_type: "IMMEDIATE",
+    });
+  });
+
+  it("keeps an OPEN Upstox GTT quantity fixed and pins ENTRY to IMMEDIATE", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      {
+        account_id: "U1",
+        broker: "upstox",
+        label: "Upstox Live",
+        source: "native",
+        status: "connected",
+      },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    listRows = [
+      {
+        gtt_order_id: "GTT-CU101",
+        symbol: "RELIANCE",
+        quantity: "2",
+        status: "OPEN",
+        rules: [
+          { strategy: "ENTRY", status: "OPEN", trigger_type: "ABOVE", trigger_price: "2895" },
+          { strategy: "TARGET", status: "SCHEDULED", trigger_type: "IMMEDIATE", trigger_price: "3100" },
+        ],
+      },
+    ];
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+
+    expect(screen.getByLabelText("New quantity")).toBeDisabled();
+    expect(screen.getByLabelText("New entry trigger type")).toBeDisabled();
+    expect(screen.getByLabelText("New entry trigger type")).toHaveTextContent("IMMEDIATE");
+    fireEvent.change(screen.getByLabelText("New target trigger price"), { target: { value: "3150" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+
+    await waitFor(() => expect(callsByMethod("PUT").length).toBe(1));
+    const [, init] = callsByMethod("PUT")[0];
+    const body = JSON.parse(init.body as string) as { changes: Record<string, unknown> };
+    expect(body.changes.quantity).toBe(2);
+    expect(body.changes.entry_trigger_type).toBe("IMMEDIATE");
+    expect(body.changes.stop_loss_trailing_gap).toBe(0);
   });
 
   it("maps the 501 unsupported-broker refusal honestly", async () => {

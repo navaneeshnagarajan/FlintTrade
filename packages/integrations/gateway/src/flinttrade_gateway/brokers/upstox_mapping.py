@@ -831,18 +831,28 @@ def _gtt_rules(order: Any, side: str = "BUY") -> tuple[str, list[dict[str, Any]]
     ]
     stop_loss = _num(getattr(order, "stop_loss_price", 0))
     target = _num(getattr(order, "target_price", 0))
+    trailing_gap_value = getattr(order, "stop_loss_trailing_gap", 0)
+    try:
+        trailing_gap = float(trailing_gap_value or 0)
+    except (TypeError, ValueError) as exc:
+        raise UpstoxMappingError("Upstox stop_loss_trailing_gap must be numeric") from exc
+    if not math.isfinite(trailing_gap) or trailing_gap < 0:
+        raise UpstoxMappingError("Upstox stop_loss_trailing_gap must be finite and non-negative")
+    if trailing_gap > 0 and stop_loss <= 0:
+        raise UpstoxMappingError("Upstox stop_loss_trailing_gap requires a STOPLOSS rule")
     if stop_loss > 0:
-        rules.append(
-            {
-                "strategy": "STOPLOSS",
-                "trigger_type": _gtt_trigger_type(
-                    getattr(order, "stop_loss_trigger_type", None),
-                    allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
-                    default="IMMEDIATE",
-                ),
-                "trigger_price": stop_loss,
-            }
-        )
+        stop_loss_rule = {
+            "strategy": "STOPLOSS",
+            "trigger_type": _gtt_trigger_type(
+                getattr(order, "stop_loss_trigger_type", None),
+                allowed=_GTT_PROTECTIVE_TRIGGER_TYPES,
+                default="IMMEDIATE",
+            ),
+            "trigger_price": stop_loss,
+        }
+        if trailing_gap > 0:
+            stop_loss_rule["trailing_gap"] = trailing_gap
+        rules.append(stop_loss_rule)
     if target > 0:
         rules.append(
             {
@@ -885,6 +895,23 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
     """
     if not gtt_order_id:
         raise UpstoxMappingError("GTT modify needs the gtt_order_id")
+    required = {
+        "type",
+        "quantity",
+        "trigger_price",
+        "entry_trigger_type",
+        "stop_loss_price",
+        "target_price",
+        "stop_loss_trigger_type",
+        "target_trigger_type",
+        "stop_loss_trailing_gap",
+    }
+    missing = sorted(key for key in required if key not in changes or changes[key] in (None, ""))
+    if missing:
+        raise UpstoxMappingError(f"Upstox GTT modify needs a complete replacement; missing fields {missing}")
+    quantity = _num(changes["quantity"], 0)
+    if not math.isfinite(quantity) or quantity <= 0 or not quantity.is_integer():
+        raise UpstoxMappingError("Upstox GTT modify quantity must be a positive whole number")
 
     class _Changes:
         trigger_price = changes.get("trigger_price", 0)
@@ -895,12 +922,18 @@ def to_gtt_modify_params(gtt_order_id: str, changes: dict[str, Any]) -> dict[str
         target_price = changes.get("target_price", 0)
         stop_loss_trigger_type = changes.get("stop_loss_trigger_type")
         target_trigger_type = changes.get("target_trigger_type")
+        stop_loss_trailing_gap = changes.get("stop_loss_trailing_gap")
 
     side = str(changes.get("transaction_type", changes.get("action", "BUY"))).upper()
     gtt_type, rules = _gtt_rules(_Changes, side=side)
+    requested_type = str(changes.get("type", gtt_type)).upper()
+    if requested_type != gtt_type:
+        raise UpstoxMappingError(
+            f"Upstox GTT type {requested_type!r} does not match the supplied {gtt_type} rule set"
+        )
     return {
-        "type": str(changes.get("type", gtt_type)).upper(),
-        "quantity": int(_num(changes.get("quantity", 0), 0)),
+        "type": gtt_type,
+        "quantity": int(quantity),
         "rules": rules,
         "gtt_order_id": str(gtt_order_id),
     }
@@ -935,28 +968,59 @@ def extract_gtt_order_id(resp: dict[str, Any]) -> str:
 def from_upstox_gtt_order(d: dict[str, Any]) -> dict[str, Any]:
     """Normalise one Upstox ``GttOrderDetails`` record."""
     rules = d.get("rules", []) if isinstance(d.get("rules"), list) else []
+    normalised_rules: list[dict[str, Any]] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        normalised_rule = {
+            "strategy": rule.get("strategy", ""),
+            "status": rule.get("status", ""),
+            "trigger_type": rule.get("trigger_type", ""),
+            "trigger_price": str(rule.get("trigger_price", 0)),
+            "transaction_type": rule.get("transaction_type", ""),
+            "order_id": str(rule.get("order_id") or ""),
+        }
+        if rule.get("trailing_gap") not in (None, ""):
+            normalised_rule["trailing_gap"] = str(rule["trailing_gap"])
+        normalised_rules.append(normalised_rule)
+    rules_by_strategy = {
+        str(rule["strategy"]).upper(): rule for rule in normalised_rules
+    }
+    entry = rules_by_strategy.get("ENTRY", {})
+    stop_loss = rules_by_strategy.get("STOPLOSS", {})
+    target = rules_by_strategy.get("TARGET", {})
+    raw_exchange = str(d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))))
+    exchange = UPSTOX_TO_EXCHANGE.get(raw_exchange, raw_exchange)
+    quantity = str(d.get("quantity", 0))
+    entry_status = str(d.get("status", entry.get("status", ""))).upper()
+    gtt_order_id = str(d.get("gtt_order_id", ""))
     return {
-        "gtt_order_id": str(d.get("gtt_order_id", "")),
+        "orderid": gtt_order_id,
+        "gtt_order_id": gtt_order_id,
         "type": d.get("type", ""),
         "symbol": d.get("trading_symbol", d.get("tradingsymbol", "")),
-        "exchange": d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
+        "instrument_token": d.get("instrument_token", ""),
+        "exchange": exchange,
         "product": _product_from_upstox(
             d.get("product", ""),
-            d.get("exchange", _exchange_of_token(d.get("instrument_token", ""))),
-            d.get("segment", ""),
+            exchange,
+            raw_exchange,
         ),
-        "quantity": str(d.get("quantity", 0)),
-        "rules": [
-            {
-                "strategy": r.get("strategy", ""),
-                "status": r.get("status", ""),
-                "trigger_price": str(r.get("trigger_price", 0)),
-                "transaction_type": r.get("transaction_type", ""),
-                "order_id": str(r.get("order_id") or ""),
-            }
-            for r in rules
-            if isinstance(r, dict)
-        ],
+        "quantity": quantity,
+        # OPEN GTT rows do not expose partial-fill quantity. Treating the whole
+        # quantity as filled is conservative, and OPEN modifications separately
+        # require that quantity remain unchanged.
+        "filled_quantity": quantity if entry_status == "OPEN" else "0",
+        "pricetype": "LIMIT",
+        "price": entry.get("trigger_price", ""),
+        "action": entry.get("transaction_type", ""),
+        "status": entry_status,
+        "entry_status": entry_status,
+        "trigger_price": entry.get("trigger_price", ""),
+        "stop_loss_price": stop_loss.get("trigger_price", ""),
+        "stop_loss_trailing_gap": stop_loss.get("trailing_gap", "0"),
+        "target_price": target.get("trigger_price", ""),
+        "rules": normalised_rules,
         "created_at": str(d.get("created_at", "")),
         "expires_at": str(d.get("expires_at", "")),
     }

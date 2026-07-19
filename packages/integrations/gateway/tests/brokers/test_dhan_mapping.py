@@ -250,18 +250,25 @@ def test_subscribe_mode_unknown_raises() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _forever_changes(**overrides):
+    changes = {
+        "pricetype": "LIMIT",
+        "leg_name": "TARGET_LEG",
+        "quantity": 10,
+        "price": 101.5,
+        "trigger_price": 100.0,
+        "disclosed_quantity": 0,
+        "order_flag": "SINGLE",
+        "validity": "DAY",
+    }
+    changes.update(overrides)
+    return changes
+
+
 def test_modify_forever_kwargs() -> None:
     kw = m.to_modify_forever_kwargs(
         "GTT1",
-        {
-            "pricetype": "SL",
-            "leg_name": "TARGET_LEG",
-            "quantity": 10,
-            "price": 101.5,
-            "trigger_price": 100.0,
-            "order_flag": "oco",
-            "validity": "DAY",
-        },
+        _forever_changes(pricetype="SL", order_flag="oco"),
     )
     assert kw["order_id"] == "GTT1"
     assert kw["order_flag"] == "OCO"
@@ -273,22 +280,32 @@ def test_modify_forever_kwargs() -> None:
 
 def test_modify_forever_invalid_flag_raises() -> None:
     with pytest.raises(m.DhanMappingError, match="SINGLE or OCO"):
-        m.to_modify_forever_kwargs("GTT1", {"order_flag": "TRIPLE"})
+        m.to_modify_forever_kwargs("GTT1", _forever_changes(order_flag="TRIPLE"))
 
 
-def test_modify_forever_defaults_to_target_leg() -> None:
-    """Regression: forever orders have no ENTRY_LEG (forever.md) — the default
-    leg must be TARGET_LEG, else the broker rejects with DH-905."""
-    kw = m.to_modify_forever_kwargs("GTT1", {"quantity": 5, "price": 100})
-    assert kw["leg_name"] == "TARGET_LEG"
+def test_modify_forever_requires_complete_replacement() -> None:
+    with pytest.raises(m.DhanMappingError, match="complete replacement"):
+        m.to_modify_forever_kwargs("GTT1", {"quantity": 5, "price": 100})
+
+
+@pytest.mark.parametrize(
+    ("pricetype", "expected"),
+    [("STOP_LOSS", "STOP_LOSS"), ("STOP_LOSS_MARKET", "STOP_LOSS_MARKET")],
+)
+def test_modify_forever_accepts_documented_stop_order_types(pricetype: str, expected: str) -> None:
+    kw = m.to_modify_forever_kwargs("GTT1", _forever_changes(pricetype=pricetype))
+    assert kw["order_type"] == expected
 
 
 def test_modify_forever_rejects_entry_leg() -> None:
     # ENTRY_LEG is a super-order concept, not a forever leg — fail closed.
     with pytest.raises(m.DhanMappingError, match="leg_name"):
-        m.to_modify_forever_kwargs("GTT1", {"leg_name": "ENTRY_LEG", "quantity": 5})
+        m.to_modify_forever_kwargs("GTT1", _forever_changes(leg_name="ENTRY_LEG"))
     # STOP_LOSS_LEG (the second OCO leg) is accepted.
-    sl = m.to_modify_forever_kwargs("GTT1", {"leg_name": "stop_loss_leg", "quantity": 5})
+    sl = m.to_modify_forever_kwargs(
+        "GTT1",
+        _forever_changes(order_flag="OCO", leg_name="stop_loss_leg", quantity=5),
+    )
     assert sl["leg_name"] == "STOP_LOSS_LEG"
 
 

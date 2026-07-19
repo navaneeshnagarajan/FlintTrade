@@ -70,6 +70,10 @@ export interface TypedOrderFields {
   quantity: number;
   price?: number;
   trigger_price?: number;
+  /** Upstox GTT TARGET rule price. */
+  target_price?: number;
+  /** Upstox GTT STOPLOSS rule price. */
+  stop_loss_price?: number;
   entry_trigger_type?: "ABOVE" | "BELOW" | "IMMEDIATE";
   stop_loss_trigger_type?: "IMMEDIATE";
   target_trigger_type?: "IMMEDIATE";
@@ -78,7 +82,7 @@ export interface TypedOrderFields {
   validity?: string;
 }
 
-/** Forever (GTT) placement — typed order + optional OCO second-leg trio. */
+/** Forever (GTT) placement — typed order plus broker-specific protective legs. */
 export interface ForeverOrderPlaceParams extends TypedOrderFields, BrokerTarget {
   variety?: "gtt";
   /** OCO second leg: limit price. */

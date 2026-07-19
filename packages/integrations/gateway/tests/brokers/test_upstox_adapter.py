@@ -491,6 +491,22 @@ def _order(**kw) -> Order:
     return Order(**base)
 
 
+def _gtt_changes(**overrides):
+    changes = {
+        "type": "SINGLE",
+        "quantity": 2,
+        "trigger_price": 2860,
+        "entry_trigger_type": "ABOVE",
+        "stop_loss_price": 0,
+        "stop_loss_trailing_gap": 0,
+        "target_price": 0,
+        "stop_loss_trigger_type": "IMMEDIATE",
+        "target_trigger_type": "IMMEDIATE",
+    }
+    changes.update(overrides)
+    return changes
+
+
 def test_facade_funds_uses_v3_sdk_method_without_v2_version_argument():
     class _Response:
         def to_dict(self):
@@ -680,7 +696,7 @@ async def test_modify_order_dispatches_gtt_by_id_and_by_changes_flag():
     adapter = _adapter(mock)
     session = await _session(adapter)
     await adapter.modify_order(
-        session, "GTT-CU100", {"quantity": 2, "trigger_price": 2860}, _router_token=_ROUTER_TOKEN
+        session, "GTT-CU100", _gtt_changes(), _router_token=_ROUTER_TOKEN
     )
     kind, params = mock.calls[0]
     assert kind == "gtt_modify" and params["gtt_order_id"] == "GTT-CU100"
@@ -688,7 +704,10 @@ async def test_modify_order_dispatches_gtt_by_id_and_by_changes_flag():
 
     mock.calls.clear()
     await adapter.modify_order(
-        session, "GTT-CU101", {"variety": "gtt", "quantity": 3, "trigger_price": 2870}, _router_token=_ROUTER_TOKEN
+        session,
+        "GTT-CU101",
+        _gtt_changes(variety="gtt", quantity=3, trigger_price=2870),
+        _router_token=_ROUTER_TOKEN,
     )
     assert mock.calls[0][0] == "gtt_modify"
 
@@ -706,6 +725,71 @@ async def test_cancel_order_dispatches_gtt_by_id_prefix():
     assert mock.calls[0] == ("gtt_cancel", {"gtt_order_id": "GTT-CU100"})
     await adapter.cancel_order(session, "240221025997024", _router_token=_ROUTER_TOKEN)
     assert mock.calls[1] == ("cancel", "240221025997024")
+
+
+@pytest.mark.asyncio
+async def test_forever_order_writes_require_router_token():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    with pytest.raises(SafetyBypassError):
+        await adapter.modify_forever(session, "GTT-CU100", {"quantity": 2, "trigger_price": 2860})
+    with pytest.raises(SafetyBypassError):
+        await adapter.cancel_forever(session, "GTT-CU100")
+
+    assert mock.calls == []
+
+
+@pytest.mark.asyncio
+async def test_modify_forever_sends_full_replacement_gtt_payload():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    await adapter.modify_forever(
+        session,
+        "GTT-CU100",
+        {
+            "type": "MULTIPLE",
+            "quantity": 2,
+            "trigger_price": 2860,
+            "entry_trigger_type": "BELOW",
+            "stop_loss_price": 2800,
+            "stop_loss_trailing_gap": 0,
+            "target_price": 2950,
+            "stop_loss_trigger_type": "IMMEDIATE",
+            "target_trigger_type": "IMMEDIATE",
+        },
+        _router_token=_ROUTER_TOKEN,
+    )
+
+    assert mock.calls == [
+        (
+            "gtt_modify",
+            {
+                "type": "MULTIPLE",
+                "quantity": 2,
+                "rules": [
+                    {"strategy": "ENTRY", "trigger_type": "BELOW", "trigger_price": 2860.0},
+                    {"strategy": "STOPLOSS", "trigger_type": "IMMEDIATE", "trigger_price": 2800.0},
+                    {"strategy": "TARGET", "trigger_type": "IMMEDIATE", "trigger_price": 2950.0},
+                ],
+                "gtt_order_id": "GTT-CU100",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_forever_sends_exact_gtt_payload():
+    mock = MockUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    await adapter.cancel_forever(session, "GTT-CU100", _router_token=_ROUTER_TOKEN)
+
+    assert mock.calls == [("gtt_cancel", {"gtt_order_id": "GTT-CU100"})]
 
 
 # ---------------------------------------------------------------------------
@@ -2578,6 +2662,77 @@ async def test_gtt_orders_read_normalises_rules():
     assert mock.calls[0] == ("gtt_details", "GTT-CU100")
     assert rows[0]["gtt_order_id"] == "GTT-CU100" and rows[0]["product"] == "CNC"
     assert rows[0]["rules"][0]["strategy"] == "ENTRY"
+
+
+@pytest.mark.asyncio
+async def test_forever_orders_lists_and_normalises_active_gtts():
+    class ActiveGttUpstox(MockUpstox):
+        def gtt_order_details(self, gtt_order_id=None):
+            self.calls.append(("gtt_details", gtt_order_id))
+            return {
+                **_OK,
+                "data": [
+                    {
+                        "gtt_order_id": "GTT-CU100",
+                        "type": "SINGLE",
+                        "trading_symbol": "RELIANCE",
+                        "exchange": "NSE",
+                        "product": "D",
+                        "quantity": 1,
+                        "rules": [
+                            {
+                                "strategy": "ENTRY",
+                                "status": "PENDING",
+                                "trigger_price": 2850.0,
+                                "transaction_type": "BUY",
+                                "order_id": None,
+                            }
+                        ],
+                    }
+                ],
+            }
+
+    mock = ActiveGttUpstox()
+    adapter = _adapter(mock)
+    session = await _session(adapter)
+
+    rows = await adapter.forever_orders(session)
+
+    assert mock.calls == [("gtt_details", None)]
+    assert rows == [
+        {
+            "orderid": "GTT-CU100",
+            "gtt_order_id": "GTT-CU100",
+            "type": "SINGLE",
+            "symbol": "RELIANCE",
+            "instrument_token": "",
+            "exchange": "NSE",
+            "product": "CNC",
+            "quantity": "1",
+            "filled_quantity": "0",
+            "pricetype": "LIMIT",
+            "price": "2850.0",
+            "action": "BUY",
+            "status": "PENDING",
+            "entry_status": "PENDING",
+            "trigger_price": "2850.0",
+            "stop_loss_price": "",
+            "stop_loss_trailing_gap": "0",
+            "target_price": "",
+            "rules": [
+                {
+                    "strategy": "ENTRY",
+                    "status": "PENDING",
+                    "trigger_type": "",
+                    "trigger_price": "2850.0",
+                    "transaction_type": "BUY",
+                    "order_id": "",
+                }
+            ],
+            "created_at": "",
+            "expires_at": "",
+        }
+    ]
 
 
 @pytest.mark.asyncio

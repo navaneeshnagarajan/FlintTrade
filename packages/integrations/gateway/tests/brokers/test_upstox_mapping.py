@@ -356,7 +356,17 @@ def test_to_gtt_place_params_requires_trigger_price():
 def test_to_gtt_modify_params_rebuilds_rules():
     p = m.to_gtt_modify_params(
         "GTT-1",
-        {"quantity": 20, "trigger_price": 100, "entry_trigger_type": "BELOW", "target_price": 110},
+        {
+            "type": "MULTIPLE",
+            "quantity": 20,
+            "trigger_price": 100,
+            "entry_trigger_type": "BELOW",
+            "stop_loss_price": 0,
+            "stop_loss_trailing_gap": 0,
+            "target_price": 110,
+            "stop_loss_trigger_type": "IMMEDIATE",
+            "target_trigger_type": "IMMEDIATE",
+        },
     )
     assert p["gtt_order_id"] == "GTT-1" and p["quantity"] == 20 and p["type"] == "MULTIPLE"
     assert [r["strategy"] for r in p["rules"]] == ["ENTRY", "TARGET"]
@@ -364,6 +374,43 @@ def test_to_gtt_modify_params_rebuilds_rules():
     assert p["rules"][1]["trigger_type"] == "IMMEDIATE"
     with pytest.raises(m.UpstoxMappingError, match="gtt_order_id"):
         m.to_gtt_modify_params("", {"trigger_price": 100})
+    with pytest.raises(m.UpstoxMappingError, match="does not match"):
+        m.to_gtt_modify_params(
+            "GTT-1",
+            {
+                "type": "SINGLE",
+                "quantity": 20,
+                "trigger_price": 100,
+                "entry_trigger_type": "ABOVE",
+                "stop_loss_price": 0,
+                "stop_loss_trailing_gap": 0,
+                "target_price": 110,
+                "stop_loss_trigger_type": "IMMEDIATE",
+                "target_trigger_type": "IMMEDIATE",
+            },
+        )
+
+
+def test_to_gtt_modify_params_requires_complete_replacement_and_preserves_trailing_gap():
+    with pytest.raises(m.UpstoxMappingError, match="complete replacement"):
+        m.to_gtt_modify_params("GTT-1", {"quantity": 20, "trigger_price": 100})
+
+    p = m.to_gtt_modify_params(
+        "GTT-1",
+        {
+            "type": "MULTIPLE",
+            "quantity": 20,
+            "trigger_price": 100,
+            "entry_trigger_type": "ABOVE",
+            "stop_loss_price": 90,
+            "stop_loss_trailing_gap": 0.5,
+            "target_price": 110,
+            "stop_loss_trigger_type": "IMMEDIATE",
+            "target_trigger_type": "IMMEDIATE",
+        },
+    )
+    stop_loss = next(rule for rule in p["rules"] if rule["strategy"] == "STOPLOSS")
+    assert stop_loss["trailing_gap"] == 0.5
 
 
 def test_gtt_protective_legs_use_immediate_trigger_type_from_docs():
@@ -426,13 +473,14 @@ def test_from_upstox_gtt_order_normalises_rules():
             "gtt_order_id": "GTT-CU1",
             "type": "MULTIPLE",
             "trading_symbol": "NHPC",
-            "exchange": "NSE",
+            "exchange": "NSE_EQ",
             "product": "D",
             "quantity": 1,
             "rules": [
                 {
                     "strategy": "ENTRY",
                     "status": "TRIGGERED",
+                    "trigger_type": "BELOW",
                     "trigger_price": 7.7,
                     "transaction_type": "BUY",
                     "order_id": "250228010168535",
@@ -441,6 +489,7 @@ def test_from_upstox_gtt_order_normalises_rules():
                     "strategy": "STOPLOSS",
                     "status": "PENDING",
                     "trigger_price": 7.6,
+                    "trailing_gap": 0.5,
                     "transaction_type": "SELL",
                     "order_id": None,
                 },
@@ -449,9 +498,17 @@ def test_from_upstox_gtt_order_normalises_rules():
             "expires_at": 1772216999000000,
         }
     )
-    assert out["gtt_order_id"] == "GTT-CU1" and out["product"] == "CNC"  # equity D -> CNC
+    assert out["orderid"] == out["gtt_order_id"] == "GTT-CU1"
+    assert out["exchange"] == "NSE" and out["product"] == "CNC"  # equity D -> CNC
+    assert out["action"] == "BUY" and out["status"] == "TRIGGERED"
+    assert out["filled_quantity"] == "0" and out["pricetype"] == "LIMIT"
+    assert out["trigger_price"] == "7.7" and out["stop_loss_price"] == "7.6"
+    assert out["stop_loss_trailing_gap"] == "0.5"
+    assert out["target_price"] == ""
+    assert out["rules"][0]["trigger_type"] == "BELOW"
     assert out["rules"][0]["order_id"] == "250228010168535"
     assert out["rules"][1]["strategy"] == "STOPLOSS" and out["rules"][1]["order_id"] == ""
+    assert out["rules"][1]["trailing_gap"] == "0.5"
 
 
 def test_from_upstox_trade_and_gtt_disambiguate_fno_product_d():
