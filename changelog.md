@@ -4,6 +4,46 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.12](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.11...v0.6.0-beta.12) (2026-07-19)
+
+
+### Added
+
+* **ai:** operator-approved skill drafts from post-session review — AI1 ([d73fd8b](https://github.com/navaneeshnagarajan/FlintTrade/commit/d73fd8b1e02d3a4a36afd9b17cc39dbcdee224ac))
+* **ai:** persist and search AI chat sessions — AI2 cross-session recall ([2a61339](https://github.com/navaneeshnagarajan/FlintTrade/commit/2a6133969f48f5e91e623fb8fa043d27c4b62c87))
+* **ai:** persist the Obsidian vault path from the UI (U18 slice) ([63ae047](https://github.com/navaneeshnagarajan/FlintTrade/commit/63ae047821b5073574ae646ff4ea5218fd0945df))
+* **ai:** wire the agent learning loop — session trades → reflection → next-session context ([317c717](https://github.com/navaneeshnagarajan/FlintTrade/commit/317c7177117279a55e15b5ceab042a046266ec2d))
+* **backtest:** fold the WFE ratio into the routed walk-forward path — U13 partial ([5c1a6d0](https://github.com/navaneeshnagarajan/FlintTrade/commit/5c1a6d0de174b5cfa5e3484fabcac3416203ec3e))
+* **core,terminal:** persist n8n bridge settings from the UI (U18 slice) ([cb8b0e9](https://github.com/navaneeshnagarajan/FlintTrade/commit/cb8b0e9a5709652a9c5fc01e413b5222ea82a5fb))
+* **core,terminal:** persist Telegram bot settings from the UI (U18 slice) ([dc28c04](https://github.com/navaneeshnagarajan/FlintTrade/commit/dc28c045c66879c199f0772c1122b47d82196cbd))
+* **core,terminal:** persist WhatsApp alert settings from the UI (U18 slice) ([d0bddf4](https://github.com/navaneeshnagarajan/FlintTrade/commit/d0bddf4336764a215d88ab032de9a8074eb353f0))
+* **core:** serve traffic stats from the persistent store — U12 complete ([555a198](https://github.com/navaneeshnagarajan/FlintTrade/commit/555a198df70633d14962bd565489b7c5a99004e8))
+* **terminal:** browse and search past AI sessions from the Advisor widget ([a6d8430](https://github.com/navaneeshnagarajan/FlintTrade/commit/a6d84303f36ca6e0e76f6103f662946606fa6ef7))
+* **terminal:** compute Session Stats from today's real trades ([ecd8c16](https://github.com/navaneeshnagarajan/FlintTrade/commit/ecd8c16a7610cc4018a440b23a09183e5af98384))
+* **terminal:** drive the Scanner widget from real scans ([c8be818](https://github.com/navaneeshnagarajan/FlintTrade/commit/c8be818b7c278abeecd09e309a8fd5ebeaad60ea))
+* **terminal:** live-back the Market Summary widget with per-section provenance ([9d73658](https://github.com/navaneeshnagarajan/FlintTrade/commit/9d736585a3ced7ffb7136ccfc4b229d21f9c63dc))
+* **terminal:** make the Scanner's OI Change tab live — all four tabs now real ([cc2f28f](https://github.com/navaneeshnagarajan/FlintTrade/commit/cc2f28fbb37a55451d9a808b595590a71edcd324))
+* **terminal:** review, approve and reject skill drafts from Settings ([97cb9ce](https://github.com/navaneeshnagarajan/FlintTrade/commit/97cb9cec1023407b3189ee3ba2cab0fdf70b2d38))
+* **terminal:** set the Obsidian vault path from the widget ([30b50fe](https://github.com/navaneeshnagarajan/FlintTrade/commit/30b50fe209818779c9ac6e8db0bb655981a80ef6))
+
+
+### Fixed
+
+* close the re-audit residuals — abandonable reflection thread, recursive redaction, safe clear-token ordering ([b0422aa](https://github.com/navaneeshnagarajan/FlintTrade/commit/b0422aa636eb97e718982a9d400fc40743bd86c5))
+* **core,terminal:** feed the persistent latency monitor and label session-scoped stats (U12) ([8ecde17](https://github.com/navaneeshnagarajan/FlintTrade/commit/8ecde178817e362615c7e5b7361f501360ca4149))
+* remediate the wave audit — learning-loop retrieval/timing, Telegram atomicity/redaction, honest provenance banners ([567bd67](https://github.com/navaneeshnagarajan/FlintTrade/commit/567bd67dd244e80a20b09e55c340ff12806c3a23))
+* **screener:** breadth sample data can no longer carry future dates ([5daa7fc](https://github.com/navaneeshnagarajan/FlintTrade/commit/5daa7fc62bf63577a674acf15391ec2c8bc3d29c))
+* **terminal:** make AI Advisor approvals gated, authenticated and honest ([49a4fdd](https://github.com/navaneeshnagarajan/FlintTrade/commit/49a4fddc0741801a05166c5861b3cda389c54017))
+* **terminal:** name the Action Centre's producer in its empty state ([e2060e1](https://github.com/navaneeshnagarajan/FlintTrade/commit/e2060e12b2615ab88d88f52b4509ffe7caf88ce4))
+
+
+### Changed
+
+* **automation:** one sliding-window alert rate limiter — U16 dedup ([2a2b6be](https://github.com/navaneeshnagarajan/FlintTrade/commit/2a2b6beb9ad30e79a3dacd6c4d1f1ca316e2768b))
+* **core:** one canonical expiry parser — U15 closed ([6c2e2f2](https://github.com/navaneeshnagarajan/FlintTrade/commit/6c2e2f2dd4d564adf9befa6e995e39c3963c2acc))
+* **terminal:** dedupe getFtBase onto the shared ftApi helper (U8 tail) ([62ed4ff](https://github.com/navaneeshnagarajan/FlintTrade/commit/62ed4ffb21fd8ac42e6023dee23238b5787696d8))
+* **terminal:** IntradayPnL consumes the shared positions/tradebook caches (U10 complete) ([afbf504](https://github.com/navaneeshnagarajan/FlintTrade/commit/afbf504c5c054aa6e7d231841b60995038901ed4))
+
 ## [0.6.0-beta.11](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.10...v0.6.0-beta.11) (2026-07-18)
 
 
