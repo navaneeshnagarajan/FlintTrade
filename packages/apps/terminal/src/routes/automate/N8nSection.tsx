@@ -13,9 +13,9 @@
  *   POST /api/v1/automation/n8n/webhook/trigger
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Power, RefreshCw, Send, Workflow as WorkflowIcon } from "lucide-react";
+import { Loader2, Power, RefreshCw, Save, Send, Workflow as WorkflowIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GlassCard } from "@/components/ui/GlassCard";
@@ -27,6 +27,7 @@ import {
   triggerN8nWebhook,
   type N8nWorkflow,
 } from "@/services/ftApi";
+import { persistN8nConfig, readN8nConfig } from "@/services/ftApi.n8n";
 
 export default function N8nSection() {
   const queryClient = useQueryClient();
@@ -34,6 +35,37 @@ export default function N8nSection() {
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [webhookId, setWebhookId] = useState("");
   const [triggerResult, setTriggerResult] = useState<string | null>(null);
+
+  // ── Connection settings (persisted server-side; key never round-trips) ──
+  const [hostDraft, setHostDraft] = useState("");
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const hostTouchedRef = useRef(false);
+  const configQuery = useQuery({
+    queryKey: ["n8n", "config"],
+    queryFn: readN8nConfig,
+    staleTime: 30_000,
+  });
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    const data = configQuery.data?.data;
+    if (!data || hydratedRef.current) return;
+    hydratedRef.current = true;
+    if (!hostTouchedRef.current) setHostDraft(data.host);
+  }, [configQuery.data]);
+  const keyStored = configQuery.data?.data?.api_key_set === true;
+
+  const saveConfigMutation = useMutation({
+    mutationFn: () => persistN8nConfig({ host: hostDraft, apiKey: apiKeyDraft }),
+    onSuccess: () => {
+      setSaveError(null);
+      setApiKeyDraft("");
+      void queryClient.invalidateQueries({ queryKey: ["n8n"] });
+    },
+    onError: (err) => {
+      setSaveError(err instanceof Error ? err.message : "Save failed");
+    },
+  });
 
   // 503 (offline) rejects the promise → isError doubles as "offline".
   const healthQuery = useQuery({
@@ -98,13 +130,62 @@ export default function N8nSection() {
         </span>
       </div>
 
+      {/* Connection settings — persisted via /v1/config/n8n */}
+      <GlassCard className="p-4 space-y-3">
+        <h3 className="text-xs font-semibold text-text-primary">Connection</h3>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input
+            value={hostDraft}
+            onChange={(e) => {
+              hostTouchedRef.current = true;
+              setHostDraft(e.target.value);
+            }}
+            placeholder="http://127.0.0.1:5678"
+            aria-label="n8n host URL"
+            className="h-8 text-xs sm:max-w-xs"
+          />
+          <Input
+            value={apiKeyDraft}
+            onChange={(e) => setApiKeyDraft(e.target.value)}
+            type="password"
+            placeholder={keyStored ? "•••••••• (saved)" : "n8n API key (for workflow management)"}
+            aria-label="n8n API key"
+            className="h-8 text-xs sm:max-w-xs"
+          />
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => saveConfigMutation.mutate()}
+            disabled={saveConfigMutation.isPending}
+            className="gap-1.5"
+          >
+            {saveConfigMutation.isPending ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Save size={13} />
+            )}
+            Save
+          </Button>
+        </div>
+        <p className="text-xxs text-text-muted">
+          The API key is stored in the backend&apos;s hardened secret store — leave the
+          field blank to keep a saved key. Environment variables
+          (<code className="font-mono">N8N_HOST</code>/<code className="font-mono">N8N_API_KEY</code>)
+          still override for server deployments.
+        </p>
+        {saveError && (
+          <p role="alert" className="text-xs text-loss">
+            {saveError}
+          </p>
+        )}
+      </GlassCard>
+
       {!healthQuery.isLoading && !online && (
         <GlassCard className="p-4 space-y-2">
           <p className="text-xs text-text-secondary">
-            No n8n instance is reachable. n8n is a self-hosted automation tool — to use
-            the bridge, run one (default <code className="font-mono">http://127.0.0.1:5678</code>)
-            and set <code className="font-mono">N8N_HOST</code> in the backend environment.
-            Workflow management additionally needs <code className="font-mono">N8N_API_KEY</code>.
+            No n8n instance is reachable. n8n is a self-hosted automation tool — run one
+            (default <code className="font-mono">http://127.0.0.1:5678</code>) and save its
+            host above. Workflow management additionally needs an API key.
           </p>
           <Button
             size="sm"
@@ -134,8 +215,8 @@ export default function N8nSection() {
                 {workflowsQuery.error instanceof Error
                   ? workflowsQuery.error.message
                   : "Could not list workflows."}{" "}
-                Listing and activation need an n8n API key — set{" "}
-                <code className="font-mono">N8N_API_KEY</code> in the backend environment.
+                Listing and activation need an n8n API key — save one in the
+                Connection card above.
               </p>
             ) : workflows.length === 0 ? (
               <p className="text-xs text-text-muted">

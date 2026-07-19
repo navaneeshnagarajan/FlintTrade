@@ -7,6 +7,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+const mockReadN8nConfig = vi.fn();
+const mockPersistN8nConfig = vi.fn();
+vi.mock("@/services/ftApi.n8n", () => ({
+  readN8nConfig: () => mockReadN8nConfig() as Promise<unknown>,
+  persistN8nConfig: (patch: unknown) => mockPersistN8nConfig(patch) as Promise<unknown>,
+}));
+
 vi.mock("@/services/ftApi", () => ({
   checkN8nHealth: vi.fn(),
   listN8nWorkflows: vi.fn(),
@@ -34,7 +41,13 @@ function renderSection() {
 }
 
 describe("N8nSection", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadN8nConfig.mockResolvedValue({
+      status: "success",
+      data: { host: "", api_key_set: false },
+    });
+  });
 
   it("shows an honest offline state with the setup hint", async () => {
     vi.mocked(checkN8nHealth).mockRejectedValue(new Error("n8n is not reachable"));
@@ -118,5 +131,61 @@ describe("N8nSection", () => {
 
     await waitFor(() => expect(triggerN8nWebhook).toHaveBeenCalledWith("abc-123"));
     expect(screen.getByText(/webhook triggered/i)).toBeInTheDocument();
+  });
+});
+
+
+describe("N8nSection connection settings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadN8nConfig.mockResolvedValue({
+      status: "success",
+      data: { host: "http://10.0.0.5:5678", api_key_set: true },
+    });
+    vi.mocked(checkN8nHealth).mockRejectedValue(new Error("offline"));
+  });
+
+  it("hydrates the host and discloses a stored key without revealing it", async () => {
+    renderSection();
+    await waitFor(() =>
+      expect(screen.getByLabelText("n8n host URL")).toHaveValue("http://10.0.0.5:5678"),
+    );
+    expect(screen.getByLabelText("n8n API key")).toHaveAttribute(
+      "placeholder",
+      expect.stringContaining("saved"),
+    );
+  });
+
+  it("saves the connection settings and clears the key draft", async () => {
+    mockPersistN8nConfig.mockResolvedValue({
+      status: "ok",
+      data: { host: "http://10.0.0.5:5678", api_key_set: true },
+    });
+    renderSection();
+    await waitFor(() =>
+      expect(screen.getByLabelText("n8n host URL")).toHaveValue("http://10.0.0.5:5678"),
+    );
+
+    fireEvent.change(screen.getByLabelText("n8n API key"), {
+      target: { value: "fresh-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    await waitFor(() => expect(mockPersistN8nConfig).toHaveBeenCalledOnce());
+    expect(mockPersistN8nConfig).toHaveBeenCalledWith({
+      host: "http://10.0.0.5:5678",
+      apiKey: "fresh-key",
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("n8n API key")).toHaveValue(""),
+    );
+  });
+
+  it("surfaces a rejected save honestly", async () => {
+    mockPersistN8nConfig.mockRejectedValue(new Error("host must be an http(s) URL"));
+    renderSection();
+    await waitFor(() => expect(mockReadN8nConfig).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+    expect(await screen.findByText(/http\(s\) URL/i)).toBeInTheDocument();
   });
 });

@@ -4970,6 +4970,61 @@ def create_flask_app(
             }
         ), 200
 
+    @app.route("/v1/config/n8n", methods=["GET", "POST"])
+    @limiter.limit("10 per minute")
+    def _n8n_config() -> Any:
+        """Read or persist redacted n8n bridge settings from the UI.
+
+        Mirrors the telegram/whatsapp config routes: localhost-only,
+        authenticated session, API key in the hardened secret store. A save
+        drops the cached bridge so the next request uses the new settings.
+        """
+        remote = request.remote_addr or ""
+        if remote not in ("127.0.0.1", "::1", "localhost"):
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "This endpoint is only reachable from localhost",
+                }
+            ), 403
+
+        from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
+
+        denied = require_local_control_auth(
+            message="n8n configuration requires an authenticated session"
+        )
+        if denied is not None:
+            return denied
+
+        from .n8n_config import persist_n8n_config, read_n8n_config  # noqa: PLC0415
+
+        if request.method == "GET":
+            return jsonify({"status": "success", "data": read_n8n_config()}), 200
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            data = persist_n8n_config(payload)
+        except ValueError as exc:
+            return jsonify({"status": "error", "message": str(exc)}), 400
+        except Exception as exc:  # noqa: BLE001 - never surface secret material
+            logger.error("Failed to persist n8n config (%s)", type(exc).__name__)
+            return jsonify({"status": "error", "message": "Could not persist n8n config"}), 500
+
+        try:
+            from flinttrade_automation.n8n_routes import reset_n8n_bridge  # noqa: PLC0415
+
+            reset_n8n_bridge()
+        except Exception:  # noqa: BLE001 - config is durable either way
+            logger.warning("Could not reset the n8n bridge after config save", exc_info=True)
+
+        return jsonify(
+            {
+                "status": "ok",
+                "message": "n8n settings saved",
+                "data": data,
+            }
+        ), 200
+
     # ------------------------------------------------------------------
     # Connection-test endpoint — /ft-api/v1/test-connection
     # Used by the Setup wizard + Settings › Connection. The browser cannot

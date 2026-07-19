@@ -47,6 +47,23 @@ def init_n8n_routes(bridge: N8nBridge) -> None:
     logger.info("N8nBridge singleton injected into n8n_routes")
 
 
+def reset_n8n_bridge() -> None:
+    """Drop the cached bridge so the next request rebuilds from fresh config.
+
+    Called by the settings route after a save — the singleton captured host
+    and API key at construction, and stale values must not outlive the
+    operator's change.
+    """
+    global _bridge  # noqa: PLW0603
+    if _bridge is not None:
+        try:
+            _bridge.close()
+        except Exception:  # noqa: BLE001 - a failed close must not block the reset
+            logger.debug("n8n bridge close failed during reset", exc_info=True)
+    _bridge = None
+    logger.info("N8nBridge singleton reset — next request reloads config")
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

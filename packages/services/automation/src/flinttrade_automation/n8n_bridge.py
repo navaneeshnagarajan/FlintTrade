@@ -30,6 +30,28 @@ import httpx
 logger = logging.getLogger("flinttrade.automation.n8n_bridge")
 
 
+def _workspace_n8n_settings() -> tuple[str, str]:
+    """Resolve the UI-persisted (host, api_key) pair, fail-safe to blanks.
+
+    The key comes from the hardened secret file via
+    ``flinttrade_core.n8n_config`` — a workspace reference literal is never
+    used as a credential. Environment variables take precedence at the call
+    site, so server-style deployments are unaffected.
+    """
+    try:
+        from flinttrade_core.n8n_config import resolve_n8n_api_key  # noqa: PLC0415
+        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+
+        ws = Workspace()
+        host = str(ws.get("n8n.host", "") or "")
+        if host.startswith("secret://"):
+            host = ""
+        return host, resolve_n8n_api_key(ws)
+    except Exception:  # noqa: BLE001 - config lookup is never fatal
+        logger.warning("Failed to load n8n config from workspace", exc_info=True)
+        return "", ""
+
+
 class N8nBridgeError(Exception):
     """Raised when an n8n API call fails."""
 
@@ -64,8 +86,11 @@ class N8nBridge:
         api_key: str | None = None,
         timeout: float = 10.0,
     ) -> None:
-        self.host = (host or os.getenv("N8N_HOST", "") or "http://127.0.0.1:5678").rstrip("/")
-        self.api_key = api_key or os.getenv("N8N_API_KEY", "")
+        ws_host, ws_key = _workspace_n8n_settings()
+        self.host = (
+            host or os.getenv("N8N_HOST", "") or ws_host or "http://127.0.0.1:5678"
+        ).rstrip("/")
+        self.api_key = api_key or os.getenv("N8N_API_KEY", "") or ws_key
         self._http = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
