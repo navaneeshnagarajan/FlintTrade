@@ -249,3 +249,46 @@ def test_exchange_segment_unknown_raises() -> None:
 def test_exchange_segment_case_insensitive() -> None:
     """exchange_segment accepts lower-case input."""
     assert exchange_segment("nse") == "EQ"
+
+
+# ---------------------------------------------------------------------------
+# parse_expiry (U15) — the one canonical expiry parser
+# ---------------------------------------------------------------------------
+
+
+class TestParseExpiry:
+    def test_all_three_formats(self):
+        from datetime import date
+
+        from flinttrade_core.symbol_utils import parse_expiry
+
+        assert parse_expiry("28MAR24") == date(2024, 3, 28)
+        assert parse_expiry("240328") == date(2024, 3, 28)
+        assert parse_expiry("2024-03-28") == date(2024, 3, 28)
+        # Case/whitespace tolerant for the symbol-style form.
+        assert parse_expiry(" 03jan25 ") == date(2025, 1, 3)
+        # Single-digit day (the screener's historical contract).
+        assert parse_expiry("3APR25") == date(2025, 4, 3)
+
+    def test_format_restriction_preserves_caller_contracts(self):
+        import pytest as _pytest
+
+        from flinttrade_core.symbol_utils import parse_expiry
+
+        # A strict DDMMMYY caller must keep rejecting YYMMDD/ISO input.
+        with _pytest.raises(ValueError):
+            parse_expiry("240328", formats=("DDMMMYY",))
+        with _pytest.raises(ValueError):
+            parse_expiry("2024-03-28", formats=("DDMMMYY",))
+        # And the historical caller must keep rejecting DDMMMYY.
+        with _pytest.raises(ValueError):
+            parse_expiry("28MAR24", formats=("YYMMDD", "ISO"))
+
+    def test_invalid_inputs_raise(self):
+        import pytest as _pytest
+
+        from flinttrade_core.symbol_utils import parse_expiry
+
+        for bad in ("", "28XXX24", "9903AA", "not-a-date", "32JAN24"):
+            with _pytest.raises(ValueError):
+                parse_expiry(bad)

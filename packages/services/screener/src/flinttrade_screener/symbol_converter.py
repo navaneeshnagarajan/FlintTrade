@@ -133,6 +133,10 @@ def format_expiry_date(dt: date) -> str:
 def parse_expiry_date(s: str) -> date:
     """Parse a ``DDMMMYY`` string into a ``date`` object.
 
+    Thin wrapper over the canonical ``flinttrade_core.symbol_utils.parse_expiry``
+    (U15 — one expiry-parsing implementation), restricted to DDMMMYY so this
+    caller's strict validation contract is unchanged.
+
     Args:
         s: Expiry string like ``28MAR24``.
 
@@ -142,15 +146,9 @@ def parse_expiry_date(s: str) -> date:
     Raises:
         ValueError: If the string does not match DDMMMYY format.
     """
-    m = _DDMMMYY_RE.fullmatch(s)
-    if not m:
-        raise ValueError(f"Invalid expiry date format: {s!r} (expected DDMMMYY)")
-    day = int(m.group(1))
-    month = _MONTH_ABBR.get(m.group(2))
-    if month is None:
-        raise ValueError(f"Unknown month abbreviation: {m.group(2)!r}")
-    year = 2000 + int(m.group(3))
-    return date(year, month, day)
+    from flinttrade_core.symbol_utils import parse_expiry
+
+    return parse_expiry(s, formats=("DDMMMYY",))
 
 
 def normalise_base(raw: str) -> str:

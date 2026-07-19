@@ -33,6 +33,7 @@ Examples::
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -364,3 +365,63 @@ def exchange_segment(
     if key not in mapping:
         raise ValueError(f"Unknown exchange: '{exchange}'")
     return mapping[key]
+
+
+# ---------------------------------------------------------------------------
+# Expiry-date parsing (U15) — ONE implementation for the formats that were
+# previously scattered: screener's DDMMMYY ("28MAR24"), historical's YYMMDD
+# ("240328"), and ISO ("2024-03-28"). Callers restrict `formats` to preserve
+# their exact validation contracts (a strict DDMMMYY caller must keep
+# rejecting YYMMDD input).
+# ---------------------------------------------------------------------------
+
+# 1-2 digit day: the screener's historical contract accepts "3APR25".
+_DDMMMYY_EXPIRY_RE = re.compile(r"^(\d{1,2})([A-Z]{3})(\d{2})$")
+_MONTH_NUM: dict[str, int] = {name: index + 1 for index, name in enumerate(_MONTHS)}
+
+ExpiryFormat = Literal["DDMMMYY", "YYMMDD", "ISO"]
+
+_ALL_EXPIRY_FORMATS: tuple[ExpiryFormat, ...] = ("DDMMMYY", "YYMMDD", "ISO")
+
+
+def parse_expiry(
+    value: str,
+    *,
+    formats: tuple[ExpiryFormat, ...] = _ALL_EXPIRY_FORMATS,
+) -> _dt.date:
+    """Parse an expiry string in any of the accepted formats.
+
+    Args:
+        value: Expiry string, e.g. ``"28MAR24"``, ``"240328"``, ``"2024-03-28"``.
+        formats: Which formats to accept, tried in order. Restrict this to
+            keep a caller's historical validation contract exact.
+
+    Returns:
+        The parsed :class:`datetime.date`.
+
+    Raises:
+        ValueError: When the string matches none of the accepted formats.
+    """
+    text = (value or "").strip().upper()
+    for fmt in formats:
+        if fmt == "DDMMMYY":
+            match = _DDMMMYY_EXPIRY_RE.fullmatch(text)
+            if match:
+                month = _MONTH_NUM.get(match.group(2))
+                if month is None:
+                    raise ValueError(f"Unknown month abbreviation: {match.group(2)!r}")
+                return _dt.date(2000 + int(match.group(3)), month, int(match.group(1)))
+        elif fmt == "YYMMDD":
+            if len(text) == 6 and text.isdigit():
+                try:
+                    return _dt.datetime.strptime(text, "%y%m%d").date()
+                except ValueError:
+                    pass
+        elif fmt == "ISO":
+            try:
+                return _dt.date.fromisoformat(value.strip())
+            except ValueError:
+                pass
+    raise ValueError(
+        f"Invalid expiry date {value!r} (accepted formats: {', '.join(formats)})"
+    )

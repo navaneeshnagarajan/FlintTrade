@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from flinttrade_core.openalgo_client import OpenAlgoClient
 
@@ -83,11 +83,14 @@ class ExpiryInfo:
 
 
 def _parse_expiry_date(exp_str: str) -> date:
-    """Parse YYMMDD expiry string to a date object."""
-    if len(exp_str) == 6:
-        return datetime.strptime(exp_str, "%y%m%d").date()
-    # Try ISO format fallback
-    return date.fromisoformat(exp_str)
+    """Parse a YYMMDD (or ISO-fallback) expiry string to a date object.
+
+    Thin wrapper over the canonical ``flinttrade_core.symbol_utils.parse_expiry``
+    (U15), restricted to this caller's historical formats.
+    """
+    from flinttrade_core.symbol_utils import parse_expiry
+
+    return parse_expiry(exp_str, formats=("YYMMDD", "ISO"))
 
 
 @dataclass
