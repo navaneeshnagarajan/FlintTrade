@@ -170,37 +170,41 @@ describe("executeApprovedToolCall", () => {
 
   it("dispatches an approvable order through the shared gated client", async () => {
     mockPlaceOrder.mockResolvedValueOnce({ orderId: "FT-123" });
-    const msg = await executeApprovedToolCall(orderCall);
+    const outcome = await executeApprovedToolCall(orderCall);
     expect(mockPlaceOrder).toHaveBeenCalledOnce();
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: "NIFTY24JUL25000CE", strategy: "AIAdvisor" }),
     );
-    expect(msg).toContain("FT-123");
+    expect(outcome.executed).toBe(true);
+    expect(outcome.message).toContain("FT-123");
   });
 
   it("refuses a non-allowlisted endpoint without any dispatch", async () => {
-    const msg = await executeApprovedToolCall({
+    const outcome = await executeApprovedToolCall({
       ...orderCall,
       endpoint: "/api/v1/native/accounts",
     });
     expect(mockPlaceOrder).not.toHaveBeenCalled();
-    expect(msg).toContain("not an approvable action");
-    expect(msg).toContain("/api/v1/native/accounts");
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("not an approvable action");
+    expect(outcome.message).toContain("/api/v1/native/accounts");
   });
 
   it("refuses an incomplete order payload without any dispatch", async () => {
-    const msg = await executeApprovedToolCall({
+    const outcome = await executeApprovedToolCall({
       ...orderCall,
       payload: { symbol: "NIFTY", action: "BUY" },
     });
     expect(mockPlaceOrder).not.toHaveBeenCalled();
-    expect(msg).toContain("Nothing was sent to the broker");
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("Nothing was sent to the broker");
   });
 
   it("reports a failed placement honestly — never 'executed successfully'", async () => {
     mockPlaceOrder.mockRejectedValueOnce(new Error("Live order blocked: mode_blocked"));
-    const msg = await executeApprovedToolCall(orderCall);
-    expect(msg).toContain("Order failed: Live order blocked: mode_blocked");
-    expect(msg).not.toContain("submitted");
+    const outcome = await executeApprovedToolCall(orderCall);
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("Order failed: Live order blocked: mode_blocked");
+    expect(outcome.message).not.toContain("submitted");
   });
 });

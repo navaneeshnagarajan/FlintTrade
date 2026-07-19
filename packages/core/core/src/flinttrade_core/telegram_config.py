@@ -60,9 +60,11 @@ def read_telegram_config(ws: Workspace | None = None) -> dict[str, Any]:
 def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None) -> dict[str, Any]:
     """Validate and persist Telegram settings from the UI.
 
-    Payload fields:
+    Payload fields — ABSENT fields preserve the current stored value (a bare
+    ``{}`` POST is a no-op, never a destructive disable/erase):
         enabled (bool): turn the bot on or off.
-        chat_id (str): authorised chat id (required when enabling).
+        chat_id (str): authorised chat id (required when enabling). An
+            explicit empty string clears the stored chat id.
         bot_token (str, optional): a NEW token to store. An absent or blank
             value preserves any existing stored token (the Settings form's
             blank-keeps-existing convention).
@@ -75,12 +77,13 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
         ValueError: On any malformed field — nothing is written in that case.
     """
     workspace = ws or Workspace()
+    current = read_telegram_config(workspace)
 
-    enabled = payload.get("enabled", False)
+    enabled = payload.get("enabled", current["enabled"])
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be a boolean")
 
-    chat_id = payload.get("chat_id", "")
+    chat_id = payload.get("chat_id", current["chat_id"])
     if not isinstance(chat_id, str):
         raise ValueError("chat_id must be a string")
     chat_id = chat_id.strip()
@@ -117,12 +120,18 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
             logger.warning("Could not remove the stored Telegram bot token file")
             raise ValueError("Could not clear the stored bot token") from None
 
-    workspace.set("notifications.telegram_enabled", enabled)
-    workspace.set("notifications.telegram_chat_id", chat_id)
-    workspace.set(
-        "notifications.telegram_bot_token_ref",
-        TELEGRAM_BOT_TOKEN_REF if would_have_token else "",
-    )
-    workspace.save()
+    # ONE workspace transaction: per-key set() calls would be three separate
+    # read-modify-write commits (torn state on a mid-sequence failure), and a
+    # trailing full save() would clobber concurrent workspace writers with
+    # this process's stale in-memory snapshot.
+    def _apply(config: dict[str, Any]) -> None:
+        notifications = config.setdefault("notifications", {})
+        notifications["telegram_enabled"] = enabled
+        notifications["telegram_chat_id"] = chat_id
+        notifications["telegram_bot_token_ref"] = (
+            TELEGRAM_BOT_TOKEN_REF if would_have_token else ""
+        )
+
+    workspace.update(_apply)
 
     return read_telegram_config(workspace)

@@ -155,6 +155,10 @@ def _build_vault() -> Any | None:
         return None
 
 
+# Process-lifetime fallback learning memory (see _build_learning_memory).
+_FALLBACK_LEARNING_MEMORY: Any | None = None
+
+
 def _build_learning_memory() -> Any | None:
     """Construct the agent's learning-memory backend (best-effort).
 
@@ -181,10 +185,18 @@ def _build_learning_memory() -> Any | None:
                 MemoryBackendConfig(persist_dir=str(workspace_dir() / "agent_memory"))
             )
         logger.warning(
-            "chromadb unavailable — agent lessons will not survive a restart "
-            "(using the in-process memory backend)"
+            "chromadb unavailable — agent lessons persist only for this backend "
+            "process (in-process memory), not across restarts"
         )
-        return create_memory_backend(MemoryBackendConfig(backend="hierarchical"))
+        # Module-level singleton: a per-session instance would make the
+        # fallback write-only — lessons stored at session end would die with
+        # the trader before the next session could ever read them.
+        global _FALLBACK_LEARNING_MEMORY
+        if _FALLBACK_LEARNING_MEMORY is None:
+            _FALLBACK_LEARNING_MEMORY = create_memory_backend(
+                MemoryBackendConfig(backend="hierarchical")
+            )
+        return _FALLBACK_LEARNING_MEMORY
     except Exception:  # pragma: no cover — learning is never order-critical
         logger.warning("Agent learning memory unavailable", exc_info=True)
         return None

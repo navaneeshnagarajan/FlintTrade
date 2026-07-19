@@ -290,8 +290,8 @@ Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.t
 A preset is a pre-built layout you can apply instantly from the command
 palette (Ctrl + K → "preset"). Built-in presets include:
 
-- **Scalper Zone** — chart, level-2 depth, order pad, recent trades.
-- **Options Desk** — option chain, payoff diagram, Greeks, straddle P&L.
+- **Scalper Zone** — chart, level-2 depth, order pad, positions, scalper panel.
+- **Options Desk** — option chain, chart, Greeks, positions, straddle P&L.
 - **Market Watch** — multi-symbol watchlist, chart, price ticker, dashboard.
 - **Analysis** — chart with indicators, OI chart, depth, positions, news.
 - **Risk Monitor** — dashboard, risk panel, MTM monitor, positions, orders.

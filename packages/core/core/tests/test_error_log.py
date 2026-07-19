@@ -78,6 +78,15 @@ class TestSanitise:
         assert result["api_key"] == "[REDACTED]"
         assert result["qty"] == 1
 
+    def test_substring_field_names_are_redacted(self):
+        """bot_token / access_token / api_secret must redact — the exact-match
+        set let the Telegram bot token through verbatim."""
+        data = {"bot_token": "123456:AAraw", "access_token": "eyJ", "chat_id": "42"}
+        result = _sanitise(data)
+        assert result["bot_token"] == "[REDACTED]"
+        assert result["access_token"] == "[REDACTED]"
+        assert result["chat_id"] == "42"
+
 
 # ---------------------------------------------------------------------------
 # ErrorLog — schema and lifecycle

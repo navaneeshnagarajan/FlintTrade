@@ -124,6 +124,14 @@ describe("ScannerWidget", () => {
     expect(screen.getByText(/2 of 50 matched/i)).toBeInTheDocument();
   });
 
+  it("drops the banner entirely when a scan fails — no stale Live claim over an error body", async () => {
+    mockRunPrebuiltScan.mockRejectedValue(new Error("Backend offline"));
+    render(<ScannerWidget />, { wrapper: createWrapper() });
+    await screen.findByText("Scan failed.", {}, { timeout: 5000 });
+    expect(screen.queryByText(/Live scan/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample scan/i)).not.toBeInTheDocument();
+  });
+
   it("reports a failed scan honestly", async () => {
     mockRunPrebuiltScan.mockRejectedValue(new Error("Backend offline"));
     render(<ScannerWidget />, { wrapper: createWrapper() });
@@ -168,7 +176,7 @@ describe("ScannerWidget", () => {
     expect(screen.getByText("Auto")).toBeInTheDocument();
     expect(screen.getByText("Banking")).toBeInTheDocument();
     expect(
-      screen.getByText(/Sample data — connect OpenAlgo outside Explore/i),
+      screen.getByText(/Sample data — leave Explore and connect OpenAlgo/i),
     ).toBeInTheDocument();
   });
 

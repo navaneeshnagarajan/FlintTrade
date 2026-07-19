@@ -62,7 +62,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   toolCall?: ToolCall;
-  toolStatus?: "pending" | "approved" | "rejected";
+  toolStatus?: "pending" | "approved" | "rejected" | "failed";
 }
 
 // AdvisorResponse and AdvisorStatusResponse are validated via ftApi schemas;
@@ -208,33 +208,46 @@ export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrder
  * model-chosen endpoint with the operator's session, and must never report
  * success for a failed request.
  */
-export async function executeApprovedToolCall(toolCall: ToolCall): Promise<string> {
+export interface ApprovedToolCallOutcome {
+  /** Chat message reporting what happened. */
+  message: string;
+  /** True only when the order was actually submitted successfully. */
+  executed: boolean;
+}
+
+export async function executeApprovedToolCall(toolCall: ToolCall): Promise<ApprovedToolCallOutcome> {
   const endpointKey = normaliseToolEndpoint(toolCall.endpoint);
   if (!APPROVABLE_ORDER_ENDPOINTS.has(endpointKey)) {
-    return (
-      `Action not executed: "${toolCall.endpoint}" is not an approvable action. ` +
-      "Only order placement through the gated order path can be approved here."
-    );
+    return {
+      executed: false,
+      message:
+        `Action not executed: "${toolCall.endpoint}" is not an approvable action. ` +
+        "Only order placement through the gated order path can be approved here.",
+    };
   }
 
   const params = toPlaceOrderParams(toolCall.payload);
   if (!params) {
-    return (
-      "Action not executed: the proposed order is missing or malforms a required field " +
-      "(symbol, exchange, action, quantity, orderType, product). Nothing was sent to the broker."
-    );
+    return {
+      executed: false,
+      message:
+        "Action not executed: the proposed order is missing or malforms a required field " +
+        "(symbol, exchange, action, quantity, orderType, product). Nothing was sent to the broker.",
+    };
   }
 
   try {
     const result = await placeOrder(params);
-    return (
-      `Order submitted through the gated order path — order ID ${result.orderId}.\n\n` +
-      `\`${params.action} ${params.quantity} × ${params.symbol} (${params.exchange}) ` +
-      `${params.orderType} ${params.product}\``
-    );
+    return {
+      executed: true,
+      message:
+        `Order submitted through the gated order path — order ID ${result.orderId}.\n\n` +
+        `\`${params.action} ${params.quantity} × ${params.symbol} (${params.exchange}) ` +
+        `${params.orderType} ${params.product}\``,
+    };
   } catch (err: unknown) {
     const errText = err instanceof Error ? err.message : String(err);
-    return `Order failed: ${errText}`;
+    return { executed: false, message: `Order failed: ${errText}` };
   }
 }
 
@@ -380,40 +393,60 @@ async function postAdvisorMessage(
 
 interface ToolCardProps {
   toolCall: ToolCall;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "failed";
   onApprove: () => void;
   onReject: () => void;
 }
 
 function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
+  // The card must show what WOULD ACTUALLY EXECUTE — the validated payload —
+  // not the model's free-text description, which a prompt-injected model
+  // could arbitrage against the payload ("Buy 1 RELIANCE" describing a
+  // SELL 1800). Non-approvable or malformed calls get no Approve button.
+  const approvable = APPROVABLE_ORDER_ENDPOINTS.has(normaliseToolEndpoint(toolCall.endpoint));
+  const params = approvable ? toPlaceOrderParams(toolCall.payload) : null;
+
   return (
     <div className="bg-surface-card border border-border-default rounded-lg p-3">
       <div className="text-xxs text-text-muted uppercase tracking-wider mb-1">
-        AI wants to execute
+        AI proposes this order
       </div>
-      <div className="font-mono text-sm font-bold text-text-primary">
-        {toolCall.description}
-      </div>
-      {toolCall.endpoint && (
-        <div className="font-mono text-xxs text-text-muted mt-1">
-          {toolCall.method} {toolCall.endpoint}
+      {params ? (
+        <div className="font-mono text-sm font-bold text-text-primary">
+          {params.action} {params.quantity} × {params.symbol} ({params.exchange}){" "}
+          {params.orderType} {params.product}
+          {params.price !== undefined && ` @ ${params.price}`}
+          {params.triggerPrice !== undefined && ` trg ${params.triggerPrice}`}
+        </div>
+      ) : (
+        <div className="text-xs text-loss">
+          {approvable
+            ? "Malformed order proposal — a required field is missing or invalid. It cannot be approved."
+            : `Not an approvable action (${toolCall.method} ${toolCall.endpoint}). Only gated order placement can be approved here.`}
+        </div>
+      )}
+      {toolCall.description && (
+        <div className="text-xxs text-text-muted mt-1">
+          Model's description: {toolCall.description}
         </div>
       )}
       {status === "pending" ? (
         <div className="flex gap-2 mt-3">
-          <button
-            type="button"
-            onClick={onApprove}
-            className="px-4 py-1.5 text-xs font-semibold rounded bg-profit/10 text-profit border border-profit/30 hover:bg-profit/20 transition-colors"
-          >
-            Approve
-          </button>
+          {params && (
+            <button
+              type="button"
+              onClick={onApprove}
+              className="px-4 py-1.5 text-xs font-semibold rounded bg-profit/10 text-profit border border-profit/30 hover:bg-profit/20 transition-colors"
+            >
+              Approve
+            </button>
+          )}
           <button
             type="button"
             onClick={onReject}
             className="px-4 py-1.5 text-xs font-semibold rounded bg-loss/10 text-loss border border-loss/30 hover:bg-loss/20 transition-colors"
           >
-            Reject
+            {params ? "Reject" : "Dismiss"}
           </button>
         </div>
       ) : (
@@ -423,7 +456,11 @@ function ToolCard({ toolCall, status, onApprove, onReject }: ToolCardProps) {
             status === "approved" ? "text-profit" : "text-loss",
           ].join(" ")}
         >
-          {status === "approved" ? "Approved" : "Rejected by user"}
+          {status === "approved"
+            ? "Approved — submitted"
+            : status === "failed"
+              ? "Approved but not executed — see the reply below"
+              : "Rejected by user"}
         </div>
       )}
     </div>
@@ -513,7 +550,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
   // Local state for tool call augmentation — per-session, not persisted
   // toolMeta maps message id → { toolCall, toolStatus }
   // ---------------------------------------------------------------------------
-  const [toolMeta, setToolMeta] = useState<Map<string, { toolCall?: ToolCall; toolStatus?: "pending" | "approved" | "rejected" }>>(
+  const [toolMeta, setToolMeta] = useState<Map<string, { toolCall?: ToolCall; toolStatus?: "pending" | "approved" | "rejected" | "failed" }>>(
     () => new Map(),
   );
 
@@ -559,7 +596,17 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         return next;
       });
 
-      addMessage("assistant", await executeApprovedToolCall(msg.toolCall));
+      const outcome = await executeApprovedToolCall(msg.toolCall);
+      if (!outcome.executed) {
+        // An approval that did not result in a submitted order must not keep
+        // a green "Approved" card — the card state follows the real outcome.
+        setToolMeta((prev) => {
+          const next = new Map(prev);
+          next.set(msg.id, { ...prev.get(msg.id), toolCall: msg.toolCall, toolStatus: "failed" });
+          return next;
+        });
+      }
+      addMessage("assistant", outcome.message);
     },
     [addMessage],
   );

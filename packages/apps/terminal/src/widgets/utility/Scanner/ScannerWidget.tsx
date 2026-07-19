@@ -552,9 +552,12 @@ function ScannerWidget() {
         })}
       </nav>
 
-      {/* Provenance notice — per-tab, honest */}
+      {/* Provenance notice — per-tab, honest. Banners render only for the
+          data actually on screen: a failed refetch (TanStack keeps stale data
+          in the error state) must never leave a green Live banner above an
+          error body or frozen rows. */}
       {liveScanKey !== undefined ? (
-        scanQuery.data && (
+        !scanQuery.isError && scanQuery.data && (
           scanQuery.data.is_sample_data ? (
             <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
               <span className="text-xxs text-warning" role="status">
@@ -580,7 +583,11 @@ function ScannerWidget() {
         ) : (
           <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
             <span className="text-xxs text-warning" role="status">
-              Sample data — connect OpenAlgo outside Explore for live sector movers
+              {sectorMovers.wantsLive
+                ? sectorMovers.error
+                  ? "Sample data — the live sector feed is unavailable right now"
+                  : "Sample data — waiting for live NIFTY 50 quotes"
+                : "Sample data — leave Explore and connect OpenAlgo for live sector movers"}
             </span>
           </div>
         )

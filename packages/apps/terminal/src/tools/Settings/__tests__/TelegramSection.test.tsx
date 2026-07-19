@@ -81,6 +81,7 @@ describe("TelegramSection", () => {
     });
     mockPersist.mockResolvedValue({
       status: "ok",
+      message: "Telegram settings saved — applying to the running bot",
       data: { enabled: true, chat_id: "77", bot_token_set: true },
     });
     renderSection({ enabled: true, chatId: "77", botToken: "123456789:AAtokentokentokentokentoken12" });
@@ -93,7 +94,11 @@ describe("TelegramSection", () => {
       chatId: "77",
       botToken: "123456789:AAtokentokentokentokentoken12",
     });
-    expect(await screen.findByText(/Saved — applied to the bot/i)).toBeInTheDocument();
+    // The status line reports what the BACKEND said happened — no hardcoded
+    // applied claim when no bot is running or the apply fails.
+    expect(
+      await screen.findByText(/Telegram settings saved — applying to the running bot/i),
+    ).toBeInTheDocument();
     // The token has moved server-side; the field is emptied.
     expect(screen.getByLabelText("Telegram bot token")).toHaveValue("");
   });
@@ -119,6 +124,35 @@ describe("TelegramSection", () => {
     renderSection({ enabled: true, chatId: "77", botToken: "" });
     await waitFor(() => expect(mockRead).toHaveBeenCalled());
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+  });
+
+  it("never clobbers a user edit made before the config query resolves", async () => {
+    let resolveRead: (value: unknown) => void = () => {};
+    mockRead.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      }),
+    );
+    renderSection({ enabled: true });
+
+    // The user types a chat id while the (slow) config query is in flight.
+    fireEvent.change(screen.getByLabelText("Telegram chat ID"), {
+      target: { value: "12345" },
+    });
+
+    resolveRead({
+      status: "success",
+      data: { enabled: true, chat_id: "-100999", bot_token_set: true },
+    });
+
+    // Untouched field hydrates; the touched one keeps the user's edit.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Telegram bot token")).toHaveAttribute(
+        "placeholder",
+        expect.stringContaining("saved"),
+      ),
+    );
+    expect(screen.getByLabelText("Telegram chat ID")).toHaveValue("12345");
   });
 
   it("allows saving with a blank token when one is already stored", async () => {

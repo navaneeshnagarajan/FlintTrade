@@ -157,8 +157,12 @@ export function deriveSectorMovers(quotes: Quote[]): SectorMoverEntry[] {
 export interface UseSectorMoversResult {
   data: SectorMoverEntry[];
   isLoading: boolean;
-  /** True only when real quote data backs the rows — never for the sample fallback. */
+  /** True only when a HEALTHY live fetch backs the rows — never for the
+   *  sample fallback, and never once the feed has gone into error (frozen
+   *  quotes must not keep a live badge). */
   isLive: boolean;
+  /** True outside Explore — the hook is trying for live data. */
+  wantsLive: boolean;
   error: Error | null;
   refetch: () => void;
 }
@@ -176,7 +180,11 @@ export function useSectorMovers(): UseSectorMoversResult {
     retry: 2,
   });
 
-  const hasLiveData = wantsLive && query.data !== undefined && query.data.length > 0;
+  // A feed that has gone into error keeps its last data in the query cache,
+  // but frozen quotes must not be presented as live — fall back to the
+  // disclosed sample rows until the next successful refetch.
+  const hasLiveData =
+    wantsLive && !query.isError && query.data !== undefined && query.data.length > 0;
 
   const data = useMemo<SectorMoverEntry[]>(() => {
     if (!hasLiveData || !query.data) return SAMPLE_SECTOR_MOVERS;
@@ -187,6 +195,7 @@ export function useSectorMovers(): UseSectorMoversResult {
     data,
     isLoading: wantsLive && query.isLoading,
     isLive: hasLiveData,
+    wantsLive,
     error: wantsLive ? (query.error as Error | null) : null,
     refetch: () => {
       void query.refetch();

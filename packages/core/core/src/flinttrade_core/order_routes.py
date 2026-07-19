@@ -1039,8 +1039,11 @@ def _dispatch_live_order(
             get_latency_tracker().record_order_latency(adapter_id, _symbol, _latency_ms)
             _persistent_monitor = current_app.config.get("LATENCY_MONITOR")
             if _persistent_monitor is not None:
+                # Label GTT/variety dispatches distinctly so the admin history
+                # does not conflate them with regular placements.
+                _op = "PLACE" if not variety else f"{variety.upper()}-PLACE"
                 _persistent_monitor.record(
-                    adapter_id, "PLACE", _latency_ms, symbol=_symbol
+                    adapter_id, _op, _latency_ms, symbol=_symbol
                 )
         except Exception:  # pragma: no cover - monitoring must never break orders
             logger.debug("order latency record failed", exc_info=True)

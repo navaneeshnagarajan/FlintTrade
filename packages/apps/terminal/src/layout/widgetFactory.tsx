@@ -258,7 +258,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "aibackends", name: "AI Backends", icon: "Layers", category: "Utility", description: "Detect and run supported AI backends — Claude Code, Cerebras, Codex, and other CLI/ACP agents" },
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
-  { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Pre-market gap scanner filtering by OI buildup, IV rank, and price action" },
+  { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Gap and volume-breakout scans over the NIFTY 50 plus live sector movers; OI change stays sample-labelled" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },

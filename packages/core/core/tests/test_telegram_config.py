@@ -117,6 +117,32 @@ def test_persist_rejects_malformed_payloads(monkeypatch, tmp_path: Path, payload
     assert not (tmp_path / "secrets" / "telegram_bot_token").exists()
 
 
+def test_absent_fields_preserve_current_state(monkeypatch, tmp_path: Path) -> None:
+    """A bare {} POST must be a no-op — never a destructive disable/erase.
+
+    Only explicitly supplied fields mutate; a partial payload flips just its
+    own field and preserves the rest (including the enabled kill-switch bot).
+    """
+    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
+    from flinttrade_core.telegram_config import (
+        persist_telegram_config,
+        read_telegram_config,
+        resolve_telegram_bot_token,
+    )
+
+    persist_telegram_config({"enabled": True, "chat_id": "-100123", "bot_token": VALID_TOKEN})
+
+    # {} → complete no-op.
+    state = persist_telegram_config({})
+    assert state == {"enabled": True, "chat_id": "-100123", "bot_token_set": True}
+    assert resolve_telegram_bot_token() == VALID_TOKEN
+
+    # Partial payload → only the supplied field changes.
+    state = persist_telegram_config({"enabled": False})
+    assert state == {"enabled": False, "chat_id": "-100123", "bot_token_set": True}
+    assert read_telegram_config()["chat_id"] == "-100123"
+
+
 def test_from_env_resolves_stored_secret_and_never_uses_the_ref_literal(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -43,6 +43,24 @@ def test_sanitise_redacts_sensitive_keys() -> None:
         assert sanitised[key] == "[REDACTED]"
 
 
+def test_sanitise_redacts_substring_matches() -> None:
+    """Field names CONTAINING a sensitive needle redact too — bot_token
+    (the Telegram config/test-send field), access_token, api_secret. Exact
+    matching let /v1/config/telegram bodies persist the raw bot token into
+    the analyzer capture."""
+    raw = {
+        "bot_token": "123456:AAliteral-telegram-token",
+        "access_token": "eyJ...",
+        "api_secret": "shh",
+        "master_password": "pw",
+        "chat_id": "-100555",
+    }
+    sanitised = _sanitise(raw)
+    for key in ("bot_token", "access_token", "api_secret", "master_password"):
+        assert sanitised[key] == "[REDACTED]"
+    assert sanitised["chat_id"] == "-100555"
+
+
 def test_sanitise_none_returns_none() -> None:
     """_sanitise(None) returns None unchanged."""
     assert _sanitise(None) is None

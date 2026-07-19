@@ -127,6 +127,11 @@ def _as_ohlcv_series(resp: Any) -> dict[str, list[float]] | None:
 # ---------------------------------------------------------------------------
 
 
+# Hard ceiling on the post-session reflection step so a slow LLM can never
+# blow the runtime's shutdown-join budget (see _run_post_session_learning).
+_LEARNING_TIMEOUT_SECONDS = 15.0
+
+
 class TradeSignal(StrEnum):
     """Output of the LLM decision step."""
 
@@ -639,7 +644,11 @@ class AutonomousTrader:
             return TradeSignal.HOLD
 
         vault_notes = self._vault_context(market_data.symbol)
-        memory_lessons = self._memory_context(market_data.symbol)
+        # Off-loop: the persistent backend's first retrieval loads an
+        # embedding model (seconds, possibly a download) — a sync call here
+        # would wedge the agent event loop and starve the 5-second
+        # approved-entry recording handoff, leaving a live position untracked.
+        memory_lessons = await asyncio.to_thread(self._memory_context, market_data.symbol)
         prompt = _build_signal_prompt(
             market_data, self.state, self.config, vault_notes=vault_notes,
             memory_lessons=memory_lessons,
@@ -1043,59 +1052,87 @@ class AutonomousTrader:
     async def _run_post_session_learning(self) -> None:
         """Reflect over this session's closed trades and persist the lessons.
 
-        Runs strictly AFTER square-off. Never raises: any failure logs and
-        the session ends exactly as it would have without a learning tier.
+        Runs strictly AFTER square-off, skips a failed square-off (the
+        session thread must stay free for an operator retry while positions
+        remain open at the broker), and is hard-bounded so a slow reflection
+        LLM can never blow the runtime's shutdown-join budget. Never raises:
+        any failure logs and the session ends exactly as it would have
+        without a learning tier.
         """
         if self.memory is None:
+            return
+        if self._status == AgentStatus.STOP_FAILED:
+            logger.warning(
+                "Skipping post-session reflection — square-off did not complete, "
+                "the session thread stays free for an operator retry"
+            )
             return
         trades = list(self.state.closed_trades)
         if not trades:
             return
         try:
-            from .trade_reflection import ReflectionConfig, TradeReflector  # noqa: PLC0415
+            await asyncio.wait_for(
+                self._reflect_and_persist(trades), timeout=_LEARNING_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Post-session reflection timed out — no lessons recorded")
+        except Exception:
+            logger.exception("Post-session reflection failed — no lessons recorded")
 
-            reflector = TradeReflector(
-                config=ReflectionConfig(
-                    trigger_every_n_trades=1,
-                    min_trades_for_reflection=1,
-                ),
-                llm_client=self.llm,
-            )
-            result = await reflector.reflect_batch(trades)
-            if result is None:
-                return
-            session_date = self._ist_now().date().isoformat()
-            symbols = sorted({str(t.get("symbol", "")) for t in trades if t.get("symbol")})
-            lessons: list[tuple[str, str]] = (
-                [("recommendation", r) for r in result.recommendations]
-                + [("losing_pattern", p) for p in result.losing_patterns]
-                + [("winning_pattern", p) for p in result.winning_patterns]
-            )
+    async def _reflect_and_persist(self, trades: list[dict[str, Any]]) -> None:
+        """Run the reflection batch and store each lesson per traded symbol."""
+        from .trade_reflection import ReflectionConfig, TradeReflector  # noqa: PLC0415
+
+        reflector = TradeReflector(
+            config=ReflectionConfig(
+                trigger_every_n_trades=1,
+                min_trades_for_reflection=1,
+            ),
+            llm_client=self.llm,
+        )
+        result = await reflector.reflect_batch(trades)
+        if result is None:
+            return
+        session_date = self._ist_now().date().isoformat()
+        symbols = sorted({str(t.get("symbol", "")) for t in trades if t.get("symbol")})
+        lessons: list[tuple[str, str]] = (
+            [("recommendation", r) for r in result.recommendations]
+            + [("losing_pattern", p) for p in result.losing_patterns]
+            + [("winning_pattern", p) for p in result.winning_patterns]
+        )
+
+        def _persist() -> int:
+            # Off-loop: ChromaDB adds may load the embedding model. One copy
+            # per traded symbol — retrieval filters on symbol equality, so a
+            # session-wide lesson stored under "" would be unreachable from
+            # decide()'s per-symbol lookup (the multi-symbol write-only bug).
             stored = 0
             for kind, text in lessons:
                 content = str(text or "").strip()
                 if not content:
                     continue
-                self.memory.add(
-                    content,
-                    category="reflection",
-                    metadata={
-                        "kind": kind,
-                        "session_date": session_date,
-                        "symbols": ",".join(symbols),
-                        "trades_analysed": result.trades_analysed,
-                        "win_rate": result.win_rate,
-                        "source": "autonomous-agent-session",
-                    },
-                    symbol=symbols[0] if len(symbols) == 1 else "",
-                )
-                stored += 1
-            logger.info(
-                "Post-session reflection stored %d lessons (%d trades, win_rate=%.0f%%)",
-                stored, result.trades_analysed, result.win_rate * 100,
-            )
-        except Exception:
-            logger.exception("Post-session reflection failed — no lessons recorded")
+                for lesson_symbol in symbols or [""]:
+                    self.memory.add(
+                        content,
+                        category="reflection",
+                        metadata={
+                            "kind": kind,
+                            "session_date": session_date,
+                            "symbols": ",".join(symbols),
+                            "trades_analysed": result.trades_analysed,
+                            "win_rate": result.win_rate,
+                            "source": "autonomous-agent-session",
+                        },
+                        symbol=lesson_symbol,
+                    )
+                    stored += 1
+            return stored
+
+        stored = await asyncio.to_thread(_persist)
+        logger.info(
+            "Post-session reflection stored %d lesson entries (%d trades, win_rate=%.0f%%)",
+            stored, result.trades_analysed, result.win_rate * 100,
+        )
 
     async def monitor(self, position: dict[str, Any]) -> None:
         """Check an open position against stop-loss and take-profit levels.
@@ -1188,6 +1225,9 @@ class AutonomousTrader:
                             quantity=qty,
                             pnl=pnl,
                             exit_reason="sl_tp",
+                            # The triggering LTP predicts but does not equal
+                            # the MARKET fill — flag it like other estimates.
+                            exit_price_estimated=True,
                         )
                     )
 
@@ -1366,8 +1406,9 @@ class AutonomousTrader:
                 self._status = AgentStatus.STOPPED
 
             # Learning tier: reflect over the session's closed trades and
-            # persist the lessons. Strictly after square-off, fully guarded —
-            # skipped on the error/cancellation paths above.
+            # persist the lessons. Strictly after square-off, time-bounded,
+            # fully guarded — skipped on the error/cancellation paths above
+            # and on a failed square-off (STOP_FAILED).
             await self._run_post_session_learning()
 
         except asyncio.CancelledError:
@@ -1420,6 +1461,13 @@ class AutonomousTrader:
                     "quantity": self.config.max_position_size,
                 })
 
+        # Learning records collected here get their exit-price estimate AFTER
+        # the loop: no learning I/O (quote reads) may sit between one symbol's
+        # exit dispatch and the next — flattening runs at full speed, and the
+        # state pop follows the dispatch with no await in between (a
+        # cancellation in that window must not leave an exited position
+        # tracked, which a retry would double-exit).
+        exited: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         for symbol, details in details_snapshot.items():
             try:
                 exit_action = "SELL" if str(details.get("action", "BUY")) == "BUY" else "BUY"
@@ -1432,27 +1480,21 @@ class AutonomousTrader:
                         symbol, getattr(decision, "error", "") or "order refused",
                     )
                     continue
-                exit_price, exit_estimated = await self._best_effort_exit_price(symbol, details)
-                entry_price = float(details.get("entry_price", 0) or 0)
-                pnl = 0.0
-                if entry_price > 0 and exit_price > 0:
-                    direction = 1.0 if str(details.get("action", "BUY")) == "BUY" else -1.0
-                    pnl = (exit_price - entry_price) * qty * direction
+                record = self._closed_trade_record(
+                    symbol=symbol,
+                    action=str(details.get("action", "BUY")),
+                    entry_price=float(details.get("entry_price", 0) or 0),
+                    exit_price=float(details.get("entry_price", 0) or 0),
+                    quantity=qty,
+                    pnl=0.0,
+                    exit_reason="square_off",
+                    exit_price_estimated=True,
+                )
                 async with self._state_lock:
                     self.state.active_positions.pop(symbol, None)
                     self.state.position_details.pop(symbol, None)
-                    self.state.closed_trades.append(
-                        self._closed_trade_record(
-                            symbol=symbol,
-                            action=str(details.get("action", "BUY")),
-                            entry_price=entry_price,
-                            exit_price=exit_price,
-                            quantity=qty,
-                            pnl=pnl,
-                            exit_reason="square_off",
-                            exit_price_estimated=exit_estimated,
-                        )
-                    )
+                    self.state.closed_trades.append(record)
+                exited.append((symbol, details, record))
                 logger.info("Squared off position in %s", symbol)
             except Exception as exc:
                 # A SmartRouteAbort (session revoked mid-square-off) stops the
@@ -1467,6 +1509,24 @@ class AutonomousTrader:
                     )
                     break
                 logger.error("Square-off failed for %s: %s", symbol, exc)
+
+        # Every exit is dispatched — NOW refine the learning records with a
+        # best-effort LTP estimate (pure learning I/O, after the order path).
+        for symbol, details, record in exited:
+            try:
+                exit_price, _ = await self._best_effort_exit_price(symbol, details)
+                entry_price = float(record.get("entry_price", 0) or 0)
+                qty = int(record.get("quantity", 1) or 1)
+                if entry_price > 0 and exit_price > 0:
+                    direction = 1.0 if str(record.get("action", "BUY")) == "BUY" else -1.0
+                    pnl = (exit_price - entry_price) * qty * direction
+                    notional = abs(entry_price) * max(qty, 1)
+                    async with self._state_lock:
+                        record["exit_price"] = exit_price
+                        record["pnl"] = pnl
+                        record["pnl_pct"] = pnl / notional * 100.0 if notional > 0 else 0.0
+            except Exception as exc:  # learning must never disturb shutdown
+                logger.debug("Exit-price refinement failed for %s: %s", symbol, exc)
 
         async with self._state_lock:
             flat = not self.state.active_positions

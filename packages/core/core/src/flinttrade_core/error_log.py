@@ -43,9 +43,17 @@ logger = logging.getLogger("flinttrade.core.error_log")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # Keys whose values must never be persisted.
+# Substring needles, not exact keys: field names like ``bot_token``,
+# ``access_token`` or ``api_secret`` must redact too. Over-redaction of a
+# benign key in a debug capture is the safe direction.
 _SENSITIVE_KEYS: frozenset[str] = frozenset(
     {"password", "token", "api_key", "apikey", "secret", "totp", "otp", "pin"}
 )
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(needle in lowered for needle in _SENSITIVE_KEYS)
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS error_log (
@@ -116,7 +124,7 @@ def _sanitise(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         return data
     return {
-        k: "[REDACTED]" if k.lower() in _SENSITIVE_KEYS else v
+        k: "[REDACTED]" if _is_sensitive_key(k) else v
         for k, v in data.items()
     }
 

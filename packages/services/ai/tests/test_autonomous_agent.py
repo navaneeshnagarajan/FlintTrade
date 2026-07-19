@@ -1389,3 +1389,109 @@ async def test_compressed_full_session_trades_squares_off_and_learns() -> None:
     assert memory.added, "post-session reflection persisted no lessons"
     # The gated executor was the ONLY order path: one entry + one exit.
     assert agent.order_executor.route_order.await_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_multi_symbol_lessons_are_stored_per_symbol_and_retrievable() -> None:
+    """The HIGH round-trip bug: a session-wide lesson stored under symbol=""
+    could never match decide()'s per-symbol retrieval. Lessons now store one
+    copy per traded symbol — proven end-to-end against a REAL backend."""
+    from flinttrade_ai.in_process_memory import HierarchicalMemoryManager
+
+    memory = HierarchicalMemoryManager()
+    agent = make_agent(memory=memory)
+    agent.llm = None  # deterministic rule-based reflection
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 2, "pnl": -10.0, "pnl_pct": -5.0},
+        {"symbol": "HDFCBANK", "action": "SELL", "entry_price": 1650.0,
+         "exit_price": 1640.0, "quantity": 1, "pnl": 10.0, "pnl_pct": 0.6},
+    ]
+
+    await agent._run_post_session_learning()
+
+    # Both traded symbols can retrieve the session's lessons.
+    for symbol in ("RELIANCE", "HDFCBANK"):
+        context = agent._memory_context(symbol)
+        assert context, f"no lessons retrievable for {symbol}"
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_skips_after_a_failed_square_off() -> None:
+    memory = StubMemory()
+    agent = make_agent(memory=memory)
+    agent.llm = None
+    agent._status = AgentStatus.STOP_FAILED
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 1, "pnl": -5.0, "pnl_pct": -5.0},
+    ]
+
+    await agent._run_post_session_learning()
+
+    assert memory.added == []
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_is_time_bounded(monkeypatch) -> None:
+    """A hung reflection LLM must not blow the runtime's shutdown budget."""
+    import asyncio
+
+    import flinttrade_ai.autonomous_agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "_LEARNING_TIMEOUT_SECONDS", 0.05)
+
+    memory = StubMemory()
+    agent = make_agent(memory=memory)
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 1, "pnl": -5.0, "pnl_pct": -5.0},
+    ]
+
+    async def hang(trades) -> None:
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(agent, "_reflect_and_persist", hang)
+
+    # Returns promptly (bounded), swallows the timeout, stores nothing.
+    await asyncio.wait_for(agent._run_post_session_learning(), timeout=5)
+    assert memory.added == []
+
+
+@pytest.mark.asyncio
+async def test_square_off_dispatches_all_exits_before_any_quote_read() -> None:
+    """No learning I/O between exits: the quote reads that refine the learning
+    records run only after every position's exit has been dispatched."""
+    agent = make_agent(quotes_ltp=110.0)
+    events: list[str] = []
+
+    original_route = agent.order_executor.route_order
+
+    async def tracking_route(order):
+        events.append(f"exit:{getattr(order, 'symbol', '?')}")
+        return await original_route(order)
+
+    agent.order_executor.route_order = tracking_route
+    original_quotes = agent.broker.quotes
+
+    async def tracking_quotes(**kwargs):
+        events.append(f"quote:{kwargs.get('symbol', '?')}")
+        return await original_quotes(**kwargs)
+
+    agent.broker.quotes = tracking_quotes
+
+    for symbol in ("RELIANCE", "HDFCBANK"):
+        agent.state.active_positions[symbol] = 100.0
+        agent.state.position_details[symbol] = {
+            "entry_price": 100.0, "action": "BUY", "quantity": 1,
+        }
+
+    flat = await agent._square_off_all()
+
+    assert flat is True
+    exit_indices = [i for i, e in enumerate(events) if e.startswith("exit:")]
+    quote_indices = [i for i, e in enumerate(events) if e.startswith("quote:")]
+    assert exit_indices and quote_indices
+    assert max(exit_indices) < min(quote_indices), events
+    # And the records were refined with the post-loop LTP estimate.
+    assert all(t["exit_price"] == 110.0 for t in agent.state.closed_trades)

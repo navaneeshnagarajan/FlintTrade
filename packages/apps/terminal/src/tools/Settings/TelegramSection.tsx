@@ -33,10 +33,22 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
   const [testError, setTestError]   = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [saveError, setSaveError]   = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
   const queryClient = useQueryClient();
 
-  // Hydrate the form once from the backend's redacted state so a reload shows
-  // the real saved settings instead of blank fields.
+  // Track which fields the user has edited: hydration must never clobber an
+  // in-flight edit made before the (possibly slow) config query resolves.
+  const touchedRef = useRef<Set<keyof TelegramSettings>>(new Set());
+  const changeField = useCallback(
+    (field: keyof TelegramSettings, value: string | boolean) => {
+      touchedRef.current.add(field);
+      onChangeField(field, value);
+    },
+    [onChangeField],
+  );
+
+  // Hydrate the untouched fields once from the backend's redacted state so a
+  // reload shows the real saved settings instead of blank fields.
   const configQuery = useQuery({
     queryKey: ["telegramConfig"],
     queryFn: readTelegramConfig,
@@ -47,8 +59,8 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
     const data = configQuery.data?.data;
     if (!data || hydratedRef.current) return;
     hydratedRef.current = true;
-    onChangeField("enabled", data.enabled);
-    onChangeField("chatId", data.chat_id);
+    if (!touchedRef.current.has("enabled")) onChangeField("enabled", data.enabled);
+    if (!touchedRef.current.has("chatId")) onChangeField("chatId", data.chat_id);
   }, [configQuery.data, onChangeField]);
 
   const tokenStored = configQuery.data?.data?.bot_token_set === true;
@@ -60,9 +72,12 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
         chatId: settings.chatId,
         botToken: settings.botToken,
       }),
-    onSuccess: () => {
+    onSuccess: (response) => {
       setSaveStatus("success");
       setSaveError("");
+      // Report what the backend actually did (it says whether the running
+      // bot is being updated) instead of hardcoding an applied claim.
+      setSaveMessage(response.message || "Saved");
       // The token now lives server-side; drop it from browser memory.
       onChangeField("botToken", "");
       void queryClient.invalidateQueries({ queryKey: ["telegramConfig"] });
@@ -71,6 +86,27 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
     onError: (err) => {
       setSaveStatus("error");
       setSaveError(err instanceof Error ? err.message : "Save failed");
+      setTimeout(() => setSaveStatus("idle"), 8000);
+    },
+  });
+
+  const forgetMutation = useMutation({
+    mutationFn: () =>
+      persistTelegramConfig({
+        // A config without a token cannot stay enabled (fail closed), so
+        // forgetting the stored token also disables the bot.
+        enabled: false,
+        chatId: settings.chatId,
+        clearToken: true,
+      }),
+    onSuccess: () => {
+      onChangeField("enabled", false);
+      onChangeField("botToken", "");
+      void queryClient.invalidateQueries({ queryKey: ["telegramConfig"] });
+    },
+    onError: (err) => {
+      setSaveStatus("error");
+      setSaveError(err instanceof Error ? err.message : "Could not forget the token");
       setTimeout(() => setSaveStatus("idle"), 8000);
     },
   });
@@ -110,7 +146,7 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
       <FieldRow label="Enable Telegram notifications">
         <Toggle
           checked={settings.enabled}
-          onChange={(v) => onChangeField("enabled", v)}
+          onChange={(v) => changeField("enabled", v)}
           label={settings.enabled ? "Enabled" : "Disabled"}
         />
       </FieldRow>
@@ -125,7 +161,7 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
       >
         <TextInput
           value={settings.botToken}
-          onChange={(v) => onChangeField("botToken", v)}
+          onChange={(v) => changeField("botToken", v)}
           type="password"
           placeholder={tokenStored ? "•••••••• (saved)" : "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"}
           disabled={!settings.enabled}
@@ -139,7 +175,7 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
       >
         <TextInput
           value={settings.chatId}
-          onChange={(v) => onChangeField("chatId", v)}
+          onChange={(v) => changeField("chatId", v)}
           placeholder="-100123456789"
           disabled={!settings.enabled}
           aria-label="Telegram chat ID"
@@ -171,7 +207,10 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
             disabled={
               testMutation.isPending
               || !settings.enabled
-              || !settings.botToken.trim()
+              // The backend send route falls back to the STORED config when
+              // credentials are omitted, so a freshly-saved token (cleared
+              // from browser memory) still supports Test Send.
+              || !(settings.botToken.trim() || tokenStored)
               || !settings.chatId.trim()
             }
             className="flex items-center gap-1.5 text-xs h-7"
@@ -185,10 +224,22 @@ export function TelegramSection({ settings, onChangeField }: TelegramSectionProp
           </Button>
         )}
 
+        {tokenStored && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => forgetMutation.mutate()}
+            disabled={forgetMutation.isPending}
+            className="flex items-center gap-1.5 text-xs h-7 text-text-muted hover:text-loss"
+          >
+            {forgetMutation.isPending ? "Forgetting..." : "Forget stored token"}
+          </Button>
+        )}
+
         {saveStatus === "success" && (
           <span className="flex items-center gap-1 text-xs text-profit" role="status">
             <CheckCircle2 size={11} />
-            Saved — applied to the bot
+            {saveMessage || "Saved"}
           </span>
         )}
         {saveStatus === "error" && (
