@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from dataclasses import dataclass
 from typing import Any
+
+from .rate_window import SlidingWindowRateLimit
 
 logger = logging.getLogger("flinttrade.automation.whatsapp")
 
@@ -83,7 +84,9 @@ class WhatsAppAlerter:
 
     def __init__(self, config: WhatsAppConfig | None = None) -> None:
         self.config = config or WhatsAppConfig.from_env()
-        self._send_timestamps: list[float] = []
+        self._rate_limit = SlidingWindowRateLimit(
+            max_events=_MAX_MESSAGES_PER_MINUTE, window_seconds=_RATE_WINDOW_SECONDS
+        )
         self._history: list[dict[str, Any]] = []
 
     @property
@@ -105,17 +108,11 @@ class WhatsAppAlerter:
 
         Enforces max 30 messages per 60-second sliding window.
         """
-        now = time.time()
-        cutoff = now - _RATE_WINDOW_SECONDS
-        # Prune old timestamps
-        self._send_timestamps = [
-            ts for ts in self._send_timestamps if ts > cutoff
-        ]
-        return len(self._send_timestamps) < _MAX_MESSAGES_PER_MINUTE
+        return self._rate_limit.allow()
 
     def _record_send(self) -> None:
         """Record a successful send for rate limiting."""
-        self._send_timestamps.append(time.time())
+        self._rate_limit.record()
 
     # ------------------------------------------------------------------
     # Core send

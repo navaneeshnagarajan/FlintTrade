@@ -214,7 +214,7 @@ class TestRateLimiting:
                 alerter.send_alert(f"Message {i}")
 
             # Simulate time passing beyond the window
-            alerter._send_timestamps = [
+            alerter._rate_limit._timestamps = [
                 time.time() - 61.0 for _ in range(30)
             ]
 
