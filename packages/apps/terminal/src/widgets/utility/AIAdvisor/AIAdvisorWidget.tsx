@@ -295,12 +295,15 @@ async function streamAdvisorMessage(
   messages: Array<{ role: string; content: string }>,
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<string> {
   const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    // session_id enables server-side session capture (AI2 recall); omitted
+    // for demo sessions so fabricated chats never persist.
+    body: JSON.stringify({ messages, ...(sessionId ? { session_id: sessionId } : {}) }),
     signal,
   });
 
@@ -354,6 +357,7 @@ async function streamAdvisorMessage(
 async function postAdvisorMessage(
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
+  sessionId?: string,
 ): Promise<string> {
   const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor`, {
@@ -364,6 +368,7 @@ async function postAdvisorMessage(
       // Legacy single-message field for backwards compat
       message: messages[messages.length - 1]?.content ?? "",
       context: "",
+      ...(sessionId ? { session_id: sessionId } : {}),
     }),
     signal,
   });
@@ -632,6 +637,12 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     // Build conversation payload from the store snapshot after adding the user message
     const snapshot = useAIConversationStore.getState().messages;
     const conversationPayload = snapshot.map((m) => ({ role: m.role, content: m.content }));
+    // AI2 session capture id — real sessions only, never demo/explore tokens.
+    const authToken = useAuthStore.getState().token;
+    const captureSessionId =
+      authToken && authToken !== "demo-user" && authToken !== "dev-bypass"
+        ? useAIConversationStore.getState().conversationId ?? undefined
+        : undefined;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -665,6 +676,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
           }));
         },
         controller.signal,
+        captureSessionId,
       );
 
       // Detect tool calls in the final reply and store in local meta
@@ -694,7 +706,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         setStreaming(false);
 
         try {
-          replyContent = await postAdvisorMessage(conversationPayload, controller.signal);
+          replyContent = await postAdvisorMessage(conversationPayload, controller.signal, captureSessionId);
         } catch (fallbackErr: unknown) {
           const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
           replyContent = `Error: ${fallbackMsg}`;

@@ -3839,6 +3839,20 @@ def create_flask_app(
 
     app.register_blueprint(advisor_bp)
 
+    # AI2 — persisted, searchable AI chat sessions (SQLite + FTS5 under the
+    # workspace). Best-effort: a failed store open leaves the routes mounted
+    # and honestly 503ing rather than blocking app start.
+    from flinttrade_ai.session_routes import session_bp  # noqa: PLC0415
+
+    try:
+        from flinttrade_ai.session_store import AiSessionStore  # noqa: PLC0415
+
+        app.config["AI_SESSION_STORE"] = AiSessionStore(_workspace_dir() / "ai_sessions.sqlite")
+    except Exception:  # noqa: BLE001 - session recall is never start-critical
+        logger.warning("AI session store unavailable", exc_info=True)
+        app.config["AI_SESSION_STORE"] = None
+    app.register_blueprint(session_bp)
+
     from flinttrade_ai.ai_routes import ai_bp  # noqa: PLC0415
 
     app.register_blueprint(ai_bp)

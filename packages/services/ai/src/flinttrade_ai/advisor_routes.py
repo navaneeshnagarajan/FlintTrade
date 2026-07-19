@@ -9,7 +9,7 @@ import json as _json
 import logging
 from typing import Any
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from .llm_client import LLMClient, LLMConfig, LLMMessage
 
@@ -25,6 +25,44 @@ _SYSTEM_PROMPT = (
     "informational — not financial advice. Never recommend specific trades "
     "without proper risk disclaimers."
 )
+
+
+def _capture_session(
+    body: dict[str, Any],
+    raw_messages: Any,
+    assistant_reply: str = "",
+) -> None:
+    """Best-effort AI2 session capture — must never break a chat.
+
+    Records the request's conversation history (and, when supplied, the fresh
+    assistant reply) into the app-owned AiSessionStore under the client's
+    ``session_id``. No ``session_id`` in the body → no capture (the frontend
+    omits it for Explore/demo sessions, so fabricated chats never persist).
+    Message ids are content-hash-derived in the store, so replaying the full
+    history each request never duplicates rows. Streamed replies are picked
+    up from the next request's history (only a session's final streamed reply
+    can be missed).
+    """
+    try:
+        session_id = str(body.get("session_id", "") or "").strip()
+        if not session_id:
+            return
+        store = current_app.config.get("AI_SESSION_STORE")
+        if store is None:
+            return
+        captured: list[dict[str, Any]] = []
+        if isinstance(raw_messages, list):
+            for msg in raw_messages:
+                if isinstance(msg, dict):
+                    captured.append(
+                        {"role": msg.get("role", ""), "content": msg.get("content", "")}
+                    )
+        if assistant_reply.strip():
+            captured.append({"role": "assistant", "content": assistant_reply})
+        if captured:
+            store.record_exchange(session_id, "advisor", captured)
+    except Exception:  # noqa: BLE001 - capture is never chat-critical
+        logger.debug("AI session capture failed", exc_info=True)
 
 
 def _is_llm_configured() -> bool:
@@ -121,6 +159,7 @@ def advisor_chat() -> tuple[Any, int]:
         client.close()
 
         if response.success:
+            _capture_session(body, raw_messages, assistant_reply=response.content or "")
             return jsonify({
                 "status": "success",
                 "data": {"response": response.content},
@@ -158,6 +197,10 @@ def advisor_stream() -> Response | tuple[Any, int]:
 
     # Build conversation (same logic as /advisor)
     raw_messages = body.get("messages")
+    # AI2 capture: the request history (incl. the PREVIOUS streamed reply the
+    # frontend appended) persists before streaming starts; the fresh reply is
+    # picked up from the next request's history.
+    _capture_session(body, raw_messages)
     if isinstance(raw_messages, list) and raw_messages:
         conversation: list[LLMMessage] = [
             LLMMessage(role="system", content=_SYSTEM_PROMPT),
