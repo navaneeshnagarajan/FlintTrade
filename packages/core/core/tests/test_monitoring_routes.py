@@ -90,3 +90,38 @@ class TestMonitoringRoutes:
         assert data["status"] == "success"
         assert isinstance(data["data"], list)
         assert len(data["data"]) >= 1
+
+
+class TestPersistentTrafficStore:
+    """U12: /traffic/* serves from the DuckDB TrafficLogger, not the counter."""
+
+    def test_stats_and_recent_serve_from_the_persistent_logger(self, app_client):
+        flask_app = app_client.application
+        traffic_logger = flask_app.config.get("TRAFFIC_LOGGER")
+        assert traffic_logger is not None
+
+        traffic_logger.log(
+            ip="127.0.0.1",
+            method="GET",
+            path="/api/v1/persistent-probe",
+            status_code=200,
+            duration_ms=7.5,
+        )
+
+        resp = _get(app_client, "/api/v1/traffic/stats?minutes=60")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)["data"]
+        assert data["total_requests"] >= 1
+        assert data["window_minutes"] == 60
+        assert "p95_latency_ms" in data
+        assert any(
+            row["path"] == "/api/v1/persistent-probe" for row in data["top_paths"]
+        )
+
+        resp = _get(app_client, "/api/v1/traffic/recent?n=50")
+        rows = json.loads(resp.data)["data"]
+        probe = [r for r in rows if r["path"] == "/api/v1/persistent-probe"]
+        assert probe, "logged row did not surface in /traffic/recent"
+        # Documented response keys preserved (status, not status_code).
+        assert probe[0]["status"] == 200
+        assert probe[0]["duration_ms"] == 7.5

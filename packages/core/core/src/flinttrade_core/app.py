@@ -4331,28 +4331,11 @@ def create_flask_app(
                 ), 415
         return None
 
-    @app.before_request
-    def _record_request_start() -> None:
-        """Store request start time for latency calculation."""
-        _flask_g._request_start = time.monotonic()
-
-    @app.after_request
-    def _record_traffic(response: Any) -> Any:
-        """Record method, path, status, and duration in TrafficCounter."""
-        try:
-            from .monitoring_routes import get_traffic_counter  # noqa: PLC0415
-
-            start = getattr(_flask_g, "_request_start", None)
-            duration_ms = (time.monotonic() - start) * 1000 if start is not None else 0.0
-            get_traffic_counter().record(
-                method=request.method,
-                path=request.path,
-                status=response.status_code,
-                duration_ms=duration_ms,
-            )
-        except Exception as _exc:
-            logger.debug("suppressed: %s", _exc)  # Never let monitoring break the response
-        return response
+    # NOTE: the per-request in-memory TrafficCounter feed was removed (U12):
+    # the always-on DuckDB TrafficLogger records every request, and the
+    # /api/v1/traffic/* read routes now serve from it — one traffic store,
+    # one set of numbers, surviving restarts. The counter class remains as
+    # the routes' fallback for logger-less standalone/test app contexts.
 
     @app.after_request
     def _track_404s(response: Any) -> Any:

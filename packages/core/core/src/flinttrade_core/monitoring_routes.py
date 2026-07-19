@@ -15,12 +15,16 @@ GET /api/v1/latency/recent     — recent latency records
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from .monitoring import LatencyTracker, TrafficCounter
+
+# TrafficLogger stamps rows in IST — window cutoffs must match.
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 logger = logging.getLogger("flinttrade.monitoring_routes")
 
@@ -74,6 +78,12 @@ def init_monitoring_routes(
 def traffic_stats() -> tuple[Any, int]:
     """Return traffic statistics.
 
+    Served from the always-on DuckDB-backed TrafficLogger (U12: one traffic
+    store — numbers no longer reset on restart or diverge from the admin
+    surface), adapted into the response shape the Settings panel consumes.
+    Falls back to the in-memory counter only when no logger is configured
+    (standalone/test app contexts).
+
     Query parameters:
         minutes (int, optional): Lookback window in minutes (default 5).
 
@@ -88,12 +98,30 @@ def traffic_stats() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "minutes must be a positive integer"}), 400
 
-    return jsonify({"status": "success", "data": _traffic.get_stats(minutes=minutes)}), 200
+    traffic_logger = current_app.config.get("TRAFFIC_LOGGER")
+    if traffic_logger is None:
+        return jsonify({"status": "success", "data": _traffic.get_stats(minutes=minutes)}), 200
+
+    since = datetime.now(_IST) - timedelta(minutes=minutes)
+    stats = traffic_logger.stats(since=since)
+    total = int(stats.get("total_requests", 0) or 0)
+    return jsonify({
+        "status": "success",
+        "data": {
+            "window_minutes": minutes,
+            "total_requests": total,
+            "requests_per_sec": round(total / (minutes * 60), 4),
+            "error_rate": stats.get("error_rate", 0.0),
+            "avg_latency_ms": stats.get("avg_duration_ms", 0.0),
+            "p95_latency_ms": stats.get("p95_duration_ms", 0.0),
+            "top_paths": stats.get("top_paths", []),
+        },
+    }), 200
 
 
 @monitoring_bp.route("/traffic/recent", methods=["GET"])
 def traffic_recent() -> tuple[Any, int]:
-    """Return recent HTTP requests.
+    """Return recent HTTP requests (persistent store; see traffic_stats).
 
     Query parameters:
         n (int, optional): Number of records (default 100, max 1000).
@@ -109,7 +137,23 @@ def traffic_recent() -> tuple[Any, int]:
     except ValueError:
         return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
 
-    return jsonify({"status": "success", "data": _traffic.get_recent(n=n)}), 200
+    traffic_logger = current_app.config.get("TRAFFIC_LOGGER")
+    if traffic_logger is None:
+        return jsonify({"status": "success", "data": _traffic.get_recent(n=n)}), 200
+
+    rows = traffic_logger.recent(limit=n)
+    # Adapt to the documented response keys (status, not status_code).
+    data = [
+        {
+            "timestamp": row.get("timestamp"),
+            "method": row.get("method"),
+            "path": row.get("path"),
+            "status": row.get("status_code"),
+            "duration_ms": row.get("duration_ms"),
+        }
+        for row in rows
+    ]
+    return jsonify({"status": "success", "data": data}), 200
 
 
 # ---------------------------------------------------------------------------
