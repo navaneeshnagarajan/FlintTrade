@@ -10,8 +10,8 @@
  *     otherwise.
  *   - Sectors derives live per-sector movers from NIFTY 50 multi-quotes
  *     outside Explore (useSectorMovers); sample rows, disclosed, otherwise.
- *   - OI Change remains a seeded sample table (disclosed per-tab) until an
- *     OI-delta scan source exists server-side.
+ *   - OI Change surfaces unusual-OI outliers from the shared /v1/oi family
+ *     (live broker chain when connected; the response flag drives the badge).
  *   - Sortable TanStack Tables per tab.
  */
 
@@ -50,12 +50,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
-import {
-  SAMPLE_OI_CHANGES,
-  type OIChangeEntry,
-  type SectorMoverEntry,
-} from "./sampleData";
+import { type SectorMoverEntry } from "./sampleData";
 import { runPrebuiltScan, type ScannerResultRow } from "@/services/ftApi";
+import { getUnusualOI, type UnusualOIRow } from "@/services/ftApi.analysis";
 import { useSectorMovers } from "@/hooks/useSectorMovers";
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
@@ -313,35 +310,20 @@ function scanColumns(): ColumnDef<ScannerResultRow, unknown>[] {
   ];
 }
 
-function oiColumns(): ColumnDef<OIChangeEntry, unknown>[] {
+function unusualOIColumns(): ColumnDef<UnusualOIRow, unknown>[] {
   return [
     {
-      accessorKey: "symbol",
-      header: "Symbol",
+      accessorKey: "strike",
+      header: "Strike",
       cell: ({ row }) => (
-        <div>
-          <div className="text-xs font-semibold text-text-primary font-mono">
-            {row.original.symbol}
-          </div>
-          <div className="text-xxs text-text-muted">{row.original.exchange}</div>
+        <div className="text-xs font-semibold text-text-primary font-mono">
+          {row.original.strike} {row.original.option_type}
         </div>
       ),
     },
     {
-      accessorKey: "oiChangePct",
-      header: () => <span className="block text-right">OI Change %</span>,
-      cell: ({ row }) => {
-        const v = row.original.oiChangePct;
-        return (
-          <div className="text-right font-mono tabular-nums text-xs text-text-primary font-semibold">
-            {fmtPct(v)}
-          </div>
-        );
-      },
-    },
-    {
-      accessorKey: "oiChange",
-      header: () => <span className="block text-right">OI Change</span>,
+      accessorKey: "oi",
+      header: () => <span className="block text-right">OI</span>,
       cell: ({ getValue }) => (
         <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
           {fmtVolume(getValue() as number)}
@@ -349,46 +331,52 @@ function oiColumns(): ColumnDef<OIChangeEntry, unknown>[] {
       ),
     },
     {
-      accessorKey: "price",
-      header: () => <span className="block text-right">Price</span>,
-      cell: ({ getValue }) => (
-        <div className="text-right font-mono tabular-nums text-xs text-text-primary">
-          {fmtPrice(getValue() as number)}
-        </div>
-      ),
-    },
-    {
-      accessorKey: "signal",
-      header: "Signal",
+      accessorKey: "oi_change",
+      header: () => <span className="block text-right">OI Chg</span>,
       cell: ({ row }) => {
-        const s = row.original.signal;
+        const v = row.original.oi_change;
         return (
-          <Badge
-            variant="outline"
+          <div
             className={cn(
-              "text-xxs h-5 font-medium",
-              s === "bullish" && "text-profit border-profit/30 bg-profit/5",
-              s === "bearish" && "text-loss border-loss/30 bg-loss/5",
-              s === "neutral" && "text-text-muted border-border-default",
+              "text-right font-mono tabular-nums text-xs font-semibold",
+              v >= 0 ? "text-profit" : "text-loss",
             )}
           >
-            {s}
-          </Badge>
+            {v >= 0 ? "+" : ""}{fmtVolume(v)}
+          </div>
         );
       },
     },
     {
-      id: "actions",
-      header: "",
-      cell: ({ row }) => (
-        <div className="flex justify-end">
-          <AddToWatchlistBtn symbol={row.original.symbol} exchange={row.original.exchange} />
+      accessorKey: "z_score",
+      header: () => <span className="block text-right">Z</span>,
+      cell: ({ getValue }) => (
+        <div className="text-right font-mono tabular-nums text-xs text-text-secondary">
+          {(getValue() as number).toFixed(1)}
         </div>
+      ),
+    },
+    {
+      accessorKey: "direction",
+      header: "Signal",
+      cell: ({ row }) => (
+        <Badge
+          variant="outline"
+          className={cn(
+            "text-xxs h-5",
+            row.original.direction === "addition"
+              ? "text-profit border-profit/30 bg-profit/5"
+              : "text-loss border-loss/30 bg-loss/5",
+          )}
+        >
+          {row.original.direction}
+        </Badge>
       ),
       enableSorting: false,
     },
   ];
 }
+
 
 function sectorColumns(): ColumnDef<SectorMoverEntry, unknown>[] {
   return [
@@ -472,7 +460,7 @@ function ScannerWidget() {
 
   // Memoize columns
   const liveCols = useMemo(() => scanColumns(), []);
-  const oiCols = useMemo(() => oiColumns(), []);
+  const unusualCols = useMemo(() => unusualOIColumns(), []);
   const sectorCols = useMemo(() => sectorColumns(), []);
 
   // Gap and Volume run real backend scans; the response's own is_sample_data
@@ -489,6 +477,16 @@ function ScannerWidget() {
   // Sectors derive from live multi-quotes outside Explore; isLive is true only
   // when real quote data actually backs the rows.
   const sectorMovers = useSectorMovers();
+
+  // OI Change: unusual-OI outliers from the shared /v1/oi family — the same
+  // client OISignals uses; the response's own is_sample_data drives the badge.
+  const unusualOIQuery = useQuery({
+    queryKey: ["scannerUnusualOI"],
+    queryFn: () => getUnusualOI("NIFTY", "NFO", ""),
+    enabled: activeTab === "oi",
+    staleTime: 60_000,
+    retry: 1,
+  });
 
   return (
     <div className="h-full flex flex-col bg-surface-base text-text-primary overflow-hidden">
@@ -573,6 +571,22 @@ function ScannerWidget() {
             </div>
           )
         )
+      ) : activeTab === "oi" ? (
+        !unusualOIQuery.isError && unusualOIQuery.data && (
+          unusualOIQuery.data.is_sample_data ? (
+            <div className="px-2 py-1 bg-warning/5 border-b border-warning/20 shrink-0">
+              <span className="text-xxs text-warning" role="status">
+                Sample OI data — connect a broker read account for live chain OI
+              </span>
+            </div>
+          ) : (
+            <div className="px-2 py-1 bg-profit/5 border-b border-profit/20 shrink-0">
+              <span className="text-xxs text-profit" role="status">
+                Live unusual OI — NIFTY · {unusualOIQuery.data.count} outliers
+              </span>
+            </div>
+          )
+        )
       ) : activeTab === "sectors" ? (
         sectorMovers.isLive ? (
           <div className="px-2 py-1 bg-profit/5 border-b border-profit/20 shrink-0">
@@ -627,7 +641,29 @@ function ScannerWidget() {
           )
         )}
         {activeTab === "oi" && (
-          <SortableTable data={SAMPLE_OI_CHANGES} columns={oiCols} />
+          unusualOIQuery.isLoading ? (
+            <div className="flex items-center justify-center h-full gap-2 text-text-muted">
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              <span className="text-xs">Scanning the option chain…</span>
+            </div>
+          ) : unusualOIQuery.isError ? (
+            <div className="flex flex-col items-center justify-center h-full gap-1 text-center px-4">
+              <span className="text-loss text-xs">OI scan failed.</span>
+              <span className="text-text-muted text-xxs">
+                {unusualOIQuery.error instanceof Error
+                  ? unusualOIQuery.error.message
+                  : "Backend may be offline."}
+              </span>
+            </div>
+          ) : (unusualOIQuery.data?.unusual.length ?? 0) === 0 ? (
+            <div className="flex items-center justify-center h-full px-4 text-center">
+              <span className="text-xs text-text-muted">
+                No unusual OI activity detected right now.
+              </span>
+            </div>
+          ) : (
+            <SortableTable data={unusualOIQuery.data?.unusual ?? []} columns={unusualCols} />
+          )
         )}
         {activeTab === "sectors" && (
           <SortableTable data={sectorMovers.data} columns={sectorCols} />

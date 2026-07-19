@@ -44,6 +44,10 @@ const mockRunPrebuiltScan = vi.fn();
 vi.mock("@/services/ftApi", () => ({
   runPrebuiltScan: (key: string) => mockRunPrebuiltScan(key) as Promise<unknown>,
 }));
+const mockGetUnusualOI = vi.fn();
+vi.mock("@/services/ftApi.analysis", () => ({
+  getUnusualOI: (...args: unknown[]) => mockGetUnusualOI(...args) as Promise<unknown>,
+}));
 
 import ScannerWidget from "../ScannerWidget";
 
@@ -161,13 +165,45 @@ describe("ScannerWidget", () => {
     expect(mockRunPrebuiltScan).toHaveBeenCalledWith("volume_breakout");
   });
 
-  it("keeps the OI Change tab as a disclosed sample table", () => {
+  it("serves unusual-OI outliers on the OI Change tab with the response badge", async () => {
+    mockGetUnusualOI.mockResolvedValue({
+      is_sample_data: true,
+      count: 1,
+      threshold: 2.0,
+      unusual: [
+        {
+          strike: 24200,
+          option_type: "CE",
+          oi: 4_100_000,
+          oi_change: 850_000,
+          change_pct: 26.1,
+          z_score: 3.2,
+          direction: "addition",
+        },
+      ],
+    });
     render(<ScannerWidget />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByText("OI Change"));
-    expect(screen.getByText("NIFTY 24200 CE")).toBeInTheDocument();
+    expect(await screen.findByText("24200 CE")).toBeInTheDocument();
+    expect(mockGetUnusualOI).toHaveBeenCalledWith("NIFTY", "NFO", "");
     expect(
-      screen.getByText(/Sample data — no live source exists for this scan yet/i),
+      screen.getByText(/Sample OI data — connect a broker read account/i),
     ).toBeInTheDocument();
+  });
+
+  it("badges live unusual OI with the outlier count", async () => {
+    mockGetUnusualOI.mockResolvedValue({
+      is_sample_data: false,
+      count: 2,
+      threshold: 2.0,
+      unusual: [
+        { strike: 24200, option_type: "CE", oi: 1, oi_change: 1, change_pct: 1, z_score: 2.5, direction: "addition" },
+        { strike: 24000, option_type: "PE", oi: 1, oi_change: -1, change_pct: -1, z_score: -2.4, direction: "reduction" },
+      ],
+    });
+    render(<ScannerWidget />, { wrapper: createWrapper() });
+    fireEvent.click(screen.getByText("OI Change"));
+    expect(await screen.findByText(/Live unusual OI — NIFTY · 2 outliers/i)).toBeInTheDocument();
   });
 
   it("keeps the Sectors tab as a disclosed sample table in Explore", () => {
