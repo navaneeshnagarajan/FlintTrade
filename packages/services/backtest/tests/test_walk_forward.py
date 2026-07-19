@@ -467,7 +467,7 @@ def test_as_dict_keys() -> None:
     d = result.as_dict()
     expected_keys = {
         "splits", "avg_train_metric", "avg_test_metric",
-        "degradation_pct", "is_robust", "n_splits_run",
+        "degradation_pct", "is_robust", "n_splits_run", "wfe_ratio",
     }
     assert expected_keys == set(d.keys())
 
@@ -485,7 +485,7 @@ def test_as_dict_split_keys() -> None:
     expected = {
         "split_index", "train_start", "train_end",
         "test_start", "test_end", "n_train_bars", "n_test_bars",
-        "train_metric", "test_metric", "degradation_pct",
+        "train_metric", "test_metric", "degradation_pct", "wfe",
     }
     assert expected == set(split_d.keys())
 
@@ -504,3 +504,31 @@ def test_analyse_performance() -> None:
     WalkForwardAnalyser(cfg).analyse(bars, _DailyReturnStrategy, {})
     elapsed = time.monotonic() - start
     assert elapsed < 10.0, f"Took {elapsed:.1f}s — too slow"
+
+
+class TestWalkForwardEfficiency:
+    """WFE folded in from walk_forward_analysis (U13)."""
+
+    def test_wfe_helper_maths(self) -> None:
+        from flinttrade_backtest.walk_forward import _wfe
+
+        assert _wfe(2.0, 1.0) == 0.5
+        assert _wfe(1.0, 1.0) == 1.0
+        assert _wfe(0.0, 1.0) == 0.0  # zero in-sample → 0, never a div/0
+        assert _wfe(-2.0, -1.0) == 0.5
+
+    def test_result_carries_wfe_ratio_and_per_split_wfe(self) -> None:
+        from flinttrade_backtest.walk_forward import SplitDetail, WalkForwardResult
+
+        split = SplitDetail(
+            split_index=0, train_start=0, train_end=99, test_start=100,
+            test_end=129, n_train_bars=100, n_test_bars=30,
+            train_metric=2.0, test_metric=1.0, degradation_pct=50.0, wfe=0.5,
+        )
+        result = WalkForwardResult(
+            splits=[split], avg_train_metric=2.0, avg_test_metric=1.0,
+            degradation_pct=50.0, is_robust=False, n_splits_run=1, wfe_ratio=0.5,
+        )
+        payload = result.as_dict()
+        assert payload["wfe_ratio"] == 0.5
+        assert payload["splits"][0]["wfe"] == 0.5

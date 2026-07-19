@@ -78,6 +78,10 @@ class SplitDetail(BaseModel):
                          ``test_metric``.  Negative means out-of-sample
                          *improved*, which can indicate the strategy is
                          conservative in-sample.
+        wfe:           Fold-level Walk-Forward Efficiency =
+                       ``test_metric / train_metric`` (0 when the
+                       in-sample metric is ~0). Folded in from
+                       walk_forward_analysis (U13).
     """
 
     split_index: int
@@ -90,6 +94,7 @@ class SplitDetail(BaseModel):
     train_metric: float
     test_metric: float
     degradation_pct: float
+    wfe: float = 0.0
 
 
 class WalkForwardResult(BaseModel):
@@ -106,6 +111,11 @@ class WalkForwardResult(BaseModel):
         is_robust:          ``True`` when ``|degradation_pct| < 30 %``.
                             A robust strategy does not lose most of its edge
                             out of sample.
+        wfe_ratio:          Walk-Forward Efficiency = ``avg_test / avg_train``
+                            (0 when the in-sample average is ~0). Near 1.0 is
+                            excellent; above 0.5 generally acceptable; below
+                            0.5 suggests over-fitting. Folded in from
+                            walk_forward_analysis (U13).
         n_splits_run:       Actual number of splits that completed without
                             errors.
     """
@@ -116,6 +126,7 @@ class WalkForwardResult(BaseModel):
     degradation_pct: float
     is_robust: bool
     n_splits_run: int
+    wfe_ratio: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         """Flat dict for JSON serialisation (splits serialised as list of dicts)."""
@@ -128,6 +139,13 @@ class WalkForwardResult(BaseModel):
 
 _ANNUALISE = 252  # trading days per year
 _RISK_FREE = 0.07  # India 7 %
+
+
+def _wfe(train_metric: float, test_metric: float) -> float:
+    """Walk-Forward Efficiency: test/train, 0 when train is ~0."""
+    if abs(train_metric) < 1e-12:
+        return 0.0
+    return test_metric / train_metric
 
 
 def _safe_mean(vals: list[float]) -> float:
@@ -537,6 +555,7 @@ class WalkForwardAnalyser:
                         train_metric=train_metric,
                         test_metric=test_metric,
                         degradation_pct=deg,
+                        wfe=_wfe(train_metric, test_metric),
                     )
                 )
 
@@ -566,6 +585,7 @@ class WalkForwardAnalyser:
         avg_test = _safe_mean([s.test_metric for s in split_details])
         avg_deg = _degradation(avg_train, avg_test)
         is_robust = abs(avg_deg) < _ROBUST_DEGRADATION_THRESHOLD
+        wfe_ratio = _wfe(avg_train, avg_test)
 
         logger.info(
             "Walk-forward complete: %d splits, avg_train=%.4f avg_test=%.4f "
@@ -580,4 +600,5 @@ class WalkForwardAnalyser:
             degradation_pct=avg_deg,
             is_robust=is_robust,
             n_splits_run=len(split_details),
+            wfe_ratio=wfe_ratio,
         )

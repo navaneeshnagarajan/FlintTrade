@@ -1,5 +1,11 @@
 """Walk-Forward Analysis with Walk-Forward Efficiency (WFE) ratio.
 
+SUPERSEDED (U13, 2026-07-19): the unique WFE capability now lives on the
+canonical ROUTED path — ``walk_forward.WalkForwardAnalyser`` computes
+``wfe_ratio`` and per-split ``wfe``. This module is kept as a compat surface
+(its richer per-fold ``WFAFold`` model has its own tests); it closes with the
+other compat windows on the maintainer's nod.
+
 Extends the existing :mod:`walk_forward` module with a richer per-fold
 metrics model and the Walk-Forward Efficiency ratio:
 
