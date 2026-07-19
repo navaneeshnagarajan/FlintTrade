@@ -1,6 +1,6 @@
 {
   "name": "@flinttrade/desktop",
-  "version": "0.6.0-beta.11",
+  "version": "0.6.0-beta.12",
   "private": true,
   "description": "FlintTrade native desktop shell (Tauri 2) — a thin shell that downloads and manages the FlintTrade backend payload in a native window.",
   "scripts": {
