@@ -555,7 +555,10 @@ def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monke
             api_key = openalgo.get("api_key") if isinstance(openalgo, dict) else None
             if api_key == "first-key":
                 first_entered.set()
-                assert release_first.wait(2)
+                # Generous: the releasing main thread can be slow on a loaded
+                # CI runner; only the SHORT non-entry window below carries the
+                # serialisation claim.
+                assert release_first.wait(10)
             elif api_key == "second-key":
                 second_entered.set()
             return result
@@ -576,12 +579,16 @@ def test_openalgo_config_endpoint_serialises_concurrent_persist_and_reload(monke
     first = threading.Thread(target=post, args=("first",))
     second = threading.Thread(target=post, args=("second",))
     first.start()
-    assert first_entered.wait(1)
+    # Generous entry window — request dispatch under a loaded runner can take
+    # well over a second; this wait is liveness, not the invariant.
+    assert first_entered.wait(10)
     second.start()
-    assert not second_entered.wait(0.1)
+    # THE invariant: while first holds the workspace transaction, second must
+    # not enter its update. Short window by design.
+    assert not second_entered.wait(0.25)
     release_first.set()
-    first.join(timeout=2)
-    second.join(timeout=2)
+    first.join(timeout=10)
+    second.join(timeout=10)
 
     assert not first.is_alive()
     assert not second.is_alive()
