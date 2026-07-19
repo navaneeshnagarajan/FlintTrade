@@ -140,11 +140,16 @@ def _build_llm() -> Any:
 
 
 def _build_vault() -> Any | None:
-    """Construct the Obsidian vault context when configured (best-effort)."""
-    try:
-        import os  # noqa: PLC0415
+    """Construct the Obsidian vault context when configured (best-effort).
 
-        vault_path = os.environ.get("FLINTTRADE_OBSIDIAN_VAULT", "").strip()
+    The path resolves through the shared helper (env override first, then the
+    UI-persisted workspace key) so the agent and the Obsidian widget always
+    agree on one vault.
+    """
+    try:
+        from flinttrade_ai.obsidian_routes import resolve_obsidian_vault_path  # noqa: PLC0415
+
+        vault_path = resolve_obsidian_vault_path()
         if not vault_path:
             return None
         from flinttrade_ai.obsidian_bridge import ObsidianVault  # noqa: PLC0415
