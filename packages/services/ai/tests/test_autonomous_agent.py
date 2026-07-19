@@ -1495,3 +1495,90 @@ async def test_square_off_dispatches_all_exits_before_any_quote_read() -> None:
     assert max(exit_indices) < min(quote_indices), events
     # And the records were refined with the post-loop LTP estimate.
     assert all(t["exit_price"] == 110.0 for t in agent.state.closed_trades)
+
+
+# ---------------------------------------------------------------------------
+# AI1 — post-session skill drafts + approved-skills prompt block
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_session_learning_writes_a_skill_draft(tmp_path) -> None:
+    from flinttrade_ai.skill_drafts import drafts_dir
+
+    memory = StubMemory()
+    agent = make_agent(memory=memory)
+    agent.llm = None  # rule-based reflection
+    agent.skills_workspace = tmp_path
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 2, "pnl": -10.0, "pnl_pct": -5.0},
+    ]
+
+    await agent._run_post_session_learning()
+
+    drafts = list(drafts_dir(tmp_path).glob("*.md"))
+    assert len(drafts) == 1
+    assert "status: draft" in drafts[0].read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_no_skills_workspace_means_no_draft(tmp_path) -> None:
+    from flinttrade_ai.skill_drafts import drafts_dir
+
+    agent = make_agent(memory=StubMemory())
+    agent.llm = None
+    agent.skills_workspace = None
+    agent.state.closed_trades = [
+        {"symbol": "RELIANCE", "action": "BUY", "entry_price": 100.0,
+         "exit_price": 95.0, "quantity": 1, "pnl": -5.0, "pnl_pct": -5.0},
+    ]
+
+    await agent._run_post_session_learning()
+
+    assert not drafts_dir(tmp_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_decide_includes_only_approved_skills(tmp_path) -> None:
+    """Drafts must be invisible to the decision prompt; approved skills show."""
+    from flinttrade_ai.skill_drafts import (
+        approve_draft,
+        draft_skill_from_reflection,
+        skills_dir,
+    )
+    from flinttrade_ai.skill_system import SkillRegistry
+    from flinttrade_ai.trade_reflection import ReflectionResult
+
+    result = ReflectionResult(
+        trades_analysed=2, win_rate=0.5, avg_pnl=1.0,
+        winning_patterns=["w"], losing_patterns=["l"], recommendations=["r"],
+    )
+    draft_skill_from_reflection(tmp_path, result, session_date="2026-07-19", symbols=["X"])
+
+    registry = SkillRegistry(skills_dir(tmp_path))
+    agent = make_agent(llm_response="HOLD")
+    agent.skill_registry = registry
+
+    await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+    prompt = agent.llm.chat.call_args.args[0][1].content
+    assert "session-lessons" not in prompt  # draft: invisible
+
+    approve_draft(tmp_path, "session-lessons-2026-07-19")
+    registry.reload()
+    await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+    prompt = agent.llm.chat.call_args.args[0][1].content
+    assert "session-lessons-2026-07-19" in prompt  # approved: visible
+
+
+@pytest.mark.asyncio
+async def test_skill_registry_failure_never_breaks_a_decision() -> None:
+    class ExplodingRegistry:
+        def get_system_prompt_section(self) -> str:
+            raise RuntimeError("registry broken")
+
+    agent = make_agent(llm_response="HOLD")
+    agent.skill_registry = ExplodingRegistry()
+
+    signal = await agent.decide(MarketData(symbol="RELIANCE", ltp=100.0))
+    assert signal in ("BUY", "SELL", "HOLD")

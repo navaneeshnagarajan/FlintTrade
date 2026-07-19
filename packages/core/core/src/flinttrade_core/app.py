@@ -3853,6 +3853,23 @@ def create_flask_app(
         app.config["AI_SESSION_STORE"] = None
     app.register_blueprint(session_bp)
 
+    # AI1 — operator-approved skill drafts. The registry serves ONLY the
+    # workspace skills/ directory (operator-approved files); drafts under
+    # skill_drafts/ influence nothing until approved through the guarded
+    # routes below.
+    from flinttrade_ai.skill_draft_routes import skill_draft_bp  # noqa: PLC0415
+
+    app.config["WORKSPACE_DIR"] = _workspace_dir()
+    try:
+        from flinttrade_ai.skill_drafts import skills_dir as _operator_skills_dir  # noqa: PLC0415
+        from flinttrade_ai.skill_system import SkillRegistry  # noqa: PLC0415
+
+        app.config["SKILL_REGISTRY"] = SkillRegistry(_operator_skills_dir(_workspace_dir()))
+    except Exception:  # noqa: BLE001 - skills are never start-critical
+        logger.warning("Workspace skill registry unavailable", exc_info=True)
+        app.config["SKILL_REGISTRY"] = None
+    app.register_blueprint(skill_draft_bp)
+
     from flinttrade_ai.ai_routes import ai_bp  # noqa: PLC0415
 
     app.register_blueprint(ai_bp)

@@ -331,6 +331,8 @@ class AutonomousTrader:
         market_session_provider: MarketSessionProvider | None = None,
         clock: Callable[[], datetime] | None = None,
         memory: Any | None = None,
+        skill_registry: Any | None = None,
+        skills_workspace: Any | None = None,
     ) -> None:
         """Initialise the autonomous trader.
 
@@ -369,12 +371,21 @@ class AutonomousTrader:
                 Pure learning I/O — NEVER on the order path, and no lesson
                 mutates safety limits or order parameters. Any memory error
                 degrades to "no lessons" rather than disrupting trading.
+            skill_registry: Optional operator-approved SkillRegistry. Only
+                APPROVED skills ever reach the decision prompt — drafts are
+                invisible here by construction.
+            skills_workspace: Optional workspace ``Path`` enabling the
+                post-session skill DRAFT (AI1): the reflection result renders
+                into ``skill_drafts/`` for operator review. ``None`` disables
+                drafting entirely.
         """
         self.llm = llm_client
         self.broker = openalgo_client
         self.config = config or AgentConfig()
         self.vault = vault
         self.memory = memory
+        self.skill_registry = skill_registry
+        self.skills_workspace = skills_workspace
         self.order_executor = order_executor
         self.entry_intent_sink = entry_intent_sink
         self._market_session_provider = market_session_provider
@@ -650,9 +661,10 @@ class AutonomousTrader:
         # would wedge the agent event loop and starve the 5-second
         # approved-entry recording handoff, leaving a live position untracked.
         memory_lessons = await asyncio.to_thread(self._memory_context, market_data.symbol)
+        skills_block = self._skills_context()
         prompt = _build_signal_prompt(
             market_data, self.state, self.config, vault_notes=vault_notes,
-            memory_lessons=memory_lessons,
+            memory_lessons=memory_lessons, skills_block=skills_block,
         )
 
         try:
@@ -1035,6 +1047,23 @@ class AutonomousTrader:
             logger.debug("Exit-price read failed for %s: %s", symbol, exc)
         return float(details.get("entry_price", 0) or 0), True
 
+    def _skills_context(self) -> str:
+        """Bounded approved-skills block for the decision prompt, or ``""``.
+
+        Reads the operator-approved registry's cached summaries (cheap,
+        in-memory). Fully guarded; a concurrent route-triggered reload can at
+        worst momentarily omit a line — never break a decision.
+        """
+        registry = self.skill_registry
+        if registry is None:
+            return ""
+        try:
+            section = registry.get_system_prompt_section()
+        except Exception as exc:
+            logger.debug("Skill registry read failed: %s", exc)
+            return ""
+        return str(section or "").strip()
+
     def _memory_context(self, symbol: str) -> str:
         """Return a bounded lessons block for the decision prompt, or ``""``.
 
@@ -1154,6 +1183,25 @@ class AutonomousTrader:
             "Post-session reflection stored %d lesson entries (%d trades, win_rate=%.0f%%)",
             stored, result.trades_analysed, result.win_rate * 100,
         )
+
+        # AI1: render the same reflection into a DRAFT skill for operator
+        # review. Drafts influence nothing until approved; failures degrade
+        # to "no draft" like every other learning step.
+        if self.skills_workspace is not None:
+            def _draft() -> None:
+                from .skill_drafts import draft_skill_from_reflection  # noqa: PLC0415
+
+                draft_skill_from_reflection(
+                    self.skills_workspace,
+                    result,
+                    session_date=session_date,
+                    symbols=symbols,
+                )
+
+            try:
+                await asyncio.to_thread(_draft)
+            except Exception:  # noqa: BLE001 - drafting is never session-critical
+                logger.exception("Skill draft failed — no draft written")
 
     async def monitor(self, position: dict[str, Any]) -> None:
         """Check an open position against stop-loss and take-profit levels.
@@ -1570,6 +1618,7 @@ def _build_signal_prompt(
     config: AgentConfig,
     vault_notes: str = "",
     memory_lessons: str = "",
+    skills_block: str = "",
 ) -> str:
     """Build a structured LLM prompt from market data and agent state.
 
@@ -1601,6 +1650,8 @@ def _build_signal_prompt(
         lines += ["", "Operator notes (from your Obsidian vault):", vault_notes]
     if memory_lessons:
         lines += ["", "Lessons from previous sessions (self-reflection):", memory_lessons]
+    if skills_block:
+        lines += ["", skills_block]
     lines += ["", "Based on the above, should I BUY, SELL, or HOLD this instrument?"]
     return "\n".join(lines)
 

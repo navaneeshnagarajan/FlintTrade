@@ -207,6 +207,23 @@ def _build_learning_memory() -> Any | None:
         return None
 
 
+def _build_skills_workspace() -> Any | None:
+    """Workspace path for post-session skill DRAFTS, or None when disabled.
+
+    Gated by ``ai.autonomous_agent.learning.skill_drafts`` (default true) —
+    drafting is pure file output for operator review, never order-critical.
+    """
+    try:
+        from .workspace import Workspace, workspace_dir  # noqa: PLC0415
+
+        if not bool(Workspace().get("ai.autonomous_agent.learning.skill_drafts", True)):
+            return None
+        return workspace_dir()
+    except Exception:  # pragma: no cover — drafting is never order-critical
+        logger.warning("Skill-draft workspace unavailable", exc_info=True)
+        return None
+
+
 def _trader_factory(**kwargs: Any) -> Any:
     """Construct the AutonomousTrader (separated for test injection)."""
     from flinttrade_ai.autonomous_agent import AutonomousTrader  # noqa: PLC0415
@@ -730,6 +747,8 @@ def start_agent() -> tuple[Any, int]:
             market_session_provider=_market_session_provider,
             clock=market_clock,
             memory=_build_learning_memory(),
+            skill_registry=app_obj.config.get("SKILL_REGISTRY"),
+            skills_workspace=_build_skills_workspace(),
         )
     except Exception:
         _release_slot()
