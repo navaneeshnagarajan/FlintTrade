@@ -97,8 +97,7 @@ describe("IntradayPnLWidget", () => {
 
   it("shows stat card labels", async () => {
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(screen.getByText("Realised")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Realised")).toBeInTheDocument());
     expect(screen.getByText("Unrealised")).toBeInTheDocument();
     expect(screen.getByText("Peak P&L")).toBeInTheDocument();
     expect(screen.getByText("Max DD")).toBeInTheDocument();
@@ -128,7 +127,9 @@ describe("IntradayPnLWidget", () => {
       .mockResolvedValueOnce([makePosition("SBIN", -250)]);
 
     const { qc } = renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("500"),
+    );
     // Second positions refresh — with the shared cache the cadence belongs to
     // usePositions, so the test drives it via the query client.
     await act(async () => {
@@ -156,10 +157,11 @@ describe("IntradayPnLWidget", () => {
   it("shows error indicator when API fails", async () => {
     mockGetPositionbook.mockRejectedValue(new Error("Network error"));
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    // Error dot has a title attribute equal to the error message
-    const errorDot = document.querySelector(".bg-loss.rounded-full");
-    expect(errorDot).toBeInTheDocument();
+    // The error state lands after the query's retry cycle — wait for the
+    // dot itself rather than racing it with a fixed flush.
+    await waitFor(() => {
+      expect(document.querySelector(".bg-loss.rounded-full")).toBeInTheDocument();
+    }, { timeout: 5000 });
   });
 
   it("sums P&L from multiple positions", async () => {
@@ -179,10 +181,10 @@ describe("IntradayPnLWidget", () => {
       makePosition("RELIANCE", 300, 1), // unrealised
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     // Net should still be 500
-    const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("500");
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("500"),
+    );
   });
 
   it("books partial-close realised from the tradebook for a still-open position", async () => {
@@ -197,10 +199,11 @@ describe("IntradayPnLWidget", () => {
       { tradeId: "T2", orderId: "O2", symbol: "SBIN", exchange: "NSE", action: "SELL", quantity: 40, price: 110, timestamp: "2026-07-09T10:00:00Z" },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     // Realised = (110 − 100) × 40 = 400 (from tradebook, not double-counted in
     // unrealised); Unrealised = (105 − 100) × 60 = 300 (open MTM); Net = 700.
-    expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹400.00");
+    await waitFor(() =>
+      expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹400.00"),
+    );
     expect(screen.getByText("Unrealised").parentElement).toHaveTextContent("+₹300.00");
     expect(screen.getByTestId("net-pnl").textContent).toContain("700");
   });
@@ -237,11 +240,12 @@ describe("IntradayPnLWidget", () => {
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: "0", pnl: "150.25" },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     // Falls into the Realised bucket (local computation impossible for closed);
     // the same figure legitimately repeats in Net and Peak P&L, so assert the
     // buckets via their stat cards rather than a bare text query.
-    expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹150.25");
+    await waitFor(() =>
+      expect(screen.getByText("Realised").parentElement).toHaveTextContent("+₹150.25"),
+    );
     expect(screen.getByText("Unrealised").parentElement).toHaveTextContent("+₹0.00");
     expect(screen.getByTestId("net-pnl").textContent).toContain("150.25");
   });
@@ -251,8 +255,9 @@ describe("IntradayPnLWidget", () => {
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 5, pnl: "250.5" },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(screen.getByTestId("net-pnl").textContent).toContain("250.50");
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("250.50"),
+    );
   });
 
   it("does not fabricate a loss when the broker reports ltp: 0 for an open position", async () => {
