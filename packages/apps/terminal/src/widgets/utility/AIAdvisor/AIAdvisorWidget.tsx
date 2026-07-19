@@ -16,7 +16,14 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent, memo } from "react";
 import { safeParse, sseTokenSchema, wsMessageSchema } from "@/lib/safeParse";
 import { AdvisorStatusResponseSchema, AdvisorResponseSchema } from "@/lib/schemas/ftApi";
-import { Send, Bot, User, Loader2, Settings, Trash2 } from "lucide-react";
+import { Send, Bot, User, Loader2, Settings, Trash2, History, ChevronLeft } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  getAiSession,
+  listAiSessions,
+  searchAiSessions,
+  type AiSessionDetail,
+} from "@/services/ftApi.ai";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -590,6 +597,31 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
     inputRef.current?.focus();
   }, [clearMessages]);
 
+  // ── AI2 history: browse/search PAST stored sessions (read-only — never
+  // touches the live conversation store). ──────────────────────────────────
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [viewingSession, setViewingSession] = useState<AiSessionDetail | null>(null);
+  const sessionsQuery = useQuery({
+    queryKey: ["aiSessions", "list"],
+    queryFn: () => listAiSessions(50),
+    enabled: historyOpen,
+    staleTime: 30_000,
+  });
+  const historySearchQuery = useQuery({
+    queryKey: ["aiSessions", "search", historySearch],
+    queryFn: () => searchAiSessions(historySearch),
+    enabled: historyOpen && historySearch.trim().length > 0,
+    staleTime: 30_000,
+  });
+  const openStoredSession = useCallback(async (sessionId: string) => {
+    try {
+      setViewingSession(await getAiSession(sessionId));
+    } catch {
+      setViewingSession(null);
+    }
+  }, []);
+
   const handleApprove = useCallback(
     async (msg: ChatMessage) => {
       if (!msg.toolCall) return;
@@ -780,6 +812,23 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
           AI Advisor
         </span>
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => {
+            setHistoryOpen((open) => !open);
+            setViewingSession(null);
+          }}
+          className={[
+            "p-1 rounded transition-colors",
+            historyOpen
+              ? "text-accent bg-accent/10"
+              : "text-text-muted hover:text-accent hover:bg-accent/10",
+          ].join(" ")}
+          aria-label="Browse past sessions"
+          title="Browse and search past sessions"
+        >
+          <History size={11} />
+        </button>
         {messages.length > 0 && (
           <button
             type="button"
@@ -803,8 +852,98 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         </span>
       </div>
 
-      {/* MESSAGE AREA */}
-      {isEmpty ? (
+      {/* HISTORY PANEL — read-only browse/search of stored sessions */}
+      {historyOpen ? (
+        viewingSession ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex items-center gap-2 px-2 py-1 border-b border-border-default bg-surface-card shrink-0">
+              <button
+                type="button"
+                onClick={() => setViewingSession(null)}
+                className="flex items-center gap-1 text-xxs text-text-muted hover:text-text-primary"
+                aria-label="Back to session list"
+              >
+                <ChevronLeft size={11} /> Back
+              </button>
+              <span className="text-xxs text-text-muted truncate">
+                Viewing a past session (read-only): {viewingSession.title}
+              </span>
+            </div>
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col gap-2 p-3">
+                {viewingSession.messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={[
+                      "px-2.5 py-1.5 rounded-lg text-xs leading-relaxed whitespace-pre-wrap border",
+                      m.role === "user"
+                        ? "bg-accent/10 border-accent/20 self-end max-w-[85%]"
+                        : "bg-surface-card border-border-default self-start max-w-[85%]",
+                    ].join(" ")}
+                  >
+                    {m.content}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="p-2 border-b border-border-default shrink-0">
+              <Input
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Search past sessions…"
+                aria-label="Search past sessions"
+                className="h-7 text-xs"
+              />
+            </div>
+            <ScrollArea className="flex-1">
+              <div className="flex flex-col p-2 gap-1">
+                {historySearch.trim() ? (
+                  (historySearchQuery.data ?? []).length === 0 ? (
+                    <span className="text-xxs text-text-muted px-1 py-2">
+                      {historySearchQuery.isFetching ? "Searching…" : "No matches in stored sessions."}
+                    </span>
+                  ) : (
+                    (historySearchQuery.data ?? []).map((hit) => (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        onClick={() => void openStoredSession(hit.session_id)}
+                        className="text-left px-2 py-1.5 rounded hover:bg-surface-hover border border-transparent hover:border-border-default"
+                      >
+                        <div className="text-xxs font-medium text-text-primary truncate">{hit.title}</div>
+                        <div className="text-xxs text-text-muted truncate">{hit.snippet}</div>
+                      </button>
+                    ))
+                  )
+                ) : (sessionsQuery.data ?? []).length === 0 ? (
+                  <span className="text-xxs text-text-muted px-1 py-2">
+                    {sessionsQuery.isLoading
+                      ? "Loading stored sessions…"
+                      : "No stored sessions yet — real (non-demo) conversations persist automatically."}
+                  </span>
+                ) : (
+                  (sessionsQuery.data ?? []).map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => void openStoredSession(session.id)}
+                      className="text-left px-2 py-1.5 rounded hover:bg-surface-hover border border-transparent hover:border-border-default"
+                    >
+                      <div className="text-xxs font-medium text-text-primary truncate">{session.title}</div>
+                      <div className="text-xxs text-text-muted">
+                        {session.message_count} messages · {new Date(session.last_at).toLocaleString("en-IN")}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+        )
+      ) : isEmpty ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-center">
           {configured ? (
             <>

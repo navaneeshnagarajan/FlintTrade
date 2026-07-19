@@ -642,6 +642,50 @@ export interface ObsidianSearchHit {
   snippet: string;
 }
 
+// ─── AI sessions (AI2 — persisted, searchable chat history) ─────────────────
+
+export interface AiSessionSummary {
+  id: string;
+  surface: string;
+  title: string;
+  started_at: string;
+  last_at: string;
+  message_count: number;
+}
+
+export interface AiSessionMessage {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface AiSessionDetail extends Omit<AiSessionSummary, "message_count"> {
+  messages: AiSessionMessage[];
+}
+
+export interface AiSessionSearchHit {
+  id: string;
+  session_id: string;
+  role: string;
+  created_at: string;
+  surface: string;
+  title: string;
+  snippet: string;
+}
+
+/** Newest-first stored session summaries. */
+export const listAiSessions = (limit = 50) =>
+  get<AiSessionSummary[]>(`ai/sessions?limit=${limit}`);
+
+/** Full-text search across stored message content. */
+export const searchAiSessions = (query: string) =>
+  get<AiSessionSearchHit[]>(`ai/sessions/search?q=${encodeURIComponent(query)}`);
+
+/** One stored session with its ordered messages. */
+export const getAiSession = (sessionId: string) =>
+  get<AiSessionDetail>(`ai/sessions/${encodeURIComponent(sessionId)}`);
+
 /** Vault configuration + availability (never 503 — reports configured=false). */
 export const getObsidianStatus = () =>
   get<ObsidianStatus>("ai/obsidian/status");

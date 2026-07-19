@@ -6,7 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -46,6 +48,16 @@ vi.mock("@/services/api", () => ({
   placeOrder: (params: unknown) => mockPlaceOrder(params) as Promise<{ orderId: string }>,
 }));
 
+// AI2 history clients — mocked so the panel is hermetic.
+const mockListSessions = vi.fn();
+const mockSearchSessions = vi.fn();
+const mockGetSession = vi.fn();
+vi.mock("@/services/ftApi.ai", () => ({
+  listAiSessions: (limit: number) => mockListSessions(limit) as Promise<unknown>,
+  searchAiSessions: (q: string) => mockSearchSessions(q) as Promise<unknown>,
+  getAiSession: (id: string) => mockGetSession(id) as Promise<unknown>,
+}));
+
 // Mock fetch to prevent real network calls (fetchAdvisorStatus on mount)
 vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
 
@@ -63,6 +75,11 @@ import AIAdvisorWidget, {
 // Tests
 // ---------------------------------------------------------------------------
 
+function Providers({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 describe("AIAdvisorWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -71,25 +88,25 @@ describe("AIAdvisorWidget", () => {
   });
 
   it("renders without crashing", () => {
-    render(<AIAdvisorWidget />);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByText("AI Advisor")).toBeInTheDocument();
   });
 
   it("shows not-configured state when LLM provider is empty", () => {
-    render(<AIAdvisorWidget />);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByText("Not configured")).toBeInTheDocument();
     expect(screen.getByText("LLM Not Configured")).toBeInTheDocument();
   });
 
   it("has a chat input field", () => {
-    render(<AIAdvisorWidget />);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(
       screen.getByPlaceholderText("Configure LLM in Settings first..."),
     ).toBeInTheDocument();
   });
 
   it("has a send button", () => {
-    render(<AIAdvisorWidget />);
+    render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
   });
 });
@@ -206,5 +223,88 @@ describe("executeApprovedToolCall", () => {
     expect(outcome.executed).toBe(false);
     expect(outcome.message).toContain("Order failed: Live order blocked: mode_blocked");
     expect(outcome.message).not.toContain("submitted");
+  });
+});
+
+
+describe("AIAdvisorWidget history panel", () => {
+  function renderWithClient() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <AIAdvisorWidget />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    mockListSessions.mockReset();
+    mockSearchSessions.mockReset();
+    mockGetSession.mockReset();
+    mockListSessions.mockResolvedValue([
+      {
+        id: "s1",
+        surface: "advisor",
+        title: "What is the max pain on BANKNIFTY?",
+        started_at: "2026-07-19T10:00:00Z",
+        last_at: "2026-07-19T10:05:00Z",
+        message_count: 4,
+      },
+    ]);
+  });
+
+  it("lists stored sessions when the history toggle opens", async () => {
+    renderWithClient();
+    fireEvent.click(screen.getByLabelText("Browse past sessions"));
+    expect(
+      await screen.findByText(/What is the max pain on BANKNIFTY\?/),
+    ).toBeInTheDocument();
+    expect(mockListSessions).toHaveBeenCalledWith(50);
+  });
+
+  it("opens a stored session read-only and returns via Back", async () => {
+    mockGetSession.mockResolvedValue({
+      id: "s1",
+      surface: "advisor",
+      title: "What is the max pain on BANKNIFTY?",
+      started_at: "2026-07-19T10:00:00Z",
+      last_at: "2026-07-19T10:05:00Z",
+      messages: [
+        { id: "m1", role: "user", content: "What is the max pain?", created_at: "t" },
+        { id: "m2", role: "assistant", content: "Near 51000.", created_at: "t" },
+      ],
+    });
+    renderWithClient();
+    fireEvent.click(screen.getByLabelText("Browse past sessions"));
+    fireEvent.click(await screen.findByText(/What is the max pain on BANKNIFTY\?/));
+
+    expect(await screen.findByText("Near 51000.")).toBeInTheDocument();
+    expect(screen.getByText(/read-only/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Back to session list"));
+    await waitFor(() =>
+      expect(screen.queryByText("Near 51000.")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("searches stored sessions", async () => {
+    mockSearchSessions.mockResolvedValue([
+      {
+        id: "m9",
+        session_id: "s1",
+        role: "assistant",
+        created_at: "t",
+        surface: "advisor",
+        title: "What is the max pain on BANKNIFTY?",
+        snippet: "Max pain sits near [51000]",
+      },
+    ]);
+    renderWithClient();
+    fireEvent.click(screen.getByLabelText("Browse past sessions"));
+    fireEvent.change(await screen.findByLabelText("Search past sessions"), {
+      target: { value: "51000" },
+    });
+    expect(await screen.findByText(/Max pain sits near/)).toBeInTheDocument();
+    expect(mockSearchSessions).toHaveBeenCalledWith("51000");
   });
 });
