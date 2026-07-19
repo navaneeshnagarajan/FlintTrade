@@ -246,29 +246,33 @@ class MarketBreadthCalculator:
         self._history = []
         rng = random.Random(42)  # Deterministic for reproducible dev mode
 
-        start = date.today() - timedelta(days=days + 1)
-        # Skip weekends in a simple way
-        current = start
-        generated = 0
-
-        while generated < days:
+        # Collect the most recent `days` WEEKDAYS ending yesterday, then seed
+        # in chronological order. (Walking forward from `today - (days + 1)`
+        # needed ~days*7/5 calendar days to find that many weekdays, so the
+        # loop marched weeks past today and the "current" sample point carried
+        # a future date.)
+        trading_days: list[date] = []
+        current = date.today() - timedelta(days=1)
+        while len(trading_days) < days:
             if current.weekday() < 5:  # Monday–Friday
-                # Mean-reverting advances around 55% participation
-                advances = max(200, min(1800, int(rng.gauss(1000, 250))))
-                declines = max(100, min(1400, int(rng.gauss(700, 200))))
-                unchanged = max(30, min(300, int(rng.gauss(150, 50))))
-                new_highs = max(0, int(rng.gauss(60, 25)))
-                new_lows = max(0, int(rng.gauss(25, 15)))
-                self.update(
-                    advances=advances,
-                    declines=declines,
-                    unchanged=unchanged,
-                    new_highs=new_highs,
-                    new_lows=new_lows,
-                    trading_date=current,
-                )
-                generated += 1
-            current += timedelta(days=1)
+                trading_days.append(current)
+            current -= timedelta(days=1)
+
+        for trading_date in reversed(trading_days):
+            # Mean-reverting advances around 55% participation
+            advances = max(200, min(1800, int(rng.gauss(1000, 250))))
+            declines = max(100, min(1400, int(rng.gauss(700, 200))))
+            unchanged = max(30, min(300, int(rng.gauss(150, 50))))
+            new_highs = max(0, int(rng.gauss(60, 25)))
+            new_lows = max(0, int(rng.gauss(25, 15)))
+            self.update(
+                advances=advances,
+                declines=declines,
+                unchanged=unchanged,
+                new_highs=new_highs,
+                new_lows=new_lows,
+                trading_date=trading_date,
+            )
 
         return list(self._history)
 
