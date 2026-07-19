@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -1071,11 +1072,31 @@ class AutonomousTrader:
         if not trades:
             return
         try:
-            await asyncio.wait_for(
-                self._reflect_and_persist(trades), timeout=_LEARNING_TIMEOUT_SECONDS
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Post-session reflection timed out — no lessons recorded")
+            # A dedicated DAEMON thread, never joined: asyncio.wait_for over
+            # to_thread would cancel only the coroutine while the blocking
+            # LLM/ChromaDB worker kept running in the DEFAULT executor — which
+            # asyncio.run's teardown joins, so a hung reflection could still
+            # blow the runtime's 30s shutdown join. The daemon thread runs its
+            # own event loop; if it hangs, nothing ever joins it and it dies
+            # with the process.
+            done = threading.Event()
+
+            def _runner() -> None:
+                try:
+                    asyncio.run(self._reflect_and_persist(trades))
+                except Exception:  # noqa: BLE001 - learning is never fatal
+                    logger.exception("Post-session reflection failed — no lessons recorded")
+                finally:
+                    done.set()
+
+            threading.Thread(target=_runner, name="agent-learning", daemon=True).start()
+            finished = await asyncio.to_thread(done.wait, _LEARNING_TIMEOUT_SECONDS)
+            if not finished:
+                logger.warning(
+                    "Post-session reflection still running after %.0fs — abandoned "
+                    "(any lessons it stores will arrive late)",
+                    _LEARNING_TIMEOUT_SECONDS,
+                )
         except Exception:
             logger.exception("Post-session reflection failed — no lessons recorded")
 

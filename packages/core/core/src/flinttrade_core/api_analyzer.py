@@ -90,12 +90,24 @@ def _sanitise(data: dict[str, Any] | None) -> dict[str, Any] | None:
         New dict with sensitive keys replaced by ``"[REDACTED]"``,
         or ``None`` when *data* is ``None``.
     """
-    if data is None or not isinstance(data, dict):
-        return data
-    return {
-        k: "[REDACTED]" if _is_sensitive_key(k) else v
-        for k, v in data.items()
-    }
+    return _sanitise_value(data)
+
+
+def _sanitise_value(value: Any) -> Any:
+    """Recursively redact sensitive keys in nested dicts and lists.
+
+    Top-level-only redaction let nested bodies (e.g. ``{"credentials":
+    {"api_secret": …}}``) persist secrets verbatim; recursion closes the
+    class, and non-dict JSON bodies (arrays) no longer bypass sanitising.
+    """
+    if isinstance(value, dict):
+        return {
+            k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitise_value(item) for item in value]
+    return value
 
 
 class APIAnalyzer:

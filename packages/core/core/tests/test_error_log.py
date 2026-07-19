@@ -87,6 +87,12 @@ class TestSanitise:
         assert result["access_token"] == "[REDACTED]"
         assert result["chat_id"] == "42"
 
+    def test_nested_structures_are_redacted(self):
+        data = {"credentials": {"password": "pw"}, "rows": [{"totp": "123456"}]}
+        result = _sanitise(data)
+        assert result["credentials"]["password"] == "[REDACTED]"
+        assert result["rows"][0]["totp"] == "[REDACTED]"
+
 
 # ---------------------------------------------------------------------------
 # ErrorLog — schema and lifecycle

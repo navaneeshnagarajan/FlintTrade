@@ -121,12 +121,19 @@ def _sanitise(data: dict[str, Any]) -> dict[str, Any]:
     Returns:
         A new dict with sensitive keys replaced by ``"[REDACTED]"``.
     """
-    if not isinstance(data, dict):
-        return data
-    return {
-        k: "[REDACTED]" if _is_sensitive_key(k) else v
-        for k, v in data.items()
-    }
+    return _sanitise_value(data)
+
+
+def _sanitise_value(value: Any) -> Any:
+    """Recursively redact sensitive keys in nested dicts and lists."""
+    if isinstance(value, dict):
+        return {
+            k: "[REDACTED]" if _is_sensitive_key(k) else _sanitise_value(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitise_value(item) for item in value]
+    return value
 
 
 class ErrorLog:

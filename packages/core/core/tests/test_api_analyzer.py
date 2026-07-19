@@ -61,6 +61,23 @@ def test_sanitise_redacts_substring_matches() -> None:
     assert sanitised["chat_id"] == "-100555"
 
 
+def test_sanitise_recurses_into_nested_structures() -> None:
+    """Nested credential objects and arrays must redact too — top-level-only
+    matching let {"credentials": {"api_secret": ...}} persist verbatim."""
+    raw = {
+        "credentials": {"api_secret": "shh", "totp_seed": "ABCDEF", "label": "main"},
+        "accounts": [{"password": "pw", "account": "A1"}],
+        "note": "fine",
+    }
+    sanitised = _sanitise(raw)
+    assert sanitised["credentials"]["api_secret"] == "[REDACTED]"
+    assert sanitised["credentials"]["totp_seed"] == "[REDACTED]"
+    assert sanitised["credentials"]["label"] == "main"
+    assert sanitised["accounts"][0]["password"] == "[REDACTED]"
+    assert sanitised["accounts"][0]["account"] == "A1"
+    assert sanitised["note"] == "fine"
+
+
 def test_sanitise_none_returns_none() -> None:
     """_sanitise(None) returns None unchanged."""
     assert _sanitise(None) is None

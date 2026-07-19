@@ -110,15 +110,12 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
     if enabled and not (chat_id and would_have_token):
         raise ValueError("Enabling Telegram requires both a bot token and a chat id")
 
-    # Secret first: if the secret write fails, workspace.json is untouched.
+    # Secret WRITE first: if it fails, workspace.json is untouched. The
+    # secret DELETE comes after the workspace transaction instead — if the
+    # transaction fails mid-clear, the token file is still present and the
+    # config stays functional, rather than a silently token-less enabled bot.
     if new_token:
         write_secret_text(_secret_path(workspace), new_token)
-    elif clear_token:
-        try:
-            _secret_path(workspace).unlink(missing_ok=True)
-        except OSError:
-            logger.warning("Could not remove the stored Telegram bot token file")
-            raise ValueError("Could not clear the stored bot token") from None
 
     # ONE workspace transaction: per-key set() calls would be three separate
     # read-modify-write commits (torn state on a mid-sequence failure), and a
@@ -133,5 +130,14 @@ def persist_telegram_config(payload: dict[str, Any], ws: Workspace | None = None
         )
 
     workspace.update(_apply)
+
+    if clear_token:
+        try:
+            _secret_path(workspace).unlink(missing_ok=True)
+        except OSError:
+            # The workspace already says "no token" (disabled, ref cleared) —
+            # an orphaned secret file is inert but must be reported.
+            logger.warning("Could not remove the stored Telegram bot token file")
+            raise ValueError("Could not clear the stored bot token") from None
 
     return read_telegram_config(workspace)
