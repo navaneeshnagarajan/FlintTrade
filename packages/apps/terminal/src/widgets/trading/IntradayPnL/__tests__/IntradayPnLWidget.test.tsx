@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
 
@@ -107,17 +107,18 @@ describe("IntradayPnLWidget", () => {
   it("displays net P&L as zero when no positions", async () => {
     mockGetPositionbook.mockResolvedValue([]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("0.00");
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("0.00"),
+    );
   });
 
   it("displays positive net P&L in profit colour", async () => {
     mockGetPositionbook.mockResolvedValue([makePosition("SBIN", 500)]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("500"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("500");
     expect(netEl.className).toMatch(/profit/);
   });
 
@@ -145,9 +146,10 @@ describe("IntradayPnLWidget", () => {
   it("displays negative net P&L in loss colour", async () => {
     mockGetPositionbook.mockResolvedValue([makePosition("SBIN", -300)]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("300"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("300");
     expect(netEl.className).toMatch(/loss/);
   });
 
@@ -166,9 +168,9 @@ describe("IntradayPnLWidget", () => {
       makePosition("RELIANCE", 300),
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("500");
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("500"),
+    );
   });
 
   it("splits realised (qty=0) vs unrealised (qty>0) correctly", async () => {
@@ -211,9 +213,10 @@ describe("IntradayPnLWidget", () => {
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 100, ltp: 110, pnl: 999999, pnlPercent: 0 },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("100.00"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("100.00");
     expect(netEl.textContent).not.toContain("9,99,999");
   });
 
@@ -224,9 +227,9 @@ describe("IntradayPnLWidget", () => {
       { symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "NRML", quantity: "75", average_price: "134", ltp: "150", pnl: "0" },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("1,200.00");
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("1,200.00"),
+    );
   });
 
   it("treats a string \"0\" quantity as a closed position (realised broker pnl)", async () => {
@@ -260,9 +263,10 @@ describe("IntradayPnLWidget", () => {
       { symbol: "NIFTY24APR24000CE", exchange: "NFO", product: "NRML", quantity: 75, averagePrice: 134, ltp: 0, pnl: 375, pnlPercent: 0 },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("375.00"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("375.00");
     expect(netEl.textContent).not.toContain("10,050");
   });
 
@@ -272,9 +276,10 @@ describe("IntradayPnLWidget", () => {
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 10, averagePrice: 0, ltp: 110, pnl: 42.5, pnlPercent: 0 },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("42.50"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("42.50");
     expect(netEl.textContent).not.toContain("1,100");
   });
 
@@ -283,9 +288,10 @@ describe("IntradayPnLWidget", () => {
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: "abc", pnl: "N/A", ltp: "", average_price: null },
     ]);
     renderWidget();
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await waitFor(() =>
+      expect(screen.getByTestId("net-pnl").textContent).toContain("0.00"),
+    );
     const netEl = screen.getByTestId("net-pnl");
-    expect(netEl.textContent).toContain("0.00");
     expect(netEl.textContent).not.toContain("NaN");
   });
 });
