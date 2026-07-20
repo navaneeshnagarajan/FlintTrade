@@ -1,28 +1,36 @@
 #!/usr/bin/env bash
 # FlintTrade desktop uninstaller (macOS + Linux)
 #
-# Default mode removes the application and every application-side residue the
-# installer or the Tauri runtime creates (app bundle / AppImage, launcher
-# wrapper, desktop entry, icon, WebView caches and profiles, launch logs, and
-# the build-from-source clone). Your trading data — the FlintTrade workspace
-# with the encrypted credential vault, auth database, journals, and
-# workspace.json — is kept unless you explicitly pass --purge.
+# Default mode removes the application and its disposable residue (app bundle /
+# AppImage, launcher wrapper, desktop entry, icon, caches, preferences, launch
+# logs, and the build-from-source clone). Two kinds of data are ALWAYS kept
+# unless you explicitly pass --purge:
+#   1. The FlintTrade workspace (encrypted credential vault, auth database,
+#      journals, workspace.json).
+#   2. The app's WebView storage, which holds in-app saved content (trade
+#      journal notes and screenshots, flow-builder workflows, saved AI chats).
 #
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 #
 # Flags:
-#   --purge     Also delete the FlintTrade workspace (credential vault,
-#               auth.db, journals, workspace.json). Irreversible.
+#   --purge     Also delete the workspace and WebView storage above. Irreversible.
 #   --yes       Skip the --purge confirmation prompt (for scripted use).
 #   --dry-run   Print what would be removed without deleting anything.
+#
+# Environment (uninstall-specific; the install scripts never read these):
+#   FLINTTRADE_UNINSTALL_PURGE=1    same as --purge
+#   FLINTTRADE_UNINSTALL_YES=1      same as --yes
+#   FLINTTRADE_UNINSTALL_DRY_RUN=1  same as --dry-run
+#   FLINTTRADE_WORKSPACE_DIR / FLINTTRADE_HOME are honoured the same way the
+#   backend honours them when resolving the workspace to purge.
 
 set -euo pipefail
 
 BUNDLE_ID="com.flinttrade.app"
-PURGE="${FLINTTRADE_PURGE:-0}"
-ASSUME_YES="${FLINTTRADE_YES:-0}"
-DRY_RUN="${FLINTTRADE_DRY_RUN:-0}"
+PURGE="${FLINTTRADE_UNINSTALL_PURGE:-0}"
+ASSUME_YES="${FLINTTRADE_UNINSTALL_YES:-0}"
+DRY_RUN="${FLINTTRADE_UNINSTALL_DRY_RUN:-0}"
 REMOVED_ANY=0
 FAILED_ANY=0
 
@@ -37,10 +45,16 @@ FlintTrade desktop uninstaller (macOS + Linux)
   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 
 Flags:
-  --purge     Also delete the FlintTrade workspace (credential vault,
-              auth.db, journals, workspace.json). Irreversible.
+  --purge     Also delete the FlintTrade workspace (credential vault, auth.db,
+              journals, workspace.json) and the app's WebView storage (in-app
+              journal notes, flows, saved AI chats). Irreversible.
   --yes       Skip the --purge confirmation prompt (for scripted use).
   --dry-run   Print what would be removed without deleting anything.
+
+Environment (uninstall-specific; the install scripts never read these):
+  FLINTTRADE_UNINSTALL_PURGE=1 / FLINTTRADE_UNINSTALL_YES=1 /
+  FLINTTRADE_UNINSTALL_DRY_RUN=1 mirror the flags for piped non-interactive
+  runs, e.g.: curl -fsSL .../uninstall.sh | FLINTTRADE_UNINSTALL_PURGE=1 FLINTTRADE_UNINSTALL_YES=1 bash
 USAGE
 }
 
@@ -60,6 +74,19 @@ case "$OS" in
   *) die "Unsupported OS: $OS (Windows uses flinttrade-uninstall.ps1)" ;;
 esac
 
+# Resolve the workspace exactly the way the backend does
+# (flinttrade_core.workspace): FLINTTRADE_WORKSPACE_DIR beats FLINTTRADE_HOME
+# beats the platform default. Purging a hardcoded default while the real vault
+# lives behind an override would report success and leave the data on disk.
+default_workspace() {
+  if [ "$OS" = "Darwin" ]; then
+    printf '%s' "$HOME/Library/Application Support/flinttrade"
+  else
+    printf '%s' "$HOME/.flinttrade"
+  fi
+}
+WORKSPACE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
+
 # Remove a path if it exists; honours --dry-run, never follows the failure
 # into an abort (a locked file should not strand the rest of the sweep).
 remove_path() {
@@ -78,6 +105,14 @@ remove_path() {
   fi
 }
 
+# Remove a directory only when it is already empty; honours --dry-run.
+remove_empty_dir() {
+  local target="$1"
+  [ -d "$target" ] || return 0
+  [ "$DRY_RUN" = "1" ] && return 0
+  rmdir "$target" 2>/dev/null || true
+}
+
 stop_running_app() {
   # Stop the desktop app and its backend sidecar so files are not busy.
   # Port 5100 is FlintTrade's backend; OpenAlgo (5000-5009) is left alone.
@@ -87,11 +122,18 @@ stop_running_app() {
   fi
   pkill -x FlintTrade 2>/dev/null && say "Stopped the FlintTrade app" || true
   if command -v lsof >/dev/null 2>&1; then
-    local backend_pid
+    local backend_pid owner
     backend_pid="$(lsof -tiTCP:5100 -sTCP:LISTEN 2>/dev/null | head -1 || true)"
     if [ -n "${backend_pid:-}" ]; then
-      kill "$backend_pid" 2>/dev/null || true
-      say "Stopped the FlintTrade backend (PID $backend_pid)"
+      # Only kill the listener if it is actually FlintTrade's backend — 5100
+      # could be an unrelated local service on a machine without FlintTrade.
+      owner="$(ps -p "$backend_pid" -o command= 2>/dev/null || true)"
+      if printf '%s' "$owner" | grep -qi flinttrade; then
+        kill "$backend_pid" 2>/dev/null || true
+        say "Stopped the FlintTrade backend (PID $backend_pid)"
+      else
+        say "Port 5100 is held by a non-FlintTrade process (PID $backend_pid) — leaving it alone."
+      fi
     fi
   fi
   sleep 1
@@ -105,9 +147,10 @@ uninstall_macos() {
   remove_path "/Applications/FlintTrade.app"
   remove_path "$HOME/Applications/FlintTrade.app"
 
-  # Tauri/WKWebView residue keyed by the bundle identifier. These are the
-  # folders macOS keeps after a plain drag-to-Trash uninstall.
-  remove_path "$HOME/Library/WebKit/$BUNDLE_ID"
+  # Disposable Tauri/WKWebView residue keyed by the bundle identifier.
+  # ~/Library/WebKit/$BUNDLE_ID is NOT here: it holds WebView localStorage,
+  # the only home of in-app journal notes, flows, and saved AI chats — it is
+  # data, and is only removed by --purge below.
   remove_path "$HOME/Library/Caches/$BUNDLE_ID"
   remove_path "$HOME/Library/HTTPStorages/$BUNDLE_ID"
   remove_path "$HOME/Library/HTTPStorages/$BUNDLE_ID.binarycookies"
@@ -120,16 +163,14 @@ uninstall_macos() {
   remove_path "$HOME/Library/Preferences/$BUNDLE_ID.plist"
 
   # Install-script residue: launch log and the build-from-source clone.
-  # On macOS ~/.flinttrade holds only the source clone (the workspace lives
-  # under ~/Library/Application Support/flinttrade/), so it is app-side.
   remove_path "$HOME/.local/state/flinttrade"
   remove_path "$HOME/.flinttrade/src"
-  rmdir "$HOME/.flinttrade" 2>/dev/null || true
+  remove_empty_dir "$HOME/.flinttrade"
 
   if [ "$PURGE" = "1" ]; then
-    purge_workspace "$HOME/Library/Application Support/flinttrade"
+    purge_all_data "$HOME/Library/WebKit/$BUNDLE_ID" "$HOME/.flinttrade"
   else
-    keep_notice "$HOME/Library/Application Support/flinttrade"
+    keep_notice "$HOME/Library/WebKit/$BUNDLE_ID"
   fi
 }
 
@@ -144,8 +185,10 @@ uninstall_linux() {
   remove_path "$HOME/.local/share/icons/hicolor/128x128/apps/flinttrade.png"
   remove_path "$HOME/.local/state/flinttrade"
 
-  # Tauri/WebKitGTK residue keyed by the bundle identifier.
-  remove_path "$HOME/.local/share/$BUNDLE_ID"
+  # Disposable Tauri/WebKitGTK residue keyed by the bundle identifier.
+  # ~/.local/share/$BUNDLE_ID is NOT here: it holds WebView localStorage
+  # (in-app journal notes, flows, saved AI chats) and is only removed by
+  # --purge below.
   remove_path "$HOME/.cache/$BUNDLE_ID"
   remove_path "$HOME/.config/$BUNDLE_ID"
 
@@ -165,17 +208,32 @@ uninstall_linux() {
   fi
 
   if [ "$PURGE" = "1" ]; then
-    purge_workspace "$HOME/.flinttrade"
+    purge_all_data "$HOME/.local/share/$BUNDLE_ID"
   else
-    keep_notice "$HOME/.flinttrade"
+    keep_notice "$HOME/.local/share/$BUNDLE_ID"
   fi
 }
 
-purge_workspace() {
-  local workspace="$1"
-  [ -e "$workspace" ] || { say "No workspace data at $workspace"; return 0; }
+# Purge everything the app has created: the resolved workspace, the WebView
+# storage (in-app saved content), and any extra legacy dirs passed in.
+purge_all_data() {
+  local webview_storage="$1"
+  shift
+  local targets=("$WORKSPACE_DIR" "$webview_storage" "$@")
+  local existing=() target
+  for target in "${targets[@]}"; do
+    if [ -e "$target" ]; then
+      existing+=("$target")
+    fi
+  done
+  if [ "${#existing[@]}" -eq 0 ]; then
+    say "No FlintTrade data to purge."
+    return 0
+  fi
   if [ "$DRY_RUN" = "1" ]; then
-    say "[dry-run] would DELETE workspace data at $workspace"
+    for target in "${existing[@]}"; do
+      say "[dry-run] would DELETE FlintTrade data at $target"
+    done
     return 0
   fi
   if [ "$ASSUME_YES" != "1" ]; then
@@ -183,25 +241,36 @@ purge_workspace() {
     # confirmation must come from the TTY. Without one (CI, scripts), refuse
     # rather than block or guess: --yes is the only non-interactive consent.
     if [ ! -t 1 ] || [ ! -r /dev/tty ]; then
-      say "Non-interactive session: workspace data kept at $workspace (pass --yes with --purge to confirm deletion)."
+      say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
       return 0
     fi
-    printf '%s' "About to DELETE all FlintTrade data at $workspace (credential vault, auth.db, journals, workspace.json). This is irreversible. Type 'purge' to continue: "
+    say "About to DELETE all FlintTrade data:"
+    for target in "${existing[@]}"; do
+      say "  $target"
+    done
+    printf '%s' "This removes the credential vault, auth.db, journals, settings, and in-app saved content (journal notes, flows, AI chats). Irreversible. Type 'purge' to continue: "
     local answer=""
     read -r answer < /dev/tty || true
     if [ "$answer" != "purge" ]; then
-      say "Purge cancelled — workspace data kept at $workspace"
+      say "Purge cancelled — FlintTrade data kept."
       return 0
     fi
   fi
-  remove_path "$workspace"
+  for target in "${existing[@]}"; do
+    remove_path "$target"
+  done
 }
 
 keep_notice() {
-  local workspace="$1"
-  if [ -e "$workspace" ]; then
-    say "Workspace data kept at $workspace (credential vault, journals, settings)."
-    say "To delete it too, re-run with --purge."
+  local webview_storage="$1"
+  if [ -e "$WORKSPACE_DIR" ]; then
+    say "Workspace data kept at $WORKSPACE_DIR (credential vault, journals, settings)."
+  fi
+  if [ -e "$webview_storage" ]; then
+    say "In-app saved content kept at $webview_storage (journal notes, flows, saved AI chats)."
+  fi
+  if [ -e "$WORKSPACE_DIR" ] || [ -e "$webview_storage" ]; then
+    say "To delete all FlintTrade data too, re-run with --purge."
   fi
 }
 

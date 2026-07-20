@@ -231,14 +231,19 @@ environment variable.
   right-click (Control-click) the app and choose **Open**, then **Open**
   again. Needed once per install.
 - **Uninstall:** `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash`
-  — removes the app **and** the WebView residue macOS keeps after a plain
-  drag-to-Trash (everything keyed by the `com.flinttrade.app` bundle id under
-  `~/Library/{WebKit,Caches,HTTPStorages,Application Support,Preferences,Saved
-  Application State,Logs}/`). Workspace data at
+  — removes the app **and** the disposable residue macOS keeps after a plain
+  drag-to-Trash (the `com.flinttrade.app` bundle-id folders under
+  `~/Library/{Caches,HTTPStorages,Application Support,Preferences,Saved
+  Application State,Logs}/`). Two kinds of data are kept: the workspace at
   `~/Library/Application Support/flinttrade/` (credential vault, journals,
-  settings) is kept; add `--purge` to delete that too (irreversible). Manual
-  alternative: trash the app, then delete those `com.flinttrade.app` folders
-  yourself.
+  settings) and the WebView storage at `~/Library/WebKit/com.flinttrade.app/`,
+  whose localStorage holds in-app saved content (trade journal notes and
+  screenshots, flows, saved AI chats).
+- **Remove all data too (irreversible):**
+  `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge`
+  — asks you to type `purge` to confirm; non-interactive runs need `--yes`
+  as well (or `FLINTTRADE_UNINSTALL_PURGE=1 FLINTTRADE_UNINSTALL_YES=1` on
+  the `bash` side of the pipe).
 
 ### Windows (`.exe`)
 - **Recommended:** `irm https://flinttrade.vercel.app/install.ps1 | iex` — the
@@ -257,20 +262,28 @@ environment variable.
   exclusion for that folder.
 - **Uninstall:** `irm https://flinttrade.vercel.app/uninstall.ps1 | iex` — runs
   the per-user NSIS uninstaller and then sweeps what it leaves behind: the
-  install folder (`%LOCALAPPDATA%\FlintTrade`), the WebView2 profile
-  (`%LOCALAPPDATA%\com.flinttrade.app`), Start-menu/desktop shortcuts, and the
-  `HKCU` uninstall/product registry keys. Workspace data at
-  `%APPDATA%\flinttrade\` (credential vault, journals, settings) is kept; set
-  `$env:FLINTTRADE_PURGE = "1"` before the command to delete that too
-  (irreversible). Manual alternative: **Settings → Apps → Installed apps →
-  FlintTrade → Uninstall**, then delete the two `%LOCALAPPDATA%` folders above.
+  install folder (`%LOCALAPPDATA%\FlintTrade`), Start-menu/desktop shortcuts,
+  and the `HKCU` uninstall/product registry keys. Two kinds of data are kept:
+  the workspace at `%APPDATA%\flinttrade\` (credential vault, journals,
+  settings) and the WebView2 profile at `%LOCALAPPDATA%\com.flinttrade.app`,
+  whose localStorage holds in-app saved content (trade journal notes and
+  screenshots, flows, saved AI chats). Manual alternative: **Settings → Apps →
+  Installed apps → FlintTrade → Uninstall**, then delete
+  `%LOCALAPPDATA%\FlintTrade` yourself.
+- **Remove all data too (irreversible):** set
+  `$env:FLINTTRADE_UNINSTALL_PURGE = "1"` before the `irm | iex` command —
+  it then asks you to type `purge` to confirm; fully scripted runs also set
+  `$env:FLINTTRADE_UNINSTALL_YES = "1"` (or use
+  `& ([scriptblock]::Create((irm …))) -Purge -Yes`).
 - The native uninstaller can remove all data itself: ticking **Delete the
   application data** on its confirmation page removes the WebView2 profile
-  **and** the whole workspace (`%APPDATA%\flinttrade`, plus any
-  `%USERPROFILE%\.flinttrade` source clone) — wired via the NSIS uninstall
-  hook in `packages/apps/desktop/src-tauri/windows/uninstall-hooks.nsh`.
-  Silent uninstalls (`/S`) and auto-updates never show that page and never
-  touch data.
+  and — after an extra confirmation dialog that names the credential vault
+  and defaults to **No** — the whole workspace (`%APPDATA%\flinttrade`, plus
+  any `%USERPROFILE%\.flinttrade` source clone). Wired via the NSIS uninstall
+  hook in `packages/apps/desktop/src-tauri/windows/uninstall-hooks.nsh`; if
+  locked files survive the purge, it says so and names the folder. Silent
+  uninstalls (`/S`) and auto-updates never show these dialogs and never touch
+  data.
 
 ### Linux
 - **Recommended:** `curl -fsSL https://flinttrade.vercel.app/install.sh | bash`
@@ -294,12 +307,19 @@ environment variable.
 - **Uninstall:** `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash`
   — removes everything the install script created (`~/.local/bin/flinttrade*`,
   `~/.local/opt/flinttrade/`, the desktop entry, icon, and
-  `~/.local/state/flinttrade/` logs) plus the WebKitGTK residue keyed by the
-  `com.flinttrade.app` bundle id under `~/.local/share/`, `~/.cache/`, and
-  `~/.config/`. Workspace data at `~/.flinttrade/` (credential vault, journals,
-  settings) is kept; add `--purge` to delete that too (irreversible). Legacy
-  `.deb`/`.rpm` installs are system-owned — remove those with
+  `~/.local/state/flinttrade/` logs) plus the disposable WebKitGTK residue
+  keyed by the `com.flinttrade.app` bundle id under `~/.cache/` and
+  `~/.config/`. Two kinds of data are kept: the workspace at `~/.flinttrade/`
+  (credential vault, journals, settings) and the WebView storage at
+  `~/.local/share/com.flinttrade.app/`, whose localStorage holds in-app saved
+  content (trade journal notes and screenshots, flows, saved AI chats).
+  Legacy `.deb`/`.rpm` installs are system-owned — remove those with
   `sudo apt remove flinttrade` / `sudo dnf remove flinttrade`.
+- **Remove all data too (irreversible):**
+  `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge`
+  — asks you to type `purge` to confirm; non-interactive runs need `--yes`
+  as well (or `FLINTTRADE_UNINSTALL_PURGE=1 FLINTTRADE_UNINSTALL_YES=1` on
+  the `bash` side of the pipe).
 
 ---
 
