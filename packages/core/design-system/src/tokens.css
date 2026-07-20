@@ -1,7 +1,7 @@
 /* ---------- text-xxs utility (Tailwind v4) ---------- */
 @utility text-xxs {
-  font-size: 10px;
-  line-height: 14px;
+  font-size: calc(10px * var(--ft-font-scale, 1));
+  line-height: calc(14px * var(--ft-font-scale, 1));
 }
 
 /* ---------- Base variables (shadcn/ui compat) ---------- */
@@ -34,6 +34,16 @@
     --chart-5: 280 65% 60%;
     --text-2xl: clamp(20px, 2vw, 24px);
     --text-lg: clamp(16px, 1.5vw, 18px);
+
+    /* User font scale (Settings → General → Font Size). Resolved from the
+       `data-font-scale` attribute on <html> — see the overrides further down.
+       Multiplies the data-table / number-display typography only; titles and
+       chrome keep their fixed scale. Line heights stay proportional because
+       Tailwind v4 line-height tokens are unitless ratios. */
+    --ft-font-scale: 1;
+    --text-xs: calc(0.75rem * var(--ft-font-scale, 1));
+    --text-sm: calc(0.875rem * var(--ft-font-scale, 1));
+    --text-base: calc(1rem * var(--ft-font-scale, 1));
 
     /* Glass Adaptive surfaces */
     --glass-base: #08080e;
@@ -91,10 +101,10 @@
     --shadow-elevated: 0 4px 16px rgba(0,0,0,0.4);
     --shadow-floating: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
 
-    /* Typography scale */
-    --data-hero: 2.25rem;
-    --data-primary: 1.25rem;
-    --data-cell: 0.8125rem;
+    /* Typography scale (data sizes multiply by the user font scale) */
+    --data-hero: calc(2.25rem * var(--ft-font-scale, 1));
+    --data-primary: calc(1.25rem * var(--ft-font-scale, 1));
+    --data-cell: calc(0.8125rem * var(--ft-font-scale, 1));
     --title-route: 1.5rem;
     --title-section: 1.125rem;
     --title-card: 0.9375rem;
@@ -263,9 +273,24 @@
 
 /* ---------- Density overrides for typography scale ---------- */
 [data-density="compact"] {
-  --data-hero: 1.75rem;
-  --data-primary: 1rem;
+  --data-hero: calc(1.75rem * var(--ft-font-scale, 1));
+  --data-primary: calc(1rem * var(--ft-font-scale, 1));
   --title-route: 1.25rem;
+}
+
+/* ---------- User font scale (Settings → General → Font Size) ---------- */
+/* The terminal mirrors the persisted preference into a `data-font-scale`
+   attribute on <html> (see apps/terminal src/hooks/useApplyFontScale.ts).
+   Factors are relative to the 13px data-cell base, matching the control's
+   Small (12px) / Normal (13px) / Large (14px) labels. */
+[data-font-scale="small"] {
+  --ft-font-scale: calc(12 / 13);
+}
+[data-font-scale="normal"] {
+  --ft-font-scale: 1;
+}
+[data-font-scale="large"] {
+  --ft-font-scale: calc(14 / 13);
 }
 
 /* ---------- Elevation layers ---------- */
