@@ -6,7 +6,7 @@
 
 ---
 
-## Current state — v0.6.0-beta.12 (ground-truth audited 2026-07-03; broker-live wave tooling updated 2026-07-05)
+## Current state — v0.6.0-beta.13 (ground-truth audited 2026-07-03; broker-live wave tooling updated 2026-07-05)
 
 - **Verification baseline (green locally):** latest compact gate `make full-check` passed after the backend-port runtime fix on 2026-07-05 with Python 5,401 passed / 39 skipped, Ruff clean, terminal `tsc --noEmit` clean, and terminal Vitest green. Direct broker-runtime probes also verified `/api/v1/native/brokers`, `/api/v1/broker/mcp`, and `/api/v1/broker/capabilities` on a non-default `FLINTTRADE_BACKEND_PORT=5127`. The current desktop release publishes all 9 installers.
 - **Diagnosis:** the code is high-quality and heavily tested, but the product still breaks in the *unwired / unreachable / silently-degraded* layer that unit tests cannot see (`state-of-repo.md`). Auth core, gated execution, the terminal shell, the desktop package, Practice mode, and native broker activation now have live or integration evidence. Remaining risk sits in broker-specific live exits (Kotak Neo, funded order probes), historical/download/data islands, and feature surfaces that still fall back too quietly.
