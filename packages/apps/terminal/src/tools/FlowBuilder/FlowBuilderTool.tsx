@@ -7,33 +7,40 @@
  *   - Centre: React Flow canvas with custom BaseNode
  *   - Right: ConfigPanel (shown when a node is selected)
  *   - Bottom: ExecutionLog (collapsible)
- *   - Top: Toolbar (Run, Save, Clear, New Flow, back navigation)
+ *   - Top: Toolbar (Save, Clear, New Flow, back navigation)
  *
- * State managed via flowStore (Zustand). Persistence via localStorage.
+ * Canvas/UI state lives in flowStore (Zustand). Saved workflows persist on
+ * the FlintTrade backend via ftApi.flows (TanStack Query); legacy
+ * localStorage drafts are imported once on mount.
  *
  * Node catalogue across 8 categories:
  *   Triggers · Orders · Conditions · Logic · Data · WebSocket · Account · Integration
  *
  * Modules:
- *   flow/FlowTemplates.ts   — template data + workflow factories
- *   flow/FlowCanvas.tsx     — React Flow canvas editor
- *   flow/FlowsTab.tsx       — saved flows list + StatusIcon
- *   flow/TemplatesTab.tsx   — template browser + DifficultyBadge
- *   flow/HowItWorksTab.tsx  — reference guide
+ *   flow/FlowTemplates.ts     — template data + workflow factories
+ *   flow/FlowCanvas.tsx       — React Flow canvas editor
+ *   flow/FlowsTab.tsx         — saved flows list + StatusIcon
+ *   flow/TemplatesTab.tsx     — template browser + DifficultyBadge
+ *   flow/HowItWorksTab.tsx    — reference guide
+ *   flow/legacyFlowImport.ts  — one-time localStorage → backend migration
  */
 
-import { useState } from "react";
-import { X, Workflow } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { X, Workflow, AlertTriangle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 import { useFlowStore } from "@/stores/flowStore";
+import { useModeStore } from "@/stores/modeStore";
+import { getFlow, putFlow } from "@/services/ftApi.flows";
 import { FlowCanvas } from "./flow/FlowCanvas";
 import { FlowsTab } from "./flow/FlowsTab";
 import { TemplatesTab } from "./flow/TemplatesTab";
 import { HowItWorksTab } from "./flow/HowItWorksTab";
 import { getTotalNodeCount } from "./flow/nodeRegistry";
+import { importLegacyFlows } from "./flow/legacyFlowImport";
 import { FLOW_TEMPLATES, type FlowTemplate } from "./flow/FlowTemplates";
 import type { FlowNodeData, SavedWorkflow } from "@/stores/flowStore";
 import type { Node } from "@xyflow/react";
@@ -54,25 +61,79 @@ type View = "list" | "editor";
 
 export default function FlowBuilderTool({ onClose }: Props) {
   const [view, setView] = useState<View>("list");
-  const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  const [activeFlowName, setActiveFlowName] = useState("Untitled Flow");
   const [activeTab, setActiveTab] = useState("flows");
+  const [openError, setOpenError] = useState<string | null>(null);
 
-  const createNewFlow = useFlowStore((s) => s.createNewFlow);
-  const openFlow = useFlowStore((s) => s.openFlow);
-  const savedFlows = useFlowStore((s) => s.savedFlows);
+  const queryClient = useQueryClient();
+  const activeFlowId = useFlowStore((s) => s.activeFlowId);
   const loadWorkflowIntoCanvas = useFlowStore((s) => s.loadWorkflowIntoCanvas);
-  const saveFlowById = useFlowStore((s) => s.saveFlowById);
+  const addLogEntry = useFlowStore((s) => s.addLogEntry);
+
+  // One-time migration of legacy localStorage drafts into the backend store.
+  // Skipped in Explore mode (no real backend session to import into); the
+  // localStorage key survives until an eligible session completes the import.
+  const importAttempted = useRef(false);
+  useEffect(() => {
+    if (importAttempted.current) return;
+    importAttempted.current = true;
+    if (useModeStore.getState().mode === "explore") return;
+    void importLegacyFlows()
+      .then((count) => {
+        if (count > 0) {
+          addLogEntry(
+            "info",
+            `Imported ${count} draft flow${count === 1 ? "" : "s"} from this browser into your workspace`
+          );
+          void queryClient.invalidateQueries({ queryKey: ["flows"] });
+        }
+      })
+      .catch(() => {
+        // Import failed wholesale — the localStorage key is kept, so the
+        // next mount retries. Nothing user-visible to do here.
+      });
+  }, [queryClient, addLogEntry]);
+
+  const saveMutation = useMutation({
+    mutationFn: putFlow,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    },
+    onError: (error: Error, flow) => {
+      addLogEntry("error", `Could not save "${flow.name}" to the workspace: ${error.message}`);
+    },
+  });
 
   function handleNewFlow(): void {
-    const id = createNewFlow("New Flow");
-    setActiveFlowId(id);
+    const id = `flow_${Date.now()}`;
+    const workflow: SavedWorkflow = {
+      id,
+      name: "New Flow",
+      nodes: [],
+      edges: [],
+      updatedAt: new Date().toISOString(),
+    };
+    loadWorkflowIntoCanvas(workflow);
+    setActiveFlowName(workflow.name);
+    setOpenError(null);
     setView("editor");
+    saveMutation.mutate(workflow);
   }
 
   function handleOpenFlow(id: string): void {
-    openFlow(id);
-    setActiveFlowId(id);
-    setView("editor");
+    setOpenError(null);
+    queryClient
+      .fetchQuery({ queryKey: ["flows", id], queryFn: () => getFlow(id) })
+      .then((flow) => {
+        loadWorkflowIntoCanvas(flow);
+        setActiveFlowName(flow.name);
+        setView("editor");
+      })
+      .catch((error: unknown) => {
+        setOpenError(
+          `Could not open the flow: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
   }
 
   function handleUseTemplate(tmpl: FlowTemplate): void {
@@ -101,22 +162,20 @@ export default function FlowBuilderTool({ onClose }: Props) {
       updatedAt: new Date().toISOString(),
     };
 
-    saveFlowById(flowId, workflow.nodes, workflow.edges, workflow.name);
     loadWorkflowIntoCanvas(workflow);
-    setActiveFlowId(flowId);
+    setActiveFlowName(workflow.name);
+    setOpenError(null);
     setView("editor");
+    saveMutation.mutate(workflow);
   }
 
   // Editor view — full page canvas
   if (view === "editor" && activeFlowId) {
-    const flow = savedFlows.find((f) => f.id === activeFlowId);
-    const flowName = flow?.name ?? "Untitled Flow";
-
     return (
       <div className="h-full flex flex-col bg-surface-base">
         <FlowCanvas
           flowId={activeFlowId}
-          flowName={flowName}
+          flowName={activeFlowName}
           onBack={() => setView("list")}
         />
       </div>
@@ -141,6 +200,13 @@ export default function FlowBuilderTool({ onClose }: Props) {
           </Button>
         )}
       </div>
+
+      {openError && (
+        <div className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-atm-border bg-atm-bg px-3 py-2 text-xs text-text-secondary">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
+          <span>{openError}</span>
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">

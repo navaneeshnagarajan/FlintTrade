@@ -6,11 +6,25 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
+
+const aiSessionMocks = vi.hoisted(() => ({
+  importAiSession: vi.fn(),
+  getAiSession: vi.fn(),
+}));
+
+vi.mock("@/services/ftApi.ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ftApi.ai")>();
+  return {
+    ...actual,
+    importAiSession: aiSessionMocks.importAiSession,
+    getAiSession: aiSessionMocks.getAiSession,
+  };
+});
 
 const signalStreamMocks = vi.hoisted(() => {
   const state: {
@@ -136,15 +150,18 @@ import { getRecentSignals, queryKnowledge } from "@/services/ftApi";
 import type { SignalEvent } from "@/services/ftApi";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useModeStore } from "@/stores/modeStore";
+import { useAuthStore } from "@/stores/authStore";
+import { useAIConversationStore } from "@/stores/aiConversationStore";
+import type { Message } from "@/stores/aiConversationStore";
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-function renderAI() {
+function renderAI(initialEntry = "/ai") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={qc}>
         <AIRoute />
       </QueryClientProvider>
@@ -152,12 +169,30 @@ function renderAI() {
   );
 }
 
+function storeMessage(overrides: Partial<Message> = {}): Message {
+  return {
+    id: "m1",
+    role: "user",
+    content: "What is theta?",
+    timestamp: 1_700_000_000_000,
+    ...overrides,
+  };
+}
+
 describe("AIRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     signalStreamMocks.state.connected = false;
     signalStreamMocks.state.replayLoss = null;
     useModeStore.setState({ mode: "explore" });
+    useAuthStore.setState({ token: null });
+    useAIConversationStore.setState({
+      messages: [],
+      isStreaming: false,
+      currentRoute: "/",
+      conversationId: null,
+    });
   });
 
   it("renders the AI Center heading", () => {
@@ -351,5 +386,120 @@ describe("AIRoute", () => {
 
     expect(await screen.findByText("legacy.md")).toBeInTheDocument();
     expect(screen.getByText("Legacy source content.")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Saved conversations — backend session store + one-time legacy import
+  // -------------------------------------------------------------------------
+
+  it("runs the one-time saved-chat import on mount and removes each key after success", async () => {
+    useModeStore.setState({ mode: "live" });
+    useAuthStore.setState({ token: "real-jwt" });
+    localStorage.setItem(
+      "flinttrade:saved-chat:legacy1",
+      JSON.stringify({ messages: [storeMessage({ content: "Old saved chat" })], savedAt: 1 }),
+    );
+    aiSessionMocks.importAiSession.mockResolvedValue({ session_id: "legacy1" });
+
+    renderAI();
+
+    await waitFor(() =>
+      expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith({
+        id: "legacy1",
+        surface: "saved-chat",
+        messages: [{ role: "user", content: "Old saved chat", timestamp: 1_700_000_000_000 }],
+      }),
+    );
+    await waitFor(() =>
+      expect(localStorage.getItem("flinttrade:saved-chat:legacy1")).toBeNull(),
+    );
+  });
+
+  it("skips the legacy saved-chat import in Explore mode", async () => {
+    useAuthStore.setState({ token: "real-jwt" });
+    localStorage.setItem(
+      "flinttrade:saved-chat:legacy1",
+      JSON.stringify({ messages: [storeMessage()], savedAt: 1 }),
+    );
+
+    renderAI();
+
+    await waitFor(() => expect(screen.getByText("AI Center")).toBeInTheDocument());
+    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem("flinttrade:saved-chat:legacy1")).not.toBeNull();
+  });
+
+  it("restores a ?chat= conversation from the backend session store first", async () => {
+    aiSessionMocks.getAiSession.mockResolvedValue({
+      id: "abc",
+      surface: "saved-chat",
+      title: "Saved chat",
+      started_at: "2026-07-19T10:00:00+05:30",
+      last_at: "2026-07-19T10:05:00+05:30",
+      messages: [
+        { id: "b1", role: "user", content: "What is theta?", created_at: "2026-07-19T10:00:00.000Z" },
+      ],
+    });
+
+    renderAI("/ai?chat=abc");
+
+    await waitFor(() =>
+      expect(useAIConversationStore.getState().messages).toHaveLength(1),
+    );
+    expect(useAIConversationStore.getState().messages[0]).toMatchObject({
+      role: "user",
+      content: "What is theta?",
+      timestamp: Date.parse("2026-07-19T10:00:00.000Z"),
+    });
+    expect(useAIConversationStore.getState().conversationId).toBe("abc");
+  });
+
+  it("falls back to the legacy localStorage snapshot for old ?chat= links", async () => {
+    aiSessionMocks.getAiSession.mockRejectedValue(new Error("HTTP 404"));
+    localStorage.setItem(
+      "flinttrade:saved-chat:old1",
+      JSON.stringify({ messages: [storeMessage({ content: "Legacy share" })], savedAt: 1 }),
+    );
+
+    renderAI("/ai?chat=old1");
+
+    await waitFor(() =>
+      expect(useAIConversationStore.getState().messages).toHaveLength(1),
+    );
+    expect(useAIConversationStore.getState().messages[0].content).toBe("Legacy share");
+  });
+
+  it("shares by saving to the backend session store and confirms with Copied", async () => {
+    useAIConversationStore.setState({
+      messages: [storeMessage()],
+      conversationId: "conv-1",
+    });
+    aiSessionMocks.importAiSession.mockResolvedValue({ session_id: "conv-1" });
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByRole("button", { name: "Share conversation" }));
+
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+    expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "conv-1", surface: "saved-chat" }),
+    );
+    // No legacy localStorage snapshot is written any more.
+    expect(localStorage.getItem("flinttrade:saved-chat:conv-1")).toBeNull();
+  });
+
+  it("reports an honest failure when the share save is refused", async () => {
+    useAIConversationStore.setState({
+      messages: [storeMessage()],
+      conversationId: "conv-1",
+    });
+    aiSessionMocks.importAiSession.mockRejectedValue(new Error("session store unavailable"));
+    const user = userEvent.setup();
+    renderAI();
+
+    await user.click(screen.getByRole("button", { name: "Share conversation" }));
+
+    expect(await screen.findByText("Share failed")).toBeInTheDocument();
+    expect(screen.queryByText("Copied")).not.toBeInTheDocument();
   });
 });

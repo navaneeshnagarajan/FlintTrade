@@ -1,5 +1,6 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { z } from "zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { safeParse } from "@/lib/safeParse";
 import {
   Search,
@@ -13,6 +14,13 @@ import {
 import { formatCurrencyCompact } from "@/lib/formatters";
 import { type TradeAnalytics } from "@/lib/journalAnalytics";
 import { type JournalTrade } from "@/services/ftApi";
+import {
+  addJournalScreenshot,
+  deleteJournalScreenshot,
+  listJournalScreenshots,
+  type JournalScreenshot,
+} from "@/services/ftApi.journal";
+import { useModeStore } from "@/stores/modeStore";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,26 +44,71 @@ import { SkeletonRows } from "./StatCard";
 import { formatDate, formatTime, formatPrice, pnlColor } from "./utils";
 
 // ---------------------------------------------------------------------------
-// Screenshot storage
+// Screenshot keys + legacy localStorage import
 // ---------------------------------------------------------------------------
 
+/** Legacy localStorage map key from the pre-backend era (import source only). */
 const SCREENSHOTS_KEY = "flinttrade_journal_screenshots";
 
-/** Max file size: 2 MB to stay within localStorage limits. */
+/** Max file size: 2 MiB (matches the backend's decoded-size cap). */
 const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
-function loadScreenshots(): Record<string, string> {
-  return safeParse(localStorage.getItem(SCREENSHOTS_KEY), z.record(z.string(), z.string())) ?? {};
+/**
+ * Stable screenshot key for a trade row — independent of filtering. The old
+ * key embedded the row's index in the *filtered* array, so a search re-pointed
+ * every screenshot at the wrong row.
+ */
+function stableTradeKey(trade: JournalTrade): string {
+  return `${trade.timestamp}|${trade.symbol}|${trade.orderid ?? "na"}`;
 }
 
-function saveScreenshots(map: Record<string, string>): void {
-  try {
-    localStorage.setItem(SCREENSHOTS_KEY, JSON.stringify(map));
-  } catch { /* ignore storage quota errors */ }
-}
-
-function tradeKey(trade: JournalTrade, idx: number): string {
+/**
+ * Legacy key format (``timestamp-symbol-idx``, idx = position in the filtered
+ * array) — imported keys are opaque strings, so rows also look up this shape
+ * to keep matching where they matched before the migration.
+ */
+function legacyTradeKey(trade: JournalTrade, idx: number): string {
   return `${trade.timestamp}-${trade.symbol}-${idx}`;
+}
+
+/**
+ * One-time import of the legacy localStorage screenshot map to the backend.
+ *
+ * Each entry is POSTed with its old key verbatim as ``trade_key``. The
+ * localStorage key is removed only after EVERY entry succeeded — the backend
+ * dedupes on ``(trade_key, content_sha256)``, so a partial import retried on
+ * the next mount is safe. Returns true when anything was uploaded (the caller
+ * invalidates the screenshots query).
+ */
+async function importLegacyScreenshots(): Promise<boolean> {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SCREENSHOTS_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) return false;
+  const map = safeParse(raw, z.record(z.string(), z.string()));
+  if (!map) return false;
+
+  let allSucceeded = true;
+  let anySucceeded = false;
+  for (const [tradeKey, dataUrl] of Object.entries(map)) {
+    try {
+      await addJournalScreenshot(tradeKey, dataUrl);
+      anySucceeded = true;
+    } catch {
+      allSucceeded = false;
+    }
+  }
+  if (allSucceeded) {
+    try {
+      localStorage.removeItem(SCREENSHOTS_KEY);
+    } catch {
+      // Removal failure is harmless — dedupe makes a re-import a no-op.
+    }
+  }
+  return anySucceeded;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,15 +116,15 @@ function tradeKey(trade: JournalTrade, idx: number): string {
 // ---------------------------------------------------------------------------
 
 interface ScreenshotCellProps {
-  tKey: string;
-  screenshots: Record<string, string>;
-  onAttach: (key: string, dataUrl: string) => void;
-  onView: (dataUrl: string, symbol: string) => void;
+  shot: JournalScreenshot | undefined;
+  /** True in Explore mode — attaching to fabricated sample rows is blocked. */
+  attachDisabled: boolean;
+  onAttach: (dataUrl: string) => void;
+  onView: (shot: JournalScreenshot) => void;
 }
 
-function ScreenshotCell({ tKey, screenshots, onAttach, onView }: ScreenshotCellProps) {
+function ScreenshotCell({ shot, attachDisabled, onAttach, onView }: ScreenshotCellProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const existing = screenshots[tKey];
 
   const handleFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -87,35 +140,36 @@ function ScreenshotCell({ tKey, screenshots, onAttach, onView }: ScreenshotCellP
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
-        onAttach(tKey, reader.result);
+        onAttach(reader.result);
       }
     };
     reader.readAsDataURL(file);
     // Reset input so the same file can be re-attached
     e.target.value = "";
-  }, [tKey, onAttach]);
+  }, [onAttach]);
 
-  if (existing) {
+  if (shot) {
     return (
-      <button
-        type="button"
-        onClick={() => onView(existing, tKey)}
-        className="flex items-center justify-center w-10 h-7 rounded overflow-hidden border border-border-default hover:border-accent transition-colors group"
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => onView(shot)}
+        className="flex items-center justify-center w-10 h-7 p-0 rounded overflow-hidden border border-border-default hover:border-accent transition-colors group"
         aria-label="View screenshot"
         title="Click to view screenshot"
       >
         <img
-          src={existing}
+          src={shot.data_url}
           alt="Trade screenshot thumbnail"
           className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
         />
-      </button>
+      </Button>
     );
   }
 
   return (
     <>
-      <input
+      <Input
         ref={inputRef}
         type="file"
         accept="image/*"
@@ -123,15 +177,21 @@ function ScreenshotCell({ tKey, screenshots, onAttach, onView }: ScreenshotCellP
         onChange={handleFile}
         aria-label="Attach screenshot"
       />
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={attachDisabled}
         onClick={() => inputRef.current?.click()}
-        className="flex items-center justify-center w-8 h-7 rounded border border-dashed border-border-default text-text-disabled hover:text-text-muted hover:border-border-hover transition-colors"
+        className="flex items-center justify-center w-8 h-7 p-0 rounded border border-dashed border-border-default text-text-disabled hover:text-text-muted hover:border-border-hover transition-colors"
         aria-label="Attach screenshot"
-        title="Attach screenshot"
+        title={
+          attachDisabled
+            ? "Sample data — attaching is disabled in Explore mode"
+            : "Attach screenshot"
+        }
       >
         <Camera size={11} />
-      </button>
+      </Button>
     </>
   );
 }
@@ -149,24 +209,65 @@ export function TradeLogTab({
   isError: boolean;
   onRetry: () => void;
 }) {
+  const isExploreMode = useModeStore((s) => s.mode === "explore");
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [filterAction, setFilterAction] = useState<"ALL" | "BUY" | "SELL">("ALL");
 
-  // Screenshot state — loaded from localStorage on mount
-  const [screenshots, setScreenshots] = useState<Record<string, string>>(loadScreenshots);
-  const [viewingScreenshot, setViewingScreenshot] = useState<{ dataUrl: string; label: string } | null>(null);
+  // Screenshot state — served by the backend journal store.
+  const screenshotsQuery = useQuery({
+    queryKey: ["journalScreenshots"],
+    queryFn: listJournalScreenshots,
+    enabled: !isExploreMode,
+  });
 
-  const handleAttachScreenshot = useCallback((key: string, dataUrl: string) => {
-    setScreenshots((prev) => {
-      const updated = { ...prev, [key]: dataUrl };
-      saveScreenshots(updated);
-      return updated;
+  const screenshotsByKey = useMemo(() => {
+    const map: Record<string, JournalScreenshot> = {};
+    for (const shot of screenshotsQuery.data ?? []) {
+      if (!(shot.trade_key in map)) map[shot.trade_key] = shot;
+    }
+    return map;
+  }, [screenshotsQuery.data]);
+
+  const [viewingScreenshot, setViewingScreenshot] = useState<{
+    screenshot: JournalScreenshot;
+    symbol: string;
+  } | null>(null);
+
+  const attachMutation = useMutation({
+    mutationFn: ({ tradeKey, dataUrl }: { tradeKey: string; dataUrl: string }) =>
+      addJournalScreenshot(tradeKey, dataUrl),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
+    },
+    onError: () => {
+      alert("Screenshot not saved — backend unreachable.");
+    },
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => deleteJournalScreenshot(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
+      setViewingScreenshot(null);
+    },
+    onError: () => {
+      alert("Screenshot not removed — backend unreachable.");
+    },
+  });
+
+  // One-time legacy import (skipped in Explore mode; runs once on the first
+  // non-Explore render).
+  const importAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (isExploreMode || importAttemptedRef.current) return;
+    importAttemptedRef.current = true;
+    void importLegacyScreenshots().then((imported) => {
+      if (imported) {
+        void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
+      }
     });
-  }, []);
-
-  const handleViewScreenshot = useCallback((dataUrl: string, label: string) => {
-    setViewingScreenshot({ dataUrl, label });
-  }, []);
+  }, [isExploreMode, queryClient]);
 
   // Sort newest first
   const sorted = useMemo(
@@ -199,7 +300,7 @@ export function TradeLogTab({
               Trade Screenshot
               {viewingScreenshot && (
                 <span className="text-text-muted font-mono text-xs font-normal ml-1">
-                  {viewingScreenshot.label.split("-")[1]}
+                  {viewingScreenshot.symbol}
                 </span>
               )}
             </DialogTitle>
@@ -207,28 +308,21 @@ export function TradeLogTab({
           {viewingScreenshot && (
             <div className="relative">
               <img
-                src={viewingScreenshot.dataUrl}
+                src={viewingScreenshot.screenshot.data_url}
                 alt="Trade screenshot"
                 className="w-full rounded border border-border-default object-contain max-h-[60vh]"
               />
-              <button
-                type="button"
-                onClick={() => {
-                  const key = viewingScreenshot.label;
-                  setScreenshots((prev) => {
-                    const updated = { ...prev };
-                    delete updated[key];
-                    saveScreenshots(updated);
-                    return updated;
-                  });
-                  setViewingScreenshot(null);
-                }}
-                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded bg-loss/80 text-white text-xs hover:bg-loss transition-colors"
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={removeMutation.isPending}
+                onClick={() => removeMutation.mutate(viewingScreenshot.screenshot.id)}
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 h-auto rounded bg-loss/80 text-white text-xs hover:bg-loss transition-colors"
                 aria-label="Remove screenshot"
               >
                 <X size={11} />
                 Remove
-              </button>
+              </Button>
             </div>
           )}
         </DialogContent>
@@ -365,10 +459,13 @@ export function TradeLogTab({
             {!isLoading &&
               !isError &&
               filtered.map((trade, idx) => {
-                const tKey = tradeKey(trade, idx);
+                const stableKey = stableTradeKey(trade);
+                const shot =
+                  screenshotsByKey[stableKey] ??
+                  screenshotsByKey[legacyTradeKey(trade, idx)];
                 return (
                 <TableRow
-                  key={tKey}
+                  key={`${stableKey}|${idx}`}
                   className="border-border-subtle hover:bg-surface-card"
                 >
                   <TableCell className="py-1 text-xs text-text-secondary whitespace-nowrap">
@@ -419,10 +516,14 @@ export function TradeLogTab({
                   </TableCell>
                   <TableCell className="py-1">
                     <ScreenshotCell
-                      tKey={tKey}
-                      screenshots={screenshots}
-                      onAttach={handleAttachScreenshot}
-                      onView={(dataUrl) => handleViewScreenshot(dataUrl, tKey)}
+                      shot={shot}
+                      attachDisabled={isExploreMode}
+                      onAttach={(dataUrl) =>
+                        attachMutation.mutate({ tradeKey: stableKey, dataUrl })
+                      }
+                      onView={(s) =>
+                        setViewingScreenshot({ screenshot: s, symbol: trade.symbol })
+                      }
                     />
                   </TableCell>
                 </TableRow>

@@ -6,6 +6,9 @@ in a dedicated ``journal.sqlite`` database, alongside a normalised
 ``journal_tags`` table (exact tag-subset filtering) and a ``journal_fts`` FTS5
 index (full-text search over symbol/notes/tags/strategy). The FTS index is kept
 in sync by SQL triggers, so every add/update/delete is searchable immediately.
+The same database also holds ``daily_notes`` (one free-text note per IST
+trading day) and ``journal_screenshots`` (trade-log screenshot metadata; the
+image bytes live on disk under the workspace ``journal_screenshots/`` dir).
 
 Storage uses :func:`flinttrade_core.db.open_sqlite`, the same WAL-hardened path
 every other FlintTrade store runs on. Pass ``":memory:"`` for tests.
@@ -36,9 +39,12 @@ Usage::
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import csv
 import functools
+import hashlib
 import io
 import json
 import logging
@@ -151,7 +157,47 @@ _SCHEMA_STATEMENTS = [
                 COALESCE(new.notes, ''), COALESCE(new.tags, ''), COALESCE(new.strategy, ''));
     END
     """,
+    # One free-text note per IST trading day (TradeJournal NotesTab).
+    """
+    CREATE TABLE IF NOT EXISTS daily_notes (
+        date        TEXT PRIMARY KEY,
+        content     TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    )
+    """,
+    # Trade-log screenshot metadata; bytes live on disk under the workspace
+    # `journal_screenshots/` directory. The UNIQUE(trade_key, content_sha256)
+    # key makes re-attaching the same image to the same trade idempotent.
+    """
+    CREATE TABLE IF NOT EXISTS journal_screenshots (
+        id              TEXT PRIMARY KEY,
+        trade_key       TEXT NOT NULL,
+        content_sha256  TEXT NOT NULL,
+        content_type    TEXT NOT NULL,
+        size            INTEGER NOT NULL,
+        created_at      TEXT NOT NULL,
+        UNIQUE(trade_key, content_sha256)
+    )
+    """,
 ]
+
+# ---------------------------------------------------------------------------
+# Screenshot constants
+# ---------------------------------------------------------------------------
+
+# Allowed data-URL content types → on-disk file extension.
+_SCREENSHOT_CONTENT_TYPES: dict[str, str] = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+_MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024  # 2 MiB decoded
+# Base64 encodes 3 bytes into 4 chars — any payload longer than this must
+# decode to more than 2 MiB, so it can be rejected before decoding.
+_MAX_SCREENSHOT_B64_CHARS = ((_MAX_SCREENSHOT_BYTES + 2) // 3) * 4
+_MAX_TRADE_KEY_CHARS = 300
 
 # ---------------------------------------------------------------------------
 # SQL column allowlist — prevents SQL injection via dynamic SET clauses.
@@ -497,6 +543,9 @@ class TradeJournal:
             ``connection`` is supplied.
         connection: An open :class:`sqlite3.Connection` to use directly
             (chiefly for tests / an injected in-memory DB).
+        screenshots_dir: Directory for trade-log screenshot files. Defaults to
+            ``journal_screenshots/`` next to the journal SQLite file (i.e.
+            inside the FlintTrade workspace). Created lazily on first write.
 
     Example::
 
@@ -515,15 +564,30 @@ class TradeJournal:
         db_path: str | Path | None = None,
         *,
         connection: sqlite3.Connection | None = None,
+        screenshots_dir: str | Path | None = None,
     ) -> None:
+        resolved_db_path: Path | None = None
         if connection is not None:
             self._conn = connection
         else:
-            path = str(db_path) if db_path is not None else str(_default_journal_path())
-            self._conn = open_sqlite(path)
+            resolved_db_path = Path(db_path).expanduser() if db_path is not None else _default_journal_path()
+            self._conn = open_sqlite(str(resolved_db_path))
         self._conn.row_factory = sqlite3.Row
         # Serialises the shared connection across Flask request threads (see _locked).
         self._lock = threading.RLock()
+        # Screenshot bytes live on disk next to the SQLite file (workspace dir)
+        # unless a directory is injected. Resolved eagerly, created lazily.
+        if screenshots_dir is not None:
+            self._screenshots_dir = Path(screenshots_dir).expanduser()
+        elif resolved_db_path is not None and str(resolved_db_path) != ":memory:":
+            self._screenshots_dir = resolved_db_path.parent / "journal_screenshots"
+        else:
+            self._screenshots_dir = _default_journal_path().parent / "journal_screenshots"
+
+    @property
+    def screenshots_dir(self) -> Path:
+        """Directory holding the trade-log screenshot files."""
+        return self._screenshots_dir
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""
@@ -985,3 +1049,242 @@ class TradeJournal:
             len(created_ids),
         )
         return created_ids
+
+    # ------------------------------------------------------------------
+    # Daily notes (one free-text note per IST trading day)
+    # ------------------------------------------------------------------
+
+    @_locked
+    def get_daily_note(self, note_date: str) -> dict[str, Any] | None:
+        """Fetch the daily note for a given date.
+
+        Args:
+            note_date: The trading day in ``"YYYY-MM-DD"`` format.
+
+        Returns:
+            ``{"date", "content", "updated_at"}`` or ``None`` if no note exists.
+        """
+        row = self._conn.execute(
+            "SELECT date, content, updated_at FROM daily_notes WHERE date = ?",
+            (note_date,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    @_locked
+    def upsert_daily_note(self, note_date: str, content: str) -> dict[str, Any]:
+        """Insert or update the daily note for a date.
+
+        Empty ``content`` deletes the stored row (an empty note is "no note"),
+        and the empty record is returned so callers see the resulting state.
+
+        Args:
+            note_date: The trading day in ``"YYYY-MM-DD"`` format.
+            content: Full note text; ``""`` deletes the note.
+
+        Returns:
+            The saved record ``{"date", "content", "updated_at"}`` —
+            ``updated_at`` is ``None`` when the note was deleted.
+        """
+        if content == "":
+            self._conn.execute("DELETE FROM daily_notes WHERE date = ?", (note_date,))
+            self._conn.commit()
+            return {"date": note_date, "content": "", "updated_at": None}
+        now_iso = datetime.now(IST).isoformat()
+        self._conn.execute(
+            "INSERT INTO daily_notes (date, content, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at",
+            (note_date, content, now_iso),
+        )
+        self._conn.commit()
+        return {"date": note_date, "content": content, "updated_at": now_iso}
+
+    @_locked
+    def list_daily_notes(self) -> list[dict[str, Any]]:
+        """List all daily notes, newest date first.
+
+        Returns:
+            One dict per note with ``date``, ``updated_at``, ``word_count``,
+            and ``preview`` (first 120 characters of the content).
+        """
+        rows = self._conn.execute(
+            "SELECT date, content, updated_at FROM daily_notes ORDER BY date DESC"
+        ).fetchall()
+        return [
+            {
+                "date": row["date"],
+                "updated_at": row["updated_at"],
+                "word_count": len(row["content"].split()),
+                "preview": row["content"][:120],
+            }
+            for row in rows
+        ]
+
+    # ------------------------------------------------------------------
+    # Trade-log screenshots (metadata in SQLite, bytes on disk)
+    # ------------------------------------------------------------------
+
+    def _screenshot_path(self, screenshot_id: str, content_type: str) -> Path:
+        """Resolve the on-disk file path for a screenshot row."""
+        ext = _SCREENSHOT_CONTENT_TYPES.get(content_type, "bin")
+        return self._screenshots_dir / f"{screenshot_id}.{ext}"
+
+    @staticmethod
+    def _screenshot_public_row(record: dict[str, Any], blob: bytes) -> dict[str, Any]:
+        """Build the API-facing screenshot dict (row fields + re-encoded data URL)."""
+        encoded = base64.b64encode(blob).decode("ascii")
+        return {
+            "id": record["id"],
+            "trade_key": record["trade_key"],
+            "content_type": record["content_type"],
+            "size": record["size"],
+            "created_at": record["created_at"],
+            "data_url": f"data:{record['content_type']};base64,{encoded}",
+        }
+
+    @staticmethod
+    def _decode_screenshot_data_url(data_url: str) -> tuple[str, bytes]:
+        """Validate and decode a screenshot data URL.
+
+        Args:
+            data_url: ``data:image/(png|jpeg|webp|gif);base64,<payload>``.
+
+        Returns:
+            ``(content_type, decoded_bytes)``.
+
+        Raises:
+            ValueError: If the prefix, content type, encoding, or decoded size
+                is invalid.
+        """
+        prefix, sep, payload = data_url.partition(";base64,")
+        if not sep or not prefix.startswith("data:"):
+            raise ValueError("data_url must be a base64 data URL (data:image/...;base64,...)")
+        content_type = prefix[len("data:"):]
+        if content_type not in _SCREENSHOT_CONTENT_TYPES:
+            raise ValueError("Unsupported screenshot type — PNG, JPEG, WebP, or GIF required")
+        if len(payload) > _MAX_SCREENSHOT_B64_CHARS:
+            raise ValueError("Screenshot exceeds the 2 MiB size limit")
+        try:
+            blob = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("data_url payload is not valid base64") from exc
+        if not blob:
+            raise ValueError("Screenshot payload is empty")
+        if len(blob) > _MAX_SCREENSHOT_BYTES:
+            raise ValueError("Screenshot exceeds the 2 MiB size limit")
+        return content_type, blob
+
+    @_locked
+    def add_screenshot(self, trade_key: str, data_url: str) -> tuple[dict[str, Any], bool]:
+        """Attach a screenshot to a trade (idempotent per trade + content hash).
+
+        The decoded bytes are written to ``<screenshots_dir>/<id>.<ext>`` and
+        the metadata row goes to ``journal_screenshots``. Posting the same
+        image for the same ``trade_key`` again returns the existing row
+        (re-creating its file if it went missing on disk).
+
+        Args:
+            trade_key: Opaque frontend trade identity, non-empty, ≤ 300 chars.
+            data_url: ``data:image/(png|jpeg|webp|gif);base64,`` URL, ≤ 2 MiB
+                decoded.
+
+        Returns:
+            ``(row, created)`` where ``row`` is the API-facing dict (with a
+            re-encoded ``data_url``) and ``created`` is ``False`` when an
+            existing row was deduplicated.
+
+        Raises:
+            ValueError: On any validation failure (maps to HTTP 400).
+        """
+        if not isinstance(trade_key, str) or not trade_key or len(trade_key) > _MAX_TRADE_KEY_CHARS:
+            raise ValueError("trade_key must be a non-empty string of at most 300 characters")
+        if not isinstance(data_url, str):
+            raise ValueError("data_url must be a string")
+        content_type, blob = self._decode_screenshot_data_url(data_url)
+        sha = hashlib.sha256(blob).hexdigest()
+
+        existing = self._conn.execute(
+            "SELECT * FROM journal_screenshots WHERE trade_key = ? AND content_sha256 = ?",
+            (trade_key, sha),
+        ).fetchone()
+        if existing is not None:
+            record = dict(existing)
+            path = self._screenshot_path(record["id"], record["content_type"])
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(blob)
+            return self._screenshot_public_row(record, blob), False
+
+        record = {
+            "id": str(uuid.uuid4()),
+            "trade_key": trade_key,
+            "content_sha256": sha,
+            "content_type": content_type,
+            "size": len(blob),
+            "created_at": datetime.now(IST).isoformat(),
+        }
+        path = self._screenshot_path(record["id"], content_type)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob)
+        try:
+            self._conn.execute(
+                "INSERT INTO journal_screenshots (id, trade_key, content_sha256, content_type, size, created_at) "
+                "VALUES (:id, :trade_key, :content_sha256, :content_type, :size, :created_at)",
+                record,
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            # Keep disk and DB consistent — no orphan file on a failed insert.
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+            raise
+        logger.info("Screenshot added: id=%s trade_key=%s size=%d", record["id"], trade_key, len(blob))
+        return self._screenshot_public_row(record, blob), True
+
+    @_locked
+    def list_screenshots(self) -> list[dict[str, Any]]:
+        """List all screenshots, newest first, with re-encoded data URLs.
+
+        Rows whose file has gone missing on disk are skipped (with a warning)
+        rather than surfacing a broken record.
+
+        Returns:
+            List of ``{"id", "trade_key", "content_type", "size",
+            "created_at", "data_url"}`` dicts.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM journal_screenshots ORDER BY created_at DESC, id"
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            path = self._screenshot_path(record["id"], record["content_type"])
+            try:
+                blob = path.read_bytes()
+            except OSError:
+                logger.warning("Screenshot file missing on disk; skipping row id=%s", record["id"])
+                continue
+            out.append(self._screenshot_public_row(record, blob))
+        return out
+
+    @_locked
+    def delete_screenshot(self, screenshot_id: str) -> bool:
+        """Delete a screenshot row and its file on disk.
+
+        Args:
+            screenshot_id: UUID of the screenshot row.
+
+        Returns:
+            ``True`` if the row existed and was deleted, ``False`` otherwise.
+        """
+        row = self._conn.execute(
+            "SELECT id, content_type FROM journal_screenshots WHERE id = ?",
+            (screenshot_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        self._conn.execute("DELETE FROM journal_screenshots WHERE id = ?", (screenshot_id,))
+        self._conn.commit()
+        with contextlib.suppress(OSError):
+            self._screenshot_path(row["id"], row["content_type"]).unlink(missing_ok=True)
+        logger.info("Screenshot deleted: id=%s", screenshot_id)
+        return True

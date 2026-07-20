@@ -43,7 +43,7 @@ export function TemplatesTab({ onUse }: TemplatesTabProps) {
     <div className="p-4">
       <div className="mb-4 flex items-start gap-2 rounded-md border border-atm-border bg-atm-bg px-3 py-2 text-xs text-text-secondary">
         <Info size={13} className="mt-0.5 shrink-0 text-amber-400" />
-        <span>Local drafts only. Loading a template does not execute a workflow or send an order.</span>
+        <span>Drafts only. Loading a template saves a draft to your workspace; it does not execute a workflow or send an order.</span>
       </div>
       <div className="flex items-center gap-1.5 flex-wrap mb-4">
         {["All", ...categories].map((cat) => (

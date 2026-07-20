@@ -18,10 +18,14 @@ const tradeJournalMocks = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
-// Mock TanStack Query
+// Mock TanStack Query. TradeLogTab (the default tab) runs its own
+// ["journalScreenshots"] query + mutations, so the capture is keyed to the
+// tool's ["tradeJournal", …] query and the mutation/client hooks are stubbed.
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { enabled?: boolean }) => {
-    tradeJournalMocks.queryOptions = options;
+  useQuery: (options: { enabled?: boolean; queryKey?: unknown[] }) => {
+    if (options.queryKey?.[0] === "tradeJournal") {
+      tradeJournalMocks.queryOptions = options;
+    }
     return {
       data: undefined,
       isLoading: false,
@@ -29,6 +33,16 @@ vi.mock("@tanstack/react-query", () => ({
       refetch: tradeJournalMocks.refetch,
     };
   },
+  useMutation: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+  }),
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(),
+    setQueryData: vi.fn(),
+  }),
 }));
 
 // Mock ft API

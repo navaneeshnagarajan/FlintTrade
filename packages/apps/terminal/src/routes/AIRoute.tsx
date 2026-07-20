@@ -8,7 +8,7 @@ import {
 } from "@/hooks/useSignals";
 import type { SignalStreamState } from "@/hooks/useSignals";
 import { useSkillStore } from "@/stores/skillStore";
-import { useAIConversationStore } from "@/stores/aiConversationStore";
+import { importLegacySavedChats, useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
@@ -1005,12 +1005,14 @@ const SECTION_LABELS: Record<SectionId, string> = {
 // Main
 // ---------------------------------------------------------------------------
 
+type ShareState = "idle" | "copied" | "failed";
+
 export default function AIRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("ai", "daysActive"); }, []);
 
   const [searchParams] = useSearchParams();
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareState, setShareState] = useState<ShareState>("idle");
   const level = useSkillLevel("ai");
   const mode = useModeStore((state) => state.mode);
   const queryClient = useQueryClient();
@@ -1019,22 +1021,31 @@ export default function AIRoute() {
   const saveConversation = useAIConversationStore((s) => s.saveConversation);
   const messages = useAIConversationStore((s) => s.messages);
 
-  // Restore shared conversation from ?chat=<id> query param
+  // Restore shared conversation from ?chat=<id> query param (backend session
+  // store first, legacy localStorage fallback), then run the one-time
+  // saved-chat migration (no-op in Explore mode / on demo auth).
   useEffect(() => {
     const chatId = searchParams.get("chat");
     if (chatId) {
-      loadConversation(chatId);
+      void loadConversation(chatId);
     }
+    void importLegacySavedChats();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
 
-  const handleShare = useCallback(() => {
+  const handleShare = useCallback(async () => {
     if (messages.length === 0) return;
-    const id = saveConversation();
-    const url = new URL(window.location.href);
-    url.searchParams.set("chat", id);
-    void navigator.clipboard.writeText(url.toString());
-    setShareCopied(true);
-    setTimeout(() => setShareCopied(false), 2000);
+    try {
+      const id = await saveConversation();
+      const url = new URL(window.location.href);
+      url.searchParams.set("chat", id);
+      await navigator.clipboard.writeText(url.toString());
+      setShareState("copied");
+    } catch {
+      // Backend save (or clipboard write) failed — never claim "Copied".
+      setShareState("failed");
+    } finally {
+      setTimeout(() => setShareState("idle"), 2000);
+    }
   }, [messages.length, saveConversation]);
 
   // Density adaptation:
@@ -1114,15 +1125,20 @@ export default function AIRoute() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleShare}
+              onClick={() => void handleShare()}
               disabled={messages.length === 0}
               className="text-text-muted hover:text-text-primary gap-1.5 h-7 text-xs shrink-0"
               aria-label="Share conversation"
             >
-              {shareCopied ? (
+              {shareState === "copied" ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-profit" />
                   Copied
+                </>
+              ) : shareState === "failed" ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5 text-loss" />
+                  Share failed
                 </>
               ) : (
                 <>

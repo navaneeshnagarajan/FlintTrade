@@ -238,8 +238,9 @@ environment variable.
   `~/.flinttrade/src`). Two kinds of data are kept: the workspace at
   `~/Library/Application Support/flinttrade/` (credential vault, journals,
   settings) and the WebView storage at `~/Library/WebKit/com.flinttrade.app/`,
-  whose localStorage holds in-app saved content (trade journal notes and
-  screenshots, flows, saved AI chats).
+  which may still hold in-app content saved by older versions (trade
+  journal notes and screenshots, flows, saved AI chats) — current versions
+  store these in the workspace.
 - **Remove all data too (irreversible):**
   `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge`
   — asks you to type `purge` to confirm; non-interactive runs need `--yes`
@@ -269,8 +270,9 @@ environment variable.
   `HKCU` uninstall/product registry keys. Two kinds of data are kept:
   the workspace at `%APPDATA%\flinttrade\` (credential vault, journals,
   settings) and the WebView2 profile at `%LOCALAPPDATA%\com.flinttrade.app`,
-  whose localStorage holds in-app saved content (trade journal notes and
-  screenshots, flows, saved AI chats). Manual alternative: **Settings → Apps →
+  which may still hold in-app content saved by older versions (trade
+  journal notes and screenshots, flows, saved AI chats) — current versions
+  store these in the workspace. Manual alternative: **Settings → Apps →
   Installed apps → FlintTrade → Uninstall**, then delete
   `%LOCALAPPDATA%\FlintTrade` yourself.
 - **Remove all data too (irreversible):** set
@@ -315,8 +317,9 @@ environment variable.
   `~/.config/`. Two kinds of data are kept: the workspace at `~/.flinttrade/`
   (credential vault, journals, settings — though its `src/` build-from-source
   clone is removed as install residue) and the WebView storage at
-  `~/.local/share/com.flinttrade.app/`, whose localStorage holds in-app saved
-  content (trade journal notes and screenshots, flows, saved AI chats).
+  `~/.local/share/com.flinttrade.app/`, which may still hold in-app content
+  saved by older versions (trade journal notes and screenshots, flows, saved
+  AI chats) — current versions store these in the workspace.
   Legacy `.deb`/`.rpm` installs are system-owned — remove those with
   `sudo apt remove flinttrade` / `sudo dnf remove flinttrade`.
 - **Remove all data too (irreversible):**

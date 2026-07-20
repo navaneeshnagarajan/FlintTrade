@@ -12,8 +12,8 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def journal():
-    j = TradeJournal(":memory:")
+def journal(tmp_path):
+    j = TradeJournal(":memory:", screenshots_dir=tmp_path / "journal_screenshots")
     j.initialise()
     yield j
     j.close()
@@ -187,3 +187,171 @@ def test_import_malformed_rows_returns_201_not_500(client):
 
 def test_import_non_list_body_returns_400(client):
     assert client.post("/api/v1/journal/import", json={"trades": "nope"}).status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Daily notes
+# ---------------------------------------------------------------------------
+
+
+def test_daily_note_roundtrip(client):
+    put = client.put("/api/v1/journal/notes/2026-07-20", json={"content": "Sat out the gap open."})
+    assert put.status_code == 200
+    saved = put.get_json()["data"]
+    assert saved["date"] == "2026-07-20"
+    assert saved["content"] == "Sat out the gap open."
+    assert saved["updated_at"] is not None
+
+    got = client.get("/api/v1/journal/notes/2026-07-20")
+    assert got.status_code == 200
+    assert got.get_json()["data"]["content"] == "Sat out the gap open."
+
+
+def test_daily_note_missing_returns_empty_200(client):
+    resp = client.get("/api/v1/journal/notes/2026-01-01")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"date": "2026-01-01", "content": "", "updated_at": None}
+
+
+def test_daily_note_empty_content_deletes(client):
+    client.put("/api/v1/journal/notes/2026-07-20", json={"content": "temp"})
+    resp = client.put("/api/v1/journal/notes/2026-07-20", json={"content": ""})
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"date": "2026-07-20", "content": "", "updated_at": None}
+    # The row is gone: the read serves the empty record and the list omits it.
+    assert client.get("/api/v1/journal/notes/2026-07-20").get_json()["data"]["updated_at"] is None
+    assert client.get("/api/v1/journal/notes").get_json()["data"] == []
+
+
+def test_daily_note_bad_date_400(client):
+    assert client.get("/api/v1/journal/notes/2026-7-1").status_code == 400
+    assert client.put("/api/v1/journal/notes/not-a-date", json={"content": "x"}).status_code == 400
+
+
+def test_daily_note_rejects_non_string_and_oversize_content(client):
+    assert client.put("/api/v1/journal/notes/2026-07-20", json={"content": 42}).status_code == 400
+    big = client.put("/api/v1/journal/notes/2026-07-20", json={"content": "x" * 100_001})
+    assert big.status_code == 400
+    assert big.get_json()["status"] == "error"
+    # Exactly at the cap is accepted.
+    assert client.put("/api/v1/journal/notes/2026-07-20", json={"content": "x" * 100_000}).status_code == 200
+
+
+def test_daily_notes_list_ordering_and_preview(client):
+    client.put("/api/v1/journal/notes/2026-07-18", json={"content": "older note " * 20})
+    client.put("/api/v1/journal/notes/2026-07-20", json={"content": "two words"})
+    resp = client.get("/api/v1/journal/notes")
+    assert resp.status_code == 200
+    notes = resp.get_json()["data"]
+    assert [n["date"] for n in notes] == ["2026-07-20", "2026-07-18"]
+    assert notes[0]["word_count"] == 2
+    assert notes[1]["preview"] == ("older note " * 20)[:120]
+    assert len(notes[1]["preview"]) == 120
+    assert all("content" not in n for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# Trade-log screenshots
+# ---------------------------------------------------------------------------
+
+
+def _data_url(data: bytes = b"fake-png-bytes", content_type: str = "image/png") -> str:
+    import base64
+
+    return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def test_screenshot_roundtrip_and_file_on_disk(client, tmp_path):
+    resp = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "2026-07-20T10:00:00|BANKNIFTY|123", "data_url": _data_url()},
+    )
+    assert resp.status_code == 201
+    row = resp.get_json()["data"]
+    assert row["trade_key"] == "2026-07-20T10:00:00|BANKNIFTY|123"
+    assert row["content_type"] == "image/png"
+    assert row["size"] == len(b"fake-png-bytes")
+    assert row["data_url"] == _data_url()
+
+    stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
+    assert stored.read_bytes() == b"fake-png-bytes"
+
+    listed = client.get("/api/v1/journal/screenshots")
+    assert listed.status_code == 200
+    rows = listed.get_json()["data"]
+    assert len(rows) == 1
+    assert rows[0]["id"] == row["id"]
+    assert rows[0]["data_url"] == _data_url()
+
+
+def test_screenshot_dedupe_returns_existing_with_200(client):
+    body = {"trade_key": "k1", "data_url": _data_url()}
+    first = client.post("/api/v1/journal/screenshots", json=body)
+    assert first.status_code == 201
+    again = client.post("/api/v1/journal/screenshots", json=body)
+    assert again.status_code == 200
+    assert again.get_json()["data"]["id"] == first.get_json()["data"]["id"]
+    assert len(client.get("/api/v1/journal/screenshots").get_json()["data"]) == 1
+    # Same bytes under a DIFFERENT trade key is a new row, not a dedupe.
+    other = client.post("/api/v1/journal/screenshots", json={"trade_key": "k2", "data_url": _data_url()})
+    assert other.status_code == 201
+
+
+def test_screenshot_bad_content_type_400(client):
+    svg = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url(content_type="image/svg+xml")},
+    )
+    assert svg.status_code == 400
+    not_a_data_url = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": "https://example.invalid/x.png"},
+    )
+    assert not_a_data_url.status_code == 400
+
+
+def test_screenshot_oversize_400(client):
+    resp = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url(data=b"x" * (2 * 1024 * 1024 + 1))},
+    )
+    assert resp.status_code == 400
+    assert "2 MiB" in resp.get_json()["message"]
+
+
+def test_screenshot_invalid_inputs_400(client):
+    assert client.post("/api/v1/journal/screenshots", json={"trade_key": "", "data_url": _data_url()}).status_code == 400
+    long_key = "k" * 301
+    assert (
+        client.post("/api/v1/journal/screenshots", json={"trade_key": long_key, "data_url": _data_url()}).status_code
+        == 400
+    )
+    assert client.post("/api/v1/journal/screenshots", json={"trade_key": "k1", "data_url": 7}).status_code == 400
+    bad_b64 = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": "data:image/png;base64,%%not-base64%%"},
+    )
+    assert bad_b64.status_code == 400
+
+
+def test_screenshot_delete_removes_file(client, tmp_path):
+    row = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url()},
+    ).get_json()["data"]
+    stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
+    assert stored.exists()
+    assert client.delete(f"/api/v1/journal/screenshots/{row['id']}").status_code == 200
+    assert not stored.exists()
+    assert client.get("/api/v1/journal/screenshots").get_json()["data"] == []
+    assert client.delete(f"/api/v1/journal/screenshots/{row['id']}").status_code == 404
+
+
+def test_notes_and_screenshots_503_when_uninitialised(app_no_journal):
+    with app_no_journal.test_client() as c:
+        assert c.get("/api/v1/journal/notes").status_code == 503
+        assert c.get("/api/v1/journal/notes/2026-07-20").status_code == 503
+        assert c.put("/api/v1/journal/notes/2026-07-20", json={"content": "x"}).status_code == 503
+        assert c.get("/api/v1/journal/screenshots").status_code == 503
+        assert c.post("/api/v1/journal/screenshots", json={}).status_code == 503
+        assert c.delete("/api/v1/journal/screenshots/x").status_code == 503

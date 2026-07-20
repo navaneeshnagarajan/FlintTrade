@@ -41,6 +41,23 @@ export function pnlColor(value: number): string {
   return "text-text-secondary";
 }
 
+/**
+ * The IST trading day (Asia/Kolkata) as ``YYYY-MM-DD``.
+ *
+ * Daily notes must key on the Indian trading day, not the machine's UTC date:
+ * ``toISOString()`` flips to the next day at 05:30 IST-behind (i.e. an evening
+ * session in the US, or any machine west of UTC, files notes under the wrong
+ * day). ``en-CA`` formats as ISO ``YYYY-MM-DD`` directly.
+ */
+export function istDayKey(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }

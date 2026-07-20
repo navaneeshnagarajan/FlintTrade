@@ -23,8 +23,9 @@ export function HowItWorksTab() {
               </span>
             </div>
             <p className="text-xs text-text-secondary leading-relaxed">
-              FlowBuilder is a local visual draft editor. Saved flows remain in this browser;
-              this screen does not execute workflows or send orders to a connected broker.
+              FlowBuilder is a visual draft editor. Saved flows are stored in your FlintTrade
+              workspace on the backend; this screen does not execute workflows or send orders
+              to a connected broker.
             </p>
             <div className="mt-3 grid grid-cols-4 gap-2 text-center">
               {[["4", "Triggers"], ["10", "Orders"], ["5", "Conditions"], ["7", "Logic"]].map(([count, label]) => (
@@ -91,7 +92,7 @@ export function HowItWorksTab() {
           <CardContent className="p-3 flex items-start gap-2">
             <Info size={13} className="text-amber-400 mt-0.5 shrink-0" />
             <p className="text-xs text-text-secondary">
-              Backend flow execution is not wired. These local drafts can be connected to the
+              Backend flow execution is not wired. These saved drafts can be connected to the
               automation runtime only after that execution contract is implemented and safety-gated.
             </p>
           </CardContent>

@@ -1,7 +1,7 @@
 """Tests for trade_journal — JournalEntry, TradeJournal, JournalStats.
 
-All tests use an in-memory SQLite journal via TradeJournal(":memory:") so no
-filesystem state is created or left behind.
+All tests use an in-memory SQLite journal via TradeJournal(":memory:"); the
+screenshot tests write their image files under pytest's tmp_path only.
 
 Run with::
 
@@ -609,3 +609,156 @@ class TestJournalVerifyRegressions:
         for t in threads:
             t.join()
         assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Daily notes store
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDailyNotes:
+    """Store-level tests for the daily_notes table."""
+
+    def test_roundtrip(self):
+        _, journal = _make_journal()
+        assert journal.get_daily_note("2026-07-20") is None
+        saved = journal.upsert_daily_note("2026-07-20", "Choppy session, stayed flat.")
+        assert saved["date"] == "2026-07-20"
+        assert saved["content"] == "Choppy session, stayed flat."
+        assert saved["updated_at"] is not None
+        assert journal.get_daily_note("2026-07-20") == saved
+
+    def test_upsert_overwrites(self):
+        _, journal = _make_journal()
+        journal.upsert_daily_note("2026-07-20", "first")
+        journal.upsert_daily_note("2026-07-20", "second")
+        assert journal.get_daily_note("2026-07-20")["content"] == "second"
+        assert len(journal.list_daily_notes()) == 1
+
+    def test_empty_content_deletes_row(self):
+        _, journal = _make_journal()
+        journal.upsert_daily_note("2026-07-20", "temp")
+        result = journal.upsert_daily_note("2026-07-20", "")
+        assert result == {"date": "2026-07-20", "content": "", "updated_at": None}
+        assert journal.get_daily_note("2026-07-20") is None
+        assert journal.list_daily_notes() == []
+
+    def test_list_ordering_word_count_and_preview(self):
+        _, journal = _make_journal()
+        long_text = "word " * 50  # 250 chars, 50 words
+        journal.upsert_daily_note("2026-07-18", long_text)
+        journal.upsert_daily_note("2026-07-20", "two words")
+        notes = journal.list_daily_notes()
+        assert [n["date"] for n in notes] == ["2026-07-20", "2026-07-18"]
+        assert notes[0]["word_count"] == 2
+        assert notes[1]["word_count"] == 50
+        assert notes[1]["preview"] == long_text[:120]
+
+
+# ---------------------------------------------------------------------------
+# Trade-log screenshots store
+# ---------------------------------------------------------------------------
+
+
+def _screenshot_journal(tmp_path):
+    """Return a journal whose screenshot files land under tmp_path."""
+    from flinttrade_journal.trade_journal import TradeJournal
+
+    journal = TradeJournal(":memory:", screenshots_dir=tmp_path / "journal_screenshots")
+    journal.initialise()
+    return journal
+
+
+def _b64_url(data: bytes, content_type: str = "image/png") -> str:
+    import base64
+
+    return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+@pytest.mark.unit
+class TestScreenshots:
+    """Store-level tests for journal_screenshots (SQLite rows + files on disk)."""
+
+    def test_add_writes_file_and_row(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        row, created = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        assert created is True
+        assert row["trade_key"] == "trade-1"
+        assert row["content_type"] == "image/png"
+        assert row["size"] == len(b"png-bytes")
+        stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
+        assert stored.read_bytes() == b"png-bytes"
+        listed = journal.list_screenshots()
+        assert len(listed) == 1
+        assert listed[0]["data_url"] == _b64_url(b"png-bytes")
+
+    def test_extension_follows_content_type(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"jpg-bytes", "image/jpeg"))
+        assert (tmp_path / "journal_screenshots" / f"{row['id']}.jpg").exists()
+
+    def test_dedupe_on_trade_key_and_hash(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        first, created_first = journal.add_screenshot("trade-1", _b64_url(b"same"))
+        second, created_second = journal.add_screenshot("trade-1", _b64_url(b"same"))
+        assert created_first is True
+        assert created_second is False
+        assert second["id"] == first["id"]
+        # Different content on the same trade, or the same content on another
+        # trade, both create fresh rows.
+        _, other_content = journal.add_screenshot("trade-1", _b64_url(b"different"))
+        _, other_trade = journal.add_screenshot("trade-2", _b64_url(b"same"))
+        assert other_content is True
+        assert other_trade is True
+        assert len(journal.list_screenshots()) == 3
+
+    def test_bad_content_type_rejected(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        with pytest.raises(ValueError, match="PNG, JPEG, WebP, or GIF"):
+            journal.add_screenshot("trade-1", _b64_url(b"x", "image/svg+xml"))
+        with pytest.raises(ValueError, match="data URL"):
+            journal.add_screenshot("trade-1", "https://example.invalid/x.png")
+
+    def test_oversize_rejected(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        with pytest.raises(ValueError, match="2 MiB"):
+            journal.add_screenshot("trade-1", _b64_url(b"x" * (2 * 1024 * 1024 + 1)))
+        # Exactly 2 MiB is accepted.
+        _, created = journal.add_screenshot("trade-1", _b64_url(b"x" * (2 * 1024 * 1024)))
+        assert created is True
+
+    def test_trade_key_validation(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        with pytest.raises(ValueError, match="trade_key"):
+            journal.add_screenshot("", _b64_url(b"x"))
+        with pytest.raises(ValueError, match="trade_key"):
+            journal.add_screenshot("k" * 301, _b64_url(b"x"))
+
+    def test_delete_removes_row_and_file(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
+        assert stored.exists()
+        assert journal.delete_screenshot(row["id"]) is True
+        assert not stored.exists()
+        assert journal.list_screenshots() == []
+        assert journal.delete_screenshot(row["id"]) is False
+
+    def test_list_skips_rows_with_missing_files(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        (tmp_path / "journal_screenshots" / f"{row['id']}.png").unlink()
+        assert journal.list_screenshots() == []
+
+    def test_screenshots_dir_defaults_next_to_sqlite_file(self, tmp_path):
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        journal = TradeJournal(tmp_path / "journal.sqlite")
+        journal.initialise()
+        try:
+            assert journal.screenshots_dir == tmp_path / "journal_screenshots"
+            row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+            assert (tmp_path / "journal_screenshots" / f"{row['id']}.png").exists()
+        finally:
+            journal.close()

@@ -17,6 +17,9 @@
  *   - Escape key collapses the panel.
  *   - Hidden on small screens (< sm breakpoint) to avoid obscuring content.
  *   - SSE streaming from /ft-api/api/v1/advisor/stream with non-streaming fallback.
+ *   - Sends session_id on real (non-demo) auth sessions — same gating as
+ *     AIAdvisorWidget — so tutor chats are captured in the server-side
+ *     AI session store.
  *
  * Animation:
  *   - Pill uses scale + opacity spring for hover glow.
@@ -105,11 +108,18 @@ async function streamAdvisorMessage(
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
   activeWidget?: string | null,
+  sessionId?: string,
 ): Promise<string> {
   const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, context: { route, activeWidget: activeWidget ?? null } }),
+    // session_id enables server-side session capture (AI2 recall); omitted
+    // for demo sessions so fabricated chats never persist.
+    body: JSON.stringify({
+      messages,
+      context: { route, activeWidget: activeWidget ?? null },
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }),
     signal,
   });
 
@@ -164,6 +174,7 @@ async function postAdvisorMessage(
   route: string,
   signal?: AbortSignal,
   activeWidget?: string | null,
+  sessionId?: string,
 ): Promise<string> {
   const resp = await fetch(`${getAdvisorBase()}/api/v1/advisor`, {
     method: "POST",
@@ -172,6 +183,7 @@ async function postAdvisorMessage(
       messages,
       message: messages[messages.length - 1]?.content ?? "",
       context: { route, activeWidget: activeWidget ?? null },
+      ...(sessionId ? { session_id: sessionId } : {}),
     }),
     signal,
   });
@@ -447,6 +459,13 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
     // Build the conversation payload from the current store snapshot + the new user message
     const snapshot = useAIConversationStore.getState().messages;
     const conversationPayload = snapshot.map((m) => ({ role: m.role, content: m.content }));
+    // AI2 session capture id — real sessions only, never demo/explore tokens
+    // (identical gating to AIAdvisorWidget so tutor chats persist server-side).
+    const authToken = useAuthStore.getState().token;
+    const captureSessionId =
+      authToken && authToken !== "demo-user" && authToken !== "dev-bypass"
+        ? useAIConversationStore.getState().conversationId ?? undefined
+        : undefined;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -476,6 +495,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
         },
         controller.signal,
         activeWidget,
+        captureSessionId,
       );
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -492,6 +512,7 @@ function ExpandedPanel({ onClose, routeName, currentRoute, isConfigured, activeW
             currentRoute,
             controller.signal,
             activeWidget,
+            captureSessionId,
           );
           addMessage("assistant", reply);
         } catch (fallbackErr: unknown) {

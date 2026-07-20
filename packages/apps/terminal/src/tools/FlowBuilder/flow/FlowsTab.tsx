@@ -1,11 +1,14 @@
 /**
- * FlowsTab — list view of saved flows within FlowBuilderTool.
+ * FlowsTab — list view of flows saved in the backend workspace, within
+ * FlowBuilderTool. Server state via TanStack Query (["flows"]).
  */
 
-import { CheckCircle2, Play, XCircle, Pause, Workflow, Plus, FolderOpen, Trash2, Package } from "lucide-react";
+import { CheckCircle2, Play, XCircle, Pause, Workflow, Plus, FolderOpen, Trash2, Package, AlertTriangle, Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useFlowStore } from "@/stores/flowStore";
+import { deleteFlow, listFlows } from "@/services/ftApi.flows";
 import { getTotalNodeCount } from "./nodeRegistry";
 
 // ---------------------------------------------------------------------------
@@ -38,14 +41,37 @@ export interface FlowsTabProps {
 }
 
 export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
-  const savedFlows = useFlowStore((s) => s.savedFlows);
-  const deleteFlow = useFlowStore((s) => s.deleteFlow);
+  const queryClient = useQueryClient();
+
+  const flowsQuery = useQuery({
+    queryKey: ["flows"],
+    queryFn: listFlows,
+    staleTime: 15_000,
+  });
+  const flows = flowsQuery.data ?? [];
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteFlow(id),
+    onSuccess: (_result, id) => {
+      // If the deleted flow is open in the editor, drop the stale canvas.
+      const { activeFlowId, clearCanvas, setActiveFlowId } = useFlowStore.getState();
+      if (activeFlowId === id) {
+        clearCanvas();
+        setActiveFlowId(null);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    },
+  });
 
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
         <span className="text-xs text-text-secondary">
-          {savedFlows.length} flow{savedFlows.length !== 1 ? "s" : ""} saved
+          {flowsQuery.isSuccess
+            ? `${flows.length} flow${flows.length !== 1 ? "s" : ""} saved in your workspace`
+            : flowsQuery.isError
+              ? "Saved flows unavailable"
+              : "Loading saved flows…"}
         </span>
         <div className="flex items-center gap-2">
           <Button
@@ -68,7 +94,26 @@ export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
         </div>
       </div>
 
-      {savedFlows.length === 0 ? (
+      {deleteMutation.isError && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-atm-border bg-atm-bg px-3 py-2 text-xs text-text-secondary">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
+          <span>Could not delete the flow: {(deleteMutation.error as Error).message}</span>
+        </div>
+      )}
+
+      {flowsQuery.isError ? (
+        <div className="flex items-start gap-2 rounded-md border border-atm-border bg-atm-bg px-3 py-2 text-xs text-text-secondary">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-400" />
+          <span>
+            Could not load saved flows — {(flowsQuery.error as Error).message}
+          </span>
+        </div>
+      ) : flowsQuery.isPending ? (
+        <div className="flex items-center justify-center gap-2 py-14 text-xs text-text-muted">
+          <Loader2 size={14} className="animate-spin" />
+          Loading saved flows…
+        </div>
+      ) : flows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-14 text-center">
           <div className="w-14 h-14 rounded-full bg-surface-card border border-border-default flex items-center justify-center mb-4">
             <Workflow size={20} className="text-text-muted" />
@@ -100,7 +145,7 @@ export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
         </div>
       ) : (
         <div className="grid gap-2">
-          {savedFlows.map((flow) => (
+          {flows.map((flow) => (
             <Card
               key={flow.id}
               className="bg-surface-card border-border-default hover:border-border-strong transition-colors cursor-default"
@@ -116,8 +161,7 @@ export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
                   </span>
                 </div>
                 <div className="flex items-center gap-3 mt-2 ml-5 text-xs text-text-muted">
-                  <span>{flow.nodes.length} nodes</span>
-                  <span>{flow.edges.length} edges</span>
+                  <span>{flow.node_count} nodes</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2 ml-5">
                   <Button
@@ -133,7 +177,8 @@ export function FlowsTab({ onNew, onOpen, onFromTemplate }: FlowsTabProps) {
                     size="sm"
                     variant="ghost"
                     className="h-6 px-2 text-xs text-red-400 hover:text-red-300 gap-1"
-                    onClick={() => deleteFlow(flow.id)}
+                    disabled={deleteMutation.isPending}
+                    onClick={() => deleteMutation.mutate(flow.id)}
                   >
                     <Trash2 size={11} />
                     Delete

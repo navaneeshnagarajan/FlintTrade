@@ -1,10 +1,15 @@
 /**
  * FlowCanvas — React Flow canvas editor for a single flow.
+ *
+ * Saving PUTs the workflow to the backend flow store (upsert) and refreshes
+ * the ["flows"] list query; the toolbar label only claims "saved" after the
+ * backend confirmed the write.
  */
 
 import "@xyflow/react/dist/style.css";
 
 import React, { useState, useCallback, type DragEvent } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ReactFlow,
   Background,
@@ -15,7 +20,9 @@ import {
 } from "@xyflow/react";
 import { Workflow, Save, Trash2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
+import { putFlow } from "@/services/ftApi.flows";
 import { useFlowStore } from "@/stores/flowStore";
 import { NodePalette, DRAG_MIME } from "./NodePalette";
 import { ConfigPanel } from "./ConfigPanel";
@@ -52,13 +59,35 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   const onConnect = useFlowStore((s) => s.onConnect);
   const addNode = useFlowStore((s) => s.addNode);
   const selectNode = useFlowStore((s) => s.selectNode);
-  const saveFlowById = useFlowStore((s) => s.saveFlowById);
   const clearCanvas = useFlowStore((s) => s.clearCanvas);
   const addLogEntry = useFlowStore((s) => s.addLogEntry);
 
+  const queryClient = useQueryClient();
   const [name, setName] = useState(flowName);
   const [saved, setSaved] = useState(true);
   const [logCollapsed, setLogCollapsed] = useState(false);
+
+  const saveMutation = useMutation({
+    mutationFn: putFlow,
+    onSuccess: (result, flow) => {
+      setSaved(true);
+      addLogEntry(
+        "success",
+        `Workflow "${flow.name}" saved to your workspace (${flow.nodes.length} nodes, ${flow.edges.length} edges)`
+      );
+      const warnings = Array.isArray(result.validation) ? result.validation.length : 0;
+      if (warnings > 0) {
+        addLogEntry(
+          "warning",
+          `Backend reported ${warnings} validation issue${warnings === 1 ? "" : "s"} for this flow`
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["flows"] });
+    },
+    onError: (error: Error, flow) => {
+      addLogEntry("error", `Could not save "${flow.name}" to the workspace: ${error.message}`);
+    },
+  });
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -144,9 +173,13 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   );
 
   function handleSave(): void {
-    saveFlowById(flowId, nodes, edges, name);
-    setSaved(true);
-    addLogEntry("success", `Workflow "${name}" saved (${nodes.length} nodes, ${edges.length} edges)`);
+    saveMutation.mutate({
+      id: flowId,
+      name,
+      nodes,
+      edges,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   function handleClear(): void {
@@ -170,24 +203,30 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-text-muted hover:text-text-primary"
             onClick={onBack}
-            style={{ color: "var(--color-text-muted)", background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex", alignItems: "center" }}
             aria-label="Back to flow list"
           >
-            <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} />
-          </button>
-          <input
+            <ChevronRight size={14} className="rotate-180" />
+          </Button>
+          <Input
             aria-label="Flow name"
             value={name}
             onChange={(e) => { setName(e.target.value); setSaved(false); }}
-            style={{ fontSize: 12, fontWeight: 600, background: "transparent", border: "1px solid transparent", borderRadius: 4, color: "var(--color-text)", padding: "2px 6px", outline: "none" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "var(--color-border)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "transparent"; }}
+            className="h-6 w-44 px-1.5 text-xs font-semibold bg-transparent border-transparent hover:border-border-default focus-visible:border-border-default rounded"
           />
-          {!saved && (
+          {saveMutation.isPending ? (
+            <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>Saving…</span>
+          ) : saveMutation.isError && !saved ? (
+            <span style={{ fontSize: 10, color: "var(--color-bearish, #f87171)" }}>
+              Not saved — {saveMutation.error.message}
+            </span>
+          ) : !saved ? (
             <span style={{ fontSize: 10, color: "var(--color-text-muted)" }}>Unsaved</span>
-          )}
+          ) : null}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -209,10 +248,10 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
             size="sm"
             className="h-6 px-3 bg-primary hover:bg-primary/90 text-white text-xs gap-1"
             onClick={handleSave}
-            disabled={saved}
+            disabled={saved || saveMutation.isPending}
           >
             <Save size={11} />
-            Save
+            {saveMutation.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>

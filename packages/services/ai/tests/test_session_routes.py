@@ -78,6 +78,101 @@ def test_unavailable_store_503s(app: Flask) -> None:
     client = app.test_client()
     assert client.get("/api/v1/ai/sessions").status_code == 503
     assert client.get("/api/v1/ai/sessions/search?q=x").status_code == 503
+    assert (
+        client.post(
+            "/api/v1/ai/sessions/import",
+            json={"surface": "saved-chat", "messages": [{"role": "user", "content": "x"}]},
+        ).status_code
+        == 503
+    )
+
+
+def test_import_roundtrip(app: Flask) -> None:
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={
+            "id": "conv-42",
+            "surface": "saved-chat",
+            "title": "Iron condor walkthrough",
+            "messages": [
+                {"role": "user", "content": "Explain the iron condor payoff.", "timestamp": 1720000000000},
+                {"role": "assistant", "content": "Sell an OTM call spread and an OTM put spread."},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"session_id": "conv-42"}
+
+    session = client.get("/api/v1/ai/sessions/conv-42").get_json()["data"]
+    assert session["surface"] == "saved-chat"
+    assert session["title"] == "Iron condor walkthrough"
+    assert [m["role"] for m in session["messages"]] == ["user", "assistant"]
+    # timestamp ms → ISO created_at (2024-07-03T09:46:40 UTC).
+    assert session["messages"][0]["created_at"] == "2024-07-03T09:46:40+00:00"
+
+
+def test_import_requires_the_write_guard(app: Flask) -> None:
+    def guard() -> Any:
+        return jsonify({"status": "error", "message": "operator session required"}), 401
+
+    app.config["BROKER_MGMT_WRITE_GUARD"] = guard
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={"surface": "saved-chat", "messages": [{"role": "user", "content": "x"}]},
+    )
+    assert resp.status_code == 401
+    # Nothing was written past the guard.
+    app.config["BROKER_MGMT_WRITE_GUARD"] = lambda: None
+    assert client.get("/api/v1/ai/sessions").get_json()["data"][0]["id"] == "s1"
+    assert len(client.get("/api/v1/ai/sessions").get_json()["data"]) == 1
+
+
+def test_import_is_idempotent(app: Flask) -> None:
+    client = app.test_client()
+    payload = {
+        "surface": "tutor",
+        "messages": [
+            {"role": "user", "content": "What is theta decay?"},
+            {"role": "assistant", "content": "The daily erosion of option time value."},
+        ],
+    }
+    first = client.post("/api/v1/ai/sessions/import", json=payload)
+    second = client.post("/api/v1/ai/sessions/import", json=payload)
+    assert first.status_code == second.status_code == 200
+    session_id = first.get_json()["data"]["session_id"]
+    # No id in the body → deterministic derived id, stable across re-imports.
+    assert second.get_json()["data"]["session_id"] == session_id
+    session = client.get(f"/api/v1/ai/sessions/{session_id}").get_json()["data"]
+    assert len(session["messages"]) == 2
+
+
+def test_import_caps_and_validation(app: Flask) -> None:
+    client = app.test_client()
+
+    def post(body: Any) -> int:
+        return client.post("/api/v1/ai/sessions/import", json=body).status_code
+
+    ok = {"surface": "saved-chat", "messages": [{"role": "user", "content": "x"}]}
+    assert post(ok) == 200
+    # Surface allowlist excludes "agent" (and unknowns) for imports.
+    assert post({**ok, "surface": "agent"}) == 400
+    assert post({**ok, "surface": ""}) == 400
+    # messages must be a non-empty list of objects.
+    assert post({"surface": "saved-chat"}) == 400
+    assert post({"surface": "saved-chat", "messages": []}) == 400
+    assert post({"surface": "saved-chat", "messages": "nope"}) == 400
+    assert post({"surface": "saved-chat", "messages": ["nope"]}) == 400
+    # ≤ 500 messages.
+    too_many = [{"role": "user", "content": f"m{i}"} for i in range(501)]
+    assert post({"surface": "saved-chat", "messages": too_many}) == 400
+    # ≤ 32 KiB per message content.
+    big = {"role": "user", "content": "x" * (32 * 1024 + 1)}
+    assert post({"surface": "saved-chat", "messages": [big]}) == 400
+    # All-skippable messages store nothing and say so.
+    assert post({"surface": "saved-chat", "messages": [{"role": "system", "content": "prompt"}]}) == 400
+    assert post("not an object") == 400
 
 
 def test_advisor_capture_is_wired_and_best_effort() -> None:

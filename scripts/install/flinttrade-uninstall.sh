@@ -319,9 +319,9 @@ keep_notice() {
   local target
   for target in "${DATA_TARGETS[@]}"; do
     if [ "$target" = "$WEBVIEW_STORAGE_DIR" ]; then
-      say "In-app saved content kept at $target (journal notes, flows, saved AI chats)."
+      say "In-app saved content kept at $target (content saved by older versions; current versions store journal notes, flows, and AI chats in the workspace)."
     else
-      say "Workspace data kept at $target (credential vault, journals, settings)."
+      say "Workspace data kept at $target (credential vault, journals, settings, in-app content)."
     fi
   done
   say "To delete all FlintTrade data too, re-run with --purge."

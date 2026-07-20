@@ -1,14 +1,16 @@
-"""AI session routes — list / read / search / delete persisted chat sessions.
+"""AI session routes — list / read / search / import / delete chat sessions.
 
 Read surface for the :class:`flinttrade_ai.session_store.AiSessionStore`
 (reference-map AI2). Registered under ``/api/v1/ai/sessions``. Reads follow
-the /api/v1 family's auth; deletes additionally require the operator session
-via the app-configured write guard (same dependency direction as the broker
-management guard, G9).
+the /api/v1 family's auth; imports and deletes additionally require the
+operator session via the app-configured write guard (same dependency
+direction as the broker management guard, G9).
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import hashlib
 import logging
 from typing import Any
 
@@ -19,6 +21,12 @@ from .session_store import AiSessionStore
 logger = logging.getLogger("flinttrade.ai.session_routes")
 
 session_bp = Blueprint("ai_sessions", __name__, url_prefix="/api/v1/ai/sessions")
+
+# Import caps (localStorage-migration spec §4): surfaces the one-time client
+# import may write, and hard limits that keep a single request bounded.
+_IMPORT_SURFACES = {"advisor", "tutor", "saved-chat"}
+_IMPORT_MAX_MESSAGES = 500
+_IMPORT_MAX_CONTENT_BYTES = 32 * 1024
 
 
 def _store() -> AiSessionStore | None:
@@ -34,7 +42,7 @@ def list_sessions() -> tuple[Any, int]:
     """Newest-first session summaries.
 
     Query parameters:
-        limit (int, default 50), surface (advisor|tutor|agent, optional).
+        limit (int, default 50), surface (advisor|tutor|agent|saved-chat, optional).
     """
     store = _store()
     if store is None:
@@ -72,6 +80,88 @@ def get_session(session_id: str) -> tuple[Any, int]:
     if session is None:
         return jsonify({"status": "error", "message": "Session not found"}), 404
     return jsonify({"status": "success", "data": session}), 200
+
+
+def _derived_import_id(surface: str, messages: list[dict[str, Any]]) -> str:
+    """Deterministic session id for imports without one (idempotent re-import)."""
+    digest = hashlib.sha1()
+    digest.update(surface.encode())
+    for message in messages:
+        digest.update(b"\x00")
+        digest.update(str(message.get("role", "") or "").encode())
+        digest.update(b"\x00")
+        digest.update(str(message.get("content", "") or "").encode())
+    return f"imp-{digest.hexdigest()[:20]}"
+
+
+@session_bp.route("/import", methods=["POST"])
+def import_session() -> tuple[Any, int]:
+    """Import a client-held conversation (operator-session-guarded write).
+
+    Body: ``{id?, surface, title?, messages: [{role, content,
+    timestamp?: ms}]}``. The store's content-hash message ids make
+    re-imports idempotent; a message ``timestamp`` (epoch milliseconds)
+    becomes its stored ``created_at``.
+    """
+    guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
+    if callable(guard):
+        denied = guard()
+        if denied is not None:
+            return denied
+    store = _store()
+    if store is None:
+        return _unavailable()
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "message": "Request body must be a JSON object"}), 400
+    surface = str(body.get("surface", "") or "").strip()
+    if surface not in _IMPORT_SURFACES:
+        return (
+            jsonify({"status": "error", "message": f"surface must be one of {sorted(_IMPORT_SURFACES)}"}),
+            400,
+        )
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"status": "error", "message": "messages must be a non-empty list"}), 400
+    if len(messages) > _IMPORT_MAX_MESSAGES:
+        return (
+            jsonify(
+                {"status": "error", "message": f"messages must contain at most {_IMPORT_MAX_MESSAGES} entries"}
+            ),
+            400,
+        )
+
+    prepared: list[dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            return jsonify({"status": "error", "message": "each message must be an object"}), 400
+        content = str(message.get("content", "") or "")
+        if len(content.encode("utf-8")) > _IMPORT_MAX_CONTENT_BYTES:
+            return (
+                jsonify({"status": "error", "message": "message content must be at most 32 KiB"}),
+                400,
+            )
+        entry: dict[str, Any] = {"role": message.get("role"), "content": content}
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool) and timestamp > 0:
+            try:
+                entry["created_at"] = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                pass  # Nonsense legacy timestamps fall back to the import time.
+        prepared.append(entry)
+
+    session_id = str(body.get("id", "") or "").strip() or _derived_import_id(surface, prepared)
+    title_raw = body.get("title")
+    title = title_raw.strip() if isinstance(title_raw, str) and title_raw.strip() else None
+    try:
+        store.record_exchange(session_id, surface, prepared, title=title)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    if store.get_session(session_id) is None:
+        # Every message was skipped (blank content / unknown roles) — nothing stored.
+        return jsonify({"status": "error", "message": "messages contained no importable entries"}), 400
+    return jsonify({"status": "success", "data": {"session_id": session_id}}), 200
 
 
 @session_bp.route("/<session_id>", methods=["DELETE"])

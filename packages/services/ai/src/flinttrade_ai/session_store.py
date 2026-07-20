@@ -31,7 +31,7 @@ logger = logging.getLogger("flinttrade.ai.session_store")
 
 _T = TypeVar("_T")
 
-_VALID_SURFACES = {"advisor", "tutor", "agent"}
+_VALID_SURFACES = {"advisor", "tutor", "agent", "saved-chat"}
 _TITLE_MAX_CHARS = 120
 _DEFAULT_MAX_SESSIONS = 500
 
@@ -117,19 +117,26 @@ class AiSessionStore:
         session_id: str,
         surface: str,
         messages: list[dict[str, Any]],
+        *,
+        title: str | None = None,
     ) -> int:
         """Upsert a session and insert any NEW messages (idempotent by id).
 
         Args:
             session_id: Stable client-owned conversation id.
-            surface: One of ``advisor``/``tutor``/``agent``.
-            messages: ``{role, content}`` dicts (``id`` optional) — the full
-                history is fine on every call. When ``id`` is absent, a
-                deterministic content-hash id is derived, so the same
-                (session, role, content) never inserts twice across requests
-                regardless of client-side ids. (Identical repeated texts in
-                one session therefore collapse to one row — acceptable for a
-                search store.)
+            surface: One of ``advisor``/``tutor``/``agent``/``saved-chat``.
+            messages: ``{role, content}`` dicts (``id`` and ``created_at``
+                optional) — the full history is fine on every call. When
+                ``id`` is absent, a deterministic content-hash id is derived,
+                so the same (session, role, content) never inserts twice
+                across requests regardless of client-side ids. (Identical
+                repeated texts in one session therefore collapse to one row —
+                acceptable for a search store.) When ``created_at`` (ISO
+                string) is present it is stored verbatim so imported
+                conversations keep their original message times; otherwise
+                the recording time is used.
+            title: Optional explicit session title (imports carry one). When
+                absent the title derives from the first user message.
 
         Returns:
             Number of newly inserted messages.
@@ -145,7 +152,7 @@ class AiSessionStore:
             raise ValueError(f"surface must be one of {sorted(_VALID_SURFACES)}")
 
         now = _now_iso()
-        clean: list[tuple[str, str, str]] = []
+        clean: list[tuple[str, str, str, str]] = []
         for message in messages:
             role = str(message.get("role", "") or "").strip()
             content = str(message.get("content", "") or "")
@@ -157,12 +164,15 @@ class AiSessionStore:
                     f"{session_id}:{role}:{content}".encode()
                 ).hexdigest()[:20]
                 message_id = f"h-{digest}"
-            clean.append((message_id, role, content))
+            created_at = str(message.get("created_at", "") or "").strip() or now
+            clean.append((message_id, role, content, created_at))
         if not clean:
             return 0
 
-        first_user = next((c for (_i, r, c) in clean if r == "user"), clean[0][2])
-        title = first_user.strip().replace("\n", " ")[:_TITLE_MAX_CHARS]
+        session_title = (title or "").strip().replace("\n", " ")[:_TITLE_MAX_CHARS]
+        if not session_title:
+            first_user = next((c for (_i, r, c, _t) in clean if r == "user"), clean[0][2])
+            session_title = first_user.strip().replace("\n", " ")[:_TITLE_MAX_CHARS]
 
         self._conn.execute(
             """
@@ -170,16 +180,16 @@ class AiSessionStore:
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET last_at = excluded.last_at
             """,
-            (session_id, surface, title, now, now),
+            (session_id, surface, session_title, now, now),
         )
         inserted = 0
-        for message_id, role, content in clean:
+        for message_id, role, content, created_at in clean:
             cursor = self._conn.execute(
                 """
                 INSERT OR IGNORE INTO messages (id, session_id, role, content, created_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (message_id, session_id, role, content, now),
+                (message_id, session_id, role, content, created_at),
             )
             inserted += cursor.rowcount if cursor.rowcount > 0 else 0
         self._conn.commit()

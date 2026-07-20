@@ -1,13 +1,14 @@
 /**
  * flowStore.ts — Zustand store for the Flow Builder tool.
  *
- * Manages React Flow nodes/edges, selection, execution state, and
- * localStorage persistence for saved workflows.
+ * Canvas/UI state ONLY: React Flow nodes/edges being edited, selection,
+ * execution log, and the id of the flow currently open in the editor.
+ * Saved workflows persist on the FlintTrade backend via
+ * :mod:`services/ftApi.flows` (TanStack Query owns that server state) — this
+ * store no longer reads or writes localStorage.
  */
 
 import { create } from "zustand";
-import { z } from "zod";
-import { safeParse } from "@/lib/safeParse";
 import {
   applyNodeChanges,
   applyEdgeChanges,
@@ -41,16 +42,16 @@ export interface FlowNodeData extends Record<string, unknown> {
   config: Record<string, string>;
 }
 
+/**
+ * A saved workflow document — the shape stored verbatim by the backend flow
+ * store (``PUT /api/v1/flows/<id>``) and used by templates/canvas loading.
+ */
 export interface SavedWorkflow {
   id: string;
   name: string;
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
   updatedAt: string;
-}
-
-interface StoredData {
-  flows: SavedWorkflow[];
 }
 
 interface FlowState {
@@ -61,8 +62,7 @@ interface FlowState {
   isRunning: boolean;
   executionLog: LogEntry[];
 
-  // Saved workflows (localStorage)
-  savedFlows: SavedWorkflow[];
+  /** Id of the flow currently open in the editor (null = none). */
   activeFlowId: string | null;
 
   // React Flow handlers
@@ -80,52 +80,12 @@ interface FlowState {
   // Canvas actions
   loadWorkflowIntoCanvas: (workflow: SavedWorkflow) => void;
   clearCanvas: () => void;
-
-  // Persistence actions
-  saveCurrentFlow: (name: string) => void;
-  createNewFlow: (name: string) => string;
-  deleteFlow: (id: string) => void;
-  openFlow: (id: string) => void;
-  saveFlowById: (id: string, nodes: Node<FlowNodeData>[], edges: Edge[], name: string) => void;
+  setActiveFlowId: (id: string | null) => void;
 
   // Execution log
   addLogEntry: (level: LogLevel, message: string) => void;
   clearLog: () => void;
   setRunning: (running: boolean) => void;
-}
-
-// ---------------------------------------------------------------------------
-// LocalStorage helpers
-// ---------------------------------------------------------------------------
-
-const LS_KEY = "flinttrade_flowbuilder_v2";
-
-// Minimal schema — nodes/edges are complex React Flow types; we validate the
-// wrapper shape and trust that the flow canvas handles malformed node data
-// gracefully. The key invariant is that `flows` is an array and each entry has
-// an id and name so the sidebar can render correctly.
-const storedDataSchema = z.object({
-  flows: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      nodes: z.array(z.unknown()),
-      edges: z.array(z.unknown()),
-      updatedAt: z.string(),
-    }).passthrough(),
-  ),
-}) as z.ZodType<StoredData>;
-
-function loadStored(): StoredData {
-  return safeParse(localStorage.getItem(LS_KEY), storedDataSchema) ?? { flows: [] };
-}
-
-function saveStored(data: StoredData): void {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-  } catch {
-    // ignore quota errors
-  }
 }
 
 let logCounter = 1;
@@ -137,15 +97,12 @@ function genLogId(): string {
 // Store
 // ---------------------------------------------------------------------------
 
-const initial = loadStored();
-
-export const useFlowStore = create<FlowState>((set, get) => ({
+export const useFlowStore = create<FlowState>((set) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
   isRunning: false,
   executionLog: [],
-  savedFlows: initial.flows,
   activeFlowId: null,
 
   // --- React Flow built-in handlers ---
@@ -235,76 +192,8 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set({ nodes: [], edges: [], selectedNodeId: null });
   },
 
-  // --- Persistence ---
-
-  saveCurrentFlow: (name) => {
-    const { nodes, edges, activeFlowId, savedFlows } = get();
-    if (!activeFlowId) return;
-    const updated: SavedWorkflow = {
-      id: activeFlowId,
-      name,
-      nodes,
-      edges,
-      updatedAt: new Date().toISOString(),
-    };
-    const nextFlows = savedFlows.map((f) => (f.id === activeFlowId ? updated : f));
-    set({ savedFlows: nextFlows });
-    saveStored({ flows: nextFlows });
-  },
-
-  saveFlowById: (id, nodes, edges, name) => {
-    const { savedFlows } = get();
-    const updated: SavedWorkflow = {
-      id,
-      name,
-      nodes,
-      edges,
-      updatedAt: new Date().toISOString(),
-    };
-    const exists = savedFlows.some((f) => f.id === id);
-    const nextFlows = exists
-      ? savedFlows.map((f) => (f.id === id ? updated : f))
-      : [...savedFlows, updated];
-    set({ savedFlows: nextFlows });
-    saveStored({ flows: nextFlows });
-  },
-
-  createNewFlow: (name) => {
-    const id = `flow_${Date.now()}`;
-    const newFlow: SavedWorkflow = {
-      id,
-      name,
-      nodes: [],
-      edges: [],
-      updatedAt: new Date().toISOString(),
-    };
-    const { savedFlows } = get();
-    const nextFlows = [...savedFlows, newFlow];
-    set({ savedFlows: nextFlows, activeFlowId: id, nodes: [], edges: [], selectedNodeId: null });
-    saveStored({ flows: nextFlows });
-    return id;
-  },
-
-  deleteFlow: (id) => {
-    const { savedFlows, activeFlowId } = get();
-    const nextFlows = savedFlows.filter((f) => f.id !== id);
-    set({
-      savedFlows: nextFlows,
-      activeFlowId: activeFlowId === id ? null : activeFlowId,
-    });
-    saveStored({ flows: nextFlows });
-  },
-
-  openFlow: (id) => {
-    const { savedFlows } = get();
-    const flow = savedFlows.find((f) => f.id === id);
-    if (!flow) return;
-    set({
-      nodes: flow.nodes,
-      edges: flow.edges,
-      selectedNodeId: null,
-      activeFlowId: id,
-    });
+  setActiveFlowId: (id) => {
+    set({ activeFlowId: id });
   },
 
   // --- Execution log ---

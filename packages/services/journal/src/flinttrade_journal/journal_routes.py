@@ -17,6 +17,12 @@ GET    /search?q=          — FTS5 search over symbol/notes/tags/strategy
 GET    /stats              — aggregate win rate / P&L / breakdowns
 GET    /export             — CSV export (text/csv attachment)
 POST   /import             — bulk import from OpenAlgo tradebook rows
+GET    /notes              — list daily notes (date desc, preview + word count)
+GET    /notes/<date>       — fetch one daily note (200 with empty content when absent)
+PUT    /notes/<date>       — upsert a daily note (empty content deletes it)
+GET    /screenshots        — list trade-log screenshots (with data URLs)
+POST   /screenshots        — attach a screenshot (dedupes per trade + content hash)
+DELETE /screenshots/<id>   — delete a screenshot (row + file on disk)
 
 Response conventions match the rest of the API: ``{"status": "success",
 "data": ...}`` / ``{"status": "error", "message": "..."}``; HTTP 503 when the
@@ -26,6 +32,7 @@ journal store has not been initialised.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
@@ -43,6 +50,11 @@ _journal: TradeJournal | None = None
 # Keys a client must never set directly on create/update — they are managed by
 # the model / store (identity + audit timestamps).
 _IMMUTABLE_KEYS = frozenset({"id", "created_at", "updated_at"})
+
+# Daily-note constraints: the day key is a plain ISO date; the content cap keeps
+# a single note bounded (a pathological PUT is a 400, not a bloating write).
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MAX_NOTE_CONTENT_CHARS = 100_000
 
 
 def init_journal_routes(journal: TradeJournal) -> None:
@@ -215,3 +227,95 @@ def import_tradebook() -> tuple[Response, int]:
         return _err("Request body must be a list of trades or {\"trades\": [...]}", 400)
     created = journal.import_from_tradebook(trades)
     return _ok({"created": created, "count": len(created)}, 201)
+
+
+# ---------------------------------------------------------------------------
+# Daily notes
+# ---------------------------------------------------------------------------
+
+
+@journal_bp.route("/notes", methods=["GET"])
+def list_daily_notes() -> tuple[Response, int]:
+    """List daily notes, newest date first (preview + word count per note)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    return _ok(journal.list_daily_notes())
+
+
+@journal_bp.route("/notes/<note_date>", methods=["GET"])
+def get_daily_note(note_date: str) -> tuple[Response, int]:
+    """Fetch the daily note for a date (200 with empty content when absent)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    if not _DATE_RE.match(note_date):
+        return _err("Date must be in YYYY-MM-DD format", 400)
+    note = journal.get_daily_note(note_date)
+    if note is None:
+        note = {"date": note_date, "content": "", "updated_at": None}
+    return _ok(note)
+
+
+@journal_bp.route("/notes/<note_date>", methods=["PUT"])
+def put_daily_note(note_date: str) -> tuple[Response, int]:
+    """Upsert the daily note for a date (empty content deletes it)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    if not _DATE_RE.match(note_date):
+        return _err("Date must be in YYYY-MM-DD format", 400)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _err("Request body must be a JSON object", 400)
+    content = body.get("content")
+    if not isinstance(content, str):
+        return _err("content must be a string", 400)
+    if len(content) > _MAX_NOTE_CONTENT_CHARS:
+        return _err("content exceeds the 100,000-character limit", 400)
+    return _ok(journal.upsert_daily_note(note_date, content))
+
+
+# ---------------------------------------------------------------------------
+# Trade-log screenshots
+# ---------------------------------------------------------------------------
+
+
+@journal_bp.route("/screenshots", methods=["GET"])
+def list_screenshots() -> tuple[Response, int]:
+    """List trade-log screenshots with re-encoded data URLs."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    return _ok(journal.list_screenshots())
+
+
+@journal_bp.route("/screenshots", methods=["POST"])
+def add_screenshot() -> tuple[Response, int]:
+    """Attach a screenshot to a trade (201 created / 200 when deduplicated)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _err("Request body must be a JSON object", 400)
+    trade_key = body.get("trade_key")
+    data_url = body.get("data_url")
+    if not isinstance(trade_key, str) or not isinstance(data_url, str):
+        return _err("trade_key and data_url must be strings", 400)
+    try:
+        row, created = journal.add_screenshot(trade_key, data_url)
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    return _ok(row, 201 if created else 200)
+
+
+@journal_bp.route("/screenshots/<screenshot_id>", methods=["DELETE"])
+def delete_screenshot(screenshot_id: str) -> tuple[Response, int]:
+    """Delete a screenshot (metadata row + file on disk)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    if not journal.delete_screenshot(screenshot_id):
+        return _err("Screenshot not found", 404)
+    return _ok({"deleted": screenshot_id})

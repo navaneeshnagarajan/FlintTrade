@@ -686,6 +686,32 @@ export const searchAiSessions = (query: string) =>
 export const getAiSession = (sessionId: string) =>
   get<AiSessionDetail>(`ai/sessions/${encodeURIComponent(sessionId)}`);
 
+/** Surfaces the session-import allowlist accepts. */
+export type AiSessionImportSurface = "advisor" | "tutor" | "saved-chat";
+
+export interface AiSessionImportMessage {
+  role: string;
+  content: string;
+  /** Client capture time in epoch milliseconds (mapped to ISO `created_at` server-side). */
+  timestamp?: number;
+}
+
+export interface AiSessionImportPayload {
+  /** Stable client id (e.g. the saved-chat conversation id) — makes re-imports idempotent. */
+  id?: string;
+  surface: AiSessionImportSurface;
+  title?: string;
+  messages: AiSessionImportMessage[];
+}
+
+/**
+ * Import a client-side conversation into the persistent AI session store
+ * (content-hash message ids keep re-imports idempotent server-side). Used by
+ * the saved-chat share flow and the one-time localStorage migration.
+ */
+export const importAiSession = (payload: AiSessionImportPayload) =>
+  post<{ session_id: string }>("ai/sessions/import", payload);
+
 /** Vault configuration + availability (never 503 — reports configured=false). */
 export const getObsidianStatus = () =>
   get<ObsidianStatus>("ai/obsidian/status");

@@ -44,6 +44,7 @@ vi.mock("@/stores/brokerStore", () => ({
 import {
   getSignalIdentity,
   getRecentSignals,
+  importAiSession,
   runTeamAnalysisStream,
   startAgent,
   type AgentSnapshot,
@@ -276,6 +277,49 @@ describe("getSignalIdentity", () => {
     };
 
     expect(getSignalIdentity({ ...restCard })).toBe(getSignalIdentity(restCard));
+  });
+});
+
+describe("importAiSession", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs the payload to ai/sessions/import and unwraps the session id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ status: "success", data: { session_id: "conv-1" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await importAiSession({
+      id: "conv-1",
+      surface: "saved-chat",
+      title: "Theta chat",
+      messages: [{ role: "user", content: "What is theta?", timestamp: 1_700_000_000_000 }],
+    });
+
+    expect(result).toEqual({ session_id: "conv-1" });
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/v1\/ai\/sessions\/import$/);
+    expect(requestBody(fetchMock)).toEqual({
+      id: "conv-1",
+      surface: "saved-chat",
+      title: "Theta chat",
+      messages: [{ role: "user", content: "What is theta?", timestamp: 1_700_000_000_000 }],
+    });
+  });
+
+  it("surfaces the backend guard refusal message instead of a bare status code", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      jsonResponse(
+        { status: "error", message: "Broker-management writes require an operator session." },
+        403,
+      ),
+    ));
+
+    await expect(
+      importAiSession({ surface: "tutor", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/operator session/i);
   });
 });
 

@@ -12,7 +12,7 @@
  * FT-API caller.
  */
 
-import { buildHeaders, del, get, getBase, patch, post } from "./ftApi.helpers";
+import { buildHeaders, del, get, getBase, patch, post, put } from "./ftApi.helpers";
 
 // ---------------------------------------------------------------------------
 // Types (mirror the backend contract exactly)
@@ -115,6 +115,40 @@ export interface JournalImportResult {
   count: number;
 }
 
+/**
+ * A single day's free-form trading notes, keyed by the IST trading day
+ * (``YYYY-MM-DD``). A missing note is served as ``content: ""`` with a null
+ * ``updated_at`` (HTTP 200), so callers never need a 404 branch.
+ */
+export interface DailyNote {
+  date: string;
+  content: string;
+  updated_at: string | null;
+}
+
+/** List row for daily notes — newest first, with a short content preview. */
+export interface DailyNoteSummary {
+  date: string;
+  updated_at: string;
+  word_count: number;
+  preview: string;
+}
+
+/**
+ * A chart screenshot attached to a trade-log row. ``trade_key`` is the stable
+ * row key (``timestamp|symbol|orderid``) for new attaches, or an opaque legacy
+ * key imported verbatim from the localStorage era. ``data_url`` is the
+ * re-encoded ``data:image/...;base64,`` payload ready for an ``<img src>``.
+ */
+export interface JournalScreenshot {
+  id: string;
+  trade_key: string;
+  content_type: string;
+  size: number;
+  created_at: string;
+  data_url: string;
+}
+
 // ---------------------------------------------------------------------------
 // Endpoints
 // ---------------------------------------------------------------------------
@@ -182,6 +216,54 @@ export const importJournalEntries = (
   trades: JournalEntryInput[],
 ): Promise<JournalImportResult> =>
   post<JournalImportResult>("journal/import", { trades });
+
+// ---------------------------------------------------------------------------
+// Daily notes (backend-persisted; replaces the localStorage-only NotesTab)
+// ---------------------------------------------------------------------------
+
+/** List all daily notes (date desc) with word counts and content previews. */
+export const listDailyNotes = (): Promise<DailyNoteSummary[]> =>
+  get<DailyNoteSummary[]>("journal/notes");
+
+/**
+ * Fetch the note for one IST trading day (``YYYY-MM-DD``). A day without a
+ * note resolves to ``{date, content: "", updated_at: null}`` — never a 404.
+ */
+export const getDailyNote = (date: string): Promise<DailyNote> =>
+  get<DailyNote>("journal/notes/" + encodeURIComponent(date));
+
+/**
+ * Upsert the note for one IST trading day; empty ``content`` deletes the
+ * stored row (the backend still returns the empty record).
+ */
+export const putDailyNote = (date: string, content: string): Promise<DailyNote> =>
+  put<DailyNote>("journal/notes/" + encodeURIComponent(date), { content });
+
+// ---------------------------------------------------------------------------
+// Trade-log screenshots (backend-persisted; replaces the localStorage map)
+// ---------------------------------------------------------------------------
+
+/** List every stored screenshot with its re-encoded ``data_url``. */
+export const listJournalScreenshots = (): Promise<JournalScreenshot[]> =>
+  get<JournalScreenshot[]>("journal/screenshots");
+
+/**
+ * Attach a screenshot (base64 data URL, ≤ 2 MiB decoded) to a trade-log row.
+ * The backend dedupes on ``(trade_key, content_sha256)`` and returns the
+ * existing row on a repeat POST, so retries and re-imports are safe.
+ */
+export const addJournalScreenshot = (
+  tradeKey: string,
+  dataUrl: string,
+): Promise<JournalScreenshot> =>
+  post<JournalScreenshot>("journal/screenshots", {
+    trade_key: tradeKey,
+    data_url: dataUrl,
+  });
+
+/** Delete a stored screenshot (row + file); resolves on 200, throws on 404. */
+export const deleteJournalScreenshot = (id: string): Promise<{ deleted: string }> =>
+  del<{ deleted: string }>("journal/screenshots/" + encodeURIComponent(id));
 
 /**
  * Absolute URL of the CSV export endpoint (``text/csv`` attachment).

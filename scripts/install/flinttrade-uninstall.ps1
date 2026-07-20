@@ -163,10 +163,10 @@ if ($Purge) {
     }
 } else {
     if (Test-Path -LiteralPath $WorkspaceDir) {
-        Say "Workspace data kept at $WorkspaceDir (credential vault, journals, settings)."
+        Say "Workspace data kept at $WorkspaceDir (credential vault, journals, settings, in-app content)."
     }
     if (Test-Path -LiteralPath $WebViewStorageDir) {
-        Say "In-app saved content kept at $WebViewStorageDir (journal notes, flows, saved AI chats)."
+        Say "In-app saved content kept at $WebViewStorageDir (content saved by older versions; current versions store journal notes, flows, and AI chats in the workspace)."
     }
     if ((Test-Path -LiteralPath $WorkspaceDir) -or (Test-Path -LiteralPath $WebViewStorageDir)) {
         Say "To delete all FlintTrade data too, re-run with -Purge (or set FLINTTRADE_UNINSTALL_PURGE=1)."

@@ -24,6 +24,8 @@ from .flow_builder import (
     SignalSource,
     ValidationResult,
 )
+from .flow_routes import flows_bp, init_flow_routes
+from .flow_store import FlowFileStore, FlowStoreError
 from .tradingview import TradingViewAlert, TradingViewWebhook
 from .voice_orders import VoiceCommand, VoiceOrderParser, voice_bp
 from .webhook_receiver import WebhookConfig, WebhookLogEntry, WebhookPayload, WebhookReceiver
@@ -49,6 +51,11 @@ __all__ = [
     "ActionType",
     "ExitType",
     "ValidationResult",
+    # Flow store + routes (saved FlowBuilder workflows)
+    "FlowFileStore",
+    "FlowStoreError",
+    "flows_bp",
+    "init_flow_routes",
     # Alerter
     "Alerter",
     "Alert",
