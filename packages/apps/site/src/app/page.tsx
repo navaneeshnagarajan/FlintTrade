@@ -53,18 +53,21 @@ const welcomeFeatures = [
 const desktopInstallOptions = [
   {
     platform: 'macOS',
-    artefacts: '.dmg',
-    instruction: 'Open the image, drag FlintTrade to Applications, then right-click Open on the first launch if the build is unsigned.',
+    artefacts: '.dmg (universal)',
+    instruction:
+      'The install script — curl -fsSL https://flinttrade.vercel.app/install.sh | bash — downloads without Gatekeeper quarantine; a manually downloaded image needs a one-time Open Anyway approval.',
   },
   {
     platform: 'Windows',
-    artefacts: '.exe',
-    instruction: 'Run the installer, launch FlintTrade from Start, and use the in-app Setup flow instead of editing environment files.',
+    artefacts: '.exe (per-user)',
+    instruction:
+      'The install script — irm https://flinttrade.vercel.app/install.ps1 | iex — verifies the SHA-256 and clears SmartScreen; the setup installs per-user with no admin rights needed.',
   },
   {
     platform: 'Linux',
-    artefacts: '.deb, .rpm, or .AppImage',
-    instruction: 'Install with your package manager or mark the AppImage executable, then launch the local desktop app.',
+    artefacts: '.AppImage',
+    instruction:
+      'One command — curl -fsSL https://flinttrade.vercel.app/install.sh | bash — installs the verified AppImage with a desktop entry and a flinttrade command, no sudo needed.',
   },
 ] as const;
 
