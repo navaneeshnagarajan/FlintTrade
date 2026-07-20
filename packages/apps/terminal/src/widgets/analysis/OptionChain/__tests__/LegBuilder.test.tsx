@@ -2,7 +2,8 @@
  * LegBuilder.test.tsx
  *
  * Unit tests for the multi-leg option strategy builder panel.
- * Covers: template application, leg CRUD, payoff maths, imperative handle.
+ * Covers: template application, leg CRUD, payoff maths, imperative handle,
+ * and strategy placement through the gated basket API (mocked).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,8 +16,21 @@ import { createRef } from "react";
 // Mocks
 // ---------------------------------------------------------------------------
 
+const basketOrderMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    status: "success",
+    strategy: "FlintLegBuilder",
+    timestamp: "2026-04-10T09:30:00+05:30",
+    placed_count: 2,
+    failed_count: 0,
+    rolled_back: false,
+    order_ids: ["ORD001", "ORD002"],
+    legs: [],
+  }),
+);
+
 vi.mock("@/services/api", () => ({
-  basketOrder: vi.fn().mockResolvedValue({ orderId: "ORD001" }),
+  basketOrder: basketOrderMock,
 }));
 
 // ---------------------------------------------------------------------------
@@ -264,7 +278,7 @@ describe("LegBuilder — metrics", () => {
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
     expect(screen.getByText(/Net/)).toBeInTheDocument();
-    // The footer's place action is present (deferred → "Coming soon" label).
+    // The footer's place action is present and live.
     expect(
       screen.getByRole("button", { name: /place strategy/i }),
     ).toBeInTheDocument();
@@ -295,10 +309,11 @@ describe("LegBuilder — metrics", () => {
   });
 });
 
-describe("LegBuilder — order placement (deferred)", () => {
-  // Strategy placement is currently deferred: the basket executor is not yet
-  // wired server-side, so the "Place Strategy" action degrades to an honest
-  // "Coming soon" state and never dispatches basketOrder (which would 503).
+describe("LegBuilder — order placement (gated basket path)", () => {
+  // Strategy placement dispatches basketOrder → POST /api/v1/orders/basket,
+  // which is live-gated server-side (require_live_unlocked → SafetySystem
+  // L1–L5 → gate_order → BrokerRouter per leg, atomic with rollback). The
+  // widget's job is to build the exact payload and surface honest outcomes.
   beforeEach(() => vi.clearAllMocks());
 
   it("does not render the place action with no legs", () => {
@@ -307,21 +322,72 @@ describe("LegBuilder — order placement (deferred)", () => {
     expect(screen.queryByRole("button", { name: /place strategy/i })).toBeNull();
   });
 
-  it("shows a disabled 'Coming soon' action when legs are present", async () => {
+  it("shows an enabled 'Place Strategy' action when legs are present", async () => {
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
-    const btn = screen.getByRole("button", { name: /place strategy \(coming soon\)/i });
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveTextContent(/coming soon/i);
+    const btn = screen.getByRole("button", { name: "Place strategy" });
+    expect(btn).toBeEnabled();
+    expect(btn).toHaveTextContent(/place strategy/i);
+    expect(btn).not.toHaveTextContent(/coming soon/i);
   });
 
-  it("never calls basketOrder when the deferred action is clicked", async () => {
-    const { basketOrder } = await import("@/services/api");
+  it("dispatches basketOrder with the exact per-leg contract for a straddle", async () => {
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("STR")); // SELL ATM CE + SELL ATM PE
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    expect(basketOrderMock).toHaveBeenCalledTimes(1);
+    // Field-by-field pin of the frontend basket contract: compact option
+    // symbols, quantity = lots × lotSize, MARKET/MIS, and NO price /
+    // trigger_price keys (MARKET legs must reach the backend as None).
+    expect(basketOrderMock).toHaveBeenCalledWith({
+      strategy: "FlintLegBuilder",
+      orders: [
+        {
+          symbol: "NIFTY10APR2622000CE",
+          exchange: "NFO",
+          action: "SELL",
+          quantity: 50,
+          orderType: "MARKET",
+          product: "MIS",
+        },
+        {
+          symbol: "NIFTY10APR2622000PE",
+          exchange: "NFO",
+          action: "SELL",
+          quantity: 50,
+          orderType: "MARKET",
+          product: "MIS",
+        },
+      ],
+    });
+  });
+
+  it("shows a placed-count toast when the basket succeeds", async () => {
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
-    const btn = screen.getByRole("button", { name: /place strategy \(coming soon\)/i });
-    // Disabled, so a click must be a no-op — fire directly to be certain.
-    fireEvent.click(btn);
-    expect(basketOrder).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("2 legs placed");
+  });
+
+  it("surfaces the backend refusal message when the basket is rejected", async () => {
+    // e.g. a SafetySystem admission block or a 422 rollback — postOrder throws
+    // with the server's message and the widget must show it verbatim.
+    basketOrderMock.mockRejectedValueOnce(new Error("Daily loss limit breached"));
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Daily loss limit breached");
+  });
+
+  it("refuses to dispatch without an expiry", async () => {
+    renderLegBuilder({ expiry: null });
+    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    expect(basketOrderMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent("Select an expiry first");
   });
 });

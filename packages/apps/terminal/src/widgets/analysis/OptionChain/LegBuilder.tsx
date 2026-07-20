@@ -10,8 +10,8 @@
  *     Bear Put Spread, Iron Condor, Butterfly, Custom
  *   - ATM-relative template auto-population with nearest-strike snapping
  *   - Net premium, max profit, max loss, breakeven(s) via payoff scan
- *   - Place Strategy button dispatches basketOrder (deferred: shows a
- *     "Coming soon" state until the backend basket executor is wired)
+ *   - Place Strategy button dispatches basketOrder through the gated backend
+ *     basket route (SafetySystem L1–L5 → gate_order → BrokerRouter per leg)
  *   - BUY legs: profit tint background; SELL legs: loss tint background
  *   - forwardRef exposes addLegFromStrike so OptionChainWidget can push
  *     strike-click events in when the panel is open
@@ -33,14 +33,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 /**
  * Whether multi-leg strategy placement is wired in this build.
  *
- * "Place Strategy" dispatches `basketOrder`, which hits the engine basket
- * executor (`/api/v1/orders/basket`). That executor is not yet wired into
- * the backend, so the route currently fails closed with a 503. Until it is
- * enabled, we present an honest "coming soon" state rather than letting the
- * click surface a raw 503 error toast. Flip this to `true` once the basket
- * executor is wired server-side.
+ * "Place Strategy" dispatches `basketOrder`, which posts to the backend basket
+ * route (`POST /api/v1/orders/basket` in `flinttrade_core.order_routes`). That
+ * route is live now: it sits behind `require_live_unlocked` + order rate
+ * limiting, pre-admits the whole basket through SafetySystem L1–L5, then
+ * executes atomically-with-rollback via the engine `BasketOrderExecutor`
+ * whose `place_leg` is the gated dispatcher (`gate_order` one-shot HMAC
+ * `SafetyContext` → `BrokerRouter` → broker adapter). The flag is kept as an
+ * honest degrade switch: should the executor ever be unbound again (the route
+ * then fails closed with a 503), flip it back to `false` so the button shows
+ * "Coming soon" instead of surfacing raw 503 toasts.
  */
-const STRATEGY_PLACEMENT_AVAILABLE = false;
+const STRATEGY_PLACEMENT_AVAILABLE: boolean = true;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -575,8 +579,8 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   async function handlePlaceStrategy() {
     if (legs.length < 1) return;
     if (!STRATEGY_PLACEMENT_AVAILABLE) {
-      // Basket executor is not yet wired — degrade honestly instead of
-      // dispatching an order that would fail closed with a 503.
+      // Honest degrade path — only reachable if the availability flag is
+      // flipped back off (e.g. the backend basket executor is unbound again).
       setOrderMsg({ text: "Strategy placement coming soon", ok: false });
       orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
       return;
@@ -589,21 +593,21 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
     setPlacing(true);
 
     try {
+      // All legs are MARKET/MIS — price and trigger price are intentionally
+      // omitted so the backend BasketLeg parses them as None.
       const orders = legs.map((leg) => ({
-        symbol:        buildCompactOptionSymbol(symLabel, expiry, leg.strike, leg.optionType)
+        symbol:    buildCompactOptionSymbol(symLabel, expiry, leg.strike, leg.optionType)
           ?? `${symLabel}${expiry}${leg.strike}${leg.optionType}`,
         exchange,
-        action:        leg.side,
-        quantity:      leg.lots * lotSize,
-        orderType:     "MARKET" as const,
-        product:       "MIS" as const,
-        price:         0,
-        trigger_price: 0,
-        strategy:      "FlintLegBuilder",
+        action:    leg.side,
+        quantity:  leg.lots * lotSize,
+        orderType: "MARKET" as const,
+        product:   "MIS" as const,
       }));
 
-      await basketOrder({ strategy: "FlintLegBuilder", orders });
-      setOrderMsg({ text: `${legs.length} leg${legs.length > 1 ? "s" : ""} placed`, ok: true });
+      const result = await basketOrder({ strategy: "FlintLegBuilder", orders });
+      const placed = result.placed_count;
+      setOrderMsg({ text: `${placed} leg${placed === 1 ? "" : "s"} placed`, ok: true });
       orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
     } catch (e) {
       setOrderMsg({ text: (e as Error).message || "Order failed", ok: false });
@@ -783,7 +787,9 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             Lot {lotSize}
           </span>
 
-          {/* Place Strategy — deferred until the basket executor is wired */}
+          {/* Place Strategy — dispatches the gated basket route; the "Coming
+              soon" branches only render if the availability flag is turned
+              back off (honest degrade, never a raw 503 toast) */}
           <button
             onClick={() => void handlePlaceStrategy()}
             disabled={!canPlace}

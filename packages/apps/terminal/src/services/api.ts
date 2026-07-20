@@ -20,6 +20,7 @@ import type {
   OrderStatusParams,
   OpenPositionParams,
   BasketOrderParams,
+  BasketOrderResult,
   SplitOrderParams,
   OptionsOrderParams,
   OptionsMultiOrderParams,
@@ -119,6 +120,14 @@ const NATIVE_READ_ENDPOINTS: Partial<Record<string, NativeReadKind>> = {
 };
 
 const NATIVE_ROUTED_ORDER_ENDPOINTS = new Set(["place", "modify", "cancel"]);
+
+// Endpoints with no `/<broker>/` path variant whose backend handler resolves the
+// broker principal from `broker` / `account_id` in the request body
+// (`_request_principal` → `_resolve_target` in order_routes / bracket_routes).
+// When a native write target is selected, the selectors MUST ride in the body —
+// otherwise the backend silently falls back to `brokers.execution.default`, a
+// different target than the operator chose.
+const TARGET_IN_BODY_ORDER_ENDPOINTS = new Set(["cancel-all", "basket"]);
 
 // Account-scoped native reads expose the REAL broker account (balances,
 // positions, order/trade book, margin). They must only surface in LIVE mode —
@@ -1811,7 +1820,7 @@ async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
     ? `${encodeURIComponent(nativeTarget.broker)}/${ftEndpoint}`
     : ftEndpoint;
   const requestBody = nativeTarget !== undefined && (
-    isNativeRoutedEndpoint || ftEndpoint === "cancel-all"
+    isNativeRoutedEndpoint || TARGET_IN_BODY_ORDER_ENDPOINTS.has(ftEndpoint)
   )
     ? { ...normalisedBody, broker: nativeTarget.broker, account_id: nativeTarget.accountId }
     : normalisedBody;
@@ -2009,8 +2018,25 @@ export const orderStatus = (params: OrderStatusParams) =>
   post<{ status: string }>("orderstatus", params);
 export const openPosition = (params: OpenPositionParams) =>
   postOrder<{ orderId: string }>("open-position", params);
+// The backend basket route (order_routes `place_basket`) reads a `legs` array
+// with snake_case per-leg fields; `normaliseOrderBody` only aliases top-level
+// keys, so the nested legs are mapped onto the wire contract here. `price` /
+// `trigger_price` are omitted when unset — the backend treats an absent key as
+// None (MARKET legs must not arrive as price 0 LIMIT-alikes).
 export const basketOrder = (params: BasketOrderParams) =>
-  postOrder<{ orderId: string }>("basket", params);
+  postOrder<BasketOrderResult>("basket", {
+    strategy: params.strategy ?? "basket",
+    legs: params.orders.map((leg) => ({
+      symbol: leg.symbol,
+      exchange: leg.exchange,
+      action: leg.action,
+      quantity: leg.quantity,
+      order_type: leg.orderType,
+      product: leg.product,
+      ...(leg.price !== undefined ? { price: leg.price } : {}),
+      ...(leg.triggerPrice !== undefined ? { trigger_price: leg.triggerPrice } : {}),
+    })),
+  });
 export const optionsOrder = (params: OptionsOrderParams) =>
   postOrder<{ orderId: string }>("options", params);
 export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>

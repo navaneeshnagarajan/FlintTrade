@@ -73,6 +73,7 @@ import {
   placeGtt,
   modifyGtt,
   cancelGtt,
+  basketOrder,
   cancelAllOrders,
   exitAllPositions,
   cancelOrder,
@@ -2649,6 +2650,123 @@ describe("OpenAlgo API client (api.ts)", () => {
       account_id: "U1",
     });
     expect(body).not.toHaveProperty("strategy");
+  });
+
+  it("maps basketOrder params onto the backend legs contract", async () => {
+    // The backend basket route reads a `legs` array with snake_case per-leg
+    // fields; the terminal-facing params keep camelCase `orders`. Pin the wire
+    // mapping field by field.
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        strategy: "FlintLegBuilder",
+        placed_count: 2,
+        failed_count: 0,
+        rolled_back: false,
+        order_ids: ["B1", "B2"],
+        legs: [],
+      }, 201),
+    );
+
+    await basketOrder({
+      strategy: "FlintLegBuilder",
+      orders: [
+        {
+          symbol: "NIFTY10APR2622000CE",
+          exchange: "NFO",
+          action: "SELL",
+          quantity: 50,
+          orderType: "MARKET",
+          product: "MIS",
+        },
+        {
+          symbol: "NIFTY10APR2622100CE",
+          exchange: "NFO",
+          action: "BUY",
+          quantity: 50,
+          orderType: "LIMIT",
+          product: "MIS",
+          price: 42.5,
+          triggerPrice: 41,
+        },
+      ],
+    });
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/basket");
+    const body = JSON.parse(init.body as string);
+    expect(body.strategy).toBe("FlintLegBuilder");
+    expect(body).not.toHaveProperty("orders");
+    expect(body.legs).toEqual([
+      {
+        symbol: "NIFTY10APR2622000CE",
+        exchange: "NFO",
+        action: "SELL",
+        quantity: 50,
+        order_type: "MARKET",
+        product: "MIS",
+      },
+      {
+        symbol: "NIFTY10APR2622100CE",
+        exchange: "NFO",
+        action: "BUY",
+        quantity: 50,
+        order_type: "LIMIT",
+        product: "MIS",
+        price: 42.5,
+        trigger_price: 41,
+      },
+    ]);
+    // MARKET leg must NOT carry price/trigger_price keys — the backend parses
+    // an absent key as None, and a present key as a float.
+    expect(body.legs[0]).not.toHaveProperty("price");
+    expect(body.legs[0]).not.toHaveProperty("trigger_price");
+  });
+
+  it("sends native broker/account selectors for live basketOrder", async () => {
+    // The basket route has no /<broker>/ path variant — the principal comes
+    // from `broker` / `account_id` in the body. Without them the backend would
+    // resolve brokers.execution.default, silently retargeting the basket.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", placed_count: 1, failed_count: 0, order_ids: ["B1"], legs: [] }, 201),
+    );
+
+    await basketOrder({
+      orders: [
+        { symbol: "NIFTY10APR2622000CE", exchange: "NFO", action: "SELL", quantity: 50, orderType: "MARKET", product: "MIS" },
+      ],
+    });
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/basket");
+    expect(url).not.toContain("/api/v1/orders/upstox/basket");
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ broker: "upstox", account_id: "U1", strategy: "basket" });
+    expect(body.legs).toHaveLength(1);
+  });
+
+  it("fails closed for basketOrder when the active native account is not connected", async () => {
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "disconnected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+
+    await expect(
+      basketOrder({
+        orders: [
+          { symbol: "NIFTY10APR2622000CE", exchange: "NFO", action: "SELL", quantity: 50, orderType: "MARKET", product: "MIS" },
+        ],
+      }),
+    ).rejects.toThrow(/not available for live writes/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("routes live exit-all through the confirmed account-scoped safety endpoint", async () => {

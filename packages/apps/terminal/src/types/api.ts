@@ -227,6 +227,36 @@ export interface BasketOrderParams {
   orders: BasketOrderLeg[];
 }
 
+/** Per-leg outcome from the backend basket executor (order_routes `place_basket`). */
+export interface BasketLegResult {
+  leg_index: number;
+  symbol: string;
+  action: string;
+  quantity: number;
+  success: boolean;
+  order_id: string;
+  error: string;
+  rolled_back: boolean;
+  rollback_order_id: string;
+}
+
+/**
+ * Response shape of `POST /api/v1/orders/basket` (201 on full success; a 422
+ * partial/total failure is thrown by the client before this shape is returned).
+ */
+export interface BasketOrderResult {
+  status: "success" | "error";
+  strategy: string;
+  timestamp: string;
+  placed_count: number;
+  failed_count: number;
+  rolled_back: boolean;
+  order_ids: string[];
+  legs: BasketLegResult[];
+  message?: string;
+  failed_leg_index?: number | null;
+}
+
 export interface SplitOrderParams {
   symbol: string;
   exchange: string;
