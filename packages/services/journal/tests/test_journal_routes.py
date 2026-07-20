@@ -304,12 +304,42 @@ def test_screenshot_roundtrip_and_file_on_disk(client, tmp_path):
     stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
     assert stored.read_bytes() == b"fake-png-bytes"
 
-    listed = client.get("/api/v1/journal/screenshots")
+    listed = client.get("/api/v1/journal/screenshots?include_data=1")
     assert listed.status_code == 200
     rows = listed.get_json()["data"]
     assert len(rows) == 1
     assert rows[0]["id"] == row["id"]
     assert rows[0]["data_url"] == _data_url()
+
+
+def test_list_screenshots_metadata_only_by_default(client):
+    """Pins finding 8: the default listing must NOT inline any image bytes."""
+    row = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url()},
+    ).get_json()["data"]
+    listed = client.get("/api/v1/journal/screenshots")
+    assert listed.status_code == 200
+    rows = listed.get_json()["data"]
+    assert len(rows) == 1
+    assert set(rows[0]) == {"id", "trade_key", "content_type", "size", "created_at"}
+    assert rows[0]["id"] == row["id"]
+    assert rows[0]["trade_key"] == "k1"
+    assert rows[0]["content_type"] == "image/png"
+    assert rows[0]["size"] == len(b"fake-png-bytes")
+
+
+def test_list_screenshots_include_data_flag(client):
+    """``?include_data=1`` keeps the compatibility shape; falsy values do not."""
+    client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url()},
+    )
+    with_data = client.get("/api/v1/journal/screenshots?include_data=1").get_json()["data"]
+    assert with_data[0]["data_url"] == _data_url()
+    for falsy in ("0", "no", ""):
+        rows = client.get(f"/api/v1/journal/screenshots?include_data={falsy}").get_json()["data"]
+        assert "data_url" not in rows[0]
 
 
 def test_screenshot_dedupe_returns_existing_with_200(client):

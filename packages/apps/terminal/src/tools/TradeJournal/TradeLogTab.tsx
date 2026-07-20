@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Camera,
   Eye,
+  ImageOff,
   X,
 } from "lucide-react";
 import { formatCurrencyCompact } from "@/lib/formatters";
@@ -17,8 +18,10 @@ import { type JournalTrade } from "@/services/ftApi";
 import {
   addJournalScreenshot,
   deleteJournalScreenshot,
+  getJournalScreenshot,
   listJournalScreenshots,
   type JournalScreenshot,
+  type JournalScreenshotMeta,
 } from "@/services/ftApi.journal";
 import { useModeStore } from "@/stores/modeStore";
 import { Badge } from "@/components/ui/badge";
@@ -143,8 +146,71 @@ async function importLegacyScreenshots(): Promise<LegacyScreenshotImportResult> 
 // Screenshot cell component
 // ---------------------------------------------------------------------------
 
+/**
+ * Thumbnail for one attached screenshot. The metadata list carries no image
+ * bytes, so each rendered thumbnail lazily fetches its own row via
+ * ``GET /screenshots/<id>``. Screenshot bytes are immutable (rows are only
+ * ever created or deleted), so the query never goes stale.
+ */
+function ScreenshotThumbnail({
+  shot,
+  onView,
+}: {
+  shot: JournalScreenshotMeta;
+  onView: (shot: JournalScreenshot) => void;
+}) {
+  const dataQuery = useQuery({
+    queryKey: ["journalScreenshot", shot.id],
+    queryFn: () => getJournalScreenshot(shot.id),
+    staleTime: Infinity,
+  });
+
+  if (dataQuery.isError) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => void dataQuery.refetch()}
+        className="flex items-center justify-center w-10 h-7 p-0 rounded border border-border-default text-loss hover:border-border-hover transition-colors"
+        aria-label="Screenshot failed to load"
+        title="Screenshot failed to load — click to retry"
+      >
+        <ImageOff size={11} />
+      </Button>
+    );
+  }
+
+  const row = dataQuery.data;
+  if (!row) {
+    return (
+      <div
+        className="w-10 h-7 rounded border border-border-default bg-surface-elevated animate-pulse"
+        role="status"
+        aria-label="Loading screenshot"
+      />
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => onView(row)}
+      className="flex items-center justify-center w-10 h-7 p-0 rounded overflow-hidden border border-border-default hover:border-accent transition-colors group"
+      aria-label="View screenshot"
+      title="Click to view screenshot"
+    >
+      <img
+        src={row.data_url}
+        alt="Trade screenshot thumbnail"
+        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+      />
+    </Button>
+  );
+}
+
 interface ScreenshotCellProps {
-  shot: JournalScreenshot | undefined;
+  shot: JournalScreenshotMeta | undefined;
   /** True in Explore mode — attaching to fabricated sample rows is blocked. */
   attachDisabled: boolean;
   onAttach: (dataUrl: string) => void;
@@ -177,22 +243,7 @@ function ScreenshotCell({ shot, attachDisabled, onAttach, onView }: ScreenshotCe
   }, [onAttach]);
 
   if (shot) {
-    return (
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => onView(shot)}
-        className="flex items-center justify-center w-10 h-7 p-0 rounded overflow-hidden border border-border-default hover:border-accent transition-colors group"
-        aria-label="View screenshot"
-        title="Click to view screenshot"
-      >
-        <img
-          src={shot.data_url}
-          alt="Trade screenshot thumbnail"
-          className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
-        />
-      </Button>
-    );
+    return <ScreenshotThumbnail shot={shot} onView={onView} />;
   }
 
   return (
@@ -242,7 +293,9 @@ export function TradeLogTab({
   const [search, setSearch] = useState("");
   const [filterAction, setFilterAction] = useState<"ALL" | "BUY" | "SELL">("ALL");
 
-  // Screenshot state — served by the backend journal store.
+  // Screenshot metadata — served by the backend journal store. The list is
+  // bytes-free; each rendered thumbnail lazily fetches its own image via
+  // ScreenshotThumbnail's per-id query.
   const screenshotsQuery = useQuery({
     queryKey: ["journalScreenshots"],
     queryFn: listJournalScreenshots,
@@ -250,7 +303,7 @@ export function TradeLogTab({
   });
 
   const screenshotsByKey = useMemo(() => {
-    const map: Record<string, JournalScreenshot> = {};
+    const map: Record<string, JournalScreenshotMeta> = {};
     for (const shot of screenshotsQuery.data ?? []) {
       if (!(shot.trade_key in map)) map[shot.trade_key] = shot;
     }
@@ -265,7 +318,11 @@ export function TradeLogTab({
   const attachMutation = useMutation({
     mutationFn: ({ tradeKey, dataUrl }: { tradeKey: string; dataUrl: string }) =>
       addJournalScreenshot(tradeKey, dataUrl),
-    onSuccess: () => {
+    onSuccess: (row) => {
+      // The POST response already carries the image bytes — seed the new id's
+      // data query with them so the fresh thumbnail never refetches, then
+      // invalidate ONLY the metadata list (cheap; no image payloads).
+      queryClient.setQueryData<JournalScreenshot>(["journalScreenshot", row.id], row);
       void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
     },
     onError: () => {
@@ -275,7 +332,10 @@ export function TradeLogTab({
 
   const removeMutation = useMutation({
     mutationFn: (id: string) => deleteJournalScreenshot(id),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
+      // Drop the deleted image's cached bytes and refresh ONLY the metadata
+      // list — surviving thumbnails keep their immutable cached data.
+      queryClient.removeQueries({ queryKey: ["journalScreenshot", id] });
       void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
       setViewingScreenshot(null);
     },

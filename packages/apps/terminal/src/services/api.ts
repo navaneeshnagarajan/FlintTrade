@@ -2070,8 +2070,24 @@ export const optionsOrder = (params: OptionsOrderParams) =>
   postOrder<{ orderId: string }>("options", params);
 export const optionsMultiOrder = (params: OptionsMultiOrderParams) =>
   postOrder<{ orderId: string }>("options-multi", params);
+// The backend split route (order_routes `place_split`) requires snake_case
+// total_qty / chunk_size (delay_seconds optional) and 400s without them;
+// `normaliseOrderBody` only aliases its fixed top-level set, so the wire
+// fields are mapped here the same way basketOrder maps its legs.
 export const splitOrder = (params: SplitOrderParams) =>
-  postOrder<{ orderId: string }>("split", params);
+  postOrder<{ orderId: string }>("split", {
+    symbol: params.symbol,
+    exchange: params.exchange,
+    action: params.action,
+    total_qty: params.totalQuantity,
+    chunk_size: params.chunkSize,
+    order_type: params.orderType,
+    product: params.product,
+    ...(params.price !== undefined ? { price: params.price } : {}),
+    ...(params.triggerPrice !== undefined ? { trigger_price: params.triggerPrice } : {}),
+    ...(params.delaySeconds !== undefined ? { delay_seconds: params.delaySeconds } : {}),
+    ...(params.strategy !== undefined ? { strategy: params.strategy } : {}),
+  });
 
 // --- GTT (Good Till Triggered) ---
 //

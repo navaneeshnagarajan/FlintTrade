@@ -2801,6 +2801,19 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(url).not.toContain("/api/v1/orders/upstox/split");
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({ broker: "upstox", account_id: "U1" });
+    // The wire body must carry the snake_case contract place_split requires —
+    // pinning the injection against a body the route would 400 on is useless.
+    expect(body).toMatchObject({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      total_qty: 100,
+      chunk_size: 25,
+      order_type: "MARKET",
+      product: "MIS",
+    });
+    expect(body).not.toHaveProperty("totalQuantity");
+    expect(body).not.toHaveProperty("chunkSize");
   });
 
   it("throws an OrderApiError carrying the HTTP status and the 422 BasketOrderResult body", async () => {

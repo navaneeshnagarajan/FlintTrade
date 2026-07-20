@@ -1129,17 +1129,23 @@ class TradeJournal:
         return self._screenshots_dir / f"{screenshot_id}.{ext}"
 
     @staticmethod
-    def _screenshot_public_row(record: dict[str, Any], blob: bytes) -> dict[str, Any]:
-        """Build the API-facing screenshot dict (row fields + re-encoded data URL)."""
-        encoded = base64.b64encode(blob).decode("ascii")
+    def _screenshot_meta_row(record: dict[str, Any]) -> dict[str, Any]:
+        """Build the metadata-only API-facing screenshot dict (no image bytes)."""
         return {
             "id": record["id"],
             "trade_key": record["trade_key"],
             "content_type": record["content_type"],
             "size": record["size"],
             "created_at": record["created_at"],
-            "data_url": f"data:{record['content_type']};base64,{encoded}",
         }
+
+    @staticmethod
+    def _screenshot_public_row(record: dict[str, Any], blob: bytes) -> dict[str, Any]:
+        """Build the API-facing screenshot dict (row fields + re-encoded data URL)."""
+        row = TradeJournal._screenshot_meta_row(record)
+        encoded = base64.b64encode(blob).decode("ascii")
+        row["data_url"] = f"data:{record['content_type']};base64,{encoded}"
+        return row
 
     @staticmethod
     def _decode_screenshot_data_url(data_url: str) -> tuple[str, bytes]:
@@ -1240,22 +1246,32 @@ class TradeJournal:
         logger.info("Screenshot added: id=%s trade_key=%s size=%d", record["id"], trade_key, len(blob))
         return self._screenshot_public_row(record, blob), True
 
-    def list_screenshots(self) -> list[dict[str, Any]]:
-        """List all screenshots, newest first, with re-encoded data URLs.
+    def list_screenshots(self, include_data: bool = False) -> list[dict[str, Any]]:
+        """List all screenshots, newest first — metadata only by default.
+
+        The default response is the lightweight metadata row (``id``,
+        ``trade_key``, ``content_type``, ``size``, ``created_at``); at the
+        25-image cap the old always-embedded shape weighed tens of MB per
+        listing. Callers that still want every image inlined pass
+        ``include_data=True`` (compatibility shape); :meth:`get_screenshot`
+        is the lazy per-image byte path.
 
         Only the SQLite read holds the store lock; the (potentially large)
         file reads and base64 encodes run after it is released, so a big
         collection cannot block every other journal request for the duration.
-        The response still embeds every image's full ``data_url`` — the
-        frontend keeps its eager pattern for now; :meth:`get_screenshot`
-        provides the lazy per-image path.
 
         Rows whose file has gone missing on disk are skipped (with a warning)
-        rather than surfacing a broken record.
+        rather than surfacing a broken record — in metadata mode too, so a
+        listed row is always fetchable by id.
+
+        Args:
+            include_data: When ``True``, embed each row's re-encoded base64
+                ``data_url``.
 
         Returns:
             List of ``{"id", "trade_key", "content_type", "size",
-            "created_at", "data_url"}`` dicts.
+            "created_at"}`` dicts, each with a ``"data_url"`` key added when
+            ``include_data`` is ``True``.
         """
         with self._lock:
             rows = self._conn.execute(
@@ -1265,6 +1281,12 @@ class TradeJournal:
         out: list[dict[str, Any]] = []
         for record in records:
             path = self._screenshot_path(record["id"], record["content_type"])
+            if not include_data:
+                if not path.exists():
+                    logger.warning("Screenshot file missing on disk; skipping row id=%s", record["id"])
+                    continue
+                out.append(self._screenshot_meta_row(record))
+                continue
             try:
                 blob = path.read_bytes()
             except OSError:

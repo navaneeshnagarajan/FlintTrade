@@ -689,9 +689,26 @@ class TestScreenshots:
         assert row["size"] == len(b"png-bytes")
         stored = tmp_path / "journal_screenshots" / f"{row['id']}.png"
         assert stored.read_bytes() == b"png-bytes"
-        listed = journal.list_screenshots()
+        listed = journal.list_screenshots(include_data=True)
         assert len(listed) == 1
         assert listed[0]["data_url"] == _b64_url(b"png-bytes")
+
+    def test_list_metadata_only_by_default(self, tmp_path):
+        """Pins finding 8: the default listing carries no image bytes."""
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        meta = journal.list_screenshots()
+        assert meta == [
+            {
+                "id": row["id"],
+                "trade_key": "trade-1",
+                "content_type": "image/png",
+                "size": len(b"png-bytes"),
+                "created_at": row["created_at"],
+            }
+        ]
+        with_data = journal.list_screenshots(include_data=True)
+        assert with_data[0]["data_url"] == _b64_url(b"png-bytes")
 
     def test_extension_follows_content_type(self, tmp_path):
         journal = _screenshot_journal(tmp_path)
@@ -749,7 +766,9 @@ class TestScreenshots:
         journal = _screenshot_journal(tmp_path)
         row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
         (tmp_path / "journal_screenshots" / f"{row['id']}.png").unlink()
+        # Skipped in BOTH modes — a metadata row must always be fetchable by id.
         assert journal.list_screenshots() == []
+        assert journal.list_screenshots(include_data=True) == []
 
     def test_get_screenshot_roundtrip_and_absent(self, tmp_path):
         journal = _screenshot_journal(tmp_path)
@@ -782,7 +801,7 @@ class TestScreenshots:
             return original(screenshot_id, content_type)
 
         journal._screenshot_path = spy  # type: ignore[method-assign]
-        listed = journal.list_screenshots()
+        listed = journal.list_screenshots(include_data=True)
         got = journal.get_screenshot(row["id"])
         assert len(listed) == 1
         assert got is not None

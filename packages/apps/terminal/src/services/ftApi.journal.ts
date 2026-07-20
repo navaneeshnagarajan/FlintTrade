@@ -135,17 +135,25 @@ export interface DailyNoteSummary {
 }
 
 /**
- * A chart screenshot attached to a trade-log row. ``trade_key`` is the stable
- * row key (``timestamp|symbol|orderid``) for new attaches, or an opaque legacy
- * key imported verbatim from the localStorage era. ``data_url`` is the
- * re-encoded ``data:image/...;base64,`` payload ready for an ``<img src>``.
+ * Metadata for a chart screenshot attached to a trade-log row — the shape the
+ * list endpoint returns (no image bytes). ``trade_key`` is the stable row key
+ * (``timestamp|symbol|orderid``) for new attaches, or an opaque legacy key
+ * imported verbatim from the localStorage era.
  */
-export interface JournalScreenshot {
+export interface JournalScreenshotMeta {
   id: string;
   trade_key: string;
   content_type: string;
   size: number;
   created_at: string;
+}
+
+/**
+ * A full screenshot row — metadata plus ``data_url``, the re-encoded
+ * ``data:image/...;base64,`` payload ready for an ``<img src>``. Served by
+ * {@link getJournalScreenshot} (per-id) and by the attach POST response.
+ */
+export interface JournalScreenshot extends JournalScreenshotMeta {
   data_url: string;
 }
 
@@ -243,9 +251,23 @@ export const putDailyNote = (date: string, content: string): Promise<DailyNote> 
 // Trade-log screenshots (backend-persisted; replaces the localStorage map)
 // ---------------------------------------------------------------------------
 
-/** List every stored screenshot with its re-encoded ``data_url``. */
-export const listJournalScreenshots = (): Promise<JournalScreenshot[]> =>
-  get<JournalScreenshot[]>("journal/screenshots");
+/**
+ * List every stored screenshot's metadata — NO image bytes. At the 25-image
+ * cap the old ``data_url``-embedding listing weighed tens of MB per refetch;
+ * fetch bytes lazily per thumbnail via {@link getJournalScreenshot} instead.
+ * (The backend still serves the old shape under ``?include_data=1`` for
+ * compatibility, deliberately unused here.)
+ */
+export const listJournalScreenshots = (): Promise<JournalScreenshotMeta[]> =>
+  get<JournalScreenshotMeta[]>("journal/screenshots");
+
+/**
+ * Fetch one screenshot row WITH its ``data_url``. Screenshot bytes are
+ * immutable (rows are only ever created or deleted, never edited), so callers
+ * can cache the result indefinitely.
+ */
+export const getJournalScreenshot = (id: string): Promise<JournalScreenshot> =>
+  get<JournalScreenshot>("journal/screenshots/" + encodeURIComponent(id));
 
 /**
  * Attach a screenshot (base64 data URL, ≤ 2 MiB decoded) to a trade-log row.

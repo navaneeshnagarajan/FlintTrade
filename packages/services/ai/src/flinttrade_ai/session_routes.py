@@ -26,6 +26,10 @@ session_bp = Blueprint("ai_sessions", __name__, url_prefix="/api/v1/ai/sessions"
 # Import caps (localStorage-migration spec §4): surfaces the one-time client
 # import may write, and hard limits that keep a single request bounded.
 _IMPORT_SURFACES = {"advisor", "tutor", "saved-chat"}
+# Live-capture surfaces whose sessions a "saved-chat" import may target: the
+# Share flow saves the SAME conversation the advisor/tutor capture already
+# recorded under the SAME id, so that collision is a promotion, not a clash.
+_SAVED_CHAT_PROMOTABLE_SURFACES = {"advisor", "tutor"}
 _IMPORT_MAX_MESSAGES = 500
 _IMPORT_MAX_CONTENT_BYTES = 32 * 1024
 # Explicit import ids become the sessions primary key (echoed by every later
@@ -33,6 +37,14 @@ _IMPORT_MAX_CONTENT_BYTES = 32 * 1024
 # fall back to the derived deterministic ``imp-`` id. Checked with fullmatch —
 # a $-anchored match would admit a trailing newline.
 _IMPORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Optional per-message ids let byte-identical chunk contents coexist: the
+# store's content-hash fallback collapses equal same-role messages, which
+# silently loses chunks of highly repetitive content. Out-of-shape ids are
+# ignored (content-hash fallback) rather than refused so legacy payloads keep
+# importing. Accepted ids are namespaced per session before storage — the
+# messages table's id column is a global primary key, so an unscoped client id
+# reused across sessions would silently drop the second session's message.
+_IMPORT_MESSAGE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
 def _store() -> AiSessionStore | None:
@@ -104,13 +116,21 @@ def _derived_import_id(surface: str, messages: list[dict[str, Any]]) -> str:
 def import_session() -> tuple[Any, int]:
     """Import a client-held conversation (operator-session-guarded write).
 
-    Body: ``{id?, surface, title?, messages: [{role, content,
-    timestamp?: ms}]}``. The store's content-hash message ids make
-    re-imports idempotent; a message ``timestamp`` (epoch milliseconds)
-    becomes its stored ``created_at``. An explicit ``id`` must fullmatch
+    Body: ``{id?, surface, title?, messages: [{id?, role, content,
+    timestamp?: ms}]}``. Message ids make re-imports idempotent: an explicit
+    per-message ``id`` (fullmatch ``[A-Za-z0-9_.:-]{1,128}``, namespaced per
+    session before storage; out-of-shape ids are ignored) lets byte-identical
+    chunk contents coexist, while messages without one fall back to the
+    store's content-hash ids, which collapse equal same-role contents. A
+    message ``timestamp`` (epoch milliseconds) becomes its stored
+    ``created_at``. An explicit session ``id`` must fullmatch
     ``[A-Za-z0-9_-]{1,64}`` (otherwise the derived ``imp-`` id is used),
     and an id that names an existing session of a different surface is
-    refused with 400 rather than appending into that conversation.
+    refused with 400 rather than appending into that conversation. The one
+    exception is the Share flow's promotion: a ``saved-chat`` import may
+    target an existing ``advisor``/``tutor`` session — that is the same
+    operator saving the same live-captured conversation under its own id
+    (the stored surface stays unchanged; reads serve the id regardless).
     """
     guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
     if callable(guard):
@@ -142,6 +162,7 @@ def import_session() -> tuple[Any, int]:
         )
 
     prepared: list[dict[str, Any]] = []
+    message_ids: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
             return jsonify({"status": "error", "message": "each message must be an object"}), 400
@@ -152,6 +173,14 @@ def import_session() -> tuple[Any, int]:
                 400,
             )
         entry: dict[str, Any] = {"role": message.get("role"), "content": content}
+        raw_message_id = message.get("id")
+        message_id = raw_message_id.strip() if isinstance(raw_message_id, str) else ""
+        if message_id and not _IMPORT_MESSAGE_ID_RE.fullmatch(message_id):
+            # Out-of-shape ids are ignored, not refused: the content-hash
+            # fallback still imports the message (collapsing byte-identical
+            # same-role contents, the pre-id behaviour).
+            message_id = ""
+        message_ids.append(message_id)
         timestamp = message.get("timestamp")
         if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool) and timestamp > 0:
             try:
@@ -167,9 +196,16 @@ def import_session() -> tuple[Any, int]:
         requested_id = ""
     session_id = requested_id or _derived_import_id(surface, prepared)
     existing_surface = store.session_surface(session_id)
-    if existing_surface is not None and existing_surface != surface:
+    if (
+        existing_surface is not None
+        and existing_surface != surface
+        and not (surface == "saved-chat" and existing_surface in _SAVED_CHAT_PROMOTABLE_SURFACES)
+    ):
         # record_exchange upserts by id, so an id collision would silently
         # append imported messages into an unrelated live conversation.
+        # Exception: saved-chat promotion of a live advisor/tutor capture —
+        # the Share flow re-imports the SAME conversation under the SAME id,
+        # and the upsert only bumps last_at, so the stored surface persists.
         return (
             jsonify(
                 {
@@ -179,6 +215,13 @@ def import_session() -> tuple[Any, int]:
             ),
             400,
         )
+    for entry, message_id in zip(prepared, message_ids):
+        if message_id:
+            # Namespace accepted client message ids by the resolved session so
+            # the same client id in two different imports can never collide on
+            # the messages table's global primary key (which would silently
+            # drop the later session's message).
+            entry["id"] = f"imp:{session_id}:{message_id}"
     title_raw = body.get("title")
     title = title_raw.strip() if isinstance(title_raw, str) and title_raw.strip() else None
     try:

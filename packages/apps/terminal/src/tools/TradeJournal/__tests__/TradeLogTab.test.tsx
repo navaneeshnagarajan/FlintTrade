@@ -22,10 +22,12 @@ vi.mock("@/stores/modeStore", () => ({
 }));
 
 const mockList = vi.fn();
+const mockGet = vi.fn();
 const mockAdd = vi.fn();
 const mockDelete = vi.fn();
 vi.mock("@/services/ftApi.journal", () => ({
   listJournalScreenshots: () => mockList() as Promise<unknown>,
+  getJournalScreenshot: (id: string) => mockGet(id) as Promise<unknown>,
   addJournalScreenshot: (tradeKey: string, dataUrl: string) =>
     mockAdd(tradeKey, dataUrl) as Promise<unknown>,
   deleteJournalScreenshot: (id: string) => mockDelete(id) as Promise<unknown>,
@@ -153,15 +155,20 @@ function stableKey(trade: JournalTrade): string {
   return `${trade.timestamp}|${trade.symbol}|${trade.orderid ?? "na"}`;
 }
 
-function makeScreenshot(tradeKey: string, id = "shot-1") {
+/** Metadata-only row — the shape the list endpoint now returns (no bytes). */
+function makeMeta(tradeKey: string, id = "shot-1") {
   return {
     id,
     trade_key: tradeKey,
     content_type: "image/png",
     size: 128,
     created_at: "2026-04-13T10:00:00",
-    data_url: FAKE_DATA_URL,
   };
+}
+
+/** Full row (metadata + data_url) — the per-id GET / attach POST shape. */
+function makeScreenshot(tradeKey: string, id = "shot-1") {
+  return { ...makeMeta(tradeKey, id), data_url: FAKE_DATA_URL };
 }
 
 const emptyAnalytics: TradeAnalytics = {
@@ -204,6 +211,9 @@ describe("TradeLogTab", () => {
     localStorageMock.clear();
     runtime.mode = "live";
     mockList.mockResolvedValue([]);
+    mockGet.mockImplementation((id: string) =>
+      Promise.resolve(makeScreenshot("whatever", id)),
+    );
     mockAdd.mockResolvedValue(makeScreenshot("whatever"));
     mockDelete.mockResolvedValue({ deleted: "shot-1" });
   });
@@ -280,13 +290,16 @@ describe("TradeLogTab screenshots", () => {
     localStorageMock.clear();
     runtime.mode = "live";
     mockList.mockResolvedValue([]);
+    mockGet.mockImplementation((id: string) =>
+      Promise.resolve(makeScreenshot("whatever", id)),
+    );
     mockAdd.mockResolvedValue(makeScreenshot("whatever"));
     mockDelete.mockResolvedValue({ deleted: "shot-1" });
   });
 
   it("renders a thumbnail for a screenshot keyed by the stable trade key", async () => {
     const trade = makeTrade();
-    mockList.mockResolvedValue([makeScreenshot(stableKey(trade))]);
+    mockList.mockResolvedValue([makeMeta(stableKey(trade))]);
 
     renderTab({ trades: [trade] });
 
@@ -300,7 +313,7 @@ describe("TradeLogTab screenshots", () => {
   it("still renders screenshots stored under the legacy timestamp-symbol-idx key", async () => {
     const trade = makeTrade();
     mockList.mockResolvedValue([
-      makeScreenshot(`${trade.timestamp}-${trade.symbol}-0`),
+      makeMeta(`${trade.timestamp}-${trade.symbol}-0`),
     ]);
 
     renderTab({ trades: [trade] });
@@ -331,7 +344,7 @@ describe("TradeLogTab screenshots", () => {
 
   it("shows the trade symbol in the viewer dialog title (not a date fragment)", async () => {
     const trade = makeTrade({ symbol: "BANKNIFTY" });
-    mockList.mockResolvedValue([makeScreenshot(stableKey(trade))]);
+    mockList.mockResolvedValue([makeMeta(stableKey(trade))]);
 
     renderTab({ trades: [trade] });
 
@@ -346,7 +359,7 @@ describe("TradeLogTab screenshots", () => {
 
   it("removes a screenshot through the delete mutation", async () => {
     const trade = makeTrade();
-    mockList.mockResolvedValue([makeScreenshot(stableKey(trade), "shot-9")]);
+    mockList.mockResolvedValue([makeMeta(stableKey(trade), "shot-9")]);
 
     renderTab({ trades: [trade] });
 
@@ -368,6 +381,135 @@ describe("TradeLogTab screenshots", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Lazy per-thumbnail byte fetching (finding 8, second half)
+// ---------------------------------------------------------------------------
+
+describe("TradeLogTab lazy screenshot bytes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorageMock.clear();
+    runtime.mode = "live";
+    mockList.mockResolvedValue([]);
+    mockGet.mockImplementation((id: string) =>
+      Promise.resolve(makeScreenshot("whatever", id)),
+    );
+    mockAdd.mockResolvedValue(makeScreenshot("whatever"));
+    mockDelete.mockResolvedValue({ deleted: "shot-1" });
+  });
+
+  it("fetches each thumbnail's bytes per-id — the list carries metadata only", async () => {
+    const trade = makeTrade();
+    mockList.mockResolvedValue([makeMeta(stableKey(trade), "shot-7")]);
+
+    renderTab({ trades: [trade] });
+
+    const img = await waitFor(() => {
+      const el = document.querySelector("img[alt='Trade screenshot thumbnail']");
+      expect(el).toBeInTheDocument();
+      return el as HTMLImageElement;
+    });
+    // The bytes come from GET /screenshots/<id>, not from the list payload.
+    expect(mockGet).toHaveBeenCalledWith("shot-7");
+    expect(img).toHaveAttribute("src", FAKE_DATA_URL);
+  });
+
+  it("shows a loading placeholder while a thumbnail's bytes are in flight", async () => {
+    const trade = makeTrade();
+    mockList.mockResolvedValue([makeMeta(stableKey(trade))]);
+    mockGet.mockImplementation(() => new Promise(() => undefined)); // never settles
+
+    renderTab({ trades: [trade] });
+
+    expect(await screen.findByLabelText("Loading screenshot")).toBeInTheDocument();
+    expect(
+      document.querySelector("img[alt='Trade screenshot thumbnail']"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an honest failure state (with retry) when the byte fetch fails", async () => {
+    const trade = makeTrade();
+    mockList.mockResolvedValue([makeMeta(stableKey(trade), "shot-3")]);
+    mockGet.mockRejectedValueOnce(new Error("backend unreachable"));
+
+    renderTab({ trades: [trade] });
+
+    const failBtn = await screen.findByRole("button", {
+      name: /screenshot failed to load/i,
+    });
+    expect(
+      document.querySelector("img[alt='Trade screenshot thumbnail']"),
+    ).not.toBeInTheDocument();
+
+    // Clicking retries the per-id fetch and recovers to a real thumbnail.
+    fireEvent.click(failBtn);
+    await waitFor(() => {
+      expect(
+        document.querySelector("img[alt='Trade screenshot thumbnail']"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("attach seeds the new id's data query from the POST response — no byte refetch", async () => {
+    const trade = makeTrade();
+    const key = stableKey(trade);
+    mockAdd.mockResolvedValue(makeScreenshot(key, "shot-new"));
+    // First list: nothing attached; post-attach refetch: the new metadata row.
+    mockList.mockResolvedValue([makeMeta(key, "shot-new")]);
+    mockList.mockResolvedValueOnce([]);
+
+    renderTab({ trades: [trade] });
+
+    const fileInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    const file = new File(["chart-bytes"], "chart.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(mockAdd).toHaveBeenCalled());
+    const img = await waitFor(() => {
+      const el = document.querySelector("img[alt='Trade screenshot thumbnail']");
+      expect(el).toBeInTheDocument();
+      return el as HTMLImageElement;
+    });
+    expect(img).toHaveAttribute("src", FAKE_DATA_URL);
+    // The data_url was already in hand from the POST — a per-id GET here
+    // would be the old whole-collection-refetch defect in a new shape.
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("delete invalidates only the metadata list — surviving thumbnails keep their bytes", async () => {
+    const tradeA = makeTrade({ symbol: "AAA", timestamp: "2026-04-13T09:30:00" });
+    const tradeB = makeTrade({ symbol: "BBB", timestamp: "2026-04-13T10:30:00" });
+    mockList.mockResolvedValue([
+      makeMeta(stableKey(tradeA), "shot-a"),
+      makeMeta(stableKey(tradeB), "shot-b"),
+    ]);
+
+    renderTab({ trades: [tradeA, tradeB] });
+
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll("img[alt='Trade screenshot thumbnail']").length,
+      ).toBe(2);
+    });
+    expect(mockGet).toHaveBeenCalledTimes(2);
+
+    const rowA = screen.getByText("AAA").closest("tr") as HTMLTableRowElement;
+    fireEvent.click(within(rowA).getByRole("button", { name: /view screenshot/i }));
+    mockList.mockResolvedValue([makeMeta(stableKey(tradeB), "shot-b")]);
+    fireEvent.click(screen.getByRole("button", { name: /remove screenshot/i }));
+
+    await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("shot-a"));
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll("img[alt='Trade screenshot thumbnail']").length,
+      ).toBe(1);
+    });
+    // The surviving thumbnail's bytes are immutable and cached — the delete
+    // must not have triggered any per-id refetch.
+    expect(mockGet).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // One-time legacy localStorage import
 // ---------------------------------------------------------------------------
 
@@ -377,6 +519,9 @@ describe("TradeLogTab legacy screenshot import", () => {
     localStorageMock.clear();
     runtime.mode = "live";
     mockList.mockResolvedValue([]);
+    mockGet.mockImplementation((id: string) =>
+      Promise.resolve(makeScreenshot("whatever", id)),
+    );
     mockAdd.mockResolvedValue(makeScreenshot("whatever"));
     mockDelete.mockResolvedValue({ deleted: "shot-1" });
   });

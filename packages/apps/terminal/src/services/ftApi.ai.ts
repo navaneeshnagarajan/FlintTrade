@@ -692,6 +692,14 @@ export type AiSessionImportSurface = "advisor" | "tutor" | "saved-chat";
 export interface AiSessionImportMessage {
   role: string;
   content: string;
+  /**
+   * Optional stable client message id (1–128 chars of `[A-Za-z0-9_.:-]`,
+   * namespaced per session server-side; out-of-shape ids are ignored). With
+   * an id, byte-identical chunk contents coexist as distinct rows; without
+   * one the backend falls back to content-hash ids, which collapse equal
+   * same-role messages. {@link importAiSessionChunked} always assigns one.
+   */
+  id?: string;
   /** Client capture time in epoch milliseconds (mapped to ISO `created_at` server-side). */
   timestamp?: number;
 }
@@ -706,8 +714,9 @@ export interface AiSessionImportPayload {
 
 /**
  * Import a client-side conversation into the persistent AI session store
- * (content-hash message ids keep re-imports idempotent server-side). Used by
- * the saved-chat share flow and the one-time localStorage migration.
+ * (message ids — explicit per-message ids, or the server's content-hash
+ * fallback — keep re-imports idempotent). Used by the saved-chat share flow
+ * and the one-time localStorage migration.
  */
 export const importAiSession = (payload: AiSessionImportPayload) =>
   post<{ session_id: string }>("ai/sessions/import", payload);
@@ -734,31 +743,28 @@ function codePointUtf8Bytes(codePoint: number): number {
  * piece round-trips through UTF-8 intact. Concatenating the pieces always
  * reproduces the input exactly: content is preserved, never truncated.
  *
- * Each subsequent piece's byte budget shrinks by one byte. Byte-identical
- * same-role messages collapse to one row under the session store's
- * content-hash ids, so equal-budget chunks of highly repetitive content
- * (e.g. a pasted log of one repeated line) could silently lose chunks;
- * distinct byte lengths guarantee distinct chunk strings for uniform
- * single-byte content and make a collision vanishingly unlikely otherwise.
- * The budget is floored well above the widest code point (4 bytes) — with a
- * 32 KiB starting budget the floor is unreachable below ~1 GiB of input,
- * far beyond any localStorage-held conversation.
+ * Every piece gets the same fixed budget, so uniformly repetitive content
+ * yields byte-identical pieces — that is fine because
+ * {@link importAiSessionChunked} gives every chunk an explicit message id,
+ * which is what keeps equal contents distinct in the session store. (A
+ * descending-budget variant once tried to make pieces pairwise distinct, but
+ * a 1-byte decrement cannot change the CHARACTER count when every character
+ * is ≥2 UTF-8 bytes, so e.g. "य"-repeats still produced identical pieces.)
+ * A budget below the widest code point (4 bytes) is still safe: a piece
+ * always advances by at least one code point, so the split terminates.
  */
 export function splitContentByUtf8Bytes(content: string, maxBytes: number): string[] {
-  const budgetFloor = Math.max(4, maxBytes >> 1);
   const chunks: string[] = [];
   let start = 0;
   let chunkBytes = 0;
-  let budget = maxBytes;
   let i = 0;
   while (i < content.length) {
     const codePoint = content.codePointAt(i) as number;
     const bytes = codePointUtf8Bytes(codePoint);
-    if (chunkBytes + bytes > budget && chunkBytes > 0) {
+    if (chunkBytes + bytes > maxBytes && chunkBytes > 0) {
       chunks.push(content.slice(start, i));
       start = i;
       chunkBytes = 0;
-      budget = Math.max(budgetFloor, maxBytes - chunks.length);
     }
     chunkBytes += bytes;
     i += codePoint > 0xffff ? 2 : 1;
@@ -776,10 +782,15 @@ export function splitContentByUtf8Bytes(content: string, maxBytes: number): stri
  * timestamp, concatenation identical to the original — nothing is ever
  * truncated), and when the expanded list exceeds 500 messages it is sent as
  * sequential {@link importAiSession} batches of at most 500 against the SAME
- * session id — the store appends by content-hash message id, so a retry
- * after a mid-batch failure re-sends earlier batches as idempotent no-ops.
- * An explicit id is required: a backend-derived id would differ per batch
- * and scatter one conversation across several sessions.
+ * session id. An explicit id is required: a backend-derived id would differ
+ * per batch and scatter one conversation across several sessions.
+ *
+ * Every expanded message carries a deterministic explicit id
+ * (`m<messageIndex>-c<chunkIndex>`, namespaced per session by the backend),
+ * so a retry after a mid-batch failure re-sends earlier batches as
+ * idempotent no-ops AND byte-identical chunk contents (e.g. equal-packing
+ * chunks of one repeated character) can never collapse under the store's
+ * content-hash fallback — the silent-loss defect the ids exist to prevent.
  *
  * Blank-content messages are dropped up front (the backend skips them
  * anyway) so a batch can never consist solely of unimportable entries; a
@@ -790,12 +801,13 @@ export async function importAiSessionChunked(
   payload: AiSessionImportPayload & { id: string },
 ): Promise<{ session_id: string }> {
   const expanded: AiSessionImportMessage[] = [];
-  for (const message of payload.messages) {
-    if (!message.content.trim()) continue;
-    for (const content of splitContentByUtf8Bytes(message.content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES)) {
-      expanded.push({ ...message, content });
-    }
-  }
+  payload.messages.forEach((message, messageIndex) => {
+    if (!message.content.trim()) return;
+    const pieces = splitContentByUtf8Bytes(message.content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+    pieces.forEach((content, chunkIndex) => {
+      expanded.push({ ...message, content, id: `m${messageIndex}-c${chunkIndex}` });
+    });
+  });
   if (expanded.length === 0) {
     return importAiSession(payload);
   }

@@ -192,13 +192,15 @@ def test_import_refuses_id_collision_with_another_surface(app: Flask) -> None:
 
     Pins finding 10: record_exchange upserts by id, so without the check the
     imported messages would silently append into the unrelated conversation.
+    (The one carve-out — saved-chat promotion of a live advisor/tutor capture
+    — is pinned separately below.)
     """
     client = app.test_client()
     resp = client.post(
         "/api/v1/ai/sessions/import",
         json={
             "id": "s1",  # fixture session s1 has surface "advisor"
-            "surface": "saved-chat",
+            "surface": "tutor",
             "messages": [{"role": "user", "content": "injected into the advisor session?"}],
         },
     )
@@ -220,6 +222,94 @@ def test_import_refuses_id_collision_with_another_surface(app: Flask) -> None:
     )
     assert resp.status_code == 200
     assert resp.get_json()["data"] == {"session_id": "s1"}
+
+
+def test_share_import_promotes_a_live_advisor_session(app: Flask) -> None:
+    """The Share flow works on a live-captured advisor conversation.
+
+    Pins the finding-10 over-refusal fix: AIAdvisorWidget captures the
+    conversation under its id with surface "advisor", and Share then imports
+    the SAME id with surface "saved-chat" — that must succeed (it is the same
+    operator saving the same conversation), append idempotently, and leave
+    the stored surface unchanged (reads serve the share link by id anyway).
+    """
+    client = app.test_client()
+    share_payload = {
+        "id": "s1",  # fixture session s1: live advisor capture
+        "surface": "saved-chat",
+        "messages": [
+            {"role": "user", "content": "What is the max pain on BANKNIFTY?"},
+            {"role": "assistant", "content": "Near 51000 for this expiry."},
+        ],
+    }
+    resp = client.post("/api/v1/ai/sessions/import", json=share_payload)
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"session_id": "s1"}
+
+    # Idempotent: the content-hash message ids dedupe the re-imported history.
+    session = client.get("/api/v1/ai/sessions/s1").get_json()["data"]
+    assert session["surface"] == "advisor"  # stored surface stays unchanged
+    assert len(session["messages"]) == 2
+
+    # Sharing again after the conversation grew appends only the new message.
+    share_payload["messages"].append({"role": "user", "content": "And for NIFTY?"})
+    assert client.post("/api/v1/ai/sessions/import", json=share_payload).status_code == 200
+    session = client.get("/api/v1/ai/sessions/s1").get_json()["data"]
+    assert [m["content"] for m in session["messages"]][-1] == "And for NIFTY?"
+    assert len(session["messages"]) == 3
+
+
+def test_share_import_promotes_a_live_tutor_session(app: Flask) -> None:
+    """tutor → saved-chat promotion succeeds likewise (AITutorPill capture)."""
+    store: AiSessionStore = app.config["AI_SESSION_STORE"]
+    store.record_exchange(
+        "t1",
+        "tutor",
+        [
+            {"role": "user", "content": "What is a strangle?"},
+            {"role": "assistant", "content": "An OTM call plus an OTM put."},
+        ],
+    )
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={
+            "id": "t1",
+            "surface": "saved-chat",
+            "messages": [
+                {"role": "user", "content": "What is a strangle?"},
+                {"role": "assistant", "content": "An OTM call plus an OTM put."},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"session_id": "t1"}
+    session = client.get("/api/v1/ai/sessions/t1").get_json()["data"]
+    assert session["surface"] == "tutor"
+    assert len(session["messages"]) == 2
+
+
+def test_saved_chat_promotion_is_the_only_cross_surface_import(app: Flask) -> None:
+    """Every cross-surface pair other than advisor/tutor → saved-chat still 400s."""
+    store: AiSessionStore = app.config["AI_SESSION_STORE"]
+    store.record_exchange("a1", "agent", [{"role": "user", "content": "run the scan"}])
+    store.record_exchange("c1", "saved-chat", [{"role": "user", "content": "old share"}])
+    client = app.test_client()
+
+    def import_as(session_id: str, surface: str) -> int:
+        return client.post(
+            "/api/v1/ai/sessions/import",
+            json={
+                "id": session_id,
+                "surface": surface,
+                "messages": [{"role": "user", "content": "cross-surface attempt"}],
+            },
+        ).status_code
+
+    assert import_as("s1", "tutor") == 400  # advisor id imported as tutor
+    assert import_as("a1", "saved-chat") == 400  # agent sessions are never promotable
+    assert import_as("c1", "advisor") == 400  # no demotion out of saved-chat
+    assert import_as("c1", "tutor") == 400
 
 
 def test_import_caps_and_validation(app: Flask) -> None:
@@ -247,6 +337,123 @@ def test_import_caps_and_validation(app: Flask) -> None:
     # All-skippable messages store nothing and say so.
     assert post({"surface": "saved-chat", "messages": [{"role": "system", "content": "prompt"}]}) == 400
     assert post("not an object") == 400
+
+
+def test_import_explicit_message_ids_keep_identical_contents(app: Flask) -> None:
+    """Byte-identical same-role contents survive when each carries its own id.
+
+    Pins the chunked-import silent-loss defect: the client splits an
+    over-32-KiB message into fixed-budget chunks, and uniformly repetitive
+    content (e.g. "य" repeats — 3 UTF-8 bytes per character) packs into
+    byte-identical chunks. Without explicit ids the store's content-hash
+    fallback collapses them via INSERT OR IGNORE, permanently losing content
+    once the client-side copy is gone.
+    """
+    client = app.test_client()
+    chunk = "य" * 100
+    payload = {
+        "id": "conv-chunks",
+        "surface": "saved-chat",
+        "messages": [
+            {"id": "m0-c0", "role": "user", "content": chunk, "timestamp": 1720000000000},
+            {"id": "m0-c1", "role": "user", "content": chunk, "timestamp": 1720000000000},
+            {"id": "m0-c2", "role": "user", "content": "tail", "timestamp": 1720000000000},
+        ],
+    }
+    assert client.post("/api/v1/ai/sessions/import", json=payload).status_code == 200
+    session = client.get("/api/v1/ai/sessions/conv-chunks").get_json()["data"]
+    assert [m["content"] for m in session["messages"]] == [chunk, chunk, "tail"]
+    # The stored id is the client id namespaced by the session.
+    assert session["messages"][0]["id"] == "imp:conv-chunks:m0-c0"
+    # Re-import (a retry after a mid-batch failure) is an idempotent no-op.
+    assert client.post("/api/v1/ai/sessions/import", json=payload).status_code == 200
+    session = client.get("/api/v1/ai/sessions/conv-chunks").get_json()["data"]
+    assert [m["content"] for m in session["messages"]] == [chunk, chunk, "tail"]
+
+
+@pytest.mark.parametrize(
+    ("char", "repeats"),
+    [
+        ("य", 33_100),  # 3-byte char: three byte-identical full chunks (the defect case)
+        ("é", 20_000),  # 2-byte char across the 32 KiB boundary
+        ("🚀", 9_000),  # 4-byte emoji across the boundary
+    ],
+)
+def test_import_chunked_boundary_reassembly(app: Flask, char: str, repeats: int) -> None:
+    """A multi-byte repeat crossing the 32 KiB cap reassembles exactly.
+
+    Mirrors what the fixed client sends: fixed-budget chunks (each within the
+    cap) with deterministic per-chunk ids and one shared timestamp. The
+    recorded messages, joined in stored order, must reproduce the original —
+    and a re-import must change nothing.
+    """
+    client = app.test_client()
+    content = char * repeats
+    per_chunk = (32 * 1024) // len(char.encode("utf-8"))
+    chunks = [content[i : i + per_chunk] for i in range(0, repeats, per_chunk)]
+    assert len(chunks) > 1
+    assert all(len(piece.encode("utf-8")) <= 32 * 1024 for piece in chunks)
+    payload = {
+        "id": "conv-exact",
+        "surface": "saved-chat",
+        "messages": [
+            {"id": f"m0-c{index}", "role": "user", "content": piece, "timestamp": 1720000000000}
+            for index, piece in enumerate(chunks)
+        ],
+    }
+    assert client.post("/api/v1/ai/sessions/import", json=payload).status_code == 200
+    session = client.get("/api/v1/ai/sessions/conv-exact").get_json()["data"]
+    recorded = [m["content"] for m in session["messages"]]
+    assert "".join(recorded) == content
+    assert len(recorded) == len(chunks)
+    # Idempotent re-import: nothing duplicated, nothing lost.
+    assert client.post("/api/v1/ai/sessions/import", json=payload).status_code == 200
+    session = client.get("/api/v1/ai/sessions/conv-exact").get_json()["data"]
+    assert [m["content"] for m in session["messages"]] == recorded
+
+
+def test_import_message_id_validation_and_namespacing(app: Flask) -> None:
+    """Out-of-shape message ids fall back to the content hash; accepted ids
+    are namespaced per session so equal client ids never collide globally."""
+    client = app.test_client()
+
+    # Invalid ids (non-string, oversized, out-of-alphabet) are ignored, so
+    # byte-identical contents collapse to one row — the documented fallback.
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={
+            "id": "conv-badids",
+            "surface": "saved-chat",
+            "messages": [
+                {"id": 42, "role": "user", "content": "same text"},
+                {"id": "x" * 129, "role": "user", "content": "same text"},
+                {"id": "sp ace", "role": "user", "content": "same text"},
+                {"id": "new\nline", "role": "user", "content": "same text"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    session = client.get("/api/v1/ai/sessions/conv-badids").get_json()["data"]
+    assert len(session["messages"]) == 1
+    assert session["messages"][0]["id"].startswith("h-")
+
+    # The SAME message id in two different sessions stores both messages —
+    # the messages table's id is a global primary key, so an unscoped client
+    # id would silently drop the second session's message.
+    for conv, text in (("conv-ns-a", "alpha"), ("conv-ns-b", "beta")):
+        resp = client.post(
+            "/api/v1/ai/sessions/import",
+            json={
+                "id": conv,
+                "surface": "saved-chat",
+                "messages": [{"id": "m0-c0", "role": "user", "content": text}],
+            },
+        )
+        assert resp.status_code == 200
+    session_a = client.get("/api/v1/ai/sessions/conv-ns-a").get_json()["data"]
+    session_b = client.get("/api/v1/ai/sessions/conv-ns-b").get_json()["data"]
+    assert [m["content"] for m in session_a["messages"]] == ["alpha"]
+    assert [m["content"] for m in session_b["messages"]] == ["beta"]
 
 
 def test_advisor_capture_is_wired_and_best_effort() -> None:

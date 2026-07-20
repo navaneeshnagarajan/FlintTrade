@@ -380,17 +380,22 @@ describe("splitContentByUtf8Bytes", () => {
     }
   });
 
-  it("yields pairwise-distinct chunks for uniformly repeated content", () => {
-    // The session store collapses byte-identical same-role messages to one
-    // row (content-hash ids), so equal chunks of a repetitive paste would
-    // silently lose content. Distinct per-chunk byte budgets prevent that.
-    const content = "x".repeat(AI_SESSION_IMPORT_MAX_CONTENT_BYTES * 2 + 500);
+  it("keeps one fixed byte budget for every chunk of a multi-byte repeat", () => {
+    // 33 100 three-byte chars (99 300 bytes) pack into three byte-identical
+    // full chunks plus a remainder. Identical chunks are EXPECTED here — the
+    // importer's explicit per-chunk ids keep them distinct in the store (a
+    // descending byte budget provably could not: a 1-byte decrement never
+    // changes the character count when every character is ≥2 UTF-8 bytes).
+    const content = "य".repeat(33_100);
 
     const chunks = splitContentByUtf8Bytes(content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
 
-    expect(chunks.length).toBeGreaterThan(2);
-    expect(new Set(chunks).size).toBe(chunks.length);
+    expect(chunks).toHaveLength(4);
     expect(chunks.join("")).toBe(content);
+    for (const chunk of chunks) {
+      expect(utf8Bytes(chunk)).toBeLessThanOrEqual(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+    }
+    expect(new Set(chunks.slice(0, -1)).size).toBe(1);
   });
 
   it("preserves every byte across a split — nothing is ever truncated", () => {
@@ -421,7 +426,7 @@ describe("importAiSessionChunked", () => {
     return fetchMock;
   }
 
-  it("passes a within-caps conversation through as a single import call", async () => {
+  it("passes a within-caps conversation through as a single import call with deterministic ids", async () => {
     const fetchMock = importFetchMock();
     const messages: AiSessionImportMessage[] = [
       { role: "user", content: "What is theta?", timestamp: 1_700_000_000_000 },
@@ -432,7 +437,14 @@ describe("importAiSessionChunked", () => {
 
     expect(result).toEqual({ session_id: "conv-1" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(requestBody(fetchMock)).toEqual({ id: "conv-1", surface: "saved-chat", messages });
+    expect(requestBody(fetchMock)).toEqual({
+      id: "conv-1",
+      surface: "saved-chat",
+      messages: [
+        { ...messages[0], id: "m0-c0" },
+        { ...messages[1], id: "m1-c0" },
+      ],
+    });
   });
 
   it("splits an over-cap message into sequential same-role chunks that reassemble exactly", async () => {
@@ -463,7 +475,33 @@ describe("importAiSessionChunked", () => {
       role: "assistant",
       content: "Short reply.",
       timestamp: 1_700_000_005_000,
+      id: "m1-c0",
     });
+  });
+
+  it("assigns pairwise-distinct ids so byte-identical chunks survive the content-hash store", async () => {
+    const fetchMock = importFetchMock();
+    // The defect case: 33 100 three-byte "य" chars pack into three
+    // byte-identical full chunks plus a remainder. Without explicit ids the
+    // backend's content-hash INSERT OR IGNORE collapses the identical chunks
+    // to one row, silently and permanently losing content once the
+    // localStorage copy is removed.
+    const oversized = "य".repeat(33_100);
+
+    await importAiSessionChunked({
+      id: "conv-rep",
+      surface: "saved-chat",
+      messages: [{ role: "user", content: oversized, timestamp: 1_700_000_000_000 }],
+    });
+
+    const sent = requestBody(fetchMock).messages as AiSessionImportMessage[];
+    expect(sent.length).toBeGreaterThan(2);
+    // Byte-identical chunk contents ARE present — the ids keep them apart.
+    expect(new Set(sent.map((message) => message.content)).size).toBeLessThan(sent.length);
+    const ids = sent.map((message) => message.id);
+    expect(ids.every((id) => typeof id === "string" && /^m\d+-c\d+$/.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(sent.length);
+    expect(sent.map((message) => message.content).join("")).toBe(oversized);
   });
 
   it("batches beyond-500-message histories as sequential imports under the same session id", async () => {
@@ -487,6 +525,10 @@ describe("importAiSessionChunked", () => {
     expect(secondMessages).toHaveLength(1);
     expect(firstMessages[0].content).toBe("message 0");
     expect(secondMessages[0].content).toBe("message 500");
+    // Message indices in the ids are global across batches, so a retry that
+    // re-sends batch one repeats the SAME ids (idempotent no-op server-side).
+    expect(firstMessages[0].id).toBe("m0-c0");
+    expect(secondMessages[0].id).toBe("m500-c0");
   });
 
   it("rejects on a mid-batch failure so callers keep their retry state", async () => {
@@ -519,7 +561,68 @@ describe("importAiSessionChunked", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(requestBody(fetchMock).messages).toEqual([{ role: "user", content: "Real question" }]);
+    expect(requestBody(fetchMock).messages).toEqual([
+      { role: "user", content: "Real question", id: "m0-c0" },
+    ]);
+  });
+
+  /**
+   * Minimal model of the backend store's insert semantics: one row per key,
+   * first write wins (INSERT OR IGNORE), keyed by the explicit message id
+   * (namespaced per session, as session_routes.py does) or the content-hash
+   * fallback. What survives this model is exactly what a real import stores.
+   */
+  function recordingFetchMock(): Map<string, { role: string; content: string }> {
+    const recorded = new Map<string, { role: string; content: string }>();
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as {
+        id: string;
+        messages: Array<{ id?: string; role: string; content: string }>;
+      };
+      for (const message of body.messages) {
+        const key = message.id
+          ? `imp:${body.id}:${message.id}`
+          : `h:${body.id}:${message.role}:${message.content}`;
+        if (!recorded.has(key)) {
+          recorded.set(key, { role: message.role, content: message.content });
+        }
+      }
+      return Promise.resolve(jsonResponse({ status: "success", data: { session_id: body.id } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return recorded;
+  }
+
+  it.each<[string, string, number]>([
+    // 3-byte char: three byte-identical full chunks — the silent-loss defect case.
+    ["य", "य", 33_100],
+    // 2-byte char across the 32 KiB boundary.
+    ["é", "é", 20_000],
+    // 4-byte surrogate-pair emoji across the boundary.
+    ["🚀", "\u{1F680}", 9_000],
+  ])("reassembles %s repeats exactly from the recorded messages, idempotently", async (_label, char, repeats) => {
+    const content = char.repeat(repeats);
+    expect(utf8Bytes(content)).toBeGreaterThan(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+    const recorded = recordingFetchMock();
+    const payload = {
+      id: "conv-exact",
+      surface: "saved-chat" as const,
+      messages: [{ role: "user", content, timestamp: 1_700_000_000_000 }],
+    };
+
+    await importAiSessionChunked(payload);
+    const firstPass = [...recorded.values()].map((message) => message.content);
+    // Exact reassembly: every recorded chunk survives, in order, losslessly.
+    expect(firstPass.join("")).toBe(content);
+    for (const chunk of firstPass) {
+      expect(utf8Bytes(chunk)).toBeLessThanOrEqual(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+      expect(isUtf8RoundTrippable(chunk)).toBe(true);
+    }
+
+    // Re-import (a retry after e.g. a mid-batch failure) is an idempotent
+    // no-op: nothing duplicated, nothing lost.
+    await importAiSessionChunked(payload);
+    expect([...recorded.values()].map((message) => message.content)).toEqual(firstPass);
   });
 
   it("lets the backend's honest refusal surface for an all-blank conversation", async () => {

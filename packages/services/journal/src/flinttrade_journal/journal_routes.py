@@ -20,7 +20,8 @@ POST   /import             — bulk import from OpenAlgo tradebook rows
 GET    /notes              — list daily notes (date desc, preview + word count)
 GET    /notes/<date>       — fetch one daily note (200 with empty content when absent)
 PUT    /notes/<date>       — upsert a daily note (empty content deletes it)
-GET    /screenshots        — list trade-log screenshots (with data URLs)
+GET    /screenshots        — list screenshot metadata (``?include_data=1`` embeds
+                             each row's base64 ``data_url``)
 GET    /screenshots/<id>   — fetch one screenshot (with data URL; 404 when absent)
 POST   /screenshots        — attach a screenshot (dedupes per trade + content hash)
 DELETE /screenshots/<id>   — delete a screenshot (row + file on disk)
@@ -304,16 +305,20 @@ def put_daily_note(note_date: str) -> tuple[Response, int]:
 
 @journal_bp.route("/screenshots", methods=["GET"])
 def list_screenshots() -> tuple[Response, int]:
-    """List trade-log screenshots with re-encoded data URLs.
+    """List trade-log screenshots — metadata only by default.
 
-    Every row still embeds its full base64 ``data_url`` — the frontend keeps
-    its current eager pattern for now. ``GET /screenshots/<id>`` exists as the
-    lazy per-image path for callers that want to fetch bytes on demand.
+    Each row is ``{id, trade_key, content_type, size, created_at}``; the
+    image bytes are NOT inlined (at the 25-image cap the old shape weighed
+    tens of MB per listing). Pass ``?include_data=1`` (also ``true``/``yes``)
+    to embed each row's re-encoded base64 ``data_url`` — the pre-metadata
+    compatibility shape. ``GET /screenshots/<id>`` is the lazy per-image
+    byte path.
     """
     journal = _get_journal()
     if journal is None:
         return _err("Journal not initialised", 503)
-    return _ok(journal.list_screenshots())
+    include_data = (request.args.get("include_data") or "").strip().lower() in {"1", "true", "yes"}
+    return _ok(journal.list_screenshots(include_data=include_data))
 
 
 @journal_bp.route("/screenshots/<screenshot_id>", methods=["GET"])
