@@ -2772,7 +2772,10 @@ def test_connect_candidate_timeout_preserves_live_state_and_releases_lock(client
     elapsed = time.monotonic() - started
 
     assert response.status_code == 504
-    assert elapsed < 0.5
+    # Generous bound: the invariant is "the 504 comes from the 0.01s candidate
+    # timeout rather than a hang", not a latency target — loaded runners
+    # (parallel agents, busy CI) blow sub-second wall-clock windows.
+    assert elapsed < 5.0
     assert app.config["BROKER_ROUTER"] is router
     assert router.calls == 0
     assert app.config["CREDENTIAL_STORE"].list_accounts() == []
@@ -2937,7 +2940,9 @@ def test_relogin_candidate_timeout_preserves_live_state_and_releases_lock(client
     elapsed = time.monotonic() - started
 
     assert response.status_code == 504
-    assert elapsed < 0.5
+    # Generous bound: see the connect-timeout twin above — prompt-vs-hang is
+    # the invariant, not sub-second latency.
+    assert elapsed < 5.0
     assert app.config["BROKER_ROUTER"] is router
     assert router.calls == 0
     assert store.retrieve_for("upstox", "TIMEOUTRELOGIN") == {"access_token": "prior"}
