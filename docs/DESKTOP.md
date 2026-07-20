@@ -230,8 +230,15 @@ environment variable.
   **System Settings → Privacy & Security → Open Anyway**; on macOS 13/14,
   right-click (Control-click) the app and choose **Open**, then **Open**
   again. Needed once per install.
-- **Uninstall:** drag **FlintTrade** from **Applications** to the Trash. To also
-  remove data: delete `~/Library/Application Support/flinttrade/`.
+- **Uninstall:** `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash`
+  — removes the app **and** the WebView residue macOS keeps after a plain
+  drag-to-Trash (everything keyed by the `com.flinttrade.app` bundle id under
+  `~/Library/{WebKit,Caches,HTTPStorages,Application Support,Preferences,Saved
+  Application State,Logs}/`). Workspace data at
+  `~/Library/Application Support/flinttrade/` (credential vault, journals,
+  settings) is kept; add `--purge` to delete that too (irreversible). Manual
+  alternative: trash the app, then delete those `com.flinttrade.app` folders
+  yourself.
 
 ### Windows (`.exe`)
 - **Recommended:** `irm https://flinttrade.vercel.app/install.ps1 | iex` — the
@@ -248,9 +255,15 @@ environment variable.
   `%APPDATA%\flinttrade\runtime\backend`. If the app reports the engine
   "disappeared", restore it from Defender's protection history or add an
   exclusion for that folder.
-- **Uninstall:** **Settings → Apps → Installed apps → FlintTrade → Uninstall**,
-  or **Control Panel → Programs and Features**. To also remove data: delete
-  `%APPDATA%\flinttrade\`.
+- **Uninstall:** `irm https://flinttrade.vercel.app/uninstall.ps1 | iex` — runs
+  the per-user NSIS uninstaller and then sweeps what it leaves behind: the
+  install folder (`%LOCALAPPDATA%\FlintTrade`), the WebView2 profile
+  (`%LOCALAPPDATA%\com.flinttrade.app`), Start-menu/desktop shortcuts, and the
+  `HKCU` uninstall/product registry keys. Workspace data at
+  `%APPDATA%\flinttrade\` (credential vault, journals, settings) is kept; set
+  `$env:FLINTTRADE_PURGE = "1"` before the command to delete that too
+  (irreversible). Manual alternative: **Settings → Apps → Installed apps →
+  FlintTrade → Uninstall**, then delete the two `%LOCALAPPDATA%` folders above.
 
 ### Linux
 - **Recommended:** `curl -fsSL https://flinttrade.vercel.app/install.sh | bash`
@@ -271,7 +284,15 @@ environment variable.
 - The desktop app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` internally by
   default, which fixes the blank-window issue on NVIDIA and virtual-machine
   graphics stacks.
-- To also remove data: delete `~/.flinttrade/`.
+- **Uninstall:** `curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash`
+  — removes everything the install script created (`~/.local/bin/flinttrade*`,
+  `~/.local/opt/flinttrade/`, the desktop entry, icon, and
+  `~/.local/state/flinttrade/` logs) plus the WebKitGTK residue keyed by the
+  `com.flinttrade.app` bundle id under `~/.local/share/`, `~/.cache/`, and
+  `~/.config/`. Workspace data at `~/.flinttrade/` (credential vault, journals,
+  settings) is kept; add `--purge` to delete that too (irreversible). Legacy
+  `.deb`/`.rpm` installs are system-owned — remove those with
+  `sudo apt remove flinttrade` / `sudo dnf remove flinttrade`.
 
 ---
 
