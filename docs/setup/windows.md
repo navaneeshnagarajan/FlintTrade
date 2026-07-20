@@ -1,6 +1,6 @@
 # FlintTrade on Windows
 
-> FlintTrade `v0.6.0-beta.12` is not production ready; use Explore and Practice
+> FlintTrade `v0.6.0-beta.13` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
 ## Option A — One-command install (Recommended)

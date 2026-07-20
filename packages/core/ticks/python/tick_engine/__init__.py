@@ -136,4 +136,4 @@ __all__ = [
     "PairsStrategy",
     "run_batch",
 ]
-__version__ = "0.6.0-beta.12"
+__version__ = "0.6.0-beta.13"

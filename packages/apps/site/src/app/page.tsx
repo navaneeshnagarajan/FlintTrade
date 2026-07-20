@@ -120,7 +120,7 @@ export default function HomePage() {
             app for macOS, Windows, and Linux.
           </p>
           <p className="hero-disclaimer">
-            v0.6.0-beta.12 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
+            v0.6.0-beta.13 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
           <div className="hero-feature-grid">
             {welcomeFeatures.map((item) => (
