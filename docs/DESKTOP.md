@@ -264,6 +264,13 @@ environment variable.
   `$env:FLINTTRADE_PURGE = "1"` before the command to delete that too
   (irreversible). Manual alternative: **Settings → Apps → Installed apps →
   FlintTrade → Uninstall**, then delete the two `%LOCALAPPDATA%` folders above.
+- The native uninstaller can remove all data itself: ticking **Delete the
+  application data** on its confirmation page removes the WebView2 profile
+  **and** the whole workspace (`%APPDATA%\flinttrade`, plus any
+  `%USERPROFILE%\.flinttrade` source clone) — wired via the NSIS uninstall
+  hook in `packages/apps/desktop/src-tauri/windows/uninstall-hooks.nsh`.
+  Silent uninstalls (`/S`) and auto-updates never show that page and never
+  touch data.
 
 ### Linux
 - **Recommended:** `curl -fsSL https://flinttrade.vercel.app/install.sh | bash`

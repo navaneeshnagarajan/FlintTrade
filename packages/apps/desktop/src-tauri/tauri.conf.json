@@ -77,7 +77,8 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./windows/uninstall-hooks.nsh"
       }
     }
   }

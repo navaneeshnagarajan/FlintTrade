@@ -11,6 +11,7 @@ is never touched.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SH = ROOT / "scripts" / "install" / "flinttrade-uninstall.sh"
 PS1 = ROOT / "scripts" / "install" / "flinttrade-uninstall.ps1"
+TAURI_CONF = ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
+NSIS_HOOKS = ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "windows" / "uninstall-hooks.nsh"
 
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
@@ -176,3 +179,87 @@ def test_uninstall_reports_clean_when_nothing_is_installed(tmp_path: Path) -> No
 
     assert result.returncode == 0, result.stderr
     assert "does not appear to be installed" in result.stdout
+
+
+@pytest.mark.unit
+def test_nsis_uninstall_hook_is_wired_and_exists() -> None:
+    """The native Windows uninstaller must be able to remove ALL app data.
+
+    Tauri's stock "Delete the application data" checkbox only removes the
+    bundle-id folders; the workspace at %APPDATA%\\flinttrade (credential
+    vault, journals, settings) needs the installerHooks file to be wired.
+    """
+    conf = json.loads(TAURI_CONF.read_text(encoding="utf-8"))
+    hooks_ref = conf["bundle"]["windows"]["nsis"]["installerHooks"]
+    assert hooks_ref == "./windows/uninstall-hooks.nsh"
+    assert NSIS_HOOKS.is_file(), "installerHooks points at a missing file"
+
+
+@pytest.mark.unit
+def test_nsis_uninstall_hook_extends_the_checkbox_with_both_guards() -> None:
+    """The hook must delete the workspace ONLY behind the same interactive
+    checkbox and update-mode guards the stock template uses — a silent (/S)
+    or auto-update uninstall must never wipe trading data."""
+    text = NSIS_HOOKS.read_text(encoding="utf-8")
+    # NSIS charset detection for included files is fragile; stay pure ASCII.
+    assert text.isascii(), "uninstall-hooks.nsh must be pure ASCII"
+
+    macro = text.index("!macro NSIS_HOOK_POSTUNINSTALL")
+    checkbox = text.index("${If} $DeleteAppDataCheckboxState = 1")
+    update_guard = text.index("${AndIf} $UpdateMode <> 1")
+    workspace = text.index('RMDir /r "$APPDATA\\flinttrade"')
+    src_clone = text.index('RMDir /r "$PROFILE\\.flinttrade"')
+    end_if = text.index("${EndIf}")
+    macro_end = text.index("!macroend")
+
+    # Both deletions sit inside the guarded block, inside the macro.
+    assert macro < checkbox < update_guard < workspace < src_clone < end_if < macro_end
+
+
+@pytest.mark.unit
+def test_nsis_uninstall_hook_compiles_when_makensis_works(tmp_path: Path) -> None:
+    """Compile the hook via makensis inside a minimal harness that mirrors the
+    Tauri template's context (LogicLib + the checkbox/update-mode vars).
+
+    Skips when makensis is absent or its toolchain is broken (the Homebrew
+    arm64 build aborts with std::bad_alloc on ANY script, even a trivial one),
+    so a red result always means the hook itself failed to parse.
+    """
+    makensis = shutil.which("makensis")
+    if not makensis:
+        pytest.skip("makensis is not available on this runner")
+
+    def compile_nsi(path: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [makensis, str(path)], cwd=path.parent, text=True, capture_output=True
+        )
+
+    trivial = tmp_path / "trivial.nsi"
+    trivial.write_text('Name "T"\nOutFile "t.exe"\nSection\nSectionEnd\n')
+    if compile_nsi(trivial).returncode != 0:
+        pytest.skip("makensis is present but its toolchain is broken")
+
+    harness = tmp_path / "harness.nsi"
+    harness.write_text(
+        "Unicode true\n"
+        '!include "LogicLib.nsh"\n'
+        'Name "HookHarness"\n'
+        'OutFile "hook-harness-setup.exe"\n'
+        'InstallDir "$LOCALAPPDATA\\HookHarness"\n'
+        "Var DeleteAppDataCheckboxState\n"
+        "Var UpdateMode\n"
+        f'!include "{NSIS_HOOKS}"\n'
+        'Section "Install"\n'
+        '  SetOutPath "$INSTDIR"\n'
+        '  WriteUninstaller "$INSTDIR\\uninstall.exe"\n'
+        "SectionEnd\n"
+        'Section "Uninstall"\n'
+        '  StrCpy $UpdateMode "0"\n'
+        '  StrCpy $DeleteAppDataCheckboxState "0"\n'
+        "  !ifmacrodef NSIS_HOOK_POSTUNINSTALL\n"
+        "    !insertmacro NSIS_HOOK_POSTUNINSTALL\n"
+        "  !endif\n"
+        "SectionEnd\n"
+    )
+    result = compile_nsi(harness)
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
