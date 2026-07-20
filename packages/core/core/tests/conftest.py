@@ -62,6 +62,12 @@ def _clean_legacy_scratch_dbs(base: Path) -> None:
                 pass
 
 
+# The constant every seeded workspace's master_password file carries. The
+# per-module fixture below also pins the process cache to it so the password an
+# app encrypts under always matches the file beside its stores.
+_TEST_MASTER_PASSWORD = "pytest-master-password"
+
+
 def _seed_test_master_password(base: Path) -> None:
     # Master password no longer auto-generates (locked #13: getpass/fd only).
     # Seed a file so app-creating tests don't block on a TTY prompt.
@@ -70,7 +76,7 @@ def _seed_test_master_password(base: Path) -> None:
         if not pw_file.exists():
             from flinttrade_core.secure_file import write_secret_text
 
-            write_secret_text(pw_file, "pytest-master-password")
+            write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
     except OSError:
         pass
 
@@ -125,15 +131,37 @@ def _isolated_auth_state(tmp_path_factory):
 
 @pytest.fixture(scope="module", autouse=True)
 def _per_module_workspace(request):
-    """Give each app-building test module its own persistent-state workspace."""
+    """Give each app-building test module its own persistent-state workspace.
+
+    Also pins the process-global master-password cache to the seeded constant
+    for the module's duration. ``flinttrade_core.app._get_master_password``
+    caches whichever password the first app-building test happened to resolve
+    (several tests seed bespoke passwords in throw-away workspaces), so without
+    the pin the password a module's app encrypts with is an accident of xdist
+    scheduling. Module workspaces persist across the fixture's re-setups when
+    xdist interleaves modules, so a later round decrypting ``webhook_secrets.db``
+    rows written by an earlier round under a different cached password fails
+    with ``InvalidTag`` (the TestWebhooksManagement 503 flake). Pinning makes
+    every round of every core module encrypt and decrypt under the same
+    password that ``_seed_test_master_password`` wrote beside the store.
+    """
+    import flinttrade_core.app as app_mod
+
     prev = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    base = Path(prev) if prev else (Path(tempfile.gettempdir()) / "flinttrade-pytest" / "main")
+    # mkdtemp fallback, NOT a deterministic path: a stable directory would be
+    # reused by every later suite invocation, and stale encrypted stores under
+    # yesterday's master password fail with InvalidTag (see 82d7e17f, which
+    # removed the same reusable-path pattern from the data conftest).
+    base = Path(prev) if prev else Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     mod_dir = base / Path(request.module.__file__).stem
     mod_dir.mkdir(parents=True, exist_ok=True)
     _clean_legacy_scratch_dbs(mod_dir)
     _seed_test_master_password(mod_dir)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(mod_dir)
+    prev_cached_pw = app_mod._MASTER_PASSWORD
+    app_mod._MASTER_PASSWORD = _TEST_MASTER_PASSWORD
     yield
+    app_mod._MASTER_PASSWORD = prev_cached_pw
     if prev is not None:
         os.environ["FLINTTRADE_WORKSPACE_DIR"] = prev
     else:
