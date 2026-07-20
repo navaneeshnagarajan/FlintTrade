@@ -717,9 +717,20 @@ class TestLiveModeForwarding:
         # BrokerRouter is deliberately unpublished and the write fails closed.
         assert resp.status_code == 503
 
-    @pytest.mark.parametrize("endpoint", ["/api/v1/orders/modify", "/api/v1/orders/cancel"])
+    @pytest.mark.parametrize(
+        ("endpoint", "expected_status"),
+        [
+            # modify: the order is absent from the authoritative book — a
+            # verifiable STATE refusal, reported 409 with the specific reason.
+            ("/api/v1/orders/modify", 409),
+            # cancel: no router available at all — a service-unavailable 503.
+            ("/api/v1/orders/cancel", 503),
+        ],
+    )
     @patch("flinttrade_core.order_routes.httpx.Client")
-    def test_live_modify_cancel_are_gated_not_forwarded(self, mock_client_cls, endpoint, client):
+    def test_live_modify_cancel_are_gated_not_forwarded(
+        self, mock_client_cls, endpoint, expected_status, client
+    ):
         """modify/cancel live now route through the gated BrokerRouter, never the raw forward."""
         mock_http = MagicMock()
         mock_http.__enter__ = MagicMock(return_value=mock_http)
@@ -734,7 +745,7 @@ class TestLiveModeForwarding:
         )
         # No raw httpx forward; bare WSGI has no emergency runtime/router.
         mock_http.post.assert_not_called()
-        assert resp.status_code == 503
+        assert resp.status_code == expected_status
 
     def test_kotak_cancel_signs_trading_symbol_extra(self, flask_app, monkeypatch):
         """Kotak AMO cancel ``trading_symbol`` must be covered by the signed fingerprint."""
