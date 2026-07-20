@@ -6382,6 +6382,8 @@ mod tests {
     /// shell claims once at startup and holds for life), so this transient
     /// window is a test-only concern; every acquire-after-release site must
     /// tolerate it with this bounded retry.
+    /// `surviving_lock_fd_duplicate_defers_release_until_last_close` pins
+    /// the mechanism deterministically.
     fn acquire_released_instance_lock(
         path: &Path,
         shell_pid: u32,
@@ -7117,6 +7119,44 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "100\n");
         drop(empty);
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Deterministic pin of the transient-WouldBlock mechanism that flaked
+    /// CI run 29519006596: flock ownership belongs to the open file
+    /// description, not the fd, so any surviving duplicate of the lock fd
+    /// keeps a just-released lock alive until the last reference closes. In
+    /// CI the duplicate arises by accident when a concurrent test's
+    /// `Command::spawn` forks while the fd is open (the child holds
+    /// inherited fds until exec's O_CLOEXEC sweep); `try_clone` recreates
+    /// the same kernel state without the timing dependence. Both halves of
+    /// the contract are asserted: release really is deferred while a
+    /// duplicate survives, and the bounded retry outlasts it.
+    #[cfg(unix)]
+    #[test]
+    fn surviving_lock_fd_duplicate_defers_release_until_last_close() {
+        let root = std::env::temp_dir().join(format!(
+            "flinttrade-instance-fd-duplicate-{}",
+            generate_launch_token().unwrap()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("desktop-instance.lock");
+        let owner = DesktopInstanceLock::acquire_at(&path, 77, "a".repeat(64)).unwrap();
+        let inherited_duplicate = owner._file.try_clone().unwrap();
+
+        // Same-process release: the owner's fd closes, but the duplicate
+        // keeps the open file description — and its flock — alive, so the
+        // kernel still reports contention.
+        drop(owner);
+        let error = DesktopInstanceLock::acquire_at(&path, 99, "b".repeat(64)).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+
+        // Closing the last reference releases the lock; the bounded retry
+        // used by every acquire-after-release site then claims it.
+        drop(inherited_duplicate);
+        let successor = acquire_released_instance_lock(&path, 99, "b".repeat(64));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "99\n");
+        drop(successor);
         let _ = std::fs::remove_dir_all(root);
     }
 
