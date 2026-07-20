@@ -7,8 +7,9 @@
  * current script without a site redeploy. The install scripts resolve the
  * current desktop-release manifest at run time and install the matching release
  * asset by default, with source builds available only via explicit flags. The
- * uninstall scripts remove the app plus all Tauri/WebView residue and keep
- * workspace data unless explicitly purged.
+ * uninstall scripts remove the app plus its disposable residue and keep BOTH
+ * the workspace and the WebView storage (in-app saved content) unless
+ * explicitly purged.
  */
 
 const RAW_BASE =

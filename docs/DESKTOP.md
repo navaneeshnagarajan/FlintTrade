@@ -234,7 +234,8 @@ environment variable.
   — removes the app **and** the disposable residue macOS keeps after a plain
   drag-to-Trash (the `com.flinttrade.app` bundle-id folders under
   `~/Library/{Caches,HTTPStorages,Application Support,Preferences,Saved
-  Application State,Logs}/`). Two kinds of data are kept: the workspace at
+  Application State,Logs}/`, and the build-from-source clone at
+  `~/.flinttrade/src`). Two kinds of data are kept: the workspace at
   `~/Library/Application Support/flinttrade/` (credential vault, journals,
   settings) and the WebView storage at `~/Library/WebKit/com.flinttrade.app/`,
   whose localStorage holds in-app saved content (trade journal notes and
@@ -262,8 +263,10 @@ environment variable.
   exclusion for that folder.
 - **Uninstall:** `irm https://flinttrade.vercel.app/uninstall.ps1 | iex` — runs
   the per-user NSIS uninstaller and then sweeps what it leaves behind: the
-  install folder (`%LOCALAPPDATA%\FlintTrade`), Start-menu/desktop shortcuts,
-  and the `HKCU` uninstall/product registry keys. Two kinds of data are kept:
+  install folder (`%LOCALAPPDATA%\FlintTrade`), the Tauri app-config residue
+  (`%APPDATA%\com.flinttrade.app`), the build-from-source clone
+  (`%USERPROFILE%\.flinttrade\src`), Start-menu/desktop shortcuts, and the
+  `HKCU` uninstall/product registry keys. Two kinds of data are kept:
   the workspace at `%APPDATA%\flinttrade\` (credential vault, journals,
   settings) and the WebView2 profile at `%LOCALAPPDATA%\com.flinttrade.app`,
   whose localStorage holds in-app saved content (trade journal notes and
@@ -310,7 +313,8 @@ environment variable.
   `~/.local/state/flinttrade/` logs) plus the disposable WebKitGTK residue
   keyed by the `com.flinttrade.app` bundle id under `~/.cache/` and
   `~/.config/`. Two kinds of data are kept: the workspace at `~/.flinttrade/`
-  (credential vault, journals, settings) and the WebView storage at
+  (credential vault, journals, settings — though its `src/` build-from-source
+  clone is removed as install residue) and the WebView storage at
   `~/.local/share/com.flinttrade.app/`, whose localStorage holds in-app saved
   content (trade journal notes and screenshots, flows, saved AI chats).
   Legacy `.deb`/`.rpm` installs are system-owned — remove those with

@@ -74,10 +74,13 @@ case "$OS" in
   *) die "Unsupported OS: $OS (Windows uses flinttrade-uninstall.ps1)" ;;
 esac
 
-# Resolve the workspace exactly the way the backend does
+# Resolve the workspace the way the backend does
 # (flinttrade_core.workspace): FLINTTRADE_WORKSPACE_DIR beats FLINTTRADE_HOME
-# beats the platform default. Purging a hardcoded default while the real vault
-# lives behind an override would report success and leave the data on disk.
+# beats the platform default, with a leading ~ expanded like the backend's
+# expanduser(). Purging a hardcoded default while the real vault lives behind
+# an override would report success and leave the data on disk — and the
+# platform default stays on the data-target list even under an override,
+# because pre-override data may still live there.
 default_workspace() {
   if [ "$OS" = "Darwin" ]; then
     printf '%s' "$HOME/Library/Application Support/flinttrade"
@@ -85,7 +88,37 @@ default_workspace() {
     printf '%s' "$HOME/.flinttrade"
   fi
 }
-WORKSPACE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
+expand_tilde() {
+  case "$1" in
+    "~") printf '%s' "$HOME" ;;
+    "~/"*) printf '%s' "$HOME/${1#\~/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+WORKSPACE_DIR="$(expand_tilde "${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}")"
+# Set per-OS before purge/keep run; labels the in-app-content line.
+WEBVIEW_STORAGE_DIR=""
+DATA_TARGETS=()
+
+# Collect every FlintTrade data location that exists, deduplicated: the
+# resolved workspace, the platform default (an override must not orphan it),
+# the WebView storage, and any extra legacy dirs.
+collect_data_targets() {
+  local candidates=("$WORKSPACE_DIR" "$(default_workspace)" "$WEBVIEW_STORAGE_DIR" "$@")
+  DATA_TARGETS=()
+  local candidate existing seen
+  for candidate in "${candidates[@]}"; do
+    [ -n "$candidate" ] || continue
+    [ -e "$candidate" ] || continue
+    seen=0
+    if [ "${#DATA_TARGETS[@]}" -gt 0 ]; then
+      for existing in "${DATA_TARGETS[@]}"; do
+        [ "$existing" = "$candidate" ] && seen=1
+      done
+    fi
+    [ "$seen" = "1" ] || DATA_TARGETS+=("$candidate")
+  done
+}
 
 # Remove a path if it exists; honours --dry-run, never follows the failure
 # into an abort (a locked file should not strand the rest of the sweep).
@@ -167,10 +200,11 @@ uninstall_macos() {
   remove_path "$HOME/.flinttrade/src"
   remove_empty_dir "$HOME/.flinttrade"
 
+  WEBVIEW_STORAGE_DIR="$HOME/Library/WebKit/$BUNDLE_ID"
   if [ "$PURGE" = "1" ]; then
-    purge_all_data "$HOME/Library/WebKit/$BUNDLE_ID" "$HOME/.flinttrade"
+    purge_all_data "$HOME/.flinttrade"
   else
-    keep_notice "$HOME/Library/WebKit/$BUNDLE_ID"
+    keep_notice "$HOME/.flinttrade"
   fi
 }
 
@@ -207,36 +241,52 @@ uninstall_linux() {
     say "Remove it with your package manager: sudo apt remove flinttrade  (or: sudo dnf remove flinttrade)"
   fi
 
+  WEBVIEW_STORAGE_DIR="$HOME/.local/share/$BUNDLE_ID"
   if [ "$PURGE" = "1" ]; then
-    purge_all_data "$HOME/.local/share/$BUNDLE_ID"
+    purge_all_data
   else
-    keep_notice "$HOME/.local/share/$BUNDLE_ID"
+    keep_notice
   fi
 }
 
-# Purge everything the app has created: the resolved workspace, the WebView
-# storage (in-app saved content), and any extra legacy dirs passed in.
+# Purge everything the app has created: the resolved workspace, the platform
+# default, the WebView storage (in-app saved content), and any extra legacy
+# dirs passed in.
 purge_all_data() {
-  local webview_storage="$1"
-  shift
-  local targets=("$WORKSPACE_DIR" "$webview_storage" "$@")
-  local existing=() target
-  for target in "${targets[@]}"; do
-    if [ -e "$target" ]; then
-      existing+=("$target")
-    fi
-  done
-  if [ "${#existing[@]}" -eq 0 ]; then
+  collect_data_targets "$@"
+  if [ "${#DATA_TARGETS[@]}" -eq 0 ]; then
     say "No FlintTrade data to purge."
     return 0
   fi
+  # An env-supplied override names an arbitrary path; --yes consent was given
+  # for "the FlintTrade workspace", not for whatever the environment says.
+  # Refuse the obviously-wrong targets outright.
+  local target safe=()
+  for target in "${DATA_TARGETS[@]}"; do
+    case "${target%/}" in
+      ""|"$HOME"|"${HOME%/}")
+        say "Refusing to purge $target — not a FlintTrade data directory."
+        FAILED_ANY=1
+        ;;
+      *) safe+=("$target") ;;
+    esac
+  done
+  if [ "${#safe[@]}" -eq 0 ]; then
+    return 0
+  fi
   if [ "$DRY_RUN" = "1" ]; then
-    for target in "${existing[@]}"; do
+    for target in "${safe[@]}"; do
       say "[dry-run] would DELETE FlintTrade data at $target"
     done
     return 0
   fi
-  if [ "$ASSUME_YES" != "1" ]; then
+  if [ "$ASSUME_YES" = "1" ]; then
+    # Scripted consent still gets told exactly what is being deleted.
+    say "Purging FlintTrade data:"
+    for target in "${safe[@]}"; do
+      say "  $target"
+    done
+  else
     # When piped through `curl | bash` stdin carries the script, so the
     # confirmation must come from the TTY. Without one (CI, scripts), refuse
     # rather than block or guess: --yes is the only non-interactive consent.
@@ -245,7 +295,7 @@ purge_all_data() {
       return 0
     fi
     say "About to DELETE all FlintTrade data:"
-    for target in "${existing[@]}"; do
+    for target in "${safe[@]}"; do
       say "  $target"
     done
     printf '%s' "This removes the credential vault, auth.db, journals, settings, and in-app saved content (journal notes, flows, AI chats). Irreversible. Type 'purge' to continue: "
@@ -256,22 +306,25 @@ purge_all_data() {
       return 0
     fi
   fi
-  for target in "${existing[@]}"; do
+  for target in "${safe[@]}"; do
     remove_path "$target"
   done
 }
 
+# Reports the same target set purge_all_data would delete, so nothing --purge
+# would remove goes unmentioned on a default run.
 keep_notice() {
-  local webview_storage="$1"
-  if [ -e "$WORKSPACE_DIR" ]; then
-    say "Workspace data kept at $WORKSPACE_DIR (credential vault, journals, settings)."
-  fi
-  if [ -e "$webview_storage" ]; then
-    say "In-app saved content kept at $webview_storage (journal notes, flows, saved AI chats)."
-  fi
-  if [ -e "$WORKSPACE_DIR" ] || [ -e "$webview_storage" ]; then
-    say "To delete all FlintTrade data too, re-run with --purge."
-  fi
+  collect_data_targets "$@"
+  [ "${#DATA_TARGETS[@]}" -gt 0 ] || return 0
+  local target
+  for target in "${DATA_TARGETS[@]}"; do
+    if [ "$target" = "$WEBVIEW_STORAGE_DIR" ]; then
+      say "In-app saved content kept at $target (journal notes, flows, saved AI chats)."
+    else
+      say "Workspace data kept at $target (credential vault, journals, settings)."
+    fi
+  done
+  say "To delete all FlintTrade data too, re-run with --purge."
 }
 
 case "$OS" in

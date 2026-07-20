@@ -34,7 +34,8 @@
     RMDir /r "$PROFILE\.flinttrade"
     ${If} ${Errors}
     ${OrIf} ${FileExists} "$APPDATA\flinttrade\*.*"
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Some FlintTrade data could not be removed (files may still be in use).$\r$\n$\r$\nPlease delete this folder manually:$\r$\n$APPDATA\flinttrade" /SD IDOK
+    ${OrIf} ${FileExists} "$PROFILE\.flinttrade\*.*"
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Some FlintTrade data could not be removed (files may still be in use).$\r$\n$\r$\nPlease check and delete these folders manually:$\r$\n$APPDATA\flinttrade$\r$\n$PROFILE\.flinttrade" /SD IDOK
     ${EndIf}
   ft_uninstall_keep_workspace:
   ${EndIf}

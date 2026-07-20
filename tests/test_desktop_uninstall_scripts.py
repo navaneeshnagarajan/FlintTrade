@@ -230,8 +230,9 @@ def test_installer_consent_env_var_does_not_authorise_purge(tmp_path: Path) -> N
 def test_purge_honours_workspace_dir_override(tmp_path: Path) -> None:
     """The backend resolves FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME >
     platform default; purging the hardcoded default while the real vault
-    lives elsewhere would report success and leave the data on disk."""
-    _plant_linux_footprint(tmp_path)
+    lives elsewhere would report success and leave the data on disk. The
+    platform default must ALSO be purged — pre-override data may live there."""
+    paths = _plant_linux_footprint(tmp_path)
     override = tmp_path / "custom-workspace"
     override.mkdir()
     (override / "credentials.db").write_text("x")
@@ -246,6 +247,64 @@ def test_purge_honours_workspace_dir_override(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert not override.exists()
+    assert not paths["workspace"].exists(), "platform-default workspace must be purged too"
+    assert str(override) in result.stdout, "--yes purge must list its targets"
+
+
+@pytest.mark.unit
+def test_keep_notice_reports_override_and_default(tmp_path: Path) -> None:
+    """A default run must mention every location --purge would delete."""
+    _plant_linux_footprint(tmp_path)
+    override = tmp_path / "custom-workspace"
+    override.mkdir()
+    (override / "credentials.db").write_text("x")
+
+    result = _run(
+        tmp_path, os_name="Linux", extra_env={"FLINTTRADE_WORKSPACE_DIR": str(override)}
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert str(override) in result.stdout
+    assert f"Workspace data kept at {tmp_path}/.flinttrade" in result.stdout
+
+
+@pytest.mark.unit
+def test_workspace_override_is_tilde_expanded(tmp_path: Path) -> None:
+    """The backend expanduser()s the override; a literal '~/...' must reach
+    the same directory, not a ./~ path that quietly never matches."""
+    ws = tmp_path / "flint-ws"
+    ws.mkdir()
+    (ws / "credentials.db").write_text("x")
+
+    result = _run(
+        tmp_path,
+        "--purge",
+        "--yes",
+        os_name="Linux",
+        extra_env={"FLINTTRADE_WORKSPACE_DIR": "~/flint-ws"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not ws.exists()
+
+
+@pytest.mark.unit
+def test_purge_refuses_home_as_workspace(tmp_path: Path) -> None:
+    """A leaked or hostile override naming $HOME must never be rm -rf'd —
+    consent was given for the FlintTrade workspace, not the home directory."""
+    (tmp_path / "unrelated.txt").write_text("x")
+
+    result = _run(
+        tmp_path,
+        "--purge",
+        "--yes",
+        os_name="Linux",
+        extra_env={"FLINTTRADE_WORKSPACE_DIR": str(tmp_path)},
+    )
+
+    assert (tmp_path / "unrelated.txt").exists(), "$HOME contents must survive"
+    assert "Refusing to purge" in result.stdout
+    assert result.returncode == 1, "a refused purge target must not exit 0"
 
 
 @pytest.mark.unit
@@ -368,9 +427,12 @@ def test_nsis_uninstall_hook_deletes_only_behind_consent_and_guards() -> None:
     clear_errors = code.index("ClearErrors")
     assert consent_box < clear_errors < deletions[0]
     assert "${If} ${Errors}" in code[deletions[-1] : keep_label]
-    # Nothing deletion-like after the keep label (the unguarded tail region).
-    tail = code[keep_label:]
-    assert not re.search(r"RMDir|Delete |Rename ", tail), "deletion after the guard region"
+    # Nothing deletion-like anywhere outside the consented region — neither
+    # before the MessageBox (checkbox-gated but not consent-gated) nor after
+    # the keep label (fully unguarded).
+    deletion_like = r"RMDir|Delete |Rename "
+    assert not re.search(deletion_like, code[:consent_box]), "deletion before the consent box"
+    assert not re.search(deletion_like, code[keep_label:]), "deletion after the guard region"
 
 
 @pytest.mark.unit
