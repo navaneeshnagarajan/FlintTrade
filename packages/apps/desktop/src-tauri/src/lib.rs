@@ -3099,8 +3099,8 @@ fn spawn_backend_supervision(
                     // a NEW attempt owns the splash and payload pin) still do
                     // their record cleanup, but must not demote the pin the
                     // new attempt is booting or clobber its splash stage.
-                    let superseded = my_attempt.is_some()
-                        && current_bootstrap_attempt(&handle) != my_attempt;
+                    let superseded =
+                        my_attempt.is_some() && current_bootstrap_attempt(&handle) != my_attempt;
                     let bootstrap_failed = ready_port.is_none() && !quit_was_requested(&handle);
                     // An environmentally blocked backend (another instance
                     // owns the workspace lease) announced itself on stdout;
@@ -8467,7 +8467,10 @@ mod tests {
             payload_version_older_than("0.6.0-beta.10", "0.6.0-beta.9"),
             Some(false)
         );
-        assert_eq!(payload_version_older_than("0.6.0-beta.7", "0.6.0"), Some(true));
+        assert_eq!(
+            payload_version_older_than("0.6.0-beta.7", "0.6.0"),
+            Some(true)
+        );
         // Malformed versions yield no decision: the boot keeps the installed
         // payload instead of blocking or downloading blindly.
         assert_eq!(payload_version_older_than("not-a-version", "0.6.0"), None);
