@@ -369,6 +369,37 @@ describe("ForeverOrdersWidget", () => {
     expect(body.changes.pricetype).toBe(expectedValue);
   });
 
+  it("prefills SL for a resting STOP_LOSS forever order — never silently LIMIT", async () => {
+    // Regression: dhanModifyPriceType("SL") used to fall through to "LIMIT",
+    // so an innocent trigger-price edit rewrote the resting leg's order type
+    // at the broker under the complete-replacement modify contract.
+    listRows = [{ ...LIST_ROW, pricetype: "SL" }];
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    fireEvent.change(screen.getByLabelText("New trigger price"), { target: { value: "2950" } });
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }));
+
+    await waitFor(() => expect(callsByMethod("PUT").length).toBe(1));
+    const [, init] = callsByMethod("PUT")[0];
+    const body = JSON.parse(init.body as string) as { changes: Record<string, unknown> };
+    expect(body.changes.pricetype).toBe("SL");
+  });
+
+  it("fails closed on an unrecognised broker price type — Apply stays disabled", async () => {
+    listRows = [{ ...LIST_ROW, pricetype: "MYSTERY_TYPE" }];
+    renderWidget();
+    await waitFor(() => expect(screen.getByText("RELIANCE")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    fireEvent.change(screen.getByLabelText("New trigger price"), { target: { value: "2950" } });
+    const apply = screen.getByRole("button", { name: /apply/i });
+    expect(apply).toBeDisabled();
+    // Choosing a type deliberately re-enables Apply.
+    fireEvent.click(screen.getByLabelText("New price type"));
+    fireEvent.click(await screen.findByRole("option", { name: "STOP_LOSS" }));
+    expect(screen.getByRole("button", { name: /apply/i })).toBeEnabled();
+  });
+
   it("modifies the selected Dhan OCO stop-loss leg instead of the first leg", async () => {
     listRows = [
       {

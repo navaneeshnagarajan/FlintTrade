@@ -94,11 +94,17 @@ function ruleText(rule: BrokerOrderRow | null, key: string, fallback = ""): stri
 
 function dhanModifyPriceType(value: string): string {
   const normalised = value.toUpperCase().replace("-", "_");
-  if (normalised === "STOP_LOSS") return "SL";
+  if (normalised === "STOP_LOSS" || normalised === "SL") return "SL";
   if (normalised === "STOP_LOSS_MARKET" || normalised === "SL_M" || normalised === "SLM") {
     return "SLM";
   }
-  return normalised === "MARKET" ? "MARKET" : "LIMIT";
+  if (normalised === "MARKET") return "MARKET";
+  if (normalised === "LIMIT") return "LIMIT";
+  // Fail closed: an unrecognised broker price type must not silently prefill
+  // LIMIT — under the complete-replacement modify contract that would rewrite
+  // the resting leg's order type at the broker. "" blocks Apply until the
+  // operator picks the type deliberately.
+  return "";
 }
 
 export default function ForeverOrdersWidget() {
@@ -193,7 +199,7 @@ export default function ForeverOrdersWidget() {
     modTrigger !== null &&
     modTrigger > 0 &&
     modQty !== null &&
-    ((isDhan && modDhanPrice !== null) ||
+    ((isDhan && modDhanPrice !== null && modPriceType !== "") ||
       (isUpstox &&
         (!modStopLossEnabled || (modStopLoss ?? 0) > 0) &&
         (!modStopLossEnabled || modTrailingGap !== null) &&
@@ -259,7 +265,8 @@ export default function ForeverOrdersWidget() {
       const flag = rowText(row, ["order_flag", "orderFlag"], "SINGLE").toUpperCase();
       setModDhanFlag(flag === "OCO" ? "OCO" : "SINGLE");
       setModPriceType(
-        dhanModifyPriceType(rowText(row, ["pricetype", "order_type", "orderType"], "LIMIT")),
+        // Absent price type also fails closed ("") — never assume LIMIT.
+        dhanModifyPriceType(rowText(row, ["pricetype", "order_type", "orderType"], "")),
       );
       setModValidity(rowText(row, ["validity"], "DAY"));
       setModDisclosedQuantity(rowText(row, ["disclosed_quantity", "disclosedQuantity"], "0"));
@@ -728,7 +735,7 @@ export default function ForeverOrdersWidget() {
               <>
                 <Select value={modPriceType} onValueChange={setModPriceType}>
                   <SelectTrigger className="h-7 w-24 text-xs" aria-label="New price type">
-                    <SelectValue />
+                    <SelectValue placeholder="Type?" />
                   </SelectTrigger>
                   <SelectContent>
                     {DHAN_MODIFY_PRICE_TYPES.map((option) => (

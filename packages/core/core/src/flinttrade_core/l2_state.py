@@ -1134,6 +1134,11 @@ def _select_forever_leg(parent: Any, changes: Mapping[str, Any]) -> tuple[Any, A
     leg_name = _text(changes.get("leg_name") or "TARGET_LEG").upper()
     order_flag = _text(_field(parent, "order_flag", "orderFlag")).upper()
     requested_flag = _text(changes.get("order_flag")).upper()
+    if requested_flag and not order_flag:
+        # Fail closed: the caller claims a flag but the authoritative row does
+        # not expose one — the claim cannot be verified, so it must not be
+        # forwarded to the broker unchecked.
+        raise PortfolioSafetyStateError("Authoritative forever-order flag is unavailable")
     if order_flag and requested_flag and requested_flag != order_flag:
         raise PortfolioSafetyStateError("Forever-order flag cannot be changed during modification")
     if leg_name == "TARGET_LEG":

@@ -551,6 +551,13 @@ def _admit_modify_intent(
             adapter_id,
             type(exc).__name__,
         )
+        from .l2_state import PortfolioSafetyStateError  # noqa: PLC0415
+
+        if isinstance(exc, PortfolioSafetyStateError):
+            # These are crafted, user-actionable rule refusals (e.g. "quantity
+            # cannot be modified once OPEN", "invalid leg name") — a generic
+            # 503 hides exactly what the operator must change. Still a refusal.
+            return (jsonify({"status": "error", "message": str(exc)}), 409), None, []
         return _safety_state_unavailable_response(), None, []
     if not intent.risk_increasing:
         return None, None, []

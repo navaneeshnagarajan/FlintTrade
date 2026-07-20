@@ -1020,7 +1020,12 @@ def test_modify_unknown_current_order_fails_closed_before_router() -> None:
         headers=_live_headers(),
     )
 
-    assert response.status_code == 503
+    # Still a fail-closed refusal before the router — but a STATE refusal
+    # (the order is not in the authoritative book) now reports 409 with the
+    # specific reason instead of a generic service-unavailable 503, which is
+    # reserved for genuine safety-state fetch failures.
+    assert response.status_code == 409
+    assert response.get_json()["message"]
     router.modify_order.assert_not_called()
 
 

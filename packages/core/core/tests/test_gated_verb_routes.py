@@ -544,6 +544,47 @@ def test_upstox_forever_modify_uses_official_gtt_row_for_full_admission() -> Non
     assert router.execute_gated.await_args.kwargs["payload"]["changes"]["quantity"] == 2
 
 
+def test_dhan_forever_flag_claim_without_authoritative_flag_fails_closed() -> None:
+    """A caller-claimed order_flag with no flag on the broker row must refuse.
+
+    The claim cannot be verified against the authoritative record, so it is a
+    409 rule refusal — never forwarded to the broker unchecked.
+    """
+    router = _gated_router()
+    app = _app(broker_router=router, safety=_passing_safety())
+    app.config["NATIVE_ADAPTERS"]["dhan"].forever_orders = AsyncMock(
+        return_value=[
+            {
+                "orderid": "GTT-1",
+                "status": "PENDING",
+                # No order_flag on the authoritative row.
+                "symbol": "RELIANCE",
+                "exchange": "NSE",
+                "action": "BUY",
+                "product": "CNC",
+                "pricetype": "LIMIT",
+                "quantity": "10",
+                "filled_quantity": "0",
+                "price": "100",
+                "trigger_price": "99",
+            }
+        ]
+    )
+
+    resp = app.test_client().put(
+        "/api/v1/orders/forever/GTT-1",
+        json={
+            "changes": _dhan_forever_changes(order_flag="SINGLE"),
+            "broker": "dhan",
+        },
+        headers=_live_headers(),
+    )
+
+    assert resp.status_code == 409
+    assert "flag" in resp.get_json()["message"].lower()
+    router.execute_gated.assert_not_called()
+
+
 def test_dhan_oco_stop_leg_increase_runs_full_admission() -> None:
     router = _gated_router()
     safety = _passing_safety()
@@ -628,7 +669,10 @@ def test_open_upstox_gtt_rejects_quantity_or_non_immediate_entry_changes(
         headers=_live_headers(),
     )
 
-    assert resp.status_code == 503
+    # A user-actionable rule refusal: 409 with the SPECIFIC reason, not a
+    # generic safety-state 503 (still a refusal — nothing is dispatched).
+    assert resp.status_code == 409
+    assert resp.get_json()["message"]  # carries the crafted rule statement
     router.execute_gated.assert_not_called()
 
 
