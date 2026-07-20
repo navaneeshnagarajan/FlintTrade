@@ -228,6 +228,34 @@ def test_daily_note_bad_date_400(client):
     assert client.put("/api/v1/journal/notes/not-a-date", json={"content": "x"}).status_code == 400
 
 
+def test_daily_note_date_uses_fullmatch_ascii_and_real_calendar(client):
+    """Pins the _DATE_RE hardening: fullmatch + re.ASCII + date.fromisoformat.
+
+    ``re.match`` + ``$`` accepts a trailing newline, ``\\d`` without
+    ``re.ASCII`` accepts Unicode digits, and the regex alone accepts
+    impossible dates — each previously created a daily_notes row under a key
+    the NotesTab can never address.
+    """
+    bad_dates = [
+        # Trailing newline, percent-encoded as a real HTTP client sends it —
+        # Werkzeug decodes %0A to "\n" AFTER routing (a raw "\n" in the path
+        # is stripped before routing and never reaches the handler).
+        "2026-07-20%0A",
+        "२०२६-०७-२०",  # Devanagari digits — \d matches these without re.ASCII
+        "2026-99-99",  # regex-shaped but not a real calendar date
+        "2026-02-30",  # regex-shaped but not a real calendar date
+    ]
+    for bad in bad_dates:
+        put = client.put(f"/api/v1/journal/notes/{bad}", json={"content": "x"})
+        assert put.status_code == 400, f"PUT accepted bad date {bad!r}"
+        got = client.get(f"/api/v1/journal/notes/{bad}")
+        assert got.status_code == 400, f"GET accepted bad date {bad!r}"
+    # No DB write happened for any rejected key.
+    assert client.get("/api/v1/journal/notes").get_json()["data"] == []
+    # A genuine date still round-trips.
+    assert client.put("/api/v1/journal/notes/2026-07-20", json={"content": "x"}).status_code == 200
+
+
 def test_daily_note_rejects_non_string_and_oversize_content(client):
     assert client.put("/api/v1/journal/notes/2026-07-20", json={"content": 42}).status_code == 400
     big = client.put("/api/v1/journal/notes/2026-07-20", json={"content": "x" * 100_001})
@@ -334,6 +362,33 @@ def test_screenshot_invalid_inputs_400(client):
     assert bad_b64.status_code == 400
 
 
+def test_screenshot_get_single_roundtrip(client, tmp_path):
+    """Pins GET /screenshots/<id> — the lazy per-image path (finding 8)."""
+    row = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url()},
+    ).get_json()["data"]
+    got = client.get(f"/api/v1/journal/screenshots/{row['id']}")
+    assert got.status_code == 200
+    single = got.get_json()["data"]
+    assert single["id"] == row["id"]
+    assert single["trade_key"] == "k1"
+    assert single["content_type"] == "image/png"
+    assert single["size"] == len(b"fake-png-bytes")
+    assert single["data_url"] == _data_url()
+
+
+def test_screenshot_get_single_404_when_absent_or_file_missing(client, tmp_path):
+    assert client.get("/api/v1/journal/screenshots/no-such-id").status_code == 404
+    # A row whose file has gone missing on disk is also a 404, not a 500.
+    row = client.post(
+        "/api/v1/journal/screenshots",
+        json={"trade_key": "k1", "data_url": _data_url()},
+    ).get_json()["data"]
+    (tmp_path / "journal_screenshots" / f"{row['id']}.png").unlink()
+    assert client.get(f"/api/v1/journal/screenshots/{row['id']}").status_code == 404
+
+
 def test_screenshot_delete_removes_file(client, tmp_path):
     row = client.post(
         "/api/v1/journal/screenshots",
@@ -353,5 +408,6 @@ def test_notes_and_screenshots_503_when_uninitialised(app_no_journal):
         assert c.get("/api/v1/journal/notes/2026-07-20").status_code == 503
         assert c.put("/api/v1/journal/notes/2026-07-20", json={"content": "x"}).status_code == 503
         assert c.get("/api/v1/journal/screenshots").status_code == 503
+        assert c.get("/api/v1/journal/screenshots/x").status_code == 503
         assert c.post("/api/v1/journal/screenshots", json={}).status_code == 503
         assert c.delete("/api/v1/journal/screenshots/x").status_code == 503

@@ -22,6 +22,9 @@ vi.mock("@/services/ftApi.ai", async (importOriginal) => {
   return {
     ...actual,
     importAiSession: aiSessionMocks.importAiSession,
+    // The store routes saves/imports through the chunked helper; alias it to
+    // the same mock so the call-shape assertions cover both entry points.
+    importAiSessionChunked: aiSessionMocks.importAiSession,
     getAiSession: aiSessionMocks.getAiSession,
   };
 });

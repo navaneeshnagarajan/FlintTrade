@@ -240,6 +240,19 @@ class AiSessionStore:
         return [dict(row) for row in rows]
 
     @_locked
+    def session_surface(self, session_id: str) -> str | None:
+        """Surface of the stored session, or None when the id is unknown.
+
+        A lightweight existence probe for the import route's cross-surface
+        collision check — unlike :meth:`get_session` it never loads messages.
+        """
+        row = self._conn.execute(
+            "SELECT surface FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        return str(row["surface"]) if row is not None else None
+
+    @_locked
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         """One session with its ordered messages, or None."""
         session = self._conn.execute(

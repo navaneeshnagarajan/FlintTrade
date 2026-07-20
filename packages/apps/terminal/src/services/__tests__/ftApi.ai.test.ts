@@ -42,13 +42,18 @@ vi.mock("@/stores/brokerStore", () => ({
 }));
 
 import {
+  AI_SESSION_IMPORT_MAX_CONTENT_BYTES,
+  AI_SESSION_IMPORT_MAX_MESSAGES,
   getSignalIdentity,
   getRecentSignals,
   importAiSession,
+  importAiSessionChunked,
   runTeamAnalysisStream,
+  splitContentByUtf8Bytes,
   startAgent,
   type AgentSnapshot,
   type AgentStartParams,
+  type AiSessionImportMessage,
   type SignalCardModel,
   type TeamStreamFrame,
 } from "../ftApi.ai";
@@ -87,6 +92,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
   const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+  return JSON.parse(String(init.body)) as Record<string, unknown>;
+}
+
+function requestBodyAt(fetchMock: ReturnType<typeof vi.fn>, index: number): Record<string, unknown> {
+  const [, init] = fetchMock.mock.calls[index] as [string, RequestInit];
   return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
 
@@ -320,6 +330,212 @@ describe("importAiSession", () => {
     await expect(
       importAiSession({ surface: "tutor", messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/operator session/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitContentByUtf8Bytes — UTF-8 byte-budget chunking (REVIEW_FINDINGS #5)
+// ---------------------------------------------------------------------------
+
+const utf8Bytes = (value: string): number => new TextEncoder().encode(value).length;
+
+/** True when the string survives a UTF-8 round-trip (no lone surrogates). */
+function isUtf8RoundTrippable(value: string): boolean {
+  return new TextDecoder().decode(new TextEncoder().encode(value)) === value;
+}
+
+describe("splitContentByUtf8Bytes", () => {
+  it("returns content within the budget unchanged as a single piece", () => {
+    expect(splitContentByUtf8Bytes("hello", AI_SESSION_IMPORT_MAX_CONTENT_BYTES)).toEqual(["hello"]);
+  });
+
+  it("splits on the UTF-8 byte budget, not the JS string length", () => {
+    // "₹" is 1 UTF-16 code unit but 3 UTF-8 bytes: 12 000 chars pass a naive
+    // length check (< 32 768) while weighing 36 000 bytes — over the cap.
+    const content = "₹".repeat(12_000);
+    expect(content.length).toBeLessThan(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+    expect(utf8Bytes(content)).toBeGreaterThan(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+
+    const chunks = splitContentByUtf8Bytes(content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(content);
+    for (const chunk of chunks) {
+      expect(utf8Bytes(chunk)).toBeLessThanOrEqual(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+    }
+  });
+
+  it("never splits a surrogate pair at a chunk boundary", () => {
+    // "🚀" is 4 UTF-8 bytes / 2 UTF-16 units; the leading "a" forces every
+    // naive byte-offset cut to land mid-pair for a 10-byte budget.
+    const content = "a" + "🚀".repeat(5);
+
+    const chunks = splitContentByUtf8Bytes(content, 10);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(content);
+    for (const chunk of chunks) {
+      expect(utf8Bytes(chunk)).toBeLessThanOrEqual(10);
+      expect(isUtf8RoundTrippable(chunk)).toBe(true);
+    }
+  });
+
+  it("yields pairwise-distinct chunks for uniformly repeated content", () => {
+    // The session store collapses byte-identical same-role messages to one
+    // row (content-hash ids), so equal chunks of a repetitive paste would
+    // silently lose content. Distinct per-chunk byte budgets prevent that.
+    const content = "x".repeat(AI_SESSION_IMPORT_MAX_CONTENT_BYTES * 2 + 500);
+
+    const chunks = splitContentByUtf8Bytes(content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(new Set(chunks).size).toBe(chunks.length);
+    expect(chunks.join("")).toBe(content);
+  });
+
+  it("preserves every byte across a split — nothing is ever truncated", () => {
+    const content = "log line with ₹ and 🚀 mixed in — ".repeat(2_000);
+
+    const chunks = splitContentByUtf8Bytes(content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+
+    expect(chunks.join("")).toBe(content);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// importAiSessionChunked — cap-aware batched import (REVIEW_FINDINGS #5)
+// ---------------------------------------------------------------------------
+
+describe("importAiSessionChunked", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function importFetchMock(): ReturnType<typeof vi.fn> {
+    // A fresh Response per call — a Response body is single-read, and the
+    // batching path issues several sequential POSTs.
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(jsonResponse({ status: "success", data: { session_id: "conv-1" } })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("passes a within-caps conversation through as a single import call", async () => {
+    const fetchMock = importFetchMock();
+    const messages: AiSessionImportMessage[] = [
+      { role: "user", content: "What is theta?", timestamp: 1_700_000_000_000 },
+      { role: "assistant", content: "Time decay.", timestamp: 1_700_000_005_000 },
+    ];
+
+    const result = await importAiSessionChunked({ id: "conv-1", surface: "saved-chat", messages });
+
+    expect(result).toEqual({ session_id: "conv-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetchMock)).toEqual({ id: "conv-1", surface: "saved-chat", messages });
+  });
+
+  it("splits an over-cap message into sequential same-role chunks that reassemble exactly", async () => {
+    const fetchMock = importFetchMock();
+    // 15 000 JS chars but 45 000 UTF-8 bytes — refused whole, importable split.
+    const oversized = "य".repeat(15_000);
+
+    await importAiSessionChunked({
+      id: "conv-big",
+      surface: "saved-chat",
+      messages: [
+        { role: "user", content: oversized, timestamp: 1_700_000_000_000 },
+        { role: "assistant", content: "Short reply.", timestamp: 1_700_000_005_000 },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const sent = requestBody(fetchMock).messages as AiSessionImportMessage[];
+    const chunks = sent.filter((message) => message.role === "user");
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(utf8Bytes(chunk.content)).toBeLessThanOrEqual(AI_SESSION_IMPORT_MAX_CONTENT_BYTES);
+      expect(chunk.timestamp).toBe(1_700_000_000_000);
+    }
+    expect(chunks.map((chunk) => chunk.content).join("")).toBe(oversized);
+    // The follow-up message still trails its chunked predecessor in order.
+    expect(sent[sent.length - 1]).toEqual({
+      role: "assistant",
+      content: "Short reply.",
+      timestamp: 1_700_000_005_000,
+    });
+  });
+
+  it("batches beyond-500-message histories as sequential imports under the same session id", async () => {
+    const fetchMock = importFetchMock();
+    const messages: AiSessionImportMessage[] = Array.from({ length: 501 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: `message ${index}`,
+      timestamp: 1_700_000_000_000 + index,
+    }));
+
+    await importAiSessionChunked({ id: "conv-batch", surface: "saved-chat", messages });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = requestBodyAt(fetchMock, 0);
+    const second = requestBodyAt(fetchMock, 1);
+    expect(first.id).toBe("conv-batch");
+    expect(second.id).toBe("conv-batch");
+    const firstMessages = first.messages as AiSessionImportMessage[];
+    const secondMessages = second.messages as AiSessionImportMessage[];
+    expect(firstMessages).toHaveLength(AI_SESSION_IMPORT_MAX_MESSAGES);
+    expect(secondMessages).toHaveLength(1);
+    expect(firstMessages[0].content).toBe("message 0");
+    expect(secondMessages[0].content).toBe("message 500");
+  });
+
+  it("rejects on a mid-batch failure so callers keep their retry state", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "success", data: { session_id: "conv-fail" } }))
+      .mockResolvedValueOnce(jsonResponse({ status: "error", message: "AI session store unavailable" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+    const messages: AiSessionImportMessage[] = Array.from({ length: 501 }, (_, index) => ({
+      role: "user",
+      content: `message ${index}`,
+    }));
+
+    await expect(
+      importAiSessionChunked({ id: "conv-fail", surface: "saved-chat", messages }),
+    ).rejects.toThrow(/session store unavailable/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops blank messages so no batch can consist solely of unimportable entries", async () => {
+    const fetchMock = importFetchMock();
+
+    await importAiSessionChunked({
+      id: "conv-blank",
+      surface: "saved-chat",
+      messages: [
+        { role: "user", content: "Real question" },
+        { role: "assistant", content: "   \n  " },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody(fetchMock).messages).toEqual([{ role: "user", content: "Real question" }]);
+  });
+
+  it("lets the backend's honest refusal surface for an all-blank conversation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ status: "error", message: "messages contained no importable entries" }, 400),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      importAiSessionChunked({
+        id: "conv-empty",
+        surface: "saved-chat",
+        messages: [{ role: "user", content: "   " }],
+      }),
+    ).rejects.toThrow(/no importable entries/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

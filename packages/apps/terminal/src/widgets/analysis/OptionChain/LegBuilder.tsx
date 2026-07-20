@@ -19,7 +19,8 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
-import { basketOrder } from "@/services/api";
+import { basketOrder, OrderApiError } from "@/services/api";
+import type { BasketOrderResult } from "@/types/api";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
@@ -269,6 +270,50 @@ function computePayoff(legs: OptionLeg[], lotSize: number): PayoffMetrics {
 }
 
 // ---------------------------------------------------------------------------
+// Basket partial-failure surfacing
+// ---------------------------------------------------------------------------
+
+/** Toast message state: `urgent` messages never auto-dismiss and render as alerts. */
+interface OrderMsg {
+  text: string;
+  ok: boolean;
+  urgent?: boolean;
+}
+
+/** Narrow an `OrderApiError.body` to the 422 `BasketOrderResult` shape. */
+function isBasketOrderResult(body: unknown): body is BasketOrderResult {
+  if (typeof body !== "object" || body === null) return false;
+  const b = body as Partial<BasketOrderResult>;
+  return (
+    typeof b.placed_count === "number"
+    && typeof b.failed_count === "number"
+    && Array.isArray(b.legs)
+  );
+}
+
+/**
+ * Build the honest toast for a 422 basket partial/total failure.
+ *
+ * The backend basket executor marks a rollback it ATTEMPTED but could not
+ * confirm as `rolled_back: true` with an empty `rollback_order_id`
+ * (basket_orders.py `_rollback`): that leg was really placed and may still be
+ * open on the broker. That state must surface as an urgent, non-dismissing
+ * warning — a bare first-error toast would hide live naked legs.
+ */
+function describeBasketFailure(result: BasketOrderResult, serverMsg: string): OrderMsg {
+  const rollbackUnconfirmed = result.legs.some(
+    (leg) => leg.rolled_back && leg.rollback_order_id === "",
+  );
+  const placedLabel = `${result.placed_count} leg${result.placed_count === 1 ? "" : "s"} placed`;
+  const rolledBackNote =
+    result.placed_count > 0 && result.rolled_back && !rollbackUnconfirmed ? " then rolled back" : "";
+  let text = `${placedLabel}${rolledBackNote}, ${result.failed_count} failed`;
+  if (serverMsg) text += ` — ${serverMsg}`;
+  if (rollbackUnconfirmed) text += ". Rollback unconfirmed — check Positions.";
+  return { text, ok: false, urgent: rollbackUnconfirmed };
+}
+
+// ---------------------------------------------------------------------------
 // LegRow sub-component
 // ---------------------------------------------------------------------------
 
@@ -409,7 +454,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   const [legs, setLegs]           = useState<OptionLeg[]>([]);
   const [activeTemplate, setActiveTemplate] = useState<string>("straddle");
   const [placing, setPlacing]     = useState(false);
-  const [orderMsg, setOrderMsg]   = useState<{ text: string; ok: boolean } | null>(null);
+  const [orderMsg, setOrderMsg]   = useState<OrderMsg | null>(null);
   const orderMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -418,6 +463,23 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
         clearTimeout(orderMsgTimerRef.current);
       }
     };
+  }, []);
+
+  /**
+   * Show a toast, clearing any pending auto-dismiss first so a stale timer from
+   * an earlier toast can never wipe a fresh one. Urgent messages (unconfirmed
+   * rollback — possibly live naked legs) never auto-dismiss: they persist until
+   * the next placement attempt replaces them.
+   */
+  const showOrderMsg = useCallback((msg: OrderMsg) => {
+    if (orderMsgTimerRef.current !== null) {
+      clearTimeout(orderMsgTimerRef.current);
+      orderMsgTimerRef.current = null;
+    }
+    setOrderMsg(msg);
+    if (!msg.urgent) {
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+    }
   }, []);
 
   const strikeGap = useMemo(() => inferStrikeGap(strikes), [strikes]);
@@ -581,8 +643,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
     if (!STRATEGY_PLACEMENT_AVAILABLE) {
       // Honest degrade path — only reachable if the availability flag is
       // flipped back off (e.g. the backend basket executor is unbound again).
-      setOrderMsg({ text: "Strategy placement coming soon", ok: false });
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+      showOrderMsg({ text: "Strategy placement coming soon", ok: false });
       return;
     }
     if (!expiry) {
@@ -607,11 +668,16 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
 
       const result = await basketOrder({ strategy: "FlintLegBuilder", orders });
       const placed = result.placed_count;
-      setOrderMsg({ text: `${placed} leg${placed === 1 ? "" : "s"} placed`, ok: true });
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+      showOrderMsg({ text: `${placed} leg${placed === 1 ? "" : "s"} placed`, ok: true });
     } catch (e) {
-      setOrderMsg({ text: (e as Error).message || "Order failed", ok: false });
-      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+      // A 422 from the basket route carries the full per-leg truth in the
+      // error body — surface placed/failed counts (and the urgent
+      // rollback-unconfirmed warning) instead of only the first error string.
+      if (e instanceof OrderApiError && e.status === 422 && isBasketOrderResult(e.body)) {
+        showOrderMsg(describeBasketFailure(e.body, e.message));
+      } else {
+        showOrderMsg({ text: (e as Error).message || "Order failed", ok: false });
+      }
     } finally {
       setPlacing(false);
     }
@@ -833,10 +899,12 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
           className={`px-2 py-1 text-xs border-t ${
             orderMsg.ok
               ? "bg-profit/10 border-profit/20 text-profit"
+              : orderMsg.urgent
+              ? "bg-loss/20 border-loss/40 text-loss font-semibold"
               : "bg-loss/10 border-loss/20 text-loss"
           }`}
-          role="status"
-          aria-live="polite"
+          role={orderMsg.urgent ? "alert" : "status"}
+          aria-live={orderMsg.urgent ? "assertive" : "polite"}
         >
           {orderMsg.text}
         </div>

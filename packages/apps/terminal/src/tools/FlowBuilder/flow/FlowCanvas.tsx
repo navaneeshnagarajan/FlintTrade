@@ -3,7 +3,9 @@
  *
  * Saving PUTs the workflow to the backend flow store (upsert) and refreshes
  * the ["flows"] list query; the toolbar label only claims "saved" after the
- * backend confirmed the write.
+ * backend confirmed the write. Flows that do not yet exist on the backend
+ * (new/template) mount with ``initialSaved={false}`` so the unsaved state is
+ * visible from the first render and Save stays enabled until confirmation.
  */
 
 import "@xyflow/react/dist/style.css";
@@ -43,6 +45,13 @@ import type { Node } from "@xyflow/react";
 export interface FlowCanvasProps {
   flowId: string;
   flowName: string;
+  /**
+   * Whether the loaded workflow already exists on the backend. New/template
+   * flows pass ``false`` so the toolbar starts at "Unsaved" with Save
+   * enabled — the first persistence is this canvas's own confirmed save,
+   * never a fire-and-forget PUT by the caller.
+   */
+  initialSaved: boolean;
   onBack: () => void;
 }
 
@@ -50,7 +59,7 @@ export interface FlowCanvasProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
+export function FlowCanvas({ flowId, flowName, initialSaved, onBack }: FlowCanvasProps) {
   const nodes = useFlowStore((s) => s.nodes);
   const edges = useFlowStore((s) => s.edges);
   const selectedNodeId = useFlowStore((s) => s.selectedNodeId);
@@ -64,7 +73,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
 
   const queryClient = useQueryClient();
   const [name, setName] = useState(flowName);
-  const [saved, setSaved] = useState(true);
+  const [saved, setSaved] = useState(initialSaved);
   const [logCollapsed, setLogCollapsed] = useState(false);
 
   const saveMutation = useMutation({

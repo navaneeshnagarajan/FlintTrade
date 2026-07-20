@@ -241,8 +241,12 @@ export interface BasketLegResult {
 }
 
 /**
- * Response shape of `POST /api/v1/orders/basket` (201 on full success; a 422
- * partial/total failure is thrown by the client before this shape is returned).
+ * Response shape of `POST /api/v1/orders/basket` — returned on a 201 full
+ * success. A 422 partial/total failure is thrown as an `OrderApiError` whose
+ * `body` carries this same shape, so callers can surface the per-leg truth
+ * (placed/failed counts, and any leg with `rolled_back: true` but an empty
+ * `rollback_order_id` — a rollback that was attempted but never confirmed,
+ * i.e. a possibly still-open live leg).
  */
 export interface BasketOrderResult {
   status: "success" | "error";

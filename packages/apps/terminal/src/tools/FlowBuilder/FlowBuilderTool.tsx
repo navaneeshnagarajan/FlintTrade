@@ -26,7 +26,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { X, Workflow, AlertTriangle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +34,7 @@ import { Button } from "@/components/ui/button";
 
 import { useFlowStore } from "@/stores/flowStore";
 import { useModeStore } from "@/stores/modeStore";
-import { getFlow, putFlow } from "@/services/ftApi.flows";
+import { getFlow } from "@/services/ftApi.flows";
 import { FlowCanvas } from "./flow/FlowCanvas";
 import { FlowsTab } from "./flow/FlowsTab";
 import { TemplatesTab } from "./flow/TemplatesTab";
@@ -64,20 +64,28 @@ export default function FlowBuilderTool({ onClose }: Props) {
   const [activeFlowName, setActiveFlowName] = useState("Untitled Flow");
   const [activeTab, setActiveTab] = useState("flows");
   const [openError, setOpenError] = useState<string | null>(null);
+  // Whether the flow loaded into the editor already exists on the backend.
+  // New/template flows mount the canvas with `false` so the toolbar honestly
+  // shows "Unsaved" and the FIRST persistence is the canvas's own confirmed
+  // save — the flow appears in the saved list only after that save succeeds.
+  const [editorInitialSaved, setEditorInitialSaved] = useState(true);
 
   const queryClient = useQueryClient();
   const activeFlowId = useFlowStore((s) => s.activeFlowId);
   const loadWorkflowIntoCanvas = useFlowStore((s) => s.loadWorkflowIntoCanvas);
   const addLogEntry = useFlowStore((s) => s.addLogEntry);
+  const isExploreMode = useModeStore((s) => s.mode === "explore");
 
   // One-time migration of legacy localStorage drafts into the backend store.
   // Skipped in Explore mode (no real backend session to import into); the
-  // localStorage key survives until an eligible session completes the import.
+  // Explore check runs BEFORE the ref is consumed, so a panel first mounted
+  // in Explore mode still imports on the first non-Explore render (the mode
+  // is a subscribed dep). The localStorage key survives until an eligible
+  // session completes the import.
   const importAttempted = useRef(false);
   useEffect(() => {
-    if (importAttempted.current) return;
+    if (isExploreMode || importAttempted.current) return;
     importAttempted.current = true;
-    if (useModeStore.getState().mode === "explore") return;
     void importLegacyFlows()
       .then((count) => {
         if (count > 0) {
@@ -92,17 +100,7 @@ export default function FlowBuilderTool({ onClose }: Props) {
         // Import failed wholesale — the localStorage key is kept, so the
         // next mount retries. Nothing user-visible to do here.
       });
-  }, [queryClient, addLogEntry]);
-
-  const saveMutation = useMutation({
-    mutationFn: putFlow,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["flows"] });
-    },
-    onError: (error: Error, flow) => {
-      addLogEntry("error", `Could not save "${flow.name}" to the workspace: ${error.message}`);
-    },
-  });
+  }, [isExploreMode, queryClient, addLogEntry]);
 
   function handleNewFlow(): void {
     const id = `flow_${Date.now()}`;
@@ -116,8 +114,8 @@ export default function FlowBuilderTool({ onClose }: Props) {
     loadWorkflowIntoCanvas(workflow);
     setActiveFlowName(workflow.name);
     setOpenError(null);
+    setEditorInitialSaved(false);
     setView("editor");
-    saveMutation.mutate(workflow);
   }
 
   function handleOpenFlow(id: string): void {
@@ -127,6 +125,7 @@ export default function FlowBuilderTool({ onClose }: Props) {
       .then((flow) => {
         loadWorkflowIntoCanvas(flow);
         setActiveFlowName(flow.name);
+        setEditorInitialSaved(true);
         setView("editor");
       })
       .catch((error: unknown) => {
@@ -165,8 +164,8 @@ export default function FlowBuilderTool({ onClose }: Props) {
     loadWorkflowIntoCanvas(workflow);
     setActiveFlowName(workflow.name);
     setOpenError(null);
+    setEditorInitialSaved(false);
     setView("editor");
-    saveMutation.mutate(workflow);
   }
 
   // Editor view — full page canvas
@@ -176,6 +175,7 @@ export default function FlowBuilderTool({ onClose }: Props) {
         <FlowCanvas
           flowId={activeFlowId}
           flowName={activeFlowName}
+          initialSaved={editorInitialSaved}
           onBack={() => setView("list")}
         />
       </div>

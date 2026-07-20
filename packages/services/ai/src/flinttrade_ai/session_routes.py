@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import logging
+import re
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -27,6 +28,11 @@ session_bp = Blueprint("ai_sessions", __name__, url_prefix="/api/v1/ai/sessions"
 _IMPORT_SURFACES = {"advisor", "tutor", "saved-chat"}
 _IMPORT_MAX_MESSAGES = 500
 _IMPORT_MAX_CONTENT_BYTES = 32 * 1024
+# Explicit import ids become the sessions primary key (echoed by every later
+# list) so they are bounded like every other import field; out-of-shape ids
+# fall back to the derived deterministic ``imp-`` id. Checked with fullmatch —
+# a $-anchored match would admit a trailing newline.
+_IMPORT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def _store() -> AiSessionStore | None:
@@ -101,7 +107,10 @@ def import_session() -> tuple[Any, int]:
     Body: ``{id?, surface, title?, messages: [{role, content,
     timestamp?: ms}]}``. The store's content-hash message ids make
     re-imports idempotent; a message ``timestamp`` (epoch milliseconds)
-    becomes its stored ``created_at``.
+    becomes its stored ``created_at``. An explicit ``id`` must fullmatch
+    ``[A-Za-z0-9_-]{1,64}`` (otherwise the derived ``imp-`` id is used),
+    and an id that names an existing session of a different surface is
+    refused with 400 rather than appending into that conversation.
     """
     guard = current_app.config.get("BROKER_MGMT_WRITE_GUARD")
     if callable(guard):
@@ -151,7 +160,25 @@ def import_session() -> tuple[Any, int]:
                 pass  # Nonsense legacy timestamps fall back to the import time.
         prepared.append(entry)
 
-    session_id = str(body.get("id", "") or "").strip() or _derived_import_id(surface, prepared)
+    requested_id = str(body.get("id", "") or "").strip()
+    if requested_id and not _IMPORT_ID_RE.fullmatch(requested_id):
+        # Unbounded or out-of-alphabet legacy ids never become a primary key;
+        # the derived id keeps re-imports of the same content idempotent.
+        requested_id = ""
+    session_id = requested_id or _derived_import_id(surface, prepared)
+    existing_surface = store.session_surface(session_id)
+    if existing_surface is not None and existing_surface != surface:
+        # record_exchange upserts by id, so an id collision would silently
+        # append imported messages into an unrelated live conversation.
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"session id already belongs to a different surface ({existing_surface})",
+                }
+            ),
+            400,
+        )
     title_raw = body.get("title")
     title = title_raw.strip() if isinstance(title_raw, str) and title_raw.strip() else None
     try:

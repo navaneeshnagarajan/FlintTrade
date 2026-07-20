@@ -181,6 +181,29 @@ def test_store_rejects_traversal_ids_directly(store):
         store.delete_flow(".")
 
 
+def test_trailing_newline_id_rejected_by_routes_and_store(client, store):
+    """"abc\\n" must fail the guard everywhere — ``match`` + ``$`` would pass it.
+
+    Werkzeug decodes %0A in a path segment, so PUT /api/v1/flows/abc%0A reaches
+    the routes with flow_id == "abc\\n"; a $-anchored ``match`` accepts that and
+    writes the file "abc\\n.json". Pins the ``fullmatch`` fix (finding 9).
+    """
+    resp = client.put("/api/v1/flows/abc%0A", json=_workflow("abc\n"))
+    assert resp.status_code == 400
+    assert client.get("/api/v1/flows/abc%0A").status_code == 400
+    assert client.delete("/api/v1/flows/abc%0A").status_code == 400
+    assert store.list_flows() == []
+    assert not store.base_dir.exists() or list(store.base_dir.iterdir()) == []
+
+    # Defence in depth: the store itself refuses the id too.
+    with pytest.raises(FlowStoreError):
+        store.save_flow("abc\n", _workflow("abc\n"))
+    with pytest.raises(FlowStoreError):
+        store.get_flow("abc\n")
+    with pytest.raises(FlowStoreError):
+        store.delete_flow("abc\n")
+
+
 def test_body_id_must_match_path(client):
     resp = client.put("/api/v1/flows/flow_a", json=_workflow("flow_b"))
     assert resp.status_code == 400

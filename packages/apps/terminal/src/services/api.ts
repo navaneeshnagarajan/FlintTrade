@@ -126,8 +126,10 @@ const NATIVE_ROUTED_ORDER_ENDPOINTS = new Set(["place", "modify", "cancel"]);
 // (`_request_principal` → `_resolve_target` in order_routes / bracket_routes).
 // When a native write target is selected, the selectors MUST ride in the body —
 // otherwise the backend silently falls back to `brokers.execution.default`, a
-// different target than the operator chose.
-const TARGET_IN_BODY_ORDER_ENDPOINTS = new Set(["cancel-all", "basket"]);
+// different target than the operator chose. `split` shares the identical
+// body-resolved contract (order_routes `place_split` → `_request_principal`);
+// add `options-strategy` here too if a client for that route is ever wired.
+const TARGET_IN_BODY_ORDER_ENDPOINTS = new Set(["cancel-all", "basket", "split"]);
 
 // Account-scoped native reads expose the REAL broker account (balances,
 // positions, order/trade book, margin). They must only surface in LIVE mode —
@@ -1764,6 +1766,31 @@ function getExploreGetFallback<T>(endpoint: string): T | undefined {
   }
 }
 
+/**
+ * Error thrown by `postOrder` when the backend answers non-2xx.
+ *
+ * Carries the HTTP status and the parsed JSON error body so callers can render
+ * structured failure states instead of only the first error message — most
+ * critically the 422 partial-failure `BasketOrderResult` from the basket route
+ * (order_routes `place_basket`), where the per-leg detail says which legs are
+ * live and whether their rollback was confirmed. Extends `Error` with the same
+ * message as before, so existing `catch (e) { (e as Error).message }` sites
+ * keep working unchanged.
+ */
+export class OrderApiError extends Error {
+  /** HTTP status code of the failed response. */
+  readonly status: number;
+  /** Parsed JSON body of the failed response, or `null` when it was not JSON. */
+  readonly body: unknown;
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "OrderApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 /** POST an order through the FlintTrade safety proxy.
  *
  *  The backend at order_routes.py:
@@ -1837,22 +1864,24 @@ async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
   }
 
   if (!resp.ok) {
-    const body2 = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
-    const serverMsg = body2?.message ?? body2?.error ?? null;
+    const errorBody = await resp.json().catch(() => null) as { message?: string; error?: string } | null;
+    const serverMsg = errorBody?.message ?? errorBody?.error ?? null;
+    let message: string;
     if (resp.status === 401) {
-      throw new Error("API key invalid. Check Settings → Connection.");
-    }
-    if (resp.status === 400) {
-      throw new Error(serverMsg ?? "Invalid order parameters. Check symbol and exchange.");
-    }
-    if (resp.status === 403) {
+      message = "API key invalid. Check Settings → Connection.";
+    } else if (resp.status === 400) {
+      message = serverMsg ?? "Invalid order parameters. Check symbol and exchange.";
+    } else if (resp.status === 403) {
       // Backend returns 403 when mode blocks the action (e.g. real order in practice mode)
-      throw new Error(serverMsg ?? `Order blocked in ${mode} mode.`);
+      message = serverMsg ?? `Order blocked in ${mode} mode.`;
+    } else if (resp.status === 500) {
+      message = serverMsg ?? "FlintTrade backend error. Try again in a few seconds.";
+    } else {
+      message = serverMsg ?? `Server error (${resp.status})`;
     }
-    if (resp.status === 500) {
-      throw new Error(serverMsg ?? "FlintTrade backend error. Try again in a few seconds.");
-    }
-    throw new Error(serverMsg ?? `Server error (${resp.status})`);
+    // Attach the status + parsed body so callers can render structured failure
+    // states — e.g. the 422 BasketOrderResult with per-leg rollback truth.
+    throw new OrderApiError(message, resp.status, errorBody);
   }
 
   const json = await resp.json();

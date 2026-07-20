@@ -117,11 +117,11 @@ describe("NotesTab", () => {
     vi.clearAllMocks();
     localStorageMock.clear();
     runtime.mode = "live";
-    mockGetDailyNote.mockResolvedValue({
-      date: istDayKey(),
-      content: "",
-      updated_at: null,
-    });
+    // Per-date default: no backend content for any day (the import's pre-PUT
+    // re-check and the day query both go through this).
+    mockGetDailyNote.mockImplementation((date: string) =>
+      Promise.resolve({ date, content: "", updated_at: null }),
+    );
     mockListDailyNotes.mockResolvedValue([]);
     mockPutDailyNote.mockImplementation((date: string, content: string) =>
       Promise.resolve({ date, content, updated_at: "2026-07-20T10:00:00" }),
@@ -188,10 +188,17 @@ describe("NotesTab", () => {
   it("imports legacy localStorage notes and removes each key only after its PUT succeeds", async () => {
     localStorageMock.setItem("flinttrade_journal_notes_2026-07-01", "legacy note");
     // The backend already holds content for 07-02 — must not be overwritten.
+    // Only the per-date getDailyNote re-check reports it (the list mock stays
+    // empty), pinning that the guard runs immediately before each PUT rather
+    // than against a stale mount-time list snapshot.
     localStorageMock.setItem("flinttrade_journal_notes_2026-07-02", "shadowed local note");
-    mockListDailyNotes.mockResolvedValue([
-      { date: "2026-07-02", updated_at: "2026-07-02T16:00:00", word_count: 3, preview: "server copy" },
-    ]);
+    mockGetDailyNote.mockImplementation((date: string) =>
+      Promise.resolve({
+        date,
+        content: date === "2026-07-02" ? "server copy" : "",
+        updated_at: date === "2026-07-02" ? "2026-07-02T16:00:00" : null,
+      }),
+    );
 
     renderNotes();
 
@@ -201,11 +208,81 @@ describe("NotesTab", () => {
     await waitFor(() =>
       expect(localStorageMock.getItem("flinttrade_journal_notes_2026-07-01")).toBeNull(),
     );
+    // Each import PUT is preceded by its own getDailyNote re-check.
+    expect(mockGetDailyNote).toHaveBeenCalledWith("2026-07-01");
+    expect(mockGetDailyNote).toHaveBeenCalledWith("2026-07-02");
     // Backend content wins: no PUT for 07-02, and the local copy is preserved.
     expect(mockPutDailyNote).not.toHaveBeenCalledWith("2026-07-02", expect.anything());
     expect(localStorageMock.getItem("flinttrade_journal_notes_2026-07-02")).toBe(
       "shadowed local note",
     );
+  });
+
+  it("never imports the current IST day's key while the tab is mounted", async () => {
+    const day = istDayKey();
+    localStorageMock.setItem(`flinttrade_journal_notes_${day}`, "todays legacy note");
+    localStorageMock.setItem("flinttrade_journal_notes_2026-01-05", "older legacy note");
+
+    renderNotes();
+
+    // The older key imports…
+    await waitFor(() =>
+      expect(mockPutDailyNote).toHaveBeenCalledWith("2026-01-05", "older legacy note"),
+    );
+    // …but the editable current day never does — importing it would race the
+    // debounced editor save in both directions. The key survives untouched
+    // for a later mount, once the day has passed.
+    expect(mockPutDailyNote).not.toHaveBeenCalledWith(day, "todays legacy note");
+    expect(localStorageMock.getItem(`flinttrade_journal_notes_${day}`)).toBe(
+      "todays legacy note",
+    );
+  });
+
+  it("removes the day's legacy key on a successful clear so it cannot be resurrected", async () => {
+    const day = istDayKey();
+    // A retained legacy copy for today (the import deliberately skips it).
+    localStorageMock.setItem(`flinttrade_journal_notes_${day}`, "stale legacy copy");
+    mockGetDailyNote.mockImplementation((date: string) =>
+      Promise.resolve({
+        date,
+        content: date === day ? "fresh note" : "",
+        updated_at: date === day ? "2026-07-20T09:00:00" : null,
+      }),
+    );
+
+    renderNotes();
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(NOTE_PLACEHOLDER)).toHaveValue("fresh note"),
+    );
+
+    fireEvent.click(screen.getByText("Clear"));
+
+    await waitFor(() => expect(mockPutDailyNote).toHaveBeenCalledWith(day, ""));
+    // The deliberate clear also drops the legacy key — a later import must
+    // never resurrect content the user explicitly deleted.
+    await waitFor(() =>
+      expect(localStorageMock.getItem(`flinttrade_journal_notes_${day}`)).toBeNull(),
+    );
+  });
+
+  it("disables editing behind a Retry affordance while the note load is in error", async () => {
+    mockGetDailyNote.mockImplementation((date: string) =>
+      Promise.resolve({ date, content: "recovered note", updated_at: "2026-07-20T09:00:00" }),
+    );
+    mockGetDailyNote.mockRejectedValueOnce(new Error("backend down"));
+
+    renderNotes();
+
+    // Load failed: editing stays locked (typing would PUT over the unloaded
+    // backend note once it recovers) and a Retry affordance is offered.
+    const retryBtn = await screen.findByText("Retry");
+    const textarea = screen.getByPlaceholderText(NOTE_PLACEHOLDER);
+    expect(textarea).toBeDisabled();
+
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(textarea).toHaveValue("recovered note"));
+    expect(textarea).not.toBeDisabled();
   });
 
   it("keeps the legacy key when its import PUT fails", async () => {

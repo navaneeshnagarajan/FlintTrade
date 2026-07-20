@@ -3510,36 +3510,42 @@ def create_flask_app(
 
     # Annotated Trade Journal (SQLite + FTS5, own journal.sqlite). Distinct from
     # the TRADE_STORAGE execution records above: this holds the operator's notes,
-    # emotions, quality scores, and tags with full-text search. Best-effort — a
-    # storage failure degrades to "journal unavailable" (503s), never blocks boot.
+    # emotions, quality scores, and tags with full-text search. The blueprint is
+    # registered outside the try so a failed store construction genuinely yields
+    # the routes' 503 branch (never 404s); construction stays best-effort — a
+    # storage failure never blocks boot.
+    from flinttrade_journal.journal_routes import init_journal_routes, journal_bp  # noqa: PLC0415
+
     try:
-        from flinttrade_journal.journal_routes import init_journal_routes, journal_bp  # noqa: PLC0415
         from flinttrade_journal.trade_journal import TradeJournal  # noqa: PLC0415
 
         _journal = TradeJournal()
         _journal.initialise()
         app.config["JOURNAL"] = _journal
         init_journal_routes(_journal)
-        app.register_blueprint(journal_bp)
-    except Exception:  # pragma: no cover — defensive: never let the journal break boot
+    except Exception:  # defensive: never let the journal break boot
         logger.warning("Trade journal unavailable; /api/v1/journal returns 503", exc_info=True)
         app.config["JOURNAL"] = None
+    app.register_blueprint(journal_bp)
 
     # FlowBuilder saved workflows (one JSON file per flow under
     # <workspace_dir>/flows/). Backend persistence for the terminal's
-    # FlowBuilder saved-list (migrated off WebView localStorage). Best-effort —
-    # a storage failure degrades to "flows unavailable" (503s), never blocks boot.
+    # FlowBuilder saved-list (migrated off WebView localStorage). The blueprint
+    # is registered outside the try so a failed store construction genuinely
+    # yields the routes' 503 branch (never 404s); construction stays
+    # best-effort — a storage failure never blocks boot.
+    from flinttrade_webhooks.flow_routes import flows_bp, init_flow_routes  # noqa: PLC0415
+
     try:
-        from flinttrade_webhooks.flow_routes import flows_bp, init_flow_routes  # noqa: PLC0415
         from flinttrade_webhooks.flow_store import FlowFileStore  # noqa: PLC0415
 
         _flow_store = FlowFileStore(_workspace_dir() / "flows")
         app.config["FLOW_STORE"] = _flow_store
         init_flow_routes(_flow_store)
-        app.register_blueprint(flows_bp)
-    except Exception:  # pragma: no cover — defensive: never let the flow store break boot
+    except Exception:  # defensive: never let the flow store break boot
         logger.warning("Flow store unavailable; /api/v1/flows returns 503", exc_info=True)
         app.config["FLOW_STORE"] = None
+    app.register_blueprint(flows_bp)
 
     # Register Order Flow blueprint (synthetic footprint data)
     from flinttrade_data.orderflow_routes import orderflow_bp  # noqa: PLC0415

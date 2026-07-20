@@ -1240,9 +1240,15 @@ class TradeJournal:
         logger.info("Screenshot added: id=%s trade_key=%s size=%d", record["id"], trade_key, len(blob))
         return self._screenshot_public_row(record, blob), True
 
-    @_locked
     def list_screenshots(self) -> list[dict[str, Any]]:
         """List all screenshots, newest first, with re-encoded data URLs.
+
+        Only the SQLite read holds the store lock; the (potentially large)
+        file reads and base64 encodes run after it is released, so a big
+        collection cannot block every other journal request for the duration.
+        The response still embeds every image's full ``data_url`` — the
+        frontend keeps its eager pattern for now; :meth:`get_screenshot`
+        provides the lazy per-image path.
 
         Rows whose file has gone missing on disk are skipped (with a warning)
         rather than surfacing a broken record.
@@ -1251,12 +1257,13 @@ class TradeJournal:
             List of ``{"id", "trade_key", "content_type", "size",
             "created_at", "data_url"}`` dicts.
         """
-        rows = self._conn.execute(
-            "SELECT * FROM journal_screenshots ORDER BY created_at DESC, id"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM journal_screenshots ORDER BY created_at DESC, id"
+            ).fetchall()
+        records = [dict(row) for row in rows]
         out: list[dict[str, Any]] = []
-        for row in rows:
-            record = dict(row)
+        for record in records:
             path = self._screenshot_path(record["id"], record["content_type"])
             try:
                 blob = path.read_bytes()
@@ -1265,6 +1272,35 @@ class TradeJournal:
                 continue
             out.append(self._screenshot_public_row(record, blob))
         return out
+
+    def get_screenshot(self, screenshot_id: str) -> dict[str, Any] | None:
+        """Fetch one screenshot row with its re-encoded data URL.
+
+        As with :meth:`list_screenshots`, only the SQLite read holds the
+        store lock; the file read and base64 encode run after release.
+
+        Args:
+            screenshot_id: UUID of the screenshot row.
+
+        Returns:
+            The API-facing dict (row fields + ``data_url``), or ``None`` when
+            the row does not exist or its file has gone missing on disk.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM journal_screenshots WHERE id = ?",
+                (screenshot_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        path = self._screenshot_path(record["id"], record["content_type"])
+        try:
+            blob = path.read_bytes()
+        except OSError:
+            logger.warning("Screenshot file missing on disk for row id=%s", record["id"])
+            return None
+        return self._screenshot_public_row(record, blob)
 
     @_locked
     def delete_screenshot(self, screenshot_id: str) -> bool:

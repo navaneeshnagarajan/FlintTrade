@@ -3,15 +3,19 @@
  *
  * Older builds persisted saved flows only in this browser/WebView under the
  * ``flinttrade_flowbuilder_v2`` key. On mount the tool imports any such
- * drafts into the backend flow store (``PUT`` is an upsert, so re-running is
- * idempotent) and removes the localStorage key ONLY after every draft
- * imported successfully — a partial failure keeps the key so the next mount
- * retries safely.
+ * drafts into the backend flow store and removes the localStorage key ONLY
+ * after every draft imported successfully — a partial failure keeps the key
+ * so the next mount retries safely.
+ *
+ * Retries never overwrite: a flow id already present on the backend is
+ * skipped (and counted as migrated), so a retry after a partial failure —
+ * or a second silo (desktop WebView vs browser profile) importing weeks
+ * later — cannot clobber edits the user made to the imported copy.
  */
 
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
-import { putFlow } from "@/services/ftApi.flows";
+import { listFlows, putFlow } from "@/services/ftApi.flows";
 import type { SavedWorkflow } from "@/stores/flowStore";
 
 export const LEGACY_FLOWS_KEY = "flinttrade_flowbuilder_v2";
@@ -36,10 +40,13 @@ const legacyStoreSchema = z.object({
 /**
  * Import legacy localStorage drafts into the backend flow store.
  *
- * @returns The number of drafts successfully imported (0 when there was
- *          nothing to migrate). The localStorage key is removed only when
- *          every PUT succeeded; on partial failure it is kept for a retry on
- *          the next mount (backend upsert semantics make retries safe).
+ * @returns The number of drafts freshly imported (0 when there was nothing
+ *          to migrate or every draft already existed on the backend). Drafts
+ *          whose id is already on the backend are skipped — never re-PUT —
+ *          and count as migrated for key-removal purposes. The localStorage
+ *          key is removed only when every remaining PUT succeeded; on any
+ *          failure (including the backend list call) it is kept for a retry
+ *          on the next mount.
  */
 export async function importLegacyFlows(): Promise<number> {
   const raw = localStorage.getItem(LEGACY_FLOWS_KEY);
@@ -57,7 +64,15 @@ export async function importLegacyFlows(): Promise<number> {
     return 0;
   }
 
-  const results = await Promise.allSettled(parsed.flows.map((flow) => putFlow(flow)));
+  // No-overwrite guard: an id already on the backend means a previous
+  // attempt (possibly from another browser/WebView silo) imported it, and
+  // the user may have edited that copy since — re-PUTting the stale legacy
+  // draft would silently destroy those edits. If this list call fails the
+  // whole import rejects and the key survives for the next mount's retry.
+  const existingIds = new Set((await listFlows()).map((summary) => summary.id));
+  const pending = parsed.flows.filter((flow) => !existingIds.has(flow.id));
+
+  const results = await Promise.allSettled(pending.map((flow) => putFlow(flow)));
   const succeeded = results.filter((r) => r.status === "fulfilled").length;
   if (succeeded === results.length) {
     localStorage.removeItem(LEGACY_FLOWS_KEY);

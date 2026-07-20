@@ -6,8 +6,11 @@
  * saved through a debounced mutation. The header label is honest about save
  * state: "auto-saved" only after the last PUT succeeded, "saving…" while an
  * edit is pending or in flight, and "not saved — backend unreachable" on
- * failure. Legacy localStorage notes are imported once on mount (skipped in
- * Explore mode); each key is removed only after its PUT succeeds.
+ * failure. When the note load itself fails, editing is disabled behind a
+ * Retry affordance so keystrokes can never overwrite an unloaded note.
+ * Legacy localStorage notes are imported once on mount (skipped in Explore
+ * mode); the current IST day is never imported while the tab is mounted, and
+ * each key is removed only after its PUT succeeds.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,11 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useModeStore } from "@/stores/modeStore";
-import {
-  getDailyNote,
-  listDailyNotes,
-  putDailyNote,
-} from "@/services/ftApi.journal";
+import { getDailyNote, putDailyNote } from "@/services/ftApi.journal";
 import { NOTES_KEY, istDayKey } from "./utils";
 
 /** Quiet period between the last keystroke and the auto-save PUT. */
@@ -46,9 +45,16 @@ function readLegacyNoteKeys(): string[] {
 /**
  * One-time import of legacy localStorage notes into the backend.
  *
- * Each non-empty ``flinttrade_journal_notes_<date>`` value is PUT only when
- * the backend holds no content for that date (list rows exist only for
- * non-empty notes, so presence means "do not overwrite"). A localStorage key
+ * The current IST day is NEVER imported while the tab is mounted: that day is
+ * simultaneously editable in this component, so importing it races the
+ * debounced save in both directions (the legacy PUT can replace freshly typed
+ * keystrokes, or the draft save can overwrite the just-imported note whose
+ * localStorage copy was already removed). Today's key survives untouched and
+ * imports on a later mount once the day has passed.
+ *
+ * Every other date is re-checked with ``getDailyNote`` IMMEDIATELY before its
+ * own PUT — not against a mount-time list snapshot — so backend content
+ * written after the import started is never overwritten. A localStorage key
  * is removed ONLY after its own PUT succeeds; failures leave the key in place
  * so the import retries on the next mount. Returns true when anything was
  * imported (the caller invalidates the notes queries).
@@ -57,17 +63,12 @@ async function importLegacyNotes(): Promise<boolean> {
   const keys = readLegacyNoteKeys();
   if (keys.length === 0) return false;
 
-  let datesWithContent: Set<string>;
-  try {
-    datesWithContent = new Set((await listDailyNotes()).map((note) => note.date));
-  } catch {
-    return false; // Backend unreachable — retry on the next mount.
-  }
-
+  const today = istDayKey();
   let imported = false;
   for (const key of keys) {
     const date = key.slice(LEGACY_NOTE_PREFIX.length);
     if (!DAY_RE.test(date)) continue;
+    if (date === today) continue; // Editable in this tab right now — never race the editor.
     let content: string | null = null;
     try {
       content = localStorage.getItem(key);
@@ -75,7 +76,13 @@ async function importLegacyNotes(): Promise<boolean> {
       continue;
     }
     if (!content || !content.trim()) continue;
-    if (datesWithContent.has(date)) continue; // Never overwrite backend content.
+    try {
+      // Re-check right before the PUT — never overwrite backend content.
+      const existing = await getDailyNote(date);
+      if (existing.content.trim()) continue;
+    } catch {
+      continue; // Backend unreachable — leave the key; retry on the next mount.
+    }
     try {
       await putDailyNote(date, content);
       imported = true;
@@ -126,8 +133,17 @@ export function NotesTab() {
   const saveMutation = useMutation({
     mutationFn: ({ noteDay, content }: { noteDay: string; content: string }) =>
       putDailyNote(noteDay, content),
-    onSuccess: (saved) => {
+    onSuccess: (saved, variables) => {
       queryClient.setQueryData(["journalNotes", saved.date], saved);
+      if (!variables.content.trim()) {
+        // A deliberately cleared day must stay cleared: drop any retained
+        // legacy localStorage copy so a later import cannot resurrect it.
+        try {
+          localStorage.removeItem(`${LEGACY_NOTE_PREFIX}${variables.noteDay}`);
+        } catch {
+          // Storage unavailable — nothing to remove.
+        }
+      }
       // A newer edit may already be waiting — stay "saving…" if so.
       if (!pendingRef.current) setSaveState("saved");
     },
@@ -204,6 +220,13 @@ export function NotesTab() {
   const content = draft ?? noteQuery.data?.content ?? "";
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
+  // The day's note failed to load and has never loaded: editing must stay
+  // locked, or fresh keystrokes would silently PUT over the unloaded backend
+  // note once the backend recovers. A successful load (data present for this
+  // day's query key) makes editing safe again.
+  const noteLoadFailed =
+    !isExploreMode && noteQuery.isError && noteQuery.data === undefined;
+
   let saveLabel = "";
   if (isExploreMode) {
     saveLabel = "Explore mode — notes are not saved";
@@ -224,13 +247,29 @@ export function NotesTab() {
           {saveLabel ? ` · ${saveLabel}` : ""}
         </span>
       </div>
+      {noteLoadFailed && (
+        <div className="flex items-center gap-2 text-xs text-text-muted">
+          <span>
+            Could not load the note for this day — editing is disabled so it
+            cannot be overwritten.
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => void noteQuery.refetch()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
       <Textarea
         className="flex-1 text-sm leading-relaxed"
         placeholder={
           "Write your trading notes for today...\n\n- Market observations\n- Strategy notes\n- Lessons learned\n- Plan for tomorrow"
         }
         value={content}
-        disabled={!isExploreMode && noteQuery.isPending}
+        disabled={(!isExploreMode && noteQuery.isPending) || noteLoadFailed}
         onChange={(e) => scheduleSave(e.target.value)}
       />
       {content && (

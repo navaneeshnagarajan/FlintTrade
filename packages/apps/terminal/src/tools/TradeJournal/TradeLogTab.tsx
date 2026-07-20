@@ -71,44 +71,72 @@ function legacyTradeKey(trade: JournalTrade, idx: number): string {
   return `${trade.timestamp}-${trade.symbol}-${idx}`;
 }
 
+/** Outcome of one legacy-screenshot import pass. */
+interface LegacyScreenshotImportResult {
+  /** True when at least one entry was uploaded (caller invalidates the query). */
+  imported: boolean;
+  /** Entries the backend permanently rejected (4xx) — surfaced to the user. */
+  rejectedCount: number;
+}
+
+/**
+ * True for errors carrying a 4xx HTTP status (the ``FtApiError`` shape) — a
+ * permanent backend refusal (size cap, non-allowlisted image type) rather
+ * than a transient failure worth retrying silently.
+ */
+function isPermanentRejection(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
 /**
  * One-time import of the legacy localStorage screenshot map to the backend.
  *
- * Each entry is POSTed with its old key verbatim as ``trade_key``. The
- * localStorage key is removed only after EVERY entry succeeded — the backend
- * dedupes on ``(trade_key, content_sha256)``, so a partial import retried on
- * the next mount is safe. Returns true when anything was uploaded (the caller
- * invalidates the screenshots query).
+ * Each entry is POSTed with its old key verbatim as ``trade_key``. After the
+ * pass the map is rewritten to hold ONLY the entries that failed (and removed
+ * outright when none did), so already-imported entries are never re-uploaded
+ * on later mounts — the backend dedupes on ``(trade_key, content_sha256)``,
+ * so a retried failure remains safe. Entries the backend permanently rejects
+ * (4xx — e.g. an image type outside the allowlist or over the size cap) stay
+ * in the map for recovery and are counted so the caller can surface them;
+ * transient failures retry silently on the next mount.
  */
-async function importLegacyScreenshots(): Promise<boolean> {
+async function importLegacyScreenshots(): Promise<LegacyScreenshotImportResult> {
+  const nothing: LegacyScreenshotImportResult = { imported: false, rejectedCount: 0 };
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(SCREENSHOTS_KEY);
   } catch {
-    return false;
+    return nothing;
   }
-  if (!raw) return false;
+  if (!raw) return nothing;
   const map = safeParse(raw, z.record(z.string(), z.string()));
-  if (!map) return false;
+  if (!map) return nothing;
 
-  let allSucceeded = true;
+  const failed: Record<string, string> = {};
+  let rejectedCount = 0;
   let anySucceeded = false;
   for (const [tradeKey, dataUrl] of Object.entries(map)) {
     try {
       await addJournalScreenshot(tradeKey, dataUrl);
       anySucceeded = true;
-    } catch {
-      allSucceeded = false;
+    } catch (err) {
+      failed[tradeKey] = dataUrl;
+      if (isPermanentRejection(err)) rejectedCount += 1;
     }
   }
-  if (allSucceeded) {
-    try {
+  try {
+    if (Object.keys(failed).length === 0) {
       localStorage.removeItem(SCREENSHOTS_KEY);
-    } catch {
-      // Removal failure is harmless — dedupe makes a re-import a no-op.
+    } else {
+      // Keep only the failures so retries never re-send succeeded entries.
+      localStorage.setItem(SCREENSHOTS_KEY, JSON.stringify(failed));
     }
+  } catch {
+    // Storage write failure is harmless — dedupe makes a re-import a no-op.
   }
-  return anySucceeded;
+  return { imported: anySucceeded, rejectedCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -257,12 +285,15 @@ export function TradeLogTab({
   });
 
   // One-time legacy import (skipped in Explore mode; runs once on the first
-  // non-Explore render).
+  // non-Explore render). Permanently rejected entries are surfaced below the
+  // filters — silence would read as the screenshot having vanished.
   const importAttemptedRef = useRef(false);
+  const [legacyRejectedCount, setLegacyRejectedCount] = useState(0);
   useEffect(() => {
     if (isExploreMode || importAttemptedRef.current) return;
     importAttemptedRef.current = true;
-    void importLegacyScreenshots().then((imported) => {
+    void importLegacyScreenshots().then(({ imported, rejectedCount }) => {
+      if (rejectedCount > 0) setLegacyRejectedCount(rejectedCount);
       if (imported) {
         void queryClient.invalidateQueries({ queryKey: ["journalScreenshots"] });
       }
@@ -370,6 +401,17 @@ export function TradeLogTab({
           </span>
         )}
       </div>
+
+      {/* Legacy-import honesty: permanently rejected screenshots are retained
+          in local browser storage but will never reach the backend. */}
+      {legacyRejectedCount > 0 && (
+        <div className="px-3 text-xs text-text-muted shrink-0">
+          {legacyRejectedCount} legacy screenshot
+          {legacyRejectedCount === 1 ? "" : "s"} could not be migrated — the
+          original{legacyRejectedCount === 1 ? " remains" : "s remain"} in
+          local browser storage.
+        </div>
+      )}
 
       {/* Table */}
       <ScrollArea className="flex-1 px-3 pb-2">

@@ -712,6 +712,103 @@ export interface AiSessionImportPayload {
 export const importAiSession = (payload: AiSessionImportPayload) =>
   post<{ session_id: string }>("ai/sessions/import", payload);
 
+/**
+ * Backend session-import caps (session_routes.py `_IMPORT_MAX_MESSAGES` /
+ * `_IMPORT_MAX_CONTENT_BYTES`), mirrored so oversized conversations are
+ * chunked client-side instead of being permanently refused with a 400.
+ */
+export const AI_SESSION_IMPORT_MAX_MESSAGES = 500;
+export const AI_SESSION_IMPORT_MAX_CONTENT_BYTES = 32 * 1024;
+
+/** UTF-8 byte length of one code point (matches Python's `str.encode("utf-8")` for well-formed text). */
+function codePointUtf8Bytes(codePoint: number): number {
+  if (codePoint <= 0x7f) return 1;
+  if (codePoint <= 0x7ff) return 2;
+  if (codePoint <= 0xffff) return 3;
+  return 4;
+}
+
+/**
+ * Split `content` into pieces of at most `maxBytes` UTF-8 bytes each, cutting
+ * only on code-point boundaries — a surrogate pair is never split, so every
+ * piece round-trips through UTF-8 intact. Concatenating the pieces always
+ * reproduces the input exactly: content is preserved, never truncated.
+ *
+ * Each subsequent piece's byte budget shrinks by one byte. Byte-identical
+ * same-role messages collapse to one row under the session store's
+ * content-hash ids, so equal-budget chunks of highly repetitive content
+ * (e.g. a pasted log of one repeated line) could silently lose chunks;
+ * distinct byte lengths guarantee distinct chunk strings for uniform
+ * single-byte content and make a collision vanishingly unlikely otherwise.
+ * The budget is floored well above the widest code point (4 bytes) — with a
+ * 32 KiB starting budget the floor is unreachable below ~1 GiB of input,
+ * far beyond any localStorage-held conversation.
+ */
+export function splitContentByUtf8Bytes(content: string, maxBytes: number): string[] {
+  const budgetFloor = Math.max(4, maxBytes >> 1);
+  const chunks: string[] = [];
+  let start = 0;
+  let chunkBytes = 0;
+  let budget = maxBytes;
+  let i = 0;
+  while (i < content.length) {
+    const codePoint = content.codePointAt(i) as number;
+    const bytes = codePointUtf8Bytes(codePoint);
+    if (chunkBytes + bytes > budget && chunkBytes > 0) {
+      chunks.push(content.slice(start, i));
+      start = i;
+      chunkBytes = 0;
+      budget = Math.max(budgetFloor, maxBytes - chunks.length);
+    }
+    chunkBytes += bytes;
+    i += codePoint > 0xffff ? 2 : 1;
+  }
+  if (start < content.length || chunks.length === 0) {
+    chunks.push(content.slice(start));
+  }
+  return chunks;
+}
+
+/**
+ * Import a conversation of ANY size by working within the backend caps
+ * instead of tripping them: any message whose content exceeds the 32 KiB
+ * UTF-8 cap is split into sequential same-role chunk messages (same
+ * timestamp, concatenation identical to the original — nothing is ever
+ * truncated), and when the expanded list exceeds 500 messages it is sent as
+ * sequential {@link importAiSession} batches of at most 500 against the SAME
+ * session id — the store appends by content-hash message id, so a retry
+ * after a mid-batch failure re-sends earlier batches as idempotent no-ops.
+ * An explicit id is required: a backend-derived id would differ per batch
+ * and scatter one conversation across several sessions.
+ *
+ * Blank-content messages are dropped up front (the backend skips them
+ * anyway) so a batch can never consist solely of unimportable entries; a
+ * conversation with nothing importable falls through to one plain call so
+ * the backend's honest refusal surfaces instead of a fabricated success.
+ */
+export async function importAiSessionChunked(
+  payload: AiSessionImportPayload & { id: string },
+): Promise<{ session_id: string }> {
+  const expanded: AiSessionImportMessage[] = [];
+  for (const message of payload.messages) {
+    if (!message.content.trim()) continue;
+    for (const content of splitContentByUtf8Bytes(message.content, AI_SESSION_IMPORT_MAX_CONTENT_BYTES)) {
+      expanded.push({ ...message, content });
+    }
+  }
+  if (expanded.length === 0) {
+    return importAiSession(payload);
+  }
+  let result: { session_id: string } = { session_id: payload.id };
+  for (let start = 0; start < expanded.length; start += AI_SESSION_IMPORT_MAX_MESSAGES) {
+    result = await importAiSession({
+      ...payload,
+      messages: expanded.slice(start, start + AI_SESSION_IMPORT_MAX_MESSAGES),
+    });
+  }
+  return result;
+}
+
 /** Vault configuration + availability (never 503 — reports configured=false). */
 export const getObsidianStatus = () =>
   get<ObsidianStatus>("ai/obsidian/status");

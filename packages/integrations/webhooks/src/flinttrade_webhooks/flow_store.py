@@ -4,7 +4,8 @@ Each saved workflow is one JSON file at ``<base_dir>/<id>.json`` (by default
 ``<workspace_dir>/flows/``). The file content is the frontend ``SavedWorkflow``
 JSON verbatim plus a server-stamped ``saved_at`` ISO timestamp.
 
-Flow ids are validated against ``^[A-Za-z0-9_-]{1,64}$`` before any path is
+Flow ids are validated against ``[A-Za-z0-9_-]{1,64}`` (``re.fullmatch``, so a
+trailing newline can never sneak past a ``$`` anchor) before any path is
 built — this is the path-traversal guard (client ids like ``flow_1720…`` fit).
 Stored files are capped at 512 KiB. Writes are atomic (temp file +
 ``os.replace``) so a crash mid-save never corrupts an existing flow.
@@ -24,7 +25,9 @@ from typing import Any
 
 logger = logging.getLogger("flinttrade.integration.flow_store")
 
-# Path-traversal guard: the id is used verbatim as the file stem.
+# Path-traversal guard: the id is used verbatim as the file stem. Always check
+# with ``fullmatch`` — ``match`` + ``$`` would accept a trailing "\n" (e.g. an
+# %0A-encoded URL segment) and write a file named "<id>\n.json".
 FLOW_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Cap on the stored file content (SavedWorkflow JSON + saved_at).
@@ -71,7 +74,7 @@ class FlowFileStore:
 
     def _path_for(self, flow_id: str) -> Path:
         """Validate ``flow_id`` and return its file path (traversal guard)."""
-        if not isinstance(flow_id, str) or not FLOW_ID_RE.match(flow_id):
+        if not isinstance(flow_id, str) or not FLOW_ID_RE.fullmatch(flow_id):
             raise FlowStoreError(
                 "Invalid flow id — use 1-64 characters from letters, digits, underscore, or hyphen"
             )

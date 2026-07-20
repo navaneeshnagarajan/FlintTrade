@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -225,16 +225,47 @@ describe("FlowBuilderTool", () => {
     expect(screen.queryByText("No flows yet")).not.toBeInTheDocument();
   });
 
-  it("opens the real canvas editor and PUTs the new flow to the backend", async () => {
+  it("opens a new flow honestly unsaved — no PUT until the canvas's own confirmed save", async () => {
+    const user = userEvent.setup();
     renderWithClient(<FlowBuilderTool />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "New Flow" })[0]);
 
     expect(screen.getByTestId("react-flow-canvas")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run" })).not.toBeInTheDocument();
+    // Creation is NOT a fire-and-forget PUT: the editor mounts unsaved with
+    // Save enabled, and the first persistence is the canvas's own save path.
+    expect(mockPutFlow).not.toHaveBeenCalled();
+    expect(screen.getByText("Unsaved")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
     expect(mockPutFlow.mock.calls[0][0]).toEqual(
       expect.objectContaining({ name: "New Flow", nodes: [], edges: [] })
+    );
+    await waitFor(() => {
+      expect(screen.queryByText("Unsaved")).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens a template honestly unsaved and persists it only via the canvas save", async () => {
+    const user = userEvent.setup();
+    renderWithClient(<FlowBuilderTool />);
+
+    await user.click(screen.getByRole("tab", { name: "Templates" }));
+    await user.click(screen.getAllByRole("button", { name: "Load draft" })[0]);
+
+    expect(screen.getByTestId("react-flow-canvas")).toBeInTheDocument();
+    // No fire-and-forget creation PUT for templates either — the flow only
+    // reaches the saved list after the user's confirmed save.
+    expect(mockPutFlow).not.toHaveBeenCalled();
+    expect(screen.getByText("Unsaved")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
+    expect(mockPutFlow.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ name: "Simple Market Order" })
     );
   });
 
@@ -242,14 +273,13 @@ describe("FlowBuilderTool", () => {
     const user = userEvent.setup();
     renderWithClient(<FlowBuilderTool />);
     await user.click(screen.getAllByRole("button", { name: "New Flow" })[0]);
-    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
 
     await user.type(screen.getByRole("textbox", { name: "Flow name" }), "!");
     expect(screen.getByText("Unsaved")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(2));
-    expect(mockPutFlow.mock.calls[1][0]).toEqual(
+    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
+    expect(mockPutFlow.mock.calls[0][0]).toEqual(
       expect.objectContaining({ name: "New Flow!" })
     );
     await waitFor(() => {
@@ -257,19 +287,19 @@ describe("FlowBuilderTool", () => {
     });
   });
 
-  it("keeps the honest not-saved label when the backend save fails", async () => {
+  it("keeps the honest not-saved label and an enabled Save when the backend save fails", async () => {
     const user = userEvent.setup();
     renderWithClient(<FlowBuilderTool />);
     await user.click(screen.getAllByRole("button", { name: "New Flow" })[0]);
-    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
 
     mockPutFlow.mockRejectedValue(new Error("backend unreachable"));
-    await user.type(screen.getByRole("textbox", { name: "Flow name" }), "!");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
       await screen.findByText(/Not saved — backend unreachable/)
     ).toBeInTheDocument();
+    // The user can retry immediately, without first dirtying the canvas.
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
   it("opens a saved flow by fetching its full graph from the backend", async () => {
@@ -366,6 +396,74 @@ describe("FlowBuilderTool", () => {
     expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeDefined();
   });
 
+  it("never re-PUTs a legacy draft whose id already exists on the backend", async () => {
+    useModeStore.setState({ mode: "practice" });
+    localStorageMock[LEGACY_FLOWS_KEY] = JSON.stringify({
+      flows: [
+        makeWorkflow({ id: "flow_legacy_1", name: "Old draft one" }),
+        makeWorkflow({ id: "flow_legacy_2", name: "Old draft two" }),
+      ],
+    });
+    // flow_legacy_1 was already imported (and possibly edited since) — the
+    // stale localStorage copy must not clobber the backend version.
+    mockListFlows.mockResolvedValue([
+      makeSummary({ id: "flow_legacy_1", name: "Old draft one (edited)" }),
+    ]);
+
+    renderWithClient(<FlowBuilderTool />);
+
+    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
+    expect(mockPutFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "flow_legacy_2" })
+    );
+    expect(mockPutFlow).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "flow_legacy_1" })
+    );
+    // Skipped-as-existing counts as migrated: the key is still removed.
+    await waitFor(() => {
+      expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeUndefined();
+    });
+  });
+
+  it("removes the legacy key without any PUT when every draft already exists on the backend", async () => {
+    useModeStore.setState({ mode: "practice" });
+    localStorageMock[LEGACY_FLOWS_KEY] = JSON.stringify({
+      flows: [
+        makeWorkflow({ id: "flow_legacy_1" }),
+        makeWorkflow({ id: "flow_legacy_2" }),
+      ],
+    });
+    mockListFlows.mockResolvedValue([
+      makeSummary({ id: "flow_legacy_1" }),
+      makeSummary({ id: "flow_legacy_2" }),
+    ]);
+
+    renderWithClient(<FlowBuilderTool />);
+
+    await waitFor(() => {
+      expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeUndefined();
+    });
+    expect(mockPutFlow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the legacy key when the backend list check fails, so the next mount retries", async () => {
+    useModeStore.setState({ mode: "practice" });
+    localStorageMock[LEGACY_FLOWS_KEY] = JSON.stringify({
+      flows: [makeWorkflow({ id: "flow_legacy_1" })],
+    });
+    mockListFlows.mockRejectedValue(new Error("backend unreachable"));
+
+    renderWithClient(<FlowBuilderTool />);
+
+    // The list failure aborts the import before any PUT — without the
+    // existence check the import cannot guarantee no-overwrite semantics.
+    expect(
+      await screen.findByText(/Could not load saved flows — backend unreachable/)
+    ).toBeInTheDocument();
+    expect(mockPutFlow).not.toHaveBeenCalled();
+    expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeDefined();
+  });
+
   it("skips the legacy import in Explore mode", async () => {
     useModeStore.setState({ mode: "explore" });
     localStorageMock[LEGACY_FLOWS_KEY] = JSON.stringify({
@@ -377,6 +475,33 @@ describe("FlowBuilderTool", () => {
     expect(await screen.findByText("No flows yet")).toBeInTheDocument();
     expect(mockPutFlow).not.toHaveBeenCalled();
     expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeDefined();
+  });
+
+  it("runs the legacy import when the mode switches Explore → Practice within one mount", async () => {
+    useModeStore.setState({ mode: "explore" });
+    localStorageMock[LEGACY_FLOWS_KEY] = JSON.stringify({
+      flows: [makeWorkflow({ id: "flow_legacy_1", name: "Old draft one" })],
+    });
+
+    renderWithClient(<FlowBuilderTool />);
+
+    // Explore render: the one-shot ref must NOT be consumed here.
+    expect(await screen.findByText("No flows yet")).toBeInTheDocument();
+    expect(mockPutFlow).not.toHaveBeenCalled();
+
+    act(() => {
+      useModeStore.setState({ mode: "practice" });
+    });
+
+    // First non-Explore render performs the import (Dockview panels persist
+    // for the whole session — the user must not need a remount).
+    await waitFor(() => expect(mockPutFlow).toHaveBeenCalledTimes(1));
+    expect(mockPutFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "flow_legacy_1" })
+    );
+    await waitFor(() => {
+      expect(localStorageMock[LEGACY_FLOWS_KEY]).toBeUndefined();
+    });
   });
 
   it("describes saved flows as workspace-persisted drafts, not executable automation", () => {

@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const aiSessionMocks = vi.hoisted(() => ({
   importAiSession: vi.fn(),
+  importAiSessionChunked: vi.fn(),
   getAiSession: vi.fn(),
 }));
 
@@ -36,6 +37,7 @@ const gateState = vi.hoisted(() => ({
 
 vi.mock("@/services/ftApi.ai", () => ({
   importAiSession: aiSessionMocks.importAiSession,
+  importAiSessionChunked: aiSessionMocks.importAiSessionChunked,
   getAiSession: aiSessionMocks.getAiSession,
 }));
 
@@ -64,6 +66,7 @@ function resetStore() {
   });
   localStorage.clear();
   aiSessionMocks.importAiSession.mockReset();
+  aiSessionMocks.importAiSessionChunked.mockReset();
   aiSessionMocks.getAiSession.mockReset();
   gateState.mode = "live";
   gateState.token = "real-jwt";
@@ -428,7 +431,7 @@ describe("aiConversationStore — saveConversation", () => {
 
   it("posts the conversation to the session import endpoint with surface saved-chat", async () => {
     // Arrange
-    aiSessionMocks.importAiSession.mockResolvedValue({ session_id: "conv-1" });
+    aiSessionMocks.importAiSessionChunked.mockResolvedValue({ session_id: "conv-1" });
     useAIConversationStore.setState({
       messages: [
         storedMessage(),
@@ -440,7 +443,7 @@ describe("aiConversationStore — saveConversation", () => {
     const id = await useAIConversationStore.getState().saveConversation();
     // Assert
     expect(id).toBe("conv-1");
-    expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith({
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith({
       id: "conv-1",
       surface: "saved-chat",
       messages: [
@@ -452,23 +455,45 @@ describe("aiConversationStore — saveConversation", () => {
     expect(localStorage.getItem("flinttrade:saved-chat:conv-1")).toBeNull();
   });
 
+  it("routes saves through the cap-aware chunked importer, never the plain single call", async () => {
+    // Pin (REVIEW_FINDINGS #5): a >32 KiB message or >500-message history is
+    // refused whole by POST /ai/sessions/import; only importAiSessionChunked
+    // splits/batches it. Reverting to plain importAiSession fails this test.
+    aiSessionMocks.importAiSessionChunked.mockResolvedValue({ session_id: "conv-long" });
+    useAIConversationStore.setState({
+      messages: [storedMessage({ content: "x".repeat(64 * 1024) })],
+      conversationId: "conv-long",
+    });
+    // Act
+    await useAIConversationStore.getState().saveConversation();
+    // Assert — the full, unsplit content is handed to the chunked helper (it
+    // owns the byte-budget split) and the uncapped endpoint is never used.
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "conv-long",
+        messages: [expect.objectContaining({ content: "x".repeat(64 * 1024) })],
+      }),
+    );
+    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+  });
+
   it("generates and stores a conversation id when none exists yet", async () => {
     // Arrange
-    aiSessionMocks.importAiSession.mockResolvedValue({ session_id: "whatever" });
+    aiSessionMocks.importAiSessionChunked.mockResolvedValue({ session_id: "whatever" });
     useAIConversationStore.setState({ messages: [storedMessage()], conversationId: null });
     // Act
     const id = await useAIConversationStore.getState().saveConversation();
     // Assert
     expect(id.length).toBeGreaterThan(0);
     expect(useAIConversationStore.getState().conversationId).toBe(id);
-    expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith(
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith(
       expect.objectContaining({ id, surface: "saved-chat" }),
     );
   });
 
   it("rejects (and writes nothing locally) when the backend import fails", async () => {
     // Arrange
-    aiSessionMocks.importAiSession.mockRejectedValue(new Error("session store unavailable"));
+    aiSessionMocks.importAiSessionChunked.mockRejectedValue(new Error("session store unavailable"));
     useAIConversationStore.setState({ messages: [storedMessage()], conversationId: "conv-x" });
     // Act + Assert
     await expect(useAIConversationStore.getState().saveConversation()).rejects.toThrow(
@@ -549,7 +574,7 @@ describe("aiConversationStore — importLegacySavedChats", () => {
 
   it("imports each legacy key and removes it only after its import succeeds", async () => {
     // Arrange
-    aiSessionMocks.importAiSession.mockResolvedValue({ session_id: "x" });
+    aiSessionMocks.importAiSessionChunked.mockResolvedValue({ session_id: "x" });
     localStorage.setItem(
       "flinttrade:saved-chat:one",
       JSON.stringify({ messages: [storedMessage({ content: "First" })], savedAt: 1 }),
@@ -562,19 +587,47 @@ describe("aiConversationStore — importLegacySavedChats", () => {
     const imported = await importLegacySavedChats();
     // Assert
     expect(imported).toBe(2);
-    expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith(
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith(
       expect.objectContaining({ id: "one", surface: "saved-chat" }),
     );
-    expect(aiSessionMocks.importAiSession).toHaveBeenCalledWith(
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith(
       expect.objectContaining({ id: "two", surface: "saved-chat" }),
     );
     expect(localStorage.getItem("flinttrade:saved-chat:one")).toBeNull();
     expect(localStorage.getItem("flinttrade:saved-chat:two")).toBeNull();
   });
 
+  it("migrates over-cap legacy snapshots through the chunked importer, never the plain call", async () => {
+    // Pin (REVIEW_FINDINGS #5): legacy snapshots predate the backend caps —
+    // a pasted-log chat over 32 KiB or 500 messages would 400 on every visit
+    // through plain importAiSession, leaving the chat permanently stranded
+    // in the WebView localStorage this migration exists to escape.
+    aiSessionMocks.importAiSessionChunked.mockResolvedValue({ session_id: "huge" });
+    const oversized = storedMessage({ content: "log ".repeat(20_000) }); // ~80 KiB
+    localStorage.setItem(
+      "flinttrade:saved-chat:huge",
+      JSON.stringify({ messages: [oversized], savedAt: 1 }),
+    );
+    // Act
+    const imported = await importLegacySavedChats();
+    // Assert — the chunked helper receives the intact content (it owns the
+    // split), the uncapped endpoint is bypassed, and the key clears only
+    // after the whole batched import succeeded.
+    expect(imported).toBe(1);
+    expect(aiSessionMocks.importAiSessionChunked).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "huge",
+        surface: "saved-chat",
+        messages: [expect.objectContaining({ content: oversized.content })],
+      }),
+    );
+    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+    expect(localStorage.getItem("flinttrade:saved-chat:huge")).toBeNull();
+  });
+
   it("keeps a key whose import fails so the next visit can retry", async () => {
-    // Arrange — "bad" is refused; "good" succeeds.
-    aiSessionMocks.importAiSession.mockImplementation(
+    // Arrange — "bad" is refused (e.g. a batch failed mid-way); "good" succeeds.
+    aiSessionMocks.importAiSessionChunked.mockImplementation(
       (payload: { id?: string }) =>
         payload.id === "bad"
           ? Promise.reject(new Error("backend refused"))
@@ -607,7 +660,7 @@ describe("aiConversationStore — importLegacySavedChats", () => {
     const imported = await importLegacySavedChats();
     // Assert
     expect(imported).toBe(0);
-    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+    expect(aiSessionMocks.importAiSessionChunked).not.toHaveBeenCalled();
     expect(localStorage.getItem("flinttrade:saved-chat:one")).not.toBeNull();
   });
 
@@ -622,7 +675,7 @@ describe("aiConversationStore — importLegacySavedChats", () => {
     const imported = await importLegacySavedChats();
     // Assert
     expect(imported).toBe(0);
-    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+    expect(aiSessionMocks.importAiSessionChunked).not.toHaveBeenCalled();
     expect(localStorage.getItem("flinttrade:saved-chat:one")).not.toBeNull();
   });
 
@@ -633,7 +686,7 @@ describe("aiConversationStore — importLegacySavedChats", () => {
     const imported = await importLegacySavedChats();
     // Assert
     expect(imported).toBe(0);
-    expect(aiSessionMocks.importAiSession).not.toHaveBeenCalled();
+    expect(aiSessionMocks.importAiSessionChunked).not.toHaveBeenCalled();
     expect(localStorage.getItem("flinttrade:saved-chat:empty")).toBeNull();
   });
 

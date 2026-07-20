@@ -21,6 +21,7 @@ GET    /notes              — list daily notes (date desc, preview + word count
 GET    /notes/<date>       — fetch one daily note (200 with empty content when absent)
 PUT    /notes/<date>       — upsert a daily note (empty content deletes it)
 GET    /screenshots        — list trade-log screenshots (with data URLs)
+GET    /screenshots/<id>   — fetch one screenshot (with data URL; 404 when absent)
 POST   /screenshots        — attach a screenshot (dedupes per trade + content hash)
 DELETE /screenshots/<id>   — delete a screenshot (row + file on disk)
 
@@ -33,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
@@ -53,8 +55,27 @@ _IMMUTABLE_KEYS = frozenset({"id", "created_at", "updated_at"})
 
 # Daily-note constraints: the day key is a plain ISO date; the content cap keeps
 # a single note bounded (a pathological PUT is a 400, not a bloating write).
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# ``re.ASCII`` stops ``\d`` matching Unicode digits, and the pattern is applied
+# with ``fullmatch`` (``re.match`` + ``$`` accepts a trailing newline).
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 _MAX_NOTE_CONTENT_CHARS = 100_000
+
+
+def _valid_note_date(note_date: str) -> bool:
+    """Return ``True`` only for a real ASCII ``YYYY-MM-DD`` calendar date.
+
+    The regex alone still admits impossible dates like ``2026-99-99``, so the
+    value is confirmed via :func:`datetime.date.fromisoformat` before any DB
+    write — a bad key would otherwise create a ``daily_notes`` row the
+    frontend can never address.
+    """
+    if not _DATE_RE.fullmatch(note_date):
+        return False
+    try:
+        date.fromisoformat(note_date)
+    except ValueError:
+        return False
+    return True
 
 
 def init_journal_routes(journal: TradeJournal) -> None:
@@ -249,7 +270,7 @@ def get_daily_note(note_date: str) -> tuple[Response, int]:
     journal = _get_journal()
     if journal is None:
         return _err("Journal not initialised", 503)
-    if not _DATE_RE.match(note_date):
+    if not _valid_note_date(note_date):
         return _err("Date must be in YYYY-MM-DD format", 400)
     note = journal.get_daily_note(note_date)
     if note is None:
@@ -263,7 +284,7 @@ def put_daily_note(note_date: str) -> tuple[Response, int]:
     journal = _get_journal()
     if journal is None:
         return _err("Journal not initialised", 503)
-    if not _DATE_RE.match(note_date):
+    if not _valid_note_date(note_date):
         return _err("Date must be in YYYY-MM-DD format", 400)
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -283,11 +304,28 @@ def put_daily_note(note_date: str) -> tuple[Response, int]:
 
 @journal_bp.route("/screenshots", methods=["GET"])
 def list_screenshots() -> tuple[Response, int]:
-    """List trade-log screenshots with re-encoded data URLs."""
+    """List trade-log screenshots with re-encoded data URLs.
+
+    Every row still embeds its full base64 ``data_url`` — the frontend keeps
+    its current eager pattern for now. ``GET /screenshots/<id>`` exists as the
+    lazy per-image path for callers that want to fetch bytes on demand.
+    """
     journal = _get_journal()
     if journal is None:
         return _err("Journal not initialised", 503)
     return _ok(journal.list_screenshots())
+
+
+@journal_bp.route("/screenshots/<screenshot_id>", methods=["GET"])
+def get_screenshot(screenshot_id: str) -> tuple[Response, int]:
+    """Fetch one screenshot row with its re-encoded data URL (404 when absent)."""
+    journal = _get_journal()
+    if journal is None:
+        return _err("Journal not initialised", 503)
+    row = journal.get_screenshot(screenshot_id)
+    if row is None:
+        return _err("Screenshot not found", 404)
+    return _ok(row)
 
 
 @journal_bp.route("/screenshots", methods=["POST"])

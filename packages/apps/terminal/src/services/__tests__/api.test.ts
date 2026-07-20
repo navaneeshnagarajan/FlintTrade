@@ -74,6 +74,8 @@ import {
   modifyGtt,
   cancelGtt,
   basketOrder,
+  splitOrder,
+  OrderApiError,
   cancelAllOrders,
   exitAllPositions,
   cancelOrder,
@@ -2767,6 +2769,79 @@ describe("OpenAlgo API client (api.ts)", () => {
       }),
     ).rejects.toThrow(/not available for live writes/i);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("sends native broker/account selectors for live splitOrder", async () => {
+    // The split route has no /<broker>/ path variant either — order_routes
+    // `place_split` resolves its principal from `broker` / `account_id` in the
+    // body (`_request_principal` → `_resolve_target`). Without them the whole
+    // split would silently retarget to brokers.execution.default.
+    mockConnectionState.apiKey = "";
+    mockModeState.mode = "live";
+    mockBrokerState.accounts = [
+      { account_id: "U1", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:U1";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", placed_count: 4, failed_count: 0, order_ids: [] }, 201),
+    );
+
+    await splitOrder({
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      action: "BUY",
+      totalQuantity: 100,
+      chunkSize: 25,
+      orderType: "MARKET",
+      product: "MIS",
+    });
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/split");
+    expect(url).not.toContain("/api/v1/orders/upstox/split");
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ broker: "upstox", account_id: "U1" });
+  });
+
+  it("throws an OrderApiError carrying the HTTP status and the 422 BasketOrderResult body", async () => {
+    // place_basket answers 422 with the full per-leg truth on partial failure
+    // (order_routes.py). The client must attach that body + status to the
+    // thrown error so callers (LegBuilder) can surface placed/failed counts
+    // and unconfirmed rollbacks instead of only the first error string.
+    const failureBody = {
+      status: "error",
+      strategy: "FlintLegBuilder",
+      timestamp: "2026-07-20T10:15:00+05:30",
+      placed_count: 2,
+      failed_count: 1,
+      rolled_back: true,
+      order_ids: ["B1", "B2"],
+      legs: [
+        { leg_index: 0, symbol: "NIFTY10APR2621900PE", action: "SELL", quantity: 50, success: true, order_id: "B1", error: "", rolled_back: true, rollback_order_id: "" },
+        { leg_index: 1, symbol: "NIFTY10APR2622100CE", action: "SELL", quantity: 50, success: true, order_id: "B2", error: "", rolled_back: true, rollback_order_id: "RB2" },
+        { leg_index: 2, symbol: "NIFTY10APR2622200CE", action: "BUY", quantity: 50, success: false, order_id: "", error: "Broker 'dhan' is not connected", rolled_back: false, rollback_order_id: "" },
+      ],
+      message: "Leg 3 failed: Broker 'dhan' is not connected",
+      failed_leg_index: 2,
+    };
+    fetchSpy.mockResolvedValueOnce(jsonResponse(failureBody, 422));
+
+    const err: unknown = await basketOrder({
+      orders: [
+        { symbol: "NIFTY10APR2621900PE", exchange: "NFO", action: "SELL", quantity: 50, orderType: "MARKET", product: "MIS" },
+      ],
+    }).then(
+      () => { throw new Error("expected basketOrder to reject"); },
+      (e: unknown) => e,
+    );
+
+    // Backward compatible: still an Error with the server message as .message.
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(OrderApiError);
+    const apiErr = err as OrderApiError;
+    expect(apiErr.message).toBe("Leg 3 failed: Broker 'dhan' is not connected");
+    expect(apiErr.status).toBe(422);
+    expect(apiErr.body).toEqual(failureBody);
   });
 
   it("routes live exit-all through the confirmed account-scoped safety endpoint", async () => {

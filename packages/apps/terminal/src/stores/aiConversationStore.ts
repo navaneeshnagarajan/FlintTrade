@@ -21,7 +21,7 @@ import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
-import { getAiSession, importAiSession } from "@/services/ftApi.ai";
+import { getAiSession, importAiSessionChunked } from "@/services/ftApi.ai";
 import type { AiSessionMessage } from "@/services/ftApi.ai";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
@@ -53,9 +53,11 @@ export interface AIConversationState {
   clearMessages: () => void;
   /**
    * Save the current conversation to the backend AI session store (surface
-   * "saved-chat", id = conversation id). Resolves with the conversation id;
-   * rejects when the backend refuses or is unreachable — nothing is written
-   * locally, so a failed save is never silently claimed.
+   * "saved-chat", id = conversation id). Conversations beyond the backend
+   * import caps are chunked/batched client-side (never truncated). Resolves
+   * with the conversation id; rejects when the backend refuses or is
+   * unreachable — nothing is written locally, so a failed save is never
+   * silently claimed.
    */
   saveConversation: () => Promise<string>;
   /**
@@ -151,7 +153,10 @@ const storeImpl: StateCreator<
     if (!state.conversationId) {
       set({ conversationId: id });
     }
-    await importAiSession({
+    // Chunked import: oversized message contents split on the backend's
+    // 32 KiB UTF-8 cap and >500-message histories batch under the same id,
+    // so a long conversation saves whole instead of being refused.
+    await importAiSessionChunked({
       id,
       surface: "saved-chat",
       messages: state.messages.map((message) => ({
@@ -215,7 +220,10 @@ async function runLegacySavedChatImport(): Promise<number> {
     }
     const id = key.slice(SAVED_CHAT_PREFIX.length);
     try {
-      await importAiSession({
+      // Chunked import — legacy snapshots predate the backend caps (32 KiB
+      // per message, 500 messages), so pasted-log chats and long histories
+      // must split/batch client-side or they would 400 on every visit.
+      await importAiSessionChunked({
         id,
         surface: "saved-chat",
         messages: parsed.messages.map((message) => ({
@@ -226,7 +234,8 @@ async function runLegacySavedChatImport(): Promise<number> {
       });
     } catch {
       // Backend unreachable or refused — keep the key; the next visit retries
-      // (content-hash dedupe on the backend makes re-imports safe).
+      // (content-hash dedupe on the backend makes re-imports and partially
+      // succeeded batch runs safe).
       continue;
     }
     localStorage.removeItem(key);
@@ -238,10 +247,13 @@ async function runLegacySavedChatImport(): Promise<number> {
 /**
  * One-time migration of legacy `flinttrade:saved-chat:*` localStorage
  * snapshots into the backend AI session store. Skipped in Explore mode and on
- * demo auth. Each key is removed ONLY after its import confirmed success;
- * failures leave the key in place for a retry on the next visit (backend
- * upsert/dedupe keeps that idempotent). Concurrent callers share one
- * in-flight run. Resolves with the number of conversations migrated.
+ * demo auth. Snapshots beyond the backend import caps (32 KiB per message,
+ * 500 messages) are chunked/batched client-side — content is preserved,
+ * never truncated. Each key is removed ONLY after its import confirmed
+ * success; failures leave the key in place for a retry on the next visit
+ * (backend upsert/dedupe keeps that idempotent, including re-running batches
+ * that already landed). Concurrent callers share one in-flight run. Resolves
+ * with the number of conversations migrated.
  */
 export function importLegacySavedChats(): Promise<number> {
   if (!legacyImportRun) {

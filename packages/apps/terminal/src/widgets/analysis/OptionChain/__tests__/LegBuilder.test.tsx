@@ -16,21 +16,41 @@ import { createRef } from "react";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const basketOrderMock = vi.hoisted(() =>
-  vi.fn().mockResolvedValue({
-    status: "success",
-    strategy: "FlintLegBuilder",
-    timestamp: "2026-04-10T09:30:00+05:30",
-    placed_count: 2,
-    failed_count: 0,
-    rolled_back: false,
-    order_ids: ["ORD001", "ORD002"],
-    legs: [],
-  }),
-);
+const { basketOrderMock, OrderApiErrorMock } = vi.hoisted(() => {
+  /**
+   * Mirror of `OrderApiError` from services/api — the widget narrows a thrown
+   * error with `instanceof OrderApiError` + `.status` / `.body`, so the mocked
+   * module must export a class with the identical runtime shape.
+   */
+  class OrderApiErrorMock extends Error {
+    readonly status: number;
+    readonly body: unknown;
+
+    constructor(message: string, status: number, body: unknown) {
+      super(message);
+      this.name = "OrderApiError";
+      this.status = status;
+      this.body = body;
+    }
+  }
+  return {
+    OrderApiErrorMock,
+    basketOrderMock: vi.fn().mockResolvedValue({
+      status: "success",
+      strategy: "FlintLegBuilder",
+      timestamp: "2026-04-10T09:30:00+05:30",
+      placed_count: 2,
+      failed_count: 0,
+      rolled_back: false,
+      order_ids: ["ORD001", "ORD002"],
+      legs: [],
+    }),
+  };
+});
 
 vi.mock("@/services/api", () => ({
   basketOrder: basketOrderMock,
+  OrderApiError: OrderApiErrorMock,
 }));
 
 // ---------------------------------------------------------------------------
@@ -372,14 +392,122 @@ describe("LegBuilder — order placement (gated basket path)", () => {
   });
 
   it("surfaces the backend refusal message when the basket is rejected", async () => {
-    // e.g. a SafetySystem admission block or a 422 rollback — postOrder throws
-    // with the server's message and the widget must show it verbatim.
+    // e.g. a SafetySystem admission block — postOrder throws with the
+    // server's message and the widget must show it verbatim.
     basketOrderMock.mockRejectedValueOnce(new Error("Daily loss limit breached"));
     renderLegBuilder();
     await userEvent.click(screen.getByText("STR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Daily loss limit breached");
+  });
+
+  // 422 partial-failure bodies from order_routes `place_basket` — the client
+  // attaches them to OrderApiError.body and the widget must render the per-leg
+  // truth, not only the first error string.
+  const make422Leg = (over: Record<string, unknown> = {}) => ({
+    leg_index: 0,
+    symbol: "NIFTY10APR2622000CE",
+    action: "SELL",
+    quantity: 50,
+    success: true,
+    order_id: "B1",
+    error: "",
+    rolled_back: false,
+    rollback_order_id: "",
+    ...over,
+  });
+
+  it("renders placed/failed counts for a 422 partial failure with a confirmed rollback", async () => {
+    basketOrderMock.mockRejectedValueOnce(
+      new OrderApiErrorMock("Leg 2 failed: margin blocked", 422, {
+        status: "error",
+        strategy: "FlintLegBuilder",
+        timestamp: "2026-07-20T10:15:00+05:30",
+        placed_count: 1,
+        failed_count: 1,
+        rolled_back: true,
+        order_ids: ["B1"],
+        legs: [
+          make422Leg({ rolled_back: true, rollback_order_id: "RB1" }),
+          make422Leg({ leg_index: 1, symbol: "NIFTY10APR2622000PE", success: false, order_id: "", error: "margin blocked" }),
+        ],
+        message: "Leg 2 failed: margin blocked",
+        failed_leg_index: 1,
+      }),
+    );
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    // Confirmed rollback (rollback_order_id present) — honest counts, but no
+    // urgent alert: nothing is believed live on the broker.
+    const toast = await screen.findByRole("status");
+    expect(toast).toHaveTextContent("1 leg placed then rolled back, 1 failed — Leg 2 failed: margin blocked");
+    expect(toast).not.toHaveTextContent(/rollback unconfirmed/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("raises an urgent rollback-unconfirmed warning when a rolled-back leg has no rollback order id", async () => {
+    // basket_orders.py marks a FAILED rollback as rolled_back=True with
+    // rollback_order_id="" — that leg was really placed and may still be open.
+    basketOrderMock.mockRejectedValueOnce(
+      new OrderApiErrorMock("Leg 2 failed: broker session dropped", 422, {
+        status: "error",
+        strategy: "FlintLegBuilder",
+        timestamp: "2026-07-20T10:15:00+05:30",
+        placed_count: 1,
+        failed_count: 1,
+        rolled_back: true,
+        order_ids: ["B1"],
+        legs: [
+          make422Leg({ rolled_back: true, rollback_order_id: "" }),
+          make422Leg({ leg_index: 1, symbol: "NIFTY10APR2622000PE", success: false, order_id: "", error: "broker session dropped" }),
+        ],
+        message: "Leg 2 failed: broker session dropped",
+        failed_leg_index: 1,
+      }),
+    );
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "1 leg placed, 1 failed — Leg 2 failed: broker session dropped. Rollback unconfirmed — check Positions.",
+    );
+  });
+
+  it("keeps the urgent rollback warning visible past the auto-dismiss window", async () => {
+    vi.useFakeTimers();
+    try {
+      basketOrderMock.mockRejectedValueOnce(
+        new OrderApiErrorMock("Leg 2 failed: broker session dropped", 422, {
+          status: "error",
+          placed_count: 1,
+          failed_count: 1,
+          rolled_back: true,
+          order_ids: ["B1"],
+          legs: [make422Leg({ rolled_back: true, rollback_order_id: "" })],
+          message: "Leg 2 failed: broker session dropped",
+        }),
+      );
+      renderLegBuilder();
+      // fireEvent (not userEvent) — userEvent's internal delays hang under
+      // fake timers; the clicks here need no pointer-event realism.
+      fireEvent.click(screen.getByText("STR"));
+      fireEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+      await act(async () => {}); // flush the rejected basket promise
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/rollback unconfirmed — check positions/i);
+
+      // Ordinary toasts auto-dismiss after 4 s; the unconfirmed-rollback
+      // warning must survive until the next placement attempt replaces it.
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses to dispatch without an expiry", async () => {

@@ -751,6 +751,43 @@ class TestScreenshots:
         (tmp_path / "journal_screenshots" / f"{row['id']}.png").unlink()
         assert journal.list_screenshots() == []
 
+    def test_get_screenshot_roundtrip_and_absent(self, tmp_path):
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        got = journal.get_screenshot(row["id"])
+        assert got is not None
+        assert got["id"] == row["id"]
+        assert got["trade_key"] == "trade-1"
+        assert got["data_url"] == _b64_url(b"png-bytes")
+        assert journal.get_screenshot("no-such-id") is None
+        # A row whose file has gone missing on disk reads as absent too.
+        (tmp_path / "journal_screenshots" / f"{row['id']}.png").unlink()
+        assert journal.get_screenshot(row["id"]) is None
+
+    def test_screenshot_file_reads_happen_outside_the_store_lock(self, tmp_path):
+        """Pins finding 8: list/get must not hold the RLock while reading files.
+
+        ``_screenshot_path`` is resolved immediately before each file read; a
+        regression back to ``@_locked`` around the whole method would make the
+        lock owned at that point and fail this test. (``RLock._is_owned`` is a
+        private but stable CPython API — Condition relies on it.)
+        """
+        journal = _screenshot_journal(tmp_path)
+        row, _ = journal.add_screenshot("trade-1", _b64_url(b"png-bytes"))
+        lock_owned_at_resolve: list[bool] = []
+        original = journal._screenshot_path
+
+        def spy(screenshot_id: str, content_type: str):
+            lock_owned_at_resolve.append(journal._lock._is_owned())
+            return original(screenshot_id, content_type)
+
+        journal._screenshot_path = spy  # type: ignore[method-assign]
+        listed = journal.list_screenshots()
+        got = journal.get_screenshot(row["id"])
+        assert len(listed) == 1
+        assert got is not None
+        assert lock_owned_at_resolve == [False, False]
+
     def test_screenshots_dir_defaults_next_to_sqlite_file(self, tmp_path):
         from flinttrade_journal.trade_journal import TradeJournal
 

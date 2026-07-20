@@ -400,7 +400,7 @@ describe("TradeLogTab legacy screenshot import", () => {
     );
   });
 
-  it("keeps the localStorage key when any entry fails to import", async () => {
+  it("rewrites the map to only the failed entries so successes are never re-uploaded", async () => {
     localStorageMock.setItem(
       SCREENSHOTS_KEY,
       JSON.stringify({
@@ -417,9 +417,60 @@ describe("TradeLogTab legacy screenshot import", () => {
     renderTab();
 
     await waitFor(() => expect(mockAdd).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(localStorageMock.getItem(SCREENSHOTS_KEY)).not.toBeNull(),
+    // The key survives (the failed entry must retry on the next mount) but
+    // holds ONLY the failure — the succeeded entry's ~MB payload must not be
+    // re-POSTed on every future mount.
+    await waitFor(() => {
+      const raw = localStorageMock.getItem(SCREENSHOTS_KEY);
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw as string)).toEqual({ bad: FAKE_DATA_URL });
+    });
+  });
+
+  it("surfaces permanently rejected entries with a one-line notice", async () => {
+    localStorageMock.setItem(
+      SCREENSHOTS_KEY,
+      JSON.stringify({
+        ok: FAKE_DATA_URL,
+        "bmp-shot": FAKE_DATA_URL,
+      }),
     );
+    mockAdd.mockImplementation((tradeKey: string) =>
+      tradeKey === "bmp-shot"
+        ? Promise.reject(
+            Object.assign(new Error("Unsupported screenshot type"), { status: 400 }),
+          )
+        : Promise.resolve(makeScreenshot(tradeKey)),
+    );
+
+    renderTab();
+
+    // A 4xx is a permanent refusal — the user must be told the screenshot
+    // did not migrate instead of it silently vanishing after the upgrade.
+    expect(
+      await screen.findByText(/1 legacy screenshot could not be migrated/),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      const raw = localStorageMock.getItem(SCREENSHOTS_KEY);
+      expect(raw).not.toBeNull();
+      expect(JSON.parse(raw as string)).toEqual({ "bmp-shot": FAKE_DATA_URL });
+    });
+  });
+
+  it("shows no rejection notice for transient failures", async () => {
+    localStorageMock.setItem(
+      SCREENSHOTS_KEY,
+      JSON.stringify({ flaky: FAKE_DATA_URL }),
+    );
+    mockAdd.mockRejectedValue(new Error("network down"));
+
+    renderTab();
+
+    await waitFor(() => expect(mockAdd).toHaveBeenCalledTimes(1));
+    // Transient failures retry silently on the next mount — no scary banner.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText(/could not be migrated/)).not.toBeInTheDocument();
+    expect(localStorageMock.getItem(SCREENSHOTS_KEY)).not.toBeNull();
   });
 
   it("skips the import entirely in Explore mode", async () => {

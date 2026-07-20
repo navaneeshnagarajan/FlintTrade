@@ -103,7 +103,7 @@ def get_flow(flow_id: str) -> tuple[Response, int]:
     store = _get_store()
     if store is None:
         return _err("Flow store not initialised", 503)
-    if not FLOW_ID_RE.match(flow_id):
+    if not FLOW_ID_RE.fullmatch(flow_id):
         return _err(_INVALID_ID_MESSAGE, 400)
     stored = store.get_flow(flow_id)
     if stored is None:
@@ -117,7 +117,7 @@ def put_flow(flow_id: str) -> tuple[Response, int]:
     store = _get_store()
     if store is None:
         return _err("Flow store not initialised", 503)
-    if not FLOW_ID_RE.match(flow_id):
+    if not FLOW_ID_RE.fullmatch(flow_id):
         return _err(_INVALID_ID_MESSAGE, 400)
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
@@ -145,7 +145,7 @@ def delete_flow(flow_id: str) -> tuple[Response, int]:
     store = _get_store()
     if store is None:
         return _err("Flow store not initialised", 503)
-    if not FLOW_ID_RE.match(flow_id):
+    if not FLOW_ID_RE.fullmatch(flow_id):
         return _err(_INVALID_ID_MESSAGE, 400)
     if not store.delete_flow(flow_id):
         return _err("Flow not found", 404)

@@ -82,6 +82,13 @@ def test_delete_and_prune(store: AiSessionStore) -> None:
     assert all(h["session_id"] in {"s3", "s4"} for h in store.search("question"))
 
 
+def test_session_surface_probe(store: AiSessionStore) -> None:
+    """session_surface answers without loading messages; unknown ids are None."""
+    _exchange(store)
+    assert store.session_surface("s1") == "advisor"
+    assert store.session_surface("never-recorded") is None
+
+
 def test_invalid_inputs_fail_closed(store: AiSessionStore) -> None:
     with pytest.raises(ValueError):
         store.record_exchange("", "advisor", [{"role": "user", "content": "x"}])

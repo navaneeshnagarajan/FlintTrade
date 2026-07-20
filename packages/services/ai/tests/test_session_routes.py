@@ -148,6 +148,80 @@ def test_import_is_idempotent(app: Flask) -> None:
     assert len(session["messages"]) == 2
 
 
+def test_import_id_out_of_bounds_falls_back_to_derived_id(app: Flask) -> None:
+    """Unbounded/out-of-alphabet ids never become the sessions primary key.
+
+    Pins finding 10: the explicit id must fullmatch ``[A-Za-z0-9_-]{1,64}``;
+    anything else falls back to the deterministic ``imp-`` id (so re-imports
+    of the same content stay idempotent regardless of the bad id).
+    """
+    client = app.test_client()
+    messages = [{"role": "user", "content": "What is theta decay?"}]
+
+    def import_with_id(bad_id: str) -> str:
+        resp = client.post(
+            "/api/v1/ai/sessions/import",
+            json={"id": bad_id, "surface": "saved-chat", "messages": messages},
+        )
+        assert resp.status_code == 200
+        return resp.get_json()["data"]["session_id"]
+
+    oversized = "x" * 65
+    megabyte = "y" * (1024 * 1024)
+    newline = "abc\ndef"
+    ids = {import_with_id(bad) for bad in (oversized, megabyte, newline, "sp ace")}
+    # Every rejected id collapsed to the SAME derived id for identical content.
+    assert len(ids) == 1
+    derived = ids.pop()
+    assert derived.startswith("imp-")
+    # None of the bad ids were stored or echoed back by the list.
+    listed = {row["id"] for row in client.get("/api/v1/ai/sessions").get_json()["data"]}
+    assert derived in listed
+    assert not listed & {oversized, megabyte, newline, "sp ace"}
+    # A well-formed 64-char id is still honoured verbatim.
+    ok_id = "z" * 64
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={"id": ok_id, "surface": "saved-chat", "messages": messages},
+    )
+    assert resp.get_json()["data"]["session_id"] == ok_id
+
+
+def test_import_refuses_id_collision_with_another_surface(app: Flask) -> None:
+    """An import naming a live session of a DIFFERENT surface is a 400.
+
+    Pins finding 10: record_exchange upserts by id, so without the check the
+    imported messages would silently append into the unrelated conversation.
+    """
+    client = app.test_client()
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={
+            "id": "s1",  # fixture session s1 has surface "advisor"
+            "surface": "saved-chat",
+            "messages": [{"role": "user", "content": "injected into the advisor session?"}],
+        },
+    )
+    assert resp.status_code == 400
+    assert "different surface" in resp.get_json()["message"]
+    # The advisor session is untouched.
+    session = client.get("/api/v1/ai/sessions/s1").get_json()["data"]
+    assert session["surface"] == "advisor"
+    assert len(session["messages"]) == 2
+
+    # Same-surface re-import into an existing id remains the idempotent path.
+    resp = client.post(
+        "/api/v1/ai/sessions/import",
+        json={
+            "id": "s1",
+            "surface": "advisor",
+            "messages": [{"role": "user", "content": "What is the max pain on BANKNIFTY?"}],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["data"] == {"session_id": "s1"}
+
+
 def test_import_caps_and_validation(app: Flask) -> None:
     client = app.test_client()
 
