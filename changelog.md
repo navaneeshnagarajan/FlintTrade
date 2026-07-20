@@ -4,6 +4,28 @@ All notable changes to FlintTrade will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/).
 Versioning: [Semantic Versioning](https://semver.org/).
 
+## [0.6.0-beta.13](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.12...v0.6.0-beta.13) (2026-07-20)
+
+
+### Added
+
+* **desktop:** let the native Windows uninstaller remove all app data ([3b31935](https://github.com/navaneeshnagarajan/FlintTrade/commit/3b31935b253f503a209189469bc0064dbfdea813))
+* **desktop:** ship clean uninstall scripts for macOS, Linux, and Windows ([2100234](https://github.com/navaneeshnagarajan/FlintTrade/commit/2100234491fdc68568d111fe2eab10bfd77542f1))
+* **terminal:** apply the font-size setting to the terminal typography ([2b49957](https://github.com/navaneeshnagarajan/FlintTrade/commit/2b499574fb4852834251dbc41e95ca2890161e97))
+* **terminal:** move in-app saved content from WebView localStorage to the workspace ([1d1f253](https://github.com/navaneeshnagarajan/FlintTrade/commit/1d1f2537b165b263c2495a00c2a7287f5dabf9f9))
+
+
+### Fixed
+
+* **desktop:** close the uninstall-wave review findings ([a0500b3](https://github.com/navaneeshnagarajan/FlintTrade/commit/a0500b38fd296f3c5c2f85762762437cbd50f05a))
+* **desktop:** close the verification-round findings on the uninstall purge path ([644a994](https://github.com/navaneeshnagarajan/FlintTrade/commit/644a994f9a4adeb41294ed949210c3e2560daf40))
+* **orders:** align native GTT management ([6e9fe3c](https://github.com/navaneeshnagarajan/FlintTrade/commit/6e9fe3cf24b30815ed8888ef2fd1d5b67772b231))
+* **orders:** close the GTT review findings — SL prefill, honest refusals, flag verification ([ef22654](https://github.com/navaneeshnagarajan/FlintTrade/commit/ef226547f3bfb2b02db650417a1df32e5411fb38))
+* **site:** align homepage install cards with the AppImage-only Linux reality ([f6c39c9](https://github.com/navaneeshnagarajan/FlintTrade/commit/f6c39c9543c5eebaa2303228b7d10377e91319ae))
+* **terminal:** close the second verify round on the migration fixes ([e7f438f](https://github.com/navaneeshnagarajan/FlintTrade/commit/e7f438f62ab1cfc401e5d028e6b6006d4476de23))
+* **terminal:** close the seventeen review findings on the migration wave ([49564c0](https://github.com/navaneeshnagarajan/FlintTrade/commit/49564c069c22e5f3b29f466554a8a9ba4a8c2ddd))
+* **terminal:** enable LegBuilder strategy placement over the gated basket route ([6918662](https://github.com/navaneeshnagarajan/FlintTrade/commit/691866228c61d1e7ade07ea5bc9bc1b6ce1fd196))
+
 ## [0.6.0-beta.12](https://github.com/navaneeshnagarajan/FlintTrade/compare/v0.6.0-beta.11...v0.6.0-beta.12) (2026-07-19)
 
 
