@@ -95,6 +95,18 @@ for (const resource of [
 if (process.platform !== "win32") {
   const bootstrapMode = statSync(path.join(resourcesDirectory, "bootstrap", "flinttrade-bootstrap.sh")).mode;
   assert.notEqual(bootstrapMode & 0o111, 0, "The packaged POSIX bootstrap entrypoint is not executable.");
+} else {
+  const packagedSupervisor = readFileSync(
+    path.join(resourcesDirectory, "bootstrap", "flinttrade-job-supervisor.exe"),
+  );
+  const builtSupervisor = readFileSync(
+    path.join(packageRoot, "dist", "native", "win32-x64", "flinttrade-job-supervisor.exe"),
+  );
+  assert.deepEqual(
+    packagedSupervisor,
+    builtSupervisor,
+    "The packaged Windows Job supervisor differs from the helper built in this job.",
+  );
 }
 
 const packagedNotice = readFileSync(path.join(resourcesDirectory, "NOTICE"));

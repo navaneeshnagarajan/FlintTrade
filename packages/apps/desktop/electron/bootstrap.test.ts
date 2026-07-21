@@ -1,8 +1,11 @@
-import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
 import {
   access,
   appendFile,
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -15,6 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { build } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -27,6 +31,7 @@ import {
   type CommandInvocation,
 } from "./bootstrap";
 import { createNodeBootstrapDependencies } from "./bootstrap-io";
+import { createBootstrapQuitGate } from "./bootstrap-shutdown";
 import { createBootstrapState } from "./state";
 
 const revision = "a".repeat(40);
@@ -57,6 +62,12 @@ const manifest: BootstrapToolManifest = {
         sha256: sha256(nodeBytes),
         url: "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-arm64.tar.gz",
       },
+      "win32-x64": {
+        archive: "zip",
+        executable: "node-v22.23.1-win-x64/node.exe",
+        sha256: sha256(nodeBytes),
+        url: "https://nodejs.org/dist/v22.23.1/node-v22.23.1-win-x64.zip",
+      },
     },
   },
   pnpm: { integrity: "sha512-test", packageManager: "pnpm@9.15.0+sha512.test", version: "9.15.0" },
@@ -68,6 +79,12 @@ const manifest: BootstrapToolManifest = {
         executable: "uv-aarch64-apple-darwin/uv",
         sha256: sha256(uvBytes),
         url: "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-apple-darwin.tar.gz",
+      },
+      "win32-x64": {
+        archive: "zip",
+        executable: "uv-x86_64-pc-windows-msvc/uv.exe",
+        sha256: sha256(uvBytes),
+        url: "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip",
       },
     },
   },
@@ -95,19 +112,229 @@ async function writeRepositoryShape(root: string, git: boolean): Promise<void> {
   await writeFile(path.join(root, "packages", "apps", "terminal", "package.json"), '{"name":"@flinttrade/terminal"}');
 }
 
+async function crashLeaseOwner(input: {
+  candidate: string;
+  lock: string;
+  promoteTo?: string;
+  root: string;
+}): Promise<void> {
+  const output = path.join(input.root, `lease-crash-${randomUUID()}.mjs`);
+  const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
+  await build({
+    banner: {
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    },
+    bundle: true,
+    format: "esm",
+    outfile: output,
+    platform: "node",
+    stdin: {
+      contents: `
+        import { createNodeBootstrapDependencies } from ${JSON.stringify(bootstrapIo)};
+        const [lock, candidate, promoteTo] = process.argv.slice(2);
+        const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+        const release = await fileSystem.acquireOperationLock({
+          bootIdentity: "crash-fixture",
+          ownerPid: process.pid,
+          singletonAuthorised: true,
+          target: lock,
+        });
+        if (promoteTo) {
+          const identity = await fileSystem.directoryIdentity(candidate);
+          await fileSystem.promoteAbsent(candidate, promoteTo, identity);
+        }
+        process.stdout.write("ready\\n");
+        void release;
+        setInterval(() => {}, 1_000);
+      `,
+      resolveDir: import.meta.dirname,
+      sourcefile: "lease-crash-fixture.ts",
+    },
+    target: "node22",
+  });
+  const child = spawn(
+    process.execPath,
+    [output, input.lock, input.candidate, ...(input.promoteTo ? [input.promoteTo] : [])],
+    {
+    stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  await Promise.race([
+    once(child.stdout!, "data"),
+    once(child, "close").then(([code]) => {
+      throw new Error(`Lease crash fixture exited before READY with code ${String(code)}.`);
+    }),
+    once(child, "error").then(([error]) => {
+      throw error;
+    }),
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Lease crash fixture did not reach READY.")), 3_000);
+      timer.unref?.();
+    }),
+  ]);
+  child.kill("SIGKILL");
+  await once(child, "close");
+}
+
+async function crashDuringLeasePublication(input: {
+  lock: string;
+  root: string;
+  stage: "after-write" | "before-open";
+}): Promise<void> {
+  const output = path.join(input.root, `lease-publication-crash-${randomUUID()}.mjs`);
+  const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
+  await build({
+    banner: {
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    },
+    bundle: true,
+    format: "esm",
+    outfile: output,
+    platform: "node",
+    stdin: {
+      contents: `
+        import { createNodeBootstrapDependencies } from ${JSON.stringify(bootstrapIo)};
+        const [lock] = process.argv.slice(2);
+        const wanted = ${JSON.stringify(input.stage)};
+        const fileSystem = createNodeBootstrapDependencies(process.platform, {
+          testHooks: {
+            leaseOwnerWriteChunkBytes: 1,
+            async onLeaseOwnerPublication(stage, bytesWritten) {
+              if (stage === wanted && (stage !== "after-write" || bytesWritten === 1)) {
+                process.stdout.write("ready\\n");
+                await new Promise(() => {});
+              }
+            },
+          },
+        }).fileSystem;
+        await fileSystem.acquireOperationLock({
+          bootIdentity: "publication-crash-fixture",
+          ownerPid: process.pid,
+          singletonAuthorised: true,
+          target: lock,
+        });
+      `,
+      resolveDir: import.meta.dirname,
+      sourcefile: "lease-publication-crash-fixture.ts",
+    },
+    target: "node22",
+  });
+  const child = spawn(process.execPath, [output, input.lock], { stdio: ["ignore", "pipe", "inherit"] });
+  await Promise.race([
+    once(child.stdout!, "data"),
+    once(child, "close").then(([code]) => {
+      throw new Error(`Lease publication fixture exited before READY with code ${String(code)}.`);
+    }),
+    once(child, "error").then(([error]) => {
+      throw error;
+    }),
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Lease publication fixture did not reach READY.")), 3_000);
+      timer.unref?.();
+    }),
+  ]);
+  child.kill("SIGKILL");
+  await once(child, "close");
+}
+
+async function crashBootstrapCommandOwner(input: {
+  lock: string;
+  marker: string;
+  root: string;
+}): Promise<void> {
+  const output = path.join(input.root, `command-owner-crash-${randomUUID()}.mjs`);
+  const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
+  const targetScript = [
+    "const {spawn}=require('node:child_process');",
+    "const escaped=spawn(process.execPath,['-e',\"process.on('SIGTERM',()=>{});process.stdout.write('ready\\\\n');setTimeout(()=>require('node:fs').writeFileSync(process.argv[1],'survived'),1500);setInterval(()=>{},1000)\",process.argv[1]],{detached:true,stdio:['ignore','pipe','ignore']});",
+    "escaped.stdout.once('data',()=>process.stdout.write('target-ready\\n'));",
+    "escaped.unref();",
+    "setInterval(()=>{},1000);",
+  ].join("");
+  await build({
+    banner: {
+      js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    },
+    bundle: true,
+    format: "esm",
+    outfile: output,
+    platform: "node",
+    stdin: {
+      contents: `
+        import { createNodeBootstrapDependencies } from ${JSON.stringify(bootstrapIo)};
+        const [lock, marker] = process.argv.slice(2);
+        const dependencies = createNodeBootstrapDependencies(process.platform, { operationLeaseTarget: lock });
+        const release = await dependencies.fileSystem.acquireOperationLock({
+          bootIdentity: "command-owner-crash",
+          ownerPid: process.pid,
+          singletonAuthorised: true,
+          target: lock,
+        });
+        const target = ${JSON.stringify(targetScript)};
+        const result = await dependencies.command.run({
+          args: ["-e", target, marker],
+          command: process.execPath,
+          onOutput(line) {
+            if (line === "target-ready") process.stdout.write("READY\\n");
+          },
+          timeoutMs: 30_000,
+        });
+        await release();
+        process.exit(result.contained ? result.exitCode : 125);
+      `,
+      resolveDir: import.meta.dirname,
+      sourcefile: "command-owner-crash-fixture.ts",
+    },
+    target: "node22",
+  });
+  const child = spawn(process.execPath, [output, input.lock, input.marker], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  await Promise.race([
+    once(child.stdout!, "data"),
+    once(child, "close").then(([code]) => {
+      throw new Error(`Command-owner crash fixture exited before READY with code ${String(code)}.`);
+    }),
+    once(child, "error").then(([error]) => {
+      throw error;
+    }),
+    new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Command-owner crash fixture did not reach READY.")), 5_000);
+      timer.unref?.();
+    }),
+  ]);
+  child.kill("SIGKILL");
+  await once(child, "close");
+}
+
 interface FixtureOptions {
+  addedArchiveSource?: boolean;
+  abortArchiveKind?: "tar.gz" | "zip";
   badArchiveShape?: boolean;
   badUvChecksum?: boolean;
   boundary?: BootstrapBoundary;
   destinationAppearance?: "empty-directory" | "file" | "non-empty-directory" | "symlink";
+  finalLogFailure?: "once" | "permanent";
   gitAvailable?: boolean;
   gitOrigin?: string;
   holdPythonSync?: boolean;
   holdLockRelease?: boolean;
   logFailure?: "permanent" | "transient";
+  nonIgnoredUntracked?: boolean;
   outputLogFailure?: boolean;
+  outputSecrets?: boolean;
+  platform?: "darwin" | "win32";
+  realAppendParentSyncFailure?: boolean;
+  realDurableDirectorySyncFailure?: boolean;
+  releaseFailure?: "once" | "permanent";
+  realReleaseFailureStage?: "directory-remove" | "directory-sync" | "owner-unlink" | "parent-sync";
+  rootAliasAtBoundary?: boolean;
+  spuriousAbortError?: boolean;
+  sourceMutationAtBoundary?: "after-marker" | "before-rename";
   mutateTrackedDuringBuild?: boolean;
+  uncontainedOnAbort?: boolean;
   onExtract?: BootstrapDependencies["extractArchive"];
+  virtualEnvironment?: "missing" | "nonrelocatable" | "relocatable";
 }
 
 async function fixture(options: FixtureOptions = {}) {
@@ -128,59 +355,141 @@ async function fixture(options: FixtureOptions = {}) {
   let appendFailures = 0;
   let outputLogFailed = false;
   let buildMutated = false;
-  const nodeDependencies = createNodeBootstrapDependencies("darwin");
+  let finalLogFailures = 0;
+  let releaseFailures = 0;
+  let realReleaseFailures = 0;
+  let realAppendParentSyncFailures = 0;
+  let realDurableDirectorySyncFailures = 0;
+  let markArchiveExtractionStarted!: () => void;
+  const archiveExtractionStarted = new Promise<void>((resolve) => {
+    markArchiveExtractionStarted = resolve;
+  });
+  const platform = options.platform ?? "darwin";
+  const target = platform === "win32" ? "win32-x64" : "darwin-arm64";
+  const nodeDependencies = createNodeBootstrapDependencies(platform, {
+    operationLeaseTarget: path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock"),
+    testHooks: {
+      beforeAppendParentSync() {
+        if (options.realAppendParentSyncFailure && realAppendParentSyncFailures++ === 0) {
+          throw new Error("real durable-log parent sync failed");
+        }
+      },
+      beforeDurableDirectorySync(_target, kind) {
+        if (
+          kind === "directory" &&
+          options.realDurableDirectorySyncFailure &&
+          realDurableDirectorySyncFailures++ === 0
+        ) {
+          throw new Error("real durable-log directory sync failed");
+        }
+      },
+      beforeLeaseReleaseStage(stage) {
+        if (stage === options.realReleaseFailureStage && realReleaseFailures++ === 0) {
+          throw new Error(`real lease ${stage} failed`);
+        }
+      },
+    },
+  });
 
   const dependencies: BootstrapDependencies = {
     command: {
+      operationLeaseTarget: path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock"),
+      ...(platform === "win32"
+        ? { windowsPowerShell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" }
+        : {}),
       async run(invocation) {
         calls.push(invocation);
         if (invocation.command === "git" && invocation.args[0] === "--version") {
           return options.gitAvailable === false
-            ? { exitCode: 127, stderr: "git missing", stdout: "" }
-            : { exitCode: 0, stderr: "", stdout: "git version 2.50.1\n" };
+            ? { contained: true, exitCode: 127, stderr: "git missing", stdout: "" }
+            : { contained: true, exitCode: 0, stderr: "", stdout: "git version 2.50.1\n" };
         }
         if (invocation.command === "git" && invocation.args[0] === "clone") {
           await writeRepositoryShape(invocation.args.at(-1)!, true);
-          return { exitCode: 0, stderr: "", stdout: "" };
+          return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
         if (path.basename(invocation.command) === "git" && invocation.args[0] === "rev-parse") {
-          return { exitCode: 0, stderr: "", stdout: `${revision}\n` };
+          return { contained: true, exitCode: 0, stderr: "", stdout: `${revision}\n` };
         }
         if (path.basename(invocation.command) === "git" && invocation.args[0] === "remote") {
           return {
+            contained: true,
             exitCode: 0,
             stderr: "",
             stdout: `${options.gitOrigin ?? "https://github.com/navaneeshnagarajan/FlintTrade.git"}\n`,
           };
         }
         if (path.basename(invocation.command) === "git" && invocation.args[0] === "status") {
-          return { exitCode: 0, stderr: "", stdout: buildMutated ? " M uv.lock\n" : "" };
+          return {
+            contained: true,
+            exitCode: 0,
+            stderr: "",
+            stdout: buildMutated ? " M uv.lock\n" : options.nonIgnoredUntracked ? "?? injected.py\n" : "",
+          };
         }
         if (invocation.args[0] === "--version" && invocation.command.includes("uv")) {
-          return { exitCode: 0, stderr: "", stdout: "uv 0.11.16 (135a36367 2026-05-21 aarch64-apple-darwin)\n" };
+          return { contained: true, exitCode: 0, stderr: "", stdout: "uv 0.11.16 (135a36367 2026-05-21 aarch64-apple-darwin)\n" };
         }
-        if (invocation.args[0] === "--version" && path.basename(invocation.command) === "node") {
-          return { exitCode: 0, stderr: "", stdout: "v22.23.1\n" };
+        if (invocation.args[0] === "--version" && /(?:node|node\.exe)$/.test(invocation.command)) {
+          return { contained: true, exitCode: 0, stderr: "", stdout: "v22.23.1\n" };
         }
-        if (path.basename(invocation.command) === "node" && invocation.args.at(-1) === "--version") {
-          return { exitCode: 0, stderr: "", stdout: "0.34.6\n" };
+        if (/(?:node|node\.exe)$/.test(invocation.command) && invocation.args.at(-1) === "--version") {
+          return { contained: true, exitCode: 0, stderr: "", stdout: "0.34.6\n" };
         }
-        if (invocation.command === "/bin/sh") {
+        if (/^pytest(?:\.exe)?$/.test(path.basename(invocation.command))) {
+          const environmentRoot = path.dirname(path.dirname(invocation.command));
+          const configuration = await readFile(path.join(environmentRoot, "pyvenv.cfg"), "utf8");
+          return configuration.includes("relocatable = true")
+            ? { contained: true, exitCode: 0, stderr: "", stdout: "pytest 8.3.5\n" }
+            : { contained: true, exitCode: 1, stderr: "virtual environment is not relocatable", stdout: "" };
+        }
+        if (invocation.command === "/bin/sh" || invocation.args.includes("-File")) {
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-python\t48\tInstalling managed Python 3.12", "stdout");
+          if (options.uncontainedOnAbort) {
+            await new Promise<void>((resolve) => {
+              if (invocation.signal?.aborted) resolve();
+              else invocation.signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+            return { contained: false, exitCode: 130, stderr: "descendant containment was not proved", stdout: "" };
+          }
           if (options.holdPythonSync) await pythonSyncHeld;
           if (options.mutateTrackedDuringBuild) {
             buildMutated = true;
             await writeFile(path.join(invocation.args[1]!, "uv.lock"), "mutated");
           }
+          if (options.addedArchiveSource) {
+            const candidateIndex = invocation.args.includes("-Candidate") ? invocation.args.indexOf("-Candidate") + 1 : 1;
+            await writeFile(path.join(invocation.args[candidateIndex]!, "injected.py"), "print('injected')\n");
+          }
+          if (options.outputSecrets) {
+            invocation.onOutput?.(
+              'GITHUB_TOKEN=github-canary OPENAI_API_KEY=openai-canary AWS_SECRET_ACCESS_KEY=aws-canary BROKER_ACCESS_TOKEN=broker-canary Authorization: Basic dXNlcjpwYXNz Authorization: Bearer bearer-canary {"GITHUB_TOKEN":"json-github-canary","OPENAI_API_KEY": "json-openai-canary","password":"json-password-canary"} ACCESS_TOKEN=compact-one-canary;CLIENT_SECRET=compact-two-canary',
+              "stdout",
+            );
+          }
+          const candidateIndex = invocation.args.includes("-Candidate") ? invocation.args.indexOf("-Candidate") + 1 : 1;
+          const candidate = invocation.args[candidateIndex]!;
+          const virtualEnvironment = options.virtualEnvironment ?? "relocatable";
+          if (virtualEnvironment !== "missing") {
+            const scripts = path.join(candidate, ".venv", platform === "win32" ? "Scripts" : "bin");
+            const pytest = path.join(scripts, platform === "win32" ? "pytest.exe" : "pytest");
+            await mkdir(scripts, { recursive: true });
+            await writeFile(
+              path.join(candidate, ".venv", "pyvenv.cfg"),
+              virtualEnvironment === "relocatable" ? "relocatable = true\n" : `home = ${candidate}/managed-python\n`,
+            );
+            await writeFile(pytest, platform === "win32" ? "pytest launcher" : "#!/bin/sh\nexit 0\n");
+            if (platform !== "win32") await chmod(pytest, 0o755);
+          }
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 9.15.0 dependencies", "stdout");
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tbuilding-terminal\t84\tBuilding the terminal for production", "stdout");
-          return { exitCode: 0, stderr: "", stdout: "" };
+          return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
         if (options.holdPythonSync && invocation.args[0] === "sync") {
           await pythonSyncHeld;
-          return { exitCode: 0, stderr: "", stdout: "late worker output" };
+          return { contained: true, exitCode: 0, stderr: "", stdout: "late worker output" };
         }
-        return { exitCode: 0, stderr: "", stdout: "" };
+        return { contained: true, exitCode: 0, stderr: "", stdout: "" };
       },
     },
     download: {
@@ -209,32 +518,52 @@ async function fixture(options: FixtureOptions = {}) {
     },
     extractArchive:
       options.onExtract ??
-      (async ({ archive, destination }) => {
+      (async ({ archive, destination, kind, signal }) => {
+        if (options.spuriousAbortError) {
+          const error = new Error("Dependency raised an unrelated AbortError");
+          error.name = "AbortError";
+          throw error;
+        }
+        if (kind === options.abortArchiveKind) {
+          markArchiveExtractionStarted();
+          await new Promise<never>((_resolve, reject) => {
+            const onAbort = () => {
+              const error = new Error("Archive extraction aborted");
+              error.name = "AbortError";
+              reject(error);
+            };
+            if (signal.aborted) onAbort();
+            else signal.addEventListener("abort", onAbort, { once: true });
+          });
+        }
         const name = path.basename(archive);
         if (name.startsWith("uv-")) {
-          const executable = path.join(destination, manifest.uv.assets["darwin-arm64"]!.executable);
+          const executable = path.join(destination, manifest.uv.assets[target]!.executable);
           await mkdir(path.dirname(executable), { recursive: true });
           await writeFile(executable, "uv");
           await chmod(executable, 0o755);
-          return [manifest.uv.assets["darwin-arm64"]!.executable];
+          return [manifest.uv.assets[target]!.executable];
         }
         if (name.startsWith("node-")) {
-          const executable = path.join(destination, manifest.node.assets["darwin-arm64"]!.executable);
+          const executable = path.join(destination, manifest.node.assets[target]!.executable);
           await mkdir(path.dirname(executable), { recursive: true });
           await writeFile(executable, "node");
           await chmod(executable, 0o755);
-          const corepack = path.join(
-            destination,
-            "node-v22.23.1-darwin-arm64",
-            "lib",
-            "node_modules",
-            "corepack",
-            "dist",
-            "corepack.js",
-          );
+          const corepack =
+            platform === "win32"
+              ? path.join(destination, "node-v22.23.1-win-x64", "node_modules", "corepack", "dist", "corepack.js")
+              : path.join(
+                  destination,
+                  "node-v22.23.1-darwin-arm64",
+                  "lib",
+                  "node_modules",
+                  "corepack",
+                  "dist",
+                  "corepack.js",
+                );
           await mkdir(path.dirname(corepack), { recursive: true });
           await writeFile(corepack, "corepack");
-          return [manifest.node.assets["darwin-arm64"]!.executable, path.relative(destination, corepack)];
+          return [manifest.node.assets[target]!.executable, path.relative(destination, corepack)];
         }
         const extracted = path.join(destination, `FlintTrade-${revision}`);
         await writeRepositoryShape(extracted, false);
@@ -254,6 +583,12 @@ async function fixture(options: FixtureOptions = {}) {
         return async () => {
           if (options.holdLockRelease) await lockCleanupHeld;
           await release();
+          if (
+            options.releaseFailure === "permanent" ||
+            (options.releaseFailure === "once" && releaseFailures++ === 0)
+          ) {
+            throw new Error("operation lease release failed");
+          }
         };
       },
       appendText: async (target, content) => {
@@ -264,21 +599,40 @@ async function fixture(options: FixtureOptions = {}) {
           outputLogFailed = true;
           throw new Error("output log write failed");
         }
-        await appendFile(target, content);
+        if (
+          content.includes('"phase":"complete"') &&
+          (options.finalLogFailure === "permanent" ||
+            (options.finalLogFailure === "once" && finalLogFailures++ === 0))
+        ) {
+          throw new Error("final log write failed");
+        }
+        await nodeDependencies.fileSystem.appendText(target, content);
       },
     },
   };
   const state = createBootstrapState();
   const controller = createFirstRunBootstrap({
-    arch: "arm64",
+    arch: platform === "win32" ? "x64" : "arm64",
+    bootIdentity: "test-boot",
     bootstrapResources: path.resolve(import.meta.dirname, "..", "resources", "bootstrap"),
     dependencies,
     heartbeatIntervalMs: 5,
     manifest,
-    ...(options.boundary || options.destinationAppearance
+    ...(options.boundary ||
+    options.destinationAppearance ||
+    options.rootAliasAtBoundary ||
+    options.sourceMutationAtBoundary
       ? {
           onPromotionBoundary: async (boundary: BootstrapBoundary) => {
             if (boundary === options.boundary) throw new Error(`interrupted at ${boundary}`);
+            if (boundary === options.sourceMutationAtBoundary) {
+              await writeFile(`${activeSource}.candidate-1/uv.lock`, `mutated at ${boundary}`);
+              buildMutated = true;
+            }
+            if (boundary === "before-rename" && options.rootAliasAtBoundary) {
+              await rename(`${activeSource}.candidate-1`, `${activeSource}.candidate-real`);
+              await symlink(`${activeSource}.candidate-real`, `${activeSource}.candidate-1`);
+            }
             if (boundary === "before-rename" && options.destinationAppearance) {
               if (options.destinationAppearance === "file") await writeFile(activeSource, "external");
               if (options.destinationAppearance === "symlink") await symlink(root, activeSource);
@@ -297,11 +651,13 @@ async function fixture(options: FixtureOptions = {}) {
       toolsRoot: path.join(root, "tools"),
       workspace: path.join(root, "workspace"),
     },
-    platform: "darwin",
+    platform,
+    singletonAuthorised: true,
     state,
   });
   return {
     activeSource,
+    archiveExtractionStarted,
     calls,
     controller,
     dependencies,
@@ -335,6 +691,33 @@ describe("first-run source bootstrap", () => {
     expect(test.calls.some((call) => /cargo/i.test([call.command, ...call.args].join(" ")))).toBe(false);
   });
 
+  it("proves the relocatable virtual-environment entry point before and after promotion", async () => {
+    const test = await fixture();
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+
+    const probes = test.calls
+      .filter((call) => /^pytest(?:\.exe)?$/.test(path.basename(call.command)))
+      .map((call) => call.command);
+    expect(probes).toEqual([
+      path.join(`${test.activeSource}.candidate-1`, ".venv", "bin", "pytest"),
+      path.join(test.activeSource, ".venv", "bin", "pytest"),
+    ]);
+  });
+
+  it.each(["darwin", "win32"] as const)(
+    "refuses to promote a non-relocatable %s virtual environment",
+    async (platform) => {
+      const test = await fixture({ platform, virtualEnvironment: "nonrelocatable" });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/relocat|virtual environment/i),
+        ok: false,
+      });
+      expect(await exists(test.activeSource)).toBe(false);
+    },
+  );
+
   it("falls back to a commit-pinned GitHub archive and validates its repository shape", async () => {
     const test = await fixture({ gitAvailable: false });
     const result = await test.controller.start();
@@ -344,6 +727,18 @@ describe("first-run source bootstrap", () => {
     expect(test.downloads.some((url) => url.endsWith("/main.zip"))).toBe(false);
     const marker = JSON.parse(await readFile(path.join(test.activeSource, BOOTSTRAP_MARKER), "utf8"));
     expect(marker).toMatchObject({ provenance: "github-archive", revision });
+  });
+
+  it("falls back to archive acquisition on Windows when Git is unavailable", async () => {
+    const test = await fixture({ gitAvailable: false, platform: "win32" });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      ok: true,
+      provenance: "github-archive",
+      revision,
+    });
+    expect(test.downloads).toContain(`https://codeload.github.com/navaneeshnagarajan/FlintTrade/zip/${revision}`);
+    expect(await exists(test.activeSource)).toBe(true);
   });
 
   it("rejects an archive whose extracted repository shape is incomplete", async () => {
@@ -395,6 +790,11 @@ describe("first-run source bootstrap", () => {
       expect(await exists(test.activeSource)).toBe(boundary === "after-rename");
       if (boundary === "after-rename") {
         await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+        expect(
+          test.calls.some(
+            (call) => call.command === path.join(test.activeSource, ".venv", "bin", "pytest"),
+          ),
+        ).toBe(true);
       }
     },
   );
@@ -412,10 +812,127 @@ describe("first-run source bootstrap", () => {
     },
   );
 
+  it("recovers strict stale candidate, unpack, tool-extraction and download names beyond the reset attempt", async () => {
+    const test = await fixture();
+    const stale = [
+      `${test.activeSource}.candidate-7`,
+      `${test.activeSource}.candidate-8.unpack`,
+      path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64.extracting-9"),
+      path.join(
+        test.root,
+        "tools",
+        ".downloads",
+        "uv-aarch64-apple-darwin.tar.gz.download-987-123e4567-e89b-42d3-a456-426614174000",
+      ),
+      path.join(
+        test.root,
+        "source",
+        ".downloads",
+        `FlintTrade-${revision}.zip.download-987-123e4567-e89b-42d3-a456-426614174000`,
+      ),
+      path.join(test.root, "tools", ".downloads", ".flinttrade-archive-snapshot-Ab12z9"),
+      path.join(test.root, "source", ".downloads", ".flinttrade-archive-snapshot-Zz90aB"),
+    ];
+    for (const target of stale) await mkdir(target, { recursive: true });
+    const foreign = `${test.activeSource}.candidate-alias`;
+    await mkdir(foreign);
+    const completedArchive = path.join(test.root, "source", ".downloads", `FlintTrade-${revision}.zip`);
+    const foreignSnapshot = path.join(test.root, "source", ".downloads", ".flinttrade-archive-snapshot-too-long");
+    const foreignSourceTemporary = path.join(
+      test.root,
+      "source",
+      ".downloads",
+      "foreign-not-an-asset.download-987-123e4567-e89b-42d3-a456-426614174000",
+    );
+    const foreignToolTemporary = path.join(
+      test.root,
+      "tools",
+      ".downloads",
+      "foreign-not-an-asset.download-987-123e4567-e89b-42d3-a456-426614174000",
+    );
+    await writeFile(completedArchive, "complete");
+    await mkdir(foreignSnapshot);
+    await mkdir(foreignSourceTemporary);
+    await mkdir(foreignToolTemporary);
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    for (const target of stale) expect(await exists(target)).toBe(false);
+    expect(await exists(foreign)).toBe(true);
+    expect(await exists(completedArchive)).toBe(true);
+    expect(await exists(foreignSnapshot)).toBe(true);
+    expect(await exists(foreignSourceTemporary)).toBe(true);
+    expect(await exists(foreignToolTemporary)).toBe(true);
+  });
+
+  it("restarts after a killed lease owner dies before promotion", async () => {
+    const test = await fixture();
+    const lock = path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock");
+    const staleCandidate = `${test.activeSource}.candidate-41`;
+    await mkdir(path.dirname(lock), { recursive: true });
+    await mkdir(staleCandidate);
+    await crashLeaseOwner({ candidate: staleCandidate, lock, root: test.root });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    expect(await exists(staleCandidate)).toBe(false);
+    expect(await exists(test.activeSource)).toBe(true);
+  }, 15_000);
+
+  it.runIf(process.platform !== "win32")(
+    "drains an old command tree including an escaped session before immediate stale-lease restart",
+    async () => {
+      const test = await fixture();
+      const lock = path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock");
+      const marker = path.join(test.root, "old-command-survived");
+      await mkdir(path.dirname(lock), { recursive: true });
+      await crashBootstrapCommandOwner({ lock, marker, root: test.root });
+
+      const release = await test.dependencies.fileSystem.acquireOperationLock({
+        bootIdentity: "restart-after-command-owner-crash",
+        ownerPid: process.pid,
+        singletonAuthorised: true,
+        target: lock,
+      });
+      await release();
+      await new Promise((resolve) => setTimeout(resolve, 1_650));
+      await expect(access(marker)).rejects.toThrow();
+    },
+    15_000,
+  );
+
+  it("restarts after a killed lease owner dies after promotion but before release", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    const lock = path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock");
+    const candidate = `${test.activeSource}.candidate-99`;
+    await rename(test.activeSource, candidate);
+    await crashLeaseOwner({ candidate, lock, promoteTo: test.activeSource, root: test.root });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+    expect(await exists(test.activeSource)).toBe(true);
+  }, 15_000);
+
+  it.each(["before-open", "after-write"] as const)(
+    "recovers after a killed lease owner dies %s during owner publication",
+    async (stage) => {
+      const test = await fixture();
+      const lock = path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock");
+      await mkdir(path.dirname(lock), { recursive: true });
+      await crashDuringLeasePublication({ lock, root: test.root, stage });
+
+      await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+      expect(await exists(test.activeSource)).toBe(true);
+    },
+    15_000,
+  );
+
   it("cancels a running attempt and prevents its stale worker from promoting", async () => {
     const test = await fixture({ holdPythonSync: true });
     const first = test.controller.start();
-    await vi.waitFor(() => expect(test.calls.some((call) => call.command === "/bin/sh")).toBe(true));
+    await vi.waitFor(
+      () => expect(test.calls.some((call) => call.command === "/bin/sh")).toBe(true),
+      { timeout: 5_000 },
+    );
     const cancellation = test.controller.cancel();
     expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
     test.releasePythonSync();
@@ -432,7 +949,10 @@ describe("first-run source bootstrap", () => {
   it("serialises an immediate retry behind cancelled-attempt process and lock settlement", async () => {
     const test = await fixture({ holdPythonSync: true });
     const first = test.controller.start();
-    await vi.waitFor(() => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1));
+    await vi.waitFor(
+      () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
+      { timeout: 5_000 },
+    );
 
     const cancellation = test.controller.cancel();
     const retry = test.controller.retry();
@@ -474,6 +994,49 @@ describe("first-run source bootstrap", () => {
     await expect(test.controller.start()).resolves.toMatchObject({
       ok: false,
       error: "The active Git checkout does not match its bootstrap provenance marker.",
+    });
+  });
+
+  it("rejects a symlinked Git completion marker even when its JSON is otherwise valid", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const markerPath = path.join(test.activeSource, ".git", BOOTSTRAP_MARKER);
+    const externalMarker = path.join(test.root, "external-completion-marker.json");
+    await writeFile(externalMarker, await readFile(markerPath));
+    await rm(markerPath);
+    await symlink(externalMarker, markerPath);
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/no-follow regular file/i),
+      ok: false,
+    });
+    expect(await readFile(externalMarker, "utf8")).toContain('"schemaVersion":2');
+  });
+
+  it("rejects an existing checkout whose pinned toolchain marker no longer matches the manifest", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const markerPath = path.join(test.activeSource, ".git", BOOTSTRAP_MARKER);
+    const marker = JSON.parse(await readFile(markerPath, "utf8"));
+    marker.pnpm = "0.0.0";
+    await writeFile(markerPath, JSON.stringify(marker));
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/valid FlintTrade bootstrap marker/i),
+      ok: false,
+    });
+  });
+
+  it("rejects an aliased existing active checkout outside the managed source root", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const outside = path.join(test.root, "outside-active-source");
+    await rename(test.activeSource, outside);
+    await symlink(outside, test.activeSource);
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/alias|no-follow|managed source|symbolic/i),
+      ok: false,
     });
   });
 
@@ -521,13 +1084,77 @@ describe("first-run source bootstrap", () => {
     expect(await readFile(executable, "utf8")).toBe("uv");
   });
 
+  it("re-extracts a tool whose otherwise valid verification marker is a symlink", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const markerPath = `${installRoot}.flinttrade-tool-verified.json`;
+    const externalMarker = path.join(test.root, "external-tool-marker.json");
+    await writeFile(externalMarker, await readFile(markerPath));
+    await rm(markerPath);
+    await symlink(externalMarker, markerPath);
+    await rm(test.activeSource, { recursive: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+
+    expect((await lstat(markerPath)).isSymbolicLink()).toBe(false);
+    expect(await readFile(externalMarker, "utf8")).toContain('"schemaVersion":2');
+  });
+
   it("fails a Git build hook which mutates a tracked source input", async () => {
     const test = await fixture({ mutateTrackedDuringBuild: true });
 
     await expect(test.controller.start()).resolves.toMatchObject({
-      error: "The Git candidate has tracked or index changes after its build.",
+      error: "The Git candidate has tracked, index or untracked changes after its build.",
       ok: false,
     });
+    expect(await exists(test.activeSource)).toBe(false);
+  });
+
+  it.each(["tar.gz", "zip"] as const)(
+    "classifies a mid-%s archive AbortError as cancellation",
+    async (abortArchiveKind) => {
+      const test = await fixture({ abortArchiveKind, gitAvailable: abortArchiveKind === "zip" ? false : true });
+      const running = test.controller.start();
+      await test.archiveExtractionStarted;
+      const cancellation = test.controller.cancel();
+
+      await expect(running).resolves.toMatchObject({ cancelled: true, ok: false });
+      await expect(cancellation).resolves.toBe(true);
+      expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
+      const logs = await readFile(path.join(test.root, "workspace", "logs", "desktop-bootstrap.jsonl"), "utf8");
+      expect(logs).toContain('"phase":"cancelled"');
+    },
+  );
+
+  it("treats an unrelated dependency AbortError as a retryable failure", async () => {
+    const test = await fixture({ spuriousAbortError: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      cancelled: false,
+      error: "Dependency raised an unrelated AbortError",
+      ok: false,
+    });
+    expect(test.state.getSnapshot()).toMatchObject({
+      failure: "Dependency raised an unrelated AbortError",
+      phase: "failed",
+      status: "failed",
+    });
+    const logs = await readFile(path.join(test.root, "workspace", "logs", "desktop-bootstrap.jsonl"), "utf8");
+    expect(logs).toContain('"phase":"failed"');
+  });
+
+  it("rejects a non-ignored untracked Git input while permitting ignored generated output", async () => {
+    const test = await fixture({ nonIgnoredUntracked: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/untracked|clean|changes/i),
+      ok: false,
+    });
+    const statusCall = test.calls.find(
+      (call) => path.basename(call.command) === "git" && call.args[0] === "status",
+    );
+    expect(statusCall?.args).not.toContain("--untracked-files=no");
     expect(await exists(test.activeSource)).toBe(false);
   });
 
@@ -539,6 +1166,41 @@ describe("first-run source bootstrap", () => {
       ok: false,
     });
     expect(await exists(test.activeSource)).toBe(false);
+  });
+
+  it("rejects a source file added to an archive candidate during the build", async () => {
+    const test = await fixture({ addedArchiveSource: true, gitAvailable: false });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/added|source input|changed/i),
+      ok: false,
+    });
+    expect(await exists(test.activeSource)).toBe(false);
+  });
+
+  it.each(["after-marker", "before-rename"] as const)(
+    "revalidates source content after the %s asynchronous boundary",
+    async (sourceMutationAtBoundary) => {
+      const test = await fixture({ sourceMutationAtBoundary });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/changed|binding|clean|untracked/i),
+        ok: false,
+      });
+      expect(await exists(test.activeSource)).toBe(false);
+      expect(await readFile(`${test.activeSource}.candidate-1/uv.lock`, "utf8")).toContain("mutated at");
+    },
+  );
+
+  it("rejects a no-follow candidate root alias at the final promotion boundary", async () => {
+    const test = await fixture({ rootAliasAtBoundary: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/alias|symbolic|candidate|directory/i),
+      ok: false,
+    });
+    expect(await exists(test.activeSource)).toBe(false);
+    expect(await exists(`${test.activeSource}.candidate-real`)).toBe(true);
   });
 
   it("binds archive digest, final origin and canonical source inputs into marker v2", async () => {
@@ -564,6 +1226,20 @@ describe("first-run source bootstrap", () => {
 
     await expect(test.controller.start()).resolves.toMatchObject({
       error: "Archive-backed source inputs changed after bootstrap.",
+      ok: false,
+    });
+  });
+
+  it("rejects an archive marker whose claimed final origin is not the configured archive origin", async () => {
+    const test = await fixture({ gitAvailable: false });
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const markerPath = path.join(test.activeSource, BOOTSTRAP_MARKER);
+    const marker = JSON.parse(await readFile(markerPath, "utf8"));
+    marker.archiveFinalOrigin = "https://example.test";
+    await writeFile(markerPath, JSON.stringify(marker));
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/final origin/i),
       ok: false,
     });
   });
@@ -595,10 +1271,267 @@ describe("first-run source bootstrap", () => {
     });
   });
 
-  it("shutdown awaits in-flight lock cleanup after the state is already terminal", async () => {
+  it("uses a managed private home/config plane for every tool and build command", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const managedRoot = path.join(test.root, "tools", "bootstrap-user");
+
+    expect(test.calls.length).toBeGreaterThan(0);
+    for (const call of test.calls) {
+      expect(call.env).toMatchObject({
+        GIT_CONFIG_GLOBAL: path.join(managedRoot, "gitconfig"),
+        HOME: path.join(managedRoot, "home"),
+        NPM_CONFIG_USERCONFIG: path.join(managedRoot, "npmrc"),
+        USERPROFILE: path.join(managedRoot, "home"),
+        UV_CONFIG_FILE: path.join(managedRoot, "uv.toml"),
+        XDG_CONFIG_HOME: path.join(managedRoot, "xdg-config"),
+      });
+    }
+  });
+
+  it.each(["root", "config"] as const)("rejects a managed bootstrap-user %s symlink", async (kind) => {
+    const test = await fixture();
+    const tools = path.join(test.root, "tools");
+    const managed = path.join(tools, "bootstrap-user");
+    await mkdir(tools, { recursive: true });
+    if (kind === "root") {
+      await symlink(test.root, managed);
+    } else {
+      await mkdir(managed);
+      const outside = path.join(test.root, "outside-config");
+      await writeFile(outside, "canary");
+      await symlink(outside, path.join(managed, "gitconfig"));
+    }
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/bootstrap-user|no-follow|symbolic/i),
+      ok: false,
+    });
+    expect(test.calls).toHaveLength(0);
+  });
+
+  it.each(["source", "tools"] as const)("rejects an aliased %s download root without deleting outside data", async (kind) => {
+    const test = await fixture();
+    const parent = kind === "source" ? path.join(test.root, "source") : path.join(test.root, "tools");
+    const outside = path.join(test.root, `outside-${kind}-downloads`);
+    const sentinel = path.join(outside, "asset.download-987-123e4567-e89b-42d3-a456-426614174000");
+    await mkdir(parent, { recursive: true });
+    await mkdir(outside);
+    await writeFile(sentinel, "outside");
+    await symlink(outside, path.join(parent, ".downloads"));
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/no-follow|bootstrap-user|directory/i),
+      ok: false,
+    });
+    expect(await readFile(sentinel, "utf8")).toBe("outside");
+  });
+
+  it.each(["corepack", "python", "uv-cache"] as const)(
+    "rejects an aliased shared tool root %s without touching outside data",
+    async (toolRoot) => {
+      const test = await fixture();
+      const tools = path.join(test.root, "tools");
+      const outside = path.join(test.root, `outside-${toolRoot}`);
+      const sentinel = path.join(outside, "sentinel");
+      await mkdir(tools, { recursive: true });
+      await mkdir(outside);
+      await writeFile(sentinel, "outside");
+      await symlink(outside, path.join(tools, toolRoot));
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/no-follow|bootstrap-user|directory/i),
+        ok: false,
+      });
+      expect(await readFile(sentinel, "utf8")).toBe("outside");
+    },
+  );
+
+  it("redacts prefixed secret names and complete Basic/Bearer credentials in actual durable output", async () => {
+    const test = await fixture({ outputSecrets: true });
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
+    const logs = await readFile(path.join(test.root, "workspace", "logs", "desktop-bootstrap.jsonl"), "utf8");
+
+    for (const canary of [
+      "github-canary",
+      "openai-canary",
+      "aws-canary",
+      "broker-canary",
+      "dXNlcjpwYXNz",
+      "bearer-canary",
+      "json-github-canary",
+      "json-openai-canary",
+      "json-password-canary",
+      "compact-one-canary",
+      "compact-two-canary",
+    ]) {
+      expect(logs).not.toContain(canary);
+    }
+    expect(logs).toContain("<redacted>");
+  });
+
+  it("uses the trusted absolute Windows PowerShell launcher even with an empty or canary PATH", async () => {
+    const test = await fixture({ platform: "win32" });
+    const result = await test.controller.start();
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({ ok: true });
+    const buildCall = test.calls.find((call) => call.args.includes("-File"));
+
+    expect(buildCall?.command).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+    expect(buildCall?.command).not.toContain("canary");
+    expect(path.win32.isAbsolute(buildCall?.command ?? "")).toBe(true);
+    expect(
+      test.calls.some(
+        (call) => call.command === path.join(test.activeSource, ".venv", "Scripts", "pytest.exe"),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["final durable append", { finalLogFailure: "once" as const }, "final log write failed"],
+    ["operation lease release", { releaseFailure: "once" as const }, "operation lease release failed"],
+  ])("publishes readiness only after %s succeeds and retry validates the promoted source", async (_label, options, error) => {
+    const test = await fixture(options);
+    const first = await test.controller.start();
+
+    expect(first).toMatchObject({ error: expect.stringContaining(error), ok: false });
+    expect(test.state.getSnapshot()).toMatchObject({ status: "failed" });
+    expect(await exists(test.activeSource)).toBe(true);
+    await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+    expect(test.state.getSnapshot()).toMatchObject({ phase: "complete", status: "ready" });
+    expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+  });
+
+  it.each(["owner-unlink", "directory-sync", "directory-remove", "parent-sync"] as const)(
+    "resumes the exact operation-lease release closure after a %s failure",
+    async (stage) => {
+      const test = await fixture({ realReleaseFailureStage: stage });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringContaining(`real lease ${stage} failed`),
+        ok: false,
+      });
+      expect(test.state.getSnapshot()).toMatchObject({ status: "failed" });
+      expect(await exists(test.activeSource)).toBe(true);
+
+      await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+      expect(test.state.getSnapshot()).toMatchObject({ phase: "complete", status: "ready" });
+      expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+    },
+  );
+
+  it("keeps a throwing readiness subscriber outside the bootstrap result path", async () => {
+    const test = await fixture();
+    test.state.subscribe((snapshot) => {
+      if (snapshot.status === "ready") throw new Error("renderer broadcast failed");
+    });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    expect(test.state.getSnapshot()).toMatchObject({ phase: "complete", status: "ready" });
+  });
+
+  it("fails before readiness when the first durable-log parent sync fails", async () => {
+    const test = await fixture({ realAppendParentSyncFailure: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringContaining("real durable-log parent sync failed"),
+      ok: false,
+    });
+    expect(test.state.getSnapshot()).toMatchObject({ status: "failed" });
+  });
+
+  it("fails before readiness when the absent durable-log directory chain cannot be synced", async () => {
+    const test = await fixture({ realDurableDirectorySyncFailure: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringContaining("real durable-log directory sync failed"),
+      ok: false,
+    });
+    expect(test.state.getSnapshot()).toMatchObject({ status: "failed" });
+    await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+    expect(test.state.getSnapshot()).toMatchObject({ phase: "complete", status: "ready" });
+  });
+
+  it("makes shutdown terminal and joins a queued retry before resolving", async () => {
+    const test = await fixture({ holdPythonSync: true });
+    const first = test.controller.start();
+    await vi.waitFor(
+      () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
+      { timeout: 5_000 },
+    );
+    const cancellation = test.controller.cancel();
+    const retry = test.controller.retry();
+    const shutdown = test.controller.shutdown();
+
+    test.releasePythonSync();
+    await expect(Promise.all([first, cancellation, shutdown])).resolves.toBeDefined();
+    await expect(retry).resolves.toMatchObject({ error: expect.stringMatching(/shutting down|shutdown/i), ok: false });
+    expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+    await expect(test.controller.start()).resolves.toMatchObject({ error: expect.stringMatching(/shutting down|shutdown/i), ok: false });
+    await expect(test.controller.retry()).resolves.toMatchObject({ error: expect.stringMatching(/shutting down|shutdown/i), ok: false });
+  });
+
+  it("latches unproved containment over cancellation, keeps the lease and blocks quit or retry", async () => {
+    const test = await fixture({ uncontainedOnAbort: true });
+    const running = test.controller.start();
+    await vi.waitFor(
+      () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
+      { timeout: 5_000 },
+    );
+
+    const cancellation = test.controller.cancel();
+    await expect(running).resolves.toMatchObject({
+      error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
+      ok: false,
+    });
+    await expect(cancellation).resolves.toBe(true);
+    expect(await exists(path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock"))).toBe(true);
+    await expect(test.controller.retry()).resolves.toMatchObject({
+      error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
+      ok: false,
+    });
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
+      ok: false,
+    });
+    expect(test.state.getSnapshot()).toMatchObject({
+      failure: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
+      message: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
+      phase: "failed",
+      status: "failed",
+    });
+    expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+
+    const app = { quit: vi.fn() };
+    const gate = createBootstrapQuitGate(app, test.controller, 100);
+    await expect(gate.requestQuit()).rejects.toThrow(/containment.*not be proven|restart is blocked/i);
+    expect(app.quit).not.toHaveBeenCalled();
+  });
+
+  it("keeps an immediate start joined to a cancelling attempt through shutdown", async () => {
+    const test = await fixture({ holdPythonSync: true });
+    const running = test.controller.start();
+    await vi.waitFor(
+      () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
+      { timeout: 5_000 },
+    );
+
+    const cancellation = test.controller.cancel();
+    const restarted = test.controller.start();
+    const shutdown = test.controller.shutdown();
+    expect(restarted).toBe(running);
+
+    test.releasePythonSync();
+    await expect(Promise.all([running, restarted, cancellation, shutdown])).resolves.toBeDefined();
+    expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
+    expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
+  });
+
+  it("shutdown awaits in-flight lock cleanup before readiness can become terminal", async () => {
     const test = await fixture({ holdLockRelease: true });
     const running = test.controller.start();
-    await vi.waitFor(() => expect(test.state.getSnapshot().status).toBe("ready"));
+    await vi.waitFor(() => expect(exists(test.activeSource)).resolves.toBe(true), { timeout: 5_000 });
+    expect(test.state.getSnapshot().status).toBe("running");
     let shutdownSettled = false;
     const shutdown = test.controller.shutdown().then(() => {
       shutdownSettled = true;
@@ -607,7 +1540,9 @@ describe("first-run source bootstrap", () => {
     expect(shutdownSettled).toBe(false);
 
     test.releaseLockCleanup();
-    await expect(Promise.all([running, shutdown])).resolves.toBeDefined();
+    const [result] = await Promise.all([running, shutdown]);
+    expect(result).toMatchObject({ cancelled: true, ok: false });
+    expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
     expect(shutdownSettled).toBe(true);
   });
 });

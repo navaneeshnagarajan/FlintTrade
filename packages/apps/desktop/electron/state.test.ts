@@ -18,6 +18,32 @@ describe("bootstrap state", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
+  it("isolates throwing subscribers from every terminal state transition", () => {
+    const store = createBootstrapState();
+    const observer = vi.fn();
+    store.subscribe(() => {
+      throw new Error("renderer broadcast failed");
+    });
+    store.subscribe(observer);
+
+    const completedAttempt = store.begin("Preparing source checkout");
+    expect(store.complete(completedAttempt)).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ phase: "complete", status: "ready" });
+
+    const failedStore = createBootstrapState();
+    const failedObserver = vi.fn();
+    failedStore.subscribe(() => {
+      throw new Error("renderer broadcast failed");
+    });
+    failedStore.subscribe(failedObserver);
+    const failedAttempt = failedStore.begin("Preparing source checkout");
+    expect(failedStore.fail(failedAttempt, "Bootstrap failed")).toBe(true);
+    expect(failedStore.getSnapshot()).toMatchObject({ phase: "failed", status: "failed" });
+
+    expect(observer).toHaveBeenCalledTimes(2);
+    expect(failedObserver).toHaveBeenCalledTimes(2);
+  });
+
   it("allows retry only from failure and rejects stale attempt updates", () => {
     const store = createBootstrapState();
     expect(store.retry()).toBe(false);
@@ -56,6 +82,21 @@ describe("bootstrap state", () => {
     expect(store.fail(attempt, "late failure")).toBe(false);
     expect(store.cancel(attempt)).toBe(false);
     expect(store.getSnapshot()).toBe(failed);
+  });
+
+  it("allows only containment-style fail-closed state to override same-attempt cancellation", () => {
+    const store = createBootstrapState();
+    const attempt = store.begin("Running command");
+    expect(store.cancel(attempt)).toBe(true);
+
+    expect(store.failClosed(attempt, "Process containment could not be proven.")).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({
+      failure: "Process containment could not be proven.",
+      message: "Process containment could not be proven.",
+      phase: "failed",
+      status: "failed",
+    });
+    expect(store.failClosed(attempt - 1, "stale")).toBe(false);
   });
 });
 

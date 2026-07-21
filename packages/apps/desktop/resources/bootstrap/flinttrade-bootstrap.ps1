@@ -49,6 +49,7 @@ Push-Location $Candidate
 try {
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.12"
     Invoke-Checked $Uv @("python", "install", "3.12")
+    Invoke-Checked $Uv @("venv", "--relocatable", "--python", "3.12", ".venv")
     Invoke-Checked $Uv @("sync", "--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks")
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 9.15.0 dependencies"
     $resolvedPnpmVersion = (& $Node $CorepackJs pnpm --version | Out-String).Trim()

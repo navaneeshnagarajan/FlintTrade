@@ -11,6 +11,15 @@ const MAIN_COMMIT_URL = "https://api.github.com/repos/navaneeshnagarajan/FlintTr
 const ARCHIVE_BASE_URL = "https://codeload.github.com/navaneeshnagarajan/FlintTrade/zip";
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+const ARCHIVE_GENERATED_ROOTS = Object.freeze([
+  ".venv",
+  "node_modules",
+  "packages/apps/desktop/node_modules",
+  "packages/apps/site/node_modules",
+  "packages/apps/terminal/node_modules",
+  "packages/apps/terminal/dist",
+  "packages/core/design-system/node_modules",
+]);
 
 export type BootstrapBoundary = "before-marker" | "after-marker" | "before-rename" | "after-rename";
 export type BootstrapProvenance = "git" | "github-archive";
@@ -48,6 +57,13 @@ export interface CommandInvocation {
 }
 
 export interface CommandResult {
+  /**
+   * Whether the platform runner proved its supported containment domain empty.
+   * POSIX proof covers the original process group and escaped descendants that
+   * retain the inherited operation marker; it cannot attest a new-session
+   * descendant that deliberately replaces its environment and discards it.
+   */
+  contained: boolean;
   exitCode: number;
   stderr: string;
   stdout: string;
@@ -86,7 +102,11 @@ export interface SourceTreeIdentity {
 }
 
 export interface BootstrapDependencies {
-  command: { run(invocation: CommandInvocation): Promise<CommandResult> };
+  command: {
+    operationLeaseTarget?: string;
+    run(invocation: CommandInvocation): Promise<CommandResult>;
+    windowsPowerShell?: string;
+  };
   download: {
     file(url: string, destination: string, signal: AbortSignal, policy: DownloadPolicy): Promise<DownloadReceipt>;
     text(url: string, signal: AbortSignal, policy: DownloadPolicy): Promise<TextDownloadReceipt>;
@@ -94,29 +114,41 @@ export interface BootstrapDependencies {
   extractArchive(input: {
     archive: string;
     destination: string;
+    expectedSha256: string;
     expectedRoot?: string;
     kind: "tar.gz" | "zip";
     signal: AbortSignal;
   }): Promise<string[]>;
   fileSystem: {
-    acquireOperationLock(target: string): Promise<() => Promise<void>>;
+    acquireOperationLock(request: OperationLeaseRequest): Promise<() => Promise<void>>;
     appendText(target: string, content: string): Promise<void>;
+    directoryIdentity(target: string): Promise<FileSystemIdentity>;
+    ensureDurableDirectory(target: string, knownDurableAncestor: string): Promise<void>;
     exists(target: string): Promise<boolean>;
+    listNames(target: string): Promise<string[]>;
     mkdir(target: string): Promise<unknown>;
-    promoteAbsent(source: string, destination: string): Promise<void>;
+    preparePrivateTree(root: string, directories: readonly string[], files: readonly string[]): Promise<void>;
+    promoteAbsent(source: string, destination: string, identity: FileSystemIdentity): Promise<void>;
     readText(target: string): Promise<string>;
+    readTextNoFollow(target: string): Promise<string>;
     realpath(target: string): Promise<string>;
     remove(target: string): Promise<void>;
     rename(source: string, destination: string): Promise<void>;
     sha256(target: string): Promise<string>;
     snapshotSourceTree(root: string): Promise<SourceTreeIdentity>;
-    verifySourceTree(root: string, identity: SourceTreeIdentity): Promise<boolean>;
+    verifySourceTree(
+      root: string,
+      identity: SourceTreeIdentity,
+      allowedGeneratedRoots?: readonly string[],
+      allowedGeneratedFiles?: readonly string[],
+    ): Promise<boolean>;
     writeTextAtomic(target: string, content: string): Promise<void>;
   };
 }
 
 export interface BootstrapOptions {
   arch: string;
+  bootIdentity: string;
   bootstrapResources: string;
   dependencies: BootstrapDependencies;
   heartbeatIntervalMs?: number;
@@ -124,6 +156,7 @@ export interface BootstrapOptions {
   onPromotionBoundary?: (boundary: BootstrapBoundary) => Promise<void> | void;
   paths: DesktopPaths;
   platform: NodeJS.Platform;
+  singletonAuthorised: boolean;
   repository?: {
     archiveBaseUrl: string;
     branch: string;
@@ -131,6 +164,18 @@ export interface BootstrapOptions {
     gitUrl: string;
   };
   state: ReturnType<typeof createBootstrapState>;
+}
+
+export interface FileSystemIdentity {
+  dev: number;
+  ino: number;
+}
+
+export interface OperationLeaseRequest {
+  bootIdentity: string;
+  ownerPid: number;
+  singletonAuthorised: boolean;
+  target: string;
 }
 
 export interface BootstrapResult {
@@ -212,7 +257,7 @@ const uvAssetPolicy: DownloadPolicy = Object.freeze({
 
 export function redactBootstrapText(value: string): string {
   return value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer <redacted>")
+    .replace(/\b(?:Authorization\s*[:=]\s*)?(?:Basic|Bearer)\s+[^\s,;}"']+/gi, "Authorization: <redacted>")
     .replace(/https?:\/\/[^\s"']+/gi, (url) => {
       try {
         const parsed = new URL(url);
@@ -223,7 +268,7 @@ export function redactBootstrapText(value: string): string {
       return "<redacted-url>";
     })
     .replace(
-      /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|broker[_-]?(?:token|secret|key)|token|password|secret|authorization)(\s*[:=]\s*)[^\s,;]+/gi,
+      /(^|[^a-z0-9_'"-])((?:["']?)[a-z0-9_-]*(?:key|token|secret|password|authorization)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gim,
       "$1$2<redacted>",
     );
 }
@@ -263,6 +308,10 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const { dependencies, manifest, paths: desktopPaths, state } = options;
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? 2_000;
   const target = `${options.platform}-${options.arch}`;
+  const operationLeaseTarget = path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock");
+  if (dependencies.command.operationLeaseTarget !== operationLeaseTarget) {
+    throw new Error("Bootstrap command containment must be bound to the exact source operation lease.");
+  }
   const repository =
     options.repository ??
     Object.freeze({
@@ -274,14 +323,43 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   let currentAbort: AbortController | null = null;
   let currentPromise: Promise<BootstrapResult> | null = null;
   let retryPromise: Promise<BootstrapResult> | null = null;
+  let shutdownPromise: Promise<void> | null = null;
+  let shuttingDown = false;
+  let containmentFailure: Error | null = null;
   let logQueue: Promise<void> = Promise.resolve();
+  let pendingLeaseRelease: (() => Promise<void>) | null = null;
   const logFailures = new Map<number, string>();
   const logPath = path.join(desktopPaths.logs, "desktop-bootstrap.jsonl");
+  const managedUserRoot = path.join(desktopPaths.toolsRoot, "bootstrap-user");
+  const managedHome = path.join(managedUserRoot, "home");
+  const managedChildEnvironment: NodeJS.ProcessEnv = Object.freeze({
+    GIT_CONFIG_GLOBAL: path.join(managedUserRoot, "gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    HOME: managedHome,
+    NPM_CONFIG_CACHE: path.join(managedUserRoot, "npm-cache"),
+    NPM_CONFIG_USERCONFIG: path.join(managedUserRoot, "npmrc"),
+    PNPM_HOME: path.join(managedUserRoot, "pnpm-home"),
+    USERPROFILE: managedHome,
+    UV_CACHE_DIR: path.join(managedUserRoot, "uv-cache"),
+    UV_CONFIG_FILE: path.join(managedUserRoot, "uv.toml"),
+    XDG_CACHE_HOME: path.join(managedUserRoot, "xdg-cache"),
+    XDG_CONFIG_HOME: path.join(managedUserRoot, "xdg-config"),
+    XDG_DATA_HOME: path.join(managedUserRoot, "xdg-data"),
+  });
+
+  const prepareManagedUserEnvironment = async (): Promise<void> => {
+    await dependencies.fileSystem.preparePrivateTree(
+      managedUserRoot,
+      ["home", "npm-cache", "pnpm-home", "uv-cache", "xdg-cache", "xdg-config", "xdg-data"],
+      ["gitconfig", "npmrc", "uv.toml"],
+    );
+  };
 
   const queueLog = async (attempt: number, phase: BootstrapPhase, message: string): Promise<void> => {
     const event = { attempt, at: new Date().toISOString(), message: redactBootstrapText(message), phase };
     const operation = logQueue.then(async () => {
-      await dependencies.fileSystem.mkdir(desktopPaths.logs);
+      await dependencies.fileSystem.ensureDurableDirectory(desktopPaths.logs, path.dirname(desktopPaths.workspace));
       await dependencies.fileSystem.appendText(logPath, `${JSON.stringify(event)}\n`);
     });
     logQueue = operation.catch((error) => {
@@ -294,6 +372,13 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const assertLogging = (attempt: number): void => {
     const failure = logFailures.get(attempt);
     if (failure) throw new Error(failure);
+  };
+
+  const settlePendingLease = async (): Promise<void> => {
+    const release = pendingLeaseRelease;
+    if (!release) return;
+    await release();
+    if (pendingLeaseRelease === release) pendingLeaseRelease = null;
   };
 
   const publish = async (
@@ -323,13 +408,18 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     assertAttempt(attempt, signal);
     const result = await dependencies.command.run({
       ...invocation,
+      env: { ...invocation.env, ...managedChildEnvironment },
       onOutput: (line, stream) => {
         void queueLog(attempt, state.getSnapshot().phase, `${stream}: ${line}`);
         invocation.onOutput?.(line, stream);
       },
       signal,
     });
+    if (!result.contained) {
+      containmentFailure ??= new Error("Bootstrap command process containment could not be proven; restart is blocked.");
+    }
     await logQueue;
+    if (containmentFailure) throw containmentFailure;
     assertAttempt(attempt, signal);
     return result;
   };
@@ -388,27 +478,39 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       timeoutMs: 15_000,
     });
     const status = await requiredCommand(attempt, signal, {
-      args: ["status", "--porcelain=v1", "--untracked-files=no"],
+      args: ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"],
       command: "git",
       cwd: root,
       env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
       timeoutMs: 30_000,
     });
     if (remote.stdout.trim() !== repository.gitUrl) throw new Error("Git provenance validation rejected the origin URL.");
-    if (status.stdout.trim() !== "") throw new Error("The Git candidate has tracked or index changes after its build.");
+    if (status.stdout !== "") throw new Error("The Git candidate has tracked, index or untracked changes after its build.");
     return { gitTree: requireCommit(tree.stdout), provenance: "git", revision: requireCommit(head.stdout) };
   };
 
   const validateExistingMarker = async (): Promise<SourceIdentity | null> => {
     if (!(await dependencies.fileSystem.exists(desktopPaths.activeSource))) return null;
+    await dependencies.fileSystem.directoryIdentity(desktopPaths.activeSource);
+    const canonicalSourceRoot = await dependencies.fileSystem.realpath(desktopPaths.sourceRoot);
+    const canonicalActiveSource = await dependencies.fileSystem.realpath(desktopPaths.activeSource);
+    if (!isWithin(canonicalSourceRoot, canonicalActiveSource) || path.dirname(desktopPaths.activeSource) !== desktopPaths.sourceRoot) {
+      throw new Error("The active source root is aliased or escaped from its managed source directory.");
+    }
     for (const provenance of ["git", "github-archive"] as const) {
       const candidate = markerPath(desktopPaths.activeSource, provenance);
       if (!(await dependencies.fileSystem.exists(candidate))) continue;
-      const parsed = JSON.parse(await dependencies.fileSystem.readText(candidate)) as Partial<InstalledMarker>;
+      const parsed = JSON.parse(await dependencies.fileSystem.readTextNoFollow(candidate)) as Partial<InstalledMarker>;
       if (
         parsed.schemaVersion !== 2 ||
         parsed.provenance !== provenance ||
         parsed.repository !== repository.gitUrl ||
+        parsed.node !== manifest.node.version ||
+        parsed.pnpm !== manifest.pnpm.version ||
+        parsed.uv !== manifest.uv.version ||
+        typeof parsed.completedAt !== "string" ||
+        Number.isNaN(Date.parse(parsed.completedAt)) ||
+        new Date(parsed.completedAt).toISOString() !== parsed.completedAt ||
         !parsed.revision
       ) {
         break;
@@ -420,7 +522,9 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       const archiveSha256 = requireDigest(parsed.archiveSha256, "Archive digest");
       const sourceInputDigest = requireDigest(parsed.sourceInputDigest, "Source input digest");
       const sourceInputRecordSha256 = requireDigest(parsed.sourceInputRecordSha256, "Source input record digest");
-      if (typeof parsed.archiveFinalOrigin !== "string") throw new Error("Archive marker is missing its final origin.");
+      if (parsed.archiveFinalOrigin !== new URL(repository.archiveBaseUrl).origin) {
+        throw new Error("Archive marker final origin does not match the configured source archive origin.");
+      }
       const recordPath = path.join(desktopPaths.activeSource, SOURCE_INPUTS_RECORD);
       if (
         !(await dependencies.fileSystem.exists(recordPath)) ||
@@ -428,8 +532,16 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       ) {
         throw new Error("Archive source input record does not match its completion marker.");
       }
-      const sourceTree = JSON.parse(await dependencies.fileSystem.readText(recordPath)) as SourceTreeIdentity;
-      if (sourceTree.digest !== sourceInputDigest || !(await dependencies.fileSystem.verifySourceTree(desktopPaths.activeSource, sourceTree))) {
+      const sourceTree = JSON.parse(await dependencies.fileSystem.readTextNoFollow(recordPath)) as SourceTreeIdentity;
+      if (
+        sourceTree.digest !== sourceInputDigest ||
+        !(await dependencies.fileSystem.verifySourceTree(
+          desktopPaths.activeSource,
+          sourceTree,
+          ARCHIVE_GENERATED_ROOTS,
+          [BOOTSTRAP_MARKER, SOURCE_INPUTS_RECORD],
+        ))
+      ) {
         throw new Error("Archive-backed source inputs changed after bootstrap.");
       }
       return {
@@ -472,12 +584,12 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       throw new Error("Source archive changed after its bounded download.");
     }
     await dependencies.fileSystem.remove(unpack);
-    await dependencies.fileSystem.mkdir(unpack);
     const archiveRoot = `FlintTrade-${revision}`;
     const entries = await dependencies.extractArchive({
       archive,
       destination: unpack,
       expectedRoot: archiveRoot,
+      expectedSha256: receipt.sha256,
       kind: "zip",
       signal,
     });
@@ -558,8 +670,13 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     }
     if (!archiveVerified) throw new Error(`${tool} archive checksum verification failed.`);
     await dependencies.fileSystem.remove(extracting);
-    await dependencies.fileSystem.mkdir(extracting);
-    await dependencies.extractArchive({ archive, destination: extracting, kind: asset.archive, signal });
+    await dependencies.extractArchive({
+      archive,
+      destination: extracting,
+      expectedSha256: asset.sha256,
+      kind: asset.archive,
+      signal,
+    });
     assertAttempt(attempt, signal);
     const expectedTree = await dependencies.fileSystem.snapshotSourceTree(extracting);
     const expectedExecutable = expectedTree.entries.find((entry) => entry.path === asset.executable);
@@ -572,7 +689,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     }
     if ((await dependencies.fileSystem.exists(installRoot)) && (await dependencies.fileSystem.exists(verifiedMarker))) {
       try {
-        const verified = JSON.parse(await dependencies.fileSystem.readText(verifiedMarker)) as Partial<ToolVerificationMarker>;
+        const verified = JSON.parse(await dependencies.fileSystem.readTextNoFollow(verifiedMarker)) as Partial<ToolVerificationMarker>;
         const tree = await dependencies.fileSystem.snapshotSourceTree(installRoot);
         const executableEntry = tree.entries.find((entry) => entry.path === asset.executable);
         if (
@@ -716,7 +833,11 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
               "-PnpmVersion",
               common[5]!,
             ],
-            command: "powershell.exe",
+            command:
+              dependencies.command.windowsPowerShell ??
+              (() => {
+                throw new Error("Trusted absolute Windows PowerShell is unavailable.");
+              })(),
             onOutput: phaseOutput,
             timeoutMs: 90 * 60_000,
           }
@@ -729,11 +850,59 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     await requiredCommand(attempt, signal, invocation);
   };
 
+  const verifyRelocatableVirtualEnvironment = async (
+    attempt: number,
+    signal: AbortSignal,
+    sourceRoot: string,
+  ): Promise<void> => {
+    const environmentRoot = path.join(sourceRoot, ".venv");
+    const configurationPath = path.join(environmentRoot, "pyvenv.cfg");
+    const entryPoint = path.join(
+      environmentRoot,
+      options.platform === "win32" ? "Scripts" : "bin",
+      options.platform === "win32" ? "pytest.exe" : "pytest",
+    );
+    if (!(await dependencies.fileSystem.exists(configurationPath))) {
+      throw new Error("The built virtual environment is missing pyvenv.cfg.");
+    }
+    if (!(await dependencies.fileSystem.exists(entryPoint))) {
+      throw new Error("The built virtual environment is missing its pytest entry point.");
+    }
+    await dependencies.fileSystem.directoryIdentity(environmentRoot);
+    const canonicalEnvironment = await dependencies.fileSystem.realpath(environmentRoot);
+    const canonicalConfiguration = await dependencies.fileSystem.realpath(configurationPath);
+    const canonicalEntryPoint = await dependencies.fileSystem.realpath(entryPoint);
+    if (
+      !isWithin(canonicalEnvironment, canonicalConfiguration) ||
+      !isWithin(canonicalEnvironment, canonicalEntryPoint)
+    ) {
+      throw new Error("The built virtual environment contains an aliased relocation boundary.");
+    }
+    const relocatableSettings = (await dependencies.fileSystem.readText(configurationPath))
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const match = /^\s*relocatable\s*=\s*(\S+)\s*$/.exec(line);
+        return match ? [match[1]] : [];
+      });
+    if (relocatableSettings.length !== 1 || relocatableSettings[0] !== "true") {
+      throw new Error("The built virtual environment is not explicitly relocatable.");
+    }
+    const probe = await requiredCommand(attempt, signal, {
+      args: ["--version"],
+      command: entryPoint,
+      timeoutMs: 30_000,
+    });
+    if (!/^pytest\s+\d+(?:\.|$)/.test(probe.stdout.trim())) {
+      throw new Error("The relocatable virtual-environment entry point returned an unexpected version.");
+    }
+  };
+
   const verifyCandidateBinding = async (
     attempt: number,
     signal: AbortSignal,
     candidate: string,
     identity: SourceIdentity,
+    allowedGeneratedFiles: readonly string[] = [],
   ): Promise<SourceIdentity> => {
     if (identity.provenance === "git") {
       const built = await readGitIdentity(attempt, signal, candidate);
@@ -742,10 +911,53 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       }
       return built;
     }
-    if (!identity.sourceTree || !(await dependencies.fileSystem.verifySourceTree(candidate, identity.sourceTree))) {
+    if (
+      !identity.sourceTree ||
+      !(await dependencies.fileSystem.verifySourceTree(
+        candidate,
+        identity.sourceTree,
+        ARCHIVE_GENERATED_ROOTS,
+        allowedGeneratedFiles,
+      ))
+    ) {
       throw new Error("An archive source input changed during the build.");
     }
     return identity;
+  };
+
+  const removeStrictStaleArtifacts = async (): Promise<void> => {
+    const activeName = path.basename(desktopPaths.activeSource).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const candidatePattern = new RegExp(`^${activeName}\\.candidate-\\d+(?:\\.unpack)?$`);
+    for (const name of await dependencies.fileSystem.listNames(desktopPaths.sourceRoot)) {
+      if (candidatePattern.test(name)) await dependencies.fileSystem.remove(path.join(desktopPaths.sourceRoot, name));
+    }
+    for (const [tool, version] of [
+      ["node", manifest.node.version],
+      ["uv", manifest.uv.version],
+    ] as const) {
+      const versionRoot = path.join(desktopPaths.toolsRoot, tool, version);
+      const extractingPattern = new RegExp(`^${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.extracting-\\d+$`);
+      for (const name of await dependencies.fileSystem.listNames(versionRoot)) {
+        if (extractingPattern.test(name)) await dependencies.fileSystem.remove(path.join(versionRoot, name));
+      }
+    }
+    const temporarySuffix = String.raw`\.download-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`;
+    const sourceTemporaryDownloadPattern = new RegExp(`^FlintTrade-[0-9a-f]{40}\\.zip${temporarySuffix}$`, "i");
+    const toolArchiveNames = [manifest.node.assets[target], manifest.uv.assets[target]]
+      .filter((asset): asset is ManifestAsset => Boolean(asset))
+      .map((asset) => archiveName(asset.url).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const toolTemporaryDownloadPattern = new RegExp(`^(?:${toolArchiveNames.join("|")})${temporarySuffix}$`, "i");
+    const archiveSnapshotPattern = /^\.flinttrade-archive-snapshot-[A-Za-z0-9]{6}$/;
+    for (const [downloads, temporaryPattern] of [
+      [path.join(desktopPaths.sourceRoot, ".downloads"), sourceTemporaryDownloadPattern],
+      [path.join(desktopPaths.toolsRoot, ".downloads"), toolTemporaryDownloadPattern],
+    ] as const) {
+      for (const name of await dependencies.fileSystem.listNames(downloads)) {
+        if (temporaryPattern.test(name) || archiveSnapshotPattern.test(name)) {
+          await dependencies.fileSystem.remove(path.join(downloads, name));
+        }
+      }
+    }
   };
 
   const executeAttempt = async (attempt: number, signal: AbortSignal): Promise<BootstrapResult> => {
@@ -754,9 +966,28 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     assertLogging(attempt);
     await dependencies.fileSystem.mkdir(desktopPaths.sourceRoot);
     await dependencies.fileSystem.mkdir(desktopPaths.toolsRoot);
-    const releaseLock = await dependencies.fileSystem.acquireOperationLock(
-      path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock"),
+    await dependencies.fileSystem.preparePrivateTree(desktopPaths.sourceRoot, [".downloads"], []);
+    await dependencies.fileSystem.preparePrivateTree(
+      desktopPaths.toolsRoot,
+      [
+        ".downloads",
+        "corepack",
+        "python",
+        "uv-cache",
+        `node/${manifest.node.version}`,
+        `uv/${manifest.uv.version}`,
+      ],
+      [],
     );
+    await prepareManagedUserEnvironment();
+    await settlePendingLease();
+    const releaseLock = await dependencies.fileSystem.acquireOperationLock({
+      bootIdentity: options.bootIdentity,
+      ownerPid: process.pid,
+      singletonAuthorised: options.singletonAuthorised,
+      target: operationLeaseTarget,
+    });
+    pendingLeaseRelease = releaseLock;
     try {
       const existing = await validateExistingMarker();
       if (existing) {
@@ -767,17 +998,15 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
             throw new Error("The active Git checkout does not match its bootstrap provenance marker.");
           }
         }
-        state.complete(attempt, `Source ${existing.revision.slice(0, 12)} is ready`);
+        await verifyRelocatableVirtualEnvironment(attempt, signal, desktopPaths.activeSource);
         return { ok: true, provenance: existing.provenance, revision: existing.revision };
       }
-      for (let stale = 1; stale <= attempt; stale += 1) {
-        await dependencies.fileSystem.remove(`${desktopPaths.activeSource}.candidate-${stale}`);
-        await dependencies.fileSystem.remove(`${desktopPaths.activeSource}.candidate-${stale}.unpack`);
-      }
+      await removeStrictStaleArtifacts();
       assertAttempt(attempt, signal);
       let identity = await acquireSource(attempt, signal, candidate);
       const tools = await provisionTools(attempt, signal);
       await buildCandidate(attempt, signal, candidate, tools);
+      await verifyRelocatableVirtualEnvironment(attempt, signal, candidate);
       identity = await verifyCandidateBinding(attempt, signal, candidate, identity);
       assertAttempt(attempt, signal);
       if (await dependencies.fileSystem.exists(desktopPaths.activeSource)) {
@@ -811,20 +1040,46 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
         ...(identity.sourceTree ? { sourceInputDigest: identity.sourceTree.digest } : {}),
         ...(sourceInputRecordSha256 ? { sourceInputRecordSha256 } : {}),
       };
-      await dependencies.fileSystem.writeTextAtomic(markerPath(candidate, identity.provenance), `${JSON.stringify(marker)}\n`);
+      const markerContent = `${JSON.stringify(marker)}\n`;
+      const completionMarkerPath = markerPath(candidate, identity.provenance);
+      await dependencies.fileSystem.writeTextAtomic(completionMarkerPath, markerContent);
       await options.onPromotionBoundary?.("after-marker");
       assertAttempt(attempt, signal);
       await options.onPromotionBoundary?.("before-rename");
       assertAttempt(attempt, signal);
-      await dependencies.fileSystem.promoteAbsent(candidate, desktopPaths.activeSource);
+      identity = await verifyCandidateBinding(
+        attempt,
+        signal,
+        candidate,
+        identity,
+        identity.provenance === "github-archive" ? [BOOTSTRAP_MARKER, SOURCE_INPUTS_RECORD] : [],
+      );
+      await validateRepositoryShape(candidate);
+      if ((await dependencies.fileSystem.readTextNoFollow(completionMarkerPath)) !== markerContent) {
+        throw new Error("Bootstrap completion marker changed before promotion.");
+      }
+      if (identity.provenance === "github-archive") {
+        const recordPath = path.join(candidate, SOURCE_INPUTS_RECORD);
+        if (!sourceInputRecordSha256 || (await dependencies.fileSystem.sha256(recordPath)) !== sourceInputRecordSha256) {
+          throw new Error("Archive source input record changed before promotion.");
+        }
+      }
+      const finalCanonicalCandidate = await dependencies.fileSystem.realpath(candidate);
+      const finalCanonicalParent = await dependencies.fileSystem.realpath(path.dirname(candidate));
+      if (
+        !isWithin(finalCanonicalParent, finalCanonicalCandidate) ||
+        path.dirname(candidate) !== path.dirname(desktopPaths.activeSource)
+      ) {
+        throw new Error("Candidate and active source are not confined same-filesystem siblings.");
+      }
+      const candidateIdentity = await dependencies.fileSystem.directoryIdentity(candidate);
+      await dependencies.fileSystem.promoteAbsent(candidate, desktopPaths.activeSource, candidateIdentity);
       await options.onPromotionBoundary?.("after-rename");
       assertAttempt(attempt, signal);
-      state.complete(attempt, `Source ${identity.revision.slice(0, 12)} is ready`);
-      await queueLog(attempt, "complete", `First-run source ${identity.revision} is ready`);
-      assertLogging(attempt);
+      await verifyRelocatableVirtualEnvironment(attempt, signal, desktopPaths.activeSource);
       return { ok: true, provenance: identity.provenance, revision: identity.revision };
     } finally {
-      await releaseLock();
+      if (!containmentFailure) await settlePendingLease();
     }
   };
 
@@ -836,11 +1091,28 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     }, heartbeatIntervalMs);
     heartbeat.unref?.();
     try {
-      return await executeAttempt(attempt, signal);
+      const result = await executeAttempt(attempt, signal);
+      if (result.ok && result.revision) {
+        assertAttempt(attempt, signal);
+        await queueLog(attempt, "complete", `First-run source ${result.revision} is ready`);
+        assertLogging(attempt);
+        assertAttempt(attempt, signal);
+        state.complete(attempt, `Source ${result.revision.slice(0, 12)} is ready`);
+      }
+      return result;
     } catch (error) {
-      const cancelled = error instanceof DOMException && error.name === "AbortError";
+      const snapshot = state.getSnapshot();
+      const abortError =
+        typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+      const cancelled =
+        abortError &&
+        (signal.aborted ||
+          snapshot.attempt !== attempt ||
+          (snapshot.attempt === attempt && snapshot.phase === "cancelled" && snapshot.status === "failed"));
       const message = redactBootstrapText(error instanceof Error ? error.message : String(error));
-      if (!cancelled) state.fail(attempt, message);
+      if (containmentFailure) state.failClosed(attempt, containmentFailure.message);
+      else if (cancelled) state.cancel(attempt);
+      else state.fail(attempt, message);
       await queueLog(attempt, cancelled ? "cancelled" : "failed", message);
       return { cancelled, error: message, ok: false };
     } finally {
@@ -868,6 +1140,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   };
 
   const cancelAndSettle = async (): Promise<boolean> => {
+    if (containmentFailure) return false;
     const attempt = state.getSnapshot().attempt;
     const cancelled = state.cancel(attempt);
     const running = currentPromise;
@@ -876,13 +1149,23 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     return cancelled;
   };
 
+  const shutdownResult = (): BootstrapResult => ({ error: "Bootstrap is shutting down.", ok: false });
+  const containmentFailureResult = (): BootstrapResult => ({
+    error: containmentFailure?.message ?? "Bootstrap command process containment could not be proven; restart is blocked.",
+    ok: false,
+  });
+
   return {
     cancel: cancelAndSettle,
     retry(): Promise<BootstrapResult> {
+      if (shuttingDown) return Promise.resolve(shutdownResult());
+      if (containmentFailure) return Promise.resolve(containmentFailureResult());
       if (retryPromise) return retryPromise;
       retryPromise = (async () => {
         const running = currentPromise;
         if (running) await running;
+        if (shuttingDown) return shutdownResult();
+        if (containmentFailure) return containmentFailureResult();
         if (!state.retry()) return { error: "Bootstrap is not retryable.", ok: false };
         return await launch(state.getSnapshot().attempt);
       })();
@@ -894,21 +1177,39 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       return scheduled;
     },
     async shutdown(timeoutMs = 10_000): Promise<void> {
-      const settlement = cancelAndSettle();
+      if (shutdownPromise) return shutdownPromise;
+      shuttingDown = true;
+      currentAbort?.abort();
+      const attempt = state.getSnapshot().attempt;
+      state.cancel(attempt);
+      const settlement = (async () => {
+        while (currentPromise || retryPromise) {
+          const pending = [currentPromise, retryPromise].filter(
+            (promise): promise is Promise<BootstrapResult> => promise !== null,
+          );
+          if (pending.length === 0) break;
+          await Promise.allSettled(pending);
+        }
+        if (!containmentFailure) await settlePendingLease();
+        await logQueue;
+        if (containmentFailure) throw containmentFailure;
+      })();
       let timeout: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          settlement,
-          new Promise<never>((_resolve, reject) => {
-            timeout = setTimeout(() => reject(new Error("Bootstrap process containment did not settle before quit.")), timeoutMs);
-          }),
-        ]);
-      } finally {
+      shutdownPromise = Promise.race([
+        settlement,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error("Bootstrap process containment did not settle before quit.")), timeoutMs);
+        }),
+      ]).finally(() => {
         if (timeout) clearTimeout(timeout);
-      }
+      });
+      return shutdownPromise;
     },
     start(): Promise<BootstrapResult> {
-      if (state.getSnapshot().status === "running" && currentPromise) return currentPromise;
+      if (shuttingDown) return Promise.resolve(shutdownResult());
+      if (containmentFailure) return Promise.resolve(containmentFailureResult());
+      if (retryPromise) return retryPromise;
+      if (currentPromise) return currentPromise;
       const attempt = state.begin("Preparing source bootstrap", "preparing");
       return launch(attempt);
     },

@@ -53,7 +53,13 @@ function createSnapshotStore<T extends object>(initial: T) {
     },
     publish(patch: Partial<T>): Readonly<T> {
       snapshot = Object.freeze({ ...snapshot, ...patch });
-      for (const listener of listeners) listener(snapshot);
+      for (const listener of listeners) {
+        try {
+          listener(snapshot);
+        } catch {
+          // State transitions are authoritative; a broken renderer subscriber must not roll them back.
+        }
+      }
       return snapshot;
     },
     subscribe(listener: Listener<T>): () => void {
@@ -126,6 +132,23 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
         phase: "failed",
         status: "failed",
       });
+    },
+    failClosed(attempt: number, failure: string): boolean {
+      const current = state.getSnapshot();
+      if (
+        current.attempt !== attempt ||
+        (current.status !== "running" && !(current.status === "failed" && current.phase === "cancelled"))
+      ) {
+        return false;
+      }
+      state.publish({
+        failure,
+        heartbeatAt: Date.now(),
+        message: failure,
+        phase: "failed",
+        status: "failed",
+      });
+      return true;
     },
     publishForAttempt,
     retry(): boolean {

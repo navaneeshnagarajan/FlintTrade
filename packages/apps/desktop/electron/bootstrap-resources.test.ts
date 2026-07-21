@@ -9,6 +9,13 @@ const resourceRoot = path.resolve(import.meta.dirname, "..", "resources", "boots
 const posixScript = path.join(resourceRoot, "flinttrade-bootstrap.sh");
 const powershellScript = path.join(resourceRoot, "flinttrade-bootstrap.ps1");
 const probeRunner = path.resolve(import.meta.dirname, "..", "scripts", "run-bootstrap-probe.mjs");
+const windowsSupervisorBuilder = path.resolve(
+  import.meta.dirname,
+  "..",
+  "scripts",
+  "build-windows-job-supervisor.mjs",
+);
+const desktopPackage = path.resolve(import.meta.dirname, "..", "package.json");
 
 describe("packaged bootstrap entrypoints", () => {
   it.runIf(process.platform !== "win32")("passes the system POSIX shell syntax check", () => {
@@ -87,6 +94,16 @@ exit 0
     expect(combined).toContain("UV_CACHE_DIR");
     expect(combined).toContain("UV_NO_EDITABLE");
     expect(combined).toContain("UV_PYTHON_INSTALL_DIR");
+    expect(posix).toContain('"$uv" venv --relocatable --python 3.12 .venv');
+    expect(powershell).toContain(
+      'Invoke-Checked $Uv @("venv", "--relocatable", "--python", "3.12", ".venv")',
+    );
+    expect(posix.indexOf('"$uv" venv --relocatable')).toBeLessThan(
+      posix.indexOf('"$uv" sync --frozen'),
+    );
+    expect(powershell.indexOf('Invoke-Checked $Uv @("venv", "--relocatable"')).toBeLessThan(
+      powershell.indexOf('Invoke-Checked $Uv @("sync", "--frozen"'),
+    );
     expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$node" "$corepack_js" --version'));
     expect(powershell.indexOf("$env:PATH")).toBeLessThan(
       powershell.indexOf('Invoke-Checked $Node @($CorepackJs, "--version")'),
@@ -101,6 +118,18 @@ exit 0
     const source = readFileSync(probeRunner, "utf8");
 
     expect(source).toContain("createRequire(import.meta.url)");
+  });
+
+  it("runs the no-shell Windows supervisor compiler on every standard bundle path", () => {
+    const builder = readFileSync(windowsSupervisorBuilder, "utf8");
+    const metadata = JSON.parse(readFileSync(desktopPackage, "utf8")) as { scripts: Record<string, string> };
+
+    expect(metadata.scripts.bundle).toContain("build-windows-job-supervisor.mjs");
+    expect(metadata.scripts["bundle:dev"]).toContain("build-windows-job-supervisor.mjs");
+    expect(metadata.scripts["pack:dir:win"]).toContain("pnpm run bundle");
+    expect(builder).toContain('"Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"');
+    expect(builder).toContain("execFileSync(");
+    expect(builder).not.toContain("shell:");
   });
 
   it.runIf(process.platform === "win32" || Boolean(process.env.CI))(

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from "electron";
 
 import { createFirstRunBootstrap, type BootstrapToolManifest } from "./bootstrap";
-import { createNodeBootstrapDependencies } from "./bootstrap-io";
+import { createNodeBootstrapDependencies, currentBootIdentity } from "./bootstrap-io";
 import { createBootstrapQuitGate } from "./bootstrap-shutdown";
 import {
   buildSecureWebPreferences,
@@ -51,15 +51,21 @@ if (!hasSingleInstanceLock) {
   const bootstrapManifest = JSON.parse(
     readFileSync(path.join(bootstrapResources, "tool-manifest.json"), "utf8"),
   ) as BootstrapToolManifest;
+  const windowsJobSupervisor = app.isPackaged
+    ? path.join(bootstrapResources, "flinttrade-job-supervisor.exe")
+    : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-job-supervisor.exe");
   if (bootstrapManifest.schemaVersion !== 1) throw new Error("Unsupported bootstrap tool manifest schema.");
   const bootstrapState = createBootstrapState();
+  const operationLeaseTarget = path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock");
   const bootstrapController = createFirstRunBootstrap({
     arch: process.arch,
+    bootIdentity: currentBootIdentity(),
     bootstrapResources,
-    dependencies: createNodeBootstrapDependencies(process.platform),
+    dependencies: createNodeBootstrapDependencies(process.platform, { operationLeaseTarget, windowsJobSupervisor }),
     manifest: bootstrapManifest,
     paths: desktopPaths,
     platform: process.platform,
+    singletonAuthorised: hasSingleInstanceLock,
     state: bootstrapState,
   });
   const bootstrapQuitGate = createBootstrapQuitGate(app, bootstrapController);
@@ -113,7 +119,7 @@ if (!hasSingleInstanceLock) {
     window.on("closed", () => {
       if (mainWindow === window) mainWindow = null;
     });
-    void window.loadURL(splashUrl).catch(() => bootstrapQuitGate.requestQuit());
+    void window.loadURL(splashUrl).catch(() => bootstrapQuitGate.requestQuitFailClosed());
     return window;
   };
 
@@ -181,5 +187,5 @@ if (!hasSingleInstanceLock) {
       mainWindow = createSplashWindow();
       void bootstrapController.start().catch(() => undefined);
     })
-    .catch(() => bootstrapQuitGate.requestQuit());
+    .catch(() => bootstrapQuitGate.requestQuitFailClosed());
 }

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { createFirstRunBootstrap, type BootstrapToolManifest } from "./bootstrap";
-import { createNodeBootstrapDependencies } from "./bootstrap-io";
+import { createNodeBootstrapDependencies, currentBootIdentity } from "./bootstrap-io";
 import { createBootstrapState } from "./state";
 
 const rootIndex = process.argv.indexOf("--root");
@@ -21,10 +21,15 @@ const manifest = JSON.parse(readFileSync(path.resolve(manifestArgument), "utf8")
 const sourceRoot = path.join(root, "source");
 const state = createBootstrapState();
 state.subscribe((snapshot) => process.stderr.write(`${JSON.stringify(snapshot)}\n`));
+const operationLeaseTarget = path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock");
 const controller = createFirstRunBootstrap({
   arch: process.arch,
+  bootIdentity: currentBootIdentity(),
   bootstrapResources: path.dirname(path.resolve(manifestArgument)),
-  dependencies: createNodeBootstrapDependencies(process.platform),
+  dependencies: createNodeBootstrapDependencies(process.platform, {
+    operationLeaseTarget,
+    windowsJobSupervisor: path.join(path.dirname(path.resolve(manifestArgument)), "flinttrade-job-supervisor.exe"),
+  }),
   manifest,
   paths: {
     activeSource: path.join(sourceRoot, "FlintTrade"),
@@ -34,6 +39,7 @@ const controller = createFirstRunBootstrap({
     workspace: path.join(root, "workspace"),
   },
   platform: process.platform,
+  singletonAuthorised: true,
   ...(repositoryArgument && branchArgument
     ? {
         repository: {

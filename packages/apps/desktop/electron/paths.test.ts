@@ -168,9 +168,9 @@ describe("desktop path resolution", () => {
         symlinkSync(join(base, "relative-link"), join(base, "chained-link"), "dir");
 
         for (const candidate of [
-          join(base, "absolute-link", "..", "workspace", "missing"),
-          join(base, "relative-link", "..", "workspace", "missing"),
-          join(base, "chained-link", "..", "workspace", "missing"),
+          `${join(base, "absolute-link")}/../workspace/missing`,
+          `${join(base, "relative-link")}/../workspace/missing`,
+          `${join(base, "chained-link")}/../workspace/missing`,
         ]) {
           const pythonResolved = execFileSync(
             "python3",
@@ -185,14 +185,88 @@ describe("desktop path resolution", () => {
     },
   );
 
+  it.runIf(process.platform !== "win32")(
+    "matches Python for dangling relative and absolute links and literal POSIX backslashes",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "flinttrade-path-dangling-parity-"));
+      try {
+        const base = join(root, "base");
+        const literalBackslash = join(base, "literal\\component");
+        mkdirSync(base, { recursive: true });
+        mkdirSync(literalBackslash);
+        symlinkSync("missing/child", join(base, "dangling-relative"));
+        symlinkSync(join(root, "absolute-missing", "child"), join(base, "dangling-absolute"));
+
+        for (const candidate of [
+          `${join(base, "dangling-relative")}/../workspace`,
+          `${join(base, "dangling-absolute")}/../workspace`,
+          `${literalBackslash}/../workspace`,
+        ]) {
+          const pythonResolved = execFileSync(
+            "python3",
+            ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))", candidate],
+            { encoding: "utf8" },
+          ).trim();
+          expect(canonicalisePathComponents(candidate, path.posix)).toBe(pythonResolved);
+        }
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")("resolves a filesystem symlink loop exactly like Python without unbounded traversal", () => {
+    const root = mkdtempSync(join(tmpdir(), "flinttrade-path-loop-parity-"));
+    try {
+      const first = join(root, "first");
+      const second = join(root, "second");
+      symlinkSync("second", first);
+      symlinkSync("first", second);
+      const candidate = join(first, "workspace");
+      const pythonResolved = execFileSync(
+        "python3",
+        ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))", candidate],
+        { encoding: "utf8", stdio: "pipe" },
+      ).trim();
+      expect(canonicalisePathComponents(candidate, path.posix)).toBe(pythonResolved);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it.runIf(process.platform !== "win32")("follows one legitimate symlink again after leaving its traversal chain", () => {
+    const root = mkdtempSync(join(tmpdir(), "flinttrade-path-repeated-link-"));
+    try {
+      const target = join(root, "real", "child");
+      const link = join(root, "link");
+      mkdirSync(target, { recursive: true });
+      symlinkSync(target, link, "dir");
+      const candidate = `${link}/../../link/workspace`;
+      const pythonResolved = execFileSync(
+        "python3",
+        ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))", candidate],
+        { encoding: "utf8" },
+      ).trim();
+
+      expect(canonicalisePathComponents(candidate, path.posix)).toBe(pythonResolved);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps deterministic Windows component semantics when host junction resolution is unavailable", () => {
     const observed: string[] = [];
     const resolved = canonicalisePathComponents("C:\\base\\junction\\..\\workspace\\missing", path.win32, {
-      exists: (candidate) => {
+      lstat: (candidate) => {
         observed.push(candidate);
-        return candidate === "C:\\" || candidate === "C:\\base" || candidate === "C:\\base\\junction";
+        if (candidate === "C:\\base\\junction") return { isSymbolicLink: () => true };
+        if (candidate === "C:\\" || candidate === "C:\\base" || candidate === "D:\\") {
+          return { isSymbolicLink: () => false };
+        }
+        return null;
       },
-      realpath: (candidate) => (candidate === "C:\\base\\junction" ? "D:\\real\\child" : candidate),
+      readlink: (candidate) => (candidate === "C:\\base\\junction" ? "D:\\real\\child" : candidate),
+      realpath: (candidate) => candidate,
     });
 
     expect(resolved).toBe("D:\\real\\workspace\\missing");

@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 export interface DesktopPathEnvironment {
@@ -42,7 +42,8 @@ function expandHome(
 }
 
 interface PathResolutionHooks {
-  exists(candidate: string): boolean;
+  lstat(candidate: string): { isSymbolicLink(): boolean } | null;
+  readlink(candidate: string): string;
   realpath(candidate: string): string;
 }
 
@@ -55,22 +56,51 @@ export function canonicalisePathComponents(
   value: string,
   pathApi: typeof path.posix,
   hooks: PathResolutionHooks = {
-    exists: existsSync,
+    lstat(candidate) {
+      try {
+        return lstatSync(candidate);
+      } catch (error) {
+        if (["ELOOP", "ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+        throw error;
+      }
+    },
+    readlink: readlinkSync,
     realpath: realpathSync.native,
   },
 ): string {
   if (!pathApi.isAbsolute(value)) throw new TypeError("Component-wise canonicalisation requires an absolute path.");
+  const split = (input: string): string[] => input.split(pathApi === path.win32 ? /[\\/]+/ : /\/+/).filter(Boolean);
   const root = pathApi.parse(value).root;
-  let resolved = hooks.exists(root) ? hooks.realpath(root) : root;
-  const components = value.slice(root.length).split(/[\\/]+/);
-  for (const component of components) {
+  let resolved = hooks.lstat(root) ? hooks.realpath(root) : root;
+  const components = split(value.slice(root.length)).map((component) => ({ component, links: new Set<string>() }));
+  while (components.length > 0) {
+    const { component, links } = components.shift()!;
     if (!component || component === ".") continue;
     if (component === "..") {
       resolved = pathApi.dirname(resolved);
       continue;
     }
     const candidate = pathApi.join(resolved, component);
-    resolved = hooks.exists(candidate) ? hooks.realpath(candidate) : candidate;
+    const metadata = hooks.lstat(candidate);
+    if (!metadata?.isSymbolicLink()) {
+      resolved = metadata ? hooks.realpath(candidate) : candidate;
+      continue;
+    }
+    if (links.has(candidate)) {
+      resolved = candidate;
+      continue;
+    }
+    const nestedLinks = new Set(links).add(candidate);
+    const target = hooks.readlink(candidate);
+    if (pathApi.isAbsolute(target)) {
+      const targetRoot = pathApi.parse(target).root;
+      resolved = hooks.lstat(targetRoot) ? hooks.realpath(targetRoot) : targetRoot;
+      components.unshift(
+        ...split(target.slice(targetRoot.length)).map((nested) => ({ component: nested, links: nestedLinks })),
+      );
+    } else {
+      components.unshift(...split(target).map((nested) => ({ component: nested, links: nestedLinks })));
+    }
   }
   return resolved;
 }

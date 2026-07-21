@@ -21,26 +21,27 @@ export function createBootstrapQuitGate(
   const requestQuit = (): Promise<void> => {
     if (allowingQuit) return Promise.resolve();
     if (!settlement) {
-      settlement = bootstrap.shutdown(timeoutMs).then(
-        () => {
-          allowingQuit = true;
-          application.quit();
-        },
-        () => {
-          allowingQuit = true;
-          application.quit();
-        },
-      );
+      settlement = bootstrap.shutdown(timeoutMs).then(() => {
+        allowingQuit = true;
+        application.quit();
+      });
     }
     return settlement;
+  };
+
+  const requestQuitFailClosed = (): void => {
+    void requestQuit().catch(() => {
+      // Keep the application open when containment cannot be proved.
+    });
   };
 
   return {
     handleBeforeQuit(event: QuitEvent): void {
       if (allowingQuit) return;
       event.preventDefault();
-      void requestQuit();
+      requestQuitFailClosed();
     },
     requestQuit,
+    requestQuitFailClosed,
   };
 }

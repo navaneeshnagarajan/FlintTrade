@@ -39,4 +39,34 @@ describe("bootstrap quit settlement", () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(app.quit).toHaveBeenCalledOnce();
   });
+
+  it("keeps quit fail-closed when process containment cannot settle", async () => {
+    const app = { quit: vi.fn() };
+    const gate = createBootstrapQuitGate(app, {
+      shutdown: vi.fn(async () => {
+        throw new Error("containment failed");
+      }),
+    });
+
+    await expect(gate.requestQuit()).rejects.toThrow("containment failed");
+    expect(app.quit).not.toHaveBeenCalled();
+    const retryEvent = { preventDefault: vi.fn() };
+    gate.handleBeforeQuit(retryEvent);
+    expect(retryEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(app.quit).not.toHaveBeenCalled();
+  });
+
+  it("supervises fail-closed quit requests from void startup callbacks", async () => {
+    const app = { quit: vi.fn() };
+    const gate = createBootstrapQuitGate(app, {
+      shutdown: vi.fn(async () => {
+        throw new Error("containment failed");
+      }),
+    });
+
+    expect(gate.requestQuitFailClosed()).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(app.quit).not.toHaveBeenCalled();
+  });
 });

@@ -46,6 +46,7 @@ export PATH
 cd "$candidate"
 printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-python\t48\tInstalling managed Python 3.12\n'
 "$uv" python install 3.12
+"$uv" venv --relocatable --python 3.12 .venv
 "$uv" sync --frozen --all-packages --no-install-package flinttrade-ticks
 printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 9.15.0 dependencies\n'
 pnpm_version=$("$node" "$corepack_js" pnpm --version)
