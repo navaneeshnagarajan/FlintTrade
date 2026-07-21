@@ -27,6 +27,10 @@ fully-original implementations is in progress.)
 - openalgo-portfoliogreeks — MIT — Copyright 2025 Marketcalls
 - pyindicators — MIT — Copyright 2024 PyIndicators
 - OpenClaw — agent-pattern reference
+- hermes-agent (https://github.com/NousResearch/hermes-agent) — MIT
+  Copyright 2025 Nous Research
+  Electron main/preload bundling, security-hardening and lifecycle patterns
+  adapted from commit 7651764ce.
 
 ### Reference repositories (patterns studied / adapted)
 

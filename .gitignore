@@ -26,6 +26,7 @@ htmlcov/
 # === Node.js ===
 node_modules/
 yarn.lock
+/packages/apps/desktop/release/
 
 # === IDE ===
 .vscode/

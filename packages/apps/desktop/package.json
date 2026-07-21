@@ -2,16 +2,93 @@
   "name": "@flinttrade/desktop",
   "version": "0.6.0-beta.13",
   "private": true,
-  "description": "FlintTrade native desktop shell (Tauri 2) — a thin shell that downloads and manages the FlintTrade backend payload in a native window.",
+  "description": "FlintTrade Electron desktop shell.",
+  "author": "Navaneesh Nagarajan",
+  "type": "module",
+  "main": "dist/electron-main.mjs",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "dev": "pnpm run bundle:dev && electron .",
+    "start": "pnpm run bundle && electron .",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run --config vitest.electron.config.ts",
+    "test:electron": "vitest run --config vitest.electron.config.ts",
+    "bundle": "node scripts/bundle-electron.mjs",
+    "bundle:dev": "node scripts/bundle-electron.mjs --dev",
+    "build": "pnpm run typecheck && pnpm run test:electron && pnpm run bundle",
+    "pack:dir": "pnpm run bundle && electron-builder --dir --mac --publish never"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^22.20.0",
+    "electron": "40.10.2",
+    "electron-builder": "^26.8.1",
+    "electron-builder-squirrel-windows": "^26.8.1",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "build": {
+    "electronVersion": "40.10.2",
+    "appId": "com.flinttrade.desktop",
+    "productName": "FlintTrade",
+    "executableName": "FlintTrade",
+    "artifactName": "FlintTrade-${version}-${os}-${arch}.${ext}",
+    "icon": "src-tauri/icons/icon",
+    "directories": {
+      "output": "release/electron"
+    },
+    "files": [
+      "dist/**",
+      "splash/**",
+      "src-tauri/icons/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../../notice",
+        "to": "NOTICE"
+      },
+      {
+        "from": "../../../notice.generated",
+        "to": "notice.generated"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.finance",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "identity": null,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Office",
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
   }
 }

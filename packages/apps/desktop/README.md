@@ -1,31 +1,33 @@
 # Desktop
 
-> Tauri 2 native thin shell — the cross-OS installer (Linux/Windows/macOS) ships only the shell; on first run it downloads the hash-verified PyInstaller-frozen FlintTrade backend payload (which embeds the built terminal) and serves it from a single loopback origin.
+> Electron 40 shell migration in progress. The tracked Electron scaffold now
+> owns the package's default Node build while the existing Tauri implementation
+> remains alongside it under `src-tauri/` until behavioural parity is proved.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
-**Language:** Rust (Tauri 2) + TypeScript
+**Language:** TypeScript (Electron 40) + Rust (Tauri 2 compatibility source)
 
 ## Public surface
 
-- `src-tauri/src/lib.rs — shell runtime: managed payload bootstrap (first-run download with progress + retry), backend spawn + ready-port handshake, close-to-tray background runtime, tray menu, global hotkey (Cmd/Ctrl+Shift+F), native notification consumer (FLINTTRADE_NOTIFY stdout protocol)`
-- `src-tauri/src/main.rs — Tauri entry point`
-- `src-tauri/tauri.conf.json — window, bundle, and plugin configuration`
-- `splash/ — boot splash shown while the backend payload downloads (first run) and starts`
+- `electron/main.ts` — minimal single-instance Electron lifecycle and local splash window.
+- `electron/preload.ts` — sandboxed, named `window.flintDesktop` bridge.
+- `electron/hardening.ts` — deny-first window, navigation, child-window and permission policy.
+- `electron/origins.ts` and `electron/ipc.ts` — exact splash/loopback trust classification and per-handler sender validation.
+- `electron/state.ts` and `electron/paths.ts` — typed state/event stores and read-only platform path resolution.
+- `src-tauri/` — retained Tauri parity source; it is not deleted during the migration.
+- `splash/` — local boot splash staged into the Electron package.
 
 (See the source for the full surface.)
 
-## Behaviour that matters
+## Migration boundary
 
-- **Close-to-tray:** closing the window hides it — the backend, autonomous
-  agent and position monitoring keep running. Quit fully via the tray menu.
-- **First-run bootstrap:** the installer bundles no backend. The splash phase
-  downloads the sha256-pinned backend payload from the rolling channel
-  release, with a progress bar and an explicit Retry on failure.
-- **Single loopback origin:** the shell serves the built terminal and proxies
-  to the managed backend on localhost only; nothing listens externally.
-- **Native notifications:** the backend emits `FLINTTRADE_NOTIFY` lines
-  (order dispatched, safety-gate block) that surface as OS notifications.
+- The Electron scaffold includes no trading or broker authority.
+- Source checkout bootstrap, backend supervision, close-to-tray and updater
+  parity are later migration slices; the retained Tauri source remains the
+  behavioural reference until those gates pass.
+- The renderer receives named functions only. Node and raw `ipcRenderer` stay
+  unavailable, and every main-process handler validates the sender frame.
 
 See [docs/DESKTOP.md](../../../docs/DESKTOP.md) for the full desktop guide.
 
@@ -55,24 +57,27 @@ Contributors working in this package should install via the workspace from the r
 pnpm install
 ```
 
-Build the installers (thin shell — the backend payload is published separately
-and downloaded on first run):
+Typecheck, test and bundle the Electron main/preload processes:
 
 ```bash
-make desktop-build
+pnpm --filter @flinttrade/desktop build
 ```
 
-Run in dev (builds the backend payload first):
+Build an unpacked macOS application directory:
 
 ```bash
-make desktop-dev
+pnpm --filter @flinttrade/desktop pack:dir
 ```
 
 ## Tests
 
 ```bash
-cd packages/apps/desktop/src-tauri && cargo check && cargo test --lib
+pnpm --filter @flinttrade/desktop typecheck
+pnpm --filter @flinttrade/desktop test:electron
 ```
+
+The retained Tauri tests remain available with
+`cd packages/apps/desktop/src-tauri && cargo test --lib` during parity work.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 
