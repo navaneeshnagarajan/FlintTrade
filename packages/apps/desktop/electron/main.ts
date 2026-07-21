@@ -18,7 +18,10 @@ import {
 import { IPC_CHANNELS } from "./ipc-channels";
 import { registerDesktopIpc } from "./ipc";
 import { resolveDesktopPaths } from "./paths";
+import { createSourceOperationCoordinator } from "./source-operation";
+import { createSourceUpdateRuntime } from "./source-update-runtime";
 import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
+import { createStartupRecoveryController } from "./startup-recovery";
 import { createBootstrapState, createUpdateState, type BackendState, type UpdateKind } from "./state";
 
 protocol.registerSchemesAsPrivileged([
@@ -56,22 +59,67 @@ if (!hasSingleInstanceLock) {
     : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-job-supervisor.exe");
   if (bootstrapManifest.schemaVersion !== 1) throw new Error("Unsupported bootstrap tool manifest schema.");
   const bootstrapState = createBootstrapState();
+  const sourceUpdateState = createUpdateState("source");
+  const shellUpdateState = createUpdateState("shell");
+  const sourceOperationCoordinator = createSourceOperationCoordinator();
   const operationLeaseTarget = path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock");
+  const bootIdentity = currentBootIdentity();
+  const bootstrapDependencies = createNodeBootstrapDependencies(process.platform, {
+    operationLeaseTarget,
+    windowsJobSupervisor,
+  });
   const bootstrapController = createFirstRunBootstrap({
     arch: process.arch,
-    bootIdentity: currentBootIdentity(),
+    bootIdentity,
     bootstrapResources,
-    dependencies: createNodeBootstrapDependencies(process.platform, { operationLeaseTarget, windowsJobSupervisor }),
+    dependencies: bootstrapDependencies,
     manifest: bootstrapManifest,
+    operationCoordinator: sourceOperationCoordinator,
     paths: desktopPaths,
     platform: process.platform,
     singletonAuthorised: hasSingleInstanceLock,
     state: bootstrapState,
   });
-  const bootstrapQuitGate = createBootstrapQuitGate(app, bootstrapController);
+  const sourceUpdateRuntime = createSourceUpdateRuntime({
+    arch: process.arch,
+    bootIdentity,
+    bootstrapResources,
+    coordinator: sourceOperationCoordinator,
+    dependencies: bootstrapDependencies,
+    lifecycle: {
+      isAvailable: () => false,
+      async bootActive() {
+        throw new Error("Source update apply requires the Task 4 backend guardian and boot lifecycle.");
+      },
+      async drainCurrent() {
+        throw new Error("Source update apply requires the Task 4 backend guardian and drain lifecycle.");
+      },
+    },
+    manifest: bootstrapManifest,
+    paths: desktopPaths,
+    platform: process.platform,
+    singletonAuthorised: hasSingleInstanceLock,
+    state: sourceUpdateState,
+  });
+  let sourceRuntimePrepared = false;
+  const startupController = createStartupRecoveryController({
+    bootstrap: bootstrapController,
+    recovery: {
+      cancel: sourceUpdateRuntime.cancelRecovery,
+      async recover(signal) {
+        if (!sourceRuntimePrepared) {
+          await sourceUpdateRuntime.prepare();
+          sourceRuntimePrepared = true;
+        }
+        if (signal.aborted) throw signal.reason;
+        return sourceUpdateRuntime.updater.recover(signal);
+      },
+      settleForQuit: sourceUpdateRuntime.settleForQuit,
+    },
+    state: bootstrapState,
+  });
+  const bootstrapQuitGate = createBootstrapQuitGate(app, startupController);
   app.on("before-quit", (event) => bootstrapQuitGate.handleBeforeQuit(event));
-  const sourceUpdateState = createUpdateState("source");
-  const shellUpdateState = createUpdateState("shell");
   const backendState: Readonly<BackendState> = Object.freeze({ port: null, status: "stopped", url: null });
   let mainWindow: BrowserWindow | null = null;
   let terminalOrigin: string | null = null;
@@ -92,13 +140,10 @@ if (!hasSingleInstanceLock) {
 
   const checkUnavailable = (kind: UpdateKind) => {
     const store = updateStateFor(kind);
-    return store.publish({
-      failure: null,
-      message: `${kind === "source" ? "Source" : "Electron shell"} updates are not active in this scaffold.`,
-      progress: null,
-      status: "unavailable",
-      version: null,
-    });
+    const label = kind === "source" ? "Source" : "Electron shell";
+    const attempt = store.begin("checking", `Checking ${label.toLowerCase()} updates`);
+    store.unavailable(attempt, `${label} updates are not active in this scaffold.`);
+    return store.getSnapshot();
   };
 
   const createSplashWindow = (): BrowserWindow => {
@@ -160,11 +205,16 @@ if (!hasSingleInstanceLock) {
             throw new Error("Electron shell update is not available.");
           },
           applySourceUpdate: () => {
-            throw new Error("Source update is not available.");
+            throw new Error("Source update apply requires the backend guardian and is not active yet.");
           },
-          cancelBootstrap: () => bootstrapController.cancel(),
+          cancelBootstrap: () => startupController.cancel(),
           checkShellUpdate: () => checkUnavailable("shell"),
-          checkSourceUpdate: () => checkUnavailable("source"),
+          checkSourceUpdate: () => {
+            if (bootstrapState.getSnapshot().status !== "ready") {
+              throw new Error("Source updates can be checked after source bootstrap is ready.");
+            }
+            return sourceUpdateRuntime.updater.check();
+          },
           getBackendState: () => backendState,
           getBootstrapSnapshot: () => bootstrapState.getSnapshot(),
           getUpdateState: (kind) => updateStateFor(kind).getSnapshot(),
@@ -177,7 +227,7 @@ if (!hasSingleInstanceLock) {
           quitAfterBackendFailure: () => bootstrapQuitGate.requestQuit(),
           retryBootstrap: () => {
             if (bootstrapState.getSnapshot().status !== "failed") return false;
-            void bootstrapController.retry();
+            void startupController.retry();
             return true;
           },
           showWindow: showMainWindow,
@@ -185,7 +235,7 @@ if (!hasSingleInstanceLock) {
       });
 
       mainWindow = createSplashWindow();
-      void bootstrapController.start().catch(() => undefined);
+      void startupController.start().catch(() => undefined);
     })
     .catch(() => bootstrapQuitGate.requestQuitFailClosed());
 }

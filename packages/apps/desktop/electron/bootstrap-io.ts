@@ -46,7 +46,9 @@ import type {
   CommandResult,
   DownloadPolicy,
   DownloadReceipt,
+  FileSystemDirectoryMetadata,
   FileSystemIdentity,
+  FileSystemFileIdentity,
   OperationLeaseRequest,
   SourceTreeEntry,
   SourceTreeIdentity,
@@ -98,17 +100,29 @@ const CHILD_ENVIRONMENT_KEYS = new Set([
 const BOOTSTRAP_ENVIRONMENT_KEYS = new Set([
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_HOME",
+  "FLINTTRADE_DESKTOP",
+  "FLINTTRADE_FRONTEND_DIST",
+  "FLINTTRADE_HOME",
   "FLINTTRADE_BOOTSTRAP_COREPACK_JS",
   "FLINTTRADE_BOOTSTRAP_NODE",
   "FLINTTRADE_BOOTSTRAP_PNPM_VERSION",
   "FLINTTRADE_BOOTSTRAP_TOOLS_ROOT",
   "FLINTTRADE_BOOTSTRAP_UV",
+  "FLINTTRADE_WORKSPACE_DIR",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_ATTR_NOSYSTEM",
+  "GIT_COMMON_DIR",
   "GIT_CONFIG_NOSYSTEM",
   "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_OBJECT_DIRECTORY",
   "GIT_TERMINAL_PROMPT",
   "NPM_CONFIG_CACHE",
   "NPM_CONFIG_USERCONFIG",
   "PNPM_HOME",
+  "PYTHONNOUSERSITE",
   "UV_CONFIG_FILE",
   "UV_CACHE_DIR",
   "UV_NO_EDITABLE",
@@ -130,9 +144,11 @@ function abortError(): DOMException {
   return new DOMException("Operation cancelled.", "AbortError");
 }
 
-function appendBounded(current: string, chunk: string): string {
+function appendBounded(current: string, chunk: string): { text: string; truncated: boolean } {
   const combined = current + chunk;
-  return combined.length <= OUTPUT_LIMIT ? combined : combined.slice(-OUTPUT_LIMIT);
+  return combined.length <= OUTPUT_LIMIT
+    ? { text: combined, truncated: false }
+    : { text: combined.slice(-OUTPUT_LIMIT), truncated: true };
 }
 
 function emitLines(
@@ -310,7 +326,8 @@ function windowsSupervisorReleaseLine(token: string): string {
   return `FLINTTRADE_JOB_RELEASE\t1\t${token}\n`;
 }
 
-function hasWindowsSupervisorSettledProof(stderr: string, token: string): boolean {
+function hasWindowsSupervisorSettledProof(stderr: string, token: string, stderrTruncated: boolean): boolean {
+  if (stderrTruncated) return false;
   const protocolLines = stderr
     .replaceAll("\r\n", "\n")
     .split("\n")
@@ -353,7 +370,11 @@ export function parseWindowsSupervisorProof(
   stderr: string,
   token: string,
   helperExitCode: number | null,
+  stderrTruncated: boolean,
 ): { contained: boolean; exitCode: number; stderr: string } {
+  if (stderrTruncated) {
+    return { contained: false, exitCode: 1, stderr: "Windows containment proof output was truncated." };
+  }
   const lines = stderr.replaceAll("\r\n", "\n").split("\n");
   const protocolIndexes = lines.flatMap((line, index) => (line.startsWith(`${WINDOWS_SUPERVISOR_PREFIX}\t`) ? [index] : []));
   const filtered = lines.filter((_line, index) => !protocolIndexes.includes(index));
@@ -620,7 +641,7 @@ status=$?
 target=
 [ -n "$enumerator" ] || {
   printf '%s\n' containment-failed >&3
-  while :; do sleep 3600; done
+  while :; do /bin/sleep 3600; done
 }
 descendants=0
 drain_attempts=0
@@ -633,7 +654,7 @@ while :; do
     wait "$probe"
   ) || {
     printf '%s\n' containment-failed >&3
-    while :; do sleep 3600; done
+    while :; do /bin/sleep 3600; done
   }
   probe=
   probe_parent=
@@ -649,7 +670,7 @@ $snapshot
 FLINT_SNAPSHOT_PARENT
   [ -n "$probe" ] && [ -n "$probe_parent" ] || {
     printf '%s\n' containment-failed >&3
-    while :; do sleep 3600; done
+    while :; do /bin/sleep 3600; done
   }
   external=
   escaped=
@@ -685,7 +706,7 @@ FLINT_SNAPSHOT_MEMBERS
   drain_attempts=$((drain_attempts + 1))
   if [ "$drain_attempts" -gt 100 ]; then
     printf '%s\n' containment-failed >&3
-    while :; do sleep 3600; done
+    while :; do /bin/sleep 3600; done
   fi
   if [ -n "$external" ]; then /bin/kill -TERM -$$ 2>/dev/null || :; fi
   for escaped_member in $escaped; do
@@ -745,18 +766,45 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
   return {
     ...(options.operationLeaseTarget ? { operationLeaseTarget: options.operationLeaseTarget } : {}),
     ...(windowsPowerShell ? { windowsPowerShell } : {}),
+    async reconcileOperationContainment(): Promise<void> {
+      if (!options.operationLeaseTarget) {
+        throw new Error("Command containment reconciliation requires the shared source-operation lease target.");
+      }
+      await reconcileActiveOperationContainment(
+        options.operationLeaseTarget,
+        options.testHooks?.recordedProcessWaitMs,
+        options.posixProcessEnumerators,
+        options.testHooks,
+      );
+    },
     run(invocation): Promise<CommandResult> {
       return new Promise((resolve) => {
         if (platform === "win32" && !windowsJobSupervisor) {
-          resolve({ contained: true, exitCode: 127, stderr: "Verified Windows Job supervisor is unavailable.", stdout: "" });
+          resolve({
+            contained: true,
+            exitCode: 127,
+            stderr: "Verified Windows Job supervisor is unavailable.",
+            stderrTruncated: false,
+            stdout: "",
+            stdoutTruncated: false,
+          });
           return;
         }
         if (invocation.signal?.aborted) {
-          resolve({ contained: true, exitCode: 130, stderr: "Operation cancelled.", stdout: "" });
+          resolve({
+            contained: true,
+            exitCode: 130,
+            stderr: "Operation cancelled.",
+            stderrTruncated: false,
+            stdout: "",
+            stdoutTruncated: false,
+          });
           return;
         }
         let stdout = "";
         let stderr = "";
+        let stdoutTruncated = false;
+        let stderrTruncated = false;
         let stdoutBuffer = "";
         let stderrBuffer = "";
         let controlBuffer = "";
@@ -789,11 +837,22 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           invocation.command,
           ...invocation.args,
         ];
-        const childEnvironment = minimalChildEnvironment(invocation.env, environment, platform);
+        const childEnvironment = minimalChildEnvironment(
+          invocation.env,
+          invocation.inheritEnvironment === false ? {} : environment,
+          platform,
+        );
         if (platform === "win32") {
           const targetExecutable = resolveWindowsExecutable(invocation.command, childEnvironment, fileExists, canonicalise);
           if (!targetExecutable) {
-            resolve({ contained: true, exitCode: 127, stderr: "Windows bootstrap target is not a trusted absolute executable.", stdout: "" });
+            resolve({
+              contained: true,
+              exitCode: 127,
+              stderr: "Windows bootstrap target is not a trusted absolute executable.",
+              stderrTruncated: false,
+              stdout: "",
+              stdoutTruncated: false,
+            });
             return;
           }
           supervisorToken = randomBytes(16).toString("hex");
@@ -813,7 +872,9 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
               contained: true,
               exitCode: 127,
               stderr: error instanceof Error ? error.message : String(error),
+              stderrTruncated: false,
               stdout: "",
+              stdoutTruncated: false,
             });
             return;
           }
@@ -908,13 +969,22 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           const unresolvedAnchorRecord = releaseProcessAnchor !== null;
           const windowsProof =
             platform === "win32" && supervisorToken
-              ? applyWindowsSupervisorLocalState(parseWindowsSupervisorProof(stderr, supervisorToken, closeCode), {
+              ? applyWindowsSupervisorLocalState(parseWindowsSupervisorProof(
+                  stderr,
+                  supervisorToken,
+                  closeCode,
+                  stderrTruncated,
+                ), {
                   cancelled: terminalReason === "cancelled",
                   listenerFailure: terminalReason === "listener",
                   timedOut: terminalReason === "timeout",
                 })
               : null;
           const resultStderr = windowsProof?.stderr ?? stderr;
+          const stderrSuffix = terminalReason === "timeout" && !windowsProof
+            ? `\nCommand timed out.${terminationError && terminationError !== "pending" ? ` ${terminationError}` : ""}`
+            : `${terminationError && terminationError !== "pending" ? `\n${terminationError}` : ""}${unresolvedAnchorRecord ? "\nDurable process-anchor registration did not settle." : ""}${listenerFailure ? `\nOutput listener failed: ${listenerFailure}` : ""}${descendantLeak ? "\nCommand leader exited before its descendant tree; containment terminated the tree." : ""}${terminalReason === "containment" ? "\nProcess-group enumeration failed; forced cleanup was required." : ""}`;
+          const finalStderr = appendBounded(resultStderr, stderrSuffix);
           resolve({
             contained: windowsProof
               ? windowsProof.contained && !terminationError && !unresolvedAnchorRecord
@@ -930,13 +1000,10 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
                   : terminalReason === "timeout"
                     ? 124
                     : (closeCode ?? 1),
-            stderr: terminalReason === "timeout" && !windowsProof
-              ? appendBounded(resultStderr, `\nCommand timed out.${terminationError && terminationError !== "pending" ? ` ${terminationError}` : ""}`)
-              : appendBounded(
-                  resultStderr,
-                  `${terminationError && terminationError !== "pending" ? `\n${terminationError}` : ""}${unresolvedAnchorRecord ? "\nDurable process-anchor registration did not settle." : ""}${listenerFailure ? `\nOutput listener failed: ${listenerFailure}` : ""}${descendantLeak ? "\nCommand leader exited before its descendant tree; containment terminated the tree." : ""}${terminalReason === "containment" ? "\nProcess-group enumeration failed; forced cleanup was required." : ""}`,
-                ),
+            stderr: finalStderr.text,
+            stderrTruncated: stderrTruncated || finalStderr.truncated,
             stdout,
+            stdoutTruncated,
           });
         };
 
@@ -972,7 +1039,7 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
                     throw new Error("Windows Job supervisor handle did not close after forced termination.");
                   }),
                 ]);
-                if (parseWindowsSupervisorProof(stderr, supervisorToken, closeCode).contained) {
+                if (parseWindowsSupervisorProof(stderr, supervisorToken, closeCode, stderrTruncated).contained) {
                   await unregisterProcessAnchor();
                   return;
                 }
@@ -1040,7 +1107,9 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
         childStdout.setEncoding("utf8");
         childStderr.setEncoding("utf8");
         childStdout.on("data", (chunk: string) => {
-          stdout = appendBounded(stdout, chunk);
+          const appended = appendBounded(stdout, chunk);
+          stdout = appended.text;
+          stdoutTruncated ||= appended.truncated;
           try {
             stdoutBuffer = emitLines(stdoutBuffer, chunk, "stdout", invocation.onOutput);
           } catch (error) {
@@ -1049,10 +1118,16 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           }
         });
         childStderr.on("data", (chunk: string) => {
-          stderr = appendBounded(stderr, chunk);
+          const appended = appendBounded(stderr, chunk);
+          stderr = appended.text;
+          stderrTruncated ||= appended.truncated;
           try {
             stderrBuffer = emitLines(stderrBuffer, chunk, "stderr", (line, stream) => {
-              if (!line.startsWith(`${WINDOWS_SUPERVISOR_PREFIX}\t`)) invocation.onOutput?.(line, stream);
+              if (line.startsWith(`${WINDOWS_SUPERVISOR_PREFIX}\t`)) {
+                if (platform === "win32" && stderrTruncated) terminate("containment");
+                return;
+              }
+              invocation.onOutput?.(line, stream);
             });
           } catch (error) {
             listenerFailure ||= error instanceof Error ? error.message : String(error);
@@ -1061,7 +1136,7 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           if (
             platform === "win32" &&
             supervisorToken &&
-            hasWindowsSupervisorSettledProof(stderr, supervisorToken)
+            hasWindowsSupervisorSettledProof(stderr, supervisorToken, stderrTruncated)
           ) {
             void releaseProtocolAnchor(windowsSupervisorReleaseLine(supervisorToken));
           }
@@ -1165,7 +1240,9 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           closeObserved = true;
           observeClose();
           closeCode = terminalReason === "cancelled" ? 130 : 127;
-          stderr = appendBounded(stderr, error.message);
+          const appended = appendBounded(stderr, error.message);
+          stderr = appended.text;
+          stderrTruncated ||= appended.truncated;
           finish();
         });
         child.on("close", (code) => {
@@ -2645,6 +2722,83 @@ async function registerOperationProcessAnchor(
   };
 }
 
+function sameOperationContainmentScope(
+  expected: OperationLeaseDirectory,
+  current: OperationLeaseDirectory,
+): boolean {
+  const expectedOwner = expected.owner;
+  const currentOwner = current.owner;
+  return (
+    expected.dev === current.dev &&
+    expected.ino === current.ino &&
+    expected.ownerPresent &&
+    current.ownerPresent &&
+    expectedOwner !== null &&
+    currentOwner !== null &&
+    expectedOwner.acquiredAt === currentOwner.acquiredAt &&
+    expectedOwner.bootIdentity === currentOwner.bootIdentity &&
+    expectedOwner.operationId === currentOwner.operationId &&
+    expectedOwner.ownerPid === currentOwner.ownerPid &&
+    JSON.stringify(expected.processGroups) === JSON.stringify(current.processGroups) &&
+    JSON.stringify(expected.processRecordNames) === JSON.stringify(current.processRecordNames) &&
+    JSON.stringify(expected.supervisorPids) === JSON.stringify(current.supervisorPids)
+  );
+}
+
+async function reconcileActiveOperationContainment(
+  requestedTarget: string,
+  recordedProcessWaitMs?: number,
+  enumerators: readonly string[] = ["/bin/ps", "/usr/bin/ps"],
+  testHooks?: BootstrapIoOptions["testHooks"],
+): Promise<void> {
+  const parent = await realpath(path.dirname(requestedTarget));
+  const target = path.join(parent, path.basename(requestedTarget));
+  const operationId = activeOperationLeases.get(target);
+  if (!operationId || operationId.startsWith("publishing:")) {
+    throw new Error("Command containment reconciliation requires an active same-process source-operation lease.");
+  }
+  const retained = await validateOperationLeaseDirectory(target);
+  if (
+    retained.owner?.ownerPid !== process.pid ||
+    retained.owner.operationId !== operationId
+  ) {
+    throw new Error("Command containment reconciliation is not bound to this runtime lease owner.");
+  }
+
+  await waitForRecordedProcessesGone(
+    retained.processGroups,
+    retained.supervisorPids,
+    recordedProcessWaitMs,
+    enumerators,
+  );
+  testHooks?.beforeProcessAnchorReleaseStage?.("record-unlink");
+  const settled = await validateOperationLeaseDirectory(target);
+  if (
+    activeOperationLeases.get(target) !== operationId ||
+    !sameOperationContainmentScope(retained, settled)
+  ) {
+    throw new Error("Command containment reconciliation scope changed before durable release.");
+  }
+  for (const recordName of settled.processRecordNames) {
+    await unlink(path.join(target, recordName));
+  }
+  testHooks?.beforeProcessAnchorReleaseStage?.("directory-sync");
+  const cleared = await validateOperationLeaseDirectory(target);
+  if (
+    activeOperationLeases.get(target) !== operationId ||
+    cleared.dev !== retained.dev ||
+    cleared.ino !== retained.ino ||
+    cleared.owner?.ownerPid !== process.pid ||
+    cleared.owner.operationId !== operationId ||
+    cleared.processGroups.length !== 0 ||
+    cleared.processRecordNames.length !== 0 ||
+    cleared.supervisorPids.length !== 0
+  ) {
+    throw new Error("Command containment reconciliation scope changed after record release.");
+  }
+  await syncDirectoryForDurability(target);
+}
+
 async function removeValidatedLeaseDirectory(
   target: string,
   expected: { dev: number; ino: number },
@@ -3072,6 +3226,18 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
           ) {
             throw new Error("Durable bootstrap log identity changed before append.");
           }
+          const appendedIdentity = { dev: metadata.dev, ino: metadata.ino };
+          const assertTargetIdentity = async (): Promise<void> => {
+            const current = await lstat(target);
+            if (
+              current.isSymbolicLink() ||
+              !current.isFile() ||
+              current.dev !== appendedIdentity.dev ||
+              current.ino !== appendedIdentity.ino
+            ) {
+              throw new Error("Durable bootstrap log pathname changed before append settlement.");
+            }
+          };
           await handle.chmod(0o600);
           const encoded = Buffer.from(content, "utf8");
           const configuredChunk = options.testHooks?.appendWriteChunkBytes ?? Math.max(encoded.length, 1);
@@ -3088,13 +3254,16 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
             offset += bytesWritten;
           }
           await handle.sync();
+          options.testHooks?.beforeAppendParentSync?.(target);
+          await assertParentIdentity();
+          await assertTargetIdentity();
+          if (parentHandle) await parentHandle.sync();
+          else await syncDirectoryForDurability(canonicalParent);
+          await assertParentIdentity();
+          await assertTargetIdentity();
         } finally {
           await handle.close();
         }
-        options.testHooks?.beforeAppendParentSync?.(target);
-        await assertParentIdentity();
-        if (parentHandle) await parentHandle.sync();
-        else await syncDirectoryForDurability(canonicalParent);
       } finally {
         await parentHandle?.close();
       }
@@ -3106,6 +3275,19 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
       }
       return { dev: metadata.dev, ino: metadata.ino };
     },
+    async directoryMetadata(target): Promise<FileSystemDirectoryMetadata> {
+      const metadata = await lstat(target);
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        throw new Error("Candidate directory must be a no-follow directory.");
+      }
+      return {
+        ctimeMs: metadata.ctimeMs,
+        dev: metadata.dev,
+        ino: metadata.ino,
+        mtimeMs: metadata.mtimeMs,
+        size: metadata.size,
+      };
+    },
     ensureDurableDirectory: (target, anchor) =>
       ensureDurableDirectory(target, anchor, options, durableDirectoryStates),
     async exists(target) {
@@ -3115,6 +3297,28 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
       } catch {
         return false;
       }
+    },
+    async existsNoFollow(target) {
+      try {
+        await lstat(target);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
+    },
+    async fileIdentity(target): Promise<FileSystemFileIdentity> {
+      const metadata = await lstat(target);
+      if (metadata.isSymbolicLink() || !metadata.isFile()) {
+        throw new Error("Candidate file must be a no-follow regular file.");
+      }
+      return {
+        ctimeMs: metadata.ctimeMs,
+        dev: metadata.dev,
+        ino: metadata.ino,
+        mtimeMs: metadata.mtimeMs,
+        size: metadata.size,
+      };
     },
     async listNames(target) {
       try {

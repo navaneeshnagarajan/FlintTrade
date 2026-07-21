@@ -56,6 +56,44 @@ describe("bootstrap quit settlement", () => {
     expect(app.quit).not.toHaveBeenCalled();
   });
 
+  it("retries shutdown on a later quit request after a fail-closed attempt", async () => {
+    const app = { quit: vi.fn() };
+    const shutdown = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("containment did not settle"))
+      .mockResolvedValueOnce(undefined);
+    const gate = createBootstrapQuitGate(app, { shutdown });
+
+    await expect(gate.requestQuit()).rejects.toThrow("containment did not settle");
+    expect(app.quit).not.toHaveBeenCalled();
+
+    await expect(gate.requestQuit()).resolves.toBeUndefined();
+    expect(shutdown).toHaveBeenCalledTimes(2);
+    expect(app.quit).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the gate retryable when the application quit call throws", async () => {
+    const app = {
+      quit: vi
+        .fn<() => void>()
+        .mockImplementationOnce(() => {
+          throw new Error("Electron quit failed");
+        })
+        .mockImplementationOnce(() => undefined),
+    };
+    const shutdown = vi.fn(async () => undefined);
+    const gate = createBootstrapQuitGate(app, { shutdown });
+
+    await expect(gate.requestQuit()).rejects.toThrow("Electron quit failed");
+    const retryEvent = { preventDefault: vi.fn() };
+    gate.handleBeforeQuit(retryEvent);
+    expect(retryEvent.preventDefault).toHaveBeenCalledOnce();
+    await expect(gate.requestQuit()).resolves.toBeUndefined();
+
+    expect(shutdown).toHaveBeenCalledTimes(2);
+    expect(app.quit).toHaveBeenCalledTimes(2);
+  });
+
   it("supervises fail-closed quit requests from void startup callbacks", async () => {
     const app = { quit: vi.fn() };
     const gate = createBootstrapQuitGate(app, {

@@ -2,6 +2,13 @@
 import path from "node:path";
 
 import type { DesktopPaths } from "./paths";
+import { inspectHardenedGitCheckout } from "./git-source-inspection";
+import {
+  createSourceOperationCoordinator,
+  SourceOperationLeaseRetentionError,
+  type SourceOperationCoordinator,
+  type SourceOperationLeaseProof,
+} from "./source-operation";
 import type { BootstrapPhase, createBootstrapState } from "./state";
 
 export const BOOTSTRAP_MARKER = ".flinttrade-bootstrap-complete.json";
@@ -51,6 +58,8 @@ export interface CommandInvocation {
   command: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Set false when `env` is the complete managed child environment. */
+  inheritEnvironment?: boolean;
   onOutput?: (line: string, stream: "stdout" | "stderr") => void;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -66,7 +75,11 @@ export interface CommandResult {
   contained: boolean;
   exitCode: number;
   stderr: string;
+  /** Whether the retained stderr is only a bounded tail of the full stream. */
+  stderrTruncated: boolean;
   stdout: string;
+  /** Whether the retained stdout is only a bounded tail of the full stream. */
+  stdoutTruncated: boolean;
 }
 
 export interface DownloadPolicy {
@@ -104,6 +117,8 @@ export interface SourceTreeIdentity {
 export interface BootstrapDependencies {
   command: {
     operationLeaseTarget?: string;
+    /** Re-prove and durably clear only this process's recorded command-containment scope. */
+    reconcileOperationContainment(): Promise<void>;
     run(invocation: CommandInvocation): Promise<CommandResult>;
     windowsPowerShell?: string;
   };
@@ -123,8 +138,11 @@ export interface BootstrapDependencies {
     acquireOperationLock(request: OperationLeaseRequest): Promise<() => Promise<void>>;
     appendText(target: string, content: string): Promise<void>;
     directoryIdentity(target: string): Promise<FileSystemIdentity>;
+    directoryMetadata(target: string): Promise<FileSystemDirectoryMetadata>;
     ensureDurableDirectory(target: string, knownDurableAncestor: string): Promise<void>;
     exists(target: string): Promise<boolean>;
+    existsNoFollow(target: string): Promise<boolean>;
+    fileIdentity(target: string): Promise<FileSystemFileIdentity>;
     listNames(target: string): Promise<string[]>;
     mkdir(target: string): Promise<unknown>;
     preparePrivateTree(root: string, directories: readonly string[], files: readonly string[]): Promise<void>;
@@ -151,12 +169,15 @@ export interface BootstrapOptions {
   bootIdentity: string;
   bootstrapResources: string;
   dependencies: BootstrapDependencies;
+  expectedRevision?: string;
   heartbeatIntervalMs?: number;
   manifest: BootstrapToolManifest;
   onPromotionBoundary?: (boundary: BootstrapBoundary) => Promise<void> | void;
+  heldOperationLease?: SourceOperationLeaseProof;
   paths: DesktopPaths;
   platform: NodeJS.Platform;
   singletonAuthorised: boolean;
+  operationCoordinator?: SourceOperationCoordinator;
   repository?: {
     archiveBaseUrl: string;
     branch: string;
@@ -171,6 +192,19 @@ export interface FileSystemIdentity {
   ino: number;
 }
 
+/** Mutation-sensitive no-follow identity for security-critical directories. */
+export interface FileSystemDirectoryMetadata extends FileSystemIdentity {
+  ctimeMs: number;
+  mtimeMs: number;
+  size: number;
+}
+
+export interface FileSystemFileIdentity extends FileSystemIdentity {
+  ctimeMs: number;
+  mtimeMs: number;
+  size: number;
+}
+
 export interface OperationLeaseRequest {
   bootIdentity: string;
   ownerPid: number;
@@ -180,10 +214,12 @@ export interface OperationLeaseRequest {
 
 export interface BootstrapResult {
   cancelled?: boolean;
+  containmentFailed?: true;
   error?: string;
   ok: boolean;
   provenance?: BootstrapProvenance;
   revision?: string;
+  sourceIdentity?: FileSystemIdentity;
 }
 
 interface SourceIdentity {
@@ -273,6 +309,33 @@ export function redactBootstrapText(value: string): string {
     );
 }
 
+function replacePrivatePath(
+  value: string,
+  target: string,
+  replacement: string,
+  platform: NodeJS.Platform,
+): string {
+  const variants = [...new Set([
+    target,
+    target.replaceAll("\\", "/"),
+    target.replaceAll("/", "\\"),
+  ])].sort((left, right) => right.length - left.length);
+  return variants.reduce((current, variant) => {
+    if (!variant) return current;
+    if (platform !== "win32") return current.split(variant).join(replacement);
+    const needle = variant.toLowerCase();
+    let cursor = 0;
+    let redacted = "";
+    const lowered = current.toLowerCase();
+    for (;;) {
+      const index = lowered.indexOf(needle, cursor);
+      if (index < 0) return redacted + current.slice(cursor);
+      redacted += current.slice(cursor, index) + replacement;
+      cursor = index + variant.length;
+    }
+  }, value);
+}
+
 function requireCommit(value: string): string {
   const commit = value.trim().toLowerCase();
   if (!COMMIT_PATTERN.test(commit)) throw new Error("Source provenance did not provide a full Git commit.");
@@ -312,6 +375,9 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   if (dependencies.command.operationLeaseTarget !== operationLeaseTarget) {
     throw new Error("Bootstrap command containment must be bound to the exact source operation lease.");
   }
+  if (options.heldOperationLease && options.heldOperationLease.target !== operationLeaseTarget) {
+    throw new Error("The held source-operation lease does not match bootstrap command containment.");
+  }
   const repository =
     options.repository ??
     Object.freeze({
@@ -320,18 +386,33 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       commitMetadataUrl: MAIN_COMMIT_URL,
       gitUrl: REPOSITORY_URL,
     });
+  const expectedRevision = options.expectedRevision ? requireCommit(options.expectedRevision) : null;
+  const operationCoordinator = options.operationCoordinator ?? createSourceOperationCoordinator();
   let currentAbort: AbortController | null = null;
   let currentPromise: Promise<BootstrapResult> | null = null;
   let retryPromise: Promise<BootstrapResult> | null = null;
-  let shutdownPromise: Promise<void> | null = null;
+  let shutdownSettlement: Promise<void> | null = null;
   let shuttingDown = false;
   let containmentFailure: Error | null = null;
   let logQueue: Promise<void> = Promise.resolve();
   let pendingLeaseRelease: (() => Promise<void>) | null = null;
+  let pendingLeaseSettlement: Promise<void> | null = null;
   const logFailures = new Map<number, string>();
   const logPath = path.join(desktopPaths.logs, "desktop-bootstrap.jsonl");
   const managedUserRoot = path.join(desktopPaths.toolsRoot, "bootstrap-user");
   const managedHome = path.join(managedUserRoot, "home");
+  const privatePathReplacements = [
+    [desktopPaths.activeSource, "<active-source>"],
+    [desktopPaths.sourceRoot, "<source-root>"],
+    [desktopPaths.toolsRoot, "<tools-root>"],
+    [desktopPaths.workspace, "<workspace>"],
+    [options.bootstrapResources, "<bootstrap-resources>"],
+  ] as const;
+  const sanitise = (value: string): string => privatePathReplacements.reduce(
+    (current, [targetPath, replacement]) =>
+      replacePrivatePath(current, path.resolve(targetPath), replacement, options.platform),
+    redactBootstrapText(value),
+  );
   const managedChildEnvironment: NodeJS.ProcessEnv = Object.freeze({
     GIT_CONFIG_GLOBAL: path.join(managedUserRoot, "gitconfig"),
     GIT_CONFIG_NOSYSTEM: "1",
@@ -357,13 +438,13 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   };
 
   const queueLog = async (attempt: number, phase: BootstrapPhase, message: string): Promise<void> => {
-    const event = { attempt, at: new Date().toISOString(), message: redactBootstrapText(message), phase };
+    const event = { attempt, at: new Date().toISOString(), message: sanitise(message), phase };
     const operation = logQueue.then(async () => {
       await dependencies.fileSystem.ensureDurableDirectory(desktopPaths.logs, path.dirname(desktopPaths.workspace));
       await dependencies.fileSystem.appendText(logPath, `${JSON.stringify(event)}\n`);
     });
     logQueue = operation.catch((error) => {
-      const detail = redactBootstrapText(error instanceof Error ? error.message : String(error));
+      const detail = sanitise(error instanceof Error ? error.message : String(error));
       if (!logFailures.has(attempt)) logFailures.set(attempt, `Durable bootstrap log failed: ${detail}`);
     });
     await logQueue;
@@ -374,11 +455,21 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     if (failure) throw new Error(failure);
   };
 
-  const settlePendingLease = async (): Promise<void> => {
+  const settlePendingLease = (): Promise<void> => {
     const release = pendingLeaseRelease;
-    if (!release) return;
-    await release();
-    if (pendingLeaseRelease === release) pendingLeaseRelease = null;
+    if (!release) return Promise.resolve();
+    if (pendingLeaseSettlement) return pendingLeaseSettlement;
+    let settlement: Promise<void>;
+    settlement = Promise.resolve()
+      .then(release)
+      .then(() => {
+        if (pendingLeaseRelease === release) pendingLeaseRelease = null;
+      })
+      .finally(() => {
+        if (pendingLeaseSettlement === settlement) pendingLeaseSettlement = null;
+      });
+    pendingLeaseSettlement = settlement;
+    return settlement;
   };
 
   const publish = async (
@@ -387,7 +478,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     message: string,
     progress: number | null,
   ): Promise<void> => {
-    state.publishForAttempt(attempt, { message: redactBootstrapText(message), phase, progress });
+    state.publishForAttempt(attempt, { message: sanitise(message), phase, progress });
     await queueLog(attempt, phase, message);
     assertLogging(attempt);
   };
@@ -406,17 +497,30 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     invocation: Omit<CommandInvocation, "signal">,
   ): Promise<CommandResult> => {
     assertAttempt(attempt, signal);
-    const result = await dependencies.command.run({
-      ...invocation,
-      env: { ...invocation.env, ...managedChildEnvironment },
-      onOutput: (line, stream) => {
-        void queueLog(attempt, state.getSnapshot().phase, `${stream}: ${line}`);
-        invocation.onOutput?.(line, stream);
-      },
-      signal,
-    });
+    let result: CommandResult;
+    try {
+      result = await dependencies.command.run({
+        ...invocation,
+        env: { ...managedChildEnvironment, ...invocation.env },
+        onOutput: (line, stream) => {
+          void queueLog(attempt, state.getSnapshot().phase, `${stream}: ${line}`);
+          invocation.onOutput?.(line, stream);
+        },
+        signal,
+      });
+    } catch (error) {
+      containmentFailure ??= error instanceof SourceOperationLeaseRetentionError
+        ? error
+        : new SourceOperationLeaseRetentionError(
+            "Bootstrap command runner rejected without proving process containment; restart is blocked.",
+            { cause: error },
+          );
+      throw containmentFailure;
+    }
     if (!result.contained) {
-      containmentFailure ??= new Error("Bootstrap command process containment could not be proven; restart is blocked.");
+      containmentFailure ??= new SourceOperationLeaseRetentionError(
+        "Bootstrap command process containment could not be proven; restart is blocked.",
+      );
     }
     await logQueue;
     if (containmentFailure) throw containmentFailure;
@@ -430,7 +534,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     invocation: Omit<CommandInvocation, "signal">,
   ): Promise<CommandResult> => {
     const result = await runCommand(attempt, signal, invocation);
-    if (result.exitCode !== 0) throw new Error(redactBootstrapText(result.stderr.trim() || "A required command failed."));
+    if (result.exitCode !== 0) throw new Error(sanitise(result.stderr.trim() || "A required command failed."));
     return result;
   };
 
@@ -455,38 +559,29 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     }
   };
 
-  const readGitIdentity = async (attempt: number, signal: AbortSignal, root: string): Promise<SourceIdentity> => {
-    const head = await requiredCommand(attempt, signal, {
-      args: ["rev-parse", "HEAD"],
-      command: "git",
-      cwd: root,
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
-      timeoutMs: 15_000,
+  const readGitIdentity = async (
+    attempt: number,
+    signal: AbortSignal,
+    root: string,
+    expected?: { gitTree?: string; revision: string },
+  ): Promise<SourceIdentity> => {
+    const identity = await inspectHardenedGitCheckout({
+      bootstrapResources: options.bootstrapResources,
+      dependencies: {
+        command: { run: (invocation) => runCommand(attempt, signal, invocation) },
+        fileSystem: dependencies.fileSystem,
+      },
+      expected: {
+        branch: repository.branch,
+        origin: repository.gitUrl,
+        ...(expected ? { revision: expected.revision } : {}),
+        ...(expected?.gitTree ? { tree: expected.gitTree } : {}),
+      },
+      platform: options.platform,
+      root,
+      signal,
     });
-    const tree = await requiredCommand(attempt, signal, {
-      args: ["rev-parse", "HEAD^{tree}"],
-      command: "git",
-      cwd: root,
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
-      timeoutMs: 15_000,
-    });
-    const remote = await requiredCommand(attempt, signal, {
-      args: ["remote", "get-url", "origin"],
-      command: "git",
-      cwd: root,
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
-      timeoutMs: 15_000,
-    });
-    const status = await requiredCommand(attempt, signal, {
-      args: ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"],
-      command: "git",
-      cwd: root,
-      env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
-      timeoutMs: 30_000,
-    });
-    if (remote.stdout.trim() !== repository.gitUrl) throw new Error("Git provenance validation rejected the origin URL.");
-    if (status.stdout !== "") throw new Error("The Git candidate has tracked, index or untracked changes after its build.");
-    return { gitTree: requireCommit(tree.stdout), provenance: "git", revision: requireCommit(head.stdout) };
+    return { gitTree: identity.tree, provenance: "git", revision: identity.revision };
   };
 
   const validateExistingMarker = async (): Promise<SourceIdentity | null> => {
@@ -560,14 +655,22 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     signal: AbortSignal,
     candidate: string,
   ): Promise<SourceIdentity> => {
-    await publish(attempt, "cloning-source", "Resolving the public main archive", 12);
-    const metadataReceipt = await dependencies.download.text(
-      repository.commitMetadataUrl,
-      signal,
-      metadataPolicy,
+    await publish(
+      attempt,
+      "cloning-source",
+      expectedRevision ? "Acquiring the exact source archive" : "Resolving the public main archive",
+      12,
     );
-    const metadata = JSON.parse(metadataReceipt.content) as { sha?: unknown };
-    const revision = requireCommit(typeof metadata.sha === "string" ? metadata.sha : "");
+    let revision = expectedRevision;
+    if (!revision) {
+      const metadataReceipt = await dependencies.download.text(
+        repository.commitMetadataUrl,
+        signal,
+        metadataPolicy,
+      );
+      const metadata = JSON.parse(metadataReceipt.content) as { sha?: unknown };
+      revision = requireCommit(typeof metadata.sha === "string" ? metadata.sha : "");
+    }
     assertAttempt(attempt, signal);
     const downloadDirectory = path.join(desktopPaths.sourceRoot, ".downloads");
     const archive = path.join(downloadDirectory, `FlintTrade-${revision}.zip`);
@@ -636,8 +739,30 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       await dependencies.fileSystem.remove(candidate);
       return acquireArchive(attempt, signal, candidate);
     }
+    if (expectedRevision) {
+      const checkout = await runCommand(attempt, signal, {
+        args: ["checkout", "--detach", expectedRevision],
+        command: "git",
+        cwd: candidate,
+        env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+        timeoutMs: 5 * 60_000,
+      });
+      if (checkout.exitCode !== 0) {
+        await dependencies.fileSystem.remove(candidate);
+        return acquireArchive(attempt, signal, candidate);
+      }
+    }
     await validateRepositoryShape(candidate);
-    return await readGitIdentity(attempt, signal, candidate);
+    const identity = await readGitIdentity(
+      attempt,
+      signal,
+      candidate,
+      expectedRevision ? { revision: expectedRevision } : undefined,
+    );
+    if (expectedRevision && identity.revision !== expectedRevision) {
+      throw new Error("Cloned source does not match the requested update revision.");
+    }
+    return identity;
   };
 
   const installTool = async (
@@ -806,7 +931,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       if (!match) return;
       const phase = match[1] as BootstrapPhase;
       if (!["syncing-python", "syncing-javascript", "building-terminal"].includes(phase)) return;
-      state.publishForAttempt(attempt, { message: redactBootstrapText(match[3]!), phase, progress: Number(match[2]) });
+      state.publishForAttempt(attempt, { message: sanitise(match[3]!), phase, progress: Number(match[2]) });
     };
     await publish(attempt, "syncing-python", "Starting the packaged source build", 44);
     const common = [candidate, tools.uv, tools.node, tools.corepackJs, desktopPaths.toolsRoot, manifest.pnpm.version];
@@ -905,7 +1030,10 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     allowedGeneratedFiles: readonly string[] = [],
   ): Promise<SourceIdentity> => {
     if (identity.provenance === "git") {
-      const built = await readGitIdentity(attempt, signal, candidate);
+      const built = await readGitIdentity(attempt, signal, candidate, {
+        ...(identity.gitTree ? { gitTree: identity.gitTree } : {}),
+        revision: identity.revision,
+      });
       if (built.revision !== identity.revision || built.gitTree !== identity.gitTree) {
         throw new Error("Built Git commit or source tree changed before promotion.");
       }
@@ -962,6 +1090,8 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
 
   const executeAttempt = async (attempt: number, signal: AbortSignal): Promise<BootstrapResult> => {
     const candidate = `${desktopPaths.activeSource}.candidate-${attempt}`;
+    await options.heldOperationLease?.assertHeld();
+    assertAttempt(attempt, signal);
     await queueLog(attempt, "preparing", "Starting first-run source bootstrap");
     assertLogging(attempt);
     await dependencies.fileSystem.mkdir(desktopPaths.sourceRoot);
@@ -980,26 +1110,36 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       [],
     );
     await prepareManagedUserEnvironment();
-    await settlePendingLease();
-    const releaseLock = await dependencies.fileSystem.acquireOperationLock({
-      bootIdentity: options.bootIdentity,
-      ownerPid: process.pid,
-      singletonAuthorised: options.singletonAuthorised,
-      target: operationLeaseTarget,
-    });
-    pendingLeaseRelease = releaseLock;
+    if (!options.heldOperationLease) {
+      await settlePendingLease();
+      const releaseLock = await dependencies.fileSystem.acquireOperationLock({
+        bootIdentity: options.bootIdentity,
+        ownerPid: process.pid,
+        singletonAuthorised: options.singletonAuthorised,
+        target: operationLeaseTarget,
+      });
+      pendingLeaseRelease = releaseLock;
+    }
     try {
       const existing = await validateExistingMarker();
       if (existing) {
         await validateRepositoryShape(desktopPaths.activeSource);
         if (existing.provenance === "git") {
-          const actual = await readGitIdentity(attempt, signal, desktopPaths.activeSource);
+          const actual = await readGitIdentity(attempt, signal, desktopPaths.activeSource, {
+            ...(existing.gitTree ? { gitTree: existing.gitTree } : {}),
+            revision: existing.revision,
+          });
           if (actual.revision !== existing.revision || actual.gitTree !== existing.gitTree) {
             throw new Error("The active Git checkout does not match its bootstrap provenance marker.");
           }
         }
         await verifyRelocatableVirtualEnvironment(attempt, signal, desktopPaths.activeSource);
-        return { ok: true, provenance: existing.provenance, revision: existing.revision };
+        return {
+          ok: true,
+          provenance: existing.provenance,
+          revision: existing.revision,
+          sourceIdentity: await dependencies.fileSystem.directoryIdentity(desktopPaths.activeSource),
+        };
       }
       await removeStrictStaleArtifacts();
       assertAttempt(attempt, signal);
@@ -1077,9 +1217,14 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       await options.onPromotionBoundary?.("after-rename");
       assertAttempt(attempt, signal);
       await verifyRelocatableVirtualEnvironment(attempt, signal, desktopPaths.activeSource);
-      return { ok: true, provenance: identity.provenance, revision: identity.revision };
+      return {
+        ok: true,
+        provenance: identity.provenance,
+        revision: identity.revision,
+        sourceIdentity: candidateIdentity,
+      };
     } finally {
-      if (!containmentFailure) await settlePendingLease();
+      if (!options.heldOperationLease && !containmentFailure) await settlePendingLease();
     }
   };
 
@@ -1109,12 +1254,17 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
         (signal.aborted ||
           snapshot.attempt !== attempt ||
           (snapshot.attempt === attempt && snapshot.phase === "cancelled" && snapshot.status === "failed"));
-      const message = redactBootstrapText(error instanceof Error ? error.message : String(error));
+      const message = sanitise(error instanceof Error ? error.message : String(error));
       if (containmentFailure) state.failClosed(attempt, containmentFailure.message);
       else if (cancelled) state.cancel(attempt);
       else state.fail(attempt, message);
       await queueLog(attempt, cancelled ? "cancelled" : "failed", message);
-      return { cancelled, error: message, ok: false };
+      return {
+        cancelled,
+        ...(containmentFailure ? { containmentFailed: true as const } : {}),
+        error: message,
+        ok: false,
+      };
     } finally {
       clearInterval(heartbeat);
     }
@@ -1123,11 +1273,11 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const launch = (attempt: number): Promise<BootstrapResult> => {
     const abort = new AbortController();
     currentAbort = abort;
-    const promise = runAttempt(attempt, abort.signal).catch((error) => {
-      const message = redactBootstrapText(error instanceof Error ? error.message : String(error));
-      state.fail(attempt, message);
-      return { error: message, ok: false };
-    });
+    const promise = operationCoordinator.run("bootstrap", abort.signal, (signal) => runAttempt(attempt, signal)).catch((error) => {
+        const message = sanitise(error instanceof Error ? error.message : String(error));
+        state.fail(attempt, message);
+        return { error: message, ok: false };
+      });
     currentPromise = promise;
     const clear = () => {
       if (currentPromise === promise) {
@@ -1151,6 +1301,7 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
 
   const shutdownResult = (): BootstrapResult => ({ error: "Bootstrap is shutting down.", ok: false });
   const containmentFailureResult = (): BootstrapResult => ({
+    containmentFailed: true,
     error: containmentFailure?.message ?? "Bootstrap command process containment could not be proven; restart is blocked.",
     ok: false,
   });
@@ -1177,25 +1328,30 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       return scheduled;
     },
     async shutdown(timeoutMs = 10_000): Promise<void> {
-      if (shutdownPromise) return shutdownPromise;
-      shuttingDown = true;
-      currentAbort?.abort();
-      const attempt = state.getSnapshot().attempt;
-      state.cancel(attempt);
+      if (!shutdownSettlement) {
+        shuttingDown = true;
+        currentAbort?.abort();
+        const attempt = state.getSnapshot().attempt;
+        state.cancel(attempt);
+        shutdownSettlement = (async () => {
+          while (currentPromise || retryPromise) {
+            const pending = [currentPromise, retryPromise].filter(
+              (promise): promise is Promise<BootstrapResult> => promise !== null,
+            );
+            if (pending.length === 0) break;
+            await Promise.allSettled(pending);
+          }
+          await logQueue;
+        })();
+      }
       const settlement = (async () => {
-        while (currentPromise || retryPromise) {
-          const pending = [currentPromise, retryPromise].filter(
-            (promise): promise is Promise<BootstrapResult> => promise !== null,
-          );
-          if (pending.length === 0) break;
-          await Promise.allSettled(pending);
-        }
+        await Promise.all([shutdownSettlement, operationCoordinator.shutdown(timeoutMs)]);
         if (!containmentFailure) await settlePendingLease();
         await logQueue;
         if (containmentFailure) throw containmentFailure;
       })();
       let timeout: NodeJS.Timeout | undefined;
-      shutdownPromise = Promise.race([
+      return Promise.race([
         settlement,
         new Promise<never>((_resolve, reject) => {
           timeout = setTimeout(() => reject(new Error("Bootstrap process containment did not settle before quit.")), timeoutMs);
@@ -1203,7 +1359,6 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       ]).finally(() => {
         if (timeout) clearTimeout(timeout);
       });
-      return shutdownPromise;
     },
     start(): Promise<BootstrapResult> {
       if (shuttingDown) return Promise.resolve(shutdownResult());

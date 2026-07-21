@@ -83,10 +83,13 @@ for (const resource of [
   "tool-manifest.json",
   "flinttrade-bootstrap.sh",
   "flinttrade-bootstrap.ps1",
+  "flinttrade-safe-rmtree.py",
   "checksums/node-v22.23.1-SHASUMS256.txt",
   "checksums/node-v22.23.1-SHASUMS256.txt.sig",
   "checksums/node-release-rafael-gonzaga.asc",
   "checksums/uv-0.11.16-sha256.sum",
+  "git-common/objects/.flinttrade-empty",
+  "git-common/refs/.flinttrade-empty",
 ]) {
   const packaged = readFileSync(path.join(resourcesDirectory, "bootstrap", resource));
   const source = readFileSync(path.join(packageRoot, "resources", "bootstrap", resource));

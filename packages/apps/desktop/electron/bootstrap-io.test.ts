@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, renameSync, symlinkSync, truncateSync } from "node:fs";
+import { mkdirSync, renameSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { access, appendFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import https from "node:https";
 import { EventEmitter, once } from "node:events";
@@ -138,6 +138,75 @@ describe("bootstrap system boundaries", () => {
     expect(JSON.stringify(environment)).not.toContain("canary");
   });
 
+  it("admits candidate-health isolation only from explicit managed overrides", () => {
+    const environment = minimalChildEnvironment(
+      {
+        FLINTTRADE_DESKTOP: "1",
+        FLINTTRADE_FRONTEND_DIST: "/candidate/terminal/dist",
+        FLINTTRADE_HOME: "/isolated/flinttrade-home",
+        FLINTTRADE_WORKSPACE_DIR: "/isolated/workspace",
+        HOME: "/isolated/home",
+        PYTHONNOUSERSITE: "1",
+      },
+      {
+        FLINTTRADE_HOME: "/inherited-canary",
+        FLINTTRADE_WORKSPACE_DIR: "/inherited-workspace-canary",
+        OPENAI_API_KEY: "secret-canary",
+      },
+    );
+
+    expect(environment).toEqual({
+      FLINTTRADE_DESKTOP: "1",
+      FLINTTRADE_FRONTEND_DIST: "/candidate/terminal/dist",
+      FLINTTRADE_HOME: "/isolated/flinttrade-home",
+      FLINTTRADE_WORKSPACE_DIR: "/isolated/workspace",
+      HOME: "/isolated/home",
+      PYTHONNOUSERSITE: "1",
+    });
+    expect(JSON.stringify(environment)).not.toContain("canary");
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "runs an exact managed child environment without inherited profile or proxy credentials",
+    async () => {
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        environment: {
+          HTTPS_PROXY: "https://user:proxy-canary@example.invalid",
+          PATH: process.env.PATH,
+          USERPROFILE: "/real/profile-canary",
+        },
+      });
+      const result = await dependencies.command.run({
+        args: [
+          "-e",
+          "process.stdout.write(JSON.stringify({home:process.env.HOME,proxy:process.env.HTTPS_PROXY,profile:process.env.USERPROFILE}))",
+        ],
+        command: process.execPath,
+        env: { HOME: "/isolated/home", PYTHONNOUSERSITE: "1" },
+        inheritEnvironment: false,
+        timeoutMs: 5_000,
+      });
+
+      expect(result).toMatchObject({ contained: true, exitCode: 0 });
+      expect(JSON.parse(result.stdout)).toEqual({ home: "/isolated/home" });
+      expect(result.stdout).not.toContain("canary");
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "distinguishes a dangling no-follow path from an access-visible path",
+    async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-no-follow-exists-"));
+    roots.push(root);
+    const dangling = path.join(root, ".env");
+    await symlink(path.join(root, "missing-secret-file"), dangling);
+    const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+
+    await expect(fileSystem.exists(dangling)).resolves.toBe(false);
+    await expect(fileSystem.existsNoFollow(dangling)).resolves.toBe(true);
+    },
+  );
+
   it("normalises Windows environment keys case-insensitively into one deterministic spelling", () => {
     const environment = (minimalChildEnvironment as unknown as (
       overrides: NodeJS.ProcessEnv,
@@ -181,6 +250,36 @@ describe("bootstrap system boundaries", () => {
     expect(environment).toEqual({
       COREPACK_HOME: "C:\\managed\\corepack",
       FLINTTRADE_BOOTSTRAP_NODE: "C:\\managed\\node.exe",
+    });
+    expect(JSON.stringify(environment)).not.toContain("canary");
+  });
+
+  it("normalises explicit Windows candidate-health isolation overrides", () => {
+    const environment = (minimalChildEnvironment as unknown as (
+      overrides: NodeJS.ProcessEnv,
+      inherited: NodeJS.ProcessEnv,
+      platform: NodeJS.Platform,
+    ) => NodeJS.ProcessEnv)(
+      {
+        flinttrade_desktop: "1",
+        flinttrade_frontend_dist: "C:\\Candidate\\terminal\\dist",
+        flinttrade_home: "C:\\Isolated\\home",
+        flinttrade_workspace_dir: "C:\\Isolated\\workspace",
+        pythonnousersite: "1",
+      },
+      {
+        FLINTTRADE_HOME: "C:\\inherited-canary",
+        PYTHONNOUSERSITE: "inherited-canary",
+      },
+      "win32",
+    );
+
+    expect(environment).toEqual({
+      FLINTTRADE_DESKTOP: "1",
+      FLINTTRADE_FRONTEND_DIST: "C:\\Candidate\\terminal\\dist",
+      FLINTTRADE_HOME: "C:\\Isolated\\home",
+      FLINTTRADE_WORKSPACE_DIR: "C:\\Isolated\\workspace",
+      PYTHONNOUSERSITE: "1",
     });
     expect(JSON.stringify(environment)).not.toContain("canary");
   });
@@ -237,9 +336,17 @@ describe("bootstrap system boundaries", () => {
       `target error\n\nFLINTTRADE_JOB_SUPERVISOR\t1\t${token}\tsettled\t${reason}\t${leaderExit}\t0\n`,
       token,
       helperExit,
+      false,
     );
 
     expect(parsed).toEqual({ contained: true, exitCode: helperExit, stderr: "target error\n" });
+  });
+
+  it("rejects an otherwise exact Windows settlement proof when stderr was truncated", () => {
+    const token = "ab".repeat(16);
+    const stderr = `FLINTTRADE_JOB_SUPERVISOR\t1\t${token}\tsettled\tnatural\t0\t0\n`;
+
+    expect(parseWindowsSupervisorProof(stderr, token, 0, true).contained).toBe(false);
   });
 
   it("rejects missing, duplicate, malformed, token-mismatched and exit-inconsistent Windows proofs", () => {
@@ -253,7 +360,7 @@ describe("bootstrap system boundaries", () => {
       [`${proof.replace("\t0\t0", "\t0\t1")}\n`, 0],
       [`${proof}\n`, 1],
     ] as const) {
-      expect(parseWindowsSupervisorProof(stderr, token, exitCode).contained).toBe(false);
+      expect(parseWindowsSupervisorProof(stderr, token, exitCode, false).contained).toBe(false);
     }
   });
 
@@ -305,7 +412,9 @@ describe("bootstrap system boundaries", () => {
       contained: true,
       exitCode: 127,
       stderr: "Verified Windows Job supervisor is unavailable.",
+      stderrTruncated: false,
       stdout: "",
+      stdoutTruncated: false,
     });
   });
 
@@ -324,7 +433,9 @@ describe("bootstrap system boundaries", () => {
       contained: true,
       exitCode: 127,
       stderr: "Windows bootstrap target is not a trusted absolute executable.",
+      stderrTruncated: false,
       stdout: "",
+      stdoutTruncated: false,
     });
   });
 
@@ -682,7 +793,14 @@ describe("bootstrap system boundaries", () => {
       timeoutMs: 5_000,
     });
 
-    expect(result).toEqual({ contained: true, exitCode: 0, stderr: "", stdout: "probe-ok" });
+    expect(result).toEqual({
+      contained: true,
+      exitCode: 0,
+      stderr: "",
+      stderrTruncated: false,
+      stdout: "probe-ok",
+      stdoutTruncated: false,
+    });
   });
 
   it.runIf(process.platform !== "win32")(
@@ -706,6 +824,15 @@ describe("bootstrap system boundaries", () => {
       await releaseLease();
     },
   );
+
+  it("refuses containment reconciliation without an active same-process lease", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-command-reproof-owner-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    const dependencies = createNodeBootstrapDependencies(process.platform, { operationLeaseTarget: target });
+
+    await expect(dependencies.command.reconcileOperationContainment()).rejects.toThrow(/active same-process/i);
+  });
 
   it.runIf(process.platform !== "win32")(
     "retries a transient directory-sync failure after removing the process-anchor record",
@@ -740,19 +867,30 @@ describe("bootstrap system boundaries", () => {
     },
   );
 
-  it("bounds unterminated output tails before result and durable-output callbacks", async () => {
-    const output: string[] = [];
+  it("bounds unterminated output tails and reports both streams as truncated", async () => {
+    const output: Array<{ line: string; stream: "stderr" | "stdout" }> = [];
     const result = await createNodeBootstrapDependencies(process.platform).command.run({
-      args: ["-e", "process.stdout.write('x'.repeat(512*1024))"],
+      args: [
+        "-e",
+        "process.stdout.write('x'.repeat(512*1024));process.stderr.write('y'.repeat(512*1024))",
+      ],
       command: process.execPath,
-      onOutput: (line) => output.push(line),
+      onOutput: (line, stream) => output.push({ line, stream }),
       timeoutMs: 5_000,
     });
 
-    expect(result).toMatchObject({ contained: true, exitCode: 0 });
+    expect(result).toMatchObject({
+      contained: true,
+      exitCode: 0,
+      stderrTruncated: true,
+      stdoutTruncated: true,
+    });
     expect(result.stdout).toHaveLength(256 * 1024);
-    expect(output).toHaveLength(1);
-    expect(output[0]).toHaveLength(256 * 1024);
+    expect(result.stderr).toHaveLength(256 * 1024);
+    expect(output).toEqual(expect.arrayContaining([
+      { line: "x".repeat(256 * 1024), stream: "stdout" },
+      { line: "y".repeat(256 * 1024), stream: "stderr" },
+    ]));
   });
 
   it("bounds cancellation of a child command", async () => {
@@ -899,15 +1037,17 @@ describe("bootstrap system boundaries", () => {
   );
 
   it.runIf(process.platform !== "win32")(
-    "retains the durable record when forced token enumeration cannot prove escaped-child containment",
+    "retains the durable record until a later same-process containment re-proof succeeds",
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-forced-token-failure-"));
       roots.push(root);
       const marker = path.join(root, "detached-descendant-survived");
       const leaseTarget = path.join(root, ".flinttrade-bootstrap-operation.lock");
+      const enumerator = path.join(root, "recoverable-ps");
+      await writeFile(enumerator, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
       const dependencies = createNodeBootstrapDependencies(process.platform, {
         operationLeaseTarget: leaseTarget,
-        posixProcessEnumerators: ["/usr/bin/false"],
+        posixProcessEnumerators: [enumerator],
       });
       const releaseLease = await dependencies.fileSystem.acquireOperationLock({
         bootIdentity: "forced-token-failure-test",
@@ -944,7 +1084,16 @@ describe("bootstrap system boundaries", () => {
           "owner.json",
           expect.stringMatching(/^process-group-[1-9][0-9]*\.json$/),
         ]);
+        await expect(dependencies.command.reconcileOperationContainment()).rejects.toThrow(/enumeration.*unavailable/i);
         await expect(releaseLease()).rejects.toThrow(/lease identity changed/i);
+        await writeFile(
+          enumerator,
+          "#!/bin/sh\nif [ -x /bin/ps ]; then exec /bin/ps \"$@\"; fi\nexec /usr/bin/ps \"$@\"\n",
+          { mode: 0o700 },
+        );
+        await expect(dependencies.command.reconcileOperationContainment()).resolves.toBeUndefined();
+        expect(await dependencies.fileSystem.listNames(leaseTarget)).toEqual(["owner.json"]);
+        await expect(releaseLease()).resolves.toBeUndefined();
       } finally {
         if (escapedPid > 0) {
           try {
@@ -1658,6 +1807,26 @@ describe("bootstrap system boundaries", () => {
     await expect(dependencies.fileSystem.appendText(log, "event\n")).rejects.toThrow("parent directory sync failed");
     expect(await readFile(log, "utf8")).toBe("event\n");
     expect(beforeParentSync).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a durable append when the canonical log name is replaced after file sync", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-log-post-sync-race-"));
+    roots.push(root);
+    const log = path.join(root, "bootstrap.jsonl");
+    const displaced = path.join(root, "bootstrap.displaced.jsonl");
+    await writeFile(log, "old\n");
+    const dependencies = createNodeBootstrapDependencies(process.platform, {
+      testHooks: {
+        beforeAppendParentSync(target) {
+          renameSync(target, displaced);
+          writeFileSync(target, "replacement\n", { flag: "wx", mode: 0o600 });
+        },
+      },
+    });
+
+    await expect(dependencies.fileSystem.appendText(log, "terminal\n")).rejects.toThrow(/pathname changed/i);
+    expect(await readFile(log, "utf8")).toBe("replacement\n");
+    expect(await readFile(displaced, "utf8")).toBe("old\nterminal\n");
   });
 
   it("creates and syncs an absent durable-log directory chain in dependency order", async () => {

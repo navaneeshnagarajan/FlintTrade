@@ -105,9 +105,66 @@ describe("update state", () => {
     const source = createUpdateState("source");
     const shell = createUpdateState("shell");
 
-    source.publish({ status: "available", version: "main@abc123" });
+    const attempt = source.begin("checking", "Checking source updates");
+    expect(source.available(attempt, "main@abc123")).toBe(true);
 
-    expect(source.getSnapshot()).toMatchObject({ kind: "source", status: "available", version: "main@abc123" });
-    expect(shell.getSnapshot()).toMatchObject({ kind: "shell", status: "idle", version: null });
+    expect(source.getSnapshot()).toMatchObject({
+      attempt: 1,
+      kind: "source",
+      status: "available",
+      version: "main@abc123",
+    });
+    expect(shell.getSnapshot()).toMatchObject({ attempt: 0, kind: "shell", status: "idle", version: null });
+  });
+
+  it("rejects stale workers after a newer update attempt begins", () => {
+    const store = createUpdateState("source");
+    const firstAttempt = store.begin("checking", "Checking source updates");
+    expect(store.publishForAttempt(firstAttempt, { message: "Resolving revision", progress: 20 })).toBe(true);
+
+    const secondAttempt = store.begin("applying", "Applying source update", "main@def456");
+    expect(secondAttempt).toBe(2);
+    expect(store.available(firstAttempt, "main@abc123")).toBe(false);
+    expect(store.fail(firstAttempt, "stale failure")).toBe(false);
+    expect(store.getSnapshot()).toMatchObject({
+      attempt: secondAttempt,
+      message: "Applying source update",
+      status: "applying",
+      version: "main@def456",
+    });
+  });
+
+  it("keeps terminal update states immutable for the same attempt", () => {
+    const store = createUpdateState("source");
+    const attempt = store.begin("applying", "Applying source update", "main@abc123");
+
+    expect(store.complete(attempt, "Source update installed")).toBe(true);
+    const completed = store.getSnapshot();
+    expect(completed).toMatchObject({ progress: 100, status: "complete", version: "main@abc123" });
+    expect(store.publishForAttempt(attempt, { message: "late progress", progress: 90 })).toBe(false);
+    expect(store.fail(attempt, "late failure")).toBe(false);
+    expect(store.getSnapshot()).toBe(completed);
+  });
+
+  it("publishes attempt-bound unavailable and failure results", () => {
+    const unavailableStore = createUpdateState("shell");
+    const unavailableAttempt = unavailableStore.begin("checking", "Checking Electron shell updates");
+    expect(unavailableStore.unavailable(unavailableAttempt, "No shell update is available")).toBe(true);
+    expect(unavailableStore.getSnapshot()).toMatchObject({
+      failure: null,
+      message: "No shell update is available",
+      progress: null,
+      status: "unavailable",
+      version: null,
+    });
+
+    const failedStore = createUpdateState("source");
+    const failedAttempt = failedStore.begin("checking", "Checking source updates");
+    expect(failedStore.fail(failedAttempt, "Source provenance could not be verified")).toBe(true);
+    expect(failedStore.getSnapshot()).toMatchObject({
+      failure: "Source provenance could not be verified",
+      message: "Source provenance could not be verified",
+      status: "failed",
+    });
   });
 });

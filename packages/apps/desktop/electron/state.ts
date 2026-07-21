@@ -25,9 +25,12 @@ export interface BootstrapSnapshot {
 
 export type UpdateKind = "source" | "shell";
 export type UpdateStatus = "idle" | "checking" | "unavailable" | "available" | "applying" | "complete" | "failed";
+export type ActiveUpdateStatus = Extract<UpdateStatus, "checking" | "applying">;
 
 export interface UpdateSnapshot {
+  attempt: number;
   failure: string | null;
+  heartbeatAt: number;
   kind: UpdateKind;
   message: string;
   progress: number | null;
@@ -170,18 +173,89 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
 
 export function createUpdateState(kind: UpdateKind) {
   const state = createSnapshotStore<UpdateSnapshot>({
+    attempt: 0,
     failure: null,
+    heartbeatAt: Date.now(),
     kind,
     message: "No update check has run",
     progress: null,
     status: "idle",
     version: null,
   });
+
+  const publishForAttempt = (
+    attempt: number,
+    patch: Partial<Pick<UpdateSnapshot, "message" | "progress" | "version">>,
+  ): boolean => {
+    const current = state.getSnapshot();
+    if (attempt !== current.attempt || (current.status !== "checking" && current.status !== "applying")) {
+      return false;
+    }
+    state.publish({ ...patch, heartbeatAt: Date.now() });
+    return true;
+  };
+
+  const finishAttempt = (
+    attempt: number,
+    patch: Partial<Omit<UpdateSnapshot, "attempt" | "heartbeatAt" | "kind">>,
+  ): boolean => {
+    const current = state.getSnapshot();
+    if (attempt !== current.attempt || (current.status !== "checking" && current.status !== "applying")) {
+      return false;
+    }
+    state.publish({ ...patch, heartbeatAt: Date.now() });
+    return true;
+  };
+
   return {
     getSnapshot: state.getSnapshot,
     subscribe: state.subscribe,
-    publish(patch: Partial<Omit<UpdateSnapshot, "kind">>): Readonly<UpdateSnapshot> {
-      return state.publish(patch);
+    available(attempt: number, version: string, message = "Update available"): boolean {
+      return finishAttempt(attempt, {
+        failure: null,
+        message,
+        progress: null,
+        status: "available",
+        version,
+      });
+    },
+    begin(status: ActiveUpdateStatus, message: string, version: string | null = null): number {
+      const attempt = state.getSnapshot().attempt + 1;
+      state.publish({
+        attempt,
+        failure: null,
+        heartbeatAt: Date.now(),
+        message,
+        progress: status === "applying" ? 0 : null,
+        status,
+        version,
+      });
+      return attempt;
+    },
+    complete(attempt: number, message = "Update complete"): boolean {
+      return finishAttempt(attempt, {
+        failure: null,
+        message,
+        progress: 100,
+        status: "complete",
+      });
+    },
+    fail(attempt: number, failure: string): boolean {
+      return finishAttempt(attempt, {
+        failure,
+        message: failure,
+        status: "failed",
+      });
+    },
+    publishForAttempt,
+    unavailable(attempt: number, message: string): boolean {
+      return finishAttempt(attempt, {
+        failure: null,
+        message,
+        progress: null,
+        status: "unavailable",
+        version: null,
+      });
     },
   };
 }

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,20 @@ const windowsSupervisorBuilder = path.resolve(
 const desktopPackage = path.resolve(import.meta.dirname, "..", "package.json");
 
 describe("packaged bootstrap entrypoints", () => {
+  it("ships an inert exact Git common-directory scaffold", () => {
+    const common = path.join(resourceRoot, "git-common");
+    expect(readdirSync(common).sort()).toEqual(["objects", "refs"]);
+    for (const [directory, content] of [
+      ["objects", "FlintTrade hardened Git object-directory sentinel.\n"],
+      ["refs", "FlintTrade hardened Git ref-directory sentinel.\n"],
+    ] as const) {
+      const target = path.join(common, directory);
+      expect(lstatSync(target).isDirectory()).toBe(true);
+      expect(readdirSync(target)).toEqual([".flinttrade-empty"]);
+      expect(readFileSync(path.join(target, ".flinttrade-empty"), "utf8")).toBe(content);
+    }
+  });
+
   it.runIf(process.platform !== "win32")("passes the system POSIX shell syntax check", () => {
     expect(() => execFileSync("sh", ["-n", posixScript])).not.toThrow();
   });

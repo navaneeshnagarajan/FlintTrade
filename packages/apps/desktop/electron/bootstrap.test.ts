@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -32,6 +32,7 @@ import {
 } from "./bootstrap";
 import { createNodeBootstrapDependencies } from "./bootstrap-io";
 import { createBootstrapQuitGate } from "./bootstrap-shutdown";
+import { SourceOperationLeaseRetentionError } from "./source-operation";
 import { createBootstrapState } from "./state";
 
 const revision = "a".repeat(40);
@@ -101,9 +102,26 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
-async function writeRepositoryShape(root: string, git: boolean): Promise<void> {
+async function writeRepositoryShape(
+  root: string,
+  git: boolean,
+  platform: "darwin" | "win32" = "darwin",
+  origin = "https://github.com/navaneeshnagarajan/FlintTrade.git",
+): Promise<void> {
   await mkdir(path.join(root, "packages", "apps", "terminal"), { recursive: true });
-  if (git) await mkdir(path.join(root, ".git"), { recursive: true });
+  if (git) {
+    const gitDirectory = path.join(root, ".git");
+    await mkdir(path.join(gitDirectory, "info"), { recursive: true });
+    await mkdir(path.join(gitDirectory, "objects", "info"), { recursive: true });
+    await mkdir(path.join(gitDirectory, "refs", "heads"), { recursive: true });
+    await writeFile(path.join(gitDirectory, "HEAD"), "ref: refs/heads/main\n");
+    await writeFile(path.join(gitDirectory, "refs", "heads", "main"), `${revision}\n`);
+    await writeFile(path.join(gitDirectory, "index"), "fixture-index\n");
+    await writeFile(
+      path.join(gitDirectory, "config"),
+      `[core]\n\trepositoryformatversion = 0\n\tfilemode = ${platform !== "win32"}\n\tbare = false\n\tlogallrefupdates = true\n[remote "origin"]\n\turl = ${origin}\n\tfetch = +refs/heads/main:refs/remotes/origin/main\n\ttagOpt = --no-tags\n[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n`,
+    );
+  }
   await writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@9.15.0+sha512.test" }),
@@ -313,13 +331,18 @@ interface FixtureOptions {
   badArchiveShape?: boolean;
   badUvChecksum?: boolean;
   boundary?: BootstrapBoundary;
+  commandRejection?: "git-probe";
   destinationAppearance?: "empty-directory" | "file" | "non-empty-directory" | "symlink";
+  expectedRevision?: string;
   finalLogFailure?: "once" | "permanent";
   gitAvailable?: boolean;
+  realGitInspection?: boolean;
   gitOrigin?: string;
+  realGitSwapFilter?: boolean;
   holdPythonSync?: boolean;
   holdLockRelease?: boolean;
   logFailure?: "permanent" | "transient";
+  metadataRevision?: string;
   nonIgnoredUntracked?: boolean;
   outputLogFailure?: boolean;
   outputSecrets?: boolean;
@@ -355,6 +378,8 @@ async function fixture(options: FixtureOptions = {}) {
   let appendFailures = 0;
   let outputLogFailed = false;
   let buildMutated = false;
+  const gitExploitFilter = path.join(root, "bootstrap-swap-filter.sh");
+  const gitExploitCanary = `${gitExploitFilter}.called`;
   let finalLogFailures = 0;
   let releaseFailures = 0;
   let realReleaseFailures = 0;
@@ -365,6 +390,7 @@ async function fixture(options: FixtureOptions = {}) {
     markArchiveExtractionStarted = resolve;
   });
   const platform = options.platform ?? "darwin";
+  const useRealGitInspection = options.realGitInspection === true || options.realGitSwapFilter === true;
   const target = platform === "win32" ? "win32-x64" : "darwin-arm64";
   const nodeDependencies = createNodeBootstrapDependencies(platform, {
     operationLeaseTarget: path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock"),
@@ -394,37 +420,136 @@ async function fixture(options: FixtureOptions = {}) {
   const dependencies: BootstrapDependencies = {
     command: {
       operationLeaseTarget: path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock"),
+      reconcileOperationContainment: nodeDependencies.command.reconcileOperationContainment,
       ...(platform === "win32"
         ? { windowsPowerShell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" }
         : {}),
       async run(invocation) {
+        const result = await (async () => {
         calls.push(invocation);
         if (invocation.command === "git" && invocation.args[0] === "--version") {
+          if (options.commandRejection === "git-probe") {
+            throw new Error("command runner rejected without a containment result");
+          }
           return options.gitAvailable === false
             ? { contained: true, exitCode: 127, stderr: "git missing", stdout: "" }
             : { contained: true, exitCode: 0, stderr: "", stdout: "git version 2.50.1\n" };
         }
         if (invocation.command === "git" && invocation.args[0] === "clone") {
-          await writeRepositoryShape(invocation.args.at(-1)!, true);
+          const candidate = invocation.args.at(-1)!;
+          if (useRealGitInspection) {
+            await writeRepositoryShape(candidate, false, platform);
+            await writeFile(path.join(candidate, ".gitignore"), ".venv/\nnode_modules/\n");
+            if (options.realGitSwapFilter) {
+              await writeFile(path.join(candidate, ".gitattributes"), "uv.lock filter=swapped\n");
+            }
+            const run = (args: string[]): void => {
+              const result = spawnSync("git", args, {
+                cwd: candidate,
+                encoding: "utf8",
+                env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+              });
+              if (result.error) throw result.error;
+              if (result.status !== 0) throw new Error(result.stderr);
+            };
+            run(["init", "--initial-branch=main"]);
+            run(["add", "--", "."]);
+            run(["-c", "user.name=FlintTrade Test", "-c", "user.email=flinttrade@example.invalid", "commit", "-m", "fixture"]);
+            run(["remote", "add", "origin", options.gitOrigin ?? "https://github.com/navaneeshnagarajan/FlintTrade.git"]);
+            run(["config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main"]);
+            run(["config", "remote.origin.tagOpt", "--no-tags"]);
+            run(["config", "branch.main.remote", "origin"]);
+            run(["config", "branch.main.merge", "refs/heads/main"]);
+            if (options.realGitSwapFilter) {
+              await writeFile(gitExploitFilter, "#!/bin/sh\n: > \"$0.called\"\ncat\n");
+              await chmod(gitExploitFilter, 0o755);
+            }
+          } else {
+            await writeRepositoryShape(
+              candidate,
+              true,
+              platform,
+              options.gitOrigin ?? "https://github.com/navaneeshnagarajan/FlintTrade.git",
+            );
+          }
           return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
-        if (path.basename(invocation.command) === "git" && invocation.args[0] === "rev-parse") {
-          return { contained: true, exitCode: 0, stderr: "", stdout: `${revision}\n` };
+        const gitOperationIndex = path.basename(invocation.command) === "git"
+          ? invocation.args.findIndex((argument) =>
+              ["config", "diff-files", "diff-index", "ls-files", "rev-parse"].includes(argument),
+            )
+          : -1;
+        const gitOperation = gitOperationIndex >= 0 ? invocation.args.slice(gitOperationIndex) : [];
+        if (useRealGitInspection && gitOperationIndex >= 0) {
+          const candidate = invocation.cwd;
+          const cleanlinessCommand = options.realGitSwapFilter === true &&
+            (gitOperation[0] === "diff-files" || gitOperation[0] === "status");
+          const configPath = candidate ? path.join(candidate, ".git", "config") : "";
+          const attributesPath = candidate ? path.join(candidate, ".git", "info", "attributes") : "";
+          const safeConfig = cleanlinessCommand ? await readFile(configPath, "utf8") : null;
+          if (safeConfig !== null) {
+            await writeFile(configPath, `${safeConfig}\n[filter "swapped"]\n\tclean = ${gitExploitFilter}\n`);
+            await writeFile(attributesPath, "uv.lock filter=swapped\n");
+          }
+          try {
+            const result = spawnSync(invocation.command, invocation.args, {
+              ...(invocation.cwd ? { cwd: invocation.cwd } : {}),
+              encoding: "utf8",
+              env: { ...process.env, ...invocation.env },
+            });
+            if (result.error) throw result.error;
+            return {
+              contained: true,
+              exitCode: result.status ?? 1,
+              stderr: result.stderr,
+              stdout: result.stdout,
+            };
+          } finally {
+            if (safeConfig !== null) {
+              await writeFile(configPath, safeConfig);
+              await rm(attributesPath, { force: true });
+            }
+          }
         }
-        if (path.basename(invocation.command) === "git" && invocation.args[0] === "remote") {
+        if (gitOperation[0] === "config") {
+          const entries = [
+            ["core.repositoryformatversion", "0"],
+            ["core.filemode", String(platform !== "win32")],
+            ["core.bare", "false"],
+            ["core.logallrefupdates", "true"],
+            ["remote.origin.url", options.gitOrigin ?? "https://github.com/navaneeshnagarajan/FlintTrade.git"],
+            ["remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main"],
+            ["remote.origin.tagopt", "--no-tags"],
+            ["branch.main.remote", "origin"],
+            ["branch.main.merge", "refs/heads/main"],
+          ];
           return {
             contained: true,
             exitCode: 0,
             stderr: "",
-            stdout: `${options.gitOrigin ?? "https://github.com/navaneeshnagarajan/FlintTrade.git"}\n`,
+            stdout: entries.map(([key, value]) => `${key}\n${value}\0`).join(""),
           };
         }
-        if (path.basename(invocation.command) === "git" && invocation.args[0] === "status") {
+        if (gitOperation[0] === "rev-parse") {
+          return { contained: true, exitCode: 0, stderr: "", stdout: `${revision}\n` };
+        }
+        if (gitOperation[0] === "ls-files" && gitOperation.includes("-v")) {
+          return { contained: true, exitCode: 0, stderr: "", stdout: "H package.json\0H uv.lock\0" };
+        }
+        if (gitOperation[0] === "ls-files" && gitOperation.includes("--others")) {
           return {
             contained: true,
             exitCode: 0,
             stderr: "",
-            stdout: buildMutated ? " M uv.lock\n" : options.nonIgnoredUntracked ? "?? injected.py\n" : "",
+            stdout: options.nonIgnoredUntracked ? "injected.py\0" : "",
+          };
+        }
+        if (gitOperation[0] === "diff-index" || gitOperation[0] === "diff-files") {
+          return {
+            contained: true,
+            exitCode: buildMutated && gitOperation[0] === "diff-files" ? 1 : 0,
+            stderr: "",
+            stdout: "",
           };
         }
         if (invocation.args[0] === "--version" && invocation.command.includes("uv")) {
@@ -456,6 +581,11 @@ async function fixture(options: FixtureOptions = {}) {
           if (options.mutateTrackedDuringBuild) {
             buildMutated = true;
             await writeFile(path.join(invocation.args[1]!, "uv.lock"), "mutated");
+          }
+          if (options.realGitSwapFilter) {
+            const candidateIndex = invocation.args.includes("-Candidate") ? invocation.args.indexOf("-Candidate") + 1 : 1;
+            const uvLock = path.join(invocation.args[candidateIndex]!, "uv.lock");
+            await writeFile(uvLock, await readFile(uvLock, "utf8"));
           }
           if (options.addedArchiveSource) {
             const candidateIndex = invocation.args.includes("-Candidate") ? invocation.args.indexOf("-Candidate") + 1 : 1;
@@ -490,6 +620,8 @@ async function fixture(options: FixtureOptions = {}) {
           return { contained: true, exitCode: 0, stderr: "", stdout: "late worker output" };
         }
         return { contained: true, exitCode: 0, stderr: "", stdout: "" };
+        })();
+        return { ...result, stderrTruncated: false, stdoutTruncated: false };
       },
     },
     download: {
@@ -506,7 +638,7 @@ async function fixture(options: FixtureOptions = {}) {
         };
       },
       async text(url) {
-        const content = JSON.stringify({ sha: revision });
+        const content = JSON.stringify({ sha: options.metadataRevision ?? revision });
         return {
           bytes: Buffer.byteLength(content),
           content,
@@ -616,6 +748,7 @@ async function fixture(options: FixtureOptions = {}) {
     bootIdentity: "test-boot",
     bootstrapResources: path.resolve(import.meta.dirname, "..", "resources", "bootstrap"),
     dependencies,
+    ...(options.expectedRevision ? { expectedRevision: options.expectedRevision } : {}),
     heartbeatIntervalMs: 5,
     manifest,
     ...(options.boundary ||
@@ -662,6 +795,7 @@ async function fixture(options: FixtureOptions = {}) {
     controller,
     dependencies,
     downloads,
+    gitExploitCanary,
     releaseLockCleanup,
     releasePythonSync: releasePythonSync!,
     root,
@@ -690,6 +824,41 @@ describe("first-run source bootstrap", () => {
     expect(test.calls.some((call) => call.command.endsWith("corepack.cmd"))).toBe(false);
     expect(test.calls.some((call) => /cargo/i.test([call.command, ...call.args].join(" ")))).toBe(false);
   });
+
+  it.runIf(process.platform !== "win32")(
+    "validates an attached symbolic HEAD through the isolated packaged Git common directory",
+    async () => {
+      const test = await fixture({ realGitInspection: true });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        ok: true,
+        provenance: "git",
+        revision: expect.stringMatching(/^[0-9a-f]{40}$/),
+      });
+      const inspection = test.calls.find(
+        (call) => call.args.includes("rev-parse") && call.args.includes("HEAD") && call.env?.GIT_COMMON_DIR,
+      );
+      expect(inspection?.env).toMatchObject({
+        GIT_COMMON_DIR: path.resolve(import.meta.dirname, "..", "resources", "bootstrap", "git-common"),
+        GIT_INDEX_FILE: expect.stringContaining(`${path.sep}.git${path.sep}index`),
+        GIT_OBJECT_DIRECTORY: expect.stringContaining(`${path.sep}.git${path.sep}objects`),
+      });
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "does not execute config and info-attribute controls swapped into a bootstrap candidate",
+    async () => {
+      const test = await fixture({ realGitSwapFilter: true });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/metadata|config|identity|changed/i),
+        ok: false,
+      });
+      expect(await exists(test.gitExploitCanary)).toBe(false);
+      expect(await exists(test.activeSource)).toBe(false);
+    },
+  );
 
   it("proves the relocatable virtual-environment entry point before and after promotion", async () => {
     const test = await fixture();
@@ -729,6 +898,34 @@ describe("first-run source bootstrap", () => {
     expect(marker).toMatchObject({ provenance: "github-archive", revision });
   });
 
+  it("checks out the exact requested revision before building an update candidate", async () => {
+    const test = await fixture({ expectedRevision: revision });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, provenance: "git", revision });
+    expect(test.calls).toContainEqual(
+      expect.objectContaining({
+        args: ["checkout", "--detach", revision],
+        command: "git",
+        cwd: expect.stringContaining("FlintTrade.candidate-1"),
+      }),
+    );
+  });
+
+  it("uses an already resolved exact revision for archive update acquisition", async () => {
+    const test = await fixture({
+      expectedRevision: revision,
+      gitAvailable: false,
+      metadataRevision: "b".repeat(40),
+    });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      ok: true,
+      provenance: "github-archive",
+      revision,
+    });
+    expect(test.downloads).toContain(`https://codeload.github.com/navaneeshnagarajan/FlintTrade/zip/${revision}`);
+  });
+
   it("falls back to archive acquisition on Windows when Git is unavailable", async () => {
     const test = await fixture({ gitAvailable: false, platform: "win32" });
 
@@ -753,7 +950,7 @@ describe("first-run source bootstrap", () => {
 
     await expect(test.controller.start()).resolves.toMatchObject({
       ok: false,
-      error: "Git provenance validation rejected the origin URL.",
+      error: "The Git checkout has an inexact remote.origin.url setting.",
     });
     expect(await exists(test.activeSource)).toBe(false);
   });
@@ -983,6 +1180,30 @@ describe("first-run source bootstrap", () => {
     expect(logs).not.toContain("canary");
   });
 
+  it("redacts source, workspace, candidate, tool and extended Windows path spellings from durable logs", async () => {
+    const test = await fixture({ platform: "win32" });
+    const sourceRoot = path.join(test.root, "source");
+    const workspace = path.join(test.root, "workspace");
+    const toolsRoot = path.join(test.root, "tools");
+    const candidate = `${test.activeSource}.candidate-private`;
+    test.dependencies.extractArchive = async () => {
+      const upperWorkspace = workspace.toUpperCase();
+      throw new Error(
+        `private paths ${sourceRoot} ${workspace} ${candidate} ${toolsRoot} \\\\?\\${upperWorkspace}`,
+      );
+    };
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: false });
+    const logs = await readFile(path.join(workspace, "logs", "desktop-bootstrap.jsonl"), "utf8");
+
+    for (const privatePath of [sourceRoot, workspace, candidate, toolsRoot]) {
+      expect(logs.toLowerCase()).not.toContain(privatePath.toLowerCase());
+    }
+    expect(logs).toContain("<source-root>");
+    expect(logs).toContain("<workspace>");
+    expect(logs).toContain("<tools-root>");
+  });
+
   it("rejects an existing checkout whose HEAD no longer matches its completion marker", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
@@ -993,7 +1214,7 @@ describe("first-run source bootstrap", () => {
 
     await expect(test.controller.start()).resolves.toMatchObject({
       ok: false,
-      error: "The active Git checkout does not match its bootstrap provenance marker.",
+      error: "The Git HEAD does not match the explicit expected revision.",
     });
   });
 
@@ -1105,7 +1326,7 @@ describe("first-run source bootstrap", () => {
     const test = await fixture({ mutateTrackedDuringBuild: true });
 
     await expect(test.controller.start()).resolves.toMatchObject({
-      error: "The Git candidate has tracked, index or untracked changes after its build.",
+      error: "The Git checkout has tracked worktree changes.",
       ok: false,
     });
     expect(await exists(test.activeSource)).toBe(false);
@@ -1151,10 +1372,11 @@ describe("first-run source bootstrap", () => {
       error: expect.stringMatching(/untracked|clean|changes/i),
       ok: false,
     });
-    const statusCall = test.calls.find(
-      (call) => path.basename(call.command) === "git" && call.args[0] === "status",
+    const untrackedCall = test.calls.find(
+      (call) => path.basename(call.command) === "git" && call.args.includes("--others"),
     );
-    expect(statusCall?.args).not.toContain("--untracked-files=no");
+    expect(untrackedCall?.args).toContain("--exclude-standard");
+    expect(untrackedCall?.args).not.toContain("--untracked-files=no");
     expect(await exists(test.activeSource)).toBe(false);
   });
 
@@ -1184,7 +1406,7 @@ describe("first-run source bootstrap", () => {
       const test = await fixture({ sourceMutationAtBoundary });
 
       await expect(test.controller.start()).resolves.toMatchObject({
-        error: expect.stringMatching(/changed|binding|clean|untracked/i),
+        error: expect.stringMatching(/changed|binding|clean|tracked|untracked/i),
         ok: false,
       });
       expect(await exists(test.activeSource)).toBe(false);
@@ -1278,8 +1500,10 @@ describe("first-run source bootstrap", () => {
 
     expect(test.calls.length).toBeGreaterThan(0);
     for (const call of test.calls) {
+      const hardenedGitInspection =
+        path.basename(call.command) === "git" && call.args.includes("--no-replace-objects");
       expect(call.env).toMatchObject({
-        GIT_CONFIG_GLOBAL: path.join(managedRoot, "gitconfig"),
+        GIT_CONFIG_GLOBAL: hardenedGitInspection ? "/dev/null" : path.join(managedRoot, "gitconfig"),
         HOME: path.join(managedRoot, "home"),
         NPM_CONFIG_USERCONFIG: path.join(managedRoot, "npmrc"),
         USERPROFILE: path.join(managedRoot, "home"),
@@ -1481,16 +1705,19 @@ describe("first-run source bootstrap", () => {
 
     const cancellation = test.controller.cancel();
     await expect(running).resolves.toMatchObject({
+      containmentFailed: true,
       error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
       ok: false,
     });
     await expect(cancellation).resolves.toBe(true);
     expect(await exists(path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock"))).toBe(true);
     await expect(test.controller.retry()).resolves.toMatchObject({
+      containmentFailed: true,
       error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
       ok: false,
     });
     await expect(test.controller.start()).resolves.toMatchObject({
+      containmentFailed: true,
       error: expect.stringMatching(/containment.*not be proven|restart is blocked/i),
       ok: false,
     });
@@ -1506,6 +1733,18 @@ describe("first-run source bootstrap", () => {
     const gate = createBootstrapQuitGate(app, test.controller, 100);
     await expect(gate.requestQuit()).rejects.toThrow(/containment.*not be proven|restart is blocked/i);
     expect(app.quit).not.toHaveBeenCalled();
+  });
+
+  it("retains the operation lease when the command runner rejects without a containment result", async () => {
+    const test = await fixture({ commandRejection: "git-probe" });
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      containmentFailed: true,
+      error: expect.stringMatching(/command.*reject|containment.*not be proven/i),
+      ok: false,
+    });
+    expect(await exists(path.join(test.root, "source", ".flinttrade-bootstrap-operation.lock"))).toBe(true);
+    await expect(test.controller.shutdown(100)).rejects.toBeInstanceOf(SourceOperationLeaseRetentionError);
   });
 
   it("keeps an immediate start joined to a cancelling attempt through shutdown", async () => {
@@ -1525,6 +1764,34 @@ describe("first-run source bootstrap", () => {
     await expect(Promise.all([running, restarted, cancellation, shutdown])).resolves.toBeDefined();
     expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1);
     expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
+  });
+
+  it("allows a later bounded shutdown wait after stubborn bootstrap work settles", async () => {
+    const test = await fixture({ holdPythonSync: true });
+    const running = test.controller.start();
+    await vi.waitFor(
+      () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
+      { timeout: 5_000 },
+    );
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const shutdown = test.controller.shutdown(20).catch((error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(unhandled).not.toHaveBeenCalled();
+
+      test.releasePythonSync();
+      await running;
+      await expect(shutdown).resolves.toBeInstanceOf(Error);
+      await expect(test.controller.shutdown(100)).resolves.toBeUndefined();
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/shutting down/i),
+        ok: false,
+      });
+    } finally {
+      process.off("unhandledRejection", unhandled);
+      test.releasePythonSync();
+    }
   });
 
   it("shutdown awaits in-flight lock cleanup before readiness can become terminal", async () => {

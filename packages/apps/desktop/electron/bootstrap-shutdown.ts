@@ -21,10 +21,17 @@ export function createBootstrapQuitGate(
   const requestQuit = (): Promise<void> => {
     if (allowingQuit) return Promise.resolve();
     if (!settlement) {
-      settlement = bootstrap.shutdown(timeoutMs).then(() => {
+      const attempt = bootstrap.shutdown(timeoutMs).then(() => {
         allowingQuit = true;
         application.quit();
       });
+      let retryable: Promise<void>;
+      retryable = attempt.catch((error: unknown) => {
+        allowingQuit = false;
+        if (settlement === retryable) settlement = null;
+        throw error;
+      });
+      settlement = retryable;
     }
     return settlement;
   };
