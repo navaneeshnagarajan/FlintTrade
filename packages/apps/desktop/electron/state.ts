@@ -79,7 +79,8 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
     attempt: number,
     patch: Partial<Omit<BootstrapSnapshot, "attempt">>,
   ): boolean => {
-    if (attempt !== state.getSnapshot().attempt) return false;
+    const current = state.getSnapshot();
+    if (attempt !== current.attempt || current.status !== "running") return false;
     state.publish({ ...patch, heartbeatAt: Date.now() });
     return true;
   };

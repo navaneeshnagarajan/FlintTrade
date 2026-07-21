@@ -54,8 +54,27 @@ describe("window.flintDesktop bridge", () => {
     expect(bootstrapListener).toHaveBeenCalledWith({ status: "running" });
     expect(updateListener).toHaveBeenCalledWith({ status: "checking" });
 
+    const bootstrapRegistration = fake.ipc.on.mock.calls[0];
+    const updateRegistration = fake.ipc.on.mock.calls[1];
+    expect(bootstrapRegistration).toBeDefined();
+    expect(updateRegistration).toBeDefined();
+
     unsubscribeBootstrap();
+    expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(
+      1,
+      IPC_CHANNELS.bootstrap.event,
+      bootstrapRegistration?.[1],
+    );
+    fake.emit(IPC_CHANNELS.bootstrap.event, { status: "ready" });
+    fake.emit(IPC_CHANNELS.update.event, { status: "available" });
+    expect(bootstrapListener).toHaveBeenCalledOnce();
+    expect(updateListener).toHaveBeenCalledTimes(2);
+
     unsubscribeUpdate();
-    expect(fake.ipc.removeListener).toHaveBeenCalledTimes(2);
+    expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(2, IPC_CHANNELS.update.event, updateRegistration?.[1]);
+    fake.emit(IPC_CHANNELS.bootstrap.event, { status: "ready" });
+    fake.emit(IPC_CHANNELS.update.event, { status: "complete" });
+    expect(bootstrapListener).toHaveBeenCalledOnce();
+    expect(updateListener).toHaveBeenCalledTimes(2);
   });
 });

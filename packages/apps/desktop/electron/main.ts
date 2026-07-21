@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from "electron";
 
 import {
   buildSecureWebPreferences,
@@ -14,7 +14,18 @@ import {
 import { IPC_CHANNELS } from "./ipc-channels";
 import { registerDesktopIpc } from "./ipc";
 import { resolveDesktopPaths } from "./paths";
+import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
 import { createBootstrapState, createUpdateState, type BackendState, type UpdateKind } from "./state";
+
+protocol.registerSchemesAsPrivileged([
+  {
+    privileges: {
+      secure: true,
+      standard: true,
+    },
+    scheme: FLINTTRADE_SCHEME,
+  },
+]);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -24,9 +35,14 @@ if (!hasSingleInstanceLock) {
   const development = process.env.FLINTTRADE_DESKTOP_DEVELOPMENT === "1";
   const appRoot = app.getAppPath();
   const preloadPath = path.join(appRoot, "dist", "electron-preload.js");
-  const splashPath = path.join(appRoot, "splash", "index.html");
-  const splashUrl = pathToFileURL(splashPath).href;
-  const desktopPaths = resolveDesktopPaths({ env: process.env, homeDirectory: os.homedir(), platform: process.platform });
+  const splashDirectory = path.join(appRoot, "splash");
+  const splashUrl = SPLASH_URL;
+  const desktopPaths = resolveDesktopPaths({
+    currentWorkingDirectory: process.cwd(),
+    env: process.env,
+    homeDirectory: os.homedir(),
+    platform: process.platform,
+  });
   const bootstrapState = createBootstrapState();
   const sourceUpdateState = createUpdateState("source");
   const shellUpdateState = createUpdateState("shell");
@@ -77,7 +93,7 @@ if (!hasSingleInstanceLock) {
     window.on("closed", () => {
       if (mainWindow === window) mainWindow = null;
     });
-    void window.loadFile(splashPath).catch(() => app.quit());
+    void window.loadURL(splashUrl).catch(() => app.quit());
     return window;
   };
 
@@ -95,6 +111,13 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(() => {
       app.setName("FlintTrade");
+      session.defaultSession.protocol.handle(FLINTTRADE_SCHEME, (request) => {
+        const splashAsset = resolveSplashRequest(request.url, splashDirectory);
+        if (!splashAsset || request.method !== "GET") {
+          return new Response(null, { status: 404 });
+        }
+        return net.fetch(pathToFileURL(splashAsset).href);
+      });
       installSessionHardening(session.defaultSession);
       app.on("web-contents-created", (_event, contents) => {
         hardenWebContents(contents, {

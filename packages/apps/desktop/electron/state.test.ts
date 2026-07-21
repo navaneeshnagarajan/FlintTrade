@@ -35,7 +35,27 @@ describe("bootstrap state", () => {
     const attempt = store.begin("Cloning source");
     expect(store.cancel(attempt)).toBe(true);
     expect(store.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
+
+    const cancelled = store.getSnapshot();
+    expect(store.publishForAttempt(attempt, { message: "worker kept running", progress: 80 })).toBe(false);
+    expect(store.complete(attempt, "worker reported ready")).toBe(false);
+    expect(store.fail(attempt, "worker reported another failure")).toBe(false);
+    expect(store.getSnapshot()).toBe(cancelled);
+
     expect(store.retry()).toBe(true);
+  });
+
+  it("keeps an earlier failure terminal for the same attempt", () => {
+    const store = createBootstrapState();
+    const attempt = store.begin("Installing tools");
+    expect(store.fail(attempt, "Installation failed")).toBe(true);
+
+    const failed = store.getSnapshot();
+    expect(store.publishForAttempt(attempt, { message: "late progress", progress: 90 })).toBe(false);
+    expect(store.complete(attempt)).toBe(false);
+    expect(store.fail(attempt, "late failure")).toBe(false);
+    expect(store.cancel(attempt)).toBe(false);
+    expect(store.getSnapshot()).toBe(failed);
   });
 });
 

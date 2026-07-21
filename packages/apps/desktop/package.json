@@ -19,12 +19,15 @@
     "bundle": "node scripts/bundle-electron.mjs",
     "bundle:dev": "node scripts/bundle-electron.mjs --dev",
     "build": "pnpm run typecheck && pnpm run test:electron && pnpm run bundle",
-    "pack:dir": "pnpm run bundle && electron-builder --dir --mac --publish never"
+    "pack:dir": "pnpm run bundle && electron-builder --dir --mac --publish never && pnpm run verify:package",
+    "verify:package": "node scripts/verify-electron-package.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@electron/fuses": "1.8.0",
     "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^22.20.0",
     "electron": "40.10.2",
@@ -58,9 +61,22 @@
       {
         "from": "../../../notice.generated",
         "to": "notice.generated"
+      },
+      {
+        "from": "resources/licenses/hermes-agent-LICENSE",
+        "to": "licenses/hermes-agent-LICENSE"
       }
     ],
     "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false,
+      "resetAdHocDarwinSignature": true
+    },
     "npmRebuild": false,
     "mac": {
       "category": "public.app-category.finance",
