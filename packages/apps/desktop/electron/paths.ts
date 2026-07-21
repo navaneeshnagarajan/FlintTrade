@@ -41,28 +41,51 @@ function expandHome(
   return value;
 }
 
-function canonicaliseExistingComponents(value: string, pathApi: typeof path.posix): string {
-  let existing = value;
-  const missing: string[] = [];
+interface PathResolutionHooks {
+  exists(candidate: string): boolean;
+  realpath(candidate: string): string;
+}
 
-  while (!existsSync(existing)) {
-    const parent = pathApi.dirname(existing);
-    if (parent === existing) return value;
-    missing.unshift(pathApi.basename(existing));
-    existing = parent;
+function appendRaw(base: string, value: string, pathApi: typeof path.posix): string {
+  if (pathApi.isAbsolute(value)) return value;
+  return `${base}${base.endsWith(pathApi.sep) ? "" : pathApi.sep}${value}`;
+}
+
+export function canonicalisePathComponents(
+  value: string,
+  pathApi: typeof path.posix,
+  hooks: PathResolutionHooks = {
+    exists: existsSync,
+    realpath: realpathSync.native,
+  },
+): string {
+  if (!pathApi.isAbsolute(value)) throw new TypeError("Component-wise canonicalisation requires an absolute path.");
+  const root = pathApi.parse(value).root;
+  let resolved = hooks.exists(root) ? hooks.realpath(root) : root;
+  const components = value.slice(root.length).split(/[\\/]+/);
+  for (const component of components) {
+    if (!component || component === ".") continue;
+    if (component === "..") {
+      resolved = pathApi.dirname(resolved);
+      continue;
+    }
+    const candidate = pathApi.join(resolved, component);
+    resolved = hooks.exists(candidate) ? hooks.realpath(candidate) : candidate;
   }
-
-  return pathApi.join(realpathSync.native(existing), ...missing);
+  return resolved;
 }
 
 export function resolveDesktopPaths(inputs: DesktopPathInputs): DesktopPaths {
   const pathApi = inputs.platform === "win32" ? path.win32 : path.posix;
   const canonicalise =
     inputs.platform === process.platform
-      ? (value: string) => canonicaliseExistingComponents(value, pathApi)
+      ? (value: string) => canonicalisePathComponents(value, pathApi)
       : (value: string) => value;
-  const currentWorkingDirectory = canonicalise(pathApi.resolve(inputs.currentWorkingDirectory));
-  const homeDirectory = canonicalise(pathApi.resolve(currentWorkingDirectory, inputs.homeDirectory));
+  const initialWorkingDirectory = pathApi.isAbsolute(inputs.currentWorkingDirectory)
+    ? inputs.currentWorkingDirectory
+    : pathApi.resolve(inputs.currentWorkingDirectory);
+  const currentWorkingDirectory = canonicalise(initialWorkingDirectory);
+  const homeDirectory = canonicalise(appendRaw(currentWorkingDirectory, inputs.homeDirectory, pathApi));
   const sourceRoot = canonicalise(pathApi.join(homeDirectory, ".flinttrade", "src"));
   const toolsRoot = canonicalise(pathApi.join(homeDirectory, ".flinttrade", "tools"));
 
@@ -71,14 +94,11 @@ export function resolveDesktopPaths(inputs: DesktopPathInputs): DesktopPaths {
   let workspace: string;
   if (workspaceOverride) {
     workspace = canonicalise(
-      pathApi.resolve(
-        currentWorkingDirectory,
-        expandHome(workspaceOverride, homeDirectory, inputs.platform, pathApi),
-      ),
+      appendRaw(currentWorkingDirectory, expandHome(workspaceOverride, homeDirectory, inputs.platform, pathApi), pathApi),
     );
   } else if (homeOverride) {
     workspace = canonicalise(
-      pathApi.resolve(currentWorkingDirectory, expandHome(homeOverride, homeDirectory, inputs.platform, pathApi)),
+      appendRaw(currentWorkingDirectory, expandHome(homeOverride, homeDirectory, inputs.platform, pathApi), pathApi),
     );
   } else if (inputs.platform === "darwin") {
     workspace = canonicalise(pathApi.join(homeDirectory, "Library", "Application Support", "flinttrade"));

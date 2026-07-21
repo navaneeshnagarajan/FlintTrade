@@ -84,6 +84,8 @@ for (const resource of [
   "flinttrade-bootstrap.sh",
   "flinttrade-bootstrap.ps1",
   "checksums/node-v22.23.1-SHASUMS256.txt",
+  "checksums/node-v22.23.1-SHASUMS256.txt.sig",
+  "checksums/node-release-rafael-gonzaga.asc",
   "checksums/uv-0.11.16-sha256.sum",
 ]) {
   const packaged = readFileSync(path.join(resourcesDirectory, "bootstrap", resource));

@@ -8,6 +8,7 @@ import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from "elec
 
 import { createFirstRunBootstrap, type BootstrapToolManifest } from "./bootstrap";
 import { createNodeBootstrapDependencies } from "./bootstrap-io";
+import { createBootstrapQuitGate } from "./bootstrap-shutdown";
 import {
   buildSecureWebPreferences,
   hardenWebContents,
@@ -54,12 +55,15 @@ if (!hasSingleInstanceLock) {
   const bootstrapState = createBootstrapState();
   const bootstrapController = createFirstRunBootstrap({
     arch: process.arch,
+    bootstrapResources,
     dependencies: createNodeBootstrapDependencies(process.platform),
     manifest: bootstrapManifest,
     paths: desktopPaths,
     platform: process.platform,
     state: bootstrapState,
   });
+  const bootstrapQuitGate = createBootstrapQuitGate(app, bootstrapController);
+  app.on("before-quit", (event) => bootstrapQuitGate.handleBeforeQuit(event));
   const sourceUpdateState = createUpdateState("source");
   const shellUpdateState = createUpdateState("shell");
   const backendState: Readonly<BackendState> = Object.freeze({ port: null, status: "stopped", url: null });
@@ -109,7 +113,7 @@ if (!hasSingleInstanceLock) {
     window.on("closed", () => {
       if (mainWindow === window) mainWindow = null;
     });
-    void window.loadURL(splashUrl).catch(() => app.quit());
+    void window.loadURL(splashUrl).catch(() => bootstrapQuitGate.requestQuit());
     return window;
   };
 
@@ -163,8 +167,8 @@ if (!hasSingleInstanceLock) {
             if (!isSafeExternalUrl(url)) throw new TypeError("Only HTTPS external URLs are allowed.");
             await shell.openExternal(url);
           },
-          quit: () => app.quit(),
-          quitAfterBackendFailure: () => app.quit(),
+          quit: () => bootstrapQuitGate.requestQuit(),
+          quitAfterBackendFailure: () => bootstrapQuitGate.requestQuit(),
           retryBootstrap: () => {
             if (bootstrapState.getSnapshot().status !== "failed") return false;
             void bootstrapController.retry();
@@ -175,7 +179,7 @@ if (!hasSingleInstanceLock) {
       });
 
       mainWindow = createSplashWindow();
-      void bootstrapController.start();
+      void bootstrapController.start().catch(() => undefined);
     })
-    .catch(() => app.quit());
+    .catch(() => bootstrapQuitGate.requestQuit());
 }

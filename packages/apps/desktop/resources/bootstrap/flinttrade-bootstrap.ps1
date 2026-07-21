@@ -1,10 +1,12 @@
-# Packaged source-build entrypoint. Tool acquisition and checksums are owned by Electron.
+# Canonical packaged source-build entrypoint. Tool acquisition and checksums are owned by Electron.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Candidate,
     [Parameter(Mandatory = $true)][string]$Uv,
     [Parameter(Mandatory = $true)][string]$Node,
-    [Parameter(Mandatory = $true)][string]$Corepack
+    [Parameter(Mandatory = $true)][string]$CorepackJs,
+    [Parameter(Mandatory = $true)][string]$ToolsRoot,
+    [Parameter(Mandatory = $true)][string]$PnpmVersion
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,37 +19,45 @@ function Invoke-Checked {
     }
 }
 
+if ($PnpmVersion -ne "9.15.0") {
+    throw "Bootstrap entrypoint requires pnpm 9.15.0."
+}
+
 @("package.json", "pyproject.toml", "uv.lock", "pnpm-lock.yaml", "packages/apps/terminal/package.json") |
     ForEach-Object {
         if (-not (Test-Path -LiteralPath (Join-Path $Candidate $_) -PathType Leaf)) {
             throw "Candidate is missing $_."
         }
     }
+if (-not (Test-Path -LiteralPath $CorepackJs -PathType Leaf)) {
+    throw "Verified Corepack JavaScript is missing."
+}
 
-$Workspace = Split-Path -Parent (Split-Path -Parent $Candidate)
-$Tools = Join-Path $Workspace "tools"
 $env:COREPACK_DEFAULT_TO_LATEST = "0"
-$env:COREPACK_HOME = Join-Path $Tools "corepack"
-$env:UV_CACHE_DIR = Join-Path $Tools "uv-cache"
+$env:COREPACK_HOME = Join-Path $ToolsRoot "corepack"
+$env:UV_CACHE_DIR = Join-Path $ToolsRoot "uv-cache"
 $env:UV_NO_EDITABLE = "1"
 $env:UV_PYTHON = "3.12"
-$env:UV_PYTHON_INSTALL_DIR = Join-Path $Tools "python"
+$env:UV_PYTHON_INSTALL_DIR = Join-Path $ToolsRoot "python"
 $env:PATH = "$(Split-Path -Parent $Node)$([IO.Path]::PathSeparator)$env:PATH"
 
 Invoke-Checked $Uv @("--version")
 Invoke-Checked $Node @("--version")
-Invoke-Checked $Corepack @("--version")
+Invoke-Checked $Node @($CorepackJs, "--version")
 
 Push-Location $Candidate
 try {
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.12"
     Invoke-Checked $Uv @("python", "install", "3.12")
     Invoke-Checked $Uv @("sync", "--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks")
-    $pnpmVersion = (& $Corepack pnpm --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $pnpmVersion -ne "9.15.0") {
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 9.15.0 dependencies"
+    $resolvedPnpmVersion = (& $Node $CorepackJs pnpm --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -ne "9.15.0") {
         throw "Corepack did not resolve the repository-pinned pnpm 9.15.0."
     }
-    Invoke-Checked $Corepack @("pnpm", "install", "--frozen-lockfile")
-    Invoke-Checked $Corepack @("pnpm", "--filter", "@flinttrade/terminal", "build")
+    Invoke-Checked $Node @($CorepackJs, "pnpm", "install", "--frozen-lockfile")
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tbuilding-terminal`t84`tBuilding the terminal for production"
+    Invoke-Checked $Node @($CorepackJs, "pnpm", "--filter", "@flinttrade/terminal", "build")
 }
 finally {
     Pop-Location

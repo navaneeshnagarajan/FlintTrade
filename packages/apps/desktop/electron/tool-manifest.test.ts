@@ -31,6 +31,14 @@ interface ManifestAsset {
 }
 
 interface ToolManifest {
+  generatedFrom: {
+    node: {
+      sha256: string;
+      signature: { fingerprint: string; keySha256: string; sha256: string; url: string };
+      url: string;
+    };
+    uv: { sha256: string; url: string };
+  };
   node: { assets: Record<string, ManifestAsset>; version: string };
   pnpm: { integrity: string; packageManager: string; version: string };
   schemaVersion: number;
@@ -52,6 +60,17 @@ describe("bootstrap tool manifest", () => {
       packageManager: "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
       version: "9.15.0",
     });
+    expect(manifest.generatedFrom).toMatchObject({
+      node: {
+        sha256: "158f2e2c580c610b9cef2853f3444c7369b84cc23e7ad764e3c40e9d60d82ea0",
+        signature: {
+          fingerprint: "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4",
+          keySha256: "05a4080f671246086a2590bfad78965dcceaa823df1786f4ef52d58e5e3362b8",
+          sha256: "259516b9d4fe69474373c02ac684edfe20c7675e6070e26a55fb514016f138d9",
+        },
+      },
+      uv: { sha256: "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a" },
+    });
     for (const asset of [...Object.values(manifest.node.assets), ...Object.values(manifest.uv.assets)]) {
       expect(asset.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(asset.url).toMatch(/^https:\/\/(nodejs\.org|github\.com)\//);
@@ -62,6 +81,15 @@ describe("bootstrap tool manifest", () => {
   it("is reproducible from the checked-in authoritative checksum snapshots", () => {
     expect(() => execFileSync(process.execPath, [generatorPath, "--check"], { cwd: desktopRoot })).not.toThrow();
   });
+
+  it.runIf(Boolean(spawnSync("gpg", ["--version"]).status === 0))(
+    "verifies the Node checksum signature against the pinned release fingerprint",
+    () => {
+      expect(() =>
+        execFileSync(process.execPath, [generatorPath, "--check", "--verify-signature"], { cwd: desktopRoot }),
+      ).not.toThrow();
+    },
+  );
 
   it("rejects a checksum snapshot that does not match the committed manifest", () => {
     const scratch = mkdtempSync(path.join(tmpdir(), "flinttrade-manifest-test-"));
@@ -87,7 +115,7 @@ describe("bootstrap tool manifest", () => {
       );
 
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("out of date");
+      expect(result.stderr).toContain("does not match the pinned authoritative file digest");
     } finally {
       rmSync(scratch, { force: true, recursive: true });
     }

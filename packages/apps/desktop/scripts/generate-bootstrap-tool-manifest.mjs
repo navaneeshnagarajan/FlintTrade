@@ -1,13 +1,25 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const nodeVersion = "22.23.1";
 const uvVersion = "0.11.16";
+const authoritativeChecksumDigests = Object.freeze({
+  node: "158f2e2c580c610b9cef2853f3444c7369b84cc23e7ad764e3c40e9d60d82ea0",
+  uv: "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a",
+});
+const nodeSignature = Object.freeze({
+  fingerprint: "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4",
+  keySha256: "05a4080f671246086a2590bfad78965dcceaa823df1786f4ef52d58e5e3362b8",
+  sha256: "259516b9d4fe69474373c02ac684edfe20c7675e6070e26a55fb514016f138d9",
+  url: `https://nodejs.org/dist/v${nodeVersion}/SHASUMS256.txt.sig`,
+});
 const targetFiles = {
   "darwin-arm64": {
     node: `node-v${nodeVersion}-darwin-arm64.tar.gz`,
@@ -42,7 +54,16 @@ function parseArgs(argv) {
       "checksums",
       `node-v${nodeVersion}-SHASUMS256.txt`,
     ),
+    nodeReleaseKey: path.join(desktopRoot, "resources", "bootstrap", "checksums", "node-release-rafael-gonzaga.asc"),
+    nodeSignature: path.join(
+      desktopRoot,
+      "resources",
+      "bootstrap",
+      "checksums",
+      `node-v${nodeVersion}-SHASUMS256.txt.sig`,
+    ),
     uvChecksums: path.join(desktopRoot, "resources", "bootstrap", "checksums", `uv-${uvVersion}-sha256.sum`),
+    verifySignature: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -51,9 +72,15 @@ function parseArgs(argv) {
       options.check = true;
       continue;
     }
+    if (argument === "--verify-signature") {
+      options.verifySignature = true;
+      continue;
+    }
     const key = {
       "--manifest": "manifest",
       "--node-checksums": "nodeChecksums",
+      "--node-release-key": "nodeReleaseKey",
+      "--node-signature": "nodeSignature",
       "--uv-checksums": "uvChecksums",
     }[argument];
     if (!key || !argv[index + 1]) throw new Error(`Unknown or incomplete argument: ${argument}`);
@@ -93,7 +120,19 @@ function requiredDigest(table, file, label) {
   return digest;
 }
 
-export function generateManifest({ nodeChecksumContent, packageContent, uvChecksumContent }) {
+export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, nodeSignatureContent, packageContent, uvChecksumContent }) {
+  if (sha256(nodeChecksumContent) !== authoritativeChecksumDigests.node) {
+    throw new Error("Node checksum snapshot does not match the pinned authoritative file digest.");
+  }
+  if (sha256(uvChecksumContent) !== authoritativeChecksumDigests.uv) {
+    throw new Error("uv checksum snapshot does not match the pinned authoritative file digest.");
+  }
+  if (sha256(nodeSignatureContent) !== nodeSignature.sha256) {
+    throw new Error("Node checksum signature does not match its pinned authoritative digest.");
+  }
+  if (sha256(nodeReleaseKeyContent) !== nodeSignature.keySha256) {
+    throw new Error("Node release key does not match its pinned authoritative digest.");
+  }
   const packageMetadata = JSON.parse(packageContent);
   const packageManager = /^pnpm@(\d+\.\d+\.\d+)\+(sha512)\.([0-9a-f]+)$/.exec(packageMetadata.packageManager ?? "");
   if (!packageManager || packageManager[1] !== "9.15.0") {
@@ -125,6 +164,7 @@ export function generateManifest({ nodeChecksumContent, packageContent, uvChecks
     generatedFrom: {
       node: {
         sha256: sha256(nodeChecksumContent),
+        signature: nodeSignature,
         url: `https://nodejs.org/dist/v${nodeVersion}/SHASUMS256.txt`,
       },
       uv: {
@@ -142,11 +182,45 @@ export function generateManifest({ nodeChecksumContent, packageContent, uvChecks
   };
 }
 
+function verifyNodeSignature(options) {
+  const home = mkdtempSync(path.join(tmpdir(), "flinttrade-node-signature-"));
+  try {
+    const imported = spawnSync(
+      "gpg",
+      ["--homedir", home, "--batch", "--status-fd", "1", "--import", options.nodeReleaseKey],
+      { encoding: "utf8" },
+    );
+    if (imported.status !== 0) throw new Error(imported.stderr || "Could not import the pinned Node release key.");
+    const verified = spawnSync(
+      "gpg",
+      [
+        "--homedir",
+        home,
+        "--batch",
+        "--status-fd",
+        "1",
+        "--verify",
+        options.nodeSignature,
+        options.nodeChecksums,
+      ],
+      { encoding: "utf8" },
+    );
+    if (verified.status !== 0 || !verified.stdout.includes(`[GNUPG:] VALIDSIG ${nodeSignature.fingerprint} `)) {
+      throw new Error(verified.stderr || "Node checksum signature did not validate against the pinned release fingerprint.");
+    }
+  } finally {
+    rmSync(home, { force: true, recursive: true });
+  }
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.verifySignature) verifyNodeSignature(options);
   const output = `${JSON.stringify(
     generateManifest({
       nodeChecksumContent: readFileSync(options.nodeChecksums, "utf8"),
+      nodeReleaseKeyContent: readFileSync(options.nodeReleaseKey),
+      nodeSignatureContent: readFileSync(options.nodeSignature),
       packageContent: readFileSync(path.resolve(desktopRoot, "../../..", "package.json"), "utf8"),
       uvChecksumContent: readFileSync(options.uvChecksums, "utf8"),
     }),

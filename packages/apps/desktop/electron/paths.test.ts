@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import path, { basename, dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveDesktopPaths } from "./paths";
+import { canonicalisePathComponents, resolveDesktopPaths } from "./paths";
 
 describe("desktop path resolution", () => {
   it("keeps source and tools outside the macOS data workspace", () => {
@@ -153,6 +153,51 @@ describe("desktop path resolution", () => {
       }
     },
   );
+
+  it.runIf(process.platform !== "win32")(
+    "matches Python when dot-dot follows absolute and relative symlinks and missing suffixes",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "flinttrade-path-dotdot-parity-"));
+      try {
+        const base = join(root, "base");
+        const realChild = join(root, "real", "child");
+        mkdirSync(base, { recursive: true });
+        mkdirSync(realChild, { recursive: true });
+        symlinkSync(realChild, join(base, "absolute-link"), "dir");
+        symlinkSync("../real/child", join(base, "relative-link"), "dir");
+        symlinkSync(join(base, "relative-link"), join(base, "chained-link"), "dir");
+
+        for (const candidate of [
+          join(base, "absolute-link", "..", "workspace", "missing"),
+          join(base, "relative-link", "..", "workspace", "missing"),
+          join(base, "chained-link", "..", "workspace", "missing"),
+        ]) {
+          const pythonResolved = execFileSync(
+            "python3",
+            ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())", candidate],
+            { encoding: "utf8" },
+          ).trim();
+          expect(canonicalisePathComponents(candidate, path.posix)).toBe(pythonResolved);
+        }
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("keeps deterministic Windows component semantics when host junction resolution is unavailable", () => {
+    const observed: string[] = [];
+    const resolved = canonicalisePathComponents("C:\\base\\junction\\..\\workspace\\missing", path.win32, {
+      exists: (candidate) => {
+        observed.push(candidate);
+        return candidate === "C:\\" || candidate === "C:\\base" || candidate === "C:\\base\\junction";
+      },
+      realpath: (candidate) => (candidate === "C:\\base\\junction" ? "D:\\real\\child" : candidate),
+    });
+
+    expect(resolved).toBe("D:\\real\\workspace\\missing");
+    expect(observed).toContain("C:\\base\\junction");
+  });
 
   it.runIf(process.platform !== "win32")(
     "rejects POSIX named-user overrides before any filesystem mutation",

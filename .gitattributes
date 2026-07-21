@@ -12,6 +12,7 @@
 *.txt text eol=lf
 *.css text eol=lf
 *.html text eol=lf
+packages/apps/desktop/resources/bootstrap/checksums/uv-0.11.16-sha256.sum binary
 *.png binary
 *.jpg binary
 *.zip binary

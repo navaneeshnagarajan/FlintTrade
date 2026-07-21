@@ -23,6 +23,7 @@ const state = createBootstrapState();
 state.subscribe((snapshot) => process.stderr.write(`${JSON.stringify(snapshot)}\n`));
 const controller = createFirstRunBootstrap({
   arch: process.arch,
+  bootstrapResources: path.dirname(path.resolve(manifestArgument)),
   dependencies: createNodeBootstrapDependencies(process.platform),
   manifest,
   paths: {

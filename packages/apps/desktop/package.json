@@ -25,13 +25,16 @@
     "verify:package": "node scripts/verify-electron-package.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.0.0"
+    "@tauri-apps/api": "^2.0.0",
+    "tar": "7.5.20",
+    "yauzl": "2.10.0"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^22.20.0",
+    "@types/yauzl": "2.10.3",
     "electron": "40.10.2",
     "electron-builder": "^26.8.1",
     "electron-builder-squirrel-windows": "^26.8.1",

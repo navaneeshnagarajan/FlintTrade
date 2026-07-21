@@ -24,6 +24,9 @@ await build({
   outfile: output,
   platform: "node",
   target: "node22",
+  banner: {
+    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+  },
 });
 const probeArgs = [
   output,

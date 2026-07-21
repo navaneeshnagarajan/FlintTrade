@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 const resourceRoot = path.resolve(import.meta.dirname, "..", "resources", "bootstrap");
 const posixScript = path.join(resourceRoot, "flinttrade-bootstrap.sh");
 const powershellScript = path.join(resourceRoot, "flinttrade-bootstrap.ps1");
+const probeRunner = path.resolve(import.meta.dirname, "..", "scripts", "run-bootstrap-probe.mjs");
 
 describe("packaged bootstrap entrypoints", () => {
   it.runIf(process.platform !== "win32")("passes the system POSIX shell syntax check", () => {
@@ -22,7 +23,7 @@ describe("packaged bootstrap entrypoints", () => {
         const candidate = path.join(root, "workspace", "source", "FlintTrade.candidate-1");
         const tools = path.join(root, "workspace", "tools");
         const node = path.join(tools, "node", "bin", "node");
-        const corepack = path.join(tools, "node", "bin", "corepack");
+        const corepack = path.join(tools, "node", "lib", "node_modules", "corepack", "dist", "corepack.js");
         const uv = path.join(tools, "uv", "uv");
         for (const required of [
           "package.json",
@@ -36,12 +37,13 @@ describe("packaged bootstrap entrypoints", () => {
           writeFileSync(target, "{}\n");
         }
         mkdirSync(path.dirname(node), { recursive: true });
+        mkdirSync(path.dirname(corepack), { recursive: true });
         mkdirSync(path.dirname(uv), { recursive: true });
         writeFileSync(
           node,
           `#!/bin/sh
 if [ "\${1-}" = "--version" ]; then printf '%s\\n' v22.23.1; exit 0; fi
-case "\${1-}" in */corepack) shift;; *) exit 71;; esac
+case "\${1-}" in */corepack.js) shift;; *) exit 71;; esac
 [ "\${COREPACK_DEFAULT_TO_LATEST-}" = 0 ] || exit 72
 [ -n "\${COREPACK_HOME-}" ] || exit 73
 if [ "\${1-}" = "--version" ]; then printf '%s\\n' 0.29.4; exit 0; fi
@@ -62,7 +64,7 @@ exit 0
         for (const executable of [node, corepack, uv]) chmodSync(executable, 0o755);
 
         expect(() =>
-          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack], {
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "9.15.0"], {
             env: { PATH: "/usr/bin:/bin" },
           }),
         ).not.toThrow();
@@ -85,13 +87,20 @@ exit 0
     expect(combined).toContain("UV_CACHE_DIR");
     expect(combined).toContain("UV_NO_EDITABLE");
     expect(combined).toContain("UV_PYTHON_INSTALL_DIR");
-    expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$corepack" --version'));
+    expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$node" "$corepack_js" --version'));
     expect(powershell.indexOf("$env:PATH")).toBeLessThan(
-      powershell.indexOf('Invoke-Checked $Corepack @("--version")'),
+      powershell.indexOf('Invoke-Checked $Node @($CorepackJs, "--version")'),
     );
+    expect(powershell).not.toContain("corepack.cmd");
     expect(combined).not.toMatch(/\b(?:sudo|doas|apt(?:-get)?|dnf|yum|brew|choco|winget)\b/i);
     expect(combined).not.toMatch(/(?:curl|wget|Invoke-WebRequest|irm)\b[^\n|]*\|/i);
     expect(combined).not.toMatch(/\bInvoke-Expression\b|\biex\b/i);
+  });
+
+  it("bundles the real probe with the same CommonJS boundary as Electron main", () => {
+    const source = readFileSync(probeRunner, "utf8");
+
+    expect(source).toContain("createRequire(import.meta.url)");
   });
 
   it.runIf(process.platform === "win32" || Boolean(process.env.CI))(
