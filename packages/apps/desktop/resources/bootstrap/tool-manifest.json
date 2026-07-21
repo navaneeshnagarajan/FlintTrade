@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": {
+    "node": {
+      "sha256": "158f2e2c580c610b9cef2853f3444c7369b84cc23e7ad764e3c40e9d60d82ea0",
+      "url": "https://nodejs.org/dist/v22.23.1/SHASUMS256.txt"
+    },
+    "uv": {
+      "sha256": "354e3af56c975b03b69074a316395af31f82f98e57a069ecbe9db4b212d578ab",
+      "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/sha256.sum"
+    }
+  },
+  "node": {
+    "version": "22.23.1",
+    "assets": {
+      "darwin-arm64": {
+        "archive": "tar.gz",
+        "executable": "node-v22.23.1-darwin-arm64/bin/node",
+        "sha256": "ef28d8fab2c0e4314522d4bb1b7173270aa3937e93b92cb7de79c112ac1fa953",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-arm64.tar.gz"
+      },
+      "darwin-x64": {
+        "archive": "tar.gz",
+        "executable": "node-v22.23.1-darwin-x64/bin/node",
+        "sha256": "b8da981b8a0b1241b70249204916da76c63573ddf5814dbd2d1e41069105cb81",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-x64.tar.gz"
+      },
+      "linux-arm64": {
+        "archive": "tar.gz",
+        "executable": "node-v22.23.1-linux-arm64/bin/node",
+        "sha256": "543fa39e57d4c07855939459a323f4deb9a79dd1bb45e6e99458b0f2de10db8d",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-arm64.tar.gz"
+      },
+      "linux-x64": {
+        "archive": "tar.gz",
+        "executable": "node-v22.23.1-linux-x64/bin/node",
+        "sha256": "7a8cb04b4a1df4eaf432125324b81b29a088e73570a23259a8de1c65d07fc129",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-x64.tar.gz"
+      },
+      "win32-x64": {
+        "archive": "zip",
+        "executable": "node-v22.23.1-win-x64/node.exe",
+        "sha256": "7df0bc9375723f4a86b3aa1b7cc73342423d9677a8df4538aca31a049e309c29",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-win-x64.zip"
+      }
+    }
+  },
+  "pnpm": {
+    "version": "9.15.0",
+    "integrity": "sha512-76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+    "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
+  },
+  "uv": {
+    "version": "0.11.16",
+    "assets": {
+      "darwin-arm64": {
+        "archive": "tar.gz",
+        "executable": "uv-aarch64-apple-darwin/uv",
+        "sha256": "2b25be1af546be330b340b0a76b99f989daa6d92678fdffb87438e661e9d88fb",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-apple-darwin.tar.gz"
+      },
+      "darwin-x64": {
+        "archive": "tar.gz",
+        "executable": "uv-x86_64-apple-darwin/uv",
+        "sha256": "6b91ae3de155f51bd1f5b74814821c79f016a176561f252cd9ddfb976939af2e",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-apple-darwin.tar.gz"
+      },
+      "linux-arm64": {
+        "archive": "tar.gz",
+        "executable": "uv-aarch64-unknown-linux-gnu/uv",
+        "sha256": "8c9d0f0ee98166ae6ab198747519ba6f25db29d185bd2ae5960ecebc91a5c22a",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-aarch64-unknown-linux-gnu.tar.gz"
+      },
+      "linux-x64": {
+        "archive": "tar.gz",
+        "executable": "uv-x86_64-unknown-linux-gnu/uv",
+        "sha256": "74947fe2c03315cf07e82ab3acc703eddef01aba4d5232a98e4c6825ec116131",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-unknown-linux-gnu.tar.gz"
+      },
+      "win32-x64": {
+        "archive": "zip",
+        "executable": "uv-x86_64-pc-windows-msvc/uv.exe",
+        "sha256": "dd9d6d6554bfab265bfa98aa8e8a406c5c3a7b97582f93de1f4d48d9154a0395",
+        "url": "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip"
+      }
+    }
+  }
+}

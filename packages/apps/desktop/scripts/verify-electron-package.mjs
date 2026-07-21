@@ -79,6 +79,22 @@ const packagedLicence = readFileSync(path.join(resourcesDirectory, "licenses", "
 const sourceLicence = readFileSync(path.join(packageRoot, "resources", "licenses", "hermes-agent-LICENSE"));
 assert.deepEqual(packagedLicence, sourceLicence, "The packaged Hermes MIT licence differs from the tracked upstream text.");
 
+for (const resource of [
+  "tool-manifest.json",
+  "flinttrade-bootstrap.sh",
+  "flinttrade-bootstrap.ps1",
+  "checksums/node-v22.23.1-SHASUMS256.txt",
+  "checksums/uv-0.11.16-sha256.sum",
+]) {
+  const packaged = readFileSync(path.join(resourcesDirectory, "bootstrap", resource));
+  const source = readFileSync(path.join(packageRoot, "resources", "bootstrap", resource));
+  assert.deepEqual(packaged, source, `The packaged bootstrap resource differs from tracked source: ${resource}.`);
+}
+if (process.platform !== "win32") {
+  const bootstrapMode = statSync(path.join(resourcesDirectory, "bootstrap", "flinttrade-bootstrap.sh")).mode;
+  assert.notEqual(bootstrapMode & 0o111, 0, "The packaged POSIX bootstrap entrypoint is not executable.");
+}
+
 const packagedNotice = readFileSync(path.join(resourcesDirectory, "NOTICE"));
 const sourceNotice = readFileSync(path.join(repositoryRoot, "notice"));
 assert.deepEqual(packagedNotice, sourceNotice, "The packaged NOTICE differs from the tracked repository NOTICE.");

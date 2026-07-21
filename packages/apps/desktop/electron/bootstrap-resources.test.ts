@@ -1,0 +1,113 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const resourceRoot = path.resolve(import.meta.dirname, "..", "resources", "bootstrap");
+const posixScript = path.join(resourceRoot, "flinttrade-bootstrap.sh");
+const powershellScript = path.join(resourceRoot, "flinttrade-bootstrap.ps1");
+
+describe("packaged bootstrap entrypoints", () => {
+  it.runIf(process.platform !== "win32")("passes the system POSIX shell syntax check", () => {
+    expect(() => execFileSync("sh", ["-n", posixScript])).not.toThrow();
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "runs from a clean PATH with Corepack using the verified Node executable",
+    () => {
+      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
+      try {
+        const candidate = path.join(root, "workspace", "source", "FlintTrade.candidate-1");
+        const tools = path.join(root, "workspace", "tools");
+        const node = path.join(tools, "node", "bin", "node");
+        const corepack = path.join(tools, "node", "bin", "corepack");
+        const uv = path.join(tools, "uv", "uv");
+        for (const required of [
+          "package.json",
+          "pyproject.toml",
+          "uv.lock",
+          "pnpm-lock.yaml",
+          "packages/apps/terminal/package.json",
+        ]) {
+          const target = path.join(candidate, required);
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, "{}\n");
+        }
+        mkdirSync(path.dirname(node), { recursive: true });
+        mkdirSync(path.dirname(uv), { recursive: true });
+        writeFileSync(
+          node,
+          `#!/bin/sh
+if [ "\${1-}" = "--version" ]; then printf '%s\\n' v22.23.1; exit 0; fi
+case "\${1-}" in */corepack) shift;; *) exit 71;; esac
+[ "\${COREPACK_DEFAULT_TO_LATEST-}" = 0 ] || exit 72
+[ -n "\${COREPACK_HOME-}" ] || exit 73
+if [ "\${1-}" = "--version" ]; then printf '%s\\n' 0.29.4; exit 0; fi
+if [ "\${1-}" = pnpm ] && [ "\${2-}" = "--version" ]; then printf '%s\\n' 9.15.0; fi
+exit 0
+`,
+        );
+        writeFileSync(corepack, "#!/usr/bin/env node\n");
+        writeFileSync(
+          uv,
+          `#!/bin/sh
+[ "\${UV_NO_EDITABLE-}" = 1 ] || exit 74
+[ -n "\${UV_CACHE_DIR-}" ] || exit 75
+[ -n "\${UV_PYTHON_INSTALL_DIR-}" ] || exit 76
+exit 0
+`,
+        );
+        for (const executable of [node, corepack, uv]) chmodSync(executable, 0o755);
+
+        expect(() =>
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack], {
+            env: { PATH: "/usr/bin:/bin" },
+          }),
+        ).not.toThrow();
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it("uses frozen locks, exact pnpm and no privileged or remote-script execution", () => {
+    const posix = readFileSync(posixScript, "utf8");
+    const powershell = readFileSync(powershellScript, "utf8");
+    const combined = `${posix}\n${powershell}`;
+
+    expect(combined).toContain("sync --frozen --all-packages --no-install-package flinttrade-ticks");
+    expect(combined).toContain('"--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks"');
+    expect(combined).toContain("pnpm 9.15.0");
+    expect(combined).toContain("--frozen-lockfile");
+    expect(combined).toContain("COREPACK_HOME");
+    expect(combined).toContain("UV_CACHE_DIR");
+    expect(combined).toContain("UV_NO_EDITABLE");
+    expect(combined).toContain("UV_PYTHON_INSTALL_DIR");
+    expect(posix.indexOf("export PATH")).toBeLessThan(posix.indexOf('"$corepack" --version'));
+    expect(powershell.indexOf("$env:PATH")).toBeLessThan(
+      powershell.indexOf('Invoke-Checked $Corepack @("--version")'),
+    );
+    expect(combined).not.toMatch(/\b(?:sudo|doas|apt(?:-get)?|dnf|yum|brew|choco|winget)\b/i);
+    expect(combined).not.toMatch(/(?:curl|wget|Invoke-WebRequest|irm)\b[^\n|]*\|/i);
+    expect(combined).not.toMatch(/\bInvoke-Expression\b|\biex\b/i);
+  });
+
+  it.runIf(process.platform === "win32" || Boolean(process.env.CI))(
+    "parses the PowerShell entrypoint when PowerShell is available",
+    () => {
+      const executable = process.platform === "win32" ? "powershell.exe" : "pwsh";
+      const probe = spawnSync(executable, ["-NoProfile", "-NonInteractive", "-Command", "exit 0"]);
+      if (probe.error) return;
+      const parsed = spawnSync(executable, [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `[void][scriptblock]::Create((Get-Content -Raw -LiteralPath $args[0]))`,
+        powershellScript,
+      ]);
+      expect(parsed.status).toBe(0);
+    },
+  );
+});

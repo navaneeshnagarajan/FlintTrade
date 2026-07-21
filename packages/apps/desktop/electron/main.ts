@@ -1,10 +1,13 @@
 // Adapted from NousResearch/hermes-agent commit 7651764ce (MIT).
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from "electron";
 
+import { createFirstRunBootstrap, type BootstrapToolManifest } from "./bootstrap";
+import { createNodeBootstrapDependencies } from "./bootstrap-io";
 import {
   buildSecureWebPreferences,
   hardenWebContents,
@@ -43,7 +46,20 @@ if (!hasSingleInstanceLock) {
     homeDirectory: os.homedir(),
     platform: process.platform,
   });
+  const bootstrapResources = app.isPackaged ? path.join(process.resourcesPath, "bootstrap") : path.join(appRoot, "resources", "bootstrap");
+  const bootstrapManifest = JSON.parse(
+    readFileSync(path.join(bootstrapResources, "tool-manifest.json"), "utf8"),
+  ) as BootstrapToolManifest;
+  if (bootstrapManifest.schemaVersion !== 1) throw new Error("Unsupported bootstrap tool manifest schema.");
   const bootstrapState = createBootstrapState();
+  const bootstrapController = createFirstRunBootstrap({
+    arch: process.arch,
+    dependencies: createNodeBootstrapDependencies(process.platform),
+    manifest: bootstrapManifest,
+    paths: desktopPaths,
+    platform: process.platform,
+    state: bootstrapState,
+  });
   const sourceUpdateState = createUpdateState("source");
   const shellUpdateState = createUpdateState("shell");
   const backendState: Readonly<BackendState> = Object.freeze({ port: null, status: "stopped", url: null });
@@ -136,7 +152,7 @@ if (!hasSingleInstanceLock) {
           applySourceUpdate: () => {
             throw new Error("Source update is not available.");
           },
-          cancelBootstrap: () => bootstrapState.cancel(bootstrapState.getSnapshot().attempt),
+          cancelBootstrap: () => bootstrapController.cancel(),
           checkShellUpdate: () => checkUnavailable("shell"),
           checkSourceUpdate: () => checkUnavailable("source"),
           getBackendState: () => backendState,
@@ -149,16 +165,17 @@ if (!hasSingleInstanceLock) {
           },
           quit: () => app.quit(),
           quitAfterBackendFailure: () => app.quit(),
-          retryBootstrap: () => bootstrapState.retry(),
+          retryBootstrap: () => {
+            if (bootstrapState.getSnapshot().status !== "failed") return false;
+            void bootstrapController.retry();
+            return true;
+          },
           showWindow: showMainWindow,
         },
       });
 
-      // The resolved paths are intentionally read-only in Task 1. Bootstrapping
-      // will consume them in the next implementation slice without touching the
-      // platform workspace from this scaffold.
-      void desktopPaths;
       mainWindow = createSplashWindow();
+      void bootstrapController.start();
     })
     .catch(() => app.quit());
 }

@@ -1,5 +1,7 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -53,8 +55,9 @@ describe("desktop path resolution", () => {
       platform: "darwin",
     });
 
-    expect(paths.workspace).toBe(untouched);
-    expect(paths.logs).toBe(join(untouched, "logs"));
+    const canonicalUntouched = join(realpathSync.native(dirname(untouched)), basename(untouched));
+    expect(paths.workspace).toBe(canonicalUntouched);
+    expect(paths.logs).toBe(join(canonicalUntouched, "logs"));
     expect(existsSync(untouched)).toBe(false);
   });
 
@@ -120,6 +123,55 @@ describe("desktop path resolution", () => {
       }),
     ).toThrow("Could not determine home directory");
   });
+
+  it.runIf(process.platform !== "win32")(
+    "canonicalises existing symlink components exactly like Python Path.resolve",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "flinttrade-path-parity-"));
+      try {
+        const realHome = join(root, "real-home");
+        const linkedHome = join(root, "linked-home");
+        mkdirSync(realHome);
+        symlinkSync(realHome, linkedHome, "dir");
+        const override = join(linkedHome, "missing", "workspace");
+        const pythonResolved = execFileSync(
+          "python3",
+          ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())", override],
+          { encoding: "utf8" },
+        ).trim();
+
+        const resolved = resolveDesktopPaths({
+          currentWorkingDirectory: root,
+          env: { FLINTTRADE_WORKSPACE_DIR: override },
+          homeDirectory: linkedHome,
+          platform: process.platform,
+        });
+
+        expect(resolved.workspace).toBe(pythonResolved);
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "rejects POSIX named-user overrides before any filesystem mutation",
+    () => {
+      const root = join(tmpdir(), `flinttrade-named-user-${process.pid}-${Date.now()}`);
+      expect(existsSync(root)).toBe(false);
+
+      expect(() =>
+        resolveDesktopPaths({
+          currentWorkingDirectory: root,
+          env: { FLINTTRADE_WORKSPACE_DIR: "~root/flinttrade-workspace" },
+          homeDirectory: join(root, "home"),
+          platform: process.platform,
+        }),
+      ).toThrow("Named-user home paths are not supported");
+
+      expect(existsSync(root)).toBe(false);
+    },
+  );
 
   it("expands both Windows separator forms and preserves Python APPDATA fallbacks", () => {
     const inputs = {

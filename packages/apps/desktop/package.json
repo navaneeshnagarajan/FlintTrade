@@ -16,10 +16,12 @@
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.electron.config.ts",
     "test:electron": "vitest run --config vitest.electron.config.ts",
+    "verify:bootstrap-manifest": "node scripts/generate-bootstrap-tool-manifest.mjs --check",
+    "probe:bootstrap": "node scripts/run-bootstrap-probe.mjs",
     "bundle": "node scripts/bundle-electron.mjs",
     "bundle:dev": "node scripts/bundle-electron.mjs --dev",
-    "build": "pnpm run typecheck && pnpm run test:electron && pnpm run bundle",
-    "pack:dir": "pnpm run bundle && electron-builder --dir --mac --publish never && pnpm run verify:package",
+    "build": "pnpm run verify:bootstrap-manifest && pnpm run typecheck && pnpm run test:electron && pnpm run bundle",
+    "pack:dir": "pnpm run verify:bootstrap-manifest && pnpm run bundle && electron-builder --dir --mac --publish never && pnpm run verify:package",
     "verify:package": "node scripts/verify-electron-package.mjs"
   },
   "dependencies": {
@@ -65,6 +67,10 @@
       {
         "from": "resources/licenses/hermes-agent-LICENSE",
         "to": "licenses/hermes-agent-LICENSE"
+      },
+      {
+        "from": "resources/bootstrap",
+        "to": "bootstrap"
       }
     ],
     "asar": true,
