@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
     retry: "flint:bootstrap:retry",
   },
   backend: {
+    event: "flint:backend:event",
     get: "flint:backend:get",
   },
   external: {

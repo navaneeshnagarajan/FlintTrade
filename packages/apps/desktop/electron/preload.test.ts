@@ -27,6 +27,7 @@ describe("sandboxed preload", () => {
     expect(api).toMatchObject({
       getBootstrapSnapshot: expect.any(Function),
       onBootstrapEvent: expect.any(Function),
+      onBackendEvent: expect.any(Function),
       openExternal: expect.any(Function),
       window: expect.objectContaining({
         hide: expect.any(Function),

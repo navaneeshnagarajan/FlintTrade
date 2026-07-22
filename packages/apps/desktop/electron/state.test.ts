@@ -1,6 +1,58 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createBootstrapState, createUpdateState } from "./state";
+import { createBackendState, createBootstrapState, createUpdateState } from "./state";
+
+describe("backend state", () => {
+  it("publishes an attempt-bound starting to ready transition", () => {
+    const store = createBackendState();
+    const listener = vi.fn();
+    store.subscribe(listener);
+
+    const attempt = store.begin();
+    expect(store.ready(attempt, 43_210)).toBe(true);
+    expect(store.getSnapshot()).toEqual({
+      port: 43_210,
+      status: "ready",
+      url: "http://127.0.0.1:43210",
+    });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects stale workers after a retry begins", () => {
+    const store = createBackendState();
+    const first = store.begin();
+    const second = store.begin();
+
+    expect(store.ready(first, 43_210)).toBe(false);
+    expect(store.ready(first, 0)).toBe(false);
+    expect(store.fail(first)).toBe(false);
+    expect(store.ready(second, 43_211)).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ port: 43_211, status: "ready" });
+  });
+
+  it("supports post-ready failure and exact stopped publication", () => {
+    const store = createBackendState();
+    const failedAttempt = store.begin();
+    expect(store.ready(failedAttempt, 43_210)).toBe(true);
+    expect(store.fail(failedAttempt)).toBe(true);
+    expect(store.getSnapshot()).toEqual({ port: null, status: "failed", url: null });
+    expect(store.stopped(failedAttempt)).toBe(false);
+
+    const drainedAttempt = store.begin();
+    expect(store.ready(drainedAttempt, 43_211)).toBe(true);
+    expect(store.stopped(drainedAttempt)).toBe(true);
+    expect(store.getSnapshot()).toEqual({ port: null, status: "stopped", url: null });
+  });
+
+  it("validates the loopback port before publishing authority", () => {
+    const store = createBackendState();
+    const attempt = store.begin();
+
+    expect(() => store.ready(attempt, 0)).toThrow(/port/i);
+    expect(() => store.ready(attempt, 65_536)).toThrow(/port/i);
+    expect(store.getSnapshot()).toEqual({ port: null, status: "starting", url: null });
+  });
+});
 
 describe("bootstrap state", () => {
   it("publishes snapshots and returns an unsubscribe closure", () => {

@@ -72,6 +72,50 @@ function createSnapshotStore<T extends object>(initial: T) {
   };
 }
 
+/** Attempt-bound publication store for the authority-bearing loopback origin. */
+export function createBackendState() {
+  const state = createSnapshotStore<BackendState>({ port: null, status: "stopped", url: null });
+  let attempt = 0;
+
+  const activeAttempt = (candidate: number): boolean => candidate === attempt;
+  const activeStatus = (): boolean => {
+    const status = state.getSnapshot().status;
+    return status === "starting" || status === "ready";
+  };
+
+  return {
+    getSnapshot: state.getSnapshot,
+    subscribe: state.subscribe,
+    begin(): number {
+      attempt += 1;
+      state.publish({ port: null, status: "starting", url: null });
+      return attempt;
+    },
+    fail(candidate: number): boolean {
+      if (!activeAttempt(candidate) || !activeStatus()) return false;
+      state.publish({ port: null, status: "failed", url: null });
+      return true;
+    },
+    ready(candidate: number, port: number): boolean {
+      if (!activeAttempt(candidate) || state.getSnapshot().status !== "starting") return false;
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+        throw new RangeError("Backend state port must be an integer from 1 to 65535.");
+      }
+      state.publish({
+        port,
+        status: "ready",
+        url: `http://127.0.0.1:${port}`,
+      });
+      return true;
+    },
+    stopped(candidate: number): boolean {
+      if (!activeAttempt(candidate) || !activeStatus()) return false;
+      state.publish({ port: null, status: "stopped", url: null });
+      return true;
+    },
+  };
+}
+
 export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
   const state = createSnapshotStore<BootstrapSnapshot>({
     attempt: 0,

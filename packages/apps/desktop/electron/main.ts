@@ -4,25 +4,43 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, ipcMain, net, protocol, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  net,
+  Notification,
+  protocol,
+  session,
+  shell,
+  Tray,
+} from "electron";
 
-import { createFirstRunBootstrap, type BootstrapToolManifest } from "./bootstrap";
+import { createFirstRunBootstrap, type BootstrapResult, type BootstrapToolManifest } from "./bootstrap";
 import { createNodeBootstrapDependencies, currentBootIdentity } from "./bootstrap-io";
-import { createBootstrapQuitGate } from "./bootstrap-shutdown";
+import { createBackendRuntime } from "./backend-runtime";
+import { BackendSupervisor } from "./backend-supervisor";
+import { createDesktopWindows, type DesktopManagedWindow } from "./desktop-windows";
 import {
   buildSecureWebPreferences,
   hardenWebContents,
   installSessionHardening,
   isSafeExternalUrl,
 } from "./hardening";
+import { createGlobalHotkey } from "./hotkey";
 import { IPC_CHANNELS } from "./ipc-channels";
 import { registerDesktopIpc } from "./ipc";
+import { createDesktopLifecycle } from "./lifecycle";
+import { createNativeNotificationRelay } from "./notifications";
 import { resolveDesktopPaths } from "./paths";
 import { createSourceOperationCoordinator } from "./source-operation";
 import { createSourceUpdateRuntime } from "./source-update-runtime";
 import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
 import { createStartupRecoveryController } from "./startup-recovery";
-import { createBootstrapState, createUpdateState, type BackendState, type UpdateKind } from "./state";
+import { createBackendState, createBootstrapState, createUpdateState, type UpdateKind } from "./state";
+import { createDesktopTray } from "./tray";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -50,7 +68,9 @@ if (!hasSingleInstanceLock) {
     homeDirectory: os.homedir(),
     platform: process.platform,
   });
-  const bootstrapResources = app.isPackaged ? path.join(process.resourcesPath, "bootstrap") : path.join(appRoot, "resources", "bootstrap");
+  const bootstrapResources = app.isPackaged
+    ? path.join(process.resourcesPath, "bootstrap")
+    : path.join(appRoot, "resources", "bootstrap");
   const bootstrapManifest = JSON.parse(
     readFileSync(path.join(bootstrapResources, "tool-manifest.json"), "utf8"),
   ) as BootstrapToolManifest;
@@ -58,7 +78,9 @@ if (!hasSingleInstanceLock) {
     ? path.join(bootstrapResources, "flinttrade-job-supervisor.exe")
     : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-job-supervisor.exe");
   if (bootstrapManifest.schemaVersion !== 1) throw new Error("Unsupported bootstrap tool manifest schema.");
+
   const bootstrapState = createBootstrapState();
+  const backendState = createBackendState();
   const sourceUpdateState = createUpdateState("source");
   const shellUpdateState = createUpdateState("shell");
   const sourceOperationCoordinator = createSourceOperationCoordinator();
@@ -80,21 +102,51 @@ if (!hasSingleInstanceLock) {
     singletonAuthorised: hasSingleInstanceLock,
     state: bootstrapState,
   });
+
+  let terminalOrigin: string | null = null;
+  let windows: ReturnType<typeof createDesktopWindows> | null = null;
+  let lifecycle: ReturnType<typeof createDesktopLifecycle> | null = null;
+
+  const notificationRelay = createNativeNotificationRelay({
+    isSupported: () => Notification.isSupported(),
+    show: ({ body, title }) => new Notification({ body, title }).show(),
+  });
+  let backendRuntime!: ReturnType<typeof createBackendRuntime>;
+  const backendSupervisor = new BackendSupervisor({
+    bootSessionIdentity: bootIdentity,
+    frontendDist: path.join(desktopPaths.activeSource, "packages", "apps", "terminal", "dist"),
+    onNotification: ({ body, title }) => {
+      notificationRelay.publish({ body, title, type: "notification" });
+    },
+    onUnexpectedExit: () => backendRuntime.markUnexpectedExit(),
+    sourceRoot: desktopPaths.activeSource,
+    workspace: desktopPaths.workspace,
+  });
+  backendRuntime = createBackendRuntime({
+    activeSource: desktopPaths.activeSource,
+    async onFailure() {
+      lifecycle?.markBackendFailed();
+      await windows?.handleBackendFailure();
+    },
+    async onReady(backend) {
+      const shown = await windows?.showTerminal(backend.port);
+      if (shown === true) lifecycle?.markBackendReady();
+    },
+    async onStopped() {
+      lifecycle?.markBackendFailed();
+      await windows?.handleBackendFailure();
+    },
+    state: backendState,
+    supervisor: backendSupervisor,
+  });
+
   const sourceUpdateRuntime = createSourceUpdateRuntime({
     arch: process.arch,
     bootIdentity,
     bootstrapResources,
     coordinator: sourceOperationCoordinator,
     dependencies: bootstrapDependencies,
-    lifecycle: {
-      isAvailable: () => false,
-      async bootActive() {
-        throw new Error("Source update apply requires the Task 4 backend guardian and boot lifecycle.");
-      },
-      async drainCurrent() {
-        throw new Error("Source update apply requires the Task 4 backend guardian and drain lifecycle.");
-      },
-    },
+    lifecycle: backendRuntime.sourceLifecycle,
     manifest: bootstrapManifest,
     paths: desktopPaths,
     platform: process.platform,
@@ -118,124 +170,228 @@ if (!hasSingleInstanceLock) {
     },
     state: bootstrapState,
   });
-  const bootstrapQuitGate = createBootstrapQuitGate(app, startupController);
-  app.on("before-quit", (event) => bootstrapQuitGate.handleBeforeQuit(event));
-  const backendState: Readonly<BackendState> = Object.freeze({ port: null, status: "stopped", url: null });
-  let mainWindow: BrowserWindow | null = null;
-  let terminalOrigin: string | null = null;
+
+  lifecycle = createDesktopLifecycle({
+    app,
+    async drain() {
+      await startupController.shutdown();
+      await backendRuntime.drainForQuit();
+    },
+    getWindow: () => windows?.getPrimaryWindow() ?? null,
+  });
 
   const originPolicy = () => ({ splashUrl, terminalOrigin });
-
   const broadcast = (channel: string, payload: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
       if (!window.isDestroyed()) window.webContents.send(channel, payload);
     }
   };
-
   bootstrapState.subscribe((snapshot) => broadcast(IPC_CHANNELS.bootstrap.event, snapshot));
+  backendState.subscribe((snapshot) => broadcast(IPC_CHANNELS.backend.event, snapshot));
   sourceUpdateState.subscribe((snapshot) => broadcast(IPC_CHANNELS.update.event, snapshot));
   shellUpdateState.subscribe((snapshot) => broadcast(IPC_CHANNELS.update.event, snapshot));
 
   const updateStateFor = (kind: UpdateKind) => (kind === "source" ? sourceUpdateState : shellUpdateState);
-
   const checkUnavailable = (kind: UpdateKind) => {
     const store = updateStateFor(kind);
     const label = kind === "source" ? "Source" : "Electron shell";
     const attempt = store.begin("checking", `Checking ${label.toLowerCase()} updates`);
-    store.unavailable(attempt, `${label} updates are not active in this scaffold.`);
+    store.unavailable(attempt, `${label} updates are not available in this build.`);
     return store.getSnapshot();
   };
 
-  const createSplashWindow = (): BrowserWindow => {
-    const window = new BrowserWindow({
-      width: 540,
-      height: 360,
-      minWidth: 540,
-      minHeight: 360,
-      show: false,
-      resizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      title: "FlintTrade",
-      backgroundColor: "#0b0d12",
-      webPreferences: buildSecureWebPreferences(preloadPath, development),
-    });
-    window.once("ready-to-show", () => window.show());
-    window.on("closed", () => {
-      if (mainWindow === window) mainWindow = null;
-    });
-    void window.loadURL(splashUrl).catch(() => bootstrapQuitGate.requestQuitFailClosed());
-    return window;
-  };
+  const asManagedWindow = (browserWindow: BrowserWindow): DesktopManagedWindow => ({
+    destroy: () => browserWindow.destroy(),
+    focus: () => browserWindow.focus(),
+    hide: () => browserWindow.hide(),
+    isDestroyed: () => browserWindow.isDestroyed(),
+    isMinimised: () => browserWindow.isMinimized(),
+    isVisible: () => browserWindow.isVisible(),
+    loadURL: (url) => browserWindow.loadURL(url),
+    on(event, listener) {
+      if (event === "close") browserWindow.on("close", (closeEvent) => listener(closeEvent));
+      else browserWindow.on("closed", () => listener());
+    },
+    restore: () => browserWindow.restore(),
+    show: () => browserWindow.show(),
+  });
 
-  const showMainWindow = (): void => {
-    if (mainWindow?.isDestroyed() !== false) mainWindow = createSplashWindow();
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-  };
+  const createWindow = (remote: boolean): DesktopManagedWindow => asManagedWindow(new BrowserWindow({
+    backgroundColor: "#0b0d12",
+    fullscreenable: remote,
+    height: remote ? 900 : 360,
+    maximizable: remote,
+    minHeight: remote ? 640 : 360,
+    minWidth: remote ? 960 : 540,
+    resizable: remote,
+    show: false,
+    title: "FlintTrade",
+    webPreferences: buildSecureWebPreferences(preloadPath, development),
+    width: remote ? 1440 : 540,
+  }));
 
-  app.on("second-instance", showMainWindow);
-  app.on("activate", showMainWindow);
+  windows = createDesktopWindows({
+    createLocal: () => createWindow(false),
+    createRemote: () => createWindow(true),
+    localUrl: splashUrl,
+    onLocalClose: (event) => lifecycle?.handleWindowClose(event as { preventDefault(): void }),
+    onRemoteClose: (event) => lifecycle?.handleWindowClose(event as { preventDefault(): void }),
+    onRemoteFailure: () => lifecycle?.markBackendFailed(),
+    setTerminalOrigin: (origin) => { terminalOrigin = origin; },
+  });
 
-  void app
-    .whenReady()
-    .then(() => {
-      app.setName("FlintTrade");
-      session.defaultSession.protocol.handle(FLINTTRADE_SCHEME, (request) => {
-        const splashAsset = resolveSplashRequest(request.url, splashDirectory);
-        if (!splashAsset || request.method !== "GET") {
-          return new Response(null, { status: 404 });
+  let canRestoreHiddenWindow = false;
+  const tray = createDesktopTray({
+    create(callbacks) {
+      const nativeTray = new Tray(path.join(appRoot, "src-tauri", "icons", "32x32.png"));
+      nativeTray.setToolTip("FlintTrade");
+      nativeTray.setContextMenu(Menu.buildFromTemplate([
+        { click: callbacks.onShow, label: "Show FlintTrade" },
+        { type: "separator" },
+        { click: callbacks.onQuit, label: "Quit FlintTrade" },
+      ]));
+      nativeTray.on("click", () => callbacks.onLeftClick("up"));
+      return { destroy: () => nativeTray.destroy() };
+    },
+    markQuitIntent: () => lifecycle?.markQuitIntent(),
+    requestQuit: () => lifecycle?.requestQuit("tray"),
+    show: () => windows?.show(),
+    toggle: () => windows?.toggle(),
+  });
+  const hotkey = createGlobalHotkey({
+    register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+    toggle: () => windows?.toggle(),
+    unregister: (accelerator) => globalShortcut.unregister(accelerator),
+  });
+
+  let startup: Promise<boolean> | null = null;
+  const runStartup = (startBootstrap: () => Promise<BootstrapResult>): Promise<boolean> => {
+    if (startup) return startup;
+    const attempt = (async () => {
+      try {
+        await windows!.showLocal();
+        const result = await startBootstrap();
+        if (!result.ok) {
+          lifecycle!.markBackendFailed();
+          return false;
         }
-        return net.fetch(pathToFileURL(splashAsset).href);
-      });
-      installSessionHardening(session.defaultSession);
-      app.on("web-contents-created", (_event, contents) => {
-        hardenWebContents(contents, {
-          development,
-          openExternal: (url) => shell.openExternal(url),
-          originPolicy,
-        });
-      });
+        await backendRuntime.start();
+        return true;
+      } catch {
+        lifecycle!.markBackendFailed();
+        await windows!.handleBackendFailure();
+        return false;
+      }
+    })();
+    startup = attempt;
+    const clear = (): void => {
+      if (startup === attempt) startup = null;
+    };
+    void attempt.then(clear, clear);
+    return attempt;
+  };
 
-      registerDesktopIpc(ipcMain, {
+  const retryStartup = (): boolean => {
+    if (startup) return false;
+    const bootstrap = bootstrapState.getSnapshot();
+    if (bootstrap.status === "failed") {
+      void runStartup(() => startupController.retry());
+      return true;
+    }
+    if (bootstrap.status !== "ready") return false;
+    const backend = backendState.getSnapshot();
+    if (backend.status === "failed" || backend.status === "stopped") {
+      void runStartup(async () => ({ ok: true }));
+      return true;
+    }
+    const running = backendRuntime.getRunning();
+    if (backend.status === "ready" && running) {
+      void windows!.showTerminal(running.port).then((shown) => {
+        if (shown) lifecycle!.markBackendReady();
+      }, () => lifecycle!.markBackendFailed());
+      return true;
+    }
+    return false;
+  };
+
+  app.on("before-quit", (event) => lifecycle!.handleBeforeQuit(event));
+  app.on("second-instance", () => lifecycle!.handleSecondInstance());
+  app.on("activate", () => lifecycle!.handleActivate());
+  app.on("will-quit", () => {
+    hotkey.stop();
+    tray.stop();
+  });
+
+  void app.whenReady().then(async () => {
+    app.setName("FlintTrade");
+    session.defaultSession.protocol.handle(FLINTTRADE_SCHEME, (request) => {
+      const splashAsset = resolveSplashRequest(request.url, splashDirectory);
+      if (!splashAsset || request.method !== "GET") return new Response(null, { status: 404 });
+      return net.fetch(pathToFileURL(splashAsset).href);
+    });
+    installSessionHardening(session.defaultSession);
+    app.on("web-contents-created", (_event, contents) => {
+      hardenWebContents(contents, {
+        development,
+        openExternal: (url) => shell.openExternal(url),
         originPolicy,
-        services: {
-          applyShellUpdate: () => {
-            throw new Error("Electron shell update is not available.");
-          },
-          applySourceUpdate: () => {
-            throw new Error("Source update apply requires the backend guardian and is not active yet.");
-          },
-          cancelBootstrap: () => startupController.cancel(),
-          checkShellUpdate: () => checkUnavailable("shell"),
-          checkSourceUpdate: () => {
-            if (bootstrapState.getSnapshot().status !== "ready") {
-              throw new Error("Source updates can be checked after source bootstrap is ready.");
-            }
-            return sourceUpdateRuntime.updater.check();
-          },
-          getBackendState: () => backendState,
-          getBootstrapSnapshot: () => bootstrapState.getSnapshot(),
-          getUpdateState: (kind) => updateStateFor(kind).getSnapshot(),
-          hideWindow: () => mainWindow?.hide(),
-          openExternal: async (url) => {
-            if (!isSafeExternalUrl(url)) throw new TypeError("Only HTTPS external URLs are allowed.");
-            await shell.openExternal(url);
-          },
-          quit: () => bootstrapQuitGate.requestQuit(),
-          quitAfterBackendFailure: () => bootstrapQuitGate.requestQuit(),
-          retryBootstrap: () => {
-            if (bootstrapState.getSnapshot().status !== "failed") return false;
-            void startupController.retry();
-            return true;
-          },
-          showWindow: showMainWindow,
-        },
       });
+    });
 
-      mainWindow = createSplashWindow();
-      void startupController.start().catch(() => undefined);
-    })
-    .catch(() => bootstrapQuitGate.requestQuitFailClosed());
+    registerDesktopIpc(ipcMain, {
+      originPolicy,
+      services: {
+        applyShellUpdate: () => {
+          throw new Error("Electron shell update is not available.");
+        },
+        applySourceUpdate: () => sourceUpdateRuntime.updater.apply(),
+        cancelBootstrap: async () => {
+          const [bootstrapCancelled, backendCancelled] = await Promise.all([
+            startupController.cancel(),
+            backendRuntime.cancelStarting(),
+          ]);
+          return bootstrapCancelled || backendCancelled;
+        },
+        checkShellUpdate: () => checkUnavailable("shell"),
+        checkSourceUpdate: () => {
+          if (bootstrapState.getSnapshot().status !== "ready") {
+            throw new Error("Source updates can be checked after source bootstrap is ready.");
+          }
+          return sourceUpdateRuntime.updater.check();
+        },
+        getBackendState: () => backendState.getSnapshot(),
+        getBootstrapSnapshot: () => bootstrapState.getSnapshot(),
+        getUpdateState: (kind) => updateStateFor(kind).getSnapshot(),
+        hideWindow: () => {
+          if (!canRestoreHiddenWindow) throw new Error("The window cannot hide without a restore control.");
+          windows!.hide();
+        },
+        openExternal: async (url) => {
+          if (!isSafeExternalUrl(url)) throw new TypeError("Only HTTPS external URLs are allowed.");
+          await shell.openExternal(url);
+        },
+        quit: () => {
+          lifecycle!.markQuitIntent();
+          return lifecycle!.requestQuit("ipc");
+        },
+        quitAfterBackendFailure: () => {
+          lifecycle!.markBackendFailed();
+          lifecycle!.markQuitIntent();
+          return lifecycle!.requestQuit("backend-failure");
+        },
+        retryBootstrap: retryStartup,
+        showWindow: () => windows!.show(),
+      },
+    });
+
+    await windows!.showLocal();
+    const trayAvailable = tray.start();
+    const hotkeyAvailable = hotkey.start();
+    canRestoreHiddenWindow = trayAvailable || hotkeyAvailable;
+    lifecycle!.setRestoreCapabilities({ hotkey: hotkeyAvailable, tray: trayAvailable });
+    void runStartup(() => startupController.start());
+  }).catch(() => {
+    lifecycle!.markBackendFailed();
+    void lifecycle!.requestQuit("recovery").catch(() => undefined);
+  });
 }

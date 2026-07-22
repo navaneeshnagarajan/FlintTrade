@@ -1,9 +1,9 @@
-"""Native-desktop backend entry point.
+"""Native-desktop backend serving entry point.
 
-This is the process the Tauri desktop shell launches as a bundled *sidecar*.
+The Electron source guardian and retained Tauri sidecar both call this module.
 It serves the full FlintTrade backend — the gated order path, every REST
-blueprint, and the built React terminal — on a loopback port, then blocks
-until the parent process terminates it.
+blueprint, and the built React terminal — on a loopback port, then blocks until
+the desktop parent terminates it.
 
 Design goals (distinct from :func:`flinttrade_core.app.FlintTradeApp.run`):
 
@@ -24,7 +24,7 @@ Design goals (distinct from :func:`flinttrade_core.app.FlintTradeApp.run`):
   interface — so the desktop backend is unreachable from the network.
 * **Lifecycle handshake.** Once the listening socket is bound, a single
   ``FLINTTRADE_BACKEND_READY port=<port>`` line is written to stdout. The
-  Tauri shell waits for that line (and/or polls the health endpoint) before
+  desktop shell waits for that line (and/or polls the health endpoint) before
   pointing its window at ``http://127.0.0.1:<port>``.
 
 Usage::
@@ -95,7 +95,7 @@ class DesktopBackendShutdownIncomplete(RuntimeError):
 #: ``FLINTTRADE_BACKEND_PORT`` environment variable.
 DEFAULT_PORT = 5100
 
-#: Stdout sentinel the Tauri shell waits for before loading the UI.
+#: Stdout sentinel the desktop shell waits for before loading the UI.
 READY_SENTINEL = "FLINTTRADE_BACKEND_READY"
 
 _CAPTURE_RUNTIME_CONFIG = "DESKTOP_TICK_CAPTURE_RUNTIME"
@@ -1959,8 +1959,18 @@ def serve(
     ready_writer: Callable[[str], None] | None = None,
     shutdown_signal: _ShutdownSignal | None = None,
     shutdown_deadline: float | None = None,
+    guardian_owned_lease: bool = False,
 ) -> None:
     """Serve while retaining exclusive ownership of the active workspace."""
+    if guardian_owned_lease:
+        _serve_owned(
+            port,
+            ready_writer=ready_writer,
+            shutdown_signal=shutdown_signal,
+            shutdown_deadline=shutdown_deadline,
+        )
+        return
+
     lease_failure_context: str | None = None
     try:
         backend_lease = acquire_backend_instance_lease()
@@ -2103,6 +2113,7 @@ def main(
     argv: list[str] | None = None,
     *,
     shutdown_signal: _ShutdownSignal | None = None,
+    guardian_owned_lease: bool = False,
 ) -> None:
     """CLI entry point — parse args, init workspace, serve.
 
@@ -2130,7 +2141,11 @@ def main(
         raise RuntimeError(
             f"Desktop backend startup failed ({workspace_failure_context})"
         ) from None
-    serve(_resolve_port(args.port), shutdown_signal=shutdown_signal)
+    serve(
+        _resolve_port(args.port),
+        shutdown_signal=shutdown_signal,
+        guardian_owned_lease=guardian_owned_lease,
+    )
 
 
 if __name__ == "__main__":

@@ -25,8 +25,8 @@ DEFAULT_OPENALGO_WS_PORT = 8765
 
 
 def _load_dev_env() -> None:
-    """Load repo-root .env for contributor/server runs, never for frozen desktop."""
-    if getattr(sys, "frozen", False):
+    """Load repo-root .env for contributor/server runs, never for desktop."""
+    if getattr(sys, "frozen", False) or os.environ.get("FLINTTRADE_DESKTOP") == "1":
         return
     repo_root = Path(__file__).resolve().parents[5]
     load_dotenv(repo_root / ".env", override=False)

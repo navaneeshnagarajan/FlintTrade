@@ -40,28 +40,40 @@ describe("window.flintDesktop bridge", () => {
     expect(api).not.toHaveProperty("invoke");
   });
 
-  it("returns unsubscribe closures for bootstrap and update events", () => {
+  it("returns unsubscribe closures for backend, bootstrap and update events", () => {
     const fake = fakeIpcRenderer();
     const api = createFlintDesktopApi(fake.ipc);
     const bootstrapListener = vi.fn();
+    const backendListener = vi.fn();
     const updateListener = vi.fn();
 
+    const unsubscribeBackend = api.onBackendEvent(backendListener);
     const unsubscribeBootstrap = api.onBootstrapEvent(bootstrapListener);
     const unsubscribeUpdate = api.onUpdateProgress(updateListener);
+    fake.emit(IPC_CHANNELS.backend.event, { status: "starting" });
     fake.emit(IPC_CHANNELS.bootstrap.event, { status: "running" });
     fake.emit(IPC_CHANNELS.update.event, { status: "checking" });
 
+    expect(backendListener).toHaveBeenCalledWith({ status: "starting" });
     expect(bootstrapListener).toHaveBeenCalledWith({ status: "running" });
     expect(updateListener).toHaveBeenCalledWith({ status: "checking" });
 
-    const bootstrapRegistration = fake.ipc.on.mock.calls[0];
-    const updateRegistration = fake.ipc.on.mock.calls[1];
+    const backendRegistration = fake.ipc.on.mock.calls[0];
+    const bootstrapRegistration = fake.ipc.on.mock.calls[1];
+    const updateRegistration = fake.ipc.on.mock.calls[2];
+    expect(backendRegistration).toBeDefined();
     expect(bootstrapRegistration).toBeDefined();
     expect(updateRegistration).toBeDefined();
 
-    unsubscribeBootstrap();
+    unsubscribeBackend();
     expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(
       1,
+      IPC_CHANNELS.backend.event,
+      backendRegistration?.[1],
+    );
+    unsubscribeBootstrap();
+    expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(
+      2,
       IPC_CHANNELS.bootstrap.event,
       bootstrapRegistration?.[1],
     );
@@ -71,7 +83,7 @@ describe("window.flintDesktop bridge", () => {
     expect(updateListener).toHaveBeenCalledTimes(2);
 
     unsubscribeUpdate();
-    expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(2, IPC_CHANNELS.update.event, updateRegistration?.[1]);
+    expect(fake.ipc.removeListener).toHaveBeenNthCalledWith(3, IPC_CHANNELS.update.event, updateRegistration?.[1]);
     fake.emit(IPC_CHANNELS.bootstrap.event, { status: "ready" });
     fake.emit(IPC_CHANNELS.update.event, { status: "complete" });
     expect(bootstrapListener).toHaveBeenCalledOnce();

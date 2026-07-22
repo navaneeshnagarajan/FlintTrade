@@ -17,6 +17,7 @@ export interface FlintDesktopApi {
   getBackendState(): Promise<Readonly<BackendState>>;
   getBootstrapSnapshot(): Promise<Readonly<BootstrapSnapshot>>;
   getUpdateState(kind: UpdateKind): Promise<Readonly<UpdateSnapshot>>;
+  onBackendEvent(callback: (snapshot: Readonly<BackendState>) => void): () => void;
   onBootstrapEvent(callback: (snapshot: Readonly<BootstrapSnapshot>) => void): () => void;
   onUpdateProgress(callback: (snapshot: Readonly<UpdateSnapshot>) => void): () => void;
   openExternal(url: string): Promise<void>;
@@ -47,6 +48,8 @@ export function createFlintDesktopApi(ipcRenderer: IpcRendererLike): FlintDeskto
       ipcRenderer.invoke(IPC_CHANNELS.bootstrap.get) as Promise<Readonly<BootstrapSnapshot>>,
     getUpdateState: (kind: UpdateKind) =>
       ipcRenderer.invoke(IPC_CHANNELS.update.get, kind) as Promise<Readonly<UpdateSnapshot>>,
+    onBackendEvent: (callback: (snapshot: Readonly<BackendState>) => void) =>
+      subscribe(ipcRenderer, IPC_CHANNELS.backend.event, callback),
     onBootstrapEvent: (callback: (snapshot: Readonly<BootstrapSnapshot>) => void) =>
       subscribe(ipcRenderer, IPC_CHANNELS.bootstrap.event, callback),
     onUpdateProgress: (callback: (snapshot: Readonly<UpdateSnapshot>) => void) =>

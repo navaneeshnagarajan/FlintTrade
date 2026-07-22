@@ -26,6 +26,13 @@ _ACL_REVISION = 2
 _ACCESS_ALLOWED_ACE_TYPE = 0
 _INHERITED_ACE = 0x10
 _FILE_ALL_ACCESS = 0x001F01FF
+_GENERIC_READ = 0x80000000
+_GENERIC_WRITE = 0x40000000
+_READ_CONTROL = 0x00020000
+_WRITE_DAC = 0x00040000
+_FILE_SHARE_READ = 0x00000001
+_FILE_SHARE_WRITE = 0x00000002
+_FILE_SHARE_DELETE = 0x00000004
 _ERROR_INSUFFICIENT_BUFFER = 122
 _SYSTEM_SID = b"\x01\x01\x00\x00\x00\x00\x00\x05\x12\x00\x00\x00"
 
@@ -71,6 +78,10 @@ class PendingDurableUnlinkError(OSError):
     """A Windows unlink is logically committed but tombstone cleanup is pending."""
 
 
+class InsecureFilePermissionsError(PermissionError):
+    """An owner-owned regular file has broader access than the secret policy."""
+
+
 def _is_windows() -> bool:
     return os.name == "nt"
 
@@ -85,6 +96,13 @@ def _windows_security_libraries():  # type: ignore[no-untyped-def]
     kernel32.CloseHandle.restype = ctypes.c_int
     kernel32.LocalFree.argtypes = [ctypes.c_void_p]
     kernel32.LocalFree.restype = ctypes.c_void_p
+    kernel32.ReOpenFile.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    ]
+    kernel32.ReOpenFile.restype = ctypes.c_void_p
 
     advapi32.OpenProcessToken.argtypes = [
         ctypes.c_void_p,
@@ -134,6 +152,16 @@ def _windows_security_libraries():  # type: ignore[no-untyped-def]
         ctypes.c_void_p,
     ]
     advapi32.SetNamedSecurityInfoW.restype = ctypes.c_uint32
+    advapi32.SetSecurityInfo.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+    ]
+    advapi32.SetSecurityInfo.restype = ctypes.c_uint32
     advapi32.GetNamedSecurityInfoW.argtypes = [
         ctypes.c_wchar_p,
         ctypes.c_uint32,
@@ -169,6 +197,50 @@ def _windows_security_libraries():  # type: ignore[no-untyped-def]
 
 def _raise_windows_error(code: int | None = None) -> None:
     raise ctypes.WinError(code if code is not None else ctypes.get_last_error())
+
+
+def _reopen_windows_descriptor_for_security(
+    descriptor: int,
+    *,
+    allow_delete_sharing: bool = True,
+    write_dacl: bool,
+) -> int:
+    """Reopen the same file object with the rights needed for DACL proof/update."""
+    import msvcrt
+
+    kernel32, _advapi32 = _windows_security_libraries()
+    original_handle = msvcrt.get_osfhandle(descriptor)
+    desired_access = _GENERIC_READ | _READ_CONTROL
+    descriptor_flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+    if write_dacl:
+        desired_access |= _GENERIC_WRITE | _WRITE_DAC
+        descriptor_flags = os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+    share_mode = _FILE_SHARE_READ | _FILE_SHARE_WRITE
+    if allow_delete_sharing:
+        share_mode |= _FILE_SHARE_DELETE
+    reopened_handle = kernel32.ReOpenFile(
+        ctypes.c_void_p(original_handle),
+        desired_access,
+        share_mode,
+        0,
+    )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if not reopened_handle or reopened_handle == invalid_handle:
+        _raise_windows_error()
+    try:
+        reopened_descriptor = msvcrt.open_osfhandle(
+            reopened_handle,
+            descriptor_flags,
+        )
+    except Exception:
+        kernel32.CloseHandle(ctypes.c_void_p(reopened_handle))
+        raise
+    try:
+        os.close(descriptor)
+    except Exception:
+        os.close(reopened_descriptor)
+        raise
+    return reopened_descriptor
 
 
 def _copy_windows_sid(sid: ctypes.c_void_p) -> bytes:
@@ -274,6 +346,93 @@ def _install_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) 
         _raise_windows_error(result)
 
 
+def _install_exact_windows_descriptor_dacl(
+    descriptor: int,
+    *,
+    user: str | None = None,
+) -> None:
+    import msvcrt
+
+    _kernel32, advapi32 = _windows_security_libraries()
+    sid_values = (_windows_account_sid(user), _SYSTEM_SID)
+    acl_size = ctypes.sizeof(_Acl) + sum(
+        ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid)
+        for sid in sid_values
+    )
+    acl = ctypes.create_string_buffer(acl_size)
+    if not advapi32.InitializeAcl(acl, acl_size, _ACL_REVISION):
+        _raise_windows_error()
+    sid_buffers = [ctypes.create_string_buffer(sid) for sid in sid_values]
+    for sid_buffer in sid_buffers:
+        if not advapi32.AddAccessAllowedAceEx(
+            acl,
+            _ACL_REVISION,
+            0,
+            _FILE_ALL_ACCESS,
+            sid_buffer,
+        ):
+            _raise_windows_error()
+    result = advapi32.SetSecurityInfo(
+        ctypes.c_void_p(msvcrt.get_osfhandle(descriptor)),
+        _SE_FILE_OBJECT,
+        _DACL_SECURITY_INFORMATION | _PROTECTED_DACL_SECURITY_INFORMATION,
+        None,
+        None,
+        acl,
+        None,
+    )
+    if result:
+        _raise_windows_error(result)
+
+
+def _verify_windows_security_descriptor(
+    owner: ctypes.c_void_p,
+    dacl: ctypes.c_void_p,
+    descriptor: ctypes.c_void_p,
+    *,
+    user: str | None,
+) -> tuple[bool, str]:
+    _kernel32, advapi32 = _windows_security_libraries()
+    if _copy_windows_sid(owner) != _windows_account_sid(user):
+        return False, "file owner is not the selected user"
+    if not dacl:
+        return False, "no DACL (file accessible to everyone)"
+
+    control = ctypes.c_ushort()
+    revision = ctypes.c_uint32()
+    if not advapi32.GetSecurityDescriptorControl(
+        descriptor,
+        ctypes.byref(control),
+        ctypes.byref(revision),
+    ):
+        return False, "DACL control flags could not be inspected"
+    if not control.value & _SE_DACL_PROTECTED:
+        return False, "DACL inheritance is not protected"
+
+    acl = ctypes.cast(dacl, ctypes.POINTER(_Acl)).contents
+    if acl.ace_count != 2:
+        return False, "DACL must contain exactly owner and SYSTEM ACEs"
+    actual_sids: set[bytes] = set()
+    for index in range(acl.ace_count):
+        ace_pointer = ctypes.c_void_p()
+        if not advapi32.GetAce(dacl, index, ctypes.byref(ace_pointer)):
+            return False, "DACL ACE could not be inspected"
+        ace = ctypes.cast(ace_pointer, ctypes.POINTER(_AccessAllowedAce)).contents
+        if ace.header.ace_type != _ACCESS_ALLOWED_ACE_TYPE:
+            return False, "DACL contains a non-allow ACE"
+        if ace.header.ace_flags & _INHERITED_ACE:
+            return False, "DACL contains an inherited ACE"
+        if ace.access_mask != _FILE_ALL_ACCESS:
+            return False, "DACL ACE does not grant exact full control"
+        sid_pointer = ctypes.c_void_p(
+            ace_pointer.value + _AccessAllowedAce.sid_start.offset
+        )
+        actual_sids.add(_copy_windows_sid(sid_pointer))
+    if actual_sids != {_windows_account_sid(user), _SYSTEM_SID}:
+        return False, "DACL contains an unexpected SID"
+    return True, ""
+
+
 def _verify_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) -> tuple[bool, str]:
     kernel32, advapi32 = _windows_security_libraries()
     owner = ctypes.c_void_p()
@@ -292,47 +451,50 @@ def _verify_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) -
     if result:
         return False, f"ACL inspection failed with Windows error {result}"
     try:
-        if _copy_windows_sid(owner) != _windows_account_sid(user):
-            return False, "file owner is not the selected user"
-        if not dacl:
-            return False, "no DACL (file accessible to everyone)"
-
-        control = ctypes.c_ushort()
-        revision = ctypes.c_uint32()
-        if not advapi32.GetSecurityDescriptorControl(
+        return _verify_windows_security_descriptor(
+            owner,
+            dacl,
             descriptor,
-            ctypes.byref(control),
-            ctypes.byref(revision),
-        ):
-            return False, "DACL control flags could not be inspected"
-        if not control.value & _SE_DACL_PROTECTED:
-            return False, "DACL inheritance is not protected"
-
-        acl = ctypes.cast(dacl, ctypes.POINTER(_Acl)).contents
-        if acl.ace_count != 2:
-            return False, "DACL must contain exactly owner and SYSTEM ACEs"
-        actual_sids: set[bytes] = set()
-        for index in range(acl.ace_count):
-            ace_pointer = ctypes.c_void_p()
-            if not advapi32.GetAce(dacl, index, ctypes.byref(ace_pointer)):
-                return False, "DACL ACE could not be inspected"
-            ace = ctypes.cast(ace_pointer, ctypes.POINTER(_AccessAllowedAce)).contents
-            if ace.header.ace_type != _ACCESS_ALLOWED_ACE_TYPE:
-                return False, "DACL contains a non-allow ACE"
-            if ace.header.ace_flags & _INHERITED_ACE:
-                return False, "DACL contains an inherited ACE"
-            if ace.access_mask != _FILE_ALL_ACCESS:
-                return False, "DACL ACE does not grant exact full control"
-            sid_pointer = ctypes.c_void_p(
-                ace_pointer.value + _AccessAllowedAce.sid_start.offset
-            )
-            actual_sids.add(_copy_windows_sid(sid_pointer))
-        if actual_sids != {_windows_account_sid(user), _SYSTEM_SID}:
-            return False, "DACL contains an unexpected SID"
-        return True, ""
+            user=user,
+        )
     finally:
         if descriptor:
             kernel32.LocalFree(descriptor)
+
+
+def _verify_exact_windows_descriptor_dacl(
+    descriptor: int,
+    *,
+    user: str | None = None,
+) -> tuple[bool, str]:
+    import msvcrt
+
+    kernel32, advapi32 = _windows_security_libraries()
+    owner = ctypes.c_void_p()
+    dacl = ctypes.c_void_p()
+    security_descriptor = ctypes.c_void_p()
+    result = advapi32.GetSecurityInfo(
+        ctypes.c_void_p(msvcrt.get_osfhandle(descriptor)),
+        _SE_FILE_OBJECT,
+        _OWNER_SECURITY_INFORMATION | _DACL_SECURITY_INFORMATION,
+        ctypes.byref(owner),
+        None,
+        ctypes.byref(dacl),
+        None,
+        ctypes.byref(security_descriptor),
+    )
+    if result:
+        return False, f"ACL inspection failed with Windows error {result}"
+    try:
+        return _verify_windows_security_descriptor(
+            owner,
+            dacl,
+            security_descriptor,
+            user=user,
+        )
+    finally:
+        if security_descriptor:
+            kernel32.LocalFree(security_descriptor)
 
 
 def harden(path: pathlib.Path, user: str | None = None) -> None:
@@ -552,7 +714,42 @@ def _assert_current_user_owns(descriptor: int, path_stat: os.stat_result) -> Non
             kernel32.LocalFree(security_descriptor)
 
 
-def _read_bounded_descriptor(descriptor: int, *, max_bytes: int) -> bytes:
+def _assert_hardened_descriptor(
+    descriptor: int,
+    path_stat: os.stat_result,
+    *,
+    path: pathlib.Path,
+) -> None:
+    if path_stat.st_nlink != 1:
+        raise OSError("secure file must have exactly one directory entry")
+    if not _is_windows():
+        if stat.S_IMODE(path_stat.st_mode) != 0o600:
+            raise InsecureFilePermissionsError(
+                "secure file is not hardened for the current user"
+            )
+        return
+
+    hardened, reason = _verify_exact_windows_descriptor_dacl(descriptor)
+    if not hardened:
+        raise InsecureFilePermissionsError(
+            f"secure file is not hardened for the current user: {reason}"
+        )
+    current_path_stat = path.lstat()
+    if (
+        not _same_file_identity(path_stat, current_path_stat)
+        or stat.S_ISLNK(current_path_stat.st_mode)
+        or _is_reparse_point(current_path_stat)
+    ):
+        raise OSError("secure file changed while its permissions were inspected")
+
+
+def _read_bounded_descriptor(
+    descriptor: int,
+    *,
+    max_bytes: int,
+    path: pathlib.Path,
+    require_hardened: bool,
+) -> bytes:
     file_stat = os.fstat(descriptor)
     if (
         not stat.S_ISREG(file_stat.st_mode)
@@ -561,6 +758,8 @@ def _read_bounded_descriptor(descriptor: int, *, max_bytes: int) -> bytes:
     ):
         raise OSError("secure file is not a bounded regular file")
     _assert_current_user_owns(descriptor, file_stat)
+    if require_hardened:
+        _assert_hardened_descriptor(descriptor, file_stat, path=path)
     chunks: list[bytes] = []
     remaining = max_bytes + 1
     while remaining:
@@ -575,8 +774,12 @@ def _read_bounded_descriptor(descriptor: int, *, max_bytes: int) -> bytes:
     return payload
 
 
-def read_owner_owned_bytes(path: pathlib.Path, *, max_bytes: int = 64 * 1024) -> bytes:
-    """Read a bounded, current-user-owned regular file without following links."""
+def _read_owner_owned_bytes(
+    path: pathlib.Path,
+    *,
+    max_bytes: int,
+    require_hardened: bool,
+) -> bytes:
     path = pathlib.Path(path)
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
@@ -594,6 +797,10 @@ def read_owner_owned_bytes(path: pathlib.Path, *, max_bytes: int = 64 * 1024) ->
             raise OSError("secure file path is unsafe")
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
         try:
+            descriptor = _reopen_windows_descriptor_for_security(
+                descriptor,
+                write_dacl=False,
+            )
             opened_stat = os.fstat(descriptor)
             current_path_stat = path.lstat()
             if (
@@ -602,7 +809,20 @@ def read_owner_owned_bytes(path: pathlib.Path, *, max_bytes: int = 64 * 1024) ->
                 or _is_reparse_point(current_path_stat)
             ):
                 raise OSError("secure file changed while it was opened")
-            return _read_bounded_descriptor(descriptor, max_bytes=max_bytes)
+            payload = _read_bounded_descriptor(
+                descriptor,
+                max_bytes=max_bytes,
+                path=path,
+                require_hardened=require_hardened,
+            )
+            final_path_stat = path.lstat()
+            if (
+                not _same_file_identity(opened_stat, final_path_stat)
+                or stat.S_ISLNK(final_path_stat.st_mode)
+                or _is_reparse_point(final_path_stat)
+            ):
+                raise OSError("secure file changed while it was read")
+            return payload
         finally:
             os.close(descriptor)
 
@@ -623,13 +843,71 @@ def read_owner_owned_bytes(path: pathlib.Path, *, max_bytes: int = 64 * 1024) ->
             | getattr(os, "O_CLOEXEC", 0)
             | getattr(os, "O_NOFOLLOW", 0)
         )
-        descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
         try:
-            return _read_bounded_descriptor(descriptor, max_bytes=max_bytes)
+            path_stat = os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise OSError("secure file path is unsafe") from exc
+        if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISREG(path_stat.st_mode):
+            raise OSError("secure file path is unsafe")
+        try:
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise OSError("secure file path is unsafe") from exc
+        try:
+            opened_stat = os.fstat(descriptor)
+            if not _same_file_identity(path_stat, opened_stat):
+                raise OSError("secure file changed while it was opened")
+            payload = _read_bounded_descriptor(
+                descriptor,
+                max_bytes=max_bytes,
+                path=path,
+                require_hardened=require_hardened,
+            )
+            final_path_stat = os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not _same_file_identity(opened_stat, final_path_stat)
+                or stat.S_ISLNK(final_path_stat.st_mode)
+            ):
+                raise OSError("secure file changed while it was read")
+            return payload
         finally:
             os.close(descriptor)
     finally:
         os.close(parent_descriptor)
+
+
+def read_owner_owned_bytes(path: pathlib.Path, *, max_bytes: int = 64 * 1024) -> bytes:
+    """Read a bounded, current-user-owned regular file without following links."""
+    return _read_owner_owned_bytes(
+        path,
+        max_bytes=max_bytes,
+        require_hardened=False,
+    )
+
+
+def read_hardened_owner_owned_bytes(
+    path: pathlib.Path,
+    *,
+    max_bytes: int = 64 * 1024,
+) -> bytes:
+    """Read a bounded owner-owned secret only when its permissions are hardened."""
+    return _read_owner_owned_bytes(
+        path,
+        max_bytes=max_bytes,
+        require_hardened=True,
+    )
 
 
 def read_owner_owned_text(
@@ -640,6 +918,16 @@ def read_owner_owned_text(
 ) -> str:
     """Read owner-owned text through the no-follow binary reader."""
     return read_owner_owned_bytes(path, max_bytes=max_bytes).decode(encoding)
+
+
+def read_hardened_owner_owned_text(
+    path: pathlib.Path,
+    *,
+    encoding: str = "utf-8",
+    max_bytes: int = 64 * 1024,
+) -> str:
+    """Read hardened owner-owned text without following links."""
+    return read_hardened_owner_owned_bytes(path, max_bytes=max_bytes).decode(encoding)
 
 
 def assert_hardened(path: pathlib.Path, user: str | None = None) -> tuple[bool, str]:

@@ -1,7 +1,13 @@
 """Tests for FlintTrade workspace configuration."""
 
+import concurrent.futures
 import json
+import os
 import platform
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -329,6 +335,207 @@ class TestWorkspaceInit:
 
         assert _provision_master_password(ws) is False
         assert password_file.read_text(encoding="utf-8") == "operator-owned-secret"
+
+    def test_cli_provision_master_password_replaces_an_owned_empty_file(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        password_file = ws.workspace_dir / "master_password"
+        password_file.write_text(" \n", encoding="utf-8")
+
+        assert _provision_master_password(ws) is True
+        password = password_file.read_text(encoding="utf-8")
+        assert len(password) == 64
+        assert all(character in "0123456789abcdef" for character in password)
+
+    def test_cli_provision_master_password_serialises_concurrent_callers(self, tmp_path, monkeypatch):
+        from flinttrade_core import cli
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        start = threading.Barrier(2)
+        write_count = 0
+        write_count_lock = threading.Lock()
+        real_write = cli.write_secret_text
+
+        def slow_write(path, value, user=None):  # type: ignore[no-untyped-def]
+            nonlocal write_count
+            with write_count_lock:
+                write_count += 1
+            time.sleep(0.15)
+            return real_write(path, value, user=user)
+
+        def provision() -> bool:
+            start.wait()
+            return cli._provision_master_password(ws)
+
+        monkeypatch.setattr(cli, "write_secret_text", slow_write)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _index: provision(), range(2)))
+
+        assert sorted(results) == [False, True]
+        assert write_count == 1
+        password = (ws.workspace_dir / "master_password").read_text(encoding="utf-8")
+        assert len(password) == 64
+        assert all(character in "0123456789abcdef" for character in password)
+
+    def test_cli_provision_master_password_rejects_symlink_without_touching_target(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        outside = tmp_path / "outside-secret"
+        outside.write_text("operator-owned-secret", encoding="utf-8")
+        outside.chmod(0o600)
+        password_file = ws.workspace_dir / "master_password"
+        password_file.symlink_to(outside)
+
+        with pytest.raises(OSError, match="unsafe"):
+            _provision_master_password(ws)
+
+        assert password_file.is_symlink()
+        assert outside.read_text(encoding="utf-8") == "operator-owned-secret"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX ownership semantics")
+    def test_cli_provision_master_password_rejects_another_owner(self, tmp_path, monkeypatch):
+        from flinttrade_core import secure_file
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        password_file = ws.workspace_dir / "master_password"
+        password_file.write_text("operator-owned-secret", encoding="utf-8")
+        password_file.chmod(0o600)
+        actual_user = password_file.stat().st_uid
+        monkeypatch.setattr(secure_file.os, "geteuid", lambda: actual_user + 1)
+
+        with pytest.raises(PermissionError, match="owned by the current user"):
+            _provision_master_password(ws)
+
+        assert password_file.read_text(encoding="utf-8") == "operator-owned-secret"
+
+    def test_cli_provision_master_password_hardens_owned_existing_secret(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.secure_file import assert_hardened
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        password_file = ws.workspace_dir / "master_password"
+        password_file.write_text("operator-owned-secret", encoding="utf-8")
+        if os.name != "nt":
+            password_file.chmod(0o640)
+
+        assert _provision_master_password(ws) is False
+        assert password_file.read_text(encoding="utf-8") == "operator-owned-secret"
+        ok, reason = assert_hardened(password_file)
+        assert ok, reason
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit semantics")
+    def test_cli_provision_master_password_repairs_noncanonical_owner_mode(self, tmp_path):
+        from flinttrade_core.cli import _provision_master_password
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+        password_file = ws.workspace_dir / "master_password"
+        password_file.write_text("operator-owned-secret", encoding="utf-8")
+        password_file.chmod(0o400)
+
+        assert _provision_master_password(ws) is False
+        assert password_file.read_text(encoding="utf-8") == "operator-owned-secret"
+        assert password_file.stat().st_mode & 0o777 == 0o600
+
+    def test_cli_provision_master_password_fails_closed_on_postcondition(self, tmp_path, monkeypatch):
+        from flinttrade_core import cli
+        from flinttrade_core.workspace import Workspace
+
+        ws = Workspace(home_dir=tmp_path / "ws")
+        ws.initialise()
+
+        def reject_postcondition(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+            raise PermissionError("postcondition rejected")
+
+        monkeypatch.setattr(cli, "read_hardened_owner_owned_text", reject_postcondition)
+
+        with pytest.raises(PermissionError, match="postcondition rejected"):
+            cli._provision_master_password(ws)
+
+    def test_master_password_cli_success_never_prints_the_secret(self, tmp_path):
+        workspace = tmp_path / "ws"
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [sys.executable, "-m", "flinttrade_core.cli", "init", "--provision-master-password"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        password = (workspace / "master_password").read_text(encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+        assert len(password) == 64
+        assert password not in result.stdout
+        assert password not in result.stderr
+
+    def test_master_password_cli_reports_stable_failure_without_secret_leakage(self, tmp_path):
+        from flinttrade_core.workspace import Workspace
+
+        workspace = tmp_path / "ws"
+        ws = Workspace(home_dir=workspace)
+        ws.initialise()
+        outside = tmp_path / "outside-secret"
+        outside.write_text("operator-owned-secret", encoding="utf-8")
+        outside.chmod(0o600)
+        (workspace / "master_password").symlink_to(outside)
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [sys.executable, "-m", "flinttrade_core.cli", "init", "--provision-master-password"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert result.stderr.strip() == "Master password provisioning failed."
+        assert "operator-owned-secret" not in result.stdout
+        assert "operator-owned-secret" not in result.stderr
+        assert outside.read_text(encoding="utf-8") == "operator-owned-secret"
+
+    def test_master_password_cli_reports_unsafe_provision_lock_without_secret_leakage(self, tmp_path):
+        from flinttrade_core import cli
+        from flinttrade_core.workspace import Workspace
+
+        workspace = tmp_path / "ws"
+        ws = Workspace(home_dir=workspace)
+        ws.initialise()
+        outside = tmp_path / "outside-lock-target"
+        outside.write_text("do-not-touch", encoding="utf-8")
+        (workspace / cli._MASTER_PASSWORD_PROVISION_LOCK).symlink_to(outside)
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [sys.executable, "-m", "flinttrade_core.cli", "init", "--provision-master-password"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert result.stderr.strip() == "Master password provisioning failed."
+        assert "do-not-touch" not in result.stdout
+        assert "do-not-touch" not in result.stderr
+        assert outside.read_text(encoding="utf-8") == "do-not-touch"
+        assert (workspace / "master_password").exists() is False
 
 
 class TestWorkspaceLoadSave:
