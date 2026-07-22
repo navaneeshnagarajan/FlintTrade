@@ -209,6 +209,7 @@ describe("source update orchestration", () => {
     const test = fixture();
 
     await expect(test.updater.check()).resolves.toMatchObject({
+      currentVersion: currentRevision,
       failure: null,
       status: "available",
       version: latestRevision,
@@ -225,7 +226,11 @@ describe("source update orchestration", () => {
       provenance: "git" as const,
       revision: currentRevision,
     }));
-    await expect(test.updater.check()).resolves.toMatchObject({ status: "unavailable", version: null });
+    await expect(test.updater.check()).resolves.toMatchObject({
+      currentVersion: currentRevision,
+      status: "unavailable",
+      version: null,
+    });
   });
 
   it("fails before lease acquisition or staging when safe cleanup is unavailable", async () => {

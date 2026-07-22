@@ -55,6 +55,22 @@ describe("backend state", () => {
 });
 
 describe("bootstrap state", () => {
+  it("uses a strictly monotonic heartbeat when multiple publications share one clock tick", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T00:00:00.000Z"));
+      const store = createBootstrapState();
+      const initialHeartbeat = store.getSnapshot().heartbeatAt;
+      const attempt = store.begin("Preparing source bootstrap");
+      const runningHeartbeat = store.getSnapshot().heartbeatAt;
+      expect(store.publishForAttempt(attempt, { message: "Still preparing" })).toBe(true);
+      expect(initialHeartbeat).toBeLessThan(runningHeartbeat);
+      expect(runningHeartbeat).toBeLessThan(store.getSnapshot().heartbeatAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes snapshots and returns an unsubscribe closure", () => {
     const store = createBootstrapState();
     const listener = vi.fn();
@@ -153,20 +169,63 @@ describe("bootstrap state", () => {
 });
 
 describe("update state", () => {
+  it("uses a strictly monotonic heartbeat when an update changes state in one clock tick", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-07-22T00:00:00.000Z"));
+      const store = createUpdateState("shell", "0.6.0-beta.13");
+      const initialHeartbeat = store.getSnapshot().heartbeatAt;
+      const attempt = store.begin("checking", "Checking Electron shell updates");
+      const checkingHeartbeat = store.getSnapshot().heartbeatAt;
+      expect(store.available(attempt, "0.6.0-beta.14")).toBe(true);
+      expect(initialHeartbeat).toBeLessThan(checkingHeartbeat);
+      expect(checkingHeartbeat).toBeLessThan(store.getSnapshot().heartbeatAt);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a shell-owned current version before the first update check", () => {
+    expect(createUpdateState("shell", "0.6.0-beta.13").getSnapshot()).toMatchObject({
+      currentVersion: "0.6.0-beta.13",
+      kind: "shell",
+      status: "idle",
+    });
+  });
+
+  it("preserves a shell-owned current version when later callers omit it", () => {
+    const availableStore = createUpdateState("shell", "0.6.0-beta.13");
+    const availableAttempt = availableStore.begin("checking", "Checking Electron shell updates");
+    expect(availableStore.available(availableAttempt, "0.6.0-beta.14")).toBe(true);
+    expect(availableStore.getSnapshot().currentVersion).toBe("0.6.0-beta.13");
+
+    const unavailableStore = createUpdateState("shell", "0.6.0-beta.13");
+    const unavailableAttempt = unavailableStore.begin("checking", "Checking Electron shell updates");
+    expect(unavailableStore.unavailable(unavailableAttempt, "The Electron shell is current")).toBe(true);
+    expect(unavailableStore.getSnapshot().currentVersion).toBe("0.6.0-beta.13");
+  });
+
   it("keeps source and shell update state explicitly distinct", () => {
     const source = createUpdateState("source");
     const shell = createUpdateState("shell");
 
     const attempt = source.begin("checking", "Checking source updates");
-    expect(source.available(attempt, "main@abc123")).toBe(true);
+    expect(source.available(attempt, "main@abc123", "Update available", "main@old123")).toBe(true);
 
     expect(source.getSnapshot()).toMatchObject({
       attempt: 1,
+      currentVersion: "main@old123",
       kind: "source",
       status: "available",
       version: "main@abc123",
     });
-    expect(shell.getSnapshot()).toMatchObject({ attempt: 0, kind: "shell", status: "idle", version: null });
+    expect(shell.getSnapshot()).toMatchObject({
+      attempt: 0,
+      currentVersion: null,
+      kind: "shell",
+      status: "idle",
+      version: null,
+    });
   });
 
   it("rejects stale workers after a newer update attempt begins", () => {
@@ -192,7 +251,12 @@ describe("update state", () => {
 
     expect(store.complete(attempt, "Source update installed")).toBe(true);
     const completed = store.getSnapshot();
-    expect(completed).toMatchObject({ progress: 100, status: "complete", version: "main@abc123" });
+    expect(completed).toMatchObject({
+      currentVersion: "main@abc123",
+      progress: 100,
+      status: "complete",
+      version: "main@abc123",
+    });
     expect(store.publishForAttempt(attempt, { message: "late progress", progress: 90 })).toBe(false);
     expect(store.fail(attempt, "late failure")).toBe(false);
     expect(store.getSnapshot()).toBe(completed);
@@ -201,9 +265,10 @@ describe("update state", () => {
   it("publishes attempt-bound unavailable and failure results", () => {
     const unavailableStore = createUpdateState("shell");
     const unavailableAttempt = unavailableStore.begin("checking", "Checking Electron shell updates");
-    expect(unavailableStore.unavailable(unavailableAttempt, "No shell update is available")).toBe(true);
+    expect(unavailableStore.unavailable(unavailableAttempt, "No shell update is available", "0.6.0")).toBe(true);
     expect(unavailableStore.getSnapshot()).toMatchObject({
       failure: null,
+      currentVersion: "0.6.0",
       message: "No shell update is available",
       progress: null,
       status: "unavailable",

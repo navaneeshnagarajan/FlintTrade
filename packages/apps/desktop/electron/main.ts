@@ -82,7 +82,7 @@ if (!hasSingleInstanceLock) {
   const bootstrapState = createBootstrapState();
   const backendState = createBackendState();
   const sourceUpdateState = createUpdateState("source");
-  const shellUpdateState = createUpdateState("shell");
+  const shellUpdateState = createUpdateState("shell", app.getVersion());
   const sourceOperationCoordinator = createSourceOperationCoordinator();
   const operationLeaseTarget = path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock");
   const bootIdentity = currentBootIdentity();
@@ -196,7 +196,11 @@ if (!hasSingleInstanceLock) {
     const store = updateStateFor(kind);
     const label = kind === "source" ? "Source" : "Electron shell";
     const attempt = store.begin("checking", `Checking ${label.toLowerCase()} updates`);
-    store.unavailable(attempt, `${label} updates are not available in this build.`);
+    store.unavailable(
+      attempt,
+      `${label} updates are not available in this build.`,
+      kind === "shell" ? app.getVersion() : null,
+    );
     return store.getSnapshot();
   };
 
@@ -291,25 +295,28 @@ if (!hasSingleInstanceLock) {
     return attempt;
   };
 
-  const retryStartup = (): boolean => {
+  const retryStartup = async (): Promise<boolean> => {
     if (startup) return false;
     const bootstrap = bootstrapState.getSnapshot();
     if (bootstrap.status === "failed") {
-      void runStartup(() => startupController.retry());
-      return true;
+      return runStartup(() => startupController.retry());
     }
     if (bootstrap.status !== "ready") return false;
     const backend = backendState.getSnapshot();
     if (backend.status === "failed" || backend.status === "stopped") {
-      void runStartup(async () => ({ ok: true }));
-      return true;
+      return runStartup(async () => ({ ok: true }));
     }
     const running = backendRuntime.getRunning();
     if (backend.status === "ready" && running) {
-      void windows!.showTerminal(running.port).then((shown) => {
+      try {
+        const shown = await windows!.showTerminal(running.port);
         if (shown) lifecycle!.markBackendReady();
-      }, () => lifecycle!.markBackendFailed());
-      return true;
+        else lifecycle!.markBackendFailed();
+        return shown;
+      } catch {
+        lifecycle!.markBackendFailed();
+        return false;
+      }
     }
     return false;
   };

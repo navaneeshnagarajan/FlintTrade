@@ -29,6 +29,7 @@ export type ActiveUpdateStatus = Extract<UpdateStatus, "checking" | "applying">;
 
 export interface UpdateSnapshot {
   attempt: number;
+  currentVersion: string | null;
   failure: string | null;
   heartbeatAt: number;
   kind: UpdateKind;
@@ -127,6 +128,7 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
     status: "idle",
     ...initial,
   });
+  const nextHeartbeatAt = (): number => Math.max(Date.now(), state.getSnapshot().heartbeatAt + 1);
 
   const publishForAttempt = (
     attempt: number,
@@ -134,7 +136,7 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
   ): boolean => {
     const current = state.getSnapshot();
     if (attempt !== current.attempt || current.status !== "running") return false;
-    state.publish({ ...patch, heartbeatAt: Date.now() });
+    state.publish({ ...patch, heartbeatAt: nextHeartbeatAt() });
     return true;
   };
 
@@ -146,7 +148,7 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
       state.publish({
         attempt,
         failure: null,
-        heartbeatAt: Date.now(),
+        heartbeatAt: nextHeartbeatAt(),
         message,
         phase,
         progress: 0,
@@ -190,7 +192,7 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
       }
       state.publish({
         failure,
-        heartbeatAt: Date.now(),
+        heartbeatAt: nextHeartbeatAt(),
         message: failure,
         phase: "failed",
         status: "failed",
@@ -204,7 +206,7 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
       state.publish({
         attempt,
         failure: null,
-        heartbeatAt: Date.now(),
+        heartbeatAt: nextHeartbeatAt(),
         message: "Retrying bootstrap",
         phase: "preparing",
         progress: 0,
@@ -215,9 +217,10 @@ export function createBootstrapState(initial?: Partial<BootstrapSnapshot>) {
   };
 }
 
-export function createUpdateState(kind: UpdateKind) {
+export function createUpdateState(kind: UpdateKind, currentVersion: string | null = null) {
   const state = createSnapshotStore<UpdateSnapshot>({
     attempt: 0,
+    currentVersion,
     failure: null,
     heartbeatAt: Date.now(),
     kind,
@@ -226,6 +229,7 @@ export function createUpdateState(kind: UpdateKind) {
     status: "idle",
     version: null,
   });
+  const nextHeartbeatAt = (): number => Math.max(Date.now(), state.getSnapshot().heartbeatAt + 1);
 
   const publishForAttempt = (
     attempt: number,
@@ -235,7 +239,7 @@ export function createUpdateState(kind: UpdateKind) {
     if (attempt !== current.attempt || (current.status !== "checking" && current.status !== "applying")) {
       return false;
     }
-    state.publish({ ...patch, heartbeatAt: Date.now() });
+    state.publish({ ...patch, heartbeatAt: nextHeartbeatAt() });
     return true;
   };
 
@@ -247,15 +251,21 @@ export function createUpdateState(kind: UpdateKind) {
     if (attempt !== current.attempt || (current.status !== "checking" && current.status !== "applying")) {
       return false;
     }
-    state.publish({ ...patch, heartbeatAt: Date.now() });
+    state.publish({ ...patch, heartbeatAt: nextHeartbeatAt() });
     return true;
   };
 
   return {
     getSnapshot: state.getSnapshot,
     subscribe: state.subscribe,
-    available(attempt: number, version: string, message = "Update available"): boolean {
+    available(
+      attempt: number,
+      version: string,
+      message = "Update available",
+      currentVersion: string | null = state.getSnapshot().currentVersion,
+    ): boolean {
       return finishAttempt(attempt, {
+        currentVersion,
         failure: null,
         message,
         progress: null,
@@ -268,7 +278,7 @@ export function createUpdateState(kind: UpdateKind) {
       state.publish({
         attempt,
         failure: null,
-        heartbeatAt: Date.now(),
+        heartbeatAt: nextHeartbeatAt(),
         message,
         progress: status === "applying" ? 0 : null,
         status,
@@ -277,7 +287,9 @@ export function createUpdateState(kind: UpdateKind) {
       return attempt;
     },
     complete(attempt: number, message = "Update complete"): boolean {
+      const current = state.getSnapshot();
       return finishAttempt(attempt, {
+        currentVersion: current.version,
         failure: null,
         message,
         progress: 100,
@@ -292,8 +304,13 @@ export function createUpdateState(kind: UpdateKind) {
       });
     },
     publishForAttempt,
-    unavailable(attempt: number, message: string): boolean {
+    unavailable(
+      attempt: number,
+      message: string,
+      currentVersion: string | null = state.getSnapshot().currentVersion,
+    ): boolean {
       return finishAttempt(attempt, {
+        currentVersion,
         failure: null,
         message,
         progress: null,

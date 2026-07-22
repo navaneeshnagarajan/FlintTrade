@@ -646,10 +646,19 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
         });
         assertAttempt(attempt, "checking", signal);
         if (!result.available) {
-          options.state.unavailable(attempt, `Source ${result.revision.slice(0, 12)} is current`);
+          options.state.unavailable(
+            attempt,
+            `Source ${result.revision.slice(0, 12)} is current`,
+            result.active.revision,
+          );
           return options.state.getSnapshot();
         }
-        if (options.state.available(attempt, result.revision, `Source ${result.revision.slice(0, 12)} is available`)) {
+        if (options.state.available(
+          attempt,
+          result.revision,
+          `Source ${result.revision.slice(0, 12)} is available`,
+          result.active.revision,
+        )) {
           checkedUpdate = { active: result.active, revision: result.revision };
         }
         return options.state.getSnapshot();

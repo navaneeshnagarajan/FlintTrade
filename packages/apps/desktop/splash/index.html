@@ -25,15 +25,26 @@
         </svg>
       </div>
       <div class="title">FlintTrade</div>
-      <div class="status" id="status">
-        Starting engine<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-      </div>
-      <div class="progress" id="progress">
+      <div class="phase" id="phase">Preparing</div>
+      <div class="status" id="status" role="status" aria-live="polite">Preparing FlintTrade</div>
+      <div
+        class="progress"
+        id="progress"
+        role="progressbar"
+        aria-label="FlintTrade startup progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
         <div class="progress-fill" id="progress-fill"></div>
       </div>
-      <div class="error" id="error">
+      <div class="error" id="error" role="alert" aria-live="assertive">
         <div class="error-message" id="error-message"></div>
-        <button type="button" class="retry" id="retry">Retry</button>
+      </div>
+      <div class="actions" id="actions">
+        <button type="button" class="action secondary" id="cancel">Cancel</button>
+        <button type="button" class="action primary" id="retry">Retry</button>
+        <button type="button" class="action danger" id="quit">Quit FlintTrade</button>
+        <div class="action-status" id="action-status" aria-live="polite"></div>
       </div>
     </div>
     <script src="./splash.js"></script>
