@@ -27,12 +27,12 @@ $ReleaseDownloadBase = "https://github.com/$RepoSlug/releases/download"
 $ReleaseApiOverride = $env:FLINTTRADE_GITHUB_RELEASES_API
 $PinnedPnpmVersion = "9.15.0"
 $LocalAppDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-$LegacyTauriInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "FlintTrade" } else { "" }
+$LegacyShellInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "FlintTrade" } else { "" }
 $DefaultElectronInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "Programs\FlintTrade" } else { "" }
 $ReleaseTagPattern = '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
 $script:ReleaseAssetVerified = $false
 $script:WindowsUpdateInstallDir = $null
-$script:VerifiedLegacyTauriShell = $null
+$script:VerifiedLegacyShell = $null
 
 function Say([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Cyan }
 function Warn([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Yellow }
@@ -342,7 +342,7 @@ function Assert-WindowsFreshInstallAdmission {
             Where-Object { $_.DisplayName -ceq "FlintTrade" }
     )
     $electronRecords = @($entries | ForEach-Object { Get-ProvenDefaultElectronRegistryEntry $_ } | Where-Object { $_ })
-    $legacyRegistryPath = if ($script:VerifiedLegacyTauriShell) { [string]$script:VerifiedLegacyTauriShell.RegistryPath } else { "" }
+    $legacyRegistryPath = if ($script:VerifiedLegacyShell) { [string]$script:VerifiedLegacyShell.RegistryPath } else { "" }
     $provedRegistryPaths = @($electronRecords | ForEach-Object { [string]$_.RegistryPath })
     $unprovedEntries = @($entries | Where-Object {
         $path = [string]$_.PSPath
@@ -404,71 +404,71 @@ function Assert-WindowsUpdateTarget {
     $script:WindowsUpdateInstallDir = $canonical
 }
 
-function Assert-VerifiedLegacyTauriShell {
-    $script:VerifiedLegacyTauriShell = $null
-    if (-not $LegacyTauriInstallDir -or -not (Test-Path -LiteralPath $LegacyTauriInstallDir)) { return }
-    if (Test-WindowsPathContainsReparsePoint $LegacyTauriInstallDir) {
-        Fail "The legacy Tauri install path contains a reparse alias; refusing a duplicate install."
+function Assert-VerifiedLegacyShell {
+    $script:VerifiedLegacyShell = $null
+    if (-not $LegacyShellInstallDir -or -not (Test-Path -LiteralPath $LegacyShellInstallDir)) { return }
+    if (Test-WindowsPathContainsReparsePoint $LegacyShellInstallDir) {
+        Fail "The legacy desktop-shell install path contains a reparse alias; refusing a duplicate install."
     }
-    $legacyDirectory = Get-Item -LiteralPath $LegacyTauriInstallDir -Force -ErrorAction Stop
-    $legacyExecutablePath = Join-Path $LegacyTauriInstallDir "FlintTrade.exe"
-    $legacyUninstallerPath = Join-Path $LegacyTauriInstallDir "uninstall.exe"
+    $legacyDirectory = Get-Item -LiteralPath $LegacyShellInstallDir -Force -ErrorAction Stop
+    $legacyExecutablePath = Join-Path $LegacyShellInstallDir "FlintTrade.exe"
+    $legacyUninstallerPath = Join-Path $LegacyShellInstallDir "uninstall.exe"
     if (-not $legacyDirectory.PSIsContainer -or ($legacyDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
         -not (Test-Path -LiteralPath $legacyExecutablePath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $legacyUninstallerPath -PathType Leaf)) {
-        Fail "A legacy-looking FlintTrade directory exists but its Tauri identity is not proven; refusing a duplicate install."
+        Fail "A legacy-looking FlintTrade directory exists but its desktop-shell identity is not proven; refusing a duplicate install."
     }
     foreach ($path in @($legacyExecutablePath, $legacyUninstallerPath)) {
         if ((Get-Item -LiteralPath $path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            Fail "The legacy Tauri shell contains a reparse alias; refusing a duplicate install."
+            Fail "The legacy desktop shell contains a reparse alias; refusing a duplicate install."
         }
     }
     if ($script:WindowsUpdateInstallDir -and
-        $script:WindowsUpdateInstallDir.Equals($LegacyTauriInstallDir, [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "The running Electron shell is co-located with legacy Tauri files; automatic retirement is unsafe."
+        $script:WindowsUpdateInstallDir.Equals($LegacyShellInstallDir, [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "The running Electron shell is co-located with legacy desktop-shell files; automatic retirement is unsafe."
     }
     $legacyEntry = Get-ItemProperty -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FlintTrade" -ErrorAction SilentlyContinue
     if (-not $legacyEntry -or $legacyEntry.DisplayName -cne "FlintTrade" -or -not $legacyEntry.UninstallString) {
-        Fail "The legacy Tauri shell has no matching registered uninstaller; refusing a duplicate install."
+        Fail "The legacy desktop shell has no matching registered uninstaller; refusing a duplicate install."
     }
     $command = ([string]$legacyEntry.UninstallString).Trim()
     $registeredPath = if ($command -match '^"([^"]+)"') { $Matches[1] } else { ($command -split '\s+', 2)[0] }
     try { $registeredPath = (Resolve-Path -LiteralPath $registeredPath -ErrorAction Stop).Path } catch {
-        Fail "The registered legacy Tauri uninstaller cannot be resolved."
+        Fail "The registered legacy desktop-shell uninstaller cannot be resolved."
     }
     $expectedPath = (Resolve-Path -LiteralPath $legacyUninstallerPath -ErrorAction Stop).Path
     if (-not $registeredPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "The registered legacy Tauri uninstaller does not match the legacy install directory."
+        Fail "The registered legacy desktop-shell uninstaller does not match the legacy install directory."
     }
 
-    $script:VerifiedLegacyTauriShell = [pscustomobject]@{
-        Directory = (Resolve-Path -LiteralPath $LegacyTauriInstallDir -ErrorAction Stop).Path
+    $script:VerifiedLegacyShell = [pscustomobject]@{
+        Directory = (Resolve-Path -LiteralPath $LegacyShellInstallDir -ErrorAction Stop).Path
         ExecutablePath = (Resolve-Path -LiteralPath $legacyExecutablePath -ErrorAction Stop).Path
         UninstallerPath = $expectedPath
         RegistryPath = if ($legacyEntry.PSPath) { [string]$legacyEntry.PSPath } else { "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FlintTrade" }
     }
 }
 
-function Remove-VerifiedLegacyTauriShell {
-    if (-not $script:VerifiedLegacyTauriShell) { return }
-    $verified = $script:VerifiedLegacyTauriShell
+function Remove-VerifiedLegacyShell {
+    if (-not $script:VerifiedLegacyShell) { return }
+    $verified = $script:VerifiedLegacyShell
     if (-not (Test-Path -LiteralPath $verified.Directory -PathType Container)) {
-        Fail "The verified legacy Tauri shell changed before retirement; refusing to remove an unknown path."
+        Fail "The verified legacy desktop shell changed before retirement; refusing to remove an unknown path."
     }
     $legacyDirectory = Get-Item -LiteralPath $verified.Directory -Force -ErrorAction Stop
     $currentDirectory = (Resolve-Path -LiteralPath $verified.Directory -ErrorAction Stop).Path
     if (($legacyDirectory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
         -not $currentDirectory.Equals($verified.Directory, [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "The verified legacy Tauri shell changed before retirement; refusing to remove an unknown path."
+        Fail "The verified legacy desktop shell changed before retirement; refusing to remove an unknown path."
     }
     foreach ($path in @($verified.ExecutablePath, $verified.UninstallerPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
             ((Get-Item -LiteralPath $path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-            Fail "The verified legacy Tauri shell changed before retirement; refusing to remove an unknown path."
+            Fail "The verified legacy desktop shell changed before retirement; refusing to remove an unknown path."
         }
     }
 
-    Say "Retiring the identity-verified legacy Tauri shell while preserving its workspace and WebView data..."
+    Say "Retiring the identity-verified legacy desktop shell while preserving its workspace and WebView data..."
     Remove-Item -LiteralPath $verified.Directory -Recurse -Force -ErrorAction Stop
 
     # The new NSIS setup may have reused this registry key. Remove it only when
@@ -488,7 +488,7 @@ function Remove-VerifiedLegacyTauriShell {
             Remove-Item -LiteralPath $verified.RegistryPath -Recurse -Force -ErrorAction Stop
         }
     }
-    $script:VerifiedLegacyTauriShell = $null
+    $script:VerifiedLegacyShell = $null
 }
 
 function Signal-UpdateHandoff {
@@ -545,7 +545,7 @@ function Install-BinaryRelease {
         Fail "-Update requires the private verified installer handoff environment."
     }
     if ($Update) { Assert-WindowsUpdateTarget }
-    Assert-VerifiedLegacyTauriShell
+    Assert-VerifiedLegacyShell
     Assert-WindowsFreshInstallAdmission
     $arch = Get-WindowsArch
     if ($arch -eq "arm64") {
@@ -596,7 +596,7 @@ function Install-BinaryRelease {
         Say "Verified SHA-256 checksum from the selected release."
         $script:ReleaseAssetVerified = $true
         Unblock-File -LiteralPath $installer -ErrorAction SilentlyContinue
-        Assert-VerifiedLegacyTauriShell
+        Assert-VerifiedLegacyShell
         Assert-WindowsFreshInstallAdmission
         Signal-UpdateHandoff
         Say "Running FlintTrade setup..."
@@ -615,7 +615,7 @@ function Install-BinaryRelease {
             $setup = Start-Process -FilePath $installer -Wait -PassThru
         }
         if ($setup.ExitCode -ne 0) { Fail "FlintTrade setup exited with code $($setup.ExitCode)." }
-        Remove-VerifiedLegacyTauriShell
+        Remove-VerifiedLegacyShell
     } finally {
         Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -669,7 +669,7 @@ function Assert-SourcePrerequisites {
 
 function Build-FromSource {
     Say "Source-build mode packages only the Electron shell. Checking Git, Node and pnpm..."
-    Assert-VerifiedLegacyTauriShell
+    Assert-VerifiedLegacyShell
     Assert-WindowsFreshInstallAdmission
     Assert-IsolatedSourceBuildTarget
     Assert-SourcePrerequisites
@@ -718,7 +718,7 @@ function Build-FromSource {
     $installer = Join-Path $SrcDir "packages\apps\desktop\release\electron\FlintTrade-$version-win-x64.exe"
     if (-not (Test-Path -LiteralPath $installer)) { Fail "Electron packaging completed without $installer." }
     Say "Built: $installer"
-    Assert-VerifiedLegacyTauriShell
+    Assert-VerifiedLegacyShell
     Assert-WindowsFreshInstallAdmission
     if ($NoLaunch) {
         $setup = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
@@ -726,7 +726,7 @@ function Build-FromSource {
         $setup = Start-Process -FilePath $installer -Wait -PassThru
     }
     if ($setup.ExitCode -ne 0) { Fail "FlintTrade setup exited with code $($setup.ExitCode)." }
-    Remove-VerifiedLegacyTauriShell
+    Remove-VerifiedLegacyShell
 }
 
 if ($env:FLINTTRADE_RESOLVE_TAGS_ONLY -eq "1") {

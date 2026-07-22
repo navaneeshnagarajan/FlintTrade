@@ -1285,7 +1285,7 @@ def test_windows_handoff_occurs_only_after_hash_verification_and_before_setup() 
     assert "unproven same-name FlintTrade registry identity" in fresh_admission
     assert "default Electron install directory exists without one exact registered FlintTrade identity" in fresh_admission
     update_proof = text[
-        text.index("function Assert-WindowsUpdateTarget") : text.index("function Assert-VerifiedLegacyTauriShell")
+        text.index("function Assert-WindowsUpdateTarget") : text.index("function Assert-VerifiedLegacyShell")
     ]
     assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*" in update_proof
     assert "HKLM:" not in update_proof
@@ -1300,24 +1300,24 @@ def test_windows_handoff_occurs_only_after_hash_verification_and_before_setup() 
     assert "Resolve-LatestReleaseTag" in text and "Compare-FlintSemVer" in text
     assert "Test-ReleaseTagForChannel" in text
     assert 'Join-Path $LocalAppDataRoot "FlintTrade"' in text
-    assert "Remove-VerifiedLegacyTauriShell" in text
-    assert "legacy Tauri shell" in text
-    assert 'Join-Path $LegacyTauriInstallDir "uninstall.exe"' in text
+    assert "Remove-VerifiedLegacyShell" in text
+    assert "legacy desktop shell" in text
+    assert 'Join-Path $LegacyShellInstallDir "uninstall.exe"' in text
     assert 'Join-Path $env:LOCALAPPDATA $LegacyBundleId' not in text
     binary_install = text[text.index("function Install-BinaryRelease") : text.index("function Assert-TrustedSourceOrigin")]
-    assert binary_install.index("Assert-VerifiedLegacyTauriShell") < binary_install.index("Signal-UpdateHandoff")
+    assert binary_install.index("Assert-VerifiedLegacyShell") < binary_install.index("Signal-UpdateHandoff")
     assert binary_install.index("Assert-WindowsFreshInstallAdmission") < binary_install.index("Get-SelectedRelease")
     assert binary_install.rindex("Assert-WindowsFreshInstallAdmission") < binary_install.index("Signal-UpdateHandoff")
-    assert binary_install.index("$setup.ExitCode -ne 0") < binary_install.index("Remove-VerifiedLegacyTauriShell")
+    assert binary_install.index("$setup.ExitCode -ne 0") < binary_install.index("Remove-VerifiedLegacyShell")
     source_install = text[text.index("function Build-FromSource") : text.index("if ($env:FLINTTRADE_RESOLVE_TAGS_ONLY")]
-    assert source_install.index("Assert-VerifiedLegacyTauriShell") < source_install.index("Start-Process -FilePath $installer")
+    assert source_install.index("Assert-VerifiedLegacyShell") < source_install.index("Start-Process -FilePath $installer")
     assert source_install.index("Assert-WindowsFreshInstallAdmission") < source_install.index("if ($DryRun)")
     assert source_install.rindex("Assert-WindowsFreshInstallAdmission") < source_install.index(
         "Start-Process -FilePath $installer"
     )
-    assert source_install.index("$setup.ExitCode -ne 0") < source_install.index("Remove-VerifiedLegacyTauriShell")
+    assert source_install.index("$setup.ExitCode -ne 0") < source_install.index("Remove-VerifiedLegacyShell")
     legacy_retirement = text[
-        text.index("function Remove-VerifiedLegacyTauriShell") : text.index("function Signal-UpdateHandoff")
+        text.index("function Remove-VerifiedLegacyShell") : text.index("function Signal-UpdateHandoff")
     ]
     assert "Start-Process" not in legacy_retirement
     assert "Remove-Item -LiteralPath $verified.Directory" in legacy_retirement

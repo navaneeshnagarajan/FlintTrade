@@ -498,10 +498,10 @@ def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
     assert "electron-package-verification:" in workflow
     assert "electron-builder --dir --linux --x64" in workflow
     assert "verify:package" in workflow
-    assert "RUSTSEC-2024-0429" in cargo_allowlist
-    assert "glib" in cargo_allowlist
-    assert "expires:" in cargo_allowlist
+    assert "allowlist: []" in cargo_allowlist
+    assert "Tauri" not in cargo_allowlist
     assert "Vulnerabilities are never suppressed" in cargo_script
+    assert "Tauri" not in cargo_script
     assert "RUSTSEC-2026-0194" not in cargo_allowlist
 
 

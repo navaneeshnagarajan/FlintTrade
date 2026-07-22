@@ -58,50 +58,45 @@ make start        # backend + terminal UI on http://127.0.0.1:5100
 Or run it in Docker with `make docker-up`. Either way, open the printed URL in
 a browser and complete the in-app Setup flow — no `.env` file is required.
 
-### Desktop apps (convenience installs)
+### Desktop app (Electron convenience shell)
 
-The desktop apps are thin native wrappers around the same backend for people
-who want ease of installation, not a separate product surface. Releases ship
-**one installer per OS**, and the one-command installs are the recommended way
-to get them (the beta builds are unsigned, and the scripts verify the download
-and avoid the Gatekeeper/SmartScreen walls that manual downloads hit):
+The desktop app is a small Electron wrapper around the same backend, not a
+separate product surface. On first launch it verifies pinned tools, builds an
+inspectable local source checkout under `~/.flinttrade/src/FlintTrade`, starts
+the source guardian, and opens the terminal only after its loopback health
+check passes.
 
-```bash
-# macOS
-curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+No complete, checksum-published Electron installer release exists yet. The
+assets attached to `v0.6.0-beta.13` use the retired desktop packaging. Once
+this branch is deployed, the
+[download page](https://flinttrade.vercel.app/download) will withhold
+one-command installs until all four Electron installers and `SHA256SUMS.txt`
+are available together. The currently deployed beta.13 page predates that gate
+and still advertises the retired install path; do not treat it as an Electron
+source-bootstrap installer:
 
-# Linux
-curl -fsSL https://flinttrade.vercel.app/install.sh | bash
-```
-
-```powershell
-# Windows 10/11
-irm https://flinttrade.vercel.app/install.ps1 | iex
-```
-
-| OS | Installer | Architectures |
+| OS | Electron installer | Architectures |
 |---|---|---|
-| macOS | universal `.dmg` (one app for both chips) | Apple Silicon (arm64) + Intel (x64) |
-| Windows | `.exe` (NSIS, per-user — no admin needed) | x64 (Windows 11 on ARM runs it via emulation) |
-| Linux | `.AppImage` via the install script | x64 + arm64 |
+| macOS | universal `.dmg` | Apple Silicon (arm64) + Intel (x64) |
+| Windows | `.exe` (NSIS, per-user) | x64; Windows 11 on ARM uses emulation |
+| Linux | `.AppImage` | x64 + arm64 |
 
-`.deb`/`.rpm` packages are no longer published from the current release
-onward; older releases still carry them (install with `--ref <tag>`). You can
-also download an installer manually from the releases page, or build one
-yourself:
+To build and verify the shell locally:
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build
+pnpm install --frozen-lockfile
+make desktop-test
+make desktop-package
 ```
 
-Install the generated package from
-`packages/apps/desktop/src-tauri/target/release/bundle/`, launch FlintTrade,
-and follow the welcome wizard. Per-OS install steps (including the unsigned-
-build caveats for manual downloads) live in [docs/DESKTOP.md](docs/DESKTOP.md)
-and [docs/setup/](docs/setup/).
+Output lands in `packages/apps/desktop/release/electron/`. Local macOS packages
+are always ad-hoc sealed; an ad-hoc seal verifies bundle integrity but is not
+Developer ID trust. Distribution signing and notarisation are available only
+in release CI when its complete Apple secret sets are configured. See
+[docs/DESKTOP.md](docs/DESKTOP.md) for the source-bootstrap,
+update, install and uninstall contracts.
 
 > OpenAlgo is optional. Configure it from the app only if you want the
 > OpenAlgo-compatible integration path; FlintTrade's native gateway and sandbox
@@ -167,14 +162,14 @@ its broker gateway.
 ### Package map
 
 18 package surfaces — 13 Python packages, 3 applications (React terminal,
-Tauri desktop shell, Next.js site), 1 shared TypeScript design-system package,
+Electron desktop shell, Next.js site), 1 shared TypeScript design-system package,
 and 1 Rust/PyO3 tick engine.
 
 | Package | Language | Purpose |
 |---|---|---|
 | `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
 | `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
-| `packages/apps/desktop` | Tauri 2 (TS + Rust) | Thin Tauri shell — downloads the PyInstaller-frozen backend (which embeds the terminal) on first run, served from a single loopback origin (Linux/Windows/macOS) |
+| `packages/apps/desktop` | Electron 40 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
 | `packages/core/design-system` | TypeScript | Shared FlintTrade tokens, brand primitives, layers, and React components |

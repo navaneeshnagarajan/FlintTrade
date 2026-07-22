@@ -7,34 +7,29 @@
 ## 1. Run FlintTrade
 
 FlintTrade is a self-hosted web app: run the backend and open it in your
-browser (`make start` from a source checkout, or `make docker-up`). For ease
-of installation, the desktop apps wrap the same backend in a native window —
-install with one command:
+browser (`make start` from a source checkout, or `make docker-up`). The
+Electron desktop shell wraps that same local backend, but no complete,
+checksum-published Electron installer release exists yet. Once this branch is
+deployed, the download page will expose no one-command install until all four
+Electron installers and `SHA256SUMS.txt` are available together. The currently
+deployed beta.13 page predates that gate and still advertises the retired
+packaging; do not use it as an Electron source-bootstrap installer.
 
-```bash
-# macOS / Linux
-curl -fsSL https://flinttrade.vercel.app/install.sh | bash
-```
-
-```powershell
-# Windows 10/11
-irm https://flinttrade.vercel.app/install.ps1 | iex
-```
-
-The first run creates your OS workspace and opens the Setup flow. No `.env`
-file is required.
-
-To build the installer yourself:
+To build and verify the Electron shell locally:
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build
+pnpm install --frozen-lockfile
+make desktop-test
+make desktop-package
 ```
 
-Generated packages live under
-`packages/apps/desktop/src-tauri/target/release/bundle/`.
+Generated packages live under `packages/apps/desktop/release/electron/`. On
+first launch the shell verifies pinned tools, builds a managed source checkout,
+creates your OS workspace and opens Setup after the guardian is healthy. No
+`.env` file is required. See [the desktop guide](../DESKTOP.md) for the release
+availability, source-bootstrap and ad-hoc macOS signing boundaries.
 
 ## 2. Contributor Source Setup
 

@@ -23,6 +23,8 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from .source_root import discover_source_root
+
 logger = logging.getLogger("flinttrade.core.broker_sdk_attest")
 
 _PLACEHOLDER = "PLACEHOLDER"
@@ -55,8 +57,7 @@ class AttestationResult:
 
 
 def _default_brokers_lock() -> Path:
-    # packages/core/core/src/flinttrade_core/broker_sdk_attest.py → repo root.
-    return Path(__file__).resolve().parents[5] / "brokers.lock"
+    return discover_source_root() / "brokers.lock"
 
 
 def load_pins(lock_path: Path | None = None) -> list[dict[str, Any]]:

@@ -23,6 +23,8 @@ import inspect
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from flinttrade_core.source_root import discover_source_root
+
 from .exceptions import BrokerNotFoundError
 from .models import AuthFlowType, BrokerInfo
 
@@ -32,7 +34,7 @@ from .models import AuthFlowType, BrokerInfo
 
 logger = logging.getLogger("flinttrade.gateway.adapter")
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = discover_source_root()
 
 
 def _resolve_openalgo_root() -> Path:

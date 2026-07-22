@@ -15,10 +15,12 @@ workflow YAML should read this once.
 
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
-| `test.yml` | push to `main` / `dev`; non-draft PR | 8 Linux jobs (~70 minutes wall-clock) | The main quality gate. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
+| `test.yml` | push to `main` / `dev`; non-draft PR | 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
-| `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and workflow files) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Skipped unless a site-relevant path changes. |
-| `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | 1 macOS + 1 Windows | Catches slow-burn platform regressions before they accumulate. |
+| `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and `site.yml` itself) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Documentation changes run this workflow even though they skip the `test.yml` matrix. |
+| `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | Python on macOS, Windows and Ubuntu 26.04; Electron directory packages on macOS, Windows and Linux | Catches slow-burn platform and packaging regressions before they accumulate. |
+| `desktop-release.yml` | manual dispatch only; Release Please supplies the immutable release tag and expected commit SHA | macOS universal + Windows x64 + Linux x64/ARM64 | Builds the four Electron installers, verifies the packaged contract, writes `SHA256SUMS.txt`, attests provenance and publishes only to an empty release target. No complete Electron release has been published yet. |
+| `release-please.yml` | push to `main` | Linux control jobs | Maintains the release PR/version contract and dispatches `desktop-release.yml` after a release tag is created. |
 | `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
@@ -46,10 +48,9 @@ parallel jobs to keep wall-clock time low:
    unit tests; `cargo audit` in `supply-chain.yml` checks advisories, not
    behaviour. Cached via `Swatinem/rust-cache` so the per-push compile stays
    cheap.
-9. `rust-desktop-tests` — `cargo test` on the Tauri desktop shell crate
-   (`packages/apps/desktop/src-tauri`). Pinned to `ubuntu-22.04` deliberately
-   so the frequent gate compiles in the same glibc/webkit environment the
-   release matrix uses; move both together when the release floor moves.
+9. `electron-desktop-tests` — strict Electron TypeScript, the full desktop
+   Vitest suite, main/preload bundle, Linux x64 directory package and packaged
+   security-contract verification on `ubuntu-22.04`.
 
 All nine must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
@@ -80,11 +81,12 @@ Three mechanisms keep CI inexpensive and signal-rich:
 - **Draft-PR guard.** Every job is gated on
   `github.event.pull_request.draft != true`. Open PRs as drafts while
   iterating; mark "ready for review" to trigger CI.
-- **`paths-ignore` for doc-only commits.** The matrix is skipped if a
+- **`paths-ignore` for doc-only commits.** The `test.yml` matrix is skipped if a
   commit only touches `*.md`, `docs/**`, `.local/**`, `notice`,
   `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`,
   `.github/ISSUE_TEMPLATE/**`, or the `claude*.yml` / `status-report.yml`
-  workflows themselves.
+  workflows themselves. Changes under `docs/**` still run `site.yml` because
+  that workflow includes documentation in its positive path filter.
 
 ---
 
@@ -102,8 +104,9 @@ If the local checklist passes, CI catches drift rather than regressions.
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.
    - `make test` if anything inside `packages/*/src/` changed.
-3. **Doc-only commits** (paths listed above) skip CI by design. Use this
-   to keep noise down when correcting a typo or adding a screenshot.
+3. **Doc-only commits** (paths listed above) skip the `test.yml` matrix by
+   design, but changes under `docs/**` still run the site typecheck, tests and
+   build through `site.yml`.
 4. **Draft PRs are free.** Open as draft, iterate, mark "ready for
    review" when you want CI to run.
 
@@ -120,7 +123,7 @@ If the local checklist passes, CI catches drift rather than regressions.
 | 5 | `paths-ignore` for doc-only commits | Routine doc updates burning runner minutes. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
 | 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional**: Codex was retired from the review pipeline (2026-06-05), so this gate is no longer part of the standard flow (claude ultracode panels → maintainer). Kept only for contributors who still run a local Codex CLI | High-level design / contract / safety issues unit tests cannot see. |
-| 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn macOS / Windows regressions before they pile up. |
+| 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn Python and Electron-package regressions on macOS, Windows and Linux before they pile up. |
 
 ---
 
@@ -160,7 +163,7 @@ failed job to its local command:
 | `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
 | `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`) |
-| `rust-desktop-tests` | `cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml` |
+| `electron-desktop-tests` | `make desktop-test && make desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
 
 The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
 as the source of truth (the shard-coverage guard keeps it complete).
@@ -253,6 +256,9 @@ job.
   `cross-platform-smoke` / `windows-acl-test` jobs of `supply-chain.yml`,
   which are gated to `schedule` / `workflow_dispatch` even though that
   workflow also runs Linux jobs on push.
+- The four-build-leg installer matrix lives in **`desktop-release.yml`**, which
+  is `workflow_dispatch` only. Release Please supplies the immutable tag and
+  expected commit SHA; a build-only manual dispatch publishes no GitHub assets.
 - Scheduled workflows use a **weekly-or-less** cadence
   (`refresh-vuln-snapshot.yml`, `status-report.yml`,
   `nightly-cross-platform.yml`, and the `supply-chain.yml` cron) — never a

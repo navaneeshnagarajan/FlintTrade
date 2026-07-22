@@ -29,7 +29,7 @@ def _provision_master_password(ws: Workspace) -> bool:
     """Ensure the credential-vault master password exists for source/dev runs.
 
     The backend deliberately refuses to auto-generate this secret. Installers,
-    the Tauri shell, and this explicit CLI command are allowed provisioning
+    the Electron shell, and this explicit CLI command are allowed provisioning
     points because they write the supported hardened at-rest file before the
     backend starts.
     """

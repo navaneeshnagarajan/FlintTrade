@@ -28,7 +28,7 @@ export function AboutSection() {
           Native-first trading software for local data, manual order workflows, automation, AI-assisted analysis, and broker-gateway testing.
           FlintTrade has its own backend, native gateway contract, {widgetCatalog.length} widgets, and an optional
           OpenAlgo-compatible bridge, and ships as a native desktop app for macOS, Windows, and Linux.
-          Monorepo with 18 package surfaces across Python, React, Tauri, shared UI, and Rust.
+          Monorepo with 18 package surfaces across Python, React, Electron, shared UI, and Rust.
         </p>
       </div>
 

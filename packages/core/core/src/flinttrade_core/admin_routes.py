@@ -13,17 +13,17 @@ import glob as _glob
 import json
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
+
+from .source_root import discover_source_root
 
 logger = logging.getLogger("flinttrade.admin")
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/v1/admin")
 
-# Repo root — 4 levels up from packages/core/core/src/
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = discover_source_root()
 _STATUS_FILE = _REPO_ROOT / ".local" / "reference" / "absorption-status.json"
 
 

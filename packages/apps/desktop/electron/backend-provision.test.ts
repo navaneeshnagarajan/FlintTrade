@@ -33,6 +33,7 @@ describe("backend master-password provisioning", () => {
       cwd: SOURCE,
       env: {
         FLINTTRADE_DESKTOP: "1",
+        FLINTTRADE_SOURCE_ROOT: SOURCE,
         FLINTTRADE_WORKSPACE_DIR: WORKSPACE,
         PATH: "/trusted/bin",
         PYTHONNOUSERSITE: "1",
@@ -78,13 +79,14 @@ describe("backend master-password provisioning", () => {
   });
 
   it("normalises the Windows environment without case-variant override ambiguity", () => {
-    expect(createBackendProvisionEnvironment(WORKSPACE, {
+    expect(createBackendProvisionEnvironment(SOURCE, WORKSPACE, {
       Path: "C:\\canary",
       PATH: "C:\\trusted",
       FLINTTRADE_WORKSPACE_DIR: "C:\\wrong",
       SECRET: "value",
     }, "win32")).toEqual({
       FLINTTRADE_DESKTOP: "1",
+      FLINTTRADE_SOURCE_ROOT: SOURCE,
       FLINTTRADE_WORKSPACE_DIR: WORKSPACE,
       PATH: "C:\\trusted",
       PYTHONNOUSERSITE: "1",

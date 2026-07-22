@@ -1,4 +1,4 @@
-"""Source guardian and retained PyInstaller entry for the desktop backend.
+"""Source guardian entry for the desktop backend.
 
 Electron launches this file from the active source checkout. In source mode it
 validates the exact Electron parent, takes the workspace's kernel-backed
@@ -8,10 +8,6 @@ retains that lease until complete-tree cleanup and durable proof. A separate
 parent-authenticated finalisation invocation removes only that exact record
 after the shell has also observed guardian exit.
 
-The same file remains the ``__main__`` frozen by PyInstaller until the Tauri
-comparison path is retired. Keeping the old dispatch here preserves its package
-import semantics and uploaded-strategy child contract during migration.
-
 It also hosts the desktop-only **parent-liveness watchdog**. The desktop shell
 passes its own PID via ``FLINTTRADE_PARENT_PID``; a daemon thread watches that
 process and exits the sidecar cleanly when the shell dies (crash, force-quit,
@@ -20,18 +16,12 @@ across relaunches. The watchdog lives here — not in ``flinttrade_core`` —
 because it is desktop-shell behaviour: plain CLI/``make start`` runs never set
 the variable and are unaffected.
 
-PyInstaller one-file builds run this Python application below a separate
-bootloader process. Before importing the backend, this wrapper creates
-platform containment, promotes the shell's exact boot-bound recovery record to
-the backend leader PID, and announces that PID on stdout. On POSIX an external
-guardian remains alive until same-group and tracked new-session descendants are
-gone. On Windows a non-breakaway Job Object kills its complete tree when the
-last application handle closes.
-
-The frozen executable also exposes one explicit child mode for uploaded
-strategies. It is dispatched before sidecar control starts, strips desktop
-ownership variables, and replaces inherited stdin with the null device so a
-worker cannot consume shell shutdown commands or re-enter backend startup.
+Before importing the backend, this wrapper creates platform containment,
+promotes the shell's exact boot-bound recovery record to the backend leader
+PID, and announces that PID on stdout. On POSIX an external guardian remains
+alive until same-group and tracked new-session descendants are gone. On Windows
+a non-breakaway Job Object kills its complete tree when the last application
+handle closes.
 
 The real serving logic lives in :mod:`flinttrade_core.desktop`.
 """
@@ -53,28 +43,24 @@ import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, TextIO
+from typing import Iterator, NamedTuple, TextIO
 
-#: Environment variable the Tauri shell sets to its own OS process id.
+#: Environment variable the Electron shell sets to its own OS process id.
 PARENT_PID_ENV = "FLINTTRADE_PARENT_PID"
 PARENT_IDENTITY_ENV = "FLINTTRADE_PARENT_IDENTITY"
 
-#: Exact recovery record path and launch token supplied by the Tauri shell.
+#: Exact recovery record path and launch token supplied by the Electron shell.
 SIDECAR_RECORD_PATH_ENV = "FLINTTRADE_SIDECAR_RECORD_PATH"
 BOOT_ID_ENV = "FLINTTRADE_BOOT_ID"
 LAUNCH_TOKEN_ENV = "FLINTTRADE_LAUNCH_TOKEN"
 SIDECAR_RECORD_VERSION = "v4"
+RECOVERY_RECORD_BLOCKED_REASON = "recovery-record"
 PRINT_PARENT_IDENTITY_ARG = "--flinttrade-print-parent-identity"
 FINALISE_CLEANUP_ARG = "--flinttrade-finalise-cleanup"
 PARENT_IDENTITY_SENTINEL = "FLINTTRADE_PARENT_IDENTITY"
 
-#: Frozen-child execution contract published to backend code.
-PACKAGED_CHILD_EXECUTABLE_ENV = "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE"
-PACKAGED_CHILD_ARG_ENV = "FLINTTRADE_PACKAGED_CHILD_ARG"
-PACKAGED_CHILD_ARG = "--flinttrade-uploaded-strategy-child"
-
-#: Variables that belong only to the desktop sidecar control process. A
-#: packaged worker must not inherit them and impersonate the backend.
+#: Variables that belong only to the desktop source guardian. A strategy
+#: worker must not inherit them and impersonate the backend.
 DESKTOP_CONTROL_ENV = frozenset(
     {
         PARENT_PID_ENV,
@@ -82,15 +68,13 @@ DESKTOP_CONTROL_ENV = frozenset(
         SIDECAR_RECORD_PATH_ENV,
         BOOT_ID_ENV,
         LAUNCH_TOKEN_ENV,
-        PACKAGED_CHILD_EXECUTABLE_ENV,
-        PACKAGED_CHILD_ARG_ENV,
     }
 )
 
 #: How often (seconds) the POSIX watchdog polls for parent liveness.
 POLL_INTERVAL_SECONDS = 2.0
 
-#: Command the Tauri shell writes to stdin before its bounded hard-kill fallback.
+#: Command the Electron shell writes to stdin before its bounded hard-kill fallback.
 SHUTDOWN_COMMAND = "FLINTTRADE_SHUTDOWN"
 
 #: Exact-pipe hard stop used only for the application launched by this shell.
@@ -111,9 +95,9 @@ CLEANUP_COMPLETE_SENTINEL = "FLINTTRADE_BACKEND_CLEANUP_COMPLETE"
 #: Must cover the backend's own sequential shutdown budget
 #: (``flinttrade_core.desktop._DESKTOP_SHUTDOWN_TIMEOUT`` = 60s) plus margin —
 #: at the previous 12s the guardian SIGKILLed a mid-unwind trading backend
-#: (open-order handling, journal writes) whenever the shell crashed. The Rust
-#: shell's ``SIDECAR_WATCHDOG_GRACE_TIMEOUT`` derives from this value; keep
-#: them in step.
+#: (open-order handling, journal writes) whenever the shell crashed. The
+#: Electron supervisor's shutdown budget derives from this value; keep them in
+#: step.
 ORPHAN_GRACE_SECONDS = 75.0
 
 #: Grace between the guardian's escalation SIGTERM and its final SIGKILL of
@@ -125,7 +109,7 @@ FORCE_KILL_ESCALATION_SECONDS = 5.0
 #: Poll interval for forwarding a lock-free SIGTERM flag outside the handler.
 SIGNAL_RELAY_POLL_SECONDS = 0.05
 
-#: Brief wait for Rust to publish the pending record after spawning us.
+#: Brief wait for Electron to publish the pending record after spawning us.
 RECORD_PUBLISH_WAIT_SECONDS = 2.0
 RECORD_PUBLISH_POLL_SECONDS = 0.01
 
@@ -141,6 +125,34 @@ LINUX_PROC_ROOT = Path("/proc")
 
 _RECORD_TRANSITION_THREAD_LOCK = threading.Lock()
 
+_RECOVERY_PROCESS_DEAD = "dead"
+_RECOVERY_PROCESS_REUSED = "reused"
+
+
+class _RecoveryRecord(NamedTuple):
+    """Strictly parsed ownership fields needed only by startup recovery."""
+
+    version: str
+    guardian_pid: int
+    application_pid: int | None
+    shell_pid: int
+    boot_id: str | None
+    launch_token: str | None
+    spawn_contained: bool
+
+
+class _RecoveryProcessIdentity(NamedTuple):
+    """One generation-stable process image observation."""
+
+    start_token: str
+    image_path: Path
+    image_hash: str
+    command: str
+
+
+class _StaleRecoveryRecordBlocked(OSError):
+    """Signal an unresolved record without exposing process details to Electron."""
+
 
 def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
     return (
@@ -148,58 +160,6 @@ def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
         and len(value) % 2 == 0
         and all(character in "0123456789abcdefABCDEF" for character in value)
     )
-
-
-def publish_packaged_child_contract(
-    *,
-    environ: dict[str, str] | None = None,
-    executable: str | None = None,
-    frozen: bool | None = None,
-) -> bool:
-    """Publish the frozen executable + mode argument used for safe child work."""
-    env = os.environ if environ is None else environ
-    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
-    if not is_frozen:
-        return False
-    env[PACKAGED_CHILD_EXECUTABLE_ENV] = sys.executable if executable is None else executable
-    env[PACKAGED_CHILD_ARG_ENV] = PACKAGED_CHILD_ARG
-    return True
-
-
-def dispatch_packaged_child_mode(
-    *,
-    argv: list[str] | None = None,
-    dispatcher: Callable[[list[str]], bool] | None = None,
-) -> bool:
-    """Run an explicit frozen child before sidecar control threads can start.
-
-    The entrypoint enforces a detached stdin even if a caller forgets to do so,
-    and removes every sidecar-control variable before importing engine code.
-    """
-    arguments = list(sys.argv if argv is None else argv)
-    if len(arguments) < 2 or arguments[1] != PACKAGED_CHILD_ARG:
-        return False
-
-    for name in DESKTOP_CONTROL_ENV:
-        os.environ.pop(name, None)
-
-    if dispatcher is None:
-        from flinttrade_engine.strategy_runner import (  # noqa: PLC0415 - child-only import
-            dispatch_frozen_strategy_child,
-        )
-
-        dispatcher = dispatch_frozen_strategy_child
-
-    original_stdin = sys.stdin
-    with open(os.devnull, encoding="utf-8") as detached_stdin:
-        sys.stdin = detached_stdin
-        try:
-            handled = dispatcher(arguments)
-        finally:
-            sys.stdin = original_stdin
-    if not handled:
-        raise RuntimeError("packaged child dispatcher rejected the recognised child mode")
-    return True
 
 
 class _ShutdownCoordinator:
@@ -354,7 +314,10 @@ def _windows_process_creation_and_image(pid: int) -> tuple[str, Path] | None:
 
     handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
     if not handle:
-        return None
+        error = ctypes.get_last_error()
+        if error == 87:  # ERROR_INVALID_PARAMETER: no such PID.
+            return None
+        raise ctypes.WinError(error)
     try:
         creation = wintypes.FILETIME()
         exit_time = wintypes.FILETIME()
@@ -522,7 +485,7 @@ def _read_hardened_recovery_file(path: Path, *, max_bytes: int) -> bytes:
     except InsecureFilePermissionsError:
         if os.name != "nt":
             raise
-    # Retained Tauri on Windows historically published its owner-owned record
+    # The legacy packaged Windows shell published its owner-owned record
     # under an inherited workspace DACL. Repair that exact descriptor before
     # reading so migration does not sacrifice compatibility or weaken the new
     # current-user+SYSTEM policy.
@@ -626,6 +589,333 @@ def _reconcile_orphaned_cleanup_proof(record_path: Path) -> None:
     except FileNotFoundError:
         return
     raise OSError("orphaned cleanup proof remains after durable unlink")
+
+
+def _parse_recovery_record(payload: bytes) -> _RecoveryRecord | None:
+    """Parse current and safely recoverable legacy record shapes exactly."""
+    try:
+        contents = payload.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    lines = contents.splitlines()
+
+    def positive_pid(raw: str) -> int | None:
+        try:
+            value = int(raw.strip())
+        except ValueError:
+            return None
+        return value if value > 0 else None
+
+    if len(lines) == 6 and lines[0].strip() in {SIDECAR_RECORD_VERSION, "v3"}:
+        guardian_pid = positive_pid(lines[1])
+        raw_application = lines[2].strip()
+        application_pid = None if raw_application == "pending" else positive_pid(raw_application)
+        shell_pid = positive_pid(lines[3])
+        boot_id = lines[4]
+        launch_token = lines[5]
+        if (
+            guardian_pid is None
+            or (raw_application != "pending" and application_pid is None)
+            or shell_pid is None
+            or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord(
+            version=lines[0].strip(),
+            guardian_pid=guardian_pid,
+            application_pid=application_pid,
+            shell_pid=shell_pid,
+            boot_id=boot_id,
+            launch_token=launch_token,
+            spawn_contained=lines[0].strip() == SIDECAR_RECORD_VERSION,
+        )
+
+    if len(lines) == 5 and lines[0].strip() == "v2":
+        guardian_pid = positive_pid(lines[1])
+        raw_application = lines[2].strip()
+        application_pid = None if raw_application == "pending" else positive_pid(raw_application)
+        shell_pid = positive_pid(lines[3])
+        launch_token = lines[4]
+        if (
+            guardian_pid is None
+            or (raw_application != "pending" and application_pid is None)
+            or shell_pid is None
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord("v2", guardian_pid, application_pid, shell_pid, None, launch_token, False)
+
+    if len(lines) == 3:
+        guardian_pid = positive_pid(lines[0])
+        shell_pid = positive_pid(lines[1])
+        launch_token = lines[2]
+        if (
+            guardian_pid is None
+            or shell_pid is None
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord("v1", guardian_pid, None, shell_pid, None, launch_token, False)
+
+    if len(lines) == 2:
+        guardian_pid = positive_pid(lines[0])
+        shell_pid = positive_pid(lines[1])
+        if guardian_pid is None or shell_pid is None:
+            return None
+        return _RecoveryRecord("legacy", guardian_pid, None, shell_pid, None, None, False)
+    return None
+
+
+def _capture_recovery_process_identity(
+    pid: int,
+) -> _RecoveryProcessIdentity | str:
+    """Capture a stable start-token and image, or prove death/PID reuse."""
+    if pid <= 0:
+        raise OSError("recovery process PID is invalid")
+    if os.name == "nt":
+        try:
+            captured = _windows_process_creation_and_image(pid)
+        except PermissionError:
+            # A prior FlintTrade process belongs to this user. Access denial
+            # therefore proves that the numeric PID belongs to another owner.
+            return _RECOVERY_PROCESS_REUSED
+        if captured is None:
+            return _RECOVERY_PROCESS_DEAD
+        start_token, image_path = captured
+        image_hash = _sha256_file(image_path)
+        try:
+            after = _windows_process_creation_and_image(pid)
+        except PermissionError:
+            return _RECOVERY_PROCESS_REUSED
+        if after is None:
+            return _RECOVERY_PROCESS_DEAD
+        if after != captured:
+            return _RECOVERY_PROCESS_REUSED
+        return _RecoveryProcessIdentity(start_token, image_path, image_hash, str(image_path))
+
+    try:
+        before = _posix_process_start_token(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    if before is None:
+        return _RECOVERY_PROCESS_DEAD
+    try:
+        command = _posix_process_command(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    if command is None:
+        return _RECOVERY_PROCESS_DEAD
+    probe_image_path = Path(f"/proc/{pid}/exe") if sys.platform.startswith("linux") else Path(command)
+    try:
+        image_path = Path(os.readlink(probe_image_path)) if sys.platform.startswith("linux") else probe_image_path
+        image_hash = _sha256_file(probe_image_path)
+        after = _posix_process_start_token(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    except FileNotFoundError:
+        after = _posix_process_start_token(pid)
+        if after is None:
+            return _RECOVERY_PROCESS_DEAD
+        raise
+    if after is None:
+        return _RECOVERY_PROCESS_DEAD
+    if after != before:
+        return _RECOVERY_PROCESS_REUSED
+    return _RecoveryProcessIdentity(before, image_path, image_hash, command)
+
+
+def _recovery_process_group_liveness(pgid: int) -> str:
+    """Probe a POSIX containment group without delivering a signal."""
+    if os.name == "nt":
+        return _RECOVERY_PROCESS_DEAD
+    try:
+        os.kill(-pgid, 0)
+    except ProcessLookupError:
+        return _RECOVERY_PROCESS_DEAD
+    except PermissionError:
+        # Source guardian groups are same-user. A foreign-only numeric group
+        # is a recycled identifier, not surviving FlintTrade authority.
+        return _RECOVERY_PROCESS_REUSED
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return _RECOVERY_PROCESS_DEAD
+        if exc.errno in {errno.EPERM, errno.EACCES}:
+            return _RECOVERY_PROCESS_REUSED
+        raise
+    return "alive"
+
+
+def _looks_like_recovery_shell(identity: _RecoveryProcessIdentity, expected_hash: str) -> bool:
+    image_name = identity.image_path.name.lower()
+    command = identity.command.lower().strip()
+    command_executable = (
+        command.split('"', 2)[1]
+        if command.startswith('"') and '"' in command[1:]
+        else command.split(maxsplit=1)[0]
+    )
+    command_image_name = Path(command_executable).name
+    known_names = {
+        "flinttrade",
+        "flinttrade.exe",
+        "flinttrade-desktop",
+        "flinttrade-desktop.exe",
+    }
+    return identity.image_hash == expected_hash or image_name in known_names or command_image_name in known_names
+
+
+def _looks_like_recovery_backend(identity: _RecoveryProcessIdentity, expected_hash: str) -> bool:
+    command = identity.command.lower()
+    image_name = identity.image_path.name.lower()
+    return (
+        identity.image_hash == expected_hash
+        or "packaging/desktop_backend.py" in command.replace("\\", "/")
+        or "flinttrade-backend" in command
+        or "flinttrade-backend" in image_name
+    )
+
+
+def recover_stale_desktop_record(
+    *,
+    environ: dict[str, str] | None = None,
+    process_probe: Callable[[int], _RecoveryProcessIdentity | str] = _capture_recovery_process_identity,
+    group_probe: Callable[[int], str] = _recovery_process_group_liveness,
+    current_pid: int | None = None,
+    backend_image_hash: str | None = None,
+) -> bool:
+    """Durably remove only a conclusively stale pre-existing desktop record.
+
+    The caller must already hold the workspace backend lease. This function
+    never terminates a recorded process; any live, unreadable or changing
+    ownership state remains an explicit retryable startup block.
+    """
+    env = os.environ if environ is None else environ
+    raw_path = env.get(SIDECAR_RECORD_PATH_ENV) or ""
+    current_boot_id = env.get(BOOT_ID_ENV) or ""
+    current_shell_pid = _parent_pid_from_env(env)
+    parent_identity = _source_identity_parts(env.get(PARENT_IDENTITY_ENV) or "")
+    this_pid = os.getpid() if current_pid is None else current_pid
+    if (
+        not raw_path
+        or raw_path != raw_path.strip()
+        or current_shell_pid is None
+        or this_pid <= 0
+        or parent_identity is None
+        or parent_identity[1] != current_shell_pid
+        or not _valid_hex_identity(current_boot_id, minimum=16, maximum=512)
+    ):
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+    record_path = Path(raw_path)
+    if not record_path.is_absolute():
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+    expected_shell_hash = parent_identity[3]
+
+    try:
+        with _record_transition_guard(record_path):
+            try:
+                original_record = _read_hardened_recovery_file(record_path, max_bytes=4096)
+            except FileNotFoundError:
+                _reconcile_orphaned_cleanup_proof(record_path)
+                return False
+            record = _parse_recovery_record(original_record)
+            if record is None:
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            proof_path = _cleanup_complete_proof_path(record_path)
+            try:
+                original_proof = _read_hardened_recovery_file(proof_path, max_bytes=4096)
+            except FileNotFoundError:
+                original_proof = None
+            if original_proof is not None:
+                proof_token = _cleanup_proof_token(original_proof)
+                if record.launch_token is None or proof_token != record.launch_token:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            earlier_boot = (
+                record.boot_id is not None
+                and not hmac.compare_digest(record.boot_id.lower(), current_boot_id.lower())
+            )
+            if not earlier_boot:
+                if backend_image_hash is None:
+                    try:
+                        expected_backend_hash = _sha256_file(Path(sys.executable))
+                    except OSError as exc:
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                else:
+                    expected_backend_hash = backend_image_hash
+                states: dict[int, str] = {}
+
+                def inspect(pid: int, *, shell: bool) -> str:
+                    if pid == (current_shell_pid if shell else this_pid):
+                        return _RECOVERY_PROCESS_REUSED
+                    try:
+                        observed = process_probe(pid)
+                    except (OSError, ValueError) as exc:
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                    if observed in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
+                        return str(observed)
+                    if not isinstance(observed, _RecoveryProcessIdentity):
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                    compatible = (
+                        _looks_like_recovery_shell(observed, expected_shell_hash)
+                        if shell
+                        else _looks_like_recovery_backend(observed, expected_backend_hash)
+                    )
+                    if compatible:
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                    return _RECOVERY_PROCESS_REUSED
+
+                inspect(record.shell_pid, shell=True)
+                process_pids = [record.guardian_pid]
+                if record.application_pid is not None and record.application_pid != record.guardian_pid:
+                    process_pids.insert(0, record.application_pid)
+                for pid in process_pids:
+                    states[pid] = inspect(pid, shell=False)
+
+                if record.spawn_contained and os.name != "nt":
+                    # Legacy packaged-shell v4 groups were led by the launcher; source
+                    # guardian v4 groups are led by the promoted application.
+                    # Proving both possible group identifiers dead preserves
+                    # the union during migration. A reused leader proves its
+                    # former numeric group generation is gone.
+                    containment_pids = {record.guardian_pid}
+                    if record.application_pid is not None:
+                        containment_pids.add(record.application_pid)
+                    for pgid in containment_pids:
+                        if states.get(pgid) == _RECOVERY_PROCESS_REUSED:
+                            continue
+                        try:
+                            group_state = group_probe(pgid)
+                        except (OSError, ValueError) as exc:
+                            raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                        if group_state not in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
+                            raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            if not hmac.compare_digest(
+                _read_hardened_recovery_file(record_path, max_bytes=4096),
+                original_record,
+            ):
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+            if original_proof is not None and not hmac.compare_digest(
+                _read_hardened_recovery_file(proof_path, max_bytes=4096),
+                original_proof,
+            ):
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            _durably_unlink_cleanup_file(record_path)
+            if original_proof is not None:
+                _durably_unlink_cleanup_file(proof_path)
+            try:
+                record_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+            return True
+    except _StaleRecoveryRecordBlocked:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
 
 
 def _sync_parent_directory(path: Path) -> None:
@@ -3069,7 +3359,7 @@ def _exit_orphaned(
         return
     request_shutdown()
 
-    # A crashed shell cannot provide Tauri's hard-kill fallback. Keep one
+    # A crashed shell cannot provide its hard-kill fallback. Keep one
     # bounded last resort so a wedged third-party server never becomes an orphan.
     def force_exit() -> None:
         time.sleep(ORPHAN_GRACE_SECONDS)
@@ -3223,7 +3513,7 @@ def _posix_process_identity(
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
     """Read native command, PID, and a kernel-resolution process identity."""
-    _ = run  # Retained for compatibility with callers from older frozen builds.
+    _ = run  # Retained for compatibility with callers from older desktop builds.
     before = _posix_process_start_token(pid)
     if before is None:
         return None
@@ -3249,9 +3539,9 @@ def _posix_parent_alive(
         parent_pid: PID the shell reported for itself.
         track_reparent: True when this process started as a direct child of
             ``parent_pid`` — the shell's death then re-parents us to
-            init/launchd, which is race-free against PID reuse. PyInstaller
-            grandchild topology instead compares ``expected_identity`` before
-            using ``kill(pid, 0)`` only as an indeterminate fallback.
+            init/launchd, which is race-free against PID reuse. Indirect-child
+            topology instead compares ``expected_identity`` before using
+            ``kill(pid, 0)`` only as an indeterminate fallback.
 
     Returns:
         True only while the exact shell identity remains confirmable.
@@ -3446,7 +3736,7 @@ def start_stdin_shutdown_listener(
                 return
             if command == SHUTDOWN_COMMAND:
                 request_shutdown()
-                # Keep the exact inherited pipe alive for Rust's bounded
+                # Keep the exact inherited pipe alive for Electron's bounded
                 # force-exit fallback if graceful server cleanup wedges.
         _exit_orphaned(request_shutdown, terminate_owned_tree)
 
@@ -3460,8 +3750,8 @@ def start_stdin_shutdown_listener(
 
 
 def _source_desktop_mode() -> bool:
-    """Return whether this invocation is the source guardian, not PyInstaller."""
-    return os.environ.get("FLINTTRADE_DESKTOP") == "1" and not bool(getattr(sys, "frozen", False))
+    """Return whether this invocation is owned by the desktop source guardian."""
+    return os.environ.get("FLINTTRADE_DESKTOP") == "1"
 
 
 def _acquire_source_guardian_lease() -> object:
@@ -3533,7 +3823,7 @@ def _run_core_desktop(
 
 
 def run_desktop_backend(argv: list[str] | None = None) -> int:
-    """Run the frozen compatibility path or the source-owned guardian."""
+    """Run the source-owned desktop guardian or the plain CLI entrypoint."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == FINALISE_CLEANUP_ARG:
         parsed_cleanup = _parse_finalise_cleanup_arguments(arguments)
@@ -3548,10 +3838,6 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
         return 0
     if PRINT_PARENT_IDENTITY_ARG in arguments:
         raise SystemExit("parent identity probe does not accept backend arguments")
-    if dispatch_packaged_child_mode(argv=[sys.argv[0], *arguments]):
-        return 0
-    publish_packaged_child_contract()
-
     source_mode = _source_desktop_mode()
     source_lease: object | None = None
     if source_mode:
@@ -3566,6 +3852,17 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
             raise RuntimeError(
                 f"Source guardian lease acquisition failed ({type(exc).__name__})"
+            ) from None
+        try:
+            recover_stale_desktop_record()
+        except _StaleRecoveryRecordBlocked:
+            print(
+                f"FLINTTRADE_BACKEND_BLOCKED reason={RECOVERY_RECORD_BLOCKED_REASON}",
+                flush=True,
+            )
+            _release_failed_source_start_lease(source_lease)
+            raise SystemExit(
+                "source guardian recovery record is unresolved; retry after the prior backend exits"
             ) from None
         if not create_pending_application_pid_record():
             _release_failed_source_start_lease(source_lease)

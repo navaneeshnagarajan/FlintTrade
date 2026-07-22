@@ -1,96 +1,102 @@
 # Desktop
 
-> Electron 40 shell migration in progress. The tracked Electron scaffold now
-> owns the package's default Node build while the existing Tauri implementation
-> remains alongside it under `src-tauri/` until behavioural parity is proved.
+**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** —
+the Electron 40 shell for the self-hosted terminal.
 
-**Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
+**Language:** TypeScript (strict) · **Runtime:** Electron 40.10.2
 
-**Language:** TypeScript (Electron 40) + Rust (Tauri 2 compatibility source)
+The package contains only the shell, local splash, bootstrap resources and
+licence notices. It does not bundle the Python backend or built terminal. On
+first launch the shell verifies pinned tools, builds the official source under
+`~/.flinttrade/src/FlintTrade`, and starts the source guardian from that
+checkout.
 
-## Public surface
+> No complete Electron installer release has been published yet. Existing
+> `v0.6.0-beta.13` desktop assets use the retired packaging and are not accepted
+> by the new installer. Once this branch is deployed, the download page becomes
+> the release availability gate; the currently deployed beta.13 page predates
+> that cutover and still advertises the retired install path.
 
-- `electron/main.ts` — minimal single-instance Electron lifecycle and local splash window.
-- `electron/preload.ts` — sandboxed, named `window.flintDesktop` bridge.
-- `electron/hardening.ts` — deny-first window, navigation, child-window and permission policy.
-- `electron/origins.ts` and `electron/ipc.ts` — exact splash/loopback trust classification and per-handler sender validation.
-- `electron/state.ts` and `electron/paths.ts` — typed state/event stores and read-only platform path resolution.
-- `src-tauri/` — retained Tauri parity source; it is not deleted during the migration.
-- `splash/` — local boot splash staged into the Electron package.
+## Main surfaces
 
-(See the source for the full surface.)
+- `electron/main.ts` wires the singleton, bootstrap, source updates, guardian
+  supervision, windows, tray, hotkey, notifications and shell updates.
+- `electron/preload.ts` exposes the named `window.flintDesktop` bridge.
+- `electron/hardening.ts`, `electron/origins.ts` and `electron/ipc.ts` enforce
+  the deny-first renderer boundary and validate every IPC sender.
+- `electron/bootstrap*.ts`, `electron/source-*.ts` and
+  `electron/candidate-health.ts` acquire, build, health-prove, promote and roll
+  back managed source without mutating the running checkout.
+- `electron/backend-*.ts`, `electron/lifecycle.ts` and
+  `electron/startup-recovery.ts` own the source guardian lifecycle and crash
+  recovery.
+- `electron/shell-updater.ts` and `electron/shell-update-io.ts` select and
+  verify a complete release before handing off to an installer.
+- `splash/` is the local bootstrap and recovery surface.
+- `resources/bootstrap/` contains the platform bootstrap entrypoints and
+  checksum-bound tool manifest.
+- `resources/icons/` contains the packaged application and tray icons.
 
-## Migration boundary
+The full backend guardian remains at `packaging/desktop_backend.py` because it
+is executed from the managed source checkout. Trading, broker and safety-gate
+authority stays in the loopback Python backend; Electron owns machine lifecycle
+only.
 
-- The Electron scaffold includes no trading or broker authority.
-- Source checkout bootstrap, backend supervision, close-to-tray and updater
-  parity are later migration slices; the retained Tauri source remains the
-  behavioural reference until those gates pass.
-- The renderer receives named functions only. Node and raw `ipcRenderer` stay
-  unavailable, and every main-process handler validates the sender frame.
+## Security and lifecycle contract
 
-See [docs/DESKTOP.md](../../../docs/DESKTOP.md) for the full desktop guide.
+- Windows use `contextIsolation: true`, `sandbox: true` and
+  `nodeIntegration: false`.
+- The preload exposes named methods only; it does not expose Node or raw
+  `ipcRenderer`.
+- The splash is trusted only at its exact packaged file URL. The terminal is
+  trusted only at the selected `127.0.0.1` backend origin.
+- Navigation, downloads, webviews, permissions and unexpected child windows
+  are denied.
+- The main window opens only after the exact ready sentinel and
+  `GET /api/v1/ping` both succeed.
+- Window close hides to the tray. Explicit quit drains the backend before
+  releasing its process containment.
+- Source/runtime updates and Electron-shell installer updates are separate
+  operations and separate renderer actions.
 
-## Install
+## Development
 
-End users should install from the published release assets:
-
-```bash
-# macOS / Linux
-curl -fsSL https://flinttrade.vercel.app/install.sh | bash
-```
-
-```powershell
-# Windows 10/11
-irm https://flinttrade.vercel.app/install.ps1 | iex
-```
-
-The scripts resolve the `flinttrade-desktop-manifest.json` asset straight from
-the GitHub release-download URLs (the rolling `updater-beta` / `updater-stable`
-releases by default, or an exact tag via `--ref`) and download the matching
-`.dmg`, `.exe`, `.AppImage`, `.deb`, or `.rpm`. Source builds are an explicit
-advanced path via `--build-from-source` / `-BuildFromSource`.
-
-Contributors working in this package should install via the workspace from the repo root:
-
-```bash
-pnpm install
-```
-
-Typecheck, test and bundle the Electron main/preload processes:
-
-```bash
-pnpm --filter @flinttrade/desktop build
-```
-
-Build an unpacked macOS application directory:
+Install from the repository root with the locked workspace:
 
 ```bash
-pnpm --filter @flinttrade/desktop pack:dir
+pnpm install --frozen-lockfile
 ```
 
-## Tests
+Then use either the root Makefile or package scripts:
 
 ```bash
+make desktop-test
+make desktop-build
+make desktop-package
+make desktop-dev
+
 pnpm --filter @flinttrade/desktop typecheck
 pnpm --filter @flinttrade/desktop test:electron
+pnpm --filter @flinttrade/desktop bundle
 ```
 
-The retained Tauri tests remain available with
-`cd packages/apps/desktop/src-tauri && cargo test --lib` during parity work.
+Platform package commands are `pack:mac`, `pack:win`, `pack:linux:x64` and
+`pack:linux:arm64`. They write to `release/electron/`; only the command matching
+the host platform is expected to work locally. `verify:package` checks the
+packaged Electron security and resource contract.
 
-For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
+Local macOS packaging always uses an ad-hoc code seal. Apple distribution
+signing and notarisation are supported only by release CI when its complete
+secret sets are supplied. Windows and Linux package behaviour is verified by
+deterministic tests and the cross-platform CI matrix; a local Mac package is
+not proof for those platforms.
 
-## How this fits in
+See [docs/DESKTOP.md](../../../docs/DESKTOP.md) for end-user delivery and the
+complete first-run/update/uninstall model, and
+[docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md) for repository-wide
+contributor guidance.
 
-This package's role in the wider FlintTrade architecture is documented in
-[docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). For end-user features it powers, see
-[docs/USER_GUIDE.md](../../../docs/USER_GUIDE.md).
+## Licence
 
-## Contributing
-
-Contributions welcome. Please read [`contributing.md`](../../../contributing.md) at the repo root before opening a pull request.
-
-## License
-
-AGPL-3.0 — same as the parent repository. See [`LICENSE`](../../../LICENSE) for the full text.
+AGPL-3.0, with retained third-party notices and the Hermes-derived MIT
+attribution under `resources/licenses/`.

@@ -98,8 +98,7 @@ class TestResourceLimits:
 
     def test_returns_callable_when_resource_available(self):
         """On Linux/macOS with resource module, preexec_fn is a callable."""
-        with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
-             patch.object(mod, "_resource", create=True) as mock_res:
+        with patch.object(mod, "_RESOURCE_AVAILABLE", True), patch.object(mod, "_resource", create=True) as mock_res:
             mock_res.RLIMIT_CPU = 0
             mock_res.RLIMIT_NOFILE = 7
             mock_res.RLIMIT_NPROC = 6
@@ -114,8 +113,7 @@ class TestResourceLimits:
 
     def test_preexec_fn_calls_setrlimit(self):
         """The preexec_fn should install CPU, FD, process and memory limits."""
-        with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
-             patch.object(mod, "_resource", create=True) as mock_res:
+        with patch.object(mod, "_RESOURCE_AVAILABLE", True), patch.object(mod, "_resource", create=True) as mock_res:
             mock_res.RLIMIT_CPU = 0
             mock_res.RLIMIT_NOFILE = 7
             mock_res.RLIMIT_NPROC = 6
@@ -137,13 +135,10 @@ class TestResourceLimits:
             assert any(c[0][0] == mock_res.RLIMIT_NOFILE for c in calls)
             # NPROC limit
             assert any(c[0][0] == mock_res.RLIMIT_NPROC for c in calls)
-            assert (mock_res.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024)) in [
-                call.args for call in calls
-            ]
+            assert (mock_res.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024)) in [call.args for call in calls]
 
     def test_preexec_fn_fails_closed_without_memory_limit_primitive(self):
-        with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
-             patch.object(mod, "_resource", create=True) as mock_res:
+        with patch.object(mod, "_RESOURCE_AVAILABLE", True), patch.object(mod, "_resource", create=True) as mock_res:
             mock_res.RLIMIT_CPU = 0
             mock_res.RLIMIT_NOFILE = 7
             mock_res.RLIMIT_NPROC = 6
@@ -154,8 +149,7 @@ class TestResourceLimits:
 
     def test_preexec_fn_skips_nproc_when_missing(self):
         """When RLIMIT_NPROC is absent (some macOS builds), no error."""
-        with patch.object(mod, "_RESOURCE_AVAILABLE", True), \
-             patch.object(mod, "_resource", create=True) as mock_res:
+        with patch.object(mod, "_RESOURCE_AVAILABLE", True), patch.object(mod, "_resource", create=True) as mock_res:
             mock_res.RLIMIT_CPU = 0
             mock_res.RLIMIT_NOFILE = 7
             # Simulate macOS without RLIMIT_NPROC
@@ -169,19 +163,9 @@ class TestResourceLimits:
             calls = mock_res.setrlimit.call_args_list
             assert len(calls) == 2  # Only CPU and FD
 
-    def test_frozen_child_limits_preserve_bootloader_fd_ceiling(self):
-        """Post-boot frozen limits must not lower NOFILE below open bundle FDs."""
-        with patch.object(mod, "_build_preexec_fn", return_value=lambda: None) as build:
-            mod._apply_uploaded_strategy_child_limits(
-                memory_limit_bytes=64 * 1024 * 1024,
-                process_limit=1,
-            )
-
-        build.assert_called_once_with(
-            fd_limit=None,
-            nproc_limit=0,
-            memory_limit_bytes=64 * 1024 * 1024,
-        )
+    def test_frozen_child_limit_dispatch_is_retired(self):
+        """Source-only strategy execution has no frozen-child dispatch hook."""
+        assert not hasattr(mod, "_apply_uploaded_strategy_child_limits")
 
 
 # ---------------------------------------------------------------------------
@@ -192,22 +176,48 @@ class TestResourceLimits:
 class TestBwrapCommand:
     """Verify bwrap command is built correctly."""
 
-    def test_command_structure(self):
-        cmd = mod._build_bwrap_command("/usr/bin/python3", "/tmp/wrapper.py")
+    def test_command_structure(self, tmp_path):
+        wrapper = mod._create_sandbox_wrapper(tmp_path)
+        start_gate = mod._create_strategy_start_gate(tmp_path)
+        strategy = tmp_path / "strategy.py"
+        strategy.write_text("print('ok')\n", encoding="utf-8")
+
+        cmd = mod._build_bwrap_command(
+            sys.executable,
+            str(wrapper),
+            str(start_gate),
+            str(strategy),
+        )
+
         assert cmd[0] == "bwrap"
         assert "--ro-bind" in cmd
         assert "--unshare-net" in cmd
         assert "--unshare-pid" in cmd
         assert "--die-with-parent" in cmd
         assert "--tmpfs" in cmd
-        assert "/usr/bin/python3" in cmd
-        assert "/tmp/wrapper.py" in cmd
+        assert str(wrapper.resolve()) in cmd
+        assert str(start_gate.resolve()) in cmd
+        assert str(strategy.resolve()) in cmd
 
-    def test_command_ends_with_python_and_script(self):
-        cmd = mod._build_bwrap_command("/usr/bin/python3", "/tmp/wrapper.py")
-        # Last two elements: python exe and script path
-        assert cmd[-2] == "/usr/bin/python3"
-        assert cmd[-1] == "/tmp/wrapper.py"
+    def test_command_ends_with_sandbox_paths_only(self, tmp_path):
+        wrapper = mod._create_sandbox_wrapper(tmp_path)
+        start_gate = mod._create_strategy_start_gate(tmp_path)
+        strategy = tmp_path / "strategy.py"
+        strategy.write_text("print('ok')\n", encoding="utf-8")
+
+        cmd = mod._build_bwrap_command(
+            sys.executable,
+            str(wrapper),
+            str(start_gate),
+            str(strategy),
+        )
+
+        assert cmd[-4].startswith("/run/flinttrade-python/bin/python")
+        assert cmd[-3:] == [
+            "/run/flinttrade-strategy/_sandbox_wrapper.py",
+            "/run/flinttrade-strategy/_start_gate",
+            "/run/flinttrade-strategy/strategy.py",
+        ]
 
     def test_is_bwrap_available_true(self):
         with patch("shutil.which", return_value="/usr/bin/bwrap"):
@@ -328,7 +338,7 @@ class TestRestrictedBuiltins:
         assert '"exec"' not in content or "exec(compile(" in content  # exec is used in wrapper itself
         assert '"compile"' not in content or "compile(_code" in content
 
-    def test_wrapper_matches_frozen_main_module_namespace(self, tmp_path):
+    def test_wrapper_matches_source_main_module_namespace(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         content = wrapper.read_text(encoding="utf-8")
 
@@ -350,8 +360,20 @@ class TestRestrictedBuiltins:
 
     def test_safe_builtins_excludes_dangerous(self):
         """The _SAFE_BUILTINS dict must not contain dangerous names."""
-        dangerous = {"eval", "exec", "__import__", "compile", "globals", "locals",
-                     "vars", "dir", "getattr", "setattr", "delattr", "open"}
+        dangerous = {
+            "eval",
+            "exec",
+            "__import__",
+            "compile",
+            "globals",
+            "locals",
+            "vars",
+            "dir",
+            "getattr",
+            "setattr",
+            "delattr",
+            "open",
+        }
         overlap = dangerous & set(mod._SAFE_BUILTINS.keys())
         assert overlap == set(), f"Dangerous builtins in _SAFE_BUILTINS: {overlap}"
 
@@ -369,9 +391,11 @@ class TestFallback:
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
-             patch.object(mod, "_is_bwrap_available", return_value=False), \
-             patch("platform.system", return_value="Linux"):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch.object(mod, "_is_bwrap_available", return_value=False),
+            patch("platform.system", return_value="Linux"),
+        ):
             runner.start(strategy_id)
 
         cmd = mock_popen.call_args[0][0]
@@ -387,9 +411,11 @@ class TestFallback:
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
-             patch.object(mod, "_is_bwrap_available", return_value=True), \
-             patch("platform.system", return_value="Linux"):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch.object(mod, "_is_bwrap_available", return_value=True),
+            patch("platform.system", return_value="Linux"),
+        ):
             runner.start(strategy_id)
 
         cmd = mock_popen.call_args[0][0]
@@ -403,8 +429,10 @@ class TestFallback:
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
-             patch("platform.system", return_value="Windows"):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch("platform.system", return_value="Windows"),
+        ):
             runner.start(strategy_id)
 
         cmd = mock_popen.call_args[0][0]
@@ -418,8 +446,10 @@ class TestFallback:
         mock_proc = _make_mock_process()
         sentinel = lambda: None  # noqa: E731
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
-             patch.object(mod, "_build_preexec_fn", return_value=sentinel):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch.object(mod, "_build_preexec_fn", return_value=sentinel),
+        ):
             runner.start(strategy_id)
 
         assert mock_popen.call_args.kwargs["preexec_fn"] is sentinel
@@ -431,14 +461,17 @@ class TestFallback:
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
 
-        with patch("subprocess.Popen", return_value=mock_proc) as mock_popen, \
-             patch("platform.system", return_value="Windows"):
+        with (
+            patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch("platform.system", return_value="Windows"),
+        ):
             runner.start(strategy_id)
 
         cmd = mock_popen.call_args[0][0]
         # Second arg should be the wrapper script path
         assert "_sandbox_wrapper.py" in cmd[1]
-        # Third arg should be the strategy script path
-        assert strategy_id in cmd[2]
+        # Third arg is the parent-owned start gate; fourth is the strategy.
+        assert "_start_gate" in cmd[2]
+        assert strategy_id in cmd[3]
 
         runner.stop(strategy_id)

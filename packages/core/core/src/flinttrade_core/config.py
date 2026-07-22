@@ -7,7 +7,6 @@ Config model:
 
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -15,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator
 
+from .source_root import discover_source_root
 from .workspace import Workspace
 
 logger = logging.getLogger("flinttrade.core.config")
@@ -26,10 +26,9 @@ DEFAULT_OPENALGO_WS_PORT = 8765
 
 def _load_dev_env() -> None:
     """Load repo-root .env for contributor/server runs, never for desktop."""
-    if getattr(sys, "frozen", False) or os.environ.get("FLINTTRADE_DESKTOP") == "1":
+    if os.environ.get("FLINTTRADE_DESKTOP") == "1":
         return
-    repo_root = Path(__file__).resolve().parents[5]
-    load_dotenv(repo_root / ".env", override=False)
+    load_dotenv(discover_source_root() / ".env", override=False)
 
 
 def _workspace_openalgo_overrides_from_data(data: dict[str, Any]) -> dict[str, Any]:

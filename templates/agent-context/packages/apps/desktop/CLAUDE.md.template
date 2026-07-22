@@ -1,39 +1,46 @@
 # FlintTrade — desktop
 
-> Tauri 2 native shell — backend sidecar + built terminal in one cross-OS installer
-> Serves: single loopback origin | Branch: main (pre-release, no PRs)
+> Electron 40 shell with verified local-source bootstrap and guardian lifecycle
+> Serves: selected loopback origin only | Branch: follow the current task context
 
-## Quick Commands
+## Quick commands
 
 ```bash
-make desktop-dev                                   # run the app in dev (builds the sidecar first)
-make desktop-build                                 # full installers: frontend + sidecar + Tauri bundle
-cd packages/apps/desktop/src-tauri && cargo check  # fast Rust validation
-cd packages/apps/desktop/src-tauri && cargo test --lib   # Rust unit tests
+make desktop-test       # strict Electron TypeScript + full Vitest
+make desktop-build      # verify resources and bundle main/preload
+make desktop-package    # package and verify this host's installer
+make desktop-dev        # run against the managed source bootstrap
 ```
 
 ## Architecture
-- Tauri 2 shell in `src-tauri/src/lib.rs`; entry point `main.rs`; config `tauri.conf.json`
-- Spawns the PyInstaller-frozen FlintTrade backend as a **sidecar** with a
-  ready-port stdout handshake, then loads the built terminal from a single
-  loopback origin (nothing listens externally)
-- **Close-to-tray background runtime**: window close hides to the system tray;
-  the backend, autonomous agent, and position monitoring keep running. Quit
-  fully via the tray menu (QuitRequested AtomicBool). macOS dock-reopen
-  restores the window
-- Tray menu (Show/Quit + left-click toggle), global hotkey `Cmd/Ctrl+Shift+F`
-- Native notifications: consumes `FLINTTRADE_NOTIFY\t<title>\t<body>` lines
-  from the sidecar stdout (producer: `flinttrade_core/desktop_notify.py`,
-  active only when `FLINTTRADE_DESKTOP=1`)
-- Plugins: tray-icon, tauri-plugin-global-shortcut, tauri-plugin-notification
+
+- `electron/main.ts` wires the singleton, bootstrap, guardian supervision,
+  windows, tray, hotkey, notifications and both update flows.
+- `electron/preload.ts` exposes named `window.flintDesktop` methods only.
+- `resources/bootstrap/` contains checksum-bound platform bootstrap entrypoints.
+- First launch builds the active source at `~/.flinttrade/src/FlintTrade`; the
+  user workspace stays separate and never participates in promotion or
+  ordinary uninstall.
+- Source/runtime updates stage and health-prove a sibling candidate before
+  promotion. Electron-shell updates require a complete release and checksum,
+  then hand off to the identity-bound installer.
+- Close hides to tray; explicit quit drains the guardian. Native notifications
+  consume strictly parsed `FLINTTRADE_NOTIFY\t<title>\t<body>` lines.
 
 ## House rules that bite
-- The sidecar is the REAL backend — never bypass it with a second server
-- Keep the loopback-only origin; adding an external listener is a safety bug
-- The Kotak Neo SDK stays EXCLUDED from installers (redistribution vs use)
-- Cross-platform verification belongs in the weekly nightly workflow, not
-  per-push CI
+
+- Electron owns machine lifecycle only. Trading, broker and safety authority
+  stays in the Python backend.
+- Every IPC handler validates its sender; never expose Node, raw `ipcRenderer`
+  or a generic command string to the renderer.
+- Never mutate the running source checkout or include user data in
+  promotion/rollback.
+- No complete Electron release is published yet. Do not present beta.13's
+  retired assets as source-bootstrap installers.
+- A macOS package is not Windows/Linux proof. Cross-platform evidence belongs
+  to deterministic tests and CI/contributor runs.
 
 ## Docs
-Full desktop guide: `docs/DESKTOP.md`. Release workflow: `desktop-release.yml`
-(manual trigger).
+
+Full desktop guide: `docs/DESKTOP.md`. Release workflow:
+`.github/workflows/desktop-release.yml`.

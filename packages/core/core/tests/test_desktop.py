@@ -151,7 +151,7 @@ def test_resolve_port_zero_means_os_chosen(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.unit
 def test_ready_sentinel_constant() -> None:
-    """The handshake sentinel is the exact string the Tauri shell scans for."""
+    """The handshake sentinel is the exact string the Electron guardian scans for."""
     assert desktop.READY_SENTINEL == "FLINTTRADE_BACKEND_READY"
 
 
@@ -160,10 +160,10 @@ def test_desktop_lease_conflict_prints_the_blocked_sentinel(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A lease conflict announces itself so the shell keeps the payload pin.
+    """A lease conflict announces itself so the shell offers an accurate retry.
 
-    Without the sentinel the Tauri shell treats the pre-ready exit as a broken
-    payload, demotes it, and each Retry re-downloads the engine.
+    Without the sentinel the Electron guardian would treat the pre-ready exit
+    as an ordinary source-runtime failure instead of an instance conflict.
     """
     from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning
 

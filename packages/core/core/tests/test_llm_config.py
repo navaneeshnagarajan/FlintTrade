@@ -46,6 +46,11 @@ elif fault == "secret-installed":
         del user
         os.chmod(path, 0o600)
 
+    def portable_windows_reopen(descriptor, **_kwargs):
+        reopened = os.dup(descriptor)
+        os.close(descriptor)
+        return reopened
+
     def crash_after_windows_secret_install(source, destination):
         result = original_replace(source, destination)
         source_path = Path(source)
@@ -56,6 +61,7 @@ elif fault == "secret-installed":
     secure_file._is_windows = lambda: True
     secure_file.harden = portable_windows_harden
     secure_file._assert_current_user_owns = lambda *args: None
+    secure_file._reopen_windows_descriptor_for_security = portable_windows_reopen
     secure_file._windows_replace_write_through = crash_after_windows_secret_install
 elif fault == "committed-cleanup":
     original_unlink = Path.unlink

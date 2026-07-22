@@ -1,52 +1,59 @@
 # FlintTrade on Linux (Ubuntu/Debian)
 
-## Option A — One-command install (Recommended)
+## Electron installer status
+
+No complete, checksum-published Electron release exists yet. The public
+[download page](https://flinttrade.vercel.app/download) will withhold installer
+commands until the x64 and ARM64 Electron AppImages, the macOS and Windows
+installers, and `SHA256SUMS.txt` are published together once this branch is
+deployed. The currently deployed beta.13 page predates that gate and still
+advertises the retired packaging; do not use those instructions as an Electron
+source-bootstrap install.
+
+After that gate opens, the one-command install is:
 
 ```bash
 curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 ```
 
-The script downloads and verifies the right `.AppImage` for your architecture
-(x64 or arm64), with an automatic FUSE-less self-extraction fallback because
-modern distros no longer ship `libfuse2`. It installs an app icon plus a
+The script downloads and verifies the canonical `.AppImage` for your
+architecture (x64 or arm64), with an automatic FUSE-less self-extraction
+fallback because modern distros no longer ship `libfuse2`. It installs an app icon plus a
 `flinttrade` command in `~/.local/bin` (no sudo), and verifies the app
 survives launch — the launch log is at
 `~/.local/state/flinttrade/desktop-launch.log`. The script lives at
 [`scripts/install/`](../../scripts/install/) — read it before piping to a
 shell if that is your policy (it should be).
 
-The desktop app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` internally by
-default, which fixes the blank-window issue on NVIDIA and virtual-machine
-graphics stacks.
-
 Complete Setup in the app. Broker/OpenAlgo configuration is handled in the
 UI; no `.env` file is required.
 
-## Option B — Manual `.AppImage` download
+## Manual `.AppImage` download
 
-1. Download the `.AppImage` for your architecture from the release page.
-2. `chmod +x FlintTrade_*.AppImage && ./FlintTrade_*.AppImage`. Running an
-   AppImage directly needs `libfuse2`; if your distro does not ship it,
-   either install it or run
-   `./FlintTrade_*.AppImage --appimage-extract-and-run`.
+1. Download `FlintTrade-<version>-linux-x64.AppImage` or
+   `FlintTrade-<version>-linux-arm64.AppImage` for your architecture from the
+   release page.
+2. Run `chmod +x FlintTrade-<version>-linux-<arch>.AppImage`, then
+   `./FlintTrade-<version>-linux-<arch>.AppImage`. Running an AppImage directly
+   needs `libfuse2`; if your distro does not ship it, either install it or run
+   `./FlintTrade-<version>-linux-<arch>.AppImage --appimage-extract-and-run`.
 3. Complete Setup in the app. Broker/OpenAlgo configuration is handled in the
    UI; no `.env` file is required.
 
-> **`.deb`/`.rpm` retired:** new releases publish only the AppImage for
-> Linux. Older releases still carry `.deb`/`.rpm` packages — install one via
-> the script's `--ref <tag>` flag or from that release's assets.
+Electron releases publish AppImage only; `.deb` and `.rpm` are not part of the
+new four-installer contract.
 
 To build the installer locally:
 
 ```bash
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build
+pnpm install --frozen-lockfile
+make desktop-test
+make desktop-package
 ```
 
-Generated packages live under
-`packages/apps/desktop/src-tauri/target/release/bundle/`.
+Generated packages live under `packages/apps/desktop/release/electron/`.
 
-## Option C — Source Development
+## Source development
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -57,7 +64,7 @@ make dev
 
 Open http://localhost:5173.
 
-## Option D — Server Services (Advanced)
+## Server services (advanced)
 1. `git clone https://github.com/navaneeshnagarajan/FlintTrade.git`
 2. `cd FlintTrade`
 3. `bash infra/scripts/setup-production.sh`

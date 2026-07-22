@@ -175,6 +175,7 @@ describe("candidate health proof", () => {
       "FLINTTRADE_DESKTOP",
       "FLINTTRADE_FRONTEND_DIST",
       "FLINTTRADE_HOME",
+      "FLINTTRADE_SOURCE_ROOT",
       "FLINTTRADE_WORKSPACE_DIR",
       "HOME",
       "PYTHONNOUSERSITE",

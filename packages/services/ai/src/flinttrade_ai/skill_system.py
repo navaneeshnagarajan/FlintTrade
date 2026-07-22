@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from flinttrade_core.source_root import discover_source_root
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("flinttrade.ai.skills")
@@ -148,6 +149,12 @@ def _load_skill_file(path: Path) -> SkillConfig | None:
 # ---------------------------------------------------------------------------
 
 
+def _default_skills_dir(module_file: Path | str | None = None) -> Path:
+    """Return the AI skill directory inside the managed source checkout."""
+    source_root = discover_source_root(module_file=module_file or __file__)
+    return source_root / "packages" / "services" / "ai" / "skills"
+
+
 class SkillRegistry:
     """Registry of domain-knowledge skill files.
 
@@ -164,10 +171,10 @@ class SkillRegistry:
 
         Args:
             skills_dir: Directory containing ``*.md`` skill files. Defaults to
-                ``packages/services/ai/skills/`` relative to this module.
+                ``packages/services/ai/skills/`` in the managed source checkout.
         """
         if skills_dir is None:
-            skills_dir = Path(__file__).resolve().parents[2] / "skills"
+            skills_dir = _default_skills_dir()
         self.skills_dir: Path = skills_dir
         self._skills: dict[str, SkillConfig] = {}
         self._scan()

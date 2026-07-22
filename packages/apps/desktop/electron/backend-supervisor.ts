@@ -330,6 +330,7 @@ export interface CreateBackendEnvironmentInput {
   parentPid: number;
   platform?: NodeJS.Platform;
   recordPath: string;
+  sourceRoot: string;
   workspace: string;
 }
 
@@ -363,6 +364,7 @@ export function createBackendEnvironment(input: CreateBackendEnvironmentInput): 
     FLINTTRADE_PARENT_IDENTITY: input.parentIdentity.raw,
     FLINTTRADE_PARENT_PID: String(input.parentPid),
     FLINTTRADE_SIDECAR_RECORD_PATH: input.recordPath,
+    FLINTTRADE_SOURCE_ROOT: input.sourceRoot,
     FLINTTRADE_WORKSPACE_DIR: input.workspace,
   });
   return environment;
@@ -666,6 +668,7 @@ export class BackendSupervisor {
         parentPid: this.parentPid,
         platform: this.platform,
         recordPath: this.recordPath,
+        sourceRoot: this.sourceRoot,
         workspace: this.workspace,
       });
       attempt.readyDeferred = deferred<RunningBackend>();
@@ -758,10 +761,15 @@ export class BackendSupervisor {
         );
         return;
       }
-      attempt.noRecordProof = event.reason === "instance-lease";
+      attempt.noRecordProof = event.reason === "instance-lease" || event.reason === "recovery-record";
       void this.failAttempt(
         attempt,
-        new BackendSupervisorError("blocked", "Backend startup was blocked by another workspace owner."),
+        new BackendSupervisorError(
+          "blocked",
+          event.reason === "recovery-record"
+            ? "Backend recovery state is unresolved. Retry after the prior backend exits."
+            : "Backend startup was blocked by another workspace owner.",
+        ),
       );
       return;
     }

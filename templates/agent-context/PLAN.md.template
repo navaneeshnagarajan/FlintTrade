@@ -336,7 +336,7 @@ These are tracked, not forgotten. Every one gets built eventually.
 | 15 | IPO Tracker | — | ✅ Done (Wave 1-9) — ipo_routes.py + IpoTab.tsx |
 | 16 | /learn route (full) | — | ✅ Done (v0.1.0-alpha) |
 | 17 | OpenClaw bridge | — | ✅ Done (Wave 1-9) — openclaw_bridge.py (ai + automation) |
-| 18 | Desktop App (Tauri) | fastscalper-tauri | Archived after v0.6.0 restructure; no active `packages/desktop/` package |
+| 18 | Desktop App (Electron source bootstrap) | hermes-agent lifecycle patterns | Active at `packages/apps/desktop`: secure Electron 40 shell, verified local-source bootstrap/update, source guardian and four-installer CI; no complete Electron release published yet |
 | 19 | Pine Script Indicator Editor | PineTS | ✅ Done (Wave 1-9) — PineEditor.tsx + compile endpoint |
 | 20 | Multi-user Auth | openalgo-multiuser | ✅ Done (Wave 1-9) — user_manager.py + user_routes.py |
 | 21 | Blue-green Deployment | — | v0.6.0 |

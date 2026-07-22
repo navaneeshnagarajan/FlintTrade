@@ -3,31 +3,37 @@
 > FlintTrade `v0.6.0-beta.13` is not production ready; use Explore and Practice
 > modes before connecting any live broker workflow.
 
-## Option A — One-command install (Recommended)
+## Electron installer status
+
+No complete, checksum-published Electron release exists yet. The public
+[download page](https://flinttrade.vercel.app/download) will withhold the
+install command until the universal Electron DMG, the Windows installer, both
+Linux AppImages and `SHA256SUMS.txt` are published together once this branch is
+deployed. The currently deployed beta.13 page predates that gate and still
+advertises the retired packaging; do not treat its assets or instructions as
+Electron/source-bootstrap packages.
+
+After that gate opens, the macOS one-command path is:
 
 ```bash
 curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 ```
 
-This is the recommended path because release builds are currently
-**unsigned**: the script's download carries no quarantine attribute, so
-Gatekeeper never blocks the app — no "Open Anyway" dance, even on macOS 15+
-where Apple removed the right-click → Open override for unnotarised apps. The
-script installs the single **universal** `.dmg` build (one app for both Apple
-Silicon and Intel) and launches it. The script lives at
-[`scripts/install/`](../../scripts/install/) — read it before piping to a
-shell if that is your policy (it should be).
+The script requires the canonical universal DMG and checksum asset from the
+same official release before installing it. First launch then verifies pinned
+tools and builds the managed FlintTrade source checkout; no `.env` file is
+required.
 
-Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
-in the app; no `.env` file is required.
+## Manual `.dmg` download (after release availability)
 
-## Option B — Manual `.dmg` download
-
-1. Download the universal `.dmg` (`FlintTrade_<version>_universal.dmg` — one
+1. Download the universal `.dmg`
+   (`FlintTrade-<version>-mac-universal.dmg` — one
    file for both Apple Silicon and Intel) from the release page.
 2. Install FlintTrade like any other macOS app.
-3. Release builds are currently **unsigned**, so on first launch Gatekeeper
-   will block a manually downloaded app. The bypass depends on your macOS
+3. Release CI produces an ad-hoc-sealed DMG until its complete Apple
+   distribution-signing and notarisation secret sets are configured. The seal
+   proves bundle integrity, but Gatekeeper can block a manually downloaded app.
+   The override depends on your macOS
    version:
    - **macOS 15 (Sequoia) and later**: Apple removed the right-click → Open
      override for unnotarised apps. Double-click FlintTrade once (it will be
@@ -43,16 +49,21 @@ in the app; no `.env` file is required.
 4. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
    in the app; no `.env` file is required.
 
-To build the installer locally:
+To build and verify the installer locally:
 
 ```bash
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build
+pnpm install --frozen-lockfile
+make desktop-test
+make desktop-package
 ```
 
-## Option C — Source Development
+Output lands in `packages/apps/desktop/release/electron/`. Local packages use
+an ad-hoc seal unconditionally. Apple distribution signing and notarisation are
+available only through release CI when its complete secret sets are supplied.
 
-Requires: Python 3.12, Node.js 22+, Git, and optionally Rust.
+## Source development
+
+Requires Python 3.12, Node.js 22+, Git, and optionally Rust for `core/ticks`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
@@ -63,7 +74,7 @@ make dev
 
 Open http://localhost:5173.
 
-## Option D — Docker/Server (Advanced)
+## Docker/server deployment (advanced)
 
 Docker is retained for advanced self-hosting and contributor testing, not for
 the normal desktop app.

@@ -137,7 +137,7 @@ if (process.platform !== "win32") {
 }
 
 const packagedTrayIcon = readFileSync(path.join(resourcesDirectory, "icons", "tray.png"));
-const sourceTrayIcon = readFileSync(path.join(packageRoot, "src-tauri", "icons", "32x32.png"));
+const sourceTrayIcon = readFileSync(path.join(packageRoot, "resources", "icons", "32x32.png"));
 assert.deepEqual(packagedTrayIcon, sourceTrayIcon, "The packaged tray icon differs from its tracked source.");
 assert.deepEqual(walkManagedFiles(path.join(resourcesDirectory, "icons")), ["tray.png"]);
 if (process.platform !== "win32") {

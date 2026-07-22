@@ -166,6 +166,7 @@ export function createCandidateHealthEnvironment(
     FLINTTRADE_DESKTOP: "1",
     FLINTTRADE_FRONTEND_DIST: candidateFrontend(input.candidateRoot),
     FLINTTRADE_HOME: input.isolation.flinttradeHome,
+    FLINTTRADE_SOURCE_ROOT: input.candidateRoot,
     FLINTTRADE_WORKSPACE_DIR: input.isolation.workspace,
     HOME: input.isolation.home,
     PYTHONNOUSERSITE: "1",

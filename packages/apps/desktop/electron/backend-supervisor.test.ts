@@ -212,6 +212,7 @@ describe("backend supervisor", () => {
         FLINTTRADE_PARENT_IDENTITY: IDENTITY.raw,
         FLINTTRADE_PARENT_PID: String(PARENT_PID),
         FLINTTRADE_SIDECAR_RECORD_PATH: path.join(WORKSPACE, "desktop_backend.pid"),
+        FLINTTRADE_SOURCE_ROOT: SOURCE,
         FLINTTRADE_WORKSPACE_DIR: WORKSPACE,
         PATH: "/trusted/bin",
         PYTHONNOUSERSITE: "1",
@@ -242,6 +243,7 @@ describe("backend supervisor", () => {
       parentPid: PARENT_PID,
       platform: "linux",
       recordPath: path.join(WORKSPACE, "desktop_backend.pid"),
+      sourceRoot: SOURCE,
       workspace: WORKSPACE,
     });
     expect(environment.FLINTTRADE_SIDECAR_RECORD_PATH).toBe(path.join(WORKSPACE, "desktop_backend.pid"));
@@ -458,6 +460,28 @@ describe("backend supervisor", () => {
     backendSpawn.handles[0]!.emitStdout("FLINTTRADE_BACKEND_BLOCKED reason=instance-lease\n");
     backendSpawn.handles[0]!.exit(1);
     await expect(starting).rejects.toMatchObject({ reason: "blocked", stoppedSafe: true });
+    expect(finaliseRecord).not.toHaveBeenCalled();
+
+    const retry = supervisor.start();
+    await eventually(() => backendSpawn.handles.length === 2);
+    backendSpawn.handles[1]!.emitStdout("FLINTTRADE_BACKEND_PID pid=9002\n");
+    backendSpawn.handles[1]!.emitStdout("FLINTTRADE_BACKEND_READY port=5200\n");
+    await expect(retry).resolves.toMatchObject({ applicationPid: 9002, attempt: 2, port: 5200 });
+  });
+
+  it("lets Retry replace a first-event stale-record block without finalising foreign authority", async () => {
+    const finaliseRecord = vi.fn(async () => undefined);
+    const { backendSpawn, supervisor } = createFixture({ finaliseRecord });
+    const starting = supervisor.start();
+    await eventually(() => backendSpawn.handles.length === 1);
+    backendSpawn.handles[0]!.emitStdout("FLINTTRADE_BACKEND_BLOCKED reason=recovery-record\n");
+    backendSpawn.handles[0]!.exit(1);
+
+    await expect(starting).rejects.toMatchObject({
+      message: "Backend recovery state is unresolved. Retry after the prior backend exits.",
+      reason: "blocked",
+      stoppedSafe: true,
+    });
     expect(finaliseRecord).not.toHaveBeenCalled();
 
     const retry = supervisor.start();

@@ -46,17 +46,6 @@ from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.strategy_runner")
 
-FROZEN_STRATEGY_CHILD_ARG = "--flinttrade-uploaded-strategy-child"
-PACKAGED_CHILD_EXECUTABLE_ENV = "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE"
-PACKAGED_CHILD_ARG_ENV = "FLINTTRADE_PACKAGED_CHILD_ARG"
-STRATEGY_MEMORY_LIMIT_ENV = "FLINTTRADE_STRATEGY_MEMORY_LIMIT_BYTES"
-STRATEGY_PROCESS_LIMIT_ENV = "FLINTTRADE_STRATEGY_PROCESS_LIMIT"
-_frozen_dispatch_checked = False
-
-
-class PackagedChildConfigurationError(Exception):
-    """Raised when the packaged parent did not publish a usable child contract."""
-
 
 class StrategyNotRunningError(RuntimeError):
     """Raised when no owned subprocess exists for a requested stop."""
@@ -227,9 +216,54 @@ class _PosixProcessGroup:
                 f"Process-group leader {self._process.pid} exited during identity verification"
             ) from exc
         if current_identity != self._leader_identity or current_pgid != self._pgid:
+            raise _ProcessTreeIdentityError(f"Process-group leader identity changed for pid={self._process.pid}")
+
+
+class _PendingPosixProcessGroup:
+    """Retain a blocked POSIX child until its process identity can be proved.
+
+    The strategy start gate remains closed while this owner is pending, so the
+    child can only be the trusted sandbox wrapper.  Signals are never sent
+    until :class:`_PosixProcessGroup` can establish the original leader's
+    stable identity.
+    """
+
+    def __init__(self, process: subprocess.Popen[Any]) -> None:
+        self._process = process
+        self._owner: _PosixProcessGroup | None = None
+
+    def is_alive(self) -> bool:
+        if self._owner is not None:
+            return self._owner.is_alive()
+        if self._process.poll() is None:
+            return True
+        try:
+            os.killpg(self._process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError as exc:
             raise _ProcessTreeIdentityError(
-                f"Process-group leader identity changed for pid={self._process.pid}"
-            )
+                f"Blocked process group {self._process.pid} remains after its leader exited"
+            ) from exc
+        raise _ProcessTreeIdentityError(f"Blocked process group {self._process.pid} remains after its leader exited")
+
+    def terminate(self) -> None:
+        self._adopt().terminate()
+
+    def kill(self) -> None:
+        self._adopt().kill()
+
+    def wait_gone(self, timeout: float) -> bool:
+        return self._adopt().wait_gone(timeout)
+
+    def close(self) -> None:
+        if self._owner is not None:
+            self._owner.close()
+
+    def _adopt(self) -> _PosixProcessGroup:
+        if self._owner is None:
+            self._owner = _PosixProcessGroup(self._process)
+        return self._owner
 
 
 class _WindowsJobProcessTree:
@@ -481,8 +515,6 @@ _DESKTOP_CONTROL_ENV = frozenset(
         "FLINTTRADE_SIDECAR_RECORD_PATH",
         "FLINTTRADE_BOOT_ID",
         "FLINTTRADE_LAUNCH_TOKEN",
-        PACKAGED_CHILD_EXECUTABLE_ENV,
-        PACKAGED_CHILD_ARG_ENV,
     }
 )
 
@@ -612,14 +644,59 @@ _FORBIDDEN_ATTRS: frozenset[str] = frozenset(
 _SAFE_BUILTINS: dict[str, Any] = {
     name: getattr(__builtins__ if isinstance(__builtins__, dict) else __builtins__, name, None)
     for name in [
-        "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
-        "callable", "chr", "classmethod", "complex", "dict", "divmod",
-        "enumerate", "filter", "float", "format", "frozenset", "hash",
-        "hex", "id", "int", "isinstance", "issubclass", "iter",
-        "len", "list", "map", "max", "memoryview", "min", "next", "object",
-        "oct", "ord", "pow", "print", "property", "range", "repr",
-        "reversed", "round", "set", "slice", "sorted", "staticmethod",
-        "str", "sum", "super", "tuple", "type", "zip",
+        "abs",
+        "all",
+        "any",
+        "ascii",
+        "bin",
+        "bool",
+        "bytearray",
+        "bytes",
+        "callable",
+        "chr",
+        "classmethod",
+        "complex",
+        "dict",
+        "divmod",
+        "enumerate",
+        "filter",
+        "float",
+        "format",
+        "frozenset",
+        "hash",
+        "hex",
+        "id",
+        "int",
+        "isinstance",
+        "issubclass",
+        "iter",
+        "len",
+        "list",
+        "map",
+        "max",
+        "memoryview",
+        "min",
+        "next",
+        "object",
+        "oct",
+        "ord",
+        "pow",
+        "print",
+        "property",
+        "range",
+        "repr",
+        "reversed",
+        "round",
+        "set",
+        "slice",
+        "sorted",
+        "staticmethod",
+        "str",
+        "sum",
+        "super",
+        "tuple",
+        "type",
+        "zip",
     ]
 }
 
@@ -655,24 +732,6 @@ def _build_preexec_fn(
     return _set_limits
 
 
-def _apply_uploaded_strategy_child_limits(
-    *,
-    memory_limit_bytes: int | None = None,
-    process_limit: int = 1,
-) -> None:
-    """Apply resource limits inside a dispatched frozen child process."""
-    # The PyInstaller application has already opened its archive and extension
-    # modules. Lowering NOFILE after boot can make later runtime reads fail.
-    apply_limits = _build_preexec_fn(
-        fd_limit=None,
-        nproc_limit=max(0, process_limit - 1),
-        memory_limit_bytes=memory_limit_bytes,
-    )
-    if apply_limits is None:
-        raise RuntimeError("Hard uploaded-strategy memory enforcement is unavailable")
-    apply_limits()
-
-
 def _require_platform_enforcement(system: str, *, process_limit: int) -> None:
     """Reject a launch before spawn when its hard limits cannot be installed."""
     if system == "Windows":
@@ -696,32 +755,105 @@ def _is_bwrap_available() -> bool:
     return shutil.which("bwrap") is not None
 
 
-def _build_bwrap_command(python_exe: str, script_path: str) -> list[str]:
-    """Build a bubblewrap sandbox command for running a strategy.
+def _build_bwrap_command(
+    python_exe: str,
+    script_path: str,
+    start_gate_path: str,
+    strategy_path: str,
+) -> list[str]:
+    """Build a bubblewrap sandbox command for running one strategy.
 
     Args:
         python_exe: Path to the Python interpreter.
         script_path: Path to the wrapper script to execute.
+        start_gate_path: Path to the parent-owned start gate.
+        strategy_path: Path to the validated uploaded strategy.
 
     Returns:
         Command list suitable for subprocess.Popen.
+
+    Raises:
+        RuntimeError: If an input cannot be resolved to a regular file or the
+            interpreter does not have a self-contained installation root.
     """
-    return [
+    try:
+        interpreter = Path(python_exe).resolve(strict=True)
+        wrapper = Path(script_path).resolve(strict=True)
+        start_gate = Path(start_gate_path).resolve(strict=True)
+        strategy = Path(strategy_path).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("Uploaded-strategy sandbox inputs are unavailable") from exc
+    if not all(path.is_file() for path in (interpreter, wrapper, start_gate, strategy)):
+        raise RuntimeError("Uploaded-strategy sandbox inputs must be regular files")
+
+    runtime_root = interpreter.parent.parent
+    try:
+        runtime_executable = interpreter.relative_to(runtime_root)
+    except ValueError as exc:  # pragma: no cover - parent.parent is necessarily an ancestor
+        raise RuntimeError("Uploaded-strategy Python runtime layout is invalid") from exc
+    if not runtime_root.is_dir() or runtime_executable.parts[:1] != ("bin",):
+        raise RuntimeError("Uploaded-strategy Python runtime layout is invalid")
+
+    sandbox_runtime = Path("/run/flinttrade-python")
+    sandbox_work = Path("/run/flinttrade-strategy")
+    command = [
         "bwrap",
-        "--ro-bind", "/usr", "/usr",
-        "--ro-bind", "/lib", "/lib",
-        "--ro-bind", "/lib64", "/lib64",
-        "--ro-bind", "/bin", "/bin",
-        "--ro-bind", "/sbin", "/sbin",
-        "--tmpfs", "/tmp",
-        "--proc", "/proc",
-        "--dev", "/dev",
-        "--unshare-net",
-        "--unshare-pid",
-        "--die-with-parent",
-        python_exe,
-        script_path,
+        "--dir",
+        "/run",
+        "--ro-bind",
+        str(runtime_root),
+        str(sandbox_runtime),
+        "--dir",
+        str(sandbox_work),
+        "--ro-bind",
+        str(wrapper),
+        str(sandbox_work / "_sandbox_wrapper.py"),
+        "--ro-bind",
+        str(start_gate),
+        str(sandbox_work / "_start_gate"),
+        "--ro-bind",
+        str(strategy),
+        str(sandbox_work / "strategy.py"),
     ]
+    for system_path in ("/usr", "/lib", "/lib64", "/bin", "/sbin"):
+        if Path(system_path).exists():
+            command.extend(("--ro-bind", system_path, system_path))
+    command.extend(
+        [
+            "--tmpfs",
+            "/tmp",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--unshare-net",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--die-with-parent",
+            "--chdir",
+            str(sandbox_work),
+            "--clearenv",
+            "--setenv",
+            "HOME",
+            "/nonexistent",
+            "--setenv",
+            "PATH",
+            f"{sandbox_runtime / 'bin'}:/usr/bin:/bin",
+            "--setenv",
+            "PYTHONDONTWRITEBYTECODE",
+            "1",
+            "--setenv",
+            "PYTHONNOUSERSITE",
+            "1",
+            "--",
+            str(sandbox_runtime / runtime_executable),
+            str(sandbox_work / "_sandbox_wrapper.py"),
+            str(sandbox_work / "_start_gate"),
+            str(sandbox_work / "strategy.py"),
+        ]
+    )
+    return command
 
 
 def _create_sandbox_wrapper(
@@ -732,9 +864,10 @@ def _create_sandbox_wrapper(
 ) -> Path:
     """Create a sandbox wrapper script that restricts available builtins.
 
-    The wrapper is written into *temp_dir* and, when executed, reads the
-    strategy script path from ``sys.argv[1]``, compiles it, and runs it
-    with a restricted ``__builtins__`` dict.
+    The wrapper is written into *temp_dir* and waits for the parent-owned gate
+    at ``sys.argv[1]`` before reading the strategy at ``sys.argv[2]``.  This
+    keeps uploaded code blocked until complete process-tree ownership has been
+    published.  The strategy then runs with a restricted ``__builtins__`` dict.
 
     Returns:
         Path to the generated wrapper script.
@@ -742,6 +875,7 @@ def _create_sandbox_wrapper(
     safe_names = list(_SAFE_BUILTINS.keys())
     # Use json.dumps for the list so names are double-quoted (tests expect this).
     import json as _json
+
     safe_names_str = _json.dumps(safe_names)
     resource_limits = ""
     if memory_limit_bytes is not None:
@@ -755,10 +889,24 @@ def _create_sandbox_wrapper(
         )
     wrapper_code = (
         "import sys\n"
+        "import time\n"
         f"{resource_limits}"
+        "_gate = sys.argv[1]\n"
+        "_deadline = time.monotonic() + 30.0\n"
+        "while True:\n"
+        "    try:\n"
+        "        with open(_gate, encoding='utf-8') as _gate_file:\n"
+        "            _gate_state = _gate_file.read()\n"
+        "    except OSError:\n"
+        "        _gate_state = ''\n"
+        "    if _gate_state == 'start\\n':\n"
+        "        break\n"
+        "    if time.monotonic() >= _deadline:\n"
+        "        raise SystemExit('strategy start gate timed out')\n"
+        "    time.sleep(0.01)\n"
         "_safe_names = " + safe_names_str + "\n"
         "_restricted = {n: __builtins__[n] if isinstance(__builtins__, dict) else getattr(__builtins__, n) for n in _safe_names}\n"
-        "_script = sys.argv[1]\n"
+        "_script = sys.argv[2]\n"
         "with open(_script) as _f:\n"
         "    _code = _f.read()\n"
         "exec(compile(_code, _script, 'exec'), "
@@ -769,78 +917,20 @@ def _create_sandbox_wrapper(
     return wrapper_path
 
 
-def _execute_uploaded_strategy_file(strategy_path: Path) -> None:
-    """Execute one uploaded strategy with the restricted builtin namespace."""
-    source = strategy_path.read_text(encoding="utf-8")
-    runtime_builtins = __builtins__
-    restricted = {
-        name: runtime_builtins[name]
-        if isinstance(runtime_builtins, dict)
-        else getattr(runtime_builtins, name)
-        for name in _SAFE_BUILTINS
-    }
-    namespace = {
-        "__builtins__": restricted,
-        "__file__": str(strategy_path),
-        "__name__": "__main__",
-    }
-    exec(compile(source, str(strategy_path), "exec"), namespace)  # noqa: S102
+def _create_strategy_start_gate(temp_dir: Path) -> Path:
+    """Create an empty owner-only file that blocks uploaded strategy code."""
+    gate_path = temp_dir / "_start_gate"
+    descriptor = os.open(gate_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(descriptor)
+    return gate_path
 
 
-def dispatch_frozen_strategy_child(argv: list[str] | None = None) -> bool:
-    """Dispatch the frozen executable's uploaded-strategy child mode.
-
-    A PyInstaller one-file executable cannot interpret ``wrapper.py`` as a
-    normal Python interpreter would. Its entry script must call this function
-    before starting sidecar watchdogs or importing the backend application.
-    A normal parent invocation returns ``False`` and records that this early
-    handshake occurred; frozen strategy launch fails closed without it.
-
-    Args:
-        argv: Argument vector to inspect. Defaults to :data:`sys.argv`.
-
-    Returns:
-        ``True`` when child mode was recognised and executed, otherwise
-        ``False`` so the normal sidecar entry can continue.
-    """
-    global _frozen_dispatch_checked  # noqa: PLW0603 - process-wide entry handshake
-
-    arguments = sys.argv if argv is None else argv
-    if len(arguments) < 2 or arguments[1] != FROZEN_STRATEGY_CHILD_ARG:
-        _frozen_dispatch_checked = True
-        return False
-    if len(arguments) != 3:
-        raise ValueError("Frozen strategy child mode requires exactly one strategy path")
-
-    try:
-        memory_limit_bytes = int(os.environ[STRATEGY_MEMORY_LIMIT_ENV])
-        process_limit = int(os.environ[STRATEGY_PROCESS_LIMIT_ENV])
-    except (KeyError, ValueError) as exc:
-        raise RuntimeError("Frozen strategy child resource limits are missing or invalid") from exc
-    if memory_limit_bytes <= 0 or process_limit <= 0:
-        raise RuntimeError("Frozen strategy child resource limits must be positive")
-    system = platform.system()
-    if system != "Windows":
-        _require_platform_enforcement(system, process_limit=process_limit)
-        _apply_uploaded_strategy_child_limits(
-            memory_limit_bytes=memory_limit_bytes,
-            process_limit=process_limit,
-        )
-    _execute_uploaded_strategy_file(Path(arguments[2]))
-    return True
-
-
-def _resolve_frozen_child_contract() -> tuple[str, str]:
-    """Return the parent-verified frozen child executable and mode argument."""
-    executable = (os.environ.get(PACKAGED_CHILD_EXECUTABLE_ENV) or "").strip()
-    child_arg = (os.environ.get(PACKAGED_CHILD_ARG_ENV) or "").strip()
-    if executable and child_arg == FROZEN_STRATEGY_CHILD_ARG:
-        return executable, child_arg
-    if _frozen_dispatch_checked:
-        return sys.executable, FROZEN_STRATEGY_CHILD_ARG
-    raise PackagedChildConfigurationError(
-        "Frozen strategy child dispatcher is not installed by the parent entrypoint"
-    )
+def _release_strategy_start_gate(gate_path: Path) -> None:
+    """Release a published strategy without replacing the bound gate inode."""
+    with gate_path.open("w", encoding="utf-8") as gate_file:
+        gate_file.write("start\n")
+        gate_file.flush()
+        os.fsync(gate_file.fileno())
 
 
 # ---------------------------------------------------------------------------
@@ -948,30 +1038,23 @@ class UserStrategyRunner:
                     for alias in node.names:
                         module_name = alias.name.split(".")[0]
                         if module_name in _BLOCKED_MODULES:
-                            violations.append(
-                                f"Blocked import: '{alias.name}' — module '{module_name}' is not allowed"
-                            )
+                            violations.append(f"Blocked import: '{alias.name}' — module '{module_name}' is not allowed")
                 elif isinstance(node, ast.ImportFrom):
                     module_name = (node.module or "").split(".")[0]
                     if module_name in _BLOCKED_MODULES:
                         violations.append(
-                            f"Blocked import: 'from {node.module} import ...' — "
-                            f"module '{module_name}' is not allowed"
+                            f"Blocked import: 'from {node.module} import ...' — module '{module_name}' is not allowed"
                         )
                     # Also check imported names for dangerous builtins re-exported
                     for alias in node.names:
                         if alias.name in _BLOCKED_BUILTINS:
-                            violations.append(
-                                f"Blocked import: 'from {node.module} import {alias.name}'"
-                            )
+                            violations.append(f"Blocked import: 'from {node.module} import {alias.name}'")
 
             # Block forbidden dunder attribute access on any object
             # (e.g. obj.__class__, obj.__subclasses__())
             elif isinstance(node, ast.Attribute):
                 if node.attr in _FORBIDDEN_ATTRS:
-                    violations.append(
-                        f"Blocked attribute: '.{node.attr}' access is not allowed in strategies"
-                    )
+                    violations.append(f"Blocked attribute: '.{node.attr}' access is not allowed in strategies")
 
             # Block dangerous built-in calls: eval("..."), exec("..."), __import__(...)
             elif isinstance(node, ast.Call):
@@ -982,17 +1065,13 @@ class UserStrategyRunner:
                         # Only flag open() if it has a write-mode argument
                         _check_open_call(node, violations)
                     else:
-                        violations.append(
-                            f"Blocked call: '{func.id}()' is not allowed in strategies"
-                        )
+                        violations.append(f"Blocked call: '{func.id}()' is not allowed in strategies")
                 # Attribute call: os.system(...), subprocess.Popen(...)
                 elif isinstance(func, ast.Attribute):
                     if isinstance(func.value, ast.Name):
                         pair = (func.value.id, func.attr)
                         if pair in _BLOCKED_ATTR_PATTERNS:
-                            violations.append(
-                                f"Blocked call: '{func.value.id}.{func.attr}()' is not allowed"
-                            )
+                            violations.append(f"Blocked call: '{func.value.id}.{func.attr}()' is not allowed")
 
         return violations
 
@@ -1017,8 +1096,7 @@ class UserStrategyRunner:
         """
         if not name.isidentifier():
             raise ValueError(
-                f"Strategy name '{name}' is not a valid Python identifier. "
-                "Use letters, digits, and underscores only."
+                f"Strategy name '{name}' is not a valid Python identifier. Use letters, digits, and underscores only."
             )
 
         violations = self.validate(code)
@@ -1097,7 +1175,6 @@ class UserStrategyRunner:
 
         Raises:
             FileNotFoundError: If the strategy file does not exist.
-            PackagedChildConfigurationError: If packaged child dispatch is not configured.
             RuntimeError: If the strategy is already running.
         """
         with self._lifecycle_lock:
@@ -1124,17 +1201,12 @@ class UserStrategyRunner:
 
         name = self._get_name(strategy_id)
         log_path = self._log_dir / f"{strategy_id}.log"
-        frozen = bool(getattr(sys, "frozen", False))
         system = platform.system()
         _require_platform_enforcement(
             system,
             process_limit=self._max_processes_per_strategy,
         )
-        child_executable, child_arg = (
-            _resolve_frozen_child_contract()
-            if frozen
-            else (sys.executable, "")
-        )
+        child_executable = sys.executable
 
         # Create an isolated temp directory for this run
         temp_dir = Path(tempfile.mkdtemp(prefix=f"flinttrade_{strategy_id[:8]}_"))
@@ -1145,38 +1217,34 @@ class UserStrategyRunner:
             memory_limit_bytes=self._memory_limit_bytes if system == "Linux" else None,
             process_limit=self._max_processes_per_strategy,
         )
+        start_gate_path = _create_strategy_start_gate(temp_dir)
 
         log_file = open(log_path, "a", encoding="utf-8")  # noqa: WPS515
+        process: subprocess.Popen[Any] | None = None
 
         try:
             # Build command — bwrap on Linux when available, plain subprocess otherwise
-            use_bwrap = not frozen and system == "Linux" and _is_bwrap_available()
-            child_arg = child_arg if frozen else str(wrapper_path)
+            use_bwrap = system == "Linux" and _is_bwrap_available()
+            child_arg = str(wrapper_path)
             if use_bwrap:
-                cmd: list[str] = _build_bwrap_command(child_executable, child_arg)
-                cmd.append(str(strategy_path))
+                cmd: list[str] = _build_bwrap_command(
+                    child_executable,
+                    child_arg,
+                    str(start_gate_path),
+                    str(strategy_path),
+                )
             else:
-                cmd = [child_executable, child_arg, str(strategy_path)]
+                cmd = [child_executable, child_arg, str(start_gate_path), str(strategy_path)]
 
-            # A frozen one-file executable has a bootloader parent that must
-            # spawn the Python application process. Apply limits in the early
-            # child dispatcher instead of blocking that bootloader with
-            # RLIMIT_NPROC=0 before exec.
             preexec_fn = (
                 None
-                if frozen or system == "Windows" or use_bwrap
+                if system == "Windows" or use_bwrap
                 else _build_preexec_fn(
                     nproc_limit=max(0, self._max_processes_per_strategy - 1),
                     memory_limit_bytes=self._memory_limit_bytes,
                 )
             )
-            child_env = {
-                key: value
-                for key, value in os.environ.items()
-                if key not in _DESKTOP_CONTROL_ENV
-            }
-            child_env[STRATEGY_MEMORY_LIMIT_ENV] = str(self._memory_limit_bytes)
-            child_env[STRATEGY_PROCESS_LIMIT_ENV] = str(self._max_processes_per_strategy)
+            child_env = {key: value for key, value in os.environ.items() if key not in _DESKTOP_CONTROL_ENV}
 
             platform_spawn: dict[str, Any]
             if system == "Windows":
@@ -1197,14 +1265,14 @@ class UserStrategyRunner:
                 preexec_fn=preexec_fn,
                 **platform_spawn,
             )
-            ownership_process_limit = self._max_processes_per_strategy + int(frozen and system == "Windows")
             tree = _create_process_tree(
                 process,
                 system,
                 memory_limit_bytes=self._memory_limit_bytes,
-                process_limit=ownership_process_limit,
+                process_limit=self._max_processes_per_strategy,
             )
         except _WindowsJobCreationRollbackError as exc:
+            assert process is not None  # Popen completed before Job creation
             self._running[strategy_id] = _RunningStrategy(
                 strategy_id=strategy_id,
                 name=name,
@@ -1224,10 +1292,30 @@ class UserStrategyRunner:
             )
             raise
         except Exception:
-            log_file.close()
-            self._cleanup_temp_dir(temp_dir)
+            if process is not None and system != "Windows":
+                self._running[strategy_id] = _RunningStrategy(
+                    strategy_id=strategy_id,
+                    name=name,
+                    process=process,
+                    tree=_PendingPosixProcessGroup(process),
+                    started_at=datetime.now(timezone.utc),
+                    log_path=log_path,
+                    memory_limit_mb=self._memory_limit_mb,
+                    temp_dir=temp_dir,
+                    log_file=log_file,
+                )
+                logger.error(
+                    "POSIX strategy start failed with blocked process ownership retained: %s (id=%s, pid=%d)",
+                    name,
+                    strategy_id,
+                    process.pid,
+                )
+            else:
+                log_file.close()
+                self._cleanup_temp_dir(temp_dir)
             raise
 
+        assert process is not None
         self._running[strategy_id] = _RunningStrategy(
             strategy_id=strategy_id,
             name=name,
@@ -1239,6 +1327,16 @@ class UserStrategyRunner:
             temp_dir=temp_dir,
             log_file=log_file,
         )
+        try:
+            _release_strategy_start_gate(start_gate_path)
+        except Exception:
+            logger.exception(
+                "Strategy ownership was published but its start gate could not be released: %s (id=%s, pid=%d)",
+                name,
+                strategy_id,
+                process.pid,
+            )
+            raise
         logger.info("Strategy started: %s (id=%s, pid=%d)", name, strategy_id, process.pid)
 
     def stop(self, strategy_id: str) -> None:
@@ -1532,16 +1630,12 @@ def _check_open_call(node: ast.Call, violations: list[str]) -> None:
     if len(node.args) >= 2:
         mode_arg = node.args[1]
         if isinstance(mode_arg, ast.Constant) and str(mode_arg.value) in write_modes:
-            violations.append(
-                f"Blocked call: 'open()' with write mode '{mode_arg.value}' is not allowed"
-            )
+            violations.append(f"Blocked call: 'open()' with write mode '{mode_arg.value}' is not allowed")
             return
 
     # Check 'mode' keyword argument
     for keyword in node.keywords:
         if keyword.arg == "mode":
             if isinstance(keyword.value, ast.Constant) and str(keyword.value.value) in write_modes:
-                violations.append(
-                    f"Blocked call: 'open()' with write mode '{keyword.value.value}' is not allowed"
-                )
+                violations.append(f"Blocked call: 'open()' with write mode '{keyword.value.value}' is not allowed")
                 return

@@ -7,13 +7,9 @@ lifecycle management.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
-
-# Resolve repo root relative to this file (packages/core/core/src/backtest_routes.py)
-_REPO_ROOT = str(Path(__file__).resolve().parents[5])
 
 logger = logging.getLogger("flinttrade")
 

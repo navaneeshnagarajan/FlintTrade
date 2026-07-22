@@ -13,14 +13,14 @@ contract, see [API.md](API.md). For CI behaviour, see [CI.md](CI.md).
 ## 1. Repository layout
 
 FlintTrade is a monorepo with 18 package surfaces: 13 Python packages, 3
-applications (React terminal, Tauri desktop shell, Next.js site), 1 shared
+applications (React terminal, Electron desktop shell, Next.js site), 1 shared
 TypeScript design-system package, and 1 Rust package with Python bindings.
 
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
 | `site` | TypeScript / Next.js | Public website, generated documentation, contribution pages, and read-only docs MCP | `packages/apps/site/src/**/*.test.ts` |
 | `terminal` | TypeScript / React | User-facing single-page application; Dockview workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
-| `desktop` | TypeScript / Rust (Tauri 2) | Native desktop shell; bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin | `packages/apps/desktop/src-tauri/src/**` (cargo tests) |
+| `desktop` | TypeScript / Electron 40 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
 | `data` | Python | Tick recorder, audit logger, trade logger, SQLite sandbox state, DuckDB analytics storage | `packages/core/data/tests/` |
@@ -112,6 +112,21 @@ npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
 ```
 
+### Desktop (Electron)
+
+From the repository root, using the locked pnpm workspace:
+
+```bash
+pnpm --filter @flinttrade/desktop typecheck
+pnpm --filter @flinttrade/desktop test:electron
+pnpm --filter @flinttrade/desktop bundle
+```
+
+The Electron tests cover the renderer security waist, first-run bootstrap,
+source promotion/rollback, guardian protocol and recovery, tray/hotkey/native
+notifications, source updates and shell-installer handoff. They do not move
+trading or broker authority out of Python.
+
 ### Rust (ticks)
 
 From `packages/core/ticks/`:
@@ -156,6 +171,28 @@ npm run build
 
 The site build regenerates the docs index, package index, version metadata,
 llms files, and the read-only docs MCP content from repository source files.
+
+### Desktop
+
+```bash
+make desktop-test       # Electron TypeScript + Vitest
+make desktop-build      # verify bootstrap resources and bundle main/preload
+make desktop-package    # build and verify this host's installer
+```
+
+Output lands in `packages/apps/desktop/release/electron/`. The release workflow
+produces a universal macOS DMG, Windows x64 NSIS installer, and x64/ARM64 Linux
+AppImages. No complete Electron release is published yet; the current
+`v0.6.0-beta.13` assets use the retired packaging. The local macOS packaging
+target always uses an ad-hoc seal, which verifies bundle integrity but does not
+provide Developer ID trust or notarisation. Only release CI can use complete
+Apple distribution-signing and notarisation secret sets.
+
+First launch uses system Git or the official HTTPS archive fallback, verifies
+pinned tool distributions, provisions Python 3.12 with `uv`, installs from the
+frozen Python and pnpm locks, builds the terminal, and starts the source guardian
+only after candidate promotion succeeds. Rust is not a desktop build
+prerequisite; it remains optional for `core/ticks`.
 
 ---
 

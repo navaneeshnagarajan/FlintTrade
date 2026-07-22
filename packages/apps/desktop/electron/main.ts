@@ -45,23 +45,23 @@ import { createStartupRecoveryController } from "./startup-recovery";
 import { createBackendState, createBootstrapState, createUpdateState, type UpdateKind } from "./state";
 import { createDesktopTray } from "./tray";
 
-protocol.registerSchemesAsPrivileged([
-  {
-    privileges: {
-      secure: true,
-      standard: true,
-    },
-    scheme: FLINTTRADE_SCHEME,
-  },
-]);
-
-const shellUserData = resolveShellUserDataPath(app.getPath("appData"), process.platform);
-app.setPath("userData", shellUserData);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
+  protocol.registerSchemesAsPrivileged([
+    {
+      privileges: {
+        secure: true,
+        standard: true,
+      },
+      scheme: FLINTTRADE_SCHEME,
+    },
+  ]);
+
+  const shellUserData = resolveShellUserDataPath(app.getPath("appData"), process.platform);
+  app.setPath("userData", shellUserData);
   const development = process.env.FLINTTRADE_DESKTOP_DEVELOPMENT === "1";
   const appRoot = app.getAppPath();
   const preloadPath = path.join(appRoot, "dist", "electron-preload.js");
@@ -273,7 +273,7 @@ if (!hasSingleInstanceLock) {
     create(callbacks) {
       const trayIcon = app.isPackaged
         ? path.join(process.resourcesPath, "icons", "tray.png")
-        : path.join(appRoot, "src-tauri", "icons", "32x32.png");
+        : path.join(appRoot, "resources", "icons", "32x32.png");
       const nativeTray = new Tray(trayIcon);
       nativeTray.setToolTip("FlintTrade");
       nativeTray.setContextMenu(Menu.buildFromTemplate([

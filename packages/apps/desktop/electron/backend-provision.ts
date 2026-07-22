@@ -58,11 +58,13 @@ function platformPath(platform: NodeJS.Platform): typeof path.posix {
 }
 
 export function createBackendProvisionEnvironment(
+  sourceRoot: string,
   workspace: string,
   inherited: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const environment = minimalChildEnvironment({ FLINTTRADE_DESKTOP: "1", PYTHONNOUSERSITE: "1" }, inherited, platform);
+  environment.FLINTTRADE_SOURCE_ROOT = sourceRoot;
   environment.FLINTTRADE_WORKSPACE_DIR = workspace;
   return environment;
 }
@@ -124,7 +126,7 @@ export async function provisionBackendMasterPassword(
       args: ["-m", "flinttrade_core.cli", "init", "--provision-master-password"],
       command: activeSourcePythonPath(options.sourceRoot, platform),
       cwd: options.sourceRoot,
-      env: createBackendProvisionEnvironment(options.workspace, options.inheritedEnvironment, platform),
+      env: createBackendProvisionEnvironment(options.sourceRoot, options.workspace, options.inheritedEnvironment, platform),
       output: "discard",
       ...(options.signal ? { signal: options.signal } : {}),
       timeoutMs,
