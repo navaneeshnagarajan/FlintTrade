@@ -253,8 +253,13 @@ if (!hasSingleInstanceLock) {
     app,
     async drain() {
       await shellUpdater?.settleForQuit();
-      await startupController.shutdown();
-      await backendRuntime.drainForQuit();
+      // Backend containment must always be attempted on quit: if a stuck bootstrap or source-recovery
+      // phase fails to settle, the backend is still drained here so the runtime cannot be orphaned.
+      try {
+        await startupController.shutdown();
+      } finally {
+        await backendRuntime.drainForQuit();
+      }
       await shellUpdater?.settleForQuit();
     },
     getWindow: () => windows?.getPrimaryWindow() ?? null,

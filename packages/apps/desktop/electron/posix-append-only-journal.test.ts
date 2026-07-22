@@ -92,21 +92,49 @@ describe.runIf(process.platform !== "win32")("POSIX append-only source journal",
     expect((await readdir(moved)).some((name) => name.startsWith(".stage-"))).toBe(true);
   });
 
-  it("fails closed on a synced but unpublished stage and retains the partial publication", async () => {
+  it("recovers from an interrupted publication stage instead of wedging, and sweeps it on the next write", async () => {
     const { journal } = await fixture("journal-partial-publication");
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    const committed = createNodeSourcePromotionFileSystem();
+    await committed.writeJournalAtomic(journal, "first\n");
+
+    const crashing = createNodeSourcePromotionFileSystem({
       testHooks: {
         journalAdversarial(event) {
           if (event === "before-record-link") throw new Error("simulated crash before publication link");
         },
       },
     });
+    await expect(crashing.writeJournalAtomic(journal, "second\n")).rejects.toThrow(/simulated crash/i);
+    const wedged = await readdir(journal);
+    // The committed revision keeps its authenticated stage; the interrupted write leaves one orphan.
+    expect(wedged.filter((name) => name.startsWith("revision-"))).toHaveLength(1);
+    expect(wedged.filter((name) => name.startsWith(".stage-"))).toHaveLength(2);
 
-    await expect(fileSystem.writeJournalAtomic(journal, "value\n")).rejects.toThrow(/simulated crash/i);
-    const entries = await readdir(journal);
-    expect(entries.filter((name) => name.startsWith(".stage-"))).toHaveLength(1);
-    expect(entries.filter((name) => name.startsWith("revision-"))).toHaveLength(0);
-    await expect(createNodeSourcePromotionFileSystem().readJournal(journal)).rejects.toThrow(/unpublished/i);
+    // The interrupted stage no longer fails closed: recovery reads the last committed value.
+    await expect(createNodeSourcePromotionFileSystem().readJournal(journal)).resolves.toBe("first\n");
+
+    // The next successful write sweeps the orphan and advances the chain.
+    await createNodeSourcePromotionFileSystem().writeJournalAtomic(journal, "second\n");
+    await expect(createNodeSourcePromotionFileSystem().readJournal(journal)).resolves.toBe("second\n");
+    const settled = await readdir(journal);
+    expect(settled.filter((name) => name.startsWith("revision-"))).toHaveLength(2);
+    expect(settled.filter((name) => name.startsWith(".stage-"))).toHaveLength(2);
+  });
+
+  it("still fails closed on a foreign non-record stage that is not a genuine interrupted append", async () => {
+    const { journal } = await fixture("journal-foreign-stage");
+    const fileSystem = createNodeSourcePromotionFileSystem();
+    await fileSystem.writeJournalAtomic(journal, "value\n");
+    // A stage-shaped name with foreign, non-canonical content is not an interrupted-append artefact.
+    const foreignStage = path.join(
+      journal,
+      ".stage-00000002-0000000000000000000000000000000000000000000000000000000000000000-"
+        + "00000000-0000-4000-8000-000000000000.json",
+    );
+    await writeFile(foreignStage, "not a journal record", { mode: 0o400 });
+
+    await expect(fileSystem.readJournal(journal)).rejects.toThrow(/digest|canonical|schema|invalid/i);
+    expect(await readFile(foreignStage, "utf8")).toBe("not a journal record");
   });
 
   it("rejects tampering with an immutable linked revision", async () => {

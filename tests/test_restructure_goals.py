@@ -295,7 +295,7 @@ def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
     ):
         assert name in workflow
     assert "SHA256SUMS.txt" in workflow
-    assert "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4" in workflow
+    assert "actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1" in workflow
     assert "permissions:\n  contents: read" in workflow
     publish_job = workflow.split("\n  publish:\n", 1)[1]
     assert "permissions:\n      contents: write\n      attestations: write\n      id-token: write" in publish_job

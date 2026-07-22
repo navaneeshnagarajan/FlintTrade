@@ -59,6 +59,7 @@
     "artifactName": "FlintTrade-${version}-${os}-${arch}.${ext}",
     "icon": "resources/icons/icon",
     "afterSign": "scripts/verify-macos-signature.cjs",
+    "afterAllArtifactBuild": "scripts/normalize-appimage-arch.cjs",
     "directories": {
       "output": "release/electron"
     },

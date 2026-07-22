@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
+import { link, lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 
 const OWNER_NAME = "owner.json";
@@ -56,6 +56,7 @@ interface ScannedRevision {
 
 interface JournalState {
   latest: JournalRecord | null;
+  orphanStages: string[];
   revisions: ScannedRevision[];
   totalBytes: number;
 }
@@ -418,29 +419,37 @@ async function scanJournal(
     revisions.push({ file, name, record });
     uniqueInodes.set(`${file.dev}:${file.ino}`, file.size);
   }
+  const revisionInodes = new Set(revisions.map((candidate) => `${candidate.file.dev}:${candidate.file.ino}`));
   const stageInodes = new Map<string, string>();
+  const orphanStages: string[] = [];
   for (const name of stageNames) {
     const file = await scanFile(pin, name, 0o400);
-    if (file.nlink !== 2) {
-      throw new Error(`POSIX append-only journal has an unpublished or multiply-linked stage: ${name}.`);
-    }
+    const inode = `${file.dev}:${file.ino}`;
     const match = STAGE_PATTERN.exec(name)!;
     const recordName = `revision-${match[1]}-${match[2]}.json`;
     const revision = revisions.find((candidate) => candidate.name === recordName);
-    if (
-      !revision ||
-      revision.file.dev !== file.dev ||
-      revision.file.ino !== file.ino ||
-      revision.file.contents !== file.contents
-    ) {
-      throw new Error(`POSIX append-only journal has an unauthenticated publication stage: ${name}.`);
+    if (file.nlink === 2 && revision && revision.file.dev === file.dev && revision.file.ino === file.ino) {
+      // Published stage: the authenticated second hard link retained beside its committed revision.
+      if (revision.file.contents !== file.contents) {
+        throw new Error(`POSIX append-only journal has an unauthenticated publication stage: ${name}.`);
+      }
+      if (stageInodes.has(inode)) {
+        throw new Error(`POSIX append-only journal revision has duplicate publication stages: ${name}.`);
+      }
+      stageInodes.set(inode, name);
+      uniqueInodes.set(inode, file.size);
+    } else if (file.nlink === 1 && !revisionInodes.has(inode)) {
+      // Interrupted-append artefact: a stage whose committing hard link never became durable — a
+      // crash between the fsynced stage write and its directory-synced publication link. Its inode
+      // was never published as a revision, so it is not part of the committed chain. Require it to be
+      // a well-formed, self-consistent journal record matching its own stage name — foreign or corrupt
+      // residue still fails closed below — then treat it as sweepable so a crashed source update
+      // recovers on the next launch instead of wedging startup (PLAN Task 3).
+      parseRecord(file.contents, recordName);
+      orphanStages.push(name);
+    } else {
+      throw new Error(`POSIX append-only journal has an unpublished or multiply-linked stage: ${name}.`);
     }
-    const inode = `${file.dev}:${file.ino}`;
-    if (stageInodes.has(inode)) {
-      throw new Error(`POSIX append-only journal revision has duplicate publication stages: ${name}.`);
-    }
-    stageInodes.set(inode, name);
-    uniqueInodes.set(inode, file.size);
   }
   if (stageInodes.size !== revisions.length) {
     throw new Error(`POSIX append-only journal has a revision without its authenticated publication stage at ${pin.target}.`);
@@ -463,7 +472,7 @@ async function scanJournal(
       "stop FlintTrade and archive the exact journal directory before retrying.",
     );
   }
-  return { latest: previous, revisions, totalBytes };
+  return { latest: previous, orphanStages, revisions, totalBytes };
 }
 
 export function createPosixAppendOnlyJournal(
@@ -499,6 +508,12 @@ export function createPosixAppendOnlyJournal(
     try {
       target = pin.target;
       const state = await scanJournal(pin, limits);
+      // Sweep interrupted-append residue left by a crash between a stage write and its publication
+      // link, under the owner-private pinned directory, so it cannot accumulate across updates.
+      for (const orphan of state.orphanStages) {
+        await assertDirectoryPin(pin);
+        await unlink(path.join(target, orphan));
+      }
       if (state.revisions.length >= maxRevisions) {
         throw new Error(
           `POSIX append-only journal reached its ${maxRevisions}-revision bound at ${target}; ` +

@@ -7,6 +7,11 @@ interface PreventableEvent {
   preventDefault(): void;
 }
 
+interface FrameNavigateEvent extends PreventableEvent {
+  isMainFrame: boolean;
+  url: string;
+}
+
 interface SessionLike {
   on(event: "will-download", listener: (event: PreventableEvent) => void): unknown;
   setPermissionCheckHandler(handler: () => boolean): void;
@@ -78,6 +83,13 @@ export function hardenWebContents(contents: WebContentsLike, policy: WebContents
 
   contents.on("will-navigate", confineNavigation);
   contents.on("will-redirect", confineNavigation);
+  // Subframe navigations bypass will-navigate/will-redirect (main-frame only); confine them too so an
+  // embedded frame cannot navigate itself off the trusted origin. The main frame is already handled
+  // above, so skip it here to avoid opening an external target twice.
+  contents.on("will-frame-navigate", (frameEvent: FrameNavigateEvent) => {
+    if (frameEvent.isMainFrame) return;
+    confineNavigation(frameEvent, frameEvent.url);
+  });
   contents.on("will-attach-webview", (event: PreventableEvent) => event.preventDefault());
   contents.on("did-create-window", (child: ChildWindowLike) => child.destroy());
   contents.on("devtools-opened", () => {

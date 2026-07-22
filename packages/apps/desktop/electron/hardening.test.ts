@@ -154,6 +154,36 @@ describe("webContents confinement", () => {
     expect(webview.preventDefault).toHaveBeenCalledOnce();
   });
 
+  it("confines subframe navigation to the trusted origin and hands external subframe targets to the browser", async () => {
+    const openExternal = vi.fn(async () => undefined);
+    const fake = fakeWebContents();
+    hardenWebContents(fake.contents, {
+      development: false,
+      openExternal,
+      originPolicy: {
+        splashUrl: "file:///Applications/FlintTrade/resources/app.asar/splash/index.html",
+        terminalOrigin: "http://127.0.0.1:43127",
+      },
+    });
+
+    const sameOrigin = { ...event(), isMainFrame: false, url: "http://127.0.0.1:43127/orders" };
+    fake.emit("will-frame-navigate", sameOrigin);
+    expect(sameOrigin.preventDefault).not.toHaveBeenCalled();
+
+    const externalFrame = { ...event(), isMainFrame: false, url: "https://flinttrade.app/help" };
+    fake.emit("will-frame-navigate", externalFrame);
+    expect(externalFrame.preventDefault).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(openExternal).toHaveBeenCalledWith("https://flinttrade.app/help");
+
+    // The main frame is already confined by will-navigate; will-frame-navigate must not double-handle it.
+    openExternal.mockClear();
+    const mainFrame = { ...event(), isMainFrame: true, url: "https://flinttrade.app/help" };
+    fake.emit("will-frame-navigate", mainFrame);
+    expect(mainFrame.preventDefault).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
   it("closes production DevTools and accepts only parseable HTTPS external URLs", () => {
     const fake = fakeWebContents();
     hardenWebContents(fake.contents, {
