@@ -29,10 +29,9 @@ assert _spec is not None and _spec.loader is not None
 _checker = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_checker)
 
-TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")
+TAG_RE = re.compile(rf"^v{_checker.RELEASE_VERSION_PATTERN}$")
 
 CARGO_LOCKS = (
-    ("packages/apps/desktop/src-tauri/Cargo.lock", "flinttrade-desktop"),
     ("packages/core/ticks/Cargo.lock", "tick-engine"),
 )
 
@@ -68,6 +67,23 @@ def _changelog_section(bare: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _release_disclaimer(tag: str) -> str:
+    """Return release-channel wording without labelling stable tags as beta."""
+    bare = tag.removeprefix("v")
+    core, separator, prerelease = bare.partition("-")
+    major = int(core.split(".", maxsplit=1)[0])
+    if separator:
+        channel = "a beta prerelease" if prerelease.split(".", maxsplit=1)[0].lower() == "beta" else "a prerelease"
+    else:
+        channel = "a stable release"
+    safety = (
+        " It is not production ready; use Explore and Practice modes before connecting any live broker workflow."
+        if major == 0 or separator
+        else ""
+    )
+    return f"FlintTrade `{tag}` is {channel}.{safety}\n"
+
+
 def main() -> int:
     if len(sys.argv) != 2 or not TAG_RE.match(sys.argv[1]):
         print(__doc__)
@@ -100,13 +116,6 @@ def main() -> int:
                 f'version = "{new_bare}"',
                 already=f'version = "{new_bare}"',
             )
-
-        _replace_once(
-            ROOT / "packages/apps/desktop/src-tauri/tauri.conf.json",
-            rf'^(\s*)"version": "{re.escape(old_bare)}"',
-            rf'\1"version": "{new_bare}"',
-            already=f'"version": "{new_bare}"',
-        )
 
         for rel in _checker.CARGO_MANIFESTS:
             _replace_once(
@@ -145,10 +154,7 @@ def main() -> int:
         # The stability disclaimer is part of the release contract:
         # tests/test_restructure_goals.py pins "not production ready" in every
         # current release note while the project is pre-1.0.
-        disclaimer = (
-            f"FlintTrade `{new_tag}` is a beta prerelease. It is not production ready; "
-            "use Explore and Practice modes before connecting any live broker workflow.\n"
-        )
+        disclaimer = _release_disclaimer(new_tag)
         note.write_text(f"# FlintTrade {new_tag}\n\n{disclaimer}\n{body}\n", encoding="utf-8")
 
     generator = ROOT / "packages/apps/site/scripts/generate-content.mjs"

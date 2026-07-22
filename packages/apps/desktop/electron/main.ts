@@ -37,6 +37,9 @@ import { createNativeNotificationRelay } from "./notifications";
 import { resolveDesktopPaths } from "./paths";
 import { createSourceOperationCoordinator } from "./source-operation";
 import { createSourceUpdateRuntime } from "./source-update-runtime";
+import { createGithubShellReleaseSource, createNodeShellInstallerHandoff } from "./shell-update-io";
+import { assertShellUserDataSeparated, resolveShellUserDataPath } from "./shell-paths";
+import { createShellUpdater } from "./shell-updater";
 import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
 import { createStartupRecoveryController } from "./startup-recovery";
 import { createBackendState, createBootstrapState, createUpdateState, type UpdateKind } from "./state";
@@ -52,6 +55,8 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
+const shellUserData = resolveShellUserDataPath(app.getPath("appData"), process.platform);
+app.setPath("userData", shellUserData);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
@@ -68,6 +73,7 @@ if (!hasSingleInstanceLock) {
     homeDirectory: os.homedir(),
     platform: process.platform,
   });
+  assertShellUserDataSeparated(shellUserData, desktopPaths.workspace, process.platform);
   const bootstrapResources = app.isPackaged
     ? path.join(process.resourcesPath, "bootstrap")
     : path.join(appRoot, "resources", "bootstrap");
@@ -106,6 +112,7 @@ if (!hasSingleInstanceLock) {
   let terminalOrigin: string | null = null;
   let windows: ReturnType<typeof createDesktopWindows> | null = null;
   let lifecycle: ReturnType<typeof createDesktopLifecycle> | null = null;
+  let shellUpdater: ReturnType<typeof createShellUpdater> | null = null;
 
   const notificationRelay = createNativeNotificationRelay({
     isSupported: () => Notification.isSupported(),
@@ -174,10 +181,39 @@ if (!hasSingleInstanceLock) {
   lifecycle = createDesktopLifecycle({
     app,
     async drain() {
+      await shellUpdater?.settleForQuit();
       await startupController.shutdown();
       await backendRuntime.drainForQuit();
+      await shellUpdater?.settleForQuit();
     },
     getWindow: () => windows?.getPrimaryWindow() ?? null,
+  });
+
+  const installResources = app.isPackaged
+    ? process.resourcesPath
+    : path.resolve(appRoot, "..", "..", "..", "scripts");
+  shellUpdater = createShellUpdater({
+    arch: process.arch,
+    currentVersion: app.getVersion(),
+    enabled: app.isPackaged,
+    handoff: createNodeShellInstallerHandoff({
+      currentExecutablePath: app.isPackaged ? process.execPath : undefined,
+      currentLinuxAppDir: app.isPackaged && process.platform === "linux" ? process.env.APPDIR : undefined,
+      currentLinuxAppImage: app.isPackaged && process.platform === "linux" ? process.env.APPIMAGE : undefined,
+      homeDirectory: app.isPackaged && process.platform === "linux" ? app.getPath("home") : undefined,
+      platform: process.platform,
+      privateRoot: shellUserData,
+      resourcesDirectory: installResources,
+    }),
+    lifecycle: {
+      requestQuit: () => {
+        lifecycle!.markQuitIntent();
+        return lifecycle!.requestQuit("shell-update");
+      },
+    },
+    platform: process.platform,
+    releases: createGithubShellReleaseSource((input, init) => net.fetch(input, init)),
+    state: shellUpdateState,
   });
 
   const originPolicy = () => ({ splashUrl, terminalOrigin });
@@ -192,18 +228,6 @@ if (!hasSingleInstanceLock) {
   shellUpdateState.subscribe((snapshot) => broadcast(IPC_CHANNELS.update.event, snapshot));
 
   const updateStateFor = (kind: UpdateKind) => (kind === "source" ? sourceUpdateState : shellUpdateState);
-  const checkUnavailable = (kind: UpdateKind) => {
-    const store = updateStateFor(kind);
-    const label = kind === "source" ? "Source" : "Electron shell";
-    const attempt = store.begin("checking", `Checking ${label.toLowerCase()} updates`);
-    store.unavailable(
-      attempt,
-      `${label} updates are not available in this build.`,
-      kind === "shell" ? app.getVersion() : null,
-    );
-    return store.getSnapshot();
-  };
-
   const asManagedWindow = (browserWindow: BrowserWindow): DesktopManagedWindow => ({
     destroy: () => browserWindow.destroy(),
     focus: () => browserWindow.focus(),
@@ -247,7 +271,10 @@ if (!hasSingleInstanceLock) {
   let canRestoreHiddenWindow = false;
   const tray = createDesktopTray({
     create(callbacks) {
-      const nativeTray = new Tray(path.join(appRoot, "src-tauri", "icons", "32x32.png"));
+      const trayIcon = app.isPackaged
+        ? path.join(process.resourcesPath, "icons", "tray.png")
+        : path.join(appRoot, "src-tauri", "icons", "32x32.png");
+      const nativeTray = new Tray(trayIcon);
       nativeTray.setToolTip("FlintTrade");
       nativeTray.setContextMenu(Menu.buildFromTemplate([
         { click: callbacks.onShow, label: "Show FlintTrade" },
@@ -348,9 +375,7 @@ if (!hasSingleInstanceLock) {
     registerDesktopIpc(ipcMain, {
       originPolicy,
       services: {
-        applyShellUpdate: () => {
-          throw new Error("Electron shell update is not available.");
-        },
+        applyShellUpdate: () => shellUpdater!.apply(),
         applySourceUpdate: () => sourceUpdateRuntime.updater.apply(),
         cancelBootstrap: async () => {
           const [bootstrapCancelled, backendCancelled] = await Promise.all([
@@ -359,7 +384,7 @@ if (!hasSingleInstanceLock) {
           ]);
           return bootstrapCancelled || backendCancelled;
         },
-        checkShellUpdate: () => checkUnavailable("shell"),
+        checkShellUpdate: () => shellUpdater!.check(),
         checkSourceUpdate: () => {
           if (bootstrapState.getSnapshot().status !== "ready") {
             throw new Error("Source updates can be checked after source bootstrap is ready.");

@@ -3,8 +3,6 @@ import {
   GITHUB_RELEASES_URL,
   type DesktopReleaseChannel,
   type GitHubRelease,
-  isDesktopReleaseManifest,
-  releaseManifestAssetUrl,
   selectDesktopRelease,
 } from '@/lib/desktop-release';
 
@@ -33,13 +31,6 @@ export async function GET(request: Request): Promise<Response> {
     const releases = (await response.json()) as GitHubRelease[];
     const manifest = selectDesktopRelease(releases, { channel, tag });
     if (!manifest) return errorResponse('No desktop installer release found.', 404);
-    const release = releases.find((candidate) => candidate.tag_name === manifest.tag);
-    const manifestAssetUrl = release ? releaseManifestAssetUrl(release) : null;
-    if (manifestAssetUrl) {
-      const enriched = await fetchPublishedManifest(manifestAssetUrl, manifest.tag);
-      if (!enriched) return errorResponse('Published desktop manifest is unavailable or invalid.', 503);
-      return Response.json(enriched, { headers: cacheHeaders() });
-    }
     return Response.json(manifest, { headers: cacheHeaders() });
   } catch {
     return errorResponse('Could not reach GitHub releases.', 503);
@@ -48,22 +39,6 @@ export async function GET(request: Request): Promise<Response> {
 
 function channelParam(value: string | null): DesktopReleaseChannel {
   return value === 'stable' ? 'stable' : 'beta';
-}
-
-async function fetchPublishedManifest(manifestUrl: string, expectedTag: string) {
-  try {
-    const response = await fetch(manifestUrl, {
-      headers: { Accept: 'application/json', 'User-Agent': 'flinttrade-site/desktop-release' },
-      next: { revalidate: DESKTOP_RELEASE_REVALIDATE_SECONDS },
-    });
-    if (!response.ok) return null;
-    const manifest = (await response.json()) as unknown;
-    if (!isDesktopReleaseManifest(manifest)) return null;
-    if (manifest.tag !== expectedTag) return null;
-    return manifest;
-  } catch {
-    return null;
-  }
 }
 
 function errorResponse(message: string, status: number): Response {

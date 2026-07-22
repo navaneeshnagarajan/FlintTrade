@@ -1,86 +1,76 @@
-// Test-only manifest fixture. Uses a deliberately unreal version so the
-// fixture can never be mistaken for (or drift against) a live release.
-import type { DesktopReleaseManifest } from './desktop-release';
+// Test-only release fixtures. The deliberately unreal version prevents these
+// values from drifting against, or being mistaken for, a live release.
+import type { DesktopReleaseManifest, GitHubRelease } from './desktop-release';
+
+const releaseBase =
+  'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.test';
 
 export const FIXTURE_DESKTOP_RELEASE: DesktopReleaseManifest = {
-  tag: 'v9.9.9-test',
-  version: '9.9.9-test',
+  tag: 'v9.9.9-beta.test',
+  version: '9.9.9-beta.test',
   channel: 'beta',
   prerelease: true,
   published_at: '2026-01-01T00:00:00Z',
-  html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/tag/v9.9.9-test',
+  html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/tag/v9.9.9-beta.test',
+  checksum_url: `${releaseBase}/SHA256SUMS.txt`,
   assets: [
     {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'rpm',
-      name: 'FlintTrade-9.9.9-test-1.aarch64.rpm',
-      size: 240093625,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade-9.9.9-test-1.aarch64.rpm',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'rpm',
-      name: 'FlintTrade-9.9.9-test-1.x86_64.rpm',
-      size: 248806540,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade-9.9.9-test-1.x86_64.rpm',
-    },
-    {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'appimage',
-      name: 'FlintTrade_9.9.9-test_aarch64.AppImage',
-      size: 316230152,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_aarch64.AppImage',
-    },
-    {
       os: 'macos',
-      arch: 'arm64',
+      arch: 'universal',
       kind: 'dmg',
-      name: 'FlintTrade_9.9.9-test_aarch64.dmg',
-      size: 106866441,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_aarch64.dmg',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'appimage',
-      name: 'FlintTrade_9.9.9-test_amd64.AppImage',
-      size: 326593016,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_amd64.AppImage',
-    },
-    {
-      os: 'linux',
-      arch: 'x64',
-      kind: 'deb',
-      name: 'FlintTrade_9.9.9-test_amd64.deb',
-      size: 248805568,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_amd64.deb',
-    },
-    {
-      os: 'linux',
-      arch: 'arm64',
-      kind: 'deb',
-      name: 'FlintTrade_9.9.9-test_arm64.deb',
-      size: 240089914,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_arm64.deb',
+      name: 'FlintTrade-9.9.9-beta.test-mac-universal.dmg',
+      size: 18_000_000,
+      url: `${releaseBase}/FlintTrade-9.9.9-beta.test-mac-universal.dmg`,
+      sha256: '1'.repeat(64),
     },
     {
       os: 'windows',
       arch: 'x64',
       kind: 'nsis',
-      name: 'FlintTrade_9.9.9-test_x64-setup.exe',
-      size: 208530715,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_x64-setup.exe',
+      name: 'FlintTrade-9.9.9-beta.test-win-x64.exe',
+      size: 16_000_000,
+      url: `${releaseBase}/FlintTrade-9.9.9-beta.test-win-x64.exe`,
+      sha256: '2'.repeat(64),
     },
     {
-      os: 'macos',
+      os: 'linux',
       arch: 'x64',
-      kind: 'dmg',
-      name: 'FlintTrade_9.9.9-test_x64.dmg',
-      size: 115796291,
-      url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-test/FlintTrade_9.9.9-test_x64.dmg',
+      kind: 'appimage',
+      name: 'FlintTrade-9.9.9-beta.test-linux-x64.AppImage',
+      size: 17_000_000,
+      url: `${releaseBase}/FlintTrade-9.9.9-beta.test-linux-x64.AppImage`,
+      sha256: '3'.repeat(64),
+    },
+    {
+      os: 'linux',
+      arch: 'arm64',
+      kind: 'appimage',
+      name: 'FlintTrade-9.9.9-beta.test-linux-arm64.AppImage',
+      size: 17_500_000,
+      url: `${releaseBase}/FlintTrade-9.9.9-beta.test-linux-arm64.AppImage`,
+      sha256: '4'.repeat(64),
+    },
+  ],
+};
+
+export const FIXTURE_GITHUB_RELEASE: GitHubRelease = {
+  tag_name: FIXTURE_DESKTOP_RELEASE.tag,
+  prerelease: FIXTURE_DESKTOP_RELEASE.prerelease,
+  draft: false,
+  published_at: FIXTURE_DESKTOP_RELEASE.published_at,
+  html_url: FIXTURE_DESKTOP_RELEASE.html_url,
+  assets: [
+    ...FIXTURE_DESKTOP_RELEASE.assets.map((asset) => ({
+      name: asset.name,
+      size: asset.size,
+      browser_download_url: asset.url,
+      digest: `sha256:${asset.sha256}`,
+    })),
+    {
+      name: 'SHA256SUMS.txt',
+      size: 512,
+      browser_download_url: FIXTURE_DESKTOP_RELEASE.checksum_url,
+      digest: `sha256:${'a'.repeat(64)}`,
     },
   ],
 };

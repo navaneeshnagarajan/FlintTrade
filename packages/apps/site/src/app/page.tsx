@@ -28,7 +28,11 @@ const featureCards = [
 ];
 
 const docsCards = [
-  { href: '/download', label: 'Download', copy: 'One command installs FlintTrade on macOS, Windows, or Linux — built from the latest release on your machine.' },
+  {
+    href: '/download',
+    label: 'Download',
+    copy: 'Check verified Electron installer availability and the first-launch local source model.',
+  },
   { href: '/docs/user-guide', label: 'User Guide', copy: 'Install, connect OpenAlgo or verified native brokers, explore Practice mode, and learn the workspace.' },
   { href: '/docs/developer-guide', label: 'Developer Guide', copy: 'Repo map, tests, coding style, widgets, strategies, and PR flow.' },
   { href: '/docs/disclaimer', label: 'Beta Disclaimer', copy: 'Not production ready, no financial advice, and Live-mode risk notes.' },
@@ -55,19 +59,19 @@ const desktopInstallOptions = [
     platform: 'macOS',
     artefacts: '.dmg (universal)',
     instruction:
-      'The install script — curl -fsSL https://flinttrade.vercel.app/install.sh | bash — downloads without Gatekeeper quarantine; a manually downloaded image needs a one-time Open Anyway approval.',
+      'The install script downloads and verifies the universal DMG, then installs the small Electron shell for Apple Silicon and Intel Macs.',
   },
   {
     platform: 'Windows',
     artefacts: '.exe (per-user)',
     instruction:
-      'The install script — irm https://flinttrade.vercel.app/install.ps1 | iex — verifies the SHA-256 and clears SmartScreen; the setup installs per-user with no admin rights needed.',
+      'The install script downloads and verifies the x64 NSIS setup, which installs the Electron shell for the current user.',
   },
   {
     platform: 'Linux',
     artefacts: '.AppImage',
     instruction:
-      'One command — curl -fsSL https://flinttrade.vercel.app/install.sh | bash — installs the verified AppImage with a desktop entry and a flinttrade command, no sudo needed.',
+      'The install script selects and verifies the x64 or ARM64 AppImage, then installs the Electron shell without sudo.',
   },
 ] as const;
 
@@ -176,7 +180,7 @@ export default function HomePage() {
           </div>
           <div>
             <strong>18</strong>
-            <span>Package surfaces across Python, React, shared UI, Rust/PyO3, and the Tauri desktop shell.</span>
+            <span>Package surfaces across Python, React, shared UI, Rust/PyO3, and the Electron desktop shell.</span>
           </div>
           <div>
             <strong>102</strong>
@@ -191,15 +195,15 @@ export default function HomePage() {
 
       <section className="section">
         <div className="section-heading">
-          <h2>Install the desktop app first.</h2>
+          <h2>Electron shell delivery.</h2>
           <p>
-            One command fetches the latest release from GitHub and builds the native app on your
-            own machine — no unsigned installer to trust, and updating later is the same command.
-            Pre-built beta installers remain available from GitHub releases.
+            Desktop releases use a small Electron shell that verifies pinned tools and builds
+            hash-verified, integrity-locked local source on first launch. The download page exposes
+            install commands only after a complete, checksummed Electron asset set is available.
           </p>
           <div className="section-actions">
             <Link className="button primary" href="/download">
-              One-command install <ArrowRight aria-hidden="true" size={17} />
+              Check installer status <ArrowRight aria-hidden="true" size={17} />
             </Link>
             <Link className="button secondary" href="/docs/desktop">
               Desktop guide <ArrowRight aria-hidden="true" size={17} />

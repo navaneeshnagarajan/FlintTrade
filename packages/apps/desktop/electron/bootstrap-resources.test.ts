@@ -140,7 +140,10 @@ exit 0
 
     expect(metadata.scripts.bundle).toContain("build-windows-job-supervisor.mjs");
     expect(metadata.scripts["bundle:dev"]).toContain("build-windows-job-supervisor.mjs");
-    expect(metadata.scripts["pack:dir:win"]).toContain("pnpm run bundle");
+    expect(metadata.scripts["pack:dir:win"]).toContain("build-windows-job-supervisor.mjs");
+    expect(metadata.scripts["pack:dir:win"]).toContain("bundle-electron.mjs");
+    expect(metadata.scripts["pack:dir:win"]).toContain("run-electron-builder.mjs");
+    expect(metadata.scripts["pack:dir:win"]).not.toContain("pnpm run");
     expect(builder).toContain('"Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"');
     expect(builder).toContain("execFileSync(");
     expect(builder).not.toContain("shell:");

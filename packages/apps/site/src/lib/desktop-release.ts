@@ -1,9 +1,7 @@
 export type DesktopReleaseChannel = 'beta' | 'stable';
 export type DesktopOs = 'macos' | 'windows' | 'linux';
-// 'universal' — the single macOS DMG carrying both CPU slices (the manifest
-// also projects it onto the per-arch keys for older pickers).
 export type DesktopArch = 'x64' | 'arm64' | 'universal';
-export type DesktopAssetKind = 'dmg' | 'nsis' | 'appimage' | 'deb' | 'rpm';
+export type DesktopAssetKind = 'dmg' | 'nsis' | 'appimage';
 
 export interface DesktopReleaseAsset {
   os: DesktopOs;
@@ -22,6 +20,7 @@ export interface DesktopReleaseManifest {
   prerelease: boolean;
   published_at: string;
   html_url: string;
+  checksum_url?: string;
   assets: DesktopReleaseAsset[];
 }
 
@@ -69,7 +68,7 @@ export const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/navaneeshnagarajan/FlintTrade/releases?per_page=20';
 
 export const DESKTOP_RELEASE_REVALIDATE_SECONDS = 300;
-export const DESKTOP_RELEASE_MANIFEST_ASSET = 'flinttrade-desktop-manifest.json';
+export const DESKTOP_RELEASE_CHECKSUM_ASSET = 'SHA256SUMS.txt';
 
 import { APP_VERSION, APP_VERSION_TAG } from './version';
 
@@ -81,12 +80,16 @@ import { APP_VERSION, APP_VERSION_TAG } from './version';
 export const DEFAULT_DESKTOP_RELEASE: DesktopReleaseManifest = {
   tag: APP_VERSION_TAG,
   version: APP_VERSION,
-  channel: 'beta',
-  prerelease: true,
+  channel: APP_VERSION.includes('-') ? 'beta' : 'stable',
+  prerelease: APP_VERSION.includes('-'),
   published_at: '',
   html_url: 'https://github.com/navaneeshnagarajan/FlintTrade/releases',
   assets: [],
 };
+
+export function releaseChannelLabel(manifest: Pick<DesktopReleaseManifest, 'prerelease'>): 'beta' | 'stable' {
+  return manifest.prerelease ? 'beta' : 'stable';
+}
 
 export function parseDesktopReleaseAsset(asset: GitHubReleaseAsset): DesktopReleaseAsset | null {
   const name = asset.name ?? '';
@@ -95,39 +98,20 @@ export function parseDesktopReleaseAsset(asset: GitHubReleaseAsset): DesktopRele
   // repository's release path — the installer runs what this URL points to.
   if (!name || !isTrustedAssetUrl(url)) return null;
 
+  const identity = canonicalAssetIdentity(name);
+  if (!identity) return null;
+
   const size = asset.size ?? 0;
   const sha256 = sha256FromDigest(asset.digest);
-  const withDigest = <T extends DesktopReleaseAsset>(base: T): T =>
-    sha256 ? { ...base, sha256 } : base;
-  if (/\.dmg$/i.test(name)) {
-    const arch = /universal/i.test(name)
-      ? 'universal'
-      : /_(?:aarch64|arm64)\.dmg$/i.test(name)
-        ? 'arm64'
-        : 'x64';
-    return withDigest({ os: 'macos', arch, kind: 'dmg', name, size, url });
-  }
-  if (/_x64-setup\.exe$/i.test(name)) {
-    return withDigest({ os: 'windows', arch: 'x64', kind: 'nsis', name, size, url });
-  }
-  if (/\.AppImage$/i.test(name)) {
-    const arch = /_(?:aarch64|arm64)\.AppImage$/i.test(name) ? 'arm64' : 'x64';
-    return withDigest({ os: 'linux', arch, kind: 'appimage', name, size, url });
-  }
-  if (/\.deb$/i.test(name)) {
-    const arch = /_(?:aarch64|arm64)\.deb$/i.test(name) ? 'arm64' : 'x64';
-    return withDigest({ os: 'linux', arch, kind: 'deb', name, size, url });
-  }
-  if (/\.rpm$/i.test(name)) {
-    const arch = /\.(?:aarch64|arm64)\.rpm$/i.test(name) ? 'arm64' : 'x64';
-    return withDigest({ os: 'linux', arch, kind: 'rpm', name, size, url });
-  }
-  return null;
-}
-
-export function releaseManifestAssetUrl(release: GitHubRelease): string | null {
-  const asset = (release.assets ?? []).find((candidate) => candidate.name === DESKTOP_RELEASE_MANIFEST_ASSET);
-  return asset?.browser_download_url ?? null;
+  const parsed: DesktopReleaseAsset = {
+    os: identity.os,
+    arch: identity.arch,
+    kind: identity.kind,
+    name,
+    size,
+    url,
+  };
+  return sha256 ? { ...parsed, sha256 } : parsed;
 }
 
 export function isDesktopReleaseManifest(value: unknown): value is DesktopReleaseManifest {
@@ -139,43 +123,66 @@ export function isDesktopReleaseManifest(value: unknown): value is DesktopReleas
   if (typeof manifest.prerelease !== 'boolean') return false;
   if (typeof manifest.published_at !== 'string') return false;
   if (typeof manifest.html_url !== 'string') return false;
-  if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) return false;
-  return manifest.assets.every((asset) => {
+  if (!isTrustedAssetUrl(manifest.checksum_url)) return false;
+  if (!Array.isArray(manifest.assets) || manifest.assets.length !== REQUIRED_ASSET_KEYS.length) return false;
+  if (!isVersionTag(manifest.tag) || manifest.version !== manifest.tag.slice(1)) return false;
+  const tag = manifest.tag;
+  const version = manifest.version;
+  const assetKeys = new Set<string>();
+  const validAssets = manifest.assets.every((asset) => {
     if (asset == null || typeof asset !== 'object') return false;
     const candidate = asset as Partial<DesktopReleaseAsset>;
+    if (typeof candidate.name !== 'string' || typeof candidate.size !== 'number') return false;
+    const name = candidate.name;
+    const identity = canonicalAssetIdentity(name);
+    if (!identity || identity.version !== version) return false;
+    const key = assetKey(identity);
+    assetKeys.add(key);
     return (
       (candidate.os === 'macos' || candidate.os === 'windows' || candidate.os === 'linux') &&
       (candidate.arch === 'x64' || candidate.arch === 'arm64' || candidate.arch === 'universal') &&
-      (candidate.kind === 'dmg' ||
-        candidate.kind === 'nsis' ||
-        candidate.kind === 'appimage' ||
-        candidate.kind === 'deb' ||
-        candidate.kind === 'rpm') &&
-      typeof candidate.name === 'string' &&
-      typeof candidate.size === 'number' &&
-      isTrustedAssetUrl(candidate.url) &&
+      (candidate.kind === 'dmg' || candidate.kind === 'nsis' || candidate.kind === 'appimage') &&
+      candidate.os === identity.os &&
+      candidate.arch === identity.arch &&
+      candidate.kind === identity.kind &&
+      candidate.url === releaseAssetUrl(tag, name) &&
       (candidate.sha256 === undefined || /^[a-f0-9]{64}$/i.test(candidate.sha256))
     );
   });
+  if (!validAssets || !REQUIRED_ASSET_KEYS.every((key) => assetKeys.has(key))) return false;
+  return manifest.checksum_url === releaseAssetUrl(tag, DESKTOP_RELEASE_CHECKSUM_ASSET);
 }
 
 export function manifestFromGitHubRelease(release: GitHubRelease): DesktopReleaseManifest | null {
   if (release.draft) return null;
   const tag = release.tag_name ?? '';
-  if (!tag.startsWith('v')) return null;
-  const assets = (release.assets ?? [])
-    .map(parseDesktopReleaseAsset)
-    .filter((asset): asset is DesktopReleaseAsset => asset != null)
-    .sort(compareAssets);
-  if (assets.length === 0) return null;
+  if (!isVersionTag(tag)) return null;
+  const version = tag.slice(1);
+  const assetsByKey = new Map<string, DesktopReleaseAsset>();
+  for (const candidate of release.assets ?? []) {
+    const parsed = parseDesktopReleaseAsset(candidate);
+    if (!parsed) continue;
+    const identity = canonicalAssetIdentity(parsed.name);
+    if (!identity || identity.version !== version) continue;
+    if (parsed.url !== releaseAssetUrl(tag, parsed.name)) continue;
+    assetsByKey.set(assetKey(identity), parsed);
+  }
+  if (!REQUIRED_ASSET_KEYS.every((key) => assetsByKey.has(key))) return null;
+  const assets = REQUIRED_ASSET_KEYS.map((key) => assetsByKey.get(key)!);
+  const checksumUrl = checksumAssetUrl(release, tag);
+  if (!checksumUrl) return null;
   const prerelease = Boolean(release.prerelease);
+  const tagPrereleaseChannel = prereleaseChannel(version);
+  if (prerelease !== (tagPrereleaseChannel !== null)) return null;
+  if (prerelease && tagPrereleaseChannel !== 'beta') return null;
   return {
     tag,
-    version: tag.replace(/^v/, ''),
+    version,
     channel: prerelease ? 'beta' : 'stable',
     prerelease,
     published_at: release.published_at ?? '',
     html_url: release.html_url ?? `https://github.com/navaneeshnagarajan/FlintTrade/releases/tag/${tag}`,
+    checksum_url: checksumUrl,
     assets,
   };
 }
@@ -197,7 +204,7 @@ export function selectDesktopRelease(
   if (channel === 'stable') {
     return manifests.find((manifest) => !manifest.prerelease) ?? null;
   }
-  return manifests.find((manifest) => manifest.prerelease) ?? manifests[0] ?? null;
+  return manifests[0] ?? null;
 }
 
 export function assetForPlatform(
@@ -219,7 +226,7 @@ export function assetForPlatform(
 
 export function platformLabel(asset: Pick<DesktopReleaseAsset, 'os' | 'arch' | 'kind'>): string {
   const os = asset.os === 'macos' ? 'macOS' : asset.os === 'windows' ? 'Windows' : 'Linux';
-  const arch = asset.arch === 'arm64' ? 'ARM64' : 'x64';
+  const arch = asset.arch === 'universal' ? 'Universal' : asset.arch === 'arm64' ? 'ARM64' : 'x64';
   const kind = asset.kind === 'nsis' ? 'setup .exe' : `.${asset.kind === 'appimage' ? 'AppImage' : asset.kind}`;
   return `${os} ${arch} ${kind}`;
 }
@@ -239,18 +246,77 @@ export function formatBytes(bytes: number): string {
 function defaultKindsForOs(os: DesktopOs): DesktopAssetKind[] {
   if (os === 'macos') return ['dmg'];
   if (os === 'windows') return ['nsis'];
-  return ['appimage', 'deb', 'rpm'];
+  return ['appimage'];
 }
 
-function compareAssets(a: DesktopReleaseAsset, b: DesktopReleaseAsset): number {
-  const osOrder = ['macos', 'windows', 'linux'];
-  const kindOrder = ['dmg', 'nsis', 'appimage', 'deb', 'rpm'];
-  return (
-    osOrder.indexOf(a.os) - osOrder.indexOf(b.os) ||
-    a.arch.localeCompare(b.arch) ||
-    kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind) ||
-    a.name.localeCompare(b.name)
+interface CanonicalAssetIdentity {
+  version: string;
+  os: DesktopOs;
+  arch: DesktopArch;
+  kind: DesktopAssetKind;
+}
+
+const REQUIRED_ASSET_KEYS = [
+  'macos:universal:dmg',
+  'windows:x64:nsis',
+  'linux:x64:appimage',
+  'linux:arm64:appimage',
+] as const;
+
+function canonicalAssetIdentity(name: string): CanonicalAssetIdentity | null {
+  const variants: Array<{
+    pattern: RegExp;
+    os: DesktopOs;
+    arch: DesktopArch;
+    kind: DesktopAssetKind;
+  }> = [
+    { pattern: /^FlintTrade-(.+)-mac-universal\.dmg$/, os: 'macos', arch: 'universal', kind: 'dmg' },
+    { pattern: /^FlintTrade-(.+)-win-x64\.exe$/, os: 'windows', arch: 'x64', kind: 'nsis' },
+    { pattern: /^FlintTrade-(.+)-linux-x64\.AppImage$/, os: 'linux', arch: 'x64', kind: 'appimage' },
+    { pattern: /^FlintTrade-(.+)-linux-arm64\.AppImage$/, os: 'linux', arch: 'arm64', kind: 'appimage' },
+  ];
+  for (const variant of variants) {
+    const match = variant.pattern.exec(name);
+    if (match && isVersion(match[1])) {
+      return {
+        version: match[1],
+        os: variant.os,
+        arch: variant.arch,
+        kind: variant.kind,
+      };
+    }
+  }
+  return null;
+}
+
+function assetKey(identity: Pick<CanonicalAssetIdentity, 'os' | 'arch' | 'kind'>): string {
+  return `${identity.os}:${identity.arch}:${identity.kind}`;
+}
+
+function checksumAssetUrl(release: GitHubRelease, tag: string): string | null {
+  const expected = releaseAssetUrl(tag, DESKTOP_RELEASE_CHECKSUM_ASSET);
+  const checksum = (release.assets ?? []).find(
+    (asset) => asset.name === DESKTOP_RELEASE_CHECKSUM_ASSET && asset.browser_download_url === expected,
   );
+  return checksum ? expected : null;
+}
+
+function releaseAssetUrl(tag: string, name: string): string {
+  return `${TRUSTED_ASSET_URL_PREFIX}${tag}/${name}`;
+}
+
+function isVersionTag(value: string): boolean {
+  return value.startsWith('v') && isVersion(value.slice(1));
+}
+
+function isVersion(value: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$/.test(value);
+}
+
+function prereleaseChannel(version: string): string | null {
+  const separator = version.indexOf('-');
+  if (separator < 0) return null;
+  return version.slice(separator + 1).split('.')[0]?.toLowerCase() ?? null;
 }
 
 function compareManifestsNewestFirst(a: DesktopReleaseManifest, b: DesktopReleaseManifest): number {

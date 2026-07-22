@@ -10,9 +10,8 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "tauri": "tauri",
-    "dev": "pnpm run bundle:dev && electron .",
-    "start": "pnpm run bundle && electron .",
+    "dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs --dev && electron .",
+    "start": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && electron .",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.electron.config.ts",
     "test:electron": "vitest run --config vitest.electron.config.ts",
@@ -21,9 +20,13 @@
     "bundle": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs",
     "bundle:dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs --dev",
     "build:windows-supervisor": "node scripts/build-windows-job-supervisor.mjs",
-    "build": "pnpm run verify:bootstrap-manifest && pnpm run typecheck && pnpm run test:electron && pnpm run bundle",
-    "pack:dir": "pnpm run verify:bootstrap-manifest && pnpm run bundle && electron-builder --dir --mac --publish never && pnpm run verify:package",
-    "pack:dir:win": "pnpm run verify:bootstrap-manifest && pnpm run bundle && electron-builder --dir --win --x64 --publish never && pnpm run verify:package",
+    "build": "node scripts/generate-bootstrap-tool-manifest.mjs --check && tsc -p tsconfig.electron.json --noEmit && vitest run --config vitest.electron.config.ts && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs",
+    "pack:dir": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --mac --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
+    "pack:dir:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:mac": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --mac dmg --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
+    "pack:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:linux:x64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:linux:arm64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --arm64 --publish never && node scripts/verify-electron-package.mjs",
     "verify:package": "node scripts/verify-electron-package.mjs"
   },
   "dependencies": {
@@ -46,18 +49,18 @@
   },
   "build": {
     "electronVersion": "40.10.2",
-    "appId": "com.flinttrade.desktop",
+    "appId": "com.flinttrade.app",
     "productName": "FlintTrade",
     "executableName": "FlintTrade",
     "artifactName": "FlintTrade-${version}-${os}-${arch}.${ext}",
     "icon": "src-tauri/icons/icon",
+    "afterSign": "scripts/verify-macos-signature.cjs",
     "directories": {
       "output": "release/electron"
     },
     "files": [
       "dist/**",
       "splash/**",
-      "src-tauri/icons/**",
       "package.json"
     ],
     "extraResources": [
@@ -75,7 +78,24 @@
       },
       {
         "from": "resources/bootstrap",
-        "to": "bootstrap"
+        "to": "bootstrap",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "../../../scripts/install/flinttrade-install.sh",
+        "to": "install/flinttrade-install.sh"
+      },
+      {
+        "from": "../../../scripts/install/flinttrade-install.ps1",
+        "to": "install/flinttrade-install.ps1"
+      },
+      {
+        "from": "src-tauri/icons/32x32.png",
+        "to": "icons/tray.png"
       }
     ],
     "asar": true,
@@ -93,10 +113,8 @@
       "category": "public.app-category.finance",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "identity": null,
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     },
     "win": {
@@ -113,15 +131,14 @@
     "linux": {
       "category": "Office",
       "target": [
-        "AppImage",
-        "deb",
-        "rpm"
+        "AppImage"
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "FlintTrade"
     }
   }
 }

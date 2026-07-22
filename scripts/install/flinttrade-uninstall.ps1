@@ -1,24 +1,8 @@
-# FlintTrade desktop uninstaller (Windows)
+# FlintTrade Electron shell uninstaller (Windows)
 #
-# Default mode runs the per-user NSIS uninstaller (when present) and then
-# sweeps the disposable residue the installer creates: the install folder,
-# Start-menu and desktop shortcuts, and the per-user registry keys. Two kinds
-# of data are ALWAYS kept unless you explicitly pass -Purge:
-#   1. The FlintTrade workspace at %APPDATA%\flinttrade (encrypted credential
-#      vault, auth database, journals, workspace.json).
-#   2. The WebView2 profile at %LOCALAPPDATA%\com.flinttrade.app, whose
-#      localStorage holds in-app saved content (trade journal notes and
-#      screenshots, flow-builder workflows, saved AI chats).
-#
-#   irm https://flinttrade.vercel.app/uninstall.ps1 | iex
-#   & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
-#
-# Environment (uninstall-specific; the install scripts never read these):
-#   FLINTTRADE_UNINSTALL_PURGE=1    same as -Purge
-#   FLINTTRADE_UNINSTALL_YES=1      same as -Yes (skips the typed confirmation)
-#   FLINTTRADE_UNINSTALL_DRY_RUN=1  same as -DryRun
-#   FLINTTRADE_WORKSPACE_DIR / FLINTTRADE_HOME are honoured the same way the
-#   backend honours them when resolving the workspace to purge.
+# Ordinary uninstall removes the electron-builder application and shortcuts.
+# The workspace, Electron profile, managed source/toolchain and legacy desktop
+# storage are kept unless -Purge is explicitly confirmed.
 
 param(
     [switch]$Purge = ($env:FLINTTRADE_UNINSTALL_PURGE -eq "1"),
@@ -27,26 +11,35 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-$BundleId = "com.flinttrade.app"
-$InstallDir = Join-Path $env:LOCALAPPDATA "FlintTrade"
-# Resolve the workspace exactly the way the backend does
-# (flinttrade_core.workspace): FLINTTRADE_WORKSPACE_DIR beats FLINTTRADE_HOME
-# beats %APPDATA%\flinttrade. Purging a hardcoded default while the real vault
-# lives behind an override would report success and leave the data on disk.
-$WorkspaceDir = if ($env:FLINTTRADE_WORKSPACE_DIR) {
-    $env:FLINTTRADE_WORKSPACE_DIR
-} elseif ($env:FLINTTRADE_HOME) {
-    $env:FLINTTRADE_HOME
-} else {
-    Join-Path $env:APPDATA "flinttrade"
-}
-$WebViewStorageDir = Join-Path $env:LOCALAPPDATA $BundleId
+$LegacyBundleId = "com.flinttrade.app"
+$LocalAppDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+$RoamingAppDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+$DefaultInstallDir = Join-Path $LocalAppDataRoot "Programs\FlintTrade"
+$DefaultWorkspace = Join-Path $RoamingAppDataRoot "flinttrade"
+$ElectronProfile = Join-Path $RoamingAppDataRoot "flinttrade-shell"
+$ManagedRoot = Join-Path $HOME ".flinttrade"
+$SourceRoot = Join-Path $ManagedRoot "src"
+$ToolsRoot = Join-Path $ManagedRoot "tools"
 $script:RemovedAny = $false
 $script:FailedAny = $false
 
 function Say([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Cyan }
 function Warn([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Yellow }
+
+function Expand-FlintPath([string]$Value) {
+    if ($Value -eq "~") { return $HOME }
+    if ($Value.StartsWith("~\") -or $Value.StartsWith("~/")) { return Join-Path $HOME $Value.Substring(2) }
+    if ($Value.StartsWith("~")) { throw "Named-user home paths are not supported: $Value" }
+    return [Environment]::ExpandEnvironmentVariables($Value)
+}
+
+$WorkspaceDir = if ($env:FLINTTRADE_WORKSPACE_DIR) {
+    Expand-FlintPath $env:FLINTTRADE_WORKSPACE_DIR
+} elseif ($env:FLINTTRADE_HOME) {
+    Expand-FlintPath $env:FLINTTRADE_HOME
+} else {
+    $DefaultWorkspace
+}
 
 function Remove-IfExists([string]$Target) {
     if (-not (Test-Path -LiteralPath $Target)) { return }
@@ -61,127 +54,437 @@ function Remove-IfExists([string]$Target) {
     }
 }
 
-function Remove-RegistryKeyIfExists([string]$KeyPath) {
-    if (-not (Test-Path -Path $KeyPath)) { return }
-    if ($DryRun) { Say "[dry-run] would remove registry key $KeyPath"; return }
+function Test-PathContainsReparsePoint([string]$Target) {
     try {
-        Remove-Item -Path $KeyPath -Recurse -Force -ErrorAction Stop
-        Say "Removed registry key $KeyPath"
-        $script:RemovedAny = $true
+        $full = [System.IO.Path]::GetFullPath($Target).TrimEnd('\', '/')
+        $root = [System.IO.Path]::GetPathRoot($full)
+        if (-not $root) { return $true }
+        $relative = $full.Substring($root.Length).TrimStart('\', '/')
+        $current = $root
+        foreach ($component in @($relative -split '[\\/]' | Where-Object { $_ })) {
+            $current = Join-Path $current $component
+            if (-not (Test-Path -LiteralPath $current)) { continue }
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $true }
+        }
     } catch {
-        Warn "Could not remove registry key ${KeyPath}: $($_.Exception.Message)"
-        $script:FailedAny = $true
+        return $true
     }
+    return $false
 }
 
-# --- Stop the app and its backend sidecar so files are not locked. -----------
-if ($DryRun) {
-    Say "[dry-run] would stop any running FlintTrade app/backend"
-} else {
-    Get-Process -Name "FlintTrade" -ErrorAction SilentlyContinue | ForEach-Object {
-        Say "Stopping FlintTrade (PID $($_.Id))"
-        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+function Get-InstallEntries {
+    @(Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue) |
+        Where-Object { $_.DisplayName -ceq "FlintTrade" }
+}
+
+function Get-CommandExecutable([string]$CommandLine) {
+    if (-not $CommandLine) { return $null }
+    $trimmed = $CommandLine.Trim()
+    if ($trimmed -match '^"([^"]+)"') { return $Matches[1] }
+    return ($trimmed -split '\s+', 2)[0]
+}
+
+function Test-AllowedInstallDirectory([string]$Candidate) {
+    try {
+        $full = [System.IO.Path]::GetFullPath($Candidate).TrimEnd('\', '/')
+        $allowed = [System.IO.Path]::GetFullPath($DefaultInstallDir).TrimEnd('\', '/')
+    } catch {
+        return $false
     }
-    # Port 5100 is FlintTrade's backend; OpenAlgo (5000-5009) is left alone.
-    # Only kill the listener if it is actually FlintTrade's backend — 5100
-    # could be an unrelated local service on a machine without FlintTrade.
-    $backend = Get-NetTCPConnection -LocalPort 5100 -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($backend) {
-        $owner = Get-Process -Id $backend.OwningProcess -ErrorAction SilentlyContinue
-        if ($owner -and $owner.ProcessName -match "flinttrade") {
-            Say "Stopping the FlintTrade backend (PID $($owner.Id))"
-            Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
-        } elseif ($owner) {
-            Say "Port 5100 is held by a non-FlintTrade process ($($owner.ProcessName), PID $($owner.Id)) - leaving it alone."
+    return $full.Equals($allowed, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-ProvenInstallRecord($Entry) {
+    if (-not $Entry.PSPath -or -not $Entry.UninstallString) { return $null }
+    $registeredCommand = Get-CommandExecutable ([string]$Entry.UninstallString)
+    if (-not $registeredCommand) { return $null }
+    try {
+        $registeredCommand = [Environment]::ExpandEnvironmentVariables($registeredCommand)
+        $registeredFull = [System.IO.Path]::GetFullPath($registeredCommand).TrimEnd('\', '/')
+        $directoryFull = [System.IO.Path]::GetFullPath((Split-Path -Parent $registeredFull)).TrimEnd('\', '/')
+    } catch {
+        return $null
+    }
+    if ((Split-Path -Leaf $registeredFull) -cne "Uninstall FlintTrade.exe") { return $null }
+    if (-not (Test-AllowedInstallDirectory $directoryFull)) { return $null }
+    if (-not (Test-Path -LiteralPath $directoryFull -PathType Container)) { return $null }
+    if (Test-PathContainsReparsePoint $directoryFull) { return $null }
+
+    try {
+        $directory = Get-Item -LiteralPath $directoryFull -Force -ErrorAction Stop
+        $canonicalDirectory = (Resolve-Path -LiteralPath $directoryFull -ErrorAction Stop).Path.TrimEnd('\', '/')
+        $uninstaller = Get-Item -LiteralPath $registeredFull -Force -ErrorAction Stop
+        $canonicalUninstaller = (Resolve-Path -LiteralPath $registeredFull -ErrorAction Stop).Path
+        $executablePath = Join-Path $canonicalDirectory "FlintTrade.exe"
+        $executable = Get-Item -LiteralPath $executablePath -Force -ErrorAction Stop
+        $canonicalExecutable = (Resolve-Path -LiteralPath $executablePath -ErrorAction Stop).Path
+    } catch {
+        return $null
+    }
+    if (-not $directory.PSIsContainer -or
+        ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+        $uninstaller.PSIsContainer -or
+        ($uninstaller.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+        $executable.PSIsContainer -or
+        ($executable.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return $null
+    }
+    if (-not $canonicalDirectory.Equals($directoryFull, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $canonicalUninstaller.Equals($registeredFull, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Split-Path -Parent $canonicalUninstaller).Equals($canonicalDirectory, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Split-Path -Parent $canonicalExecutable).Equals($canonicalDirectory, [StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+    if ($Entry.InstallLocation) {
+        try { $installLocation = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$Entry.InstallLocation)).TrimEnd('\', '/') } catch { return $null }
+        if (-not $installLocation.Equals($canonicalDirectory, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    }
+    if ($Entry.QuietUninstallString) {
+        $quietCommand = Get-CommandExecutable ([string]$Entry.QuietUninstallString)
+        try { $quietFull = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($quietCommand)).TrimEnd('\', '/') } catch { return $null }
+        if (-not $quietFull.Equals($canonicalUninstaller, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    }
+    if ($Entry.DisplayIcon) {
+        $displayIcon = ([string]$Entry.DisplayIcon).Trim() -replace ',\d+$', ''
+        $displayIcon = $displayIcon.Trim('"')
+        try { $displayIcon = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($displayIcon)).TrimEnd('\', '/') } catch { return $null }
+        $allowedIcons = @($canonicalExecutable, (Join-Path $canonicalDirectory "uninstallerIcon.ico"))
+        if (-not @($allowedIcons | Where-Object { $_.Equals($displayIcon, [StringComparison]::OrdinalIgnoreCase) })) {
+            return $null
         }
     }
-    Start-Sleep -Seconds 1
+    [pscustomobject]@{
+        Directory = $canonicalDirectory
+        ExecutablePath = $canonicalExecutable
+        UninstallerPath = $canonicalUninstaller
+        RegistryPath = [string]$Entry.PSPath
+    }
 }
 
-# --- Run the NSIS uninstaller when it is still present. ----------------------
-$Uninstaller = Join-Path $InstallDir "uninstall.exe"
-if (Test-Path -LiteralPath $Uninstaller) {
-    if ($DryRun) {
-        Say "[dry-run] would run $Uninstaller /S"
-    } else {
-        Say "Running the FlintTrade uninstaller..."
-        # `_?=` keeps the uninstaller synchronous (no self-copy), so -Wait is
-        # honoured; the sweep below removes what it cannot delete of itself.
-        # Guarded so a blocked launch (AV quarantine, AppLocker) does not
-        # strand the rest of the sweep under $ErrorActionPreference = Stop.
+function Test-RegistryEntryStillBoundToRecord($Entry, $Record) {
+    if (-not $Entry -or -not $Record -or $Entry.DisplayName -cne "FlintTrade" -or -not $Entry.UninstallString) {
+        return $false
+    }
+    $command = Get-CommandExecutable ([string]$Entry.UninstallString)
+    try { $command = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($command)).TrimEnd('\', '/') } catch { return $false }
+    if (-not $command.Equals($Record.UninstallerPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if ($Entry.InstallLocation) {
+        try { $location = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$Entry.InstallLocation)).TrimEnd('\', '/') } catch { return $false }
+        if (-not $location.Equals($Record.Directory, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    if ($Entry.QuietUninstallString) {
+        $quietCommand = Get-CommandExecutable ([string]$Entry.QuietUninstallString)
+        try { $quietCommand = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($quietCommand)).TrimEnd('\', '/') } catch { return $false }
+        if (-not $quietCommand.Equals($Record.UninstallerPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    if ($Entry.DisplayIcon) {
+        $displayIcon = ([string]$Entry.DisplayIcon).Trim() -replace ',\d+$', ''
+        $displayIcon = $displayIcon.Trim('"')
+        try { $displayIcon = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($displayIcon)).TrimEnd('\', '/') } catch { return $false }
+        $allowedIcons = @($Record.ExecutablePath, (Join-Path $Record.Directory "uninstallerIcon.ico"))
+        if (-not @($allowedIcons | Where-Object { $_.Equals($displayIcon, [StringComparison]::OrdinalIgnoreCase) })) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Stop-ProvenShellProcesses($Record) {
+    if (-not $Record) { return }
+    $expectedPath = [string]$Record.ExecutablePath
+    foreach ($process in @(Get-Process -Name "FlintTrade" -ErrorAction SilentlyContinue)) {
         try {
-            Start-Process -FilePath $Uninstaller -ArgumentList "/S", "_?=$InstallDir" -Wait
+            $processPath = (Resolve-Path -LiteralPath ([string]$process.Path) -ErrorAction Stop).Path
+            $processIdentity = $process.StartTime.ToFileTimeUtc()
         } catch {
-            Warn "Could not run the NSIS uninstaller: $($_.Exception.Message)"
+            continue
+        }
+        if (-not $expectedPath.Equals($processPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($DryRun) {
+            Say "[dry-run] would stop identity-proven FlintTrade shell process $($process.Id) at $processPath"
+            continue
+        }
+        try {
+            $current = Get-Process -Id $process.Id -ErrorAction Stop
+            $currentPath = (Resolve-Path -LiteralPath ([string]$current.Path) -ErrorAction Stop).Path
+            $currentIdentity = $current.StartTime.ToFileTimeUtc()
+            if ($currentIdentity -ne $processIdentity -or
+                -not $expectedPath.Equals($currentPath, [StringComparison]::OrdinalIgnoreCase)) {
+                continue
+            }
+            Say "Stopping identity-proven FlintTrade shell process $($process.Id) at $processPath"
+            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        } catch {
+            Warn "Could not stop the identity-proven FlintTrade shell process $($process.Id): $($_.Exception.Message)"
+            $script:FailedAny = $true
+        }
+    }
+}
+
+function Get-ShortcutTarget([string]$ShortcutPath) {
+    try {
+        $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($ShortcutPath)
+        if (-not $shortcut.TargetPath) { return $null }
+        return [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$shortcut.TargetPath))
+    } catch {
+        return $null
+    }
+}
+
+function Remove-ProvenShortcuts($Record) {
+    $shortcutDirectory = Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade"
+    $shortcutPaths = @(
+        (Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade.lnk"),
+        (Join-Path $shortcutDirectory "FlintTrade.lnk"),
+        (Join-Path ([Environment]::GetFolderPath("Desktop")) "FlintTrade.lnk")
+    )
+    foreach ($shortcutPath in $shortcutPaths) {
+        if (-not (Test-Path -LiteralPath $shortcutPath)) { continue }
+        $safe = $false
+        if ($Record -and -not (Test-PathContainsReparsePoint $shortcutPath)) {
+            $target = Get-ShortcutTarget $shortcutPath
+            $safe = $target -and $Record.ExecutablePath.Equals($target, [StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not $safe) {
+            Warn "Leaving an unproven same-name shell shortcut at $shortcutPath."
+            $script:FailedAny = $true
+            continue
+        }
+        Remove-IfExists $shortcutPath
+    }
+    if (Test-Path -LiteralPath $shortcutDirectory -PathType Container) {
+        $children = @(Get-ChildItem -LiteralPath $shortcutDirectory -Force -ErrorAction SilentlyContinue)
+        if ($Record -and $children.Count -eq 0 -and -not (Test-PathContainsReparsePoint $shortcutDirectory)) {
+            if ($DryRun) { Say "[dry-run] would remove empty shortcut directory $shortcutDirectory" }
+            else {
+                try {
+                    Remove-Item -LiteralPath $shortcutDirectory -Force -ErrorAction Stop
+                    $script:RemovedAny = $true
+                } catch {
+                    Warn "Could not remove empty shortcut directory ${shortcutDirectory}: $($_.Exception.Message)"
+                    $script:FailedAny = $true
+                }
+            }
+        } else {
+            Warn "Leaving non-empty same-name shortcut directory at $shortcutDirectory."
+            $script:FailedAny = $true
+        }
+    }
+}
+
+$installEntries = @(Get-InstallEntries)
+$candidateRecords = @($installEntries | ForEach-Object { Get-ProvenInstallRecord $_ } | Where-Object { $_ })
+$record = if ($candidateRecords.Count -eq 1) { $candidateRecords[0] } else { $null }
+if ($candidateRecords.Count -gt 1) {
+    Warn "Multiple registered FlintTrade install identities were found; refusing ambiguous automatic removal."
+    $script:FailedAny = $true
+}
+if ($record) {
+    $refreshedEntry = Get-ItemProperty -LiteralPath $record.RegistryPath -ErrorAction SilentlyContinue
+    $refreshedRecord = if ($refreshedEntry) { Get-ProvenInstallRecord $refreshedEntry } else { $null }
+    $identityStillMatches = $refreshedRecord -and
+        $refreshedRecord.Directory.Equals($record.Directory, [StringComparison]::OrdinalIgnoreCase) -and
+        $refreshedRecord.ExecutablePath.Equals($record.ExecutablePath, [StringComparison]::OrdinalIgnoreCase) -and
+        $refreshedRecord.UninstallerPath.Equals($record.UninstallerPath, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $identityStillMatches) {
+        Warn "The registered FlintTrade install identity changed during validation; refusing automatic removal."
+        $script:FailedAny = $true
+        $record = $null
+    }
+}
+$defaultCollision = Test-Path -LiteralPath $DefaultInstallDir
+if (-not $record -and $defaultCollision) {
+    Warn "Leaving an unproven same-name install directory at $DefaultInstallDir."
+    $script:FailedAny = $true
+}
+$provenRegistryPath = if ($record) { [string]$record.RegistryPath } else { "" }
+$unprovenInstallEntries = @($installEntries | Where-Object {
+    -not $provenRegistryPath -or -not ([string]$_.PSPath).Equals($provenRegistryPath, [StringComparison]::OrdinalIgnoreCase)
+})
+
+Stop-ProvenShellProcesses $record
+if ($record) {
+    $executionEntry = Get-ItemProperty -LiteralPath $record.RegistryPath -ErrorAction SilentlyContinue
+    $executionRecord = if ($executionEntry) { Get-ProvenInstallRecord $executionEntry } else { $null }
+    $executionIdentityMatches = $executionRecord -and
+        $executionRecord.RegistryPath.Equals($record.RegistryPath, [StringComparison]::OrdinalIgnoreCase) -and
+        $executionRecord.Directory.Equals($record.Directory, [StringComparison]::OrdinalIgnoreCase) -and
+        $executionRecord.ExecutablePath.Equals($record.ExecutablePath, [StringComparison]::OrdinalIgnoreCase) -and
+        $executionRecord.UninstallerPath.Equals($record.UninstallerPath, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $executionIdentityMatches) {
+        Warn "The registered FlintTrade install identity changed before execution; refusing to run it."
+        $script:FailedAny = $true
+        $record = $null
+    } else {
+        $record = $executionRecord
+    }
+}
+if ($record) {
+    if ($DryRun) {
+        Say "[dry-run] would run $($record.UninstallerPath) /S _?=$($record.Directory)"
+    } else {
+        try {
+            Say "Running the exact registered FlintTrade uninstaller..."
+            $process = Start-Process -FilePath $record.UninstallerPath -ArgumentList @("/S", "_?=$($record.Directory)") -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "uninstaller exited with code $($process.ExitCode)" }
+            $script:RemovedAny = $true
+        } catch {
+            Warn "Could not run the registered FlintTrade uninstaller: $($_.Exception.Message)"
             $script:FailedAny = $true
         }
     }
 } else {
-    Say "No NSIS uninstaller found - sweeping residue directly."
+    Say "No identity-verified FlintTrade uninstaller found; leaving same-name shell residue unmodified."
 }
 
-# --- Sweep disposable residue. -----------------------------------------------
-# $WebViewStorageDir is NOT here: its localStorage is the only home of in-app
-# journal notes, flows, and saved AI chats - it is data, removed only by -Purge.
-Remove-IfExists $InstallDir
-Remove-IfExists (Join-Path $env:APPDATA $BundleId)             # Tauri app-config residue
-Remove-IfExists (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\FlintTrade.lnk")
-Remove-IfExists (Join-Path ([Environment]::GetFolderPath("Desktop")) "FlintTrade.lnk")
-Remove-IfExists (Join-Path $HOME ".flinttrade\src")            # build-from-source clone
+$directoryRemains = $record -and (Test-Path -LiteralPath $record.Directory)
+if ($record -and -not $DryRun -and $directoryRemains) {
+    Warn "The registered uninstaller left the proved install directory in place; preserving it and its registry proof for retry."
+    $script:FailedAny = $true
+}
+if ($DryRun -or -not $directoryRemains) {
+    Remove-ProvenShortcuts $record
+}
+foreach ($entry in $unprovenInstallEntries) {
+    if ($entry.PSPath -and (Test-Path -LiteralPath $entry.PSPath)) {
+        Warn "Leaving an unproven FlintTrade registry entry at $($entry.PSPath)."
+        $script:FailedAny = $true
+    }
+}
+if ($record) {
+    if (-not (Test-Path -LiteralPath $record.RegistryPath)) {
+        $script:RemovedAny = $true
+    } elseif (-not $DryRun -and $directoryRemains) {
+        Warn "Keeping the exact FlintTrade registry entry because the proved install directory remains."
+        $script:FailedAny = $true
+    } else {
+        $currentEntry = Get-ItemProperty -LiteralPath $record.RegistryPath -ErrorAction SilentlyContinue
+        if (-not (Test-RegistryEntryStillBoundToRecord $currentEntry $record)) {
+            Warn "Leaving the FlintTrade registry entry because its identity changed during uninstall."
+            $script:FailedAny = $true
+        } elseif ($DryRun) {
+            Say "[dry-run] would remove registry entry $($record.RegistryPath)"
+        } else {
+            try {
+                Remove-Item -LiteralPath $record.RegistryPath -Recurse -Force -ErrorAction Stop
+                $script:RemovedAny = $true
+            } catch {
+                Warn "Could not remove registry entry $($record.RegistryPath): $($_.Exception.Message)"
+                $script:FailedAny = $true
+            }
+        }
+    }
+}
 
-Remove-RegistryKeyIfExists "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FlintTrade"
-Remove-RegistryKeyIfExists "HKCU:\Software\FlintTrade"
-Remove-RegistryKeyIfExists "HKCU:\Software\$BundleId"
+function Get-DataTargets {
+    $candidates = @(
+        $WorkspaceDir,
+        $DefaultWorkspace,
+        $ElectronProfile,
+        $SourceRoot,
+        $ToolsRoot,
+        (Join-Path $RoamingAppDataRoot $LegacyBundleId),
+        (Join-Path $LocalAppDataRoot $LegacyBundleId)
+    )
+    $seen = @{}
+    foreach ($candidate in $candidates) {
+        if (-not $candidate -or -not (Test-Path -LiteralPath $candidate)) { continue }
+        $key = $candidate.TrimEnd('\', '/').ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $candidate
+        }
+    }
+}
 
-# --- FlintTrade data: kept by default, deleted only with -Purge. -------------
+function Test-ProvenCustomWorkspace([string]$Target) {
+    try {
+        $directory = Get-Item -LiteralPath $Target -Force -ErrorAction Stop
+        if (-not $directory.PSIsContainer -or ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            return $false
+        }
+        $workspace = Get-Item -LiteralPath (Join-Path $Target "workspace.json") -Force -ErrorAction Stop
+        if ($workspace.PSIsContainer -or ($workspace.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            return $false
+        }
+        foreach ($name in @("credentials.db", "auth.db", "security.db", "master_password", "api_key_pepper", "safety_gate_secret")) {
+            $path = Join-Path $Target $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $marker = Get-Item -LiteralPath $path -Force
+            if (-not ($marker.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $true }
+        }
+    } catch {
+        return $false
+    }
+    return $false
+}
+
+function Test-SafePurgeTarget([string]$Target) {
+    $full = [System.IO.Path]::GetFullPath($Target).TrimEnd('\', '/')
+    try { $canonical = (Resolve-Path -LiteralPath $Target -ErrorAction Stop).Path.TrimEnd('\', '/') } catch { $canonical = $full }
+    $homeFull = [System.IO.Path]::GetFullPath($HOME).TrimEnd('\', '/')
+    try { $homeCanonical = (Resolve-Path -LiteralPath $HOME -ErrorAction Stop).Path.TrimEnd('\', '/') } catch { $homeCanonical = $homeFull }
+    $root = [System.IO.Path]::GetPathRoot($full).TrimEnd('\', '/')
+    try { Get-Item -LiteralPath $Target -Force -ErrorAction Stop | Out-Null } catch { return $false }
+    if (Test-PathContainsReparsePoint $Target) {
+        Warn "Refusing to purge $Target because the target or one of its ancestors is a reparse point."
+        $script:FailedAny = $true
+        return $false
+    }
+    if (-not $full -or $full -eq $homeFull -or $canonical -eq $homeCanonical -or $full -eq $root) {
+        Warn "Refusing to purge $Target because it is not a FlintTrade data directory."
+        $script:FailedAny = $true
+        return $false
+    }
+    $workspaceFull = [System.IO.Path]::GetFullPath($WorkspaceDir).TrimEnd('\', '/')
+    $defaultFull = [System.IO.Path]::GetFullPath($DefaultWorkspace).TrimEnd('\', '/')
+    if ($full.Equals($workspaceFull, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $workspaceFull.Equals($defaultFull, [StringComparison]::OrdinalIgnoreCase) -and
+        -not (Test-ProvenCustomWorkspace $Target)) {
+        Warn "Refusing to purge $Target because custom workspace identity is not proven."
+        $script:FailedAny = $true
+        return $false
+    }
+    return $true
+}
+
+$dataTargets = @(Get-DataTargets | Where-Object { Test-SafePurgeTarget $_ })
 if ($Purge) {
-    $targets = @($WorkspaceDir, $WebViewStorageDir, (Join-Path $HOME ".flinttrade")) |
-        Where-Object { Test-Path -LiteralPath $_ }
-    if (-not $targets) {
+    if (-not $dataTargets) {
         Say "No FlintTrade data to purge."
     } elseif ($DryRun) {
-        $targets | ForEach-Object { Say "[dry-run] would DELETE FlintTrade data at $_" }
+        $dataTargets | ForEach-Object { Say "[dry-run] would DELETE FlintTrade data at $_" }
     } else {
         $proceed = $Yes
         if (-not $proceed) {
-            # In a non-interactive host Read-Host throws; treat that as a
-            # refusal - -Yes (or FLINTTRADE_UNINSTALL_YES=1) is the only
-            # scripted consent.
             try {
-                $answer = Read-Host "About to DELETE all FlintTrade data at $($targets -join ', ') (credential vault, auth.db, journals, settings, and in-app saved content: journal notes, flows, AI chats). This is irreversible. Type 'purge' to continue"
+                $answer = Read-Host "About to DELETE the workspace, Electron profile, managed source/tools and legacy desktop storage at $($dataTargets -join ', '). This is irreversible. Type 'purge' to continue"
             } catch {
                 $answer = ""
             }
             $proceed = ($answer -eq "purge")
         }
         if ($proceed) {
-            $targets | ForEach-Object { Remove-IfExists $_ }
+            Say "Purging explicitly confirmed FlintTrade data:"
+            $dataTargets | ForEach-Object { Say "  $_"; Remove-IfExists $_ }
         } else {
-            Say "Purge cancelled - FlintTrade data kept."
+            Say "Purge cancelled; FlintTrade data kept."
         }
     }
-} else {
-    if (Test-Path -LiteralPath $WorkspaceDir) {
-        Say "Workspace data kept at $WorkspaceDir (credential vault, journals, settings, in-app content)."
-    }
-    if (Test-Path -LiteralPath $WebViewStorageDir) {
-        Say "In-app saved content kept at $WebViewStorageDir (content saved by older versions; current versions store journal notes, flows, and AI chats in the workspace)."
-    }
-    if ((Test-Path -LiteralPath $WorkspaceDir) -or (Test-Path -LiteralPath $WebViewStorageDir)) {
-        Say "To delete all FlintTrade data too, re-run with -Purge (or set FLINTTRADE_UNINSTALL_PURGE=1)."
-    }
+} elseif ($dataTargets) {
+    Say "The following FlintTrade data was kept:"
+    $dataTargets | ForEach-Object { Say "  $_" }
+    Say "This includes the workspace, Electron profile, managed source/tools and any legacy desktop storage."
+    Say "To delete it too, re-run with -Purge and confirm explicitly."
 }
 
 if ($DryRun) {
-    Say "Dry run complete - nothing was deleted."
+    Say "Dry run complete; nothing was deleted."
 } elseif ($script:FailedAny) {
-    # throw, not exit: under `irm | iex` an exit terminates the user's whole
-    # PowerShell session; throw surfaces the failure and gives -File callers
-    # a non-zero exit code (same convention as flinttrade-install.ps1).
     throw "[flinttrade] Uninstall finished with some paths left behind (see above)."
 } elseif ($script:RemovedAny) {
-    Say "FlintTrade uninstalled cleanly."
+    Say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
 } else {
-    Say "Nothing to remove - FlintTrade does not appear to be installed."
+    Say "Nothing to remove; the FlintTrade shell does not appear to be installed."
 }
