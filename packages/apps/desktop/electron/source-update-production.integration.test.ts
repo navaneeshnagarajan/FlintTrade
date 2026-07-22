@@ -39,6 +39,10 @@ const CANDIDATE_CONTENT_IDENTITY = "fixture-content:candidate";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../../../..");
 const bootstrapResources = path.resolve(import.meta.dirname, "../resources/bootstrap");
+const nativeTarget = process.platform === "darwin" ? "darwin-universal" : `linux-${process.arch}`;
+const nativeRoot = path.resolve(import.meta.dirname, "..", "dist", "native", nativeTarget);
+const nativeModule = path.join(nativeRoot, "flinttrade-fs-promoter.node");
+const nativeManifest = path.join(nativeRoot, "flinttrade-fs-promoter.sha256.json");
 const pythonCandidates = [
   path.join(repositoryRoot, ".venv", "bin", "python"),
   "/opt/homebrew/bin/python3",
@@ -56,6 +60,25 @@ async function availablePython(): Promise<string | null> {
     }
   }
   return null;
+}
+
+async function nativeAtomicPromotionConfiguration() {
+  await access(nativeModule, constants.R_OK);
+  const manifest = JSON.parse(await readFile(nativeManifest, "utf8")) as Record<string, unknown>;
+  if (
+    manifest.schemaVersion !== 1 ||
+    manifest.executable !== "flinttrade-fs-promoter.node" ||
+    manifest.target !== nativeTarget ||
+    typeof manifest.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(manifest.sha256)
+  ) {
+    throw new Error("The production source-update fixture requires a valid native atomic-promoter manifest.");
+  }
+  return {
+    expectedHelperSha256: manifest.sha256,
+    helper: await realpath(nativeModule),
+    protocol: "posix" as const,
+  };
 }
 
 async function writeFakeCandidate(candidateRoot: string, python: string): Promise<void> {
@@ -152,6 +175,14 @@ if not (workspace / "master_password").is_file():
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/":
+            body = b'<!doctype html><html><body>FlintTrade candidate</body></html>'
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path != "/api/v1/ping":
             self.send_response(404)
             self.end_headers()
@@ -226,6 +257,7 @@ it.runIf(process.platform !== "win32")(
     await writeFakeCandidate(candidateRoot, python);
 
     const dependencies = createNodeBootstrapDependencies(process.platform, {
+      atomicPromotion: await nativeAtomicPromotionConfiguration(),
       environment: {
         FLINTTRADE_FAKE_HOST_SECRET: "must-not-reach-the-candidate",
         HTTPS_PROXY: "https://user:proxy-canary@example.invalid",
@@ -243,6 +275,7 @@ it.runIf(process.platform !== "win32")(
       sourceRoot,
     });
     const promotionFileSystem = createNodeSourcePromotionFileSystem({
+      promoteAbsent: dependencies.fileSystem.promoteAbsent,
       safeRemove: createSafeDirectoryRemover({
         bootstrapResources,
         dependencies,
@@ -368,7 +401,8 @@ it.runIf(process.platform !== "win32")(
       await expect(lstat(path.join(sourceRoot, JOURNAL_NAME))).resolves.toBeDefined();
       if (promotionOutcome.status === "idle") throw new Error("Promotion unexpectedly returned idle.");
       await promotion.acknowledge(promotionOutcome);
-      await expect(lstat(path.join(sourceRoot, JOURNAL_NAME))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(promotionFileSystem.readJournal(path.join(sourceRoot, JOURNAL_NAME))).resolves.toBeNull();
+      await expect(lstat(path.join(sourceRoot, JOURNAL_NAME))).resolves.toBeDefined();
       await expect(lstat(promotedIsolationPath)).rejects.toMatchObject({ code: "ENOENT" });
       await operationLease.assertHeld();
     } finally {

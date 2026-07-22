@@ -122,6 +122,7 @@ async function realGitFixture() {
     await writeFile(markerPath, `${JSON.stringify(gitMarker({
       gitTree: installedTree,
       revision: installedRevision,
+      schemaVersion: 2,
       ...overrides,
     }))}\n`);
   };
@@ -175,9 +176,22 @@ const sourceEntries: SourceTreeIdentity["entries"] = [
 ];
 const sourceInputDigest = sha256(JSON.stringify(sourceEntries));
 const sourceTree: SourceTreeIdentity = { digest: sourceInputDigest, entries: sourceEntries };
+const frontendIndexSha256 = sha256("<!doctype html><title>FlintTrade</title>\n");
+const frontendEntries: SourceTreeIdentity["entries"] = [
+  { mode: 0o644, path: "index.html", sha256: frontendIndexSha256, type: "file" },
+];
+const frontendOutputDigest = sha256(JSON.stringify(frontendEntries));
+const frontendTree: SourceTreeIdentity = { digest: frontendOutputDigest, entries: frontendEntries };
+const currentBuildIdentity = {
+  frontendOutputDigest,
+  markerSchemaVersion: 3 as const,
+  packageManager,
+  toolchain,
+};
 
 function gitMarker(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
+  const schemaVersion = overrides.schemaVersion ?? 3;
+  const common = {
     completedAt: "2026-07-21T12:00:00.000Z",
     gitTree,
     node: toolchain.node,
@@ -185,14 +199,24 @@ function gitMarker(overrides: Record<string, unknown> = {}): Record<string, unkn
     provenance: "git",
     repository: gitOrigin,
     revision,
-    schemaVersion: 2,
     uv: toolchain.uv,
-    ...overrides,
   };
+  return schemaVersion === 2
+    ? { ...common, schemaVersion: 2, ...overrides }
+    : {
+        ...common,
+        frontendOutputDigest,
+        frontendOutputEntryCount: frontendEntries.length,
+        frontendOutputIndexSha256: frontendIndexSha256,
+        packageManager,
+        schemaVersion: 3,
+        ...overrides,
+      };
 }
 
 function archiveMarker(recordSha256: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
+  const schemaVersion = overrides.schemaVersion ?? 3;
+  const common = {
     archiveFinalOrigin: archiveOrigin,
     archiveSha256,
     completedAt: "2026-07-21T12:00:00.000Z",
@@ -201,12 +225,21 @@ function archiveMarker(recordSha256: string, overrides: Record<string, unknown> 
     provenance: "github-archive",
     repository: gitOrigin,
     revision,
-    schemaVersion: 2,
     sourceInputDigest,
     sourceInputRecordSha256: recordSha256,
     uv: toolchain.uv,
-    ...overrides,
   };
+  return schemaVersion === 2
+    ? { ...common, schemaVersion: 2, ...overrides }
+    : {
+        ...common,
+        frontendOutputDigest,
+        frontendOutputEntryCount: frontendEntries.length,
+        frontendOutputIndexSha256: frontendIndexSha256,
+        packageManager,
+        schemaVersion: 3,
+        ...overrides,
+      };
 }
 
 interface FixtureOptions {
@@ -218,12 +251,14 @@ interface FixtureOptions {
   gitOrigin?: string;
   gitStatus?: string;
   gitTree?: string;
+  frontendOutput?: "missing" | "mutated" | "valid";
   includeArchiveMarker?: boolean;
   includeEnvironmentFile?: boolean;
   includeEnvironmentSymlink?: boolean;
   includeGitMarker?: boolean;
   markerOverrides?: Record<string, unknown>;
   missingShapePath?: string;
+  packageManagerPin?: string;
   packageName?: string;
   provenance?: "git" | "github-archive";
   verifyArchiveTree?: boolean;
@@ -266,7 +301,10 @@ function fixture(options: FixtureOptions = {}) {
     [gitConfigPath, "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n\tignorecase = true\n\tprecomposeunicode = true\n[remote \"origin\"]\n\turl = " + configuredOrigin + "\n\tfetch = +refs/heads/main:refs/remotes/origin/main\n\ttagOpt = --no-tags\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n"],
     [gitHeadPath, "ref: refs/heads/main\n"],
     [gitMainRefPath, `${options.gitHead ?? revision}\n`],
-    [packagePath, `${JSON.stringify({ name: options.packageName ?? "flinttrade-monorepo", packageManager })}\n`],
+    [packagePath, `${JSON.stringify({
+      name: options.packageName ?? "flinttrade-monorepo",
+      packageManager: options.packageManagerPin ?? packageManager,
+    })}\n`],
     [path.join(activeSource, "pyproject.toml"), "[project]\nname = \"flinttrade\"\n"],
     [path.join(activeSource, "uv.lock"), "version = 1\n"],
     [path.join(activeSource, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n"],
@@ -362,6 +400,20 @@ function fixture(options: FixtureOptions = {}) {
   const verifySourceTree = vi.fn<SourceProvenanceDependencies["fileSystem"]["verifySourceTree"]>(async () =>
     (options.verifyArchiveTree ?? true),
   );
+  let frontendSnapshots = 0;
+  const snapshotSourceTree = vi.fn<SourceProvenanceDependencies["fileSystem"]["snapshotSourceTree"]>(
+    async () => {
+      frontendSnapshots += 1;
+      if (options.frontendOutput === "missing") throw new Error("terminal dist is missing");
+      if (options.frontendOutput === "mutated" && frontendSnapshots > 1) {
+        const entries: SourceTreeIdentity["entries"] = [
+          { mode: 0o644, path: "index.html", sha256: "9".repeat(64), type: "file" },
+        ];
+        return { digest: sha256(JSON.stringify(entries)), entries };
+      }
+      return frontendTree;
+    },
+  );
   const nodeFileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
   const isBootstrapResource = (target: string): boolean =>
     target === bootstrapResources || target.startsWith(`${bootstrapResources}${path.sep}`);
@@ -422,6 +474,7 @@ function fixture(options: FixtureOptions = {}) {
         if (target !== sourceInputRecordPath) throw new Error(`Unexpected digest request for ${target}`);
         return options.archiveRecordHash ?? sourceInputRecordSha256;
       },
+      snapshotSourceTree,
       verifySourceTree,
     },
   };
@@ -442,7 +495,7 @@ function fixture(options: FixtureOptions = {}) {
     signal: controller.signal,
     sourceRoot,
   };
-  return { command, controller, dependencies, request, verifySourceTree };
+  return { command, controller, dependencies, request, snapshotSourceTree, verifySourceTree };
 }
 
 describe("active source provenance", () => {
@@ -464,16 +517,23 @@ describe("active source provenance", () => {
     expect(sourceContentIdentityKey(identity)).toMatch(/^[0-9a-f]{64}$/);
     expect(sourceContentIdentityKey({ ...identity, contentIdentity: "d".repeat(40) }))
       .not.toBe(sourceContentIdentityKey(identity));
+    const bound = { ...identity, buildIdentity: currentBuildIdentity };
+    expect(sourceContentIdentityKey({
+      ...bound,
+      buildIdentity: { ...currentBuildIdentity, frontendOutputDigest: "8".repeat(64) },
+    })).not.toBe(sourceContentIdentityKey(bound));
   });
 
   it("proves the exact Git marker, HEAD, tree, raw config, index flags and clean worktree", async () => {
     const test = fixture();
 
     await expect(validateActiveSourceProvenance(test.request)).resolves.toEqual({
+      buildIdentity: currentBuildIdentity,
       canonicalPath: activeSource,
       contentIdentity: gitTree,
       directoryIdentity: { dev: 9, ino: 90 },
       provenance: "git",
+      requiresRebuild: false,
       revision,
     });
     const gitDirectory = path.join(activeSource, ".git");
@@ -595,12 +655,69 @@ describe("active source provenance", () => {
   it.each([
     ["marker provenance", { provenance: "github-archive" }, /marker|provenance/i],
     ["marker repository", { repository: "https://example.test/foreign.git" }, /marker|repository|foreign/i],
-    ["marker toolchain", { pnpm: "0.0.0" }, /marker|provenance|toolchain/i],
+    ["marker toolchain", { pnpm: "0.0.0" }, /marker|provenance|toolchain|tool version/i],
     ["extra marker field", { unexpected: true }, /marker|field/i],
   ] as const)("rejects an inexact Git %s", async (_label, markerOverrides, message) => {
     const test = fixture({ markerOverrides });
 
     await expect(validateActiveSourceProvenance(test.request)).rejects.toThrow(message);
+  });
+
+  it("boots a valid legacy completion marker but requires a current-toolchain rebuild", async () => {
+    const oldPackageManager = "pnpm@9.14.4+sha512.legacy";
+    const test = fixture({
+      markerOverrides: {
+        node: "22.22.0",
+        pnpm: "9.14.4",
+        schemaVersion: 2,
+        uv: "0.10.0",
+      },
+      packageManagerPin: oldPackageManager,
+    });
+
+    await expect(validateActiveSourceProvenance(test.request)).resolves.toMatchObject({
+      buildIdentity: {
+        frontendOutputDigest: null,
+        markerSchemaVersion: 2,
+        packageManager: oldPackageManager,
+        toolchain: { node: "22.22.0", pnpm: "9.14.4", uv: "0.10.0" },
+      },
+      requiresRebuild: true,
+      revision,
+    });
+    expect(test.snapshotSourceTree).not.toHaveBeenCalled();
+  });
+
+  it("accepts an older valid bound build and marks it for a same-revision rebuild", async () => {
+    const oldPackageManager = "pnpm@9.14.4+sha512.legacy";
+    const test = fixture({
+      markerOverrides: {
+        node: "22.22.0",
+        packageManager: oldPackageManager,
+        pnpm: "9.14.4",
+        uv: "0.10.0",
+      },
+      packageManagerPin: oldPackageManager,
+    });
+
+    await expect(validateActiveSourceProvenance(test.request)).resolves.toMatchObject({
+      buildIdentity: {
+        frontendOutputDigest,
+        markerSchemaVersion: 3,
+        packageManager: oldPackageManager,
+      },
+      requiresRebuild: true,
+      revision,
+    });
+  });
+
+  it.each([
+    ["missing", "missing"],
+    ["mutated", "mutated"],
+  ] as const)("rejects %s terminal output before returning trusted provenance", async (_label, frontendOutput) => {
+    const test = fixture({ frontendOutput });
+
+    await expect(validateActiveSourceProvenance(test.request)).rejects.toThrow(/terminal|output|dist|identity/i);
   });
 
   it.each([
@@ -1275,10 +1392,12 @@ describe("active source provenance", () => {
     await expect(validateActiveSourceProvenance(test.request)).resolves.toEqual({
       archiveFinalOrigin: archiveOrigin,
       archiveSha256,
+      buildIdentity: currentBuildIdentity,
       canonicalPath: activeSource,
       contentIdentity: sourceInputDigest,
       directoryIdentity: { dev: 9, ino: 90 },
       provenance: "github-archive",
+      requiresRebuild: false,
       revision,
     });
     expect(test.command).not.toHaveBeenCalled();

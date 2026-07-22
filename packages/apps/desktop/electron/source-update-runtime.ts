@@ -22,6 +22,10 @@ import { createSourceUpdater, type SourceUpdater, type SourceUpdaterLifecycle } 
 import type { DesktopPaths } from "./paths";
 import { sourceContentIdentityKey } from "./source-provenance";
 import type { createUpdateState } from "./state";
+import {
+  createWindowsSourceFilesystemBoundary,
+  type WindowsSourceFilesystemBoundary,
+} from "./windows-source-filesystem";
 
 type SourceUpdateState = ReturnType<typeof createUpdateState>;
 
@@ -80,6 +84,9 @@ export interface SourceUpdateRuntimeOptions {
   platform: NodeJS.Platform;
   singletonAuthorised: boolean;
   state: SourceUpdateState;
+  windowsSourceFilesystem?: WindowsSourceFilesystemBoundary;
+  windowsSourceFilesystemHelperSha256?: string;
+  windowsSourceFilesystemHelper?: string;
 }
 
 export interface SourceUpdateRuntime {
@@ -110,19 +117,48 @@ export function createSourceUpdateRuntime(options: SourceUpdateRuntimeOptions): 
     singletonAuthorised: options.singletonAuthorised,
     sourceRoot: options.paths.sourceRoot,
   });
-  const safeRemove = createSafeDirectoryRemover({
-    bootstrapResources: options.bootstrapResources,
-    dependencies: options.dependencies,
-    operationLease,
+  const windowsSourceFilesystem = options.platform === "win32"
+    ? options.windowsSourceFilesystem ?? createWindowsSourceFilesystemBoundary({
+        dependencies: options.dependencies,
+        expectedHelperSha256: options.windowsSourceFilesystemHelperSha256 ?? "",
+        helper: options.windowsSourceFilesystemHelper ?? "",
+        operationLease,
+      })
+    : undefined;
+  const safeRemove = options.platform === "win32"
+    ? async ({ expected, quarantine, target }: {
+        expected: { nativeIdentity?: string };
+        quarantine: string;
+        target: string;
+      }): Promise<{ status: "quarantined" }> => {
+        if (!windowsSourceFilesystem || !expected.nativeIdentity) {
+          throw new Error("Windows source cleanup requires an exact native directory identity.");
+        }
+        await windowsSourceFilesystem.quarantineDirectory({
+          expectedNativeIdentity: expected.nativeIdentity,
+          quarantine,
+          target,
+        });
+        return { status: "quarantined" };
+      }
+    : createSafeDirectoryRemover({
+        bootstrapResources: options.bootstrapResources,
+        dependencies: options.dependencies,
+        operationLease,
+        platform: options.platform,
+        pythonExecutable: candidatePythonPath(options.paths.activeSource),
+      });
+  const promotionFileSystem = createNodeSourcePromotionFileSystem({
     platform: options.platform,
-    pythonExecutable: candidatePythonPath(options.paths.activeSource),
+    promoteAbsent: options.dependencies.fileSystem.promoteAbsent,
+    safeRemove,
+    ...(windowsSourceFilesystem ? { windows: windowsSourceFilesystem } : {}),
   });
-  const promotionFileSystem = createNodeSourcePromotionFileSystem({ platform: options.platform, safeRemove });
   const cleanup = createNodeSourceUpdaterCleanup({
     fileSystem: promotionFileSystem,
     isolationRoot,
     platform: options.platform,
-    safeRemovalSupported: options.platform !== "win32",
+    safeRemovalSupported: options.platform !== "win32" || promotionFileSystem.supportsDurableWindowsMutations === true,
     sourceRoot: options.paths.sourceRoot,
     workspace: options.paths.workspace,
   });

@@ -10,26 +10,31 @@
     "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs --dev && electron .",
-    "start": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && electron .",
+    "dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs --dev && electron .",
+    "start": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && electron .",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit",
-    "test": "vitest run --config vitest.electron.config.ts",
-    "test:electron": "vitest run --config vitest.electron.config.ts",
+    "test": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && vitest run --config vitest.electron.config.ts",
+    "test:electron": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && vitest run --config vitest.electron.config.ts",
+    "test:atomic-promoter": "node scripts/build-atomic-promoter.mjs && node scripts/run-required-atomic-promoter-test.mjs",
+    "test:windows-source-fs": "vitest run --config vitest.electron.config.ts electron/windows-source-filesystem.windows.test.ts",
     "verify:bootstrap-manifest": "node scripts/generate-bootstrap-tool-manifest.mjs --check",
     "probe:bootstrap": "node scripts/run-bootstrap-probe.mjs",
-    "bundle": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs",
-    "bundle:dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs --dev",
+    "bundle": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs",
+    "bundle:dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs --dev",
+    "build:atomic-promoter": "node scripts/build-atomic-promoter.mjs",
     "build:windows-supervisor": "node scripts/build-windows-job-supervisor.mjs",
-    "build": "node scripts/generate-bootstrap-tool-manifest.mjs --check && tsc -p tsconfig.electron.json --noEmit && vitest run --config vitest.electron.config.ts && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs",
-    "pack:dir": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --mac --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
-    "pack:dir:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
-    "pack:mac": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --mac dmg --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
-    "pack:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
-    "pack:linux:x64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --x64 --publish never && node scripts/verify-electron-package.mjs",
-    "pack:linux:arm64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --arm64 --publish never && node scripts/verify-electron-package.mjs",
+    "build": "node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && tsc -p tsconfig.electron.json --noEmit && vitest run --config vitest.electron.config.ts && node scripts/bundle-electron.mjs",
+    "pack:dir": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --mac --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
+    "pack:dir:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --dir --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:mac": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --mac dmg --universal --publish never --config.mac.identity=- --config.mac.hardenedRuntime=false && node scripts/verify-electron-package.mjs",
+    "pack:win": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --win nsis --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:linux:x64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --x64 --publish never && node scripts/verify-electron-package.mjs",
+    "pack:linux:arm64": "node scripts/clean-electron-output.mjs && node scripts/generate-bootstrap-tool-manifest.mjs --check && node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs && node scripts/run-electron-builder.mjs --linux AppImage --arm64 --publish never && node scripts/verify-electron-package.mjs",
     "verify:package": "node scripts/verify-electron-package.mjs"
   },
   "dependencies": {
+    "sigstore": "5.0.0",
+    "snappyjs": "0.7.0",
     "tar": "7.5.20",
     "yauzl": "2.10.0"
   },
@@ -37,6 +42,7 @@
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@types/node": "^22.20.0",
+    "@types/snappyjs": "0.7.1",
     "@types/yauzl": "2.10.3",
     "electron": "40.10.2",
     "electron-builder": "^26.8.1",
@@ -57,7 +63,8 @@
       "output": "release/electron"
     },
     "files": [
-      "dist/**",
+      "dist/electron-main.mjs",
+      "dist/electron-preload.js",
       "splash/**",
       "package.json"
     ],
@@ -111,6 +118,17 @@
       "category": "public.app-category.finance",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "signIgnore": "flinttrade-fs-promoter\\.node$",
+      "extraResources": [
+        {
+          "from": "dist/native/darwin-universal/flinttrade-fs-promoter.node",
+          "to": "bootstrap/flinttrade-fs-promoter.node"
+        },
+        {
+          "from": "dist/native/darwin-universal/flinttrade-fs-promoter.sha256.json",
+          "to": "bootstrap/flinttrade-fs-promoter.sha256.json"
+        }
+      ],
       "target": [
         "dmg"
       ]
@@ -120,6 +138,14 @@
         {
           "from": "dist/native/win32-x64/flinttrade-job-supervisor.exe",
           "to": "bootstrap/flinttrade-job-supervisor.exe"
+        },
+        {
+          "from": "dist/native/win32-x64/flinttrade-source-fs.exe",
+          "to": "bootstrap/flinttrade-source-fs.exe"
+        },
+        {
+          "from": "dist/native/win32-x64/flinttrade-source-fs.sha256.json",
+          "to": "bootstrap/flinttrade-source-fs.sha256.json"
         }
       ],
       "target": [
@@ -128,6 +154,16 @@
     },
     "linux": {
       "category": "Office",
+      "extraResources": [
+        {
+          "from": "dist/native/linux-${arch}/flinttrade-fs-promoter.node",
+          "to": "bootstrap/flinttrade-fs-promoter.node"
+        },
+        {
+          "from": "dist/native/linux-${arch}/flinttrade-fs-promoter.sha256.json",
+          "to": "bootstrap/flinttrade-fs-promoter.sha256.json"
+        }
+      ],
       "target": [
         "AppImage"
       ]

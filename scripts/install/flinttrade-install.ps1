@@ -31,6 +31,7 @@ $LegacyShellInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "F
 $DefaultElectronInstallDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "Programs\FlintTrade" } else { "" }
 $ReleaseTagPattern = '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
 $script:ReleaseAssetVerified = $false
+$script:UpdateAttestationBound = $false
 $script:WindowsUpdateInstallDir = $null
 $script:VerifiedLegacyShell = $null
 
@@ -495,6 +496,7 @@ function Signal-UpdateHandoff {
     if ($DryRun -or -not $env:FLINTTRADE_UPDATE_HANDOFF) { return }
     if (-not $Update) { Fail "The verified installer handoff requires explicit -Update mode." }
     if (-not $script:ReleaseAssetVerified) { Fail "Refusing an updater handoff before release checksum verification." }
+    if (-not $script:UpdateAttestationBound) { Fail "Refusing an updater handoff before app-verified release attestation binding." }
     $parentPid = 0
     if (-not [int]::TryParse($env:FLINTTRADE_UPDATE_PARENT_PID, [ref]$parentPid) -or $parentPid -le 1 -or $parentPid -eq $PID) {
         Fail "The verified installer handoff requires a valid exact parent PID."
@@ -579,6 +581,21 @@ function Install-BinaryRelease {
     try {
         Invoke-WebRequest -Uri $sumsAsset.browser_download_url -OutFile $sumsPath -UseBasicParsing
         $expectedHash = Get-Checksum (Get-Content -LiteralPath $sumsPath -Raw) $assetName
+        if ($env:FLINTTRADE_UPDATE_HANDOFF) {
+            $attestedName = $env:FLINTTRADE_UPDATE_ASSET_NAME
+            $attestedHash = $env:FLINTTRADE_UPDATE_ASSET_SHA256
+            if ($attestedName -cne $assetName) {
+                Fail "The selected installer name did not match the app-verified release attestation."
+            }
+            if (-not $attestedHash -or $attestedHash -cnotmatch '^[0-9a-f]{64}$') {
+                Fail "The app-verified release attestation digest was invalid."
+            }
+            if ($expectedHash -cne $attestedHash) {
+                Fail "SHA256SUMS.txt did not match the app-verified release attestation digest."
+            }
+            $expectedHash = $attestedHash
+            $script:UpdateAttestationBound = $true
+        }
         if ($DryRun) {
             Say "DRY-RUN: would download $assetName"
             Say "DRY-RUN: $($asset.browser_download_url)"
@@ -660,6 +677,14 @@ function Assert-SourcePrerequisites {
     if (-not (Have corepack) -and -not (Have npx) -and -not $hasPinnedPnpm) {
         $missing += "pnpm $PinnedPnpmVersion through Corepack, npx, or a matching binary"
     }
+    $compiler = if ($env:WINDIR) {
+        Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+    } else {
+        $null
+    }
+    if (-not $compiler -or -not (Test-Path -LiteralPath $compiler -PathType Leaf)) {
+        $missing += "the trusted .NET Framework x64 compiler required for native desktop helpers"
+    }
     if ($missing.Count -gt 0) {
         Warn "Missing source-build prerequisites:"
         $missing | ForEach-Object { Warn "  - $_" }
@@ -668,7 +693,7 @@ function Assert-SourcePrerequisites {
 }
 
 function Build-FromSource {
-    Say "Source-build mode packages only the Electron shell. Checking Git, Node and pnpm..."
+    Say "Source-build mode packages only the Electron shell. Checking Git, Node, pnpm and the native compiler..."
     Assert-VerifiedLegacyShell
     Assert-WindowsFreshInstallAdmission
     Assert-IsolatedSourceBuildTarget

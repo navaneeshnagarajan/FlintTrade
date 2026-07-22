@@ -15,6 +15,27 @@ const windowsSupervisorBuilder = path.resolve(
   "scripts",
   "build-windows-job-supervisor.mjs",
 );
+const atomicPromoterBuilder = path.resolve(
+  import.meta.dirname,
+  "..",
+  "scripts",
+  "build-atomic-promoter.mjs",
+);
+const windowsSourceFilesystem = path.resolve(
+  import.meta.dirname,
+  "..",
+  "native",
+  "windows-source-filesystem",
+  "Program.cs",
+);
+const windowsSupervisor = path.resolve(
+  import.meta.dirname,
+  "..",
+  "native",
+  "windows-job-supervisor",
+  "Program.cs",
+);
+const electronBundler = path.resolve(import.meta.dirname, "..", "scripts", "bundle-electron.mjs");
 const desktopPackage = path.resolve(import.meta.dirname, "..", "package.json");
 
 describe("packaged bootstrap entrypoints", () => {
@@ -146,7 +167,102 @@ exit 0
     expect(metadata.scripts["pack:dir:win"]).not.toContain("pnpm run");
     expect(builder).toContain('"Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"');
     expect(builder).toContain("execFileSync(");
+    expect(builder).toContain("windows-source-filesystem");
+    expect(builder).toContain("flinttrade-source-fs.exe");
+    expect(builder).toContain("flinttrade-source-fs.sha256.json");
+    expect(builder).toContain('createHash("sha256")');
     expect(builder).not.toContain("shell:");
+  });
+
+  it("builds, packages, and verifies the digest-bound POSIX atomic promoter", () => {
+    const builder = readFileSync(atomicPromoterBuilder, "utf8");
+    const metadata = JSON.parse(readFileSync(desktopPackage, "utf8")) as {
+      build: {
+        files: string[];
+        linux: { extraResources: Array<{ from: string; to: string }> };
+        mac: { extraResources: Array<{ from: string; to: string }>; signIgnore: string };
+      };
+      scripts: Record<string, string>;
+    };
+
+    for (const script of ["dev", "start", "test", "test:electron", "bundle", "bundle:dev", "build", "pack:mac", "pack:linux:x64", "pack:linux:arm64", "probe:bootstrap"]) {
+      if (script === "probe:bootstrap") {
+        expect(readFileSync(probeRunner, "utf8")).toContain("build-atomic-promoter.mjs");
+      } else {
+        expect(metadata.scripts[script]).toContain("build-atomic-promoter.mjs");
+      }
+    }
+    expect(metadata.scripts["test:atomic-promoter"]).toContain("run-required-atomic-promoter-test.mjs");
+    expect(builder).toContain('"flinttrade-fs-promoter.node"');
+    expect(builder).toContain('"flinttrade-fs-promoter.sha256.json"');
+    expect(builder).toContain('"darwin-universal"');
+    expect(builder).toContain('`linux-${process.arch}`');
+    expect(builder).toContain("rmSync(outputDirectory, { force: true, recursive: true })");
+    expect(builder).toContain('const codesign = "/usr/bin/codesign"');
+    expect(builder).toContain("FLINTTRADE_NATIVE_MAC_IDENTITY");
+    expect(metadata.build.mac.signIgnore).toBe("flinttrade-fs-promoter\\.node$");
+    expect(metadata.build.files).not.toContain("dist/**");
+    expect(metadata.build.files).toEqual(expect.arrayContaining([
+      "dist/electron-main.mjs",
+      "dist/electron-preload.js",
+    ]));
+    for (const resources of [metadata.build.mac.extraResources, metadata.build.linux.extraResources]) {
+      expect(resources.some(({ to }) => to === "bootstrap/flinttrade-fs-promoter.node")).toBe(true);
+      expect(resources.some(({ to }) => to === "bootstrap/flinttrade-fs-promoter.sha256.json")).toBe(true);
+    }
+  });
+
+  it("binds the Windows source helper build digest through the exact Job-supervised launch", () => {
+    const supervisor = readFileSync(windowsSupervisor, "utf8");
+    const bundler = readFileSync(electronBundler, "utf8");
+
+    expect(supervisor).toContain('args[index] == "--target-sha256"');
+    expect(supervisor).toContain("OpenAndVerifyTarget(options)");
+    expect(supervisor).toContain("HashHandle(handle)");
+    expect(supervisor).toContain("FILE_SHARE_READ,");
+    expect(supervisor).toContain("CreateProcessW(");
+    expect(bundler).toContain("__FLINTTRADE_WINDOWS_SOURCE_FS_SHA256__");
+    expect(bundler).toContain("flinttrade-source-fs.sha256.json");
+  });
+
+  it("packages the native Windows file-ID and handle-bound source mutation boundary", () => {
+    const helper = readFileSync(windowsSourceFilesystem, "utf8");
+    const metadata = JSON.parse(readFileSync(desktopPackage, "utf8")) as {
+      build: { win: { extraResources: Array<{ from: string; to: string }> } };
+    };
+
+    expect(helper).toContain("GetFileInformationByHandleEx");
+    expect(helper).toContain("FILE_ID_INFO_CLASS");
+    expect(helper).toContain("FILE_FLAG_OPEN_REPARSE_POINT");
+    expect(helper).toContain("SetFileInformationByHandle");
+    expect(helper).toContain("FILE_RENAME_INFO_CLASS");
+    expect(helper).toContain("FILE_DISPOSITION_INFO_CLASS");
+    expect(helper).toContain("exclusiveMutation ? 0 : FILE_SHARE_DELETE");
+    expect(helper).toContain("(shareWrite ? FILE_SHARE_WRITE : 0)");
+    expect(helper).toContain("OpenJournalMutationPinned(temporary, false, true)");
+    expect(helper).toContain("OpenJournalMutationPinned(path, true, false)");
+    expect(helper).toContain("FlushPinnedDirectory(parentEntry)");
+    expect(helper).toContain("DURABILITY_UNAVAILABLE");
+    expect(helper).toContain("AMBIGUOUS_EVIDENCE");
+    expect(helper).toContain('options.Command == "quarantine-directory"');
+    expect(helper).toContain("OpenExpectedJournalEntry(target, expectedTarget)");
+    expect(helper).toContain("RequireExpectedJournalState(");
+    expect(helper.match(/if \(!expectedPrevious\.IsMissing\)/g)).toHaveLength(2);
+    expect(helper).not.toContain("MarkDelete(previousEntry)");
+    expect(helper).toContain("Marshal.AllocHGlobal(1)");
+    expect(helper).toContain("Marshal.WriteByte(information, 0, 1)");
+    expect(helper).not.toContain("FindFirstFileW");
+    expect(helper).not.toContain("FindNextFileW");
+    expect(helper).not.toContain("DeleteFileW");
+    expect(helper).not.toContain("RemoveDirectoryW");
+    expect(metadata.build.win.extraResources).toContainEqual({
+      from: "dist/native/win32-x64/flinttrade-source-fs.exe",
+      to: "bootstrap/flinttrade-source-fs.exe",
+    });
+    expect(metadata.build.win.extraResources).toContainEqual({
+      from: "dist/native/win32-x64/flinttrade-source-fs.sha256.json",
+      to: "bootstrap/flinttrade-source-fs.sha256.json",
+    });
   });
 
   it.runIf(process.platform === "win32" || Boolean(process.env.CI))(

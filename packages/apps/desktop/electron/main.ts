@@ -37,6 +37,7 @@ import { createNativeNotificationRelay } from "./notifications";
 import { resolveDesktopPaths } from "./paths";
 import { createSourceOperationCoordinator } from "./source-operation";
 import { createSourceUpdateRuntime } from "./source-update-runtime";
+import { createGithubShellAttestationVerifier } from "./shell-attestation";
 import { createGithubShellReleaseSource, createNodeShellInstallerHandoff } from "./shell-update-io";
 import { assertShellUserDataSeparated, resolveShellUserDataPath } from "./shell-paths";
 import { createShellUpdater } from "./shell-updater";
@@ -44,6 +45,10 @@ import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-pr
 import { createStartupRecoveryController } from "./startup-recovery";
 import { createBackendState, createBootstrapState, createUpdateState, type UpdateKind } from "./state";
 import { createDesktopTray } from "./tray";
+
+declare const __FLINTTRADE_WINDOWS_SOURCE_FS_SHA256__: string;
+declare const __FLINTTRADE_POSIX_ATOMIC_PROMOTER_SHA256__: string;
+declare const __FLINTTRADE_POSIX_ATOMIC_PROMOTER_TARGET__: string;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
@@ -83,6 +88,69 @@ if (!hasSingleInstanceLock) {
   const windowsJobSupervisor = app.isPackaged
     ? path.join(bootstrapResources, "flinttrade-job-supervisor.exe")
     : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-job-supervisor.exe");
+  const windowsSourceFilesystemHelper = app.isPackaged
+    ? path.join(bootstrapResources, "flinttrade-source-fs.exe")
+    : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-source-fs.exe");
+  const windowsSourceFilesystemHelperSha256 = process.platform === "win32"
+    ? (() => {
+        const digestPath = app.isPackaged
+          ? path.join(bootstrapResources, "flinttrade-source-fs.sha256.json")
+          : path.join(appRoot, "dist", "native", "win32-x64", "flinttrade-source-fs.sha256.json");
+        const value = JSON.parse(readFileSync(digestPath, "utf8")) as Record<string, unknown>;
+        if (
+          value.schemaVersion !== 1 ||
+          value.executable !== "flinttrade-source-fs.exe" ||
+          typeof value.sha256 !== "string" ||
+          !/^[0-9a-f]{64}$/.test(value.sha256) ||
+          Object.keys(value).length !== 3
+        ) {
+          throw new Error("Windows source filesystem helper digest manifest is invalid.");
+        }
+        if (value.sha256 !== __FLINTTRADE_WINDOWS_SOURCE_FS_SHA256__) {
+          throw new Error("Windows source filesystem helper digest differs from the bundled build identity.");
+        }
+        return __FLINTTRADE_WINDOWS_SOURCE_FS_SHA256__;
+      })()
+    : undefined;
+  const posixAtomicPromoter = process.platform === "win32"
+    ? undefined
+    : (() => {
+        if (process.platform !== "darwin" && process.platform !== "linux") {
+          throw new Error(`POSIX atomic promotion is unsupported on ${process.platform}.`);
+        }
+        const target = process.platform === "darwin" ? "darwin-universal" : `linux-${process.arch}`;
+        const helper = app.isPackaged
+          ? path.join(bootstrapResources, "flinttrade-fs-promoter.node")
+          : path.join(appRoot, "dist", "native", target, "flinttrade-fs-promoter.node");
+        const digestPath = app.isPackaged
+          ? path.join(bootstrapResources, "flinttrade-fs-promoter.sha256.json")
+          : path.join(appRoot, "dist", "native", target, "flinttrade-fs-promoter.sha256.json");
+        const value = JSON.parse(readFileSync(digestPath, "utf8")) as Record<string, unknown>;
+        if (
+          value.schemaVersion !== 1 ||
+          value.executable !== "flinttrade-fs-promoter.node" ||
+          value.target !== target ||
+          typeof value.sha256 !== "string" ||
+          !/^[0-9a-f]{64}$/.test(value.sha256) ||
+          Object.keys(value).sort().join(",") !== "executable,schemaVersion,sha256,target" ||
+          target !== __FLINTTRADE_POSIX_ATOMIC_PROMOTER_TARGET__ ||
+          value.sha256 !== __FLINTTRADE_POSIX_ATOMIC_PROMOTER_SHA256__
+        ) {
+          throw new Error("POSIX atomic-promoter digest differs from the bundled build identity.");
+        }
+        return {
+          expectedHelperSha256: __FLINTTRADE_POSIX_ATOMIC_PROMOTER_SHA256__,
+          helper,
+          protocol: "posix" as const,
+        };
+      })();
+  const atomicPromotion = process.platform === "win32"
+    ? {
+        expectedHelperSha256: windowsSourceFilesystemHelperSha256 ?? "",
+        helper: windowsSourceFilesystemHelper,
+        protocol: "windows-source-fs" as const,
+      }
+    : posixAtomicPromoter;
   if (bootstrapManifest.schemaVersion !== 1) throw new Error("Unsupported bootstrap tool manifest schema.");
 
   const bootstrapState = createBootstrapState();
@@ -93,6 +161,7 @@ if (!hasSingleInstanceLock) {
   const operationLeaseTarget = path.join(desktopPaths.sourceRoot, ".flinttrade-bootstrap-operation.lock");
   const bootIdentity = currentBootIdentity();
   const bootstrapDependencies = createNodeBootstrapDependencies(process.platform, {
+    ...(atomicPromotion ? { atomicPromotion } : {}),
     operationLeaseTarget,
     windowsJobSupervisor,
   });
@@ -159,6 +228,8 @@ if (!hasSingleInstanceLock) {
     platform: process.platform,
     singletonAuthorised: hasSingleInstanceLock,
     state: sourceUpdateState,
+    windowsSourceFilesystemHelper,
+    ...(windowsSourceFilesystemHelperSha256 ? { windowsSourceFilesystemHelperSha256 } : {}),
   });
   let sourceRuntimePrepared = false;
   const startupController = createStartupRecoveryController({
@@ -194,6 +265,10 @@ if (!hasSingleInstanceLock) {
     : path.resolve(appRoot, "..", "..", "..", "scripts");
   shellUpdater = createShellUpdater({
     arch: process.arch,
+    attestations: createGithubShellAttestationVerifier({
+      cachePath: path.join(shellUserData, "shell-updates", "sigstore"),
+      fetcher: (input, init) => net.fetch(input, init),
+    }),
     currentVersion: app.getVersion(),
     enabled: app.isPackaged,
     handoff: createNodeShellInstallerHandoff({

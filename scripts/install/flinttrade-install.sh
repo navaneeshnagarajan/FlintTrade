@@ -27,6 +27,7 @@ DRY_RUN="${FLINTTRADE_DRY_RUN:-0}"
 DOWNLOADED_ASSET_PATH=""
 DMG_MOUNT_DIR=""
 RELEASE_ASSET_VERIFIED=0
+UPDATE_ATTESTATION_BOUND=0
 ACTIVE_SWAP_BACKUP=""
 ACTIVE_SWAP_HAD_PREVIOUS=0
 ACTIVE_SWAP_PENDING=0
@@ -295,6 +296,8 @@ signal_update_handoff() {
   [ -n "$marker" ] || return 0
   [ "$RELEASE_ASSET_VERIFIED" = "1" ] \
     || die "Refusing an updater handoff before release checksum verification."
+  [ "$UPDATE_ATTESTATION_BOUND" = "1" ] \
+    || die "Refusing an updater handoff before app-verified release attestation binding."
   [ -x /bin/ps ] && [ -x /bin/sleep ] && [ -x /usr/bin/tr ] \
     || die "The verified installer handoff cannot inspect the exact parent on this system."
   if [ -r "/proc/${FLINTTRADE_UPDATE_PARENT_PID:-}/stat" ]; then
@@ -935,6 +938,21 @@ download_release_asset() {
 
   sums="$(curl -fsSL "$sums_url")" || die "Could not download SHA256SUMS.txt from release $tag."
   expected="$(checksum_for_asset "$sums" "$asset_name")"
+  if [ -n "${FLINTTRADE_UPDATE_HANDOFF:-}" ]; then
+    local attested_name="${FLINTTRADE_UPDATE_ASSET_NAME:-}"
+    local attested_hash="${FLINTTRADE_UPDATE_ASSET_SHA256:-}"
+    [ "$attested_name" = "$asset_name" ] \
+      || die "The selected installer name did not match the app-verified release attestation."
+    [ "${#attested_hash}" -eq 64 ] \
+      || die "The app-verified release attestation digest was invalid."
+    case "$attested_hash" in
+      *[!0-9a-f]*) die "The app-verified release attestation digest was invalid." ;;
+    esac
+    [ "$(lowercase "$expected")" = "$attested_hash" ] \
+      || die "SHA256SUMS.txt did not match the app-verified release attestation digest."
+    expected="$attested_hash"
+    UPDATE_ATTESTATION_BOUND=1
+  fi
   if [ "$DRY_RUN" = "1" ]; then
     say "DRY-RUN: would download $asset_name"
     say "DRY-RUN: $asset_url"
@@ -1261,7 +1279,7 @@ validate_source_build_target() {
 }
 
 check_source_prerequisites() {
-  local missing=() node_version node_major node_minor
+  local missing=() node_version node_major node_minor node_header compiler
   need git || missing+=("Git from https://git-scm.com")
   if need node; then
     node_version="$(node -p 'process.versions.node')"
@@ -1270,9 +1288,17 @@ check_source_prerequisites() {
     if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt 12 ]; }; then
       missing+=("Node.js >= 22.12 (found v$node_version)")
     fi
+    node_header="$(node -p 'require("path").resolve(require("path").dirname(process.execPath), "..", "include", "node", "node_api.h")')"
+    [ -f "$node_header" ] || missing+=("Node.js N-API headers (missing $node_header)")
   else
     missing+=("Node.js >= 22.12")
   fi
+  case "$(uname -s)" in
+    Darwin) compiler=/usr/bin/clang ;;
+    Linux) compiler=/usr/bin/cc ;;
+    *) compiler= ;;
+  esac
+  [ -n "$compiler" ] && [ -x "$compiler" ] || missing+=("the platform C compiler required for atomic source promotion")
   if ! need corepack && ! need npx \
       && { ! need pnpm || [ "$(pnpm --version 2>/dev/null)" != "$PINNED_PNPM_VERSION" ]; }; then
     missing+=("pnpm $PINNED_PNPM_VERSION through Corepack, npx, or a matching binary")
@@ -1288,7 +1314,7 @@ check_source_prerequisites() {
 build_from_source() {
   local os_name="$(uname -s)" arch version package
   case "$os_name" in Darwin|Linux) ;; *) die "Unsupported OS '$os_name'. On Windows, use install.ps1." ;; esac
-  say "Source-build mode packages only the Electron shell. Checking Git, Node and pnpm..."
+  say "Source-build mode packages only the Electron shell. Checking Git, Node, pnpm and the native compiler..."
   validate_source_build_target
   check_source_prerequisites
   validate_source_origin

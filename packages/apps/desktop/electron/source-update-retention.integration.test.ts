@@ -12,6 +12,7 @@ import {
   ACTIVE_SOURCE_NAME,
   JOURNAL_NAME,
   LAST_KNOWN_GOOD_NAME,
+  createNodeSourcePromotionFileSystem,
 } from "./source-promotion";
 
 const OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -64,7 +65,7 @@ it.runIf(process.platform !== "win32")(
         platform: "node",
         stdin: {
           contents: String.raw`
-            import { readFile } from "node:fs/promises"
+            import { lstat, readFile, rename } from "node:fs/promises"
             import path from "node:path"
 
             import { createNodeBootstrapDependencies, currentBootIdentity } from "./bootstrap-io"
@@ -96,7 +97,24 @@ it.runIf(process.platform !== "win32")(
             const candidateSource = path.join(sourceRoot, "FlintTrade.update-" + operationId)
             const operationLeaseTarget = path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock")
             const isolationRoot = path.join(workspace, "isolation")
-            const dependencies = createNodeBootstrapDependencies(process.platform, { operationLeaseTarget })
+            const dependencies = createNodeBootstrapDependencies(process.platform, {
+              operationLeaseTarget,
+              testHooks: {
+                testAtomicPromote: async (source, destination, expected) => {
+                  const metadata = await lstat(source)
+                  if (metadata.dev !== expected.dev || metadata.ino !== expected.ino) {
+                    throw new Error("fixture no-replace source identity mismatch")
+                  }
+                  try {
+                    await lstat(destination)
+                    throw Object.assign(new Error("fixture no-replace destination exists"), { code: "EEXIST" })
+                  } catch (error) {
+                    if (error.code !== "ENOENT") throw error
+                  }
+                  await rename(source, destination)
+                },
+              },
+            })
             const operationLease = createRuntimeSourceUpdaterOperationLease({
               bootIdentity: currentBootIdentity(),
               dependencies,
@@ -104,7 +122,9 @@ it.runIf(process.platform !== "win32")(
               sourceRoot,
             })
             const coordinator = createSourceOperationCoordinator()
-            const baseFileSystem = createNodeSourcePromotionFileSystem()
+            const baseFileSystem = createNodeSourcePromotionFileSystem({
+              promoteAbsent: dependencies.fileSystem.promoteAbsent,
+            })
             let injectFailure = mode === "old"
             const failedPhase = scenario === "promoted" ? "promoted-boot-after" : "rollback-boot-after"
             const fileSystem = {
@@ -306,7 +326,9 @@ it.runIf(process.platform !== "win32")(
         });
         expect(oldResult.inventoryCalls).toBeGreaterThan(0);
         await expect(access(operationLeaseTarget)).resolves.toBeUndefined();
-        const journal = JSON.parse(await readFile(journalPath, "utf8")) as Record<string, unknown>;
+        const journalContents = await createNodeSourcePromotionFileSystem().readJournal(journalPath);
+        if (journalContents === null) throw new Error("retained live-boot journal is unexpectedly tombstoned");
+        const journal = JSON.parse(journalContents) as Record<string, unknown>;
         expect(journal).toMatchObject(
           scenario === "promoted"
             ? { phase: "promoted-boot-before", promotedBoot: "not-attempted" }
@@ -325,7 +347,8 @@ it.runIf(process.platform !== "win32")(
           leaseState: "idle",
           outcomeStatus: scenario === "promoted" ? "promoted" : "rolled-back",
         });
-        await expect(access(journalPath)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(createNodeSourcePromotionFileSystem().readJournal(journalPath)).resolves.toBeNull();
+        await expect(access(journalPath)).resolves.toBeUndefined();
         await expect(access(operationLeaseTarget)).rejects.toMatchObject({ code: "ENOENT" });
         await expect(readFile(path.join(activeSource, "release.txt"), "utf8")).resolves.toBe(
           scenario === "promoted" ? "candidate\n" : "original\n",

@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, renameSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
-import { access, appendFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { access, appendFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import https from "node:https";
 import { EventEmitter, once } from "node:events";
 import type { IncomingMessage } from "node:http";
@@ -15,9 +15,11 @@ import {
   applyWindowsSupervisorLocalState,
   buildWindowsSupervisorInvocation,
   createNodeBootstrapDependencies,
+  currentBootIdentity,
   minimalChildEnvironment,
   parseWindowsSupervisorProof,
   resolveWindowsExecutable,
+  systemGitCandidates,
   syncDirectoryForDurability,
   validateArchiveEntries,
   validateTarLinkEntries,
@@ -28,6 +30,38 @@ const roots: string[] = [];
 
 async function sha256File(target: string): Promise<string> {
   return createHash("sha256").update(await readFile(target)).digest("hex");
+}
+
+const TEST_WINDOWS_NATIVE_IDENTITY = "0000000000000001:00000000000000000000000000000001";
+const TEST_WINDOWS_NATIVE_IDENTITY_DRIFT = "0000000000000002:00000000000000000000000000000002";
+
+async function testAtomicPromote(
+  source: string,
+  destination: string,
+  expected: { dev: number; ino: number },
+): Promise<void> {
+  const sourceMetadata = await lstat(source);
+  if (sourceMetadata.dev !== expected.dev || sourceMetadata.ino !== expected.ino) {
+    throw new Error("test atomic promotion source identity mismatch");
+  }
+  try {
+    await lstat(destination);
+    const occupied = new Error("Promotion destination already exists; refusing to replace it.") as NodeJS.ErrnoException;
+    occupied.code = "EEXIST";
+    throw occupied;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await rename(source, destination);
+}
+
+function atomicPromotionTestHooks() {
+  return {
+    testAtomicPromote,
+    async testNativeDirectoryIdentity() {
+      return TEST_WINDOWS_NATIVE_IDENTITY;
+    },
+  };
 }
 
 function fakeHttpsRequest(
@@ -111,7 +145,80 @@ function fakeUnsettledHttpsResponse(statusCode: number, headers: Record<string, 
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { force: true, maxRetries: 8, recursive: true, retryDelay: 25 })),
+  );
+});
+
+describe("boot-session identity", () => {
+  it.runIf(["darwin", "linux", "win32"].includes(process.platform))(
+    "reads one stable identity from the current operating-system boot",
+    () => {
+      const first = currentBootIdentity();
+      expect(currentBootIdentity()).toBe(first);
+      expect(first).toMatch(new RegExp(`^${process.platform}:`));
+    },
+  );
+
+  it("uses the Linux kernel boot UUID", () => {
+    const readTextFile = vi.fn(() => "550e8400-e29b-41d4-a716-446655440000\n");
+    const runFile = vi.fn(() => {
+      throw new Error("Linux boot identity must not execute a helper.");
+    });
+
+    expect(currentBootIdentity("linux", {
+      environment: {},
+      readTextFile,
+      runFile,
+    })).toBe("linux:550e8400-e29b-41d4-a716-446655440000");
+    expect(readTextFile).toHaveBeenCalledWith("/proc/sys/kernel/random/boot_id");
+    expect(runFile).not.toHaveBeenCalled();
+  });
+
+  it("uses the macOS kernel boot-session UUID", () => {
+    const readTextFile = vi.fn(() => {
+      throw new Error("macOS boot identity must not read a Linux proc file.");
+    });
+    const runFile = vi.fn(() => "1FF26852-A2F9-4E02-9430-FE79DE2AEAD0\n");
+
+    expect(currentBootIdentity("darwin", {
+      environment: {},
+      readTextFile,
+      runFile,
+    })).toBe("darwin:1ff26852-a2f9-4e02-9430-fe79de2aead0");
+    expect(runFile).toHaveBeenCalledWith("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"]);
+    expect(readTextFile).not.toHaveBeenCalled();
+  });
+
+  it("uses the Windows operating-system boot timestamp", () => {
+    const readTextFile = vi.fn(() => {
+      throw new Error("Windows boot identity must not read a Linux proc file.");
+    });
+    const runFile = vi.fn(() => "134132876543210000\r\n");
+
+    expect(currentBootIdentity("win32", {
+      environment: { SystemRoot: "C:\\Windows" },
+      readTextFile,
+      runFile,
+    })).toBe("win32:134132876543210000");
+    expect(runFile).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      expect.arrayContaining(["-NoProfile", "-NonInteractive", "-Command"]),
+    );
+    expect(readTextFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["linux", "not-a-kernel-uuid"],
+    ["darwin", "not-a-kernel-uuid"],
+    ["win32", "not-a-file-time"],
+  ] as const)("fails closed for an invalid %s boot identity", (platform, output) => {
+    expect(() => currentBootIdentity(platform, {
+      environment: { SystemRoot: "C:\\Windows" },
+      readTextFile: () => output,
+      runFile: () => output,
+    })).toThrow(`Authoritative ${platform} boot-session identity is unavailable.`);
+  });
 });
 
 describe("bootstrap system boundaries", () => {
@@ -286,9 +393,11 @@ describe("bootstrap system boundaries", () => {
 
   it("constructs the token-bound Windows Job supervisor protocol without shell quoting", () => {
     const token = "ab".repeat(16);
+    const expectedTargetSha256 = "cd".repeat(32);
     const invocation = buildWindowsSupervisorInvocation({
       args: ["plain", "space value", 'quote"value', "trailing\\"],
       cwd: "C:\\Flint Trade\\source",
+      expectedTargetSha256,
       helper: "C:\\Flint\\flinttrade-job-supervisor.exe",
       parentPid: 42,
       target: "C:\\Tools\\node.exe",
@@ -306,6 +415,8 @@ describe("bootstrap system boundaries", () => {
         "42",
         "--cwd",
         "C:\\Flint Trade\\source",
+        "--target-sha256",
+        expectedTargetSha256,
         "--",
         "C:\\Tools\\node.exe",
         "plain",
@@ -317,6 +428,14 @@ describe("bootstrap system boundaries", () => {
     expect(windowsSupervisorControlLine(token, "timeout")).toBe(
       `FLINTTRADE_JOB_TERMINATE\t1\t${token}\ttimeout\n`,
     );
+    expect(() => buildWindowsSupervisorInvocation({
+      args: [],
+      expectedTargetSha256: "CD".repeat(32),
+      helper: "C:\\Flint\\flinttrade-job-supervisor.exe",
+      parentPid: 42,
+      target: "C:\\Tools\\node.exe",
+      token,
+    })).toThrow(/lowercase digest/i);
   });
 
   it.each([
@@ -401,6 +520,71 @@ describe("bootstrap system boundaries", () => {
     ).toBe("C:\\Volume\\git.exe");
   });
 
+  it("derives Windows Git only from the system drive and never from inherited PATH", () => {
+    expect(systemGitCandidates("win32", {
+      PATH: "D:\\attacker-bin",
+      SystemRoot: "C:\\Windows",
+    })).toEqual([
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+      "C:\\Program Files\\Git\\bin\\git.exe",
+    ]);
+    expect(systemGitCandidates("win32", { PATH: "D:\\attacker-bin", SystemRoot: "relative" })).toEqual([]);
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "ignores an inherited PATH Git and executes the identity-bound system Git",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-untrusted-git-"));
+      roots.push(root);
+      const marker = path.join(root, "path-git-executed");
+      await writeFile(
+        path.join(root, "git"),
+        `#!/bin/sh\nprintf compromised > '${marker}'\n`,
+        { mode: 0o755 },
+      );
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        environment: { ...process.env, PATH: root },
+      });
+
+      await expect(
+        dependencies.command.run({ args: ["--version"], command: "git", timeoutMs: 30_000 }),
+      ).resolves.toMatchObject({ contained: true, exitCode: 0, stdout: expect.stringMatching(/^git version /) });
+      await expect(access(marker)).rejects.toThrow();
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "fails Git closed when its captured executable identity changes before spawn",
+    async () => {
+      const candidate = "/trusted/system/git";
+      const captured = {
+        canonicalPath: candidate,
+        ctimeMs: 1,
+        dev: 2,
+        ino: 3,
+        mode: 0o100755,
+        mtimeMs: 4,
+        size: 5,
+      };
+      let inspections = 0;
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          inspectTrustedGit: () => ({ ...captured, size: inspections++ === 0 ? 5 : 6 }),
+        },
+        trustedGitCandidates: [candidate],
+      });
+
+      await expect(dependencies.command.run({ args: ["--version"], command: "git" })).resolves.toEqual({
+        contained: true,
+        exitCode: 127,
+        stderr: "Verified system Git is unavailable.",
+        stderrTruncated: false,
+        stdout: "",
+        stdoutTruncated: false,
+      });
+    },
+  );
+
   it("fails Windows commands closed when the compiled Job supervisor is absent", async () => {
     const dependencies = createNodeBootstrapDependencies("win32", {
       environment: { PATH: "C:\\Trusted", SystemRoot: "C:\\Windows" },
@@ -432,7 +616,7 @@ describe("bootstrap system boundaries", () => {
     await expect(dependencies.command.run({ args: ["--version"], command: "git" })).resolves.toEqual({
       contained: true,
       exitCode: 127,
-      stderr: "Windows bootstrap target is not a trusted absolute executable.",
+      stderr: "Verified system Git is unavailable.",
       stderrTruncated: false,
       stdout: "",
       stdoutTruncated: false,
@@ -544,6 +728,34 @@ describe("bootstrap system boundaries", () => {
     }
   });
 
+  it("refuses to overwrite an existing download destination", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-download-no-clobber-"));
+    roots.push(root);
+    const destination = path.join(root, "foreign-asset");
+    await writeFile(destination, "foreign");
+    const dependencies = createNodeBootstrapDependencies(process.platform);
+    const fake = fakeHttpsRequest({ body: Buffer.from("managed"), statusCode: 200 });
+    try {
+      await expect(
+        dependencies.download.file(
+          "https://nodejs.org/tool",
+          destination,
+          new AbortController().signal,
+          {
+            allowedHosts: ["nodejs.org"],
+            idleTimeoutMs: 1_000,
+            label: "test asset",
+            maxBytes: 1024,
+            totalTimeoutMs: 1_000,
+          },
+        ),
+      ).rejects.toMatchObject({ code: "EEXIST" });
+      expect(await readFile(destination, "utf8")).toBe("foreign");
+    } finally {
+      fake.get.mockRestore();
+    }
+  });
+
   it("enforces one total download deadline even when no response arrives", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "flinttrade-download-deadline-"));
     roots.push(root);
@@ -569,7 +781,7 @@ describe("bootstrap system boundaries", () => {
     }
   });
 
-  it("awaits response-consumer handle close before abort cleanup settles", async () => {
+  it("awaits response-consumer handle close and preserves the exclusive partial download on abort", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "flinttrade-download-abort-settlement-"));
     roots.push(root);
     const lifecycle: string[] = [];
@@ -634,7 +846,8 @@ describe("bootstrap system boundaries", () => {
       abort.abort();
 
       await expect(running).rejects.toMatchObject({ name: "AbortError" });
-      expect(lifecycle).toEqual(["handle-opened", "handle-closed", "before-remove"]);
+      expect(lifecycle).toEqual(["handle-opened", "handle-closed"]);
+      await expect(access(path.join(root, "asset"))).resolves.toBeUndefined();
       expect((await dependencies.fileSystem.listNames(root)).filter((name) => name.includes(".download-"))).toEqual([]);
     } finally {
       get.mockRestore();
@@ -1317,7 +1530,7 @@ describe("bootstrap system boundaries", () => {
       await once(escaped.stdout!, "data");
       try {
         const fileSystem = createNodeBootstrapDependencies(process.platform, {
-          testHooks: { recordedProcessWaitMs: 2_500 },
+          testHooks: { ...atomicPromotionTestHooks(), recordedProcessWaitMs: 2_500 },
         }).fileSystem;
         const release = await fileSystem.acquireOperationLock({
           bootIdentity: "current-boot",
@@ -1361,7 +1574,9 @@ describe("bootstrap system boundaries", () => {
       const unrelatedClosed = once(unrelated, "close");
       await once(unrelated.stdout!, "data");
       try {
-        const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+        const fileSystem = createNodeBootstrapDependencies(process.platform, {
+          testHooks: atomicPromotionTestHooks(),
+        }).fileSystem;
         const release = await fileSystem.acquireOperationLock({
           bootIdentity: "current-boot",
           ownerPid: process.pid,
@@ -1419,7 +1634,9 @@ describe("bootstrap system boundaries", () => {
     await mkdir(corrupt);
     await writeFile(path.join(corrupt, "owner.json"), owner);
     await writeFile(path.join(corrupt, "process-group-2147483644.json"), "{}\n");
-    const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+    const fileSystem = createNodeBootstrapDependencies(process.platform, {
+      testHooks: atomicPromotionTestHooks(),
+    }).fileSystem;
     await expect(
       fileSystem.acquireOperationLock({
         bootIdentity: "current-boot",
@@ -1474,7 +1691,9 @@ describe("bootstrap system boundaries", () => {
       path.join(target, "owner.json"),
       `${JSON.stringify({ acquiredAt: new Date(0).toISOString(), bootIdentity: "previous-boot", ownerPid: 999_999, operationId: "stale" })}\n`,
     );
-    const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+    const fileSystem = createNodeBootstrapDependencies(process.platform, {
+      testHooks: atomicPromotionTestHooks(),
+    }).fileSystem;
     const acquire = fileSystem.acquireOperationLock as unknown as (input: {
       bootIdentity: string;
       ownerPid: number;
@@ -1507,6 +1726,268 @@ describe("bootstrap system boundaries", () => {
     ).rejects.toThrow(/symbolic|no-follow|directory/i);
   });
 
+  it.each([
+    ["POSIX", "linux"],
+    ["simulated Windows", "win32"],
+  ] as const)(
+    "preserves a stale lease and foreign late quarantine at the %s native no-replace boundary",
+    async (_label, platform) => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-final-race-"));
+      roots.push(root);
+      const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+      const owner = `${JSON.stringify({
+        acquiredAt: new Date(0).toISOString(),
+        bootIdentity: "previous-boot",
+        operationId: "stale",
+        ownerPid: 999_999,
+      })}\n`;
+      await mkdir(target);
+      await writeFile(path.join(target, "owner.json"), owner);
+      const canonicalTarget = await realpath(target);
+      let quarantine = "";
+      let foreignIdentity: { dev: number; ino: number } | null = null;
+      const inspectNative = vi.fn(async () => TEST_WINDOWS_NATIVE_IDENTITY);
+      const preLeaseScope = vi.fn();
+      const promoteNative = vi.fn(async (
+        source: string,
+        destination: string,
+        expected: { dev: number; ino: number; nativeIdentity?: string },
+      ) => {
+        if (platform === "win32") expect(expected.nativeIdentity).toBe(TEST_WINDOWS_NATIVE_IDENTITY);
+        await testAtomicPromote(source, destination, expected);
+      });
+      const dependencies = createNodeBootstrapDependencies(platform, {
+        operationLeaseTarget: target,
+        testHooks: {
+          async beforeAtomicPromotion(source, destination) {
+            expect(source).toBe(canonicalTarget);
+            if (platform === "win32") expect(inspectNative).toHaveBeenCalledTimes(2);
+            quarantine = destination;
+            await mkdir(destination);
+            const metadata = await lstat(destination);
+            foreignIdentity = { dev: metadata.dev, ino: metadata.ino };
+          },
+          onPreLeaseCommandScope: preLeaseScope,
+          testAtomicPromote: promoteNative,
+          testNativeDirectoryIdentity: inspectNative,
+        },
+      });
+      const acquire = dependencies.fileSystem.acquireOperationLock;
+      expect(dependencies.command.operationLeaseTarget).toBe(target);
+      expect(preLeaseScope).toHaveBeenCalledTimes(platform === "win32" ? 1 : 0);
+      if (platform === "win32") expect(preLeaseScope).toHaveBeenCalledWith(undefined);
+
+      await expect(acquire({
+        bootIdentity: "current-boot",
+        ownerPid: process.pid,
+        singletonAuthorised: true,
+        target,
+      })).rejects.toMatchObject({ code: "EEXIST" });
+      expect(quarantine).toMatch(/\.stale-[0-9a-f-]{36}$/);
+      expect(await readFile(path.join(target, "owner.json"), "utf8")).toBe(owner);
+      await expect(lstat(quarantine)).resolves.toMatchObject(foreignIdentity!);
+      expect(promoteNative).toHaveBeenCalledTimes(1);
+      expect(inspectNative).toHaveBeenCalledTimes(platform === "win32" ? 2 : 0);
+    },
+  );
+
+  it("captures the Windows native lease identity before rejecting stale lease content", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-native-order-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    await mkdir(target);
+    const owner = `${JSON.stringify({
+      acquiredAt: new Date(0).toISOString(),
+      bootIdentity: "previous-boot",
+      operationId: "stale",
+      ownerPid: 999_999,
+    })}\n`;
+    await writeFile(path.join(target, "owner.json"), owner);
+    const inspectNative = vi.fn(async (nativeTarget: string) => {
+      await writeFile(path.join(nativeTarget, "unexpected"), "foreign evidence");
+      return TEST_WINDOWS_NATIVE_IDENTITY;
+    });
+    const promoteNative = vi.fn(testAtomicPromote);
+    const acquire = createNodeBootstrapDependencies("win32", {
+      operationLeaseTarget: target,
+      testHooks: {
+        testAtomicPromote: promoteNative,
+        testNativeDirectoryIdentity: inspectNative,
+      },
+    }).fileSystem.acquireOperationLock;
+
+    await expect(acquire({
+      bootIdentity: "current-boot",
+      ownerPid: process.pid,
+      singletonAuthorised: true,
+      target,
+    })).rejects.toThrow(/unexpected entries/i);
+    expect(inspectNative).toHaveBeenCalledTimes(1);
+    expect(promoteNative).not.toHaveBeenCalled();
+    await expect(readFile(path.join(target, "owner.json"), "utf8")).resolves.toBe(owner);
+    await expect(readFile(path.join(target, "unexpected"), "utf8")).resolves.toBe("foreign evidence");
+  });
+
+  it("refuses Windows stale-lease recovery when the native identity changes after validation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-native-drift-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    const owner = `${JSON.stringify({
+      acquiredAt: new Date(0).toISOString(),
+      bootIdentity: "previous-boot",
+      operationId: "stale",
+      ownerPid: 999_999,
+    })}\n`;
+    await mkdir(target);
+    await writeFile(path.join(target, "owner.json"), owner);
+    const inspectNative = vi.fn()
+      .mockResolvedValueOnce(TEST_WINDOWS_NATIVE_IDENTITY)
+      .mockResolvedValueOnce(TEST_WINDOWS_NATIVE_IDENTITY_DRIFT);
+    const promoteNative = vi.fn(testAtomicPromote);
+    const acquire = createNodeBootstrapDependencies("win32", {
+      operationLeaseTarget: target,
+      testHooks: {
+        testAtomicPromote: promoteNative,
+        testNativeDirectoryIdentity: inspectNative,
+      },
+    }).fileSystem.acquireOperationLock;
+
+    await expect(acquire({
+      bootIdentity: "current-boot",
+      ownerPid: process.pid,
+      singletonAuthorised: true,
+      target,
+    })).rejects.toThrow(/changed during containment reconciliation/i);
+    expect(inspectNative).toHaveBeenCalledTimes(2);
+    expect(promoteNative).not.toHaveBeenCalled();
+    await expect(readFile(path.join(target, "owner.json"), "utf8")).resolves.toBe(owner);
+  });
+
+  it("preserves a process record inserted during the Windows stale-lease move and refuses a new lease", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-post-move-scope-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    const owner = `${JSON.stringify({
+      acquiredAt: new Date(0).toISOString(),
+      bootIdentity: "previous-boot",
+      operationId: "stale",
+      ownerPid: 999_999,
+    })}\n`;
+    await mkdir(target);
+    await writeFile(path.join(target, "owner.json"), owner);
+    const processId = 2_147_483_644;
+    const recordName = `process-group-${processId}.json`;
+    const record = `${JSON.stringify({
+      containmentToken: "a".repeat(32),
+      kind: "posix-group",
+      operationId: "stale",
+      ownerPid: 999_999,
+      processId,
+      protocol: 1,
+    })}\n`;
+    let quarantine = "";
+    const acquire = createNodeBootstrapDependencies("win32", {
+      operationLeaseTarget: target,
+      testHooks: {
+        async beforeAtomicPromotion(source, destination) {
+          quarantine = destination;
+          await writeFile(path.join(source, recordName), record);
+        },
+        ...atomicPromotionTestHooks(),
+      },
+    }).fileSystem.acquireOperationLock;
+
+    await expect(acquire({
+      bootIdentity: "current-boot",
+      ownerPid: process.pid,
+      singletonAuthorised: true,
+      target,
+    })).rejects.toThrow(/identity changed during quarantine/i);
+    expect(quarantine).toMatch(/\.stale-[0-9a-f-]{36}$/);
+    await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(quarantine, "owner.json"), "utf8")).resolves.toBe(owner);
+    await expect(readFile(path.join(quarantine, recordName), "utf8")).resolves.toBe(record);
+  });
+
+  it("preserves and revalidates a Windows stale-lease quarantine across later acquisitions", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-windows-preserve-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    const owner = `${JSON.stringify({
+      acquiredAt: new Date(0).toISOString(),
+      bootIdentity: "previous-boot",
+      operationId: "stale",
+      ownerPid: 999_999,
+    })}\n`;
+    await mkdir(target);
+    await writeFile(path.join(target, "owner.json"), owner);
+    let quarantine = "";
+    const dependencies = createNodeBootstrapDependencies("win32", {
+      operationLeaseTarget: target,
+      testHooks: {
+        beforeAtomicPromotion(_source, destination) {
+          quarantine = destination;
+        },
+        ...atomicPromotionTestHooks(),
+      },
+    });
+    const request = {
+      bootIdentity: "current-boot",
+      ownerPid: process.pid,
+      singletonAuthorised: true,
+      target,
+    };
+
+    const firstRelease = await dependencies.fileSystem.acquireOperationLock(request);
+    expect(quarantine).toMatch(/\.stale-[0-9a-f-]{36}$/);
+    await expect(readFile(path.join(quarantine, "owner.json"), "utf8")).resolves.toBe(owner);
+    await firstRelease();
+    const secondRelease = await dependencies.fileSystem.acquireOperationLock(request);
+    await expect(readFile(path.join(quarantine, "owner.json"), "utf8")).resolves.toBe(owner);
+    await secondRelease();
+    await expect(readFile(path.join(quarantine, "owner.json"), "utf8")).resolves.toBe(owner);
+  });
+
+  it("fails closed when 64 preserved Windows lease quarantines require manual archival", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-windows-cap-"));
+    roots.push(root);
+    const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
+    const owner = `${JSON.stringify({
+      acquiredAt: new Date(0).toISOString(),
+      bootIdentity: "previous-boot",
+      operationId: "stale",
+      ownerPid: 999_999,
+    })}\n`;
+    const quarantines: string[] = [];
+    for (let index = 0; index < 64; index += 1) {
+      const quarantine = `${target}.stale-00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      quarantines.push(quarantine);
+      await mkdir(quarantine);
+      await writeFile(path.join(quarantine, "owner.json"), owner);
+    }
+    const acquire = createNodeBootstrapDependencies("win32", {
+      operationLeaseTarget: target,
+      testHooks: {
+        testAtomicPromote,
+        async testNativeDirectoryIdentity(nativeTarget) {
+          const digest = createHash("sha256").update(nativeTarget).digest("hex");
+          return `${digest.slice(0, 16)}:${digest.slice(16, 48)}`;
+        },
+      },
+    }).fileSystem.acquireOperationLock;
+
+    await expect(acquire({
+      bootIdentity: "current-boot",
+      ownerPid: process.pid,
+      singletonAuthorised: true,
+      target,
+    })).rejects.toThrow(/reached 64.*archive.*manually remove/i);
+    await expect(lstat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    for (const quarantine of quarantines) {
+      await expect(readFile(path.join(quarantine, "owner.json"), "utf8")).resolves.toBe(owner);
+    }
+  });
+
   it("reconciles a validated crash-left lease quarantine before creating the next lease", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-lease-quarantine-"));
     roots.push(root);
@@ -1517,7 +1998,9 @@ describe("bootstrap system boundaries", () => {
       path.join(quarantine, "owner.json"),
       `${JSON.stringify({ acquiredAt: new Date(0).toISOString(), bootIdentity: "previous-boot", ownerPid: 999_999, operationId: "stale" })}\n`,
     );
-    const acquire = createNodeBootstrapDependencies(process.platform).fileSystem.acquireOperationLock;
+    const acquire = createNodeBootstrapDependencies(process.platform, {
+      testHooks: atomicPromotionTestHooks(),
+    }).fileSystem.acquireOperationLock;
 
     const release = await acquire({
       bootIdentity: "current-boot",
@@ -1525,7 +2008,8 @@ describe("bootstrap system boundaries", () => {
       singletonAuthorised: true,
       target,
     });
-    await expect(access(quarantine)).rejects.toThrow();
+    if (process.platform === "win32") await expect(access(quarantine)).resolves.toBeUndefined();
+    else await expect(access(quarantine)).rejects.toThrow();
     await expect(access(path.join(target, "owner.json"))).resolves.toBeUndefined();
     await release();
   });
@@ -1541,7 +2025,9 @@ describe("bootstrap system boundaries", () => {
     const target = path.join(root, ".flinttrade-bootstrap-operation.lock");
     await mkdir(target);
     if (content !== null) await writeFile(path.join(target, "owner.json"), content);
-    const acquire = createNodeBootstrapDependencies(process.platform).fileSystem.acquireOperationLock;
+    const acquire = createNodeBootstrapDependencies(process.platform, {
+      testHooks: atomicPromotionTestHooks(),
+    }).fileSystem.acquireOperationLock;
 
     const release = await acquire({
       bootIdentity: "current-boot",
@@ -1709,6 +2195,17 @@ describe("bootstrap system boundaries", () => {
     expect(await readFile(target, "utf8")).toBe("second");
     await expect(access(`${target}.tmp`)).rejects.toThrow();
     await expect(syncDirectoryForDurability(path.dirname(target))).resolves.toBeUndefined();
+  });
+
+  it("writes an exclusive marker once and preserves an existing file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-exclusive-marker-"));
+    roots.push(root);
+    const target = path.join(root, "marker.json");
+    const dependencies = createNodeBootstrapDependencies(process.platform);
+
+    await dependencies.fileSystem.writeTextAbsent(target, "first");
+    await expect(dependencies.fileSystem.writeTextAbsent(target, "second")).rejects.toMatchObject({ code: "EEXIST" });
+    expect(await readFile(target, "utf8")).toBe("first");
   });
 
   it("does not follow predictable temporary, destination or durable-log symlinks", async () => {
@@ -1967,6 +2464,110 @@ describe("bootstrap system boundaries", () => {
   );
 
   it.runIf(process.platform !== "win32")(
+    "closes the source descriptor across every pre-snapshot setup failure",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-snapshot-setup-failure-"));
+      roots.push(root);
+      const archive = path.join(root, "source.zip");
+      await writeFile(archive, "source archive bytes");
+      const baseline = (await readdir("/dev/fd")).length;
+      const stages = ["directory-create", "directory-inspect", "destination-open"] as const;
+
+      for (const stage of stages) {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const dependencies = createNodeBootstrapDependencies(process.platform, {
+            testHooks: {
+              beforeArchiveSnapshotSetup(current) {
+                if (current === stage) throw new Error(`injected ${stage} failure`);
+              },
+            },
+          });
+          await expect(
+            dependencies.extractArchive({
+              archive,
+              destination: path.join(root, `extract-${stage}-${attempt}`),
+              expectedSha256: await sha256File(archive),
+              kind: "zip",
+              signal: new AbortController().signal,
+            }),
+          ).rejects.toThrow(`injected ${stage} failure`);
+        }
+      }
+
+      expect((await readdir("/dev/fd")).length).toBe(baseline);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "preserves its private stable snapshot after successful extraction settlement",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-snapshot-preserved-"));
+      roots.push(root);
+      const archive = path.join(root, "source.zip");
+      const destination = path.join(root, "extract");
+      let retainedSnapshot = "";
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.writestr('root/file.txt','complete'); z.close()",
+        archive,
+      ]);
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          onArchiveSnapshotRemove(target) {
+            retainedSnapshot = target;
+          },
+        },
+      });
+
+      await expect(
+        dependencies.extractArchive({
+          archive,
+          destination,
+          expectedSha256: await sha256File(archive),
+          expectedRoot: "root",
+          kind: "zip",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual(["root/file.txt"]);
+      expect(await readFile(retainedSnapshot)).toEqual(await readFile(archive));
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "extracts a validated ZIP root directly into an exclusively reserved candidate",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-strip-root-"));
+      roots.push(root);
+      const archive = path.join(root, "source.zip");
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.writestr('root/',''); z.writestr('root/file.txt','complete'); z.close()",
+        archive,
+      ]);
+      const dependencies = createNodeBootstrapDependencies(process.platform);
+      const destination = await dependencies.fileSystem.reserveTemporaryDirectory(root, "FlintTrade.candidate-1");
+
+      await expect(
+        dependencies.extractArchive({
+          archive,
+          destination: destination.path,
+          destinationIdentity: destination.identity,
+          expectedSha256: await sha256File(archive),
+          expectedRoot: "root",
+          kind: "zip",
+          signal: new AbortController().signal,
+          stripExpectedRoot: true,
+        }),
+      ).resolves.toEqual(["root", "root/file.txt"]);
+      expect(await readFile(path.join(destination.path, "file.txt"), "utf8")).toBe("complete");
+      await expect(access(path.join(destination.path, "root"))).rejects.toThrow();
+      await expect(
+        dependencies.fileSystem.assertDirectoryIdentity(destination.path, destination.identity),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
     "rejects a truncated but parseable stable ZIP snapshot before parsing",
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-snapshot-truncated-"));
@@ -1999,6 +2600,93 @@ describe("bootstrap system boundaries", () => {
         }),
       ).rejects.toThrow(/snapshot.*size|snapshot.*checksum/i);
       await expect(access(destination)).rejects.toThrow();
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "preserves both snapshot identities when its pathname is replaced at verification failure",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-snapshot-verify-swap-"));
+      roots.push(root);
+      const archive = path.join(root, "source.zip");
+      const destination = path.join(root, "extract");
+      const foreign = Buffer.from("foreign snapshot replacement");
+      let movedSnapshot = "";
+      let replacementSnapshot = "";
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.writestr('root/file.txt','complete'); z.close()",
+        archive,
+      ]);
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          beforeArchiveSnapshotVerify(target) {
+            const directory = path.dirname(target);
+            movedSnapshot = `${directory}.owned`;
+            replacementSnapshot = target;
+            renameSync(directory, movedSnapshot);
+            mkdirSync(directory, { mode: 0o700 });
+            writeFileSync(target, foreign, { mode: 0o600 });
+          },
+        },
+      });
+
+      await expect(
+        dependencies.extractArchive({
+          archive,
+          destination,
+          expectedSha256: await sha256File(archive),
+          expectedRoot: "root",
+          kind: "zip",
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(/snapshot identity changed/i);
+      expect(await readFile(path.join(movedSnapshot, "archive"))).toEqual(await readFile(archive));
+      expect(await readFile(replacementSnapshot)).toEqual(foreign);
+      await expect(access(destination)).rejects.toThrow();
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "preserves a foreign snapshot replacement when cleanup observes a pathname swap",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-snapshot-cleanup-swap-"));
+      roots.push(root);
+      const archive = path.join(root, "source.zip");
+      const destination = path.join(root, "extract");
+      const foreign = Buffer.from("foreign cleanup replacement");
+      let originalSnapshot = "";
+      let replacementSnapshot = "";
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.writestr('root/file.txt','complete'); z.close()",
+        archive,
+      ]);
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          onArchiveSnapshotRemove(target, directory) {
+            originalSnapshot = `${directory}.owned`;
+            replacementSnapshot = target;
+            renameSync(directory, originalSnapshot);
+            mkdirSync(directory, { mode: 0o700 });
+            writeFileSync(target, foreign, { mode: 0o600 });
+          },
+        },
+      });
+
+      await expect(
+        dependencies.extractArchive({
+          archive,
+          destination,
+          expectedSha256: await sha256File(archive),
+          expectedRoot: "root",
+          kind: "zip",
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(/cleanup identity changed/i);
+      expect(await readFile(replacementSnapshot)).toEqual(foreign);
+      expect(await readFile(path.join(originalSnapshot, "archive"))).toEqual(await readFile(archive));
+      expect(await readFile(path.join(destination, "root", "file.txt"), "utf8")).toBe("complete");
     },
   );
 
@@ -2250,7 +2938,7 @@ describe("bootstrap system boundaries", () => {
   );
 
   it.runIf(process.platform !== "win32")(
-    "aborts in the middle of one large ZIP entry and removes the owned partial tree",
+    "aborts in the middle of one large ZIP entry and preserves the partial tree",
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-cancel-zip-"));
       roots.push(root);
@@ -2287,7 +2975,7 @@ describe("bootstrap system boundaries", () => {
       abort.abort();
 
       await expect(extraction).rejects.toMatchObject({ name: "AbortError" });
-      await expect(access(path.join(destination, "root"))).rejects.toThrow();
+      await expect(access(path.join(destination, "root"))).resolves.toBeUndefined();
       expect(events.at(-1)).toBe("removing");
       expect(events.slice(0, -1).at(-1)).toBe("closed");
     },
@@ -2295,7 +2983,7 @@ describe("bootstrap system boundaries", () => {
   );
 
   it.runIf(process.platform !== "win32")(
-    "aborts during a large TAR extraction and removes the owned partial tree",
+    "aborts during a large TAR extraction and preserves the partial tree",
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-cancel-tar-"));
       roots.push(root);
@@ -2323,9 +3011,62 @@ describe("bootstrap system boundaries", () => {
       abort.abort();
 
       await expect(extraction).rejects.toMatchObject({ name: "AbortError" });
-      await expect(access(path.join(destination, "root"))).rejects.toThrow();
+      await expect(access(path.join(destination, "root"))).resolves.toBeUndefined();
     },
     30_000,
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "reserves a fresh UUID directory without touching a colliding foreign path",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-reserve-collision-"));
+      roots.push(root);
+      const firstId = "11111111-1111-4111-8111-111111111111";
+      const secondId = "22222222-2222-4222-8222-222222222222";
+      const prefix = "FlintTrade.candidate-1";
+      const foreign = path.join(root, `${prefix}-${firstId}`);
+      await mkdir(foreign);
+      await writeFile(path.join(foreign, "sentinel"), "foreign");
+      const ids = [firstId, secondId];
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: { temporaryDirectoryId: () => ids.shift()! },
+      });
+
+      const reservation = await dependencies.fileSystem.reserveTemporaryDirectory(root, prefix);
+
+      expect(reservation.path).toBe(path.join(root, `${prefix}-${secondId}`));
+      expect(await readFile(path.join(foreign, "sentinel"), "utf8")).toBe("foreign");
+      await expect(
+        dependencies.fileSystem.assertDirectoryIdentity(reservation.path, reservation.identity, true),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a reserved-directory pathname swap without deleting either directory",
+    async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-reserve-swap-"));
+      roots.push(root);
+      const outside = path.join(root, "outside");
+      const moved = path.join(root, "moved-reservation");
+      await mkdir(outside);
+      await writeFile(path.join(outside, "sentinel"), "outside");
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          afterTemporaryDirectoryCreated(target) {
+            renameSync(target, moved);
+            symlinkSync(outside, target, "dir");
+          },
+          temporaryDirectoryId: () => "33333333-3333-4333-8333-333333333333",
+        },
+      });
+
+      await expect(
+        dependencies.fileSystem.reserveTemporaryDirectory(root, "FlintTrade.candidate-1"),
+      ).rejects.toThrow(/identity changed/i);
+      expect(await readFile(path.join(outside, "sentinel"), "utf8")).toBe("outside");
+      await expect(access(moved)).resolves.toBeUndefined();
+    },
   );
 
   it.runIf(process.platform !== "win32")(
@@ -2333,7 +3074,9 @@ describe("bootstrap system boundaries", () => {
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-promote-"));
       roots.push(root);
-      const dependencies = createNodeBootstrapDependencies(process.platform);
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: { testAtomicPromote },
+      });
       for (const kind of ["file", "symlink", "empty-directory", "non-empty-directory"] as const) {
         const source = path.join(root, `source-${kind}`);
         const destination = path.join(root, `destination-${kind}`);
@@ -2348,6 +3091,43 @@ describe("bootstrap system boundaries", () => {
         await expect(dependencies.fileSystem.promoteAbsent(source, destination, identity)).rejects.toThrow(/already exists/i);
         expect(await readFile(path.join(source, "identity"), "utf8")).toBe("candidate");
       }
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "preserves candidate and foreign identities when the destination appears at the native promotion boundary",
+    async () => {
+      const root = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-promote-race-")));
+      roots.push(root);
+      const source = path.join(root, "candidate");
+      const destination = path.join(root, "active");
+      await mkdir(source);
+      await writeFile(path.join(source, "candidate"), "candidate");
+      let foreignIdentity: Awaited<ReturnType<typeof lstat>> | null = null;
+      const dependencies = createNodeBootstrapDependencies(process.platform, {
+        testHooks: {
+          async beforeAtomicPromotion() {
+            await mkdir(destination);
+            await writeFile(path.join(destination, "foreign"), "foreign");
+            foreignIdentity = await lstat(destination);
+          },
+          testAtomicPromote,
+        },
+      });
+      const candidateIdentity = await dependencies.fileSystem.directoryIdentity(source);
+
+      await expect(
+        dependencies.fileSystem.promoteAbsent(source, destination, candidateIdentity),
+      ).rejects.toThrow(/already exists/i);
+      const candidateAfter = await lstat(source);
+      const foreignAfter = await lstat(destination);
+      expect({ dev: candidateAfter.dev, ino: candidateAfter.ino }).toEqual(candidateIdentity);
+      expect({ dev: foreignAfter.dev, ino: foreignAfter.ino }).toEqual({
+        dev: foreignIdentity!.dev,
+        ino: foreignIdentity!.ino,
+      });
+      expect(await readFile(path.join(source, "candidate"), "utf8")).toBe("candidate");
+      expect(await readFile(path.join(destination, "foreign"), "utf8")).toBe("foreign");
     },
   );
 

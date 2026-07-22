@@ -18,6 +18,10 @@ import { SourceOperationLeaseRetentionError } from "./source-operation";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const TOOL_VERSION_PATTERN = /^(?!0\.0\.0(?:$|-))(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
+const PACKAGE_MANAGER_PATTERN = /^pnpm@((?!0\.0\.0(?:$|-))(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)(?:\+sha512\.[0-9A-Za-z_-]+)?$/;
+const MAX_FRONTEND_OUTPUT_ENTRIES = 20_000;
+const MAX_FRONTEND_OUTPUT_MANIFEST_BYTES = 32 * 1024 * 1024;
 const REQUIRED_REPOSITORY_PATHS = Object.freeze([
   "package.json",
   "pyproject.toml",
@@ -47,6 +51,7 @@ type ProvenanceFileSystem = Pick<
   | "readTextNoFollow"
   | "realpath"
   | "sha256"
+  | "snapshotSourceTree"
   | "verifySourceTree"
 >;
 
@@ -109,7 +114,7 @@ export interface SourceProvenanceRequest {
   sourceRoot: string;
 }
 
-interface CommonInstalledMarker {
+interface CommonInstalledMarkerV2 {
   completedAt: string;
   node: string;
   pnpm: string;
@@ -120,12 +125,25 @@ interface CommonInstalledMarker {
   uv: string;
 }
 
-interface GitInstalledMarker extends CommonInstalledMarker {
+interface CommonInstalledMarkerV3 extends Omit<CommonInstalledMarkerV2, "schemaVersion"> {
+  frontendOutputDigest: string;
+  frontendOutputEntryCount: number;
+  frontendOutputIndexSha256: string;
+  packageManager: string;
+  schemaVersion: 3;
+}
+
+interface GitInstalledMarkerV2 extends CommonInstalledMarkerV2 {
   gitTree: string;
   provenance: "git";
 }
 
-interface ArchiveInstalledMarker extends CommonInstalledMarker {
+interface GitInstalledMarkerV3 extends CommonInstalledMarkerV3 {
+  gitTree: string;
+  provenance: "git";
+}
+
+interface ArchiveInstalledMarkerV2 extends CommonInstalledMarkerV2 {
   archiveFinalOrigin: string;
   archiveSha256: string;
   provenance: "github-archive";
@@ -133,35 +151,66 @@ interface ArchiveInstalledMarker extends CommonInstalledMarker {
   sourceInputRecordSha256: string;
 }
 
+interface ArchiveInstalledMarkerV3 extends CommonInstalledMarkerV3 {
+  archiveFinalOrigin: string;
+  archiveSha256: string;
+  provenance: "github-archive";
+  sourceInputDigest: string;
+  sourceInputRecordSha256: string;
+}
+
+type GitInstalledMarker = GitInstalledMarkerV2 | GitInstalledMarkerV3;
+type ArchiveInstalledMarker = ArchiveInstalledMarkerV2 | ArchiveInstalledMarkerV3;
+type InstalledMarker = GitInstalledMarker | ArchiveInstalledMarker;
+
+export interface SourceBuildIdentity {
+  frontendOutputDigest: string | null;
+  markerSchemaVersion: 2 | 3;
+  packageManager: string;
+  toolchain: {
+    node: string;
+    pnpm: string;
+    uv: string;
+  };
+}
+
 export type ActiveSourceIdentity =
   | {
+      buildIdentity?: SourceBuildIdentity;
       canonicalPath: string;
       contentIdentity: string;
       directoryIdentity: FileSystemIdentity;
       provenance: "git";
+      requiresRebuild?: boolean;
       revision: string;
     }
   | {
       archiveFinalOrigin: string;
       archiveSha256: string;
+      buildIdentity?: SourceBuildIdentity;
       canonicalPath: string;
       contentIdentity: string;
       directoryIdentity: FileSystemIdentity;
       provenance: "github-archive";
+      requiresRebuild?: boolean;
       revision: string;
     };
 
 type UnboundSourceIdentity =
   | {
+      buildIdentity: SourceBuildIdentity;
       contentIdentity: string;
       provenance: "git";
+      requiresRebuild: boolean;
       revision: string;
     }
   | {
       archiveFinalOrigin: string;
       archiveSha256: string;
+      buildIdentity: SourceBuildIdentity;
       contentIdentity: string;
       provenance: "github-archive";
+      requiresRebuild: boolean;
       revision: string;
     };
 
@@ -170,7 +219,7 @@ interface ActiveDirectoryProof {
   metadata: FileSystemDirectoryMetadata;
 }
 
-const GIT_MARKER_FIELDS = Object.freeze([
+const GIT_MARKER_FIELDS_V2 = Object.freeze([
   "completedAt",
   "gitTree",
   "node",
@@ -181,7 +230,14 @@ const GIT_MARKER_FIELDS = Object.freeze([
   "schemaVersion",
   "uv",
 ]);
-const ARCHIVE_MARKER_FIELDS = Object.freeze([
+const GIT_MARKER_FIELDS_V3 = Object.freeze([
+  ...GIT_MARKER_FIELDS_V2,
+  "frontendOutputDigest",
+  "frontendOutputEntryCount",
+  "frontendOutputIndexSha256",
+  "packageManager",
+]);
+const ARCHIVE_MARKER_FIELDS_V2 = Object.freeze([
   "archiveFinalOrigin",
   "archiveSha256",
   "completedAt",
@@ -194,6 +250,13 @@ const ARCHIVE_MARKER_FIELDS = Object.freeze([
   "sourceInputDigest",
   "sourceInputRecordSha256",
   "uv",
+]);
+const ARCHIVE_MARKER_FIELDS_V3 = Object.freeze([
+  ...ARCHIVE_MARKER_FIELDS_V2,
+  "frontendOutputDigest",
+  "frontendOutputEntryCount",
+  "frontendOutputIndexSha256",
+  "packageManager",
 ]);
 const SOURCE_REVISION_METADATA_POLICY = Object.freeze({
   idleTimeoutMs: 30_000,
@@ -240,41 +303,85 @@ function requireSha256(value: unknown, label: string): string {
   return value;
 }
 
+function requireToolVersion(value: unknown, label: string): string {
+  if (typeof value !== "string" || !TOOL_VERSION_PATTERN.test(value)) {
+    throw new Error(`${label} must be a valid pinned tool version.`);
+  }
+  return value;
+}
+
+function requirePackageManager(value: unknown, pnpmVersion: string): string {
+  if (typeof value !== "string") throw new Error("The repository package-manager pin is invalid.");
+  const match = PACKAGE_MANAGER_PATTERN.exec(value);
+  if (!match || match[1] !== pnpmVersion) {
+    throw new Error("The repository package-manager pin does not match its recorded pnpm build version.");
+  }
+  return value;
+}
+
+function requireFrontendEntryCount(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_FRONTEND_OUTPUT_ENTRIES) {
+    throw new Error("The terminal output marker has an invalid bounded entry count.");
+  }
+  return value as number;
+}
+
 function assertCommonMarker(
   marker: Record<string, unknown>,
   expected: ExpectedSourceProvenance,
   provenance: BootstrapProvenance,
-): asserts marker is Record<keyof CommonInstalledMarker, unknown> {
+): void {
   if (
-    marker.schemaVersion !== 2 ||
+    (marker.schemaVersion !== 2 && marker.schemaVersion !== 3) ||
     marker.provenance !== provenance ||
     marker.repository !== expected.gitOrigin ||
-    marker.node !== expected.toolchain.node ||
-    marker.pnpm !== expected.toolchain.pnpm ||
-    marker.uv !== expected.toolchain.uv ||
     typeof marker.completedAt !== "string" ||
     Number.isNaN(Date.parse(marker.completedAt)) ||
     new Date(marker.completedAt).toISOString() !== marker.completedAt
   ) {
     throw new Error("The active source completion marker has foreign or inexact provenance.");
   }
+  requireToolVersion(marker.node, "The recorded Node version");
+  const pnpm = requireToolVersion(marker.pnpm, "The recorded pnpm version");
+  requireToolVersion(marker.uv, "The recorded uv version");
+  if (marker.schemaVersion === 3) {
+    requirePackageManager(marker.packageManager, pnpm);
+    requireSha256(marker.frontendOutputDigest, "The terminal output digest");
+    requireSha256(marker.frontendOutputIndexSha256, "The terminal index digest");
+    requireFrontendEntryCount(marker.frontendOutputEntryCount);
+  }
 }
 
 function parseGitMarker(content: string, expected: ExpectedSourceProvenance): GitInstalledMarker {
   const parsed = parseJsonObject(content, "The Git completion marker");
-  assertExactFields(parsed, GIT_MARKER_FIELDS, "The Git completion marker");
+  const schemaVersion = parsed.schemaVersion;
+  assertExactFields(
+    parsed,
+    schemaVersion === 3 ? GIT_MARKER_FIELDS_V3 : GIT_MARKER_FIELDS_V2,
+    "The Git completion marker",
+  );
   assertCommonMarker(parsed, expected, "git");
-  return {
+  const common = {
     completedAt: parsed.completedAt as string,
     gitTree: requireCommit(parsed.gitTree, "The Git marker tree"),
-    node: parsed.node as string,
-    pnpm: parsed.pnpm as string,
+    node: requireToolVersion(parsed.node, "The recorded Node version"),
+    pnpm: requireToolVersion(parsed.pnpm, "The recorded pnpm version"),
     provenance: "git",
     repository: parsed.repository as string,
     revision: requireCommit(parsed.revision, "The Git marker revision"),
-    schemaVersion: 2,
-    uv: parsed.uv as string,
+    uv: requireToolVersion(parsed.uv, "The recorded uv version"),
   };
+  return schemaVersion === 3
+    ? {
+        ...common,
+        frontendOutputDigest: requireSha256(parsed.frontendOutputDigest, "The terminal output digest"),
+        frontendOutputEntryCount: requireFrontendEntryCount(parsed.frontendOutputEntryCount),
+        frontendOutputIndexSha256: requireSha256(parsed.frontendOutputIndexSha256, "The terminal index digest"),
+        packageManager: requirePackageManager(parsed.packageManager, common.pnpm),
+        provenance: "git",
+        schemaVersion: 3,
+      }
+    : { ...common, provenance: "git", schemaVersion: 2 };
 }
 
 function expectedArchiveOrigin(value: string): string {
@@ -283,29 +390,44 @@ function expectedArchiveOrigin(value: string): string {
 
 function parseArchiveMarker(content: string, expected: ExpectedSourceProvenance): ArchiveInstalledMarker {
   const parsed = parseJsonObject(content, "The archive completion marker");
-  assertExactFields(parsed, ARCHIVE_MARKER_FIELDS, "The archive completion marker");
+  const schemaVersion = parsed.schemaVersion;
+  assertExactFields(
+    parsed,
+    schemaVersion === 3 ? ARCHIVE_MARKER_FIELDS_V3 : ARCHIVE_MARKER_FIELDS_V2,
+    "The archive completion marker",
+  );
   assertCommonMarker(parsed, expected, "github-archive");
   const archiveFinalOrigin = expectedArchiveOrigin(expected.archiveOrigin);
   if (parsed.archiveFinalOrigin !== archiveFinalOrigin) {
     throw new Error("The archive completion marker has a foreign final origin.");
   }
-  return {
+  const common = {
     archiveFinalOrigin,
     archiveSha256: requireSha256(parsed.archiveSha256, "The archive digest"),
     completedAt: parsed.completedAt as string,
-    node: parsed.node as string,
-    pnpm: parsed.pnpm as string,
+    node: requireToolVersion(parsed.node, "The recorded Node version"),
+    pnpm: requireToolVersion(parsed.pnpm, "The recorded pnpm version"),
     provenance: "github-archive",
     repository: parsed.repository as string,
     revision: requireCommit(parsed.revision, "The archive marker revision"),
-    schemaVersion: 2,
     sourceInputDigest: requireSha256(parsed.sourceInputDigest, "The archive source-input digest"),
     sourceInputRecordSha256: requireSha256(
       parsed.sourceInputRecordSha256,
       "The archive source-input record digest",
     ),
-    uv: parsed.uv as string,
+    uv: requireToolVersion(parsed.uv, "The recorded uv version"),
   };
+  return schemaVersion === 3
+    ? {
+        ...common,
+        frontendOutputDigest: requireSha256(parsed.frontendOutputDigest, "The terminal output digest"),
+        frontendOutputEntryCount: requireFrontendEntryCount(parsed.frontendOutputEntryCount),
+        frontendOutputIndexSha256: requireSha256(parsed.frontendOutputIndexSha256, "The terminal index digest"),
+        packageManager: requirePackageManager(parsed.packageManager, common.pnpm),
+        provenance: "github-archive",
+        schemaVersion: 3,
+      }
+    : { ...common, provenance: "github-archive", schemaVersion: 2 };
 }
 
 function sourceEntryPath(value: unknown): string {
@@ -426,7 +548,10 @@ async function assertNoDisallowedAliases(
   }
 }
 
-async function assertRepositoryShape(request: SourceProvenanceRequest): Promise<void> {
+async function assertRepositoryShape(
+  request: SourceProvenanceRequest,
+  marker: InstalledMarker,
+): Promise<string> {
   for (const relative of REQUIRED_REPOSITORY_PATHS) {
     if (!(await request.dependencies.fileSystem.exists(requestPath(request, request.activeSource, ...relative.split("/"))))) {
       throw new Error(`The active source has a foreign repository shape: missing ${relative}.`);
@@ -440,13 +565,65 @@ async function assertRepositoryShape(request: SourceProvenanceRequest): Promise<
   } catch {
     throw new Error("The active source package identity is not valid JSON in a no-follow regular file.");
   }
-  if (
-    !isObject(metadata) ||
-    metadata.name !== request.expected.packageName ||
-    metadata.packageManager !== request.expected.packageManager
-  ) {
+  if (!isObject(metadata) || metadata.name !== request.expected.packageName) {
     throw new Error("The active source has a foreign repository package identity.");
   }
+  const packageManager = requirePackageManager(metadata.packageManager, marker.pnpm);
+  if (marker.schemaVersion === 3 && marker.packageManager !== packageManager) {
+    throw new Error("The active source package-manager pin does not match its completion marker.");
+  }
+  return packageManager;
+}
+
+function sourceBuildIdentity(marker: InstalledMarker, packageManager: string): SourceBuildIdentity {
+  return {
+    frontendOutputDigest: marker.schemaVersion === 3 ? marker.frontendOutputDigest : null,
+    markerSchemaVersion: marker.schemaVersion,
+    packageManager,
+    toolchain: { node: marker.node, pnpm: marker.pnpm, uv: marker.uv },
+  };
+}
+
+function requiresCurrentRebuild(
+  marker: InstalledMarker,
+  packageManager: string,
+  expected: ExpectedSourceProvenance,
+): boolean {
+  return marker.schemaVersion !== 3 ||
+    marker.node !== expected.toolchain.node ||
+    marker.pnpm !== expected.toolchain.pnpm ||
+    marker.uv !== expected.toolchain.uv ||
+    packageManager !== expected.packageManager;
+}
+
+async function validateFrontendOutput(
+  request: SourceProvenanceRequest,
+  marker: InstalledMarker,
+): Promise<string | null> {
+  if (marker.schemaVersion === 2) return null;
+  const output = await request.dependencies.fileSystem.snapshotSourceTree(
+    requestPath(request, request.activeSource, "packages", "apps", "terminal", "dist"),
+  );
+  const manifestBytes = Buffer.byteLength(JSON.stringify(output.entries));
+  if (
+    output.entries.length === 0 ||
+    output.entries.length > MAX_FRONTEND_OUTPUT_ENTRIES ||
+    manifestBytes > MAX_FRONTEND_OUTPUT_MANIFEST_BYTES
+  ) {
+    throw new Error("The terminal output manifest is empty or exceeds its bounded acceptance limits.");
+  }
+  const index = output.entries.find((entry) => entry.path === "index.html");
+  if (index?.type !== "file" || !index.sha256) {
+    throw new Error("The terminal output is missing a no-follow regular index.html.");
+  }
+  if (
+    output.digest !== marker.frontendOutputDigest ||
+    output.entries.length !== marker.frontendOutputEntryCount ||
+    index.sha256 !== marker.frontendOutputIndexSha256
+  ) {
+    throw new Error("The terminal output does not match its completion-marker identity.");
+  }
+  return output.digest;
 }
 
 async function selectedMarker(request: SourceProvenanceRequest): Promise<{
@@ -700,6 +877,8 @@ async function validateGit(
   marker: GitInstalledMarker,
   markerContent: string,
   markerPath: string,
+  buildIdentity: SourceBuildIdentity,
+  requiresRebuild: boolean,
 ): Promise<UnboundSourceIdentity> {
   const identity = await inspectHardenedGitCheckout({
     bootstrapResources: request.bootstrapResources,
@@ -717,7 +896,13 @@ async function validateGit(
   if ((await request.dependencies.fileSystem.readTextNoFollow(markerPath)) !== markerContent) {
     throw new Error("The active Git completion marker changed during provenance inspection.");
   }
-  return { contentIdentity: identity.tree, provenance: "git", revision: identity.revision };
+  return {
+    buildIdentity,
+    contentIdentity: identity.tree,
+    provenance: "git",
+    requiresRebuild,
+    revision: identity.revision,
+  };
 }
 
 async function validateArchive(
@@ -725,6 +910,8 @@ async function validateArchive(
   marker: ArchiveInstalledMarker,
   markerContent: string,
   markerPath: string,
+  buildIdentity: SourceBuildIdentity,
+  requiresRebuild: boolean,
 ): Promise<UnboundSourceIdentity> {
   const recordPath = requestPath(request, request.activeSource, SOURCE_INPUTS_RECORD);
   if (!(await request.dependencies.fileSystem.exists(recordPath))) {
@@ -757,8 +944,10 @@ async function validateArchive(
   return {
     archiveFinalOrigin: marker.archiveFinalOrigin,
     archiveSha256: marker.archiveSha256,
+    buildIdentity,
     contentIdentity: sourceTree.digest,
     provenance: "github-archive",
+    requiresRebuild,
     revision: marker.revision,
   };
 }
@@ -799,23 +988,36 @@ export async function validateActiveSourceProvenance(
   if (await request.dependencies.fileSystem.existsNoFollow(requestPath(request, request.activeSource, ".env"))) {
     throw new Error("The active source contains a repository-root .env environment file.");
   }
-  await assertRepositoryShape(request);
   const markerSelection = await selectedMarker(request);
-  const identity =
-    markerSelection.provenance === "git"
-      ? await validateGit(
-          request,
-          parseGitMarker(markerSelection.content, request.expected),
-          markerSelection.content,
-          markerSelection.path,
-        )
-      : await validateArchive(
-          request,
-          parseArchiveMarker(markerSelection.content, request.expected),
-          markerSelection.content,
-          markerSelection.path,
-        );
+  const marker = markerSelection.provenance === "git"
+    ? parseGitMarker(markerSelection.content, request.expected)
+    : parseArchiveMarker(markerSelection.content, request.expected);
+  const packageManager = await assertRepositoryShape(request, marker);
+  const buildIdentity = sourceBuildIdentity(marker, packageManager);
+  const requiresRebuild = requiresCurrentRebuild(marker, packageManager, request.expected);
+  const initialFrontendOutput = await validateFrontendOutput(request, marker);
+  const identity = marker.provenance === "git"
+    ? await validateGit(
+        request,
+        marker,
+        markerSelection.content,
+        markerSelection.path,
+        buildIdentity,
+        requiresRebuild,
+      )
+    : await validateArchive(
+        request,
+        marker,
+        markerSelection.content,
+        markerSelection.path,
+        buildIdentity,
+        requiresRebuild,
+      );
   await assertFinalProof(request, active, markerSelection.path, markerSelection.content);
+  const finalFrontendOutput = await validateFrontendOutput(request, marker);
+  if (finalFrontendOutput !== initialFrontendOutput) {
+    throw new Error("The terminal output identity changed during provenance inspection.");
+  }
   return {
     ...identity,
     canonicalPath: active.canonicalPath,
@@ -826,6 +1028,7 @@ export async function validateActiveSourceProvenance(
 export function sourceContentIdentityKey(identity: ActiveSourceIdentity): string {
   const content = identity.provenance === "git"
     ? {
+        buildIdentity: identity.buildIdentity ?? null,
         contentIdentity: identity.contentIdentity,
         provenance: identity.provenance,
         revision: identity.revision,
@@ -833,6 +1036,7 @@ export function sourceContentIdentityKey(identity: ActiveSourceIdentity): string
     : {
         archiveFinalOrigin: identity.archiveFinalOrigin,
         archiveSha256: identity.archiveSha256,
+        buildIdentity: identity.buildIdentity ?? null,
         contentIdentity: identity.contentIdentity,
         provenance: identity.provenance,
         revision: identity.revision,

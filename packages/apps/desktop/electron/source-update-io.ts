@@ -26,6 +26,7 @@ import {
   LAST_KNOWN_GOOD_NAME,
   STALE_SOURCE_QUARANTINE_PREFIX,
   createNodeSourcePromotionFileSystem,
+  type DirectoryCleanupOutcome,
   type SourcePromotionFileSystem,
 } from "./source-promotion";
 import {
@@ -49,6 +50,7 @@ import type {
   SourceUpdaterProvenanceBoundary,
   SourceUpdaterRevisionBoundary,
 } from "./source-updater";
+import { WINDOWS_NATIVE_IDENTITY_PATTERN } from "./windows-source-filesystem";
 
 const OPERATION_LEASE_NAME = ".flinttrade-bootstrap-operation.lock";
 const UPDATE_LOG_NAME = "desktop-source-update.jsonl";
@@ -609,7 +611,9 @@ export function createNodeSourceUpdaterCleanup(
   assertManagedSourceWorkspaceRelationship(sourceRoot, workspace, platform);
   assertSeparated(isolationRoot, workspace, "Health isolation and workspace roots");
   const fileSystem = options.fileSystem ?? createNodeSourcePromotionFileSystem({ platform });
-  const safeRemovalSupported = options.safeRemovalSupported ?? platform !== "win32";
+  const safeRemovalSupported = options.safeRemovalSupported ?? (
+    platform !== "win32" || fileSystem.supportsDurableWindowsMutations === true
+  );
   const inventoryPath = path.join(sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
 
   type ReservedCleanupEntry = Readonly<{
@@ -621,10 +625,11 @@ export function createNodeSourceUpdaterCleanup(
   type OwnedCleanupEntry = Readonly<{
     dev: number;
     ino: number;
+    nativeIdentity?: string;
     inventoryVersion: 1 | 2;
     kind: SourceUpdaterCleanupKind;
     operationId: string;
-    state: "owned";
+    state: "owned" | "preserved";
   }>;
   type CleanupEntry = ReservedCleanupEntry | OwnedCleanupEntry;
   type CleanupLocation = Readonly<{
@@ -849,8 +854,8 @@ export function createNodeSourceUpdaterCleanup(
         return { ...common, inventoryVersion: 2, state: "reserved" };
       }
       if (
-        (record.schemaVersion === 2 && candidate.state !== "owned") ||
-        Object.keys(candidate).length !== (record.schemaVersion === 1 ? 4 : 5) ||
+        (record.schemaVersion === 2 && candidate.state !== "owned" && candidate.state !== "preserved") ||
+        Object.keys(candidate).length !== (record.schemaVersion === 1 ? 4 : platform === "win32" ? 6 : 5) ||
         !Object.hasOwn(candidate, "dev") ||
         !Object.hasOwn(candidate, "ino") ||
         !Object.hasOwn(candidate, "kind") ||
@@ -859,7 +864,11 @@ export function createNodeSourceUpdaterCleanup(
         !Number.isSafeInteger(candidate.dev) ||
         (candidate.dev as number) < 0 ||
         !Number.isSafeInteger(candidate.ino) ||
-        (candidate.ino as number) < 0
+        (candidate.ino as number) < 0 ||
+        (platform === "win32" &&
+          (typeof candidate.nativeIdentity !== "string" ||
+            !WINDOWS_NATIVE_IDENTITY_PATTERN.test(candidate.nativeIdentity))) ||
+        (platform !== "win32" && Object.hasOwn(candidate, "nativeIdentity"))
       ) {
         throw new Error("Source cleanup inventory ownership entry is invalid.");
       }
@@ -868,16 +877,17 @@ export function createNodeSourceUpdaterCleanup(
         dev: candidate.dev as number,
         ino: candidate.ino as number,
         inventoryVersion: record.schemaVersion === 1 ? 1 : 2,
-        state: "owned",
+        ...(platform === "win32" ? { nativeIdentity: candidate.nativeIdentity as string } : {}),
+        state: record.schemaVersion === 1 ? "owned" : candidate.state as "owned" | "preserved",
       };
     });
     if (
       new Set(entries.map((entry) => `${entry.kind}:${entry.operationId}`)).size !== entries.length ||
       new Set(
         entries
-          .filter((entry): entry is OwnedCleanupEntry => entry.state === "owned")
-          .map((entry) => `${entry.dev}:${entry.ino}`),
-      ).size !== entries.filter((entry) => entry.state === "owned").length
+          .filter((entry): entry is OwnedCleanupEntry => entry.state !== "reserved")
+          .map((entry) => entry.nativeIdentity ?? `${entry.dev}:${entry.ino}`),
+      ).size !== entries.filter((entry) => entry.state !== "reserved").length
     ) {
       throw new Error("Source cleanup inventory contains duplicate ownership evidence.");
     }
@@ -898,6 +908,7 @@ export function createNodeSourceUpdaterCleanup(
           dev: entry.dev,
           ino: entry.ino,
           kind: entry.kind,
+          ...(entry.nativeIdentity ? { nativeIdentity: entry.nativeIdentity } : {}),
           operationId: entry.operationId,
           state: entry.state,
         });
@@ -944,8 +955,17 @@ export function createNodeSourceUpdaterCleanup(
     if (entry.state === "reserved" && quarantine) {
       throw new Error("A reserved source cleanup path has unexpected quarantine evidence.");
     }
+    if (entry.state === "preserved" && target) {
+      throw new Error("A preserved source cleanup entry unexpectedly reappeared at its managed target.");
+    }
     const observed = target ?? quarantine;
-    if (entry.state === "owned" && observed && (observed.dev !== entry.dev || observed.ino !== entry.ino)) {
+    if (
+      entry.state !== "reserved" &&
+      observed &&
+      (observed.dev !== entry.dev ||
+        observed.ino !== entry.ino ||
+        (platform === "win32" && observed.nativeIdentity !== entry.nativeIdentity))
+    ) {
       throw new Error(`The owned ${location.label} path no longer has its captured directory identity.`);
     }
     return { quarantine, target };
@@ -957,7 +977,7 @@ export function createNodeSourceUpdaterCleanup(
       const observed = await inspectEntry(entry);
       const present = observed.target ?? observed.quarantine;
       if (!present) continue;
-      const identity = `${present.dev}:${present.ino}`;
+      const identity = present.nativeIdentity ?? `${present.dev}:${present.ino}`;
       if (observedIdentities.has(identity)) {
         throw new Error("Source cleanup inventory aliases one observed directory identity across entries.");
       }
@@ -970,8 +990,8 @@ export function createNodeSourceUpdaterCleanup(
     root: string,
     expectedName: string,
     label: string,
-    expectedIdentity: Readonly<{ dev: number; ino: number }>,
-  ): Promise<void> => {
+    expectedIdentity: Readonly<{ dev: number; ino: number; nativeIdentity?: string }>,
+  ): Promise<DirectoryCleanupOutcome> => {
     requireIdentity(expectedIdentity, label);
     const resolved = path.resolve(target);
     const expected = path.join(root, expectedName);
@@ -981,37 +1001,43 @@ export function createNodeSourceUpdaterCleanup(
     const rootIdentity = await fileSystem.inspectDirectory(root);
     if (!rootIdentity) throw new Error(`The managed ${label} root is missing.`);
     const identity = await fileSystem.inspectDirectory(resolved);
-    if (identity && (identity.dev !== expectedIdentity.dev || identity.ino !== expectedIdentity.ino)) {
+    if (
+      identity &&
+      (identity.dev !== expectedIdentity.dev ||
+        identity.ino !== expectedIdentity.ino ||
+        (platform === "win32" && identity.nativeIdentity !== expectedIdentity.nativeIdentity))
+    ) {
       throw new Error(`The owned ${label} path no longer has its captured directory identity.`);
     }
     const expectedCanonical = path.join(rootIdentity.canonicalPath, expectedName);
     if (identity && !samePath(identity.canonicalPath, expectedCanonical, platform)) {
       throw new Error(`The owned ${label} path has a foreign canonical identity.`);
     }
-    await fileSystem.removeDirectory(resolved, {
+    return fileSystem.removeDirectory(resolved, {
       canonicalPath: expectedCanonical,
       dev: expectedIdentity.dev,
       ino: expectedIdentity.ino,
+      ...(expectedIdentity.nativeIdentity ? { nativeIdentity: expectedIdentity.nativeIdentity } : {}),
     });
   };
 
-  const removeEntry = async (entry: OwnedCleanupEntry): Promise<void> => {
+  const removeEntry = async (entry: OwnedCleanupEntry): Promise<DirectoryCleanupOutcome> => {
     const location = cleanupLocation(entry.kind, entry.operationId, entry.inventoryVersion);
     if (entry.inventoryVersion === 1) {
       const observed = await inspectEntry(entry);
-      if (!observed.target && !observed.quarantine) return;
+      if (!observed.target && !observed.quarantine) return { status: "removed" };
       const rootIdentity = await fileSystem.inspectDirectory(location.root);
       if (!rootIdentity) throw new Error(`The managed ${location.label} root is missing.`);
-      await fileSystem.quarantineAndRemoveDirectory(
+      return fileSystem.settleDirectory(
         location.target,
         path.join(location.root, location.quarantineName),
         {
           canonicalPath: path.join(rootIdentity.canonicalPath, location.expectedName),
           dev: entry.dev,
           ino: entry.ino,
+          ...(entry.nativeIdentity ? { nativeIdentity: entry.nativeIdentity } : {}),
         },
       );
-      return;
     }
     return removeExact(
       location.target,
@@ -1028,6 +1054,21 @@ export function createNodeSourceUpdaterCleanup(
     const inventory = await readInventory();
     let remaining = inventory.entries;
     await validateEntries(remaining);
+    if (remaining.some((entry) => entry.state === "preserved")) {
+      const retained: CleanupEntry[] = [];
+      for (const entry of remaining) {
+        if (entry.state !== "preserved") {
+          retained.push(entry);
+          continue;
+        }
+        const observed = await inspectEntry(entry);
+        if (observed.quarantine) retained.push(entry);
+      }
+      if (retained.length !== remaining.length) {
+        remaining = retained;
+        await persistInventory(remaining);
+      }
+    }
     if (remaining.length === 0) {
       if (inventory.present) await persistInventory([]);
       return;
@@ -1036,14 +1077,17 @@ export function createNodeSourceUpdaterCleanup(
       if (selected !== null) {
         throw new Error("Source cleanup v1 inventory must be fully recovered before selected removal.");
       }
+      let preserved = false;
       for (const entry of remaining) {
         if (entry.state !== "owned") throw new Error("Source cleanup v1 inventory cannot contain reservations.");
-        await removeEntry(entry);
+        const outcome = await removeEntry(entry);
+        preserved ||= outcome.status === "quarantined";
       }
-      await persistInventory([]);
+      if (!preserved) await persistInventory([]);
       return;
     }
     const pendingKeys = remaining
+      .filter((entry) => entry.state !== "preserved")
       .map((entry) => `${entry.kind}:${entry.operationId}`)
       .filter((key) => selected === null || selected.has(key));
     for (const key of pendingKeys) {
@@ -1062,14 +1106,19 @@ export function createNodeSourceUpdaterCleanup(
           ino: observed.target.ino,
           inventoryVersion: 2,
           kind: entry.kind,
+          ...(observed.target.nativeIdentity ? { nativeIdentity: observed.target.nativeIdentity } : {}),
           operationId: entry.operationId,
           state: "owned",
         };
         remaining = remaining.map((candidate, candidateIndex) => candidateIndex === index ? entry : candidate);
         await persistInventory(remaining);
       }
-      await removeEntry(entry);
-      remaining = remaining.filter((_, candidateIndex) => candidateIndex !== index);
+      const outcome = await removeEntry(entry);
+      remaining = outcome.status === "quarantined"
+        ? remaining.map((candidate, candidateIndex) => candidateIndex === index
+          ? { ...entry, state: "preserved" as const }
+          : candidate)
+        : remaining.filter((_, candidateIndex) => candidateIndex !== index);
       await persistInventory(remaining);
     }
   };
@@ -1099,7 +1148,7 @@ export function createNodeSourceUpdaterCleanup(
     if (new Set(entries.map((entry) => entry.kind)).size !== entries.length) {
       throw new Error("Owned-path cleanup evidence contains duplicate path kinds.");
     }
-    if (new Set(entries.map((entry) => `${entry.dev}:${entry.ino}`)).size !== entries.length) {
+    if (new Set(entries.map((entry) => entry.nativeIdentity ?? `${entry.dev}:${entry.ino}`)).size !== entries.length) {
       throw new Error("Owned-path cleanup evidence aliases one directory identity.");
     }
     return entries;
@@ -1143,9 +1192,46 @@ export function createNodeSourceUpdaterCleanup(
 
   const inventoryOwnedPaths: SourceUpdaterCleanupBoundary["inventoryOwnedPaths"] = async (input) => {
     assertReady();
-    const entries = entriesForInput(input);
-    if (entries.length === 0) return;
+    const capturedEntries = entriesForInput(input);
+    if (capturedEntries.length === 0) return;
     const existing = (await readInventory()).entries;
+    const entries = await Promise.all(capturedEntries.map(async (entry): Promise<OwnedCleanupEntry> => {
+      if (platform !== "win32") return entry;
+      const prior = existing.find(
+        (candidate) => candidate.kind === entry.kind && candidate.operationId === entry.operationId,
+      );
+      if (prior && prior.state !== "reserved") {
+        if (
+          prior.dev !== entry.dev ||
+          prior.ino !== entry.ino ||
+          !WINDOWS_NATIVE_IDENTITY_PATTERN.test(prior.nativeIdentity ?? "")
+        ) {
+          throw new Error("Pending Windows source cleanup ownership changed identity.");
+        }
+        return { ...entry, nativeIdentity: prior.nativeIdentity!, state: prior.state };
+      }
+      const location = cleanupLocation(entry.kind, entry.operationId, entry.inventoryVersion);
+      const [rootIdentity, observed] = await Promise.all([
+        fileSystem.inspectDirectory(location.root),
+        fileSystem.inspectDirectory(location.target),
+      ]);
+      if (!rootIdentity || !observed) {
+        throw new Error("Windows source cleanup ownership cannot be published without present native evidence.");
+      }
+      if (
+        observed.dev !== entry.dev ||
+        observed.ino !== entry.ino ||
+        !WINDOWS_NATIVE_IDENTITY_PATTERN.test(observed.nativeIdentity ?? "") ||
+        !samePath(
+          observed.canonicalPath,
+          path.join(rootIdentity.canonicalPath, location.expectedName),
+          platform,
+        )
+      ) {
+        throw new Error("Windows source cleanup ownership changed before native identity publication.");
+      }
+      return { ...entry, nativeIdentity: observed.nativeIdentity! };
+    }));
     await validateEntries(existing);
     if (existing.some((entry) => entry.inventoryVersion === 1)) {
       throw new Error("Source cleanup v1 inventory must be recovered before publishing new ownership.");
@@ -1158,8 +1244,12 @@ export function createNodeSourceUpdaterCleanup(
       );
       if (index >= 0) {
         const prior = merged[index]!;
-        if (prior.state === "owned") {
-          if (prior.dev !== entry.dev || prior.ino !== entry.ino) {
+        if (prior.state !== "reserved") {
+          if (
+            prior.dev !== entry.dev ||
+            prior.ino !== entry.ino ||
+            prior.nativeIdentity !== entry.nativeIdentity
+          ) {
             throw new Error("Pending source cleanup ownership changed identity.");
           }
           continue;
@@ -1174,8 +1264,8 @@ export function createNodeSourceUpdaterCleanup(
     if (merged.length > MAX_SOURCE_CLEANUP_ENTRIES) {
       throw new Error("Source cleanup inventory exceeds its bounded entry limit.");
     }
-    const owned = merged.filter((entry): entry is OwnedCleanupEntry => entry.state === "owned");
-    if (new Set(owned.map((entry) => `${entry.dev}:${entry.ino}`)).size !== owned.length) {
+    const owned = merged.filter((entry): entry is OwnedCleanupEntry => entry.state !== "reserved");
+    if (new Set(owned.map((entry) => entry.nativeIdentity ?? `${entry.dev}:${entry.ino}`)).size !== owned.length) {
       throw new Error("Source cleanup inventory aliases one directory identity across entries.");
     }
     await validateEntries(merged);

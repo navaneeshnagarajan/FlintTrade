@@ -741,12 +741,56 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
         "Remove-Item -LiteralPath $record.RegistryPath"
     )
 
-    purge_start = text.index("if ($Purge)")
+    data_start = text.index("$dataTargets = @(Get-DataTargets)")
+    purge_start = text.index("if ($Purge)", data_start)
     ordinary_start = text.index("} elseif ($dataTargets)", purge_start)
-    assert "Remove-IfExists $_" in text[purge_start:ordinary_start]
+    purge_branch = text[purge_start:ordinary_start]
+    assert "$purgeTargets = @($dataTargets | Where-Object { Test-SafePurgeTarget $_ })" in purge_branch
+    assert "$purgeTargets | ForEach-Object { Say \"  $_\"; Remove-IfExists $_ }" in purge_branch
+    assert "$dataTargets | Where-Object { Test-SafePurgeTarget $_ }" not in text[:purge_start]
     assert "Remove-IfExists $_" not in text[ordinary_start:]
+    assert '$dataTargets | ForEach-Object { Say "  $_" }' in text[ordinary_start:]
     # The old shell assumed %LOCALAPPDATA%\FlintTrade directly.
     assert 'Join-Path $env:LOCALAPPDATA "FlintTrade"' not in text
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL or sys.platform != "win32", reason=NO_POWERSHELL_REASON)
+def test_windows_ordinary_dry_run_reports_unproven_custom_workspace_without_purge_admission(tmp_path: Path) -> None:
+    workspace = tmp_path / "unproven-custom-workspace"
+    workspace.mkdir()
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun"],
+        cwd=ROOT,
+        env={**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert str(workspace) in result.stdout
+    assert "data was kept" in result.stdout
+    assert "custom workspace identity is not proven" not in result.stdout
+    assert workspace.is_dir()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL or sys.platform != "win32", reason=NO_POWERSHELL_REASON)
+def test_windows_purge_dry_run_still_refuses_unproven_custom_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "unproven-custom-workspace"
+    workspace.mkdir()
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-Purge", "-Yes", "-DryRun"],
+        cwd=ROOT,
+        env={**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "custom workspace identity is not proven" in result.stdout
+    assert f"would DELETE FlintTrade data at {workspace}" not in result.stdout
+    assert workspace.is_dir()
 
 
 @pytest.mark.unit

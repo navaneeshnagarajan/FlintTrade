@@ -15,6 +15,7 @@ import {
   createCandidateHealthEnvironment,
   parseCandidateReadyLine,
   proveCandidateHealth,
+  requestCandidateFrontend,
   requestCandidatePing,
 } from "./candidate-health";
 import { SourceOperationLeaseRetentionError } from "./source-operation";
@@ -91,6 +92,13 @@ describe("candidate health proof", () => {
     await mkdir(candidateRoot, { recursive: true });
     options = {
       candidateRoot,
+      frontend: {
+        get: vi.fn().mockResolvedValue({
+          body: "<!doctype html><html><body>FlintTrade</body></html>",
+          contentType: "text/html; charset=utf-8",
+          statusCode: 200,
+        }),
+      },
       isolation: {
         flinttradeHome: path.join(root, "isolated", "flinttrade-home"),
         home: path.join(root, "isolated", "home"),
@@ -134,8 +142,13 @@ describe("candidate health proof", () => {
     const requests: Array<{ host: string | undefined; method: string | undefined; url: string | undefined }> = [];
     const server = createServer((request, response) => {
       requests.push({ host: request.headers.host, method: request.method, url: request.url });
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ status: "ok", timestamp: "fixture" }));
+      if (request.url === "/api/v1/ping") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ status: "ok", timestamp: "fixture" }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><html><body>FlintTrade fixture</body></html>");
     });
     const port = await listen(server);
     const process = waitingProcess((invocation) => {
@@ -143,7 +156,8 @@ describe("candidate health proof", () => {
     });
 
     try {
-      await expect(proveCandidateHealth({ ...options, process: process.boundary })).resolves.toEqual({
+      const { frontend: _frontend, ...realOptions } = options;
+      await expect(proveCandidateHealth({ ...realOptions, process: process.boundary })).resolves.toEqual({
         candidateRoot,
         port,
       });
@@ -151,7 +165,10 @@ describe("candidate health proof", () => {
       await close(server);
     }
 
-    expect(requests).toEqual([{ host: `127.0.0.1:${port}`, method: "GET", url: "/api/v1/ping" }]);
+    expect(requests).toEqual([
+      { host: `127.0.0.1:${port}`, method: "GET", url: "/api/v1/ping" },
+      { host: `127.0.0.1:${port}`, method: "GET", url: "/" },
+    ]);
     expect(process.cleanupObserved()).toBe(true);
     expect(process.invocations).toHaveLength(1);
     const invocation = process.invocations[0]!;
@@ -263,6 +280,57 @@ describe("candidate health proof", () => {
     const port = await listen(server);
     try {
       await expect(requestCandidatePing(port, new AbortController().signal)).rejects.toThrow(/JSON/i);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an API-only candidate whose root is not the built terminal", async () => {
+    const ping = { get: vi.fn().mockResolvedValue({ body: { status: "ok" }, statusCode: 200 }) };
+    const frontend = {
+      get: vi.fn().mockResolvedValue({
+        body: JSON.stringify({ status: "ok" }),
+        contentType: "application/json",
+        statusCode: 200,
+      }),
+    };
+    const process = waitingProcess((invocation) => {
+      queueMicrotask(() => invocation.onOutput?.("FLINTTRADE_BACKEND_READY port=5100", "stdout"));
+    });
+
+    await expect(
+      proveCandidateHealth({ ...options, frontend, ping, process: process.boundary, timeoutMs: 80 }),
+    ).rejects.toMatchObject({ reason: "timeout" });
+    expect(ping.get).toHaveBeenCalled();
+    expect(frontend.get).toHaveBeenCalled();
+    expect(process.cleanupObserved()).toBe(true);
+  });
+
+  it("requires a bounded HTML document from the real frontend boundary", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end("<!doctype html><html><body>FlintTrade</body></html>");
+    });
+    const port = await listen(server);
+    try {
+      await expect(requestCandidateFrontend(port, new AbortController().signal)).resolves.toMatchObject({
+        body: expect.stringContaining("FlintTrade"),
+        contentType: "text/html; charset=utf-8",
+        statusCode: 200,
+      });
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects a frontend response which exceeds the bounded health-proof body", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><html><body>${"x".repeat(2 * 1024 * 1024)}</body></html>`);
+    });
+    const port = await listen(server);
+    try {
+      await expect(requestCandidateFrontend(port, new AbortController().signal)).rejects.toThrow(/size limit/i);
     } finally {
       await close(server);
     }

@@ -9,13 +9,12 @@ import {
   mkdtemp,
   open,
   realpath,
-  rm,
   unlink,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { fetchBoundedResponse, type FetchLike } from "./bounded-response";
 import type {
   ShellInstallerAttempt,
   ShellInstallerHandoff,
@@ -27,20 +26,38 @@ import type {
 export const FLINTTRADE_RELEASES_API =
   "https://api.github.com/repos/navaneeshnagarajan/FlintTrade/releases?per_page=30";
 const MAX_RELEASE_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_RELEASE_RESPONSE_TIMEOUT_MS = 10_000;
+const SHELL_UPDATE_STAGE_PREFIX = "flinttrade-shell-update-";
 const INSTALLER_TAG_PATTERN =
   /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const INSTALLER_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
-type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
+function exactAttestedInstallerName(platform: NodeJS.Platform, releaseTag: string, assetName: string): boolean {
+  const version = releaseTag.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const suffix = platform === "darwin"
+    ? "mac-universal\\.dmg"
+    : platform === "win32"
+      ? "win-x64\\.exe"
+      : platform === "linux"
+        ? "linux-(?:x64|arm64)\\.AppImage"
+        : "(?!)";
+  return new RegExp(`^FlintTrade-${version}-${suffix}$`).test(assetName);
+}
 
 function validReleaseApiResponseUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" &&
+    return value === FLINTTRADE_RELEASES_API &&
+      url.href === FLINTTRADE_RELEASES_API &&
+      url.protocol === "https:" &&
       url.hostname === "api.github.com" &&
       url.port === "" &&
       url.username === "" &&
       url.password === "" &&
       url.pathname === "/repos/navaneeshnagarajan/FlintTrade/releases" &&
+      url.hash === "" &&
+      url.searchParams.getAll("per_page").length === 1 &&
+      [...url.searchParams.keys()].length === 1 &&
       url.searchParams.get("per_page") === "30";
   } catch {
     return false;
@@ -82,33 +99,45 @@ function release(value: unknown): ShellRelease | null {
   };
 }
 
-export function createGithubShellReleaseSource(fetcher: FetchLike): ShellReleaseSource {
+export function createGithubShellReleaseSource(
+  fetcher: FetchLike,
+  options: { timeoutMs?: number } = {},
+): ShellReleaseSource {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_RELEASE_RESPONSE_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
+    throw new Error("The GitHub release metadata timeout must be between 1 and 60000 milliseconds.");
+  }
   return {
     async list(signal): Promise<readonly ShellRelease[]> {
-      const response = await fetcher(FLINTTRADE_RELEASES_API, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28",
+      const bytes = await fetchBoundedResponse({
+        fetcher,
+        init: {
+          headers: {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          redirect: "error",
         },
-        redirect: "follow",
+        label: "The GitHub release metadata response",
+        maximumBytes: MAX_RELEASE_RESPONSE_BYTES,
         signal,
+        timeoutMs,
+        url: FLINTTRADE_RELEASES_API,
+        validateResponse(response) {
+          if (
+            response.status !== 200 ||
+            !validReleaseApiResponseUrl(response.url) ||
+            response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json"
+          ) {
+            throw new Error("The official GitHub release metadata endpoint was unavailable.");
+          }
+        },
       });
-      if (!response.ok || !validReleaseApiResponseUrl(response.url)) {
-        throw new Error("The official GitHub release metadata endpoint was unavailable.");
-      }
-      const declaredLength = Number(response.headers.get("content-length") ?? "0");
-      if (Number.isFinite(declaredLength) && declaredLength > MAX_RELEASE_RESPONSE_BYTES) {
-        throw new Error("The GitHub release metadata response exceeded its size limit.");
-      }
-      const text = await response.text();
-      if (Buffer.byteLength(text) > MAX_RELEASE_RESPONSE_BYTES) {
-        throw new Error("The GitHub release metadata response exceeded its size limit.");
-      }
       let input: unknown;
       try {
-        input = JSON.parse(text) as unknown;
+        input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
       } catch (error) {
-        throw new Error("The GitHub release metadata response was invalid JSON.", { cause: error });
+        throw new Error("The GitHub release metadata response was invalid UTF-8 JSON.", { cause: error });
       }
       if (!Array.isArray(input) || input.length > 30) {
         throw new Error("The GitHub release metadata response had an invalid shape.");
@@ -223,7 +252,6 @@ export interface NodeShellInstallerHandoffOptions {
   platform: NodeJS.Platform;
   privateRoot: string;
   resourcesDirectory: string;
-  temporaryDirectory?: string;
 }
 
 export function macosBundlePathForExecutable(executablePath: string): string {
@@ -526,8 +554,8 @@ export function createNodeShellInstallerHandoff(
   const privateRoot = path.resolve(options.privateRoot);
   const handoffDirectory = path.join(privateRoot, "shell-updates", "handoff");
   const logDirectory = path.join(privateRoot, "shell-updates", "logs");
+  const stagingDirectory = path.join(privateRoot, "shell-updates", "staging");
   const installerLog = path.join(logDirectory, "installer.log");
-  const temporaryDirectory = path.resolve(options.temporaryDirectory ?? os.tmpdir());
   const scriptName = options.platform === "win32" ? "flinttrade-install.ps1" : "flinttrade-install.sh";
   const sourceScript = path.join(options.resourcesDirectory, "install", scriptName);
 
@@ -555,8 +583,11 @@ export function createNodeShellInstallerHandoff(
       }
       return marker;
     },
-    async launch({ marker, releaseTag }): Promise<ShellInstallerAttempt> {
+    async launch({ assetName, digest, marker, releaseTag }): Promise<ShellInstallerAttempt> {
       if (!INSTALLER_TAG_PATTERN.test(releaseTag)) throw new Error("Shell installer release tag is invalid.");
+      if (!INSTALLER_DIGEST_PATTERN.test(digest) || !exactAttestedInstallerName(options.platform, releaseTag, assetName)) {
+        throw new Error("Shell installer attestation binding is invalid.");
+      }
       await prepareHandoffDirectory();
       if (!isWithin(handoffDirectory, path.resolve(marker)) || path.dirname(marker) !== handoffDirectory) {
         throw new Error("Shell installer handoff marker escaped its private directory.");
@@ -589,10 +620,22 @@ export function createNodeShellInstallerHandoff(
       const windowsInstallDirectory = options.platform === "win32"
         ? await resolveCurrentWindowsInstallDirectory(options.currentExecutablePath)
         : undefined;
-      const stageDirectory = await mkdtemp(path.join(temporaryDirectory, "flinttrade-shell-update-"));
+      await preparePrivateDirectory(stagingDirectory);
+      const canonicalStagingDirectory = await realpath(stagingDirectory);
+      const stageDirectory = await mkdtemp(path.join(canonicalStagingDirectory, SHELL_UPDATE_STAGE_PREFIX));
       try {
         if (options.platform !== "win32") await chmod(stageDirectory, 0o700);
-        const stagedScript = path.join(stageDirectory, scriptName);
+        await requirePrivateDirectory(stageDirectory, canonicalStagingDirectory, options.platform);
+        const canonicalStageDirectory = await realpath(stageDirectory);
+        const stageName = path.basename(canonicalStageDirectory);
+        if (
+          path.dirname(canonicalStageDirectory) !== canonicalStagingDirectory ||
+          !stageName.startsWith(SHELL_UPDATE_STAGE_PREFIX) ||
+          stageName.length === SHELL_UPDATE_STAGE_PREFIX.length
+        ) {
+          throw new Error("Shell update staging storage was not an exact private prefixed directory.");
+        }
+        const stagedScript = path.join(canonicalStageDirectory, scriptName);
         await copyFile(sourceScript, stagedScript, constants.COPYFILE_EXCL);
         await chmod(stagedScript, 0o700).catch(() => undefined);
 
@@ -606,6 +649,8 @@ export function createNodeShellInstallerHandoff(
           linuxExtractedRoot,
           windowsInstallDirectory,
         );
+        environment.FLINTTRADE_UPDATE_ASSET_NAME = assetName;
+        environment.FLINTTRADE_UPDATE_ASSET_SHA256 = digest.slice("sha256:".length);
         let command: string;
         let args: string[];
         if (options.platform === "win32") {
@@ -643,7 +688,7 @@ export function createNodeShellInstallerHandoff(
           let child: ChildProcess;
           try {
             child = spawn(command, args, {
-              cwd: stageDirectory,
+              cwd: canonicalStageDirectory,
               detached: true,
               env: environment,
               stdio: ["ignore", log.fd, log.fd],
@@ -674,9 +719,8 @@ export function createNodeShellInstallerHandoff(
               }
             },
             async cleanup(): Promise<void> {
-              if (child.exitCode !== null || child.signalCode !== null) {
-                await rm(stageDirectory, { force: true, recursive: true });
-              }
+              // A detached pathname is never sufficient authority for recursive deletion.
+              // Preserve failed, cancelled and successful stages; no automatic purge exists.
             },
             exited: exit,
           };
@@ -684,7 +728,8 @@ export function createNodeShellInstallerHandoff(
           await log.close().catch(() => undefined);
         }
       } catch (error) {
-        await rm(stageDirectory, { force: true, recursive: true });
+        // Even pre-launch failures retain the private stage. No later pathname
+        // re-derivation is accepted as recursive-deletion authority.
         throw error;
       }
     },

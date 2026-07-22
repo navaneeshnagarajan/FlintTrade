@@ -27,7 +27,9 @@ function deferred<T>() {
 }
 
 function fixture(configuration: {
+  activeRequiresRebuild?: boolean;
   heartbeatIntervalMs?: number;
+  latestRevision?: string;
   lifecycleAvailable?: boolean;
   platform?: NodeJS.Platform;
   redactedPaths?: readonly string[];
@@ -41,11 +43,13 @@ function fixture(configuration: {
   const trace: string[] = [];
   const state = createUpdateState("source");
   const coordinator = createSourceOperationCoordinator();
+  const resolvedRevision = configuration.latestRevision ?? latestRevision;
   const activeIdentity = {
     canonicalPath: activeSource,
     contentIdentity: "1".repeat(40),
     directoryIdentity: { dev: 1, ino: 1 },
     provenance: "git" as const,
+    requiresRebuild: configuration.activeRequiresRebuild ?? false,
     revision: currentRevision,
   };
   const candidateIdentity = {
@@ -53,7 +57,8 @@ function fixture(configuration: {
     contentIdentity: "2".repeat(40),
     directoryIdentity: { dev: 1, ino: 3 },
     provenance: "git" as const,
-    revision: latestRevision,
+    requiresRebuild: false,
+    revision: resolvedRevision,
   };
   let cleanup!: SourceUpdaterCleanupBoundary;
   let inventoriedCandidate: Parameters<SourceUpdaterCleanupBoundary["removeOwnedCandidate"]>[0] | undefined;
@@ -167,7 +172,7 @@ function fixture(configuration: {
     revisionResolver: {
       resolve: vi.fn(async () => {
         trace.push("latest");
-        return { provenance: "git" as const, revision: latestRevision };
+        return { provenance: "git" as const, revision: resolvedRevision };
       }),
     },
     ...(configuration.redactedPaths ? { redactedPaths: configuration.redactedPaths } : {}),
@@ -189,7 +194,7 @@ function fixture(configuration: {
     isolation,
     isolationRoot,
     lastKnownGood,
-    latestRevision,
+    latestRevision: resolvedRevision,
     operationId,
     options,
     prepare,
@@ -231,6 +236,26 @@ describe("source update orchestration", () => {
       status: "unavailable",
       version: null,
     });
+  });
+
+  it("offers and stages a current-toolchain rebuild when the revision is unchanged", async () => {
+    const test = fixture({ activeRequiresRebuild: true, latestRevision: currentRevision });
+
+    await expect(test.updater.check()).resolves.toMatchObject({
+      currentVersion: currentRevision,
+      status: "available",
+      version: currentRevision,
+    });
+    await expect(test.updater.apply()).resolves.toMatchObject({
+      currentVersion: currentRevision,
+      status: "complete",
+      version: currentRevision,
+    });
+    expect(test.options.candidateStager.stage).toHaveBeenCalledWith(
+      expect.objectContaining({ revision: currentRevision }),
+    );
+    expect(test.trace).toContain("drain");
+    expect(test.trace).toContain("promote");
   });
 
   it("fails before lease acquisition or staging when safe cleanup is unavailable", async () => {
@@ -343,6 +368,20 @@ describe("source update orchestration", () => {
     expect(test.options.promotion.acknowledge).toHaveBeenCalledWith(
       expect.objectContaining({ promotionId: operationId, status: "promoted" }),
     );
+  });
+
+  it("keeps Windows staging and health proof ahead of backend drain and native promotion", async () => {
+    const test = fixture({ platform: "win32" });
+    await test.prepare();
+
+    await expect(test.updater.apply()).resolves.toMatchObject({ failure: null, status: "complete" });
+    const at = (event: string) => test.trace.indexOf(event);
+    expect(at("stage")).toBeGreaterThanOrEqual(0);
+    expect(at("stage")).toBeLessThan(at("health"));
+    expect(at("health")).toBeLessThan(at("drain"));
+    expect(at("drain")).toBeLessThan(at("promote"));
+    expect(test.options.cleanup.inventoryOwnedPaths).toHaveBeenCalled();
+    expect(test.options.operationLease.assertHeld).toHaveBeenCalledTimes(4);
   });
 
   it("retains a completed promotion journal when its terminal event cannot be made durable", async () => {
@@ -923,6 +962,46 @@ describe("source update orchestration", () => {
       identity: { dev: 1, ino: 3 },
       operationId,
     });
+  });
+
+  it("refuses drain when the bound terminal output changes during candidate health", async () => {
+    const test = fixture();
+    await test.prepare();
+    let candidateValidationCount = 0;
+    test.options.provenance.validate = vi.fn(async ({ sourcePath }) => {
+      if (sourcePath === test.activeSource) {
+        return {
+          canonicalPath: test.activeSource,
+          contentIdentity: "1".repeat(40),
+          directoryIdentity: { dev: 1, ino: 1 },
+          provenance: "git" as const,
+          revision: currentRevision,
+        };
+      }
+      candidateValidationCount += 1;
+      return {
+        buildIdentity: {
+          frontendOutputDigest: (candidateValidationCount > 1 ? "4" : "3").repeat(64),
+          markerSchemaVersion: 3 as const,
+          packageManager: "pnpm@9.15.0+sha512.fixture",
+          toolchain: { node: "22.23.1", pnpm: "9.15.0", uv: "0.11.16" },
+        },
+        canonicalPath: test.candidate,
+        contentIdentity: "2".repeat(40),
+        directoryIdentity: { dev: 1, ino: 3 },
+        provenance: "git" as const,
+        requiresRebuild: false,
+        revision: latestRevision,
+      };
+    });
+
+    await expect(test.updater.apply()).resolves.toMatchObject({
+      failure: expect.stringMatching(/candidate source changed during its health proof/i),
+      status: "failed",
+    });
+    expect(candidateValidationCount).toBe(2);
+    expect(test.options.lifecycle.drainCurrent).not.toHaveBeenCalled();
+    expect(test.options.promotion.promote).not.toHaveBeenCalled();
   });
 
   it("reports rollback as a stable failure and preserves evidence after promotion begins", async () => {

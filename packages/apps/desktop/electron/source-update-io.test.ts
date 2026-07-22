@@ -31,6 +31,24 @@ const operationId = "12345678-1234-4123-8123-123456789abc";
 const nestedOperationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const revision = "a".repeat(40);
 
+async function testOnlyPromoteAbsent(
+  source: string,
+  destination: string,
+  expected: { dev: number; ino: number },
+): Promise<void> {
+  const sourceMetadata = await lstat(source);
+  if (sourceMetadata.dev !== expected.dev || sourceMetadata.ino !== expected.ino) {
+    throw new Error("test no-replace promotion identity mismatch");
+  }
+  try {
+    await lstat(destination);
+    throw Object.assign(new Error("test no-replace destination already exists"), { code: "EEXIST" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await rename(source, destination);
+}
+
 const testOnlySafeRemove: NonNullable<NodeSourcePromotionFileSystemOptions["safeRemove"]> = async ({
   expected,
   quarantine,
@@ -59,7 +77,92 @@ const testOnlySafeRemove: NonNullable<NodeSourcePromotionFileSystemOptions["safe
 };
 
 function cleanupFileSystem() {
-  return createNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove });
+  return createNodeSourcePromotionFileSystem({
+    promoteAbsent: testOnlyPromoteAbsent,
+    safeRemove: testOnlySafeRemove,
+  });
+}
+
+async function readLogicalJournal(target: string): Promise<string | null> {
+  return cleanupFileSystem().readJournal(target);
+}
+
+async function readRequiredLogicalJournal(target: string): Promise<string> {
+  const contents = await readLogicalJournal(target);
+  if (contents === null) throw new Error(`test logical journal is tombstoned: ${target}`);
+  return contents;
+}
+
+async function writeLogicalJournal(target: string, contents: string): Promise<void> {
+  await cleanupFileSystem().writeJournalAtomic(target, contents);
+}
+
+function windowsCleanupFileSystem(options: { failOnceAfterQuarantine?: { value: boolean } } = {}) {
+  const inspect = async (target: string) => {
+    try {
+      const metadata = await lstat(target);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("invalid Windows fixture directory");
+      return {
+        nativeIdentity: `${metadata.dev.toString(16).padStart(16, "0")}:${metadata.ino.toString(16).padStart(32, "0")}`,
+        status: "present" as const,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" as const };
+      throw error;
+    }
+  };
+  const windows = {
+    async commitJournal({ target, temporary }: { target: string; temporary: string }) {
+      await rename(temporary, target);
+    },
+    inspectDirectory: inspect,
+    async inspectJournal(target: string) {
+      try {
+        const contents = await readFile(target);
+        const metadata = await lstat(target);
+        const { createHash } = await import("node:crypto");
+        return {
+          location: "target" as const,
+          nativeIdentity: `${metadata.dev.toString(16).padStart(16, "0")}:${metadata.ino.toString(16).padStart(32, "0")}`,
+          sha256: createHash("sha256").update(contents).digest("hex"),
+          status: "journal-present" as const,
+        };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" as const };
+        throw error;
+      }
+    },
+    async quarantineDirectory(input: { expectedNativeIdentity: string; quarantine: string; target: string }) {
+      const atTarget = await inspect(input.target);
+      const atQuarantine = await inspect(input.quarantine);
+      if ((atTarget.status === "present") === (atQuarantine.status === "present")) throw new Error("ambiguous fixture");
+      const present = atTarget.status === "present" ? atTarget : atQuarantine;
+      if (present.status !== "present" || present.nativeIdentity !== input.expectedNativeIdentity) {
+        throw new Error("native fixture identity mismatch");
+      }
+      if (atTarget.status === "present") await rename(input.target, input.quarantine);
+      if (options.failOnceAfterQuarantine?.value) {
+        options.failOnceAfterQuarantine.value = false;
+        throw new Error("simulated Windows crash after handle-bound quarantine rename");
+      }
+      return { status: "quarantined" as const };
+    },
+    async removeJournal({ target }: { target: string }) {
+      await rm(`${target}.previous`, { force: true });
+      await rm(target, { force: true });
+    },
+    async renameDirectory(input: { destination: string; source: string }) {
+      await rename(input.source, input.destination);
+    },
+  };
+  return createNodeSourcePromotionFileSystem({
+    platform: "win32",
+    safeRemove: async ({ expected, quarantine, target }) => {
+      if (!expected.nativeIdentity) throw new Error("fixture native identity missing");
+      return windows.quarantineDirectory({ expectedNativeIdentity: expected.nativeIdentity, quarantine, target });
+    },
+    windows,
+  });
 }
 
 function leaseFileSystem(acquireOperationLock: BootstrapDependencies["fileSystem"]["acquireOperationLock"]) {
@@ -634,13 +737,10 @@ describe("source update production I/O", () => {
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
     await freshRuntime.recover();
 
-    for (const removed of [
-      stagingCandidate,
-      stagingUnpack,
-      path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME),
-    ]) {
+    for (const removed of [stagingCandidate, stagingUnpack]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("rejects bootstrap staging cleanup path near-misses before inventory mutation", async () => {
@@ -683,7 +783,7 @@ describe("source update production I/O", () => {
     await cleanup.reserveOwnedPaths({ kinds, operationId });
 
     const inventoryPath = path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
-    const beforeValidation = await readFile(inventoryPath, "utf8");
+    const beforeValidation = await readRequiredLogicalJournal(inventoryPath);
     expect(JSON.parse(beforeValidation)).toEqual({
       entries: kinds.map((kind) => ({ kind, operationId, state: "reserved" })),
       schemaVersion: 2,
@@ -692,7 +792,7 @@ describe("source update production I/O", () => {
     expect(beforeValidation).not.toContain(layout.isolationRoot);
 
     await cleanup.validateRecovery();
-    expect(await readFile(inventoryPath, "utf8")).toBe(beforeValidation);
+    expect(await readRequiredLogicalJournal(inventoryPath)).toBe(beforeValidation);
   });
 
   it("drops absent reservations safely when a fresh runtime recovers before creation", async () => {
@@ -704,9 +804,7 @@ describe("source update production I/O", () => {
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
     await freshRuntime.recover();
 
-    await expect(lstat(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("upgrades a fresh-runtime reservation durably before invoking the safe remover", async () => {
@@ -723,8 +821,9 @@ describe("source update production I/O", () => {
     const candidateMetadata = await lstat(candidate);
     const interruption = new SourceOperationLeaseRetentionError("simulated crash after ownership upgrade");
     const interruptedFileSystem = createNodeSourcePromotionFileSystem({
+      promoteAbsent: testOnlyPromoteAbsent,
       safeRemove: async (request) => {
-        const inventory = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+        const inventory = JSON.parse(await readRequiredLogicalJournal(inventoryPath)) as {
           entries: Array<Record<string, unknown>>;
           schemaVersion: number;
         };
@@ -744,7 +843,7 @@ describe("source update production I/O", () => {
     await expect(
       createNodeSourceUpdaterCleanup({ ...layout, fileSystem: interruptedFileSystem }).recover(),
     ).rejects.toBe(interruption);
-    const retained = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+    const retained = JSON.parse(await readRequiredLogicalJournal(inventoryPath)) as {
       entries: Array<Record<string, unknown>>;
     };
     expect(retained.entries.map((entry) => entry.state)).toEqual([
@@ -758,6 +857,7 @@ describe("source update production I/O", () => {
     const freshRuntime = createNodeSourceUpdaterCleanup({
       ...layout,
       fileSystem: createNodeSourcePromotionFileSystem({
+        promoteAbsent: testOnlyPromoteAbsent,
         safeRemove: async (request) => {
           quarantines.push(path.basename(request.quarantine));
           await testOnlySafeRemove(request);
@@ -771,9 +871,10 @@ describe("source update production I/O", () => {
       `${CLEANUP_QUARANTINE_PREFIX}staging-unpack-1-${operationId}`,
       `${CLEANUP_QUARANTINE_PREFIX}isolation-${operationId}`,
     ]);
-    for (const removed of [candidate, stagingCandidate, stagingUnpack, isolation, inventoryPath]) {
+    for (const removed of [candidate, stagingCandidate, stagingUnpack, isolation]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(inventoryPath)).resolves.toBeNull();
   });
 
   it("upgrades a reservation from published ownership and removes only selected kinds", async () => {
@@ -792,7 +893,7 @@ describe("source update production I/O", () => {
         operationId,
       },
     });
-    expect(JSON.parse(await readFile(inventoryPath, "utf8"))).toMatchObject({
+    expect(JSON.parse(await readRequiredLogicalJournal(inventoryPath))).toMatchObject({
       entries: [
         { dev: candidateMetadata.dev, ino: candidateMetadata.ino, kind: "candidate", state: "owned" },
         { kind: "isolation", state: "reserved" },
@@ -803,13 +904,13 @@ describe("source update production I/O", () => {
     await cleanup.removeReservedPaths({ kinds: ["candidate"], operationId });
     await expect(lstat(candidate)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(isolation)).resolves.toBeDefined();
-    expect(JSON.parse(await readFile(inventoryPath, "utf8"))).toMatchObject({
+    expect(JSON.parse(await readRequiredLogicalJournal(inventoryPath))).toMatchObject({
       entries: [{ kind: "isolation", state: "reserved" }],
     });
 
     await createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() }).recover();
     await expect(lstat(isolation)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readLogicalJournal(inventoryPath)).resolves.toBeNull();
   });
 
   it("refuses to reserve a pre-existing name and never claims it as owned", async () => {
@@ -845,13 +946,13 @@ describe("source update production I/O", () => {
     await rm(candidate, { recursive: true });
     await mkdir(candidate);
     const replacement = await lstat(candidate);
-    const inventoryBefore = await readFile(inventoryPath, "utf8");
+    const inventoryBefore = await readRequiredLogicalJournal(inventoryPath);
 
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
     await expect(freshRuntime.validateRecovery()).rejects.toThrow(/captured directory identity/i);
     await expect(freshRuntime.removeReservedPaths({ kinds: ["candidate"], operationId }))
       .rejects.toThrow(/captured directory identity/i);
-    expect(await readFile(inventoryPath, "utf8")).toBe(inventoryBefore);
+    expect(await readRequiredLogicalJournal(inventoryPath)).toBe(inventoryBefore);
     await expect(lstat(candidate)).resolves.toMatchObject({ ino: replacement.ino });
     expect(replacement.ino).not.toBe(original.ino);
   });
@@ -870,9 +971,9 @@ describe("source update production I/O", () => {
     });
     await ambiguousCleanup.reserveOwnedPaths({ kinds: ["candidate"], operationId });
     await Promise.all([mkdir(candidate), mkdir(quarantine)]);
-    const ambiguousBefore = await readFile(ambiguousInventory, "utf8");
+    const ambiguousBefore = await readRequiredLogicalJournal(ambiguousInventory);
     await expect(ambiguousCleanup.validateRecovery()).rejects.toThrow(/ambiguous/i);
-    expect(await readFile(ambiguousInventory, "utf8")).toBe(ambiguousBefore);
+    expect(await readRequiredLogicalJournal(ambiguousInventory)).toBe(ambiguousBefore);
     await expect(lstat(candidate)).resolves.toBeDefined();
     await expect(lstat(quarantine)).resolves.toBeDefined();
 
@@ -898,11 +999,11 @@ describe("source update production I/O", () => {
       }],
       schemaVersion: 2,
     })}\n`;
-    await writeFile(strictInventory, invalid);
+    await writeLogicalJournal(strictInventory, invalid);
     await expect(
       createNodeSourceUpdaterCleanup({ ...strictLayout, fileSystem: cleanupFileSystem() }).validateRecovery(),
     ).rejects.toThrow(/reservation is invalid/i);
-    expect(await readFile(strictInventory, "utf8")).toBe(invalid);
+    expect(await readRequiredLogicalJournal(strictInventory)).toBe(invalid);
   });
 
   it("rejects non-canonical uppercase UUID evidence without orphaning its exact path", async () => {
@@ -919,14 +1020,14 @@ describe("source update production I/O", () => {
       entries: [{ kind: "candidate", operationId: uppercaseOperationId, state: "reserved" }],
       schemaVersion: 2,
     })}\n`;
-    await writeFile(inventoryPath, invalidInventory);
+    await writeLogicalJournal(inventoryPath, invalidInventory);
     const cleanup = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
 
     await expect(cleanup.validateRecovery()).rejects.toThrow(/inventory entry is invalid/i);
-    expect(await readFile(inventoryPath, "utf8")).toBe(invalidInventory);
+    expect(await readRequiredLogicalJournal(inventoryPath)).toBe(invalidInventory);
     await expect(lstat(uppercaseCandidate)).resolves.toMatchObject({ ino: candidateMetadata.ino });
 
-    await rm(inventoryPath);
+    await cleanupFileSystem().removeJournal(inventoryPath);
     const uppercaseIsolation = path.join(
       layout.isolationRoot,
       `source-update-${uppercaseOperationId}`,
@@ -948,7 +1049,7 @@ describe("source update production I/O", () => {
     const inventoryPath = path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
     await mkdir(candidate);
     const metadata = await lstat(candidate);
-    await writeFile(inventoryPath, `${JSON.stringify({
+    await writeLogicalJournal(inventoryPath, `${JSON.stringify({
       entries: [{ dev: metadata.dev, ino: metadata.ino, kind: "candidate", operationId }],
       schemaVersion: 1,
     })}\n`);
@@ -958,7 +1059,7 @@ describe("source update production I/O", () => {
     await cleanup.recover();
 
     await expect(lstat(candidate)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readLogicalJournal(inventoryPath)).resolves.toBeNull();
   });
 
   it("replays v1 ownership after the legacy quarantine rename and rejects non-v1 kinds", async () => {
@@ -981,7 +1082,7 @@ describe("source update production I/O", () => {
       rename(candidate, legacyQuarantine),
       rename(isolation, legacyIsolationQuarantine),
     ]);
-    await writeFile(inventoryPath, `${JSON.stringify({
+    await writeLogicalJournal(inventoryPath, `${JSON.stringify({
       entries: [
         { dev: metadata.dev, ino: metadata.ino, kind: "candidate", operationId },
         { dev: isolationMetadata.dev, ino: isolationMetadata.ino, kind: "isolation", operationId },
@@ -994,9 +1095,9 @@ describe("source update production I/O", () => {
     await cleanup.recover();
     await expect(lstat(legacyQuarantine)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(legacyIsolationQuarantine)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readLogicalJournal(inventoryPath)).resolves.toBeNull();
 
-    await writeFile(inventoryPath, `${JSON.stringify({
+    await writeLogicalJournal(inventoryPath, `${JSON.stringify({
       entries: [{ dev: metadata.dev, ino: metadata.ino, kind: "staging-candidate", operationId }],
       schemaVersion: 1,
     })}\n`);
@@ -1010,20 +1111,82 @@ describe("source update production I/O", () => {
     expect(() => cleanup.assertReady()).toThrow(/unavailable on Windows.*identity-bound/i);
   });
 
-  it("permits journal-less Windows startup recovery but blocks pending directory cleanup", async () => {
+  it("fails closed before even journal-less Windows recovery when the native proof boundary is absent", async () => {
     const layout = await temporaryLayout();
     const cleanup = createNodeSourceUpdaterCleanup({ ...layout, platform: "win32" });
 
-    await expect(cleanup.validateRecovery()).resolves.toBeUndefined();
-    await expect(cleanup.recover()).resolves.toBeUndefined();
+    await expect(cleanup.validateRecovery()).rejects.toThrow(/native filesystem helper/i);
+    await expect(cleanup.recover()).rejects.toThrow(/native filesystem helper/i);
 
     const inventoryPath = path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
     await writeFile(inventoryPath, `${JSON.stringify({
       entries: [{ kind: "candidate", operationId, state: "reserved" }],
       schemaVersion: 2,
     })}\n`);
-    await expect(cleanup.validateRecovery()).rejects.toThrow(/unavailable on Windows.*identity-bound/i);
-    await expect(cleanup.recover()).rejects.toThrow(/unavailable on Windows.*identity-bound/i);
+    await expect(cleanup.validateRecovery()).rejects.toThrow(/native filesystem helper/i);
+    await expect(cleanup.recover()).rejects.toThrow(/native filesystem helper/i);
+  });
+
+  it("persists native Windows ownership and resumes cleanup from handle-bound quarantine evidence", async () => {
+    const layout = await temporaryLayout();
+    const candidate = path.join(layout.sourceRoot, `FlintTrade.update-${operationId}`);
+    const quarantine = path.join(
+      layout.sourceRoot,
+      `${CLEANUP_QUARANTINE_PREFIX}candidate-${operationId}`,
+    );
+    const inventoryPath = path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
+    const external = path.join(layout.root, "foreign-tree");
+    await mkdir(path.join(candidate, "nested"), { recursive: true });
+    await mkdir(external);
+    await writeFile(path.join(candidate, "nested", "ordinary.txt"), "preserve ordinary child");
+    await writeFile(path.join(external, "outside.txt"), "preserve reparse target");
+    await symlink(external, path.join(candidate, "foreign-link"), "dir");
+    const metadata = await lstat(candidate);
+    const failure = { value: true };
+    const cleanup = createNodeSourceUpdaterCleanup({
+      ...layout,
+      fileSystem: windowsCleanupFileSystem({ failOnceAfterQuarantine: failure }),
+      platform: "win32",
+    });
+    const request = {
+      candidatePath: candidate,
+      identity: { dev: metadata.dev, ino: metadata.ino },
+      operationId,
+    };
+
+    expect(() => cleanup.assertReady()).not.toThrow();
+    await expect(cleanup.removeOwnedCandidate(request)).rejects.toThrow(/simulated Windows crash/i);
+    await expect(lstat(candidate)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(quarantine)).resolves.toMatchObject({ ino: metadata.ino });
+    const retained = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+      entries: Array<{ nativeIdentity?: string; state?: string }>;
+    };
+    expect(retained.entries[0]?.nativeIdentity).toMatch(/^[0-9a-f]{16}:[0-9a-f]{32}$/);
+
+    const recovering = createNodeSourceUpdaterCleanup({
+      ...layout,
+      fileSystem: windowsCleanupFileSystem(),
+      platform: "win32",
+    });
+    await recovering.recover();
+    await expect(readFile(path.join(quarantine, "nested", "ordinary.txt"), "utf8")).resolves.toBe(
+      "preserve ordinary child",
+    );
+    await expect(readFile(path.join(quarantine, "foreign-link", "outside.txt"), "utf8")).resolves.toBe(
+      "preserve reparse target",
+    );
+    await expect(readFile(path.join(external, "outside.txt"), "utf8")).resolves.toBe("preserve reparse target");
+    const preserved = JSON.parse(await readFile(inventoryPath, "utf8")) as {
+      entries: Array<{ state?: string }>;
+    };
+    expect(preserved.entries).toEqual([expect.objectContaining({ state: "preserved" })]);
+
+    await recovering.recover();
+    await expect(lstat(quarantine)).resolves.toMatchObject({ ino: metadata.ino });
+    await rm(quarantine, { force: true, recursive: true });
+    await recovering.recover();
+    await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(external, "outside.txt"), "utf8")).resolves.toBe("preserve reparse target");
   });
 
   it("resumes deterministic candidate cleanup after the quarantine rename", async () => {
@@ -1062,10 +1225,12 @@ describe("source update production I/O", () => {
     const isolationMetadata = await lstat(isolation);
     let interrupted = false;
     const interruptedFileSystem = createNodeSourcePromotionFileSystem({
+      promoteAbsent: testOnlyPromoteAbsent,
       safeRemove: async (request) => {
         if (!interrupted) {
           interrupted = true;
-          await rename(request.target, request.quarantine);
+          await expect(lstat(request.target)).rejects.toMatchObject({ code: "ENOENT" });
+          await expect(lstat(request.quarantine)).resolves.toBeDefined();
           throw new SourceOperationLeaseRetentionError("simulated contained-remover interruption");
         }
         await testOnlySafeRemove(request);
@@ -1090,9 +1255,10 @@ describe("source update production I/O", () => {
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
     await freshRuntime.recover?.();
 
-    for (const removed of [candidate, quarantine, isolation, path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME)]) {
+    for (const removed of [candidate, quarantine, isolation]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("replays inventory-only containment evidence after a fresh runtime starts", async () => {
@@ -1121,9 +1287,10 @@ describe("source update production I/O", () => {
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
     await freshRuntime.recover();
 
-    for (const removed of [candidate, isolation, path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME)]) {
+    for (const removed of [candidate, isolation]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("merges nested promoted-health and apply isolation inventories before fresh-runtime replay", async () => {
@@ -1138,8 +1305,10 @@ describe("source update production I/O", () => {
     const applyMetadata = await lstat(applyIsolation);
     const promotedMetadata = await lstat(promotedIsolation);
     const interruptedFileSystem = createNodeSourcePromotionFileSystem({
+      promoteAbsent: testOnlyPromoteAbsent,
       safeRemove: async (request) => {
-        await rename(request.target, request.quarantine);
+        await expect(lstat(request.target)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(lstat(request.quarantine)).resolves.toBeDefined();
         throw new SourceOperationLeaseRetentionError("promoted-health remover containment is unresolved");
       },
     });
@@ -1165,10 +1334,10 @@ describe("source update production I/O", () => {
       applyIsolation,
       promotedIsolation,
       promotedQuarantine,
-      path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME),
     ]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("inventories a later cleanup batch before replaying an ordinary failed quarantine", async () => {
@@ -1187,6 +1356,7 @@ describe("source update production I/O", () => {
     const laterMetadata = await lstat(laterIsolation);
     const blockedMetadata = await lstat(blockedIsolation);
     const failingFileSystem = createNodeSourcePromotionFileSystem({
+      promoteAbsent: testOnlyPromoteAbsent,
       safeRemove: async (request) => {
         try {
           await rename(request.target, request.quarantine);
@@ -1207,7 +1377,7 @@ describe("source update production I/O", () => {
       isolationPath: laterIsolation,
     })).rejects.toThrow(/contained helper refusal/i);
     const inventory = JSON.parse(
-      await readFile(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME), "utf8"),
+      await readRequiredLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME)),
     ) as { entries: Array<{ operationId: string }> };
     expect(inventory.entries.map((entry) => entry.operationId)).toEqual([
       nestedOperationId,
@@ -1224,10 +1394,10 @@ describe("source update production I/O", () => {
       blockedQuarantine,
       laterIsolation,
       laterQuarantine,
-      path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME),
     ]) {
       await expect(lstat(removed)).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readLogicalJournal(path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME))).resolves.toBeNull();
   });
 
   it("refuses cleanup through a final alias and a parent alias", async () => {

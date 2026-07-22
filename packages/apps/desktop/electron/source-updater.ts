@@ -257,19 +257,23 @@ function identityKey(identity: ActiveSourceIdentity): string {
   return JSON.stringify(
     identity.provenance === "git"
       ? {
+          buildIdentity: identity.buildIdentity ?? null,
           canonicalPath: path.resolve(identity.canonicalPath),
           contentIdentity: identity.contentIdentity,
           directoryIdentity: identity.directoryIdentity,
           provenance: identity.provenance,
+          requiresRebuild: identity.requiresRebuild ?? false,
           revision: identity.revision,
         }
       : {
           archiveFinalOrigin: identity.archiveFinalOrigin,
           archiveSha256: identity.archiveSha256,
+          buildIdentity: identity.buildIdentity ?? null,
           canonicalPath: path.resolve(identity.canonicalPath),
           contentIdentity: identity.contentIdentity,
           directoryIdentity: identity.directoryIdentity,
           provenance: identity.provenance,
+          requiresRebuild: identity.requiresRebuild ?? false,
           revision: identity.revision,
         },
   );
@@ -634,7 +638,7 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
           );
           assertAttempt(attempt, "checking", signal);
           const revision = exactRevision(latest.revision, "The latest source revision");
-          const available = revision !== active.revision;
+          const available = revision !== active.revision || active.requiresRebuild === true;
           await recordAttempt(attempt, "checking", signal, {
             message: available ? "A source update is available" : "The source is current",
             operation: "update-check",
@@ -934,9 +938,10 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
               !samePath(path.resolve(candidate.canonicalPath), owned.candidate) ||
               !sameDirectoryIdentity(candidate.directoryIdentity, staged.identity) ||
               exactRevision(candidate.revision, "The candidate source revision") !== revision ||
-              candidate.provenance !== staged.provenance
+              candidate.provenance !== staged.provenance ||
+              candidate.requiresRebuild === true
             ) {
-              throw new Error("The completed candidate failed exact source revalidation.");
+              throw new Error("The completed candidate failed exact current-build source revalidation.");
             }
             const proof = await runWithHeartbeat(
               attempt,
@@ -1140,7 +1145,8 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
             if (ownedReservationsSettled) {
               // Candidate, isolation and staging reservations were all retired
               // before acknowledgement. Do not introduce a new fallible read
-              // after the terminal promotion journal has been deleted.
+              // after terminal journal acknowledgement: POSIX has appended its
+              // tombstone and Windows has removed its native sidecar.
             } else if (isSourceOperationLeaseRetentionError(applyFailure)) {
               // The uncontained tree may still hold files in both owned paths.
               // Inventory their exact identities without deleting them, then

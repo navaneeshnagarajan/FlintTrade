@@ -4,8 +4,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 
 internal static class Program
 {
@@ -33,6 +35,9 @@ internal static class Program
     private const uint FILE_SHARE_WRITE = 0x00000002;
     private const uint OPEN_EXISTING = 3;
     private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
 
     private static readonly IntPtr InvalidHandle = new IntPtr(-1);
     private static readonly IntPtr ProcThreadAttributeHandleList = new IntPtr(0x00020002);
@@ -366,6 +371,7 @@ internal static class Program
 
     private static PROCESS_INFORMATION CreateSuspendedTarget(Options options)
     {
+        IntPtr targetLock = IntPtr.Zero;
         IntPtr childInput = IntPtr.Zero;
         IntPtr childOutput = IntPtr.Zero;
         IntPtr childError = IntPtr.Zero;
@@ -375,6 +381,7 @@ internal static class Program
 
         try
         {
+            targetLock = OpenAndVerifyTarget(options);
             SECURITY_ATTRIBUTES inheritable = new SECURITY_ATTRIBUTES();
             inheritable.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
             inheritable.bInheritHandle = 1;
@@ -479,6 +486,74 @@ internal static class Program
             CloseOwnedHandle(ref childInput);
             CloseOwnedHandle(ref childOutput);
             CloseOwnedHandle(ref childError);
+            CloseOwnedHandle(ref targetLock);
+        }
+    }
+
+    private static IntPtr OpenAndVerifyTarget(Options options)
+    {
+        SECURITY_ATTRIBUTES attributes = new SECURITY_ATTRIBUTES();
+        attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+        IntPtr handle = CreateFileW(
+            options.Target,
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            ref attributes,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+            IntPtr.Zero);
+        RequireHandle(handle, "CreateFileW(target-lock)");
+        try
+        {
+            BY_HANDLE_FILE_INFORMATION information;
+            if (!GetFileInformationByHandle(handle, out information))
+                throw NativeError("GetFileInformationByHandle(target-lock)");
+            if ((information.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+                throw new InvalidOperationException("Target executable must be an exact ordinary file.");
+            string canonical = FinalPath(handle);
+            if (!String.Equals(canonical, Path.GetFullPath(options.Target), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Target executable path is aliased.");
+            if (options.TargetSha256 != null &&
+                !String.Equals(HashHandle(handle), options.TargetSha256, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Target executable digest does not match the build manifest.");
+            }
+            IntPtr result = handle;
+            handle = IntPtr.Zero;
+            return result;
+        }
+        finally
+        {
+            CloseOwnedHandle(ref handle);
+        }
+    }
+
+    private static string FinalPath(IntPtr handle)
+    {
+        StringBuilder buffer = new StringBuilder(32768);
+        uint length = GetFinalPathNameByHandleW(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length == 0 || length >= (uint)buffer.Capacity)
+            throw NativeError("GetFinalPathNameByHandleW(target-lock)");
+        string value = buffer.ToString();
+        if (value.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
+            value = "\\\\" + value.Substring(8);
+        else if (value.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase))
+            value = value.Substring(4);
+        return Path.GetFullPath(value);
+    }
+
+    private static string HashHandle(IntPtr handle)
+    {
+        SafeFileHandle safe = new SafeFileHandle(handle, false);
+        using (FileStream stream = new FileStream(safe, FileAccess.Read, 65536, false))
+        using (SHA256 algorithm = SHA256.Create())
+        {
+            stream.Position = 0;
+            byte[] digest = algorithm.ComputeHash(stream);
+            StringBuilder value = new StringBuilder(64);
+            for (int index = 0; index < digest.Length; index++)
+                value.Append(digest[index].ToString("x2", CultureInfo.InvariantCulture));
+            return value.ToString();
         }
     }
 
@@ -750,6 +825,7 @@ internal static class Program
         internal string Token;
         internal uint ParentPid;
         internal string WorkingDirectory;
+        internal string TargetSha256;
         internal string Target;
         internal string[] TargetArguments;
 
@@ -796,6 +872,15 @@ internal static class Program
                         "Working directory must be an existing absolute path.");
             }
 
+            string targetSha256 = null;
+            if (index < args.Length && args[index] == "--target-sha256")
+            {
+                index++;
+                targetSha256 = Take(args, ref index);
+                if (!IsSha256(targetSha256))
+                    throw new ArgumentException("Invalid target executable digest.");
+            }
+
             Expect(args, ref index, "--");
 
             string suppliedTarget = Take(args, ref index);
@@ -827,6 +912,7 @@ internal static class Program
                 Token = token,
                 ParentPid = parentPid,
                 WorkingDirectory = workingDirectory,
+                TargetSha256 = targetSha256,
                 Target = target,
                 TargetArguments = targetArguments
             };
@@ -861,6 +947,23 @@ internal static class Program
                 bool upper = current >= 'A' && current <= 'F';
 
                 if (!digit && !lower && !upper)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsSha256(string value)
+        {
+            if (value == null || value.Length != 64)
+                return false;
+
+            for (int index = 0; index < value.Length; index++)
+            {
+                char current = value[index];
+                bool digit = current >= '0' && current <= '9';
+                bool lower = current >= 'a' && current <= 'f';
+                if (!digit && !lower)
                     return false;
             }
 
@@ -913,6 +1016,28 @@ internal static class Program
         internal IntPtr hThread;
         internal uint dwProcessId;
         internal uint dwThreadId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FILETIME
+    {
+        internal uint dwLowDateTime;
+        internal uint dwHighDateTime;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION
+    {
+        internal uint dwFileAttributes;
+        internal FILETIME ftCreationTime;
+        internal FILETIME ftLastAccessTime;
+        internal FILETIME ftLastWriteTime;
+        internal uint dwVolumeSerialNumber;
+        internal uint nFileSizeHigh;
+        internal uint nFileSizeLow;
+        internal uint nNumberOfLinks;
+        internal uint nFileIndexHigh;
+        internal uint nFileIndexLow;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1082,6 +1207,19 @@ internal static class Program
         uint creationDisposition,
         uint flagsAndAttributes,
         IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        IntPtr file,
+        out BY_HANDLE_FILE_INFORMATION information);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandleW(
+        IntPtr file,
+        StringBuilder path,
+        uint pathLength,
+        uint flags);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

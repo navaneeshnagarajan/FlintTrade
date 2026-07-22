@@ -356,7 +356,7 @@ def _recovery_environment(
 
 
 @pytest.mark.unit
-def test_stale_recovery_removes_an_earlier_boot_record_without_process_probes(
+def test_stale_recovery_removes_an_earlier_boot_record_only_after_process_proof(
     entry: ModuleType,
     tmp_path: Path,
 ) -> None:
@@ -365,14 +365,18 @@ def test_stale_recovery_removes_an_earlier_boot_record_without_process_probes(
     _write_hardened_text(record, f"v4\n1234\npending\n77\n{'d' * 64}\n{token}\n")
     proof = entry._cleanup_complete_proof_path(record)
     _write_hardened_text(proof, f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={token}\n")
+    process_pids: list[int] = []
+    group_pids: list[int] = []
 
     assert entry.recover_stale_desktop_record(
         environ=_recovery_environment(entry, record),
-        process_probe=lambda _pid: pytest.fail("earlier-boot PIDs must not be probed"),
-        group_probe=lambda _pgid: pytest.fail("earlier-boot groups must not be probed"),
+        process_probe=lambda pid: process_pids.append(pid) or entry._RECOVERY_PROCESS_DEAD,
+        group_probe=lambda pgid: group_pids.append(pgid) or entry._RECOVERY_PROCESS_DEAD,
         current_pid=99,
         backend_image_hash="f" * 64,
     ) is True
+    assert process_pids == [77, 1234]
+    assert group_pids == [1234]
     assert record.exists() is False
     assert proof.exists() is False
 
@@ -432,12 +436,18 @@ def test_stale_recovery_removes_conclusively_reused_pids_without_signalling_thei
 
 
 @pytest.mark.unit
-def test_stale_recovery_retains_a_live_backend_and_exposes_no_process_details(
+@pytest.mark.parametrize(
+    "record_boot_id",
+    [TEST_BOOT_ID, "d" * 64],
+    ids=["same-boot", "mismatched-boot"],
+)
+def test_stale_recovery_retains_a_live_backend_regardless_of_boot_identity(
     entry: ModuleType,
     tmp_path: Path,
+    record_boot_id: str,
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
-    contents = f"v4\n1234\n1234\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n"
+    contents = f"v4\n1234\n1234\n77\n{record_boot_id}\n{'a' * 64}\n"
     _write_hardened_text(record, contents)
 
     def process(pid: int) -> object:
@@ -466,13 +476,19 @@ def test_stale_recovery_retains_a_live_backend_and_exposes_no_process_details(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failure", ["unknown-probe", "live-group"])
+@pytest.mark.parametrize(
+    "record_boot_id",
+    [TEST_BOOT_ID, "d" * 64],
+    ids=["same-boot", "mismatched-boot"],
+)
 def test_stale_recovery_retains_unknown_process_or_live_containment_state(
     entry: ModuleType,
     tmp_path: Path,
     failure: str,
+    record_boot_id: str,
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
-    contents = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n"
+    contents = f"v4\n1234\npending\n77\n{record_boot_id}\n{'a' * 64}\n"
     _write_hardened_text(record, contents)
 
     def process(pid: int) -> str:

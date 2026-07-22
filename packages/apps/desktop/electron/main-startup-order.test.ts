@@ -27,4 +27,12 @@ describe("desktop main-process entrypoint", () => {
 
     expect(losingBranch?.[1]?.trim()).toBe("app.quit();");
   });
+
+  it("binds first-run promotion to the packaged platform-native helper", () => {
+    expect(source).toContain("__FLINTTRADE_POSIX_ATOMIC_PROMOTER_SHA256__");
+    expect(source).toContain("__FLINTTRADE_WINDOWS_SOURCE_FS_SHA256__");
+    expect(source).toContain('protocol: "posix" as const');
+    expect(source).toContain('protocol: "windows-source-fs" as const');
+    expect(source).toContain("...(atomicPromotion ? { atomicPromotion } : {})");
+  });
 });

@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -392,6 +394,134 @@ def test_ci_runs_electron_desktop_build_and_cross_platform_package_smoke() -> No
     assert "electron-builder --dir --mac --universal" in nightly
     assert "desktop-rust-tests:" not in nightly
     assert "packages/apps/desktop/src-tauri" not in nightly
+
+
+def test_native_promoter_harnesses_are_required_after_bundle() -> None:
+    """Every packaging lane must exercise the native promoter it just bundled."""
+    bundle = "pnpm --filter @flinttrade/desktop bundle"
+    posix_harness = (
+        "pnpm --filter @flinttrade/desktop exec node "
+        "scripts/run-required-atomic-promoter-test.mjs"
+    )
+    windows_harness = "pnpm --filter @flinttrade/desktop test:windows-source-fs"
+
+    workflows: dict[str, dict[str, object]] = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict), path
+        workflows[path.name] = document
+
+    required_posix = {
+        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-22.04"),
+        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-22.04"),
+        ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
+            "runner.os != 'Windows'",
+            None,
+        ),
+        ("desktop-release.yml", "build"): ("runner.os != 'Windows'", None),
+    }
+    required_windows = {
+        ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): "runner.os == 'Windows'",
+        ("desktop-release.yml", "build"): "matrix.label == 'windows-x64'",
+    }
+    observed_posix: list[tuple[str, str, object]] = []
+    observed_windows: list[tuple[str, str, object]] = []
+
+    for workflow_name, workflow in workflows.items():
+        jobs = workflow.get("jobs")
+        assert isinstance(jobs, dict), workflow_name
+        for job_name, raw_job in jobs.items():
+            if not isinstance(raw_job, dict):
+                continue
+            steps = raw_job.get("steps", [])
+            assert isinstance(steps, list), f"{workflow_name}:{job_name}"
+            for raw_step in steps:
+                if not isinstance(raw_step, dict):
+                    continue
+                run = raw_step.get("run")
+                if run == posix_harness:
+                    observed_posix.append((workflow_name, str(job_name), raw_step.get("if")))
+                if isinstance(run, str) and windows_harness in run:
+                    observed_windows.append((workflow_name, str(job_name), raw_step.get("if")))
+
+    assert sorted(observed_posix) == sorted(
+        (workflow_name, job_name, condition)
+        for (workflow_name, job_name), (condition, _runner) in required_posix.items()
+    )
+    assert sorted(observed_windows) == sorted(
+        (workflow_name, job_name, condition)
+        for (workflow_name, job_name), condition in required_windows.items()
+    )
+
+    for (workflow_name, job_name), (condition, runner) in required_posix.items():
+        jobs = workflows[workflow_name]["jobs"]
+        assert isinstance(jobs, dict)
+        job = jobs[job_name]
+        assert isinstance(job, dict)
+        if runner is not None:
+            assert job.get("runs-on") == runner
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        bundle_indexes = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("run") == bundle]
+        harness_steps = [
+            (index, step)
+            for index, step in enumerate(steps)
+            if isinstance(step, dict) and step.get("run") == posix_harness
+        ]
+        assert len(bundle_indexes) == 1, f"{workflow_name}:{job_name}"
+        assert len(harness_steps) == 1, f"{workflow_name}:{job_name}"
+        harness_index, harness_step = harness_steps[0]
+        assert bundle_indexes[0] < harness_index
+        assert harness_step.get("if") == condition
+        assert harness_step.get("continue-on-error") is not True
+
+    for (workflow_name, job_name), condition in required_windows.items():
+        jobs = workflows[workflow_name]["jobs"]
+        assert isinstance(jobs, dict)
+        job = jobs[job_name]
+        assert isinstance(job, dict)
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        bundle_indexes = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("run") == bundle]
+        harness_steps = [
+            (index, step)
+            for index, step in enumerate(steps)
+            if isinstance(step, dict) and step.get("run") == windows_harness
+        ]
+        assert len(bundle_indexes) == 1, f"{workflow_name}:{job_name}"
+        assert len(harness_steps) == 1, f"{workflow_name}:{job_name}"
+        harness_index, harness_step = harness_steps[0]
+        assert bundle_indexes[0] < harness_index
+        assert harness_step.get("if") == condition
+        assert harness_step.get("continue-on-error") is not True
+
+    release_jobs = workflows["desktop-release.yml"]["jobs"]
+    assert isinstance(release_jobs, dict)
+    release_build = release_jobs["build"]
+    assert isinstance(release_build, dict)
+    release_steps = release_build["steps"]
+    assert isinstance(release_steps, list)
+    rebind_steps = [
+        step
+        for step in release_steps
+        if isinstance(step, dict)
+        and step.get("name") == "Rebuild and bind the macOS native promoter to the release identity"
+    ]
+    assert len(rebind_steps) == 1
+    rebind = rebind_steps[0]
+    assert rebind.get("if") == "runner.os == 'macOS'"
+    assert rebind.get("continue-on-error") is not True
+    rebind_run = rebind.get("run")
+    assert isinstance(rebind_run, str)
+    rebind_lines = [line.strip() for line in rebind_run.splitlines() if line.strip()]
+    identity_assignment = 'FLINTTRADE_NATIVE_MAC_IDENTITY="$MAC_IDENTITY" \\'
+    keychain_assignment = 'FLINTTRADE_NATIVE_MAC_KEYCHAIN="${CSC_KEYCHAIN:-}" \\'
+    assert (
+        rebind_lines.index(identity_assignment)
+        < rebind_lines.index(keychain_assignment)
+        < rebind_lines.index(bundle)
+        < rebind_lines.index(posix_harness)
+    )
 
 
 def test_release_versions_are_aligned() -> None:

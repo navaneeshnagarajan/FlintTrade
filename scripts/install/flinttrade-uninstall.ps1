@@ -449,17 +449,20 @@ function Test-SafePurgeTarget([string]$Target) {
     return $true
 }
 
-$dataTargets = @(Get-DataTargets | Where-Object { Test-SafePurgeTarget $_ })
+$dataTargets = @(Get-DataTargets)
 if ($Purge) {
+    $purgeTargets = @($dataTargets | Where-Object { Test-SafePurgeTarget $_ })
     if (-not $dataTargets) {
         Say "No FlintTrade data to purge."
+    } elseif (-not $purgeTargets) {
+        Say "No identity-proven FlintTrade data was eligible for purge."
     } elseif ($DryRun) {
-        $dataTargets | ForEach-Object { Say "[dry-run] would DELETE FlintTrade data at $_" }
+        $purgeTargets | ForEach-Object { Say "[dry-run] would DELETE FlintTrade data at $_" }
     } else {
         $proceed = $Yes
         if (-not $proceed) {
             try {
-                $answer = Read-Host "About to DELETE the workspace, Electron profile, managed source/tools and legacy desktop storage at $($dataTargets -join ', '). This is irreversible. Type 'purge' to continue"
+                $answer = Read-Host "About to DELETE the workspace, Electron profile, managed source/tools and legacy desktop storage at $($purgeTargets -join ', '). This is irreversible. Type 'purge' to continue"
             } catch {
                 $answer = ""
             }
@@ -467,7 +470,7 @@ if ($Purge) {
         }
         if ($proceed) {
             Say "Purging explicitly confirmed FlintTrade data:"
-            $dataTargets | ForEach-Object { Say "  $_"; Remove-IfExists $_ }
+            $purgeTargets | ForEach-Object { Say "  $_"; Remove-IfExists $_ }
         } else {
             Say "Purge cancelled; FlintTrade data kept."
         }

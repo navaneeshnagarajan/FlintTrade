@@ -9,6 +9,7 @@ import { build } from "esbuild"
 import { describe, expect, it } from "vitest"
 
 import { SourceOperationLeaseRetentionError } from "./source-operation"
+import type { WindowsSourceFilesystemBoundary } from "./windows-source-filesystem"
 
 import {
   ACTIVE_SOURCE_NAME,
@@ -17,6 +18,7 @@ import {
   FAILED_SOURCE_PREFIX,
   JOURNAL_NAME,
   LAST_KNOWN_GOOD_NAME,
+  PRESERVED_QUARANTINE_INVENTORY_NAME,
   ROLLBACK_CRASH_BOUNDARIES,
   STALE_SOURCE_QUARANTINE_PREFIX,
   SUCCESS_CRASH_BOUNDARIES,
@@ -32,10 +34,40 @@ import {
 } from "./source-promotion"
 
 const OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
+const SECOND_OPERATION_ID = "223e4567-e89b-42d3-a456-426614174001"
 const SOURCE_ROOT = "/managed/flinttrade-source"
 const WORKSPACE_ROOT = "/private/workspace/FlintTrade"
 const ORIGINAL_ACTIVE_CONTENT_IDENTITY = "git-tree:original-active"
 const CANDIDATE_CONTENT_IDENTITY = "git-tree:candidate"
+
+async function testOnlyPromoteAbsent(
+  source: string,
+  destination: string,
+  expected: { dev: number; ino: number },
+): Promise<void> {
+  const sourceMetadata = await lstat(source)
+  if (!sourceMetadata.isDirectory() || sourceMetadata.dev !== expected.dev || sourceMetadata.ino !== expected.ino) {
+    throw new Error("test no-replace promotion source identity mismatch")
+  }
+  try {
+    await lstat(destination)
+    throw Object.assign(new Error("test no-replace promotion destination already exists"), { code: "EEXIST" })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  await rename(source, destination)
+}
+
+function createTestNodeSourcePromotionFileSystem(
+  options: NodeSourcePromotionFileSystemOptions = {},
+): SourcePromotionFileSystem {
+  return createNodeSourcePromotionFileSystem({
+    ...options,
+    ...((options.platform ?? process.platform) === "win32"
+      ? {}
+      : { promoteAbsent: options.promoteAbsent ?? testOnlyPromoteAbsent }),
+  })
+}
 
 const testOnlySafeRemove: NonNullable<NodeSourcePromotionFileSystemOptions["safeRemove"]> = async ({
   expected,
@@ -64,6 +96,68 @@ const testOnlySafeRemove: NonNullable<NodeSourcePromotionFileSystemOptions["safe
   await rm(quarantine, { recursive: true })
 }
 
+function testWindowsFilesystemBoundary(): WindowsSourceFilesystemBoundary {
+  const inspect = async (target: string) => {
+    try {
+      const metadata = await lstat(target)
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("invalid test directory")
+      return {
+        nativeIdentity: `${metadata.dev.toString(16).padStart(16, "0")}:${metadata.ino.toString(16).padStart(32, "0")}`,
+        status: "present" as const,
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" as const }
+      throw error
+    }
+  }
+  return {
+    async commitJournal({ target, temporary }) {
+      await rename(temporary, target)
+    },
+    inspectDirectory: inspect,
+    async inspectJournal(target) {
+      try {
+        const contents = await readFile(target)
+        const metadata = await lstat(target)
+        const { createHash } = await import("node:crypto")
+        return {
+          location: "target" as const,
+          nativeIdentity: `${metadata.dev.toString(16).padStart(16, "0")}:${metadata.ino.toString(16).padStart(32, "0")}`,
+          sha256: createHash("sha256").update(contents).digest("hex"),
+          status: "journal-present" as const,
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" as const }
+        throw error
+      }
+    },
+    async quarantineDirectory({ expectedNativeIdentity, quarantine, target }) {
+      const atTarget = await inspect(target)
+      const atQuarantine = await inspect(quarantine)
+      if ((atTarget.status === "present") === (atQuarantine.status === "present")) {
+        throw new Error("ambiguous Windows removal fixture")
+      }
+      const selected = atTarget.status === "present" ? atTarget : atQuarantine
+      if (selected.status !== "present" || selected.nativeIdentity !== expectedNativeIdentity) {
+        throw new Error("Windows removal fixture identity mismatch")
+      }
+      if (atTarget.status === "present") await rename(target, quarantine)
+      return { status: "quarantined" as const }
+    },
+    async removeJournal({ target }) {
+      await rm(`${target}.previous`, { force: true })
+      await rm(target, { force: true })
+    },
+    async renameDirectory({ destination, expectedNativeIdentity, source }) {
+      const before = await inspect(source)
+      if (before.status !== "present" || before.nativeIdentity !== expectedNativeIdentity) {
+        throw new Error("Windows rename fixture identity mismatch")
+      }
+      await rename(source, destination)
+    },
+  }
+}
+
 type Call =
   | { kind: "delay"; milliseconds: number }
   | { kind: "remove-directory"; target: string }
@@ -73,6 +167,7 @@ type Call =
   | { kind: "write-journal"; phase: string; target: string }
 
 class FakeFileSystem implements SourcePromotionFileSystem {
+  readonly supportsDurableWindowsMutations: boolean
   readonly calls: Call[] = []
   readonly directories = new Map<string, DirectorySnapshot>()
   readonly renameFailures = new Map<string, string[]>()
@@ -83,15 +178,17 @@ class FakeFileSystem implements SourcePromotionFileSystem {
   failSyncAfterJournalRemoval = false
   removeFailure: unknown = null
   journal: string | null = null
+  preservedInventory: string | null = null
   journalRemoved = false
 
-  constructor() {
-    this.directories.set(SOURCE_ROOT, directory(SOURCE_ROOT, 1))
+  constructor(windows = false) {
+    this.supportsDurableWindowsMutations = windows
+    this.directories.set(SOURCE_ROOT, directory(SOURCE_ROOT, 1, 7, windows))
   }
 
   addDirectory(target: string, ino: number, options: Partial<DirectorySnapshot> = {}): void {
     this.directories.set(target, {
-      ...directory(target, ino),
+      ...directory(target, ino, 7, this.supportsDurableWindowsMutations),
       ...options,
     })
   }
@@ -108,11 +205,17 @@ class FakeFileSystem implements SourcePromotionFileSystem {
   }
 
   async readJournal(target: string): Promise<string | null> {
-    expect(target).toBe(path.join(SOURCE_ROOT, JOURNAL_NAME))
-    return this.journal
+    if (target === path.join(SOURCE_ROOT, JOURNAL_NAME)) return this.journal
+    expect(target).toBe(path.join(SOURCE_ROOT, PRESERVED_QUARANTINE_INVENTORY_NAME))
+    return this.preservedInventory
   }
 
   async writeJournalAtomic(target: string, contents: string): Promise<void> {
+    if (target === path.join(SOURCE_ROOT, PRESERVED_QUARANTINE_INVENTORY_NAME)) {
+      this.preservedInventory = contents
+      return
+    }
+    expect(target).toBe(path.join(SOURCE_ROOT, JOURNAL_NAME))
     const parsed = JSON.parse(contents) as { phase: string }
     this.calls.push({ kind: "write-journal", phase: parsed.phase, target })
     if (this.failJournalWritePhaseOnce === parsed.phase) {
@@ -124,6 +227,11 @@ class FakeFileSystem implements SourcePromotionFileSystem {
 
   async removeJournal(target: string): Promise<void> {
     this.calls.push({ kind: "remove-journal", target })
+    if (target === path.join(SOURCE_ROOT, PRESERVED_QUARANTINE_INVENTORY_NAME)) {
+      this.preservedInventory = null
+      return
+    }
+    expect(target).toBe(path.join(SOURCE_ROOT, JOURNAL_NAME))
     this.journal = null
     this.journalRemoved = true
   }
@@ -152,11 +260,11 @@ class FakeFileSystem implements SourcePromotionFileSystem {
     this.directories.set(destination, { ...entry, canonicalPath: destination })
   }
 
-  async quarantineAndRemoveDirectory(
+  async settleDirectory(
     target: string,
     quarantine: string,
     expected: DirectorySnapshot,
-  ): Promise<void> {
+  ): Promise<{ quarantine: DirectorySnapshot; status: "quarantined" } | { status: "removed" }> {
     this.calls.push({ kind: "remove-directory", target })
     if (this.removeFailure) throw this.removeFailure
     const atTarget = this.directories.get(target)
@@ -174,16 +282,23 @@ class FakeFileSystem implements SourcePromotionFileSystem {
         throw new Error("simulated crash after quarantine rename")
       }
     }
+    if (this.supportsDurableWindowsMutations) {
+      const preserved = this.directories.get(quarantine)
+      if (!preserved) throw new Error(`missing preserved quarantine: ${quarantine}`)
+      return { quarantine: preserved, status: "quarantined" }
+    }
     this.directories.delete(quarantine)
+    return { status: "removed" }
   }
 
-  async removeDirectory(target: string, expected: DirectorySnapshot): Promise<void> {
+  async removeDirectory(target: string, expected: DirectorySnapshot): Promise<{ status: "removed" }> {
     this.calls.push({ kind: "remove-directory", target })
     const entry = this.directories.get(target)
     if (!entry || entry.dev !== expected.dev || entry.ino !== expected.ino) {
       throw new Error(`identity changed before removal: ${target}`)
     }
     this.directories.delete(target)
+    return { status: "removed" }
   }
 
   async syncDirectory(target: string): Promise<void> {
@@ -203,12 +318,17 @@ class FakeFileSystem implements SourcePromotionFileSystem {
   }
 }
 
-function directory(canonicalPath: string, ino: number, dev = 7): DirectorySnapshot {
-  return { canonicalPath, dev, ino }
+function directory(canonicalPath: string, ino: number, dev = 7, windows = false): DirectorySnapshot {
+  return {
+    canonicalPath,
+    dev,
+    ino,
+    ...(windows ? { nativeIdentity: `${dev.toString(16).padStart(16, "0")}:${ino.toString(16).padStart(32, "0")}` } : {}),
+  }
 }
 
-function fixture(options: { staleLastKnownGood?: boolean } = {}) {
-  const fileSystem = new FakeFileSystem()
+function fixture(options: { staleLastKnownGood?: boolean; windows?: boolean } = {}) {
+  const fileSystem = new FakeFileSystem(options.windows)
   const activePath = path.join(SOURCE_ROOT, ACTIVE_SOURCE_NAME)
   const candidatePath = path.join(SOURCE_ROOT, `FlintTrade.update-${OPERATION_ID}`)
   const failedPath = path.join(SOURCE_ROOT, `${FAILED_SOURCE_PREFIX}${OPERATION_ID}`)
@@ -1267,6 +1387,70 @@ describe("source promotion", () => {
     expect(mutationCalls(fileSystem)).toEqual([])
   })
 
+  it("retries locked Windows native renames and journals exact file IDs", async () => {
+    const { activePath, candidatePath, fileSystem, lastKnownGoodPath } = fixture({ windows: true })
+    fileSystem.failRename(activePath, lastKnownGoodPath, "EBUSY", "EACCES")
+    const controller = createSourcePromotion({
+      fileSystem,
+      lifecycle: alwaysHealthyLifecycle(),
+      platform: "win32",
+      retry: { attempts: 3, delayMs: 0 },
+      sourceRoot: SOURCE_ROOT,
+    })
+
+    const outcome = await controller.promote(promotionRequest(candidatePath))
+    expect(outcome).toMatchObject({ status: "promoted" })
+    expect(fileSystem.calls.filter((call) => call.kind === "delay")).toHaveLength(2)
+    expect(JSON.parse(fileSystem.journal!)).toMatchObject({
+      candidate: { nativeIdentity: "0000000000000007:00000000000000000000000000000003" },
+      originalActive: { nativeIdentity: "0000000000000007:00000000000000000000000000000002" },
+    })
+  })
+
+  it("recovers Windows handle-bound evidence after a crash during candidate promotion", async () => {
+    const { activePath, candidatePath, fileSystem, lastKnownGoodPath } = fixture({ windows: true })
+    const crashing = createSourcePromotion({
+      fileSystem,
+      lifecycle: alwaysHealthyLifecycle(),
+      onBoundary: crashingAt("candidate-to-active:mutated"),
+      platform: "win32",
+      sourceRoot: SOURCE_ROOT,
+    })
+    await expect(crashing.promote(promotionRequest(candidatePath))).rejects.toThrow(/simulated crash/i)
+
+    const recovering = createSourcePromotion({
+      fileSystem,
+      lifecycle: alwaysHealthyLifecycle(),
+      platform: "win32",
+      sourceRoot: SOURCE_ROOT,
+    })
+    await expect(recovering.recover()).resolves.toMatchObject({ status: "promoted" })
+    expect(await fileSystem.inspectDirectory(activePath)).toMatchObject({ ino: 3 })
+    expect(await fileSystem.inspectDirectory(lastKnownGoodPath)).toMatchObject({ ino: 2 })
+  })
+
+  it("recovers a Windows promoted-boot failure and completes identity-bound rollback", async () => {
+    const { activePath, candidatePath, failedPath, fileSystem } = fixture({ windows: true })
+    const crashing = createSourcePromotion({
+      fileSystem,
+      lifecycle: identityAwareLifecycle(fileSystem, activePath, 3),
+      onBoundary: crashingAt("failed-displacement:mutated"),
+      platform: "win32",
+      sourceRoot: SOURCE_ROOT,
+    })
+    await expect(crashing.promote(promotionRequest(candidatePath))).rejects.toThrow(/simulated crash/i)
+
+    const recovering = createSourcePromotion({
+      fileSystem,
+      lifecycle: identityAwareLifecycle(fileSystem, activePath, 3),
+      platform: "win32",
+      sourceRoot: SOURCE_ROOT,
+    })
+    await expect(recovering.recover()).resolves.toMatchObject({ status: "rolled-back" })
+    expect(await fileSystem.inspectDirectory(activePath)).toMatchObject({ ino: 2 })
+    expect(await fileSystem.inspectDirectory(failedPath)).toMatchObject({ ino: 3 })
+  })
+
   it.each([
     "not json",
     JSON.stringify({ schemaVersion: 1, phase: "invented" }),
@@ -1350,7 +1534,7 @@ describe("production Node promotion filesystem", () => {
     const candidatePath = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
     const lastKnownGoodPath = path.join(temporaryRoot, LAST_KNOWN_GOOD_NAME)
     const journalPath = path.join(temporaryRoot, JOURNAL_NAME)
-    const fileSystem = createNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
+    const fileSystem = createTestNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
 
     try {
       await mkdir(activePath)
@@ -1424,12 +1608,12 @@ describe("production Node promotion filesystem", () => {
     }
   })
 
-  it("durably replaces and removes a no-follow journal", async () => {
+  it("durably appends values and a tombstone without following a foreign logical path", async () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-io-")))
     const journalPath = path.join(temporaryRoot, JOURNAL_NAME)
     const externalFile = path.join(temporaryRoot, "external-journal")
     const events: Array<{ event: string; target: string }> = []
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
       testHooks: {
         durability: (event, target) => events.push({ event, target }),
       },
@@ -1445,24 +1629,28 @@ describe("production Node promotion filesystem", () => {
       await fileSystem.removeJournal(journalPath)
       expect(await fileSystem.readJournal(journalPath)).toBeNull()
 
+      const foreignJournalPath = path.join(temporaryRoot, ".foreign-journal")
       await writeFile(externalFile, "foreign\n", { mode: 0o600 })
-      await symlink(externalFile, journalPath)
-      await expect(fileSystem.readJournal(journalPath)).rejects.toThrow(/symbolic-link|no-follow/i)
-      await expect(fileSystem.writeJournalAtomic(journalPath, "replacement\n")).rejects.toThrow(/symbolic-link|no-follow/i)
+      await symlink(externalFile, foreignJournalPath)
+      await expect(fileSystem.readJournal(foreignJournalPath)).rejects.toThrow(/owner-private|no-follow/i)
+      await expect(fileSystem.writeJournalAtomic(foreignJournalPath, "replacement\n")).rejects.toThrow(
+        /owner-private|no-follow/i,
+      )
+      expect(await readFile(externalFile, "utf8")).toBe("foreign\n")
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true })
     }
   })
 
-  it("does not reject a completed removal after the journal has been unlinked", async () => {
+  it("fails closed on a tombstone sync reporting error but recovers the durable tombstone", async () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-remove-")))
     const journalPath = path.join(temporaryRoot, JOURNAL_NAME)
-    let failPostUnlinkSync = false
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    let failTombstoneSync = false
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
       testHooks: {
         durability: (event) => {
-          if (failPostUnlinkSync && event === "directory-synced") {
-            throw new Error("simulated post-unlink sync reporting failure")
+          if (failTombstoneSync && event === "directory-synced") {
+            throw new Error("simulated tombstone sync reporting failure")
           }
         },
       },
@@ -1470,9 +1658,9 @@ describe("production Node promotion filesystem", () => {
 
     try {
       await fileSystem.writeJournalAtomic(journalPath, "completion-before\n")
-      failPostUnlinkSync = true
+      failTombstoneSync = true
 
-      await expect(fileSystem.removeJournal(journalPath)).resolves.toBeUndefined()
+      await expect(fileSystem.removeJournal(journalPath)).rejects.toThrow("simulated tombstone sync reporting failure")
       await expect(fileSystem.readJournal(journalPath)).resolves.toBeNull()
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true })
@@ -1484,7 +1672,7 @@ describe("production Node promotion filesystem", () => {
     const source = path.join(temporaryRoot, "source")
     const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
     const alias = path.join(temporaryRoot, "alias")
-    const fileSystem = createNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
+    const fileSystem = createTestNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
 
     try {
       await mkdir(source)
@@ -1516,10 +1704,92 @@ describe("production Node promotion filesystem", () => {
     }
   })
 
+  it.runIf(process.platform !== "win32")(
+    "preserves the candidate and a foreign destination inserted at the native no-replace boundary",
+    async () => {
+      const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-final-race-")))
+      const source = path.join(temporaryRoot, "source")
+      const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
+      let injected = false
+      const fileSystem = createTestNodeSourcePromotionFileSystem({
+        async promoteAbsent(from, to, expected) {
+          if (!injected) {
+            injected = true
+            await mkdir(to)
+            await writeFile(path.join(to, "foreign.txt"), "foreign destination")
+          }
+          await testOnlyPromoteAbsent(from, to, expected)
+        },
+      })
+
+      try {
+        await mkdir(source)
+        await writeFile(path.join(source, "candidate.txt"), "journalled candidate")
+        const expected = await fileSystem.inspectDirectory(source)
+        if (!expected) throw new Error("test source identity is missing")
+
+        await expect(fileSystem.renameDirectory(source, destination, expected)).rejects.toMatchObject({ code: "EEXIST" })
+        await expect(readFile(path.join(source, "candidate.txt"), "utf8")).resolves.toBe("journalled candidate")
+        await expect(readFile(path.join(destination, "foreign.txt"), "utf8")).resolves.toBe("foreign destination")
+      } finally {
+        await rm(temporaryRoot, { force: true, recursive: true })
+      }
+    },
+  )
+
+  it.runIf(process.platform !== "win32")(
+    "preserves all three trees when the restoration destination appears at the native no-replace boundary",
+    async () => {
+      const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-restore-race-")))
+      const source = path.join(temporaryRoot, "source")
+      const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
+      const capturedExpected = path.join(temporaryRoot, "captured-expected")
+      let restoreInjected = false
+      const fileSystem = createTestNodeSourcePromotionFileSystem({
+        async promoteAbsent(from, to, expected) {
+          if (from === destination && to === source && !restoreInjected) {
+            restoreInjected = true
+            await mkdir(source)
+            await writeFile(path.join(source, "foreign-source.txt"), "foreign restoration destination")
+          }
+          await testOnlyPromoteAbsent(from, to, expected)
+        },
+        testHooks: {
+          async adversarial(event, paths) {
+            if (event !== "rename-after-mutation") return
+            await rename(paths.destination, capturedExpected)
+            await mkdir(paths.destination)
+            await writeFile(path.join(paths.destination, "replacement.txt"), "unbound replacement")
+          },
+        },
+      })
+
+      try {
+        await mkdir(source)
+        await writeFile(path.join(source, "expected.txt"), "journalled source")
+        const expected = await fileSystem.inspectDirectory(source)
+        if (!expected) throw new Error("test rename identity is missing")
+
+        await expect(fileSystem.renameDirectory(source, destination, expected)).rejects.toThrow(/safely restored/i)
+        await expect(readFile(path.join(source, "foreign-source.txt"), "utf8")).resolves.toBe(
+          "foreign restoration destination",
+        )
+        await expect(readFile(path.join(destination, "replacement.txt"), "utf8")).resolves.toBe(
+          "unbound replacement",
+        )
+        await expect(readFile(path.join(capturedExpected, "expected.txt"), "utf8")).resolves.toBe(
+          "journalled source",
+        )
+      } finally {
+        await rm(temporaryRoot, { force: true, recursive: true })
+      }
+    },
+  )
+
   it("removes only exact positive-attempt bootstrap staging directory names", async () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-staging-removal-")))
     const quarantines: string[] = []
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
       safeRemove: async (request) => {
         quarantines.push(path.basename(request.quarantine))
         await testOnlySafeRemove(request)
@@ -1532,7 +1802,7 @@ describe("production Node promotion filesystem", () => {
         await mkdir(target)
         const expected = await fileSystem.inspectDirectory(target)
         if (!expected) throw new Error("test staging identity is missing")
-        await expect(fileSystem.removeDirectory(target, expected)).resolves.toBeUndefined()
+        await expect(fileSystem.removeDirectory(target, expected)).resolves.toEqual({ status: "removed" })
         expect(await fileSystem.inspectDirectory(target)).toBeNull()
       }
       expect(quarantines).toEqual([
@@ -1566,7 +1836,7 @@ describe("production Node promotion filesystem", () => {
       temporaryRoot,
       `${CLEANUP_QUARANTINE_PREFIX}candidate-${OPERATION_ID}`,
     )
-    const fileSystem = createNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
+    const fileSystem = createTestNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
 
     try {
       await mkdir(candidate)
@@ -1591,7 +1861,7 @@ describe("production Node promotion filesystem", () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-quarantine-remove-")))
     const target = path.join(temporaryRoot, LAST_KNOWN_GOOD_NAME)
     const quarantine = path.join(temporaryRoot, `${STALE_SOURCE_QUARANTINE_PREFIX}${OPERATION_ID}`)
-    const fileSystem = createNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
+    const fileSystem = createTestNodeSourcePromotionFileSystem({ safeRemove: testOnlySafeRemove })
 
     try {
       await mkdir(target)
@@ -1599,7 +1869,7 @@ describe("production Node promotion filesystem", () => {
       const expected = await fileSystem.inspectDirectory(target)
       if (!expected) throw new Error("test removal identity is missing")
 
-      await fileSystem.quarantineAndRemoveDirectory(target, quarantine, expected)
+      await expect(fileSystem.settleDirectory(target, quarantine, expected)).resolves.toEqual({ status: "removed" })
 
       expect(await fileSystem.inspectDirectory(target)).toBeNull()
       expect(await fileSystem.inspectDirectory(quarantine)).toBeNull()
@@ -1608,13 +1878,48 @@ describe("production Node promotion filesystem", () => {
     }
   })
 
+  it.runIf(process.platform !== "win32")(
+    "preserves the target and a foreign quarantine inserted at the native no-replace boundary",
+    async () => {
+      const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-quarantine-final-race-")))
+      const target = path.join(temporaryRoot, LAST_KNOWN_GOOD_NAME)
+      const quarantine = path.join(temporaryRoot, `${STALE_SOURCE_QUARANTINE_PREFIX}${OPERATION_ID}`)
+      let safeRemoveCalls = 0
+      const fileSystem = createTestNodeSourcePromotionFileSystem({
+        async promoteAbsent(from, to, expected) {
+          await mkdir(to)
+          await writeFile(path.join(to, "foreign.txt"), "foreign quarantine")
+          await testOnlyPromoteAbsent(from, to, expected)
+        },
+        safeRemove: async (request) => {
+          safeRemoveCalls += 1
+          await testOnlySafeRemove(request)
+        },
+      })
+
+      try {
+        await mkdir(target)
+        await writeFile(path.join(target, "expected.txt"), "journalled stale tree")
+        const expected = await fileSystem.inspectDirectory(target)
+        if (!expected) throw new Error("test removal identity is missing")
+
+        await expect(fileSystem.settleDirectory(target, quarantine, expected)).rejects.toMatchObject({ code: "EEXIST" })
+        expect(safeRemoveCalls).toBe(0)
+        await expect(readFile(path.join(target, "expected.txt"), "utf8")).resolves.toBe("journalled stale tree")
+        await expect(readFile(path.join(quarantine, "foreign.txt"), "utf8")).resolves.toBe("foreign quarantine")
+      } finally {
+        await rm(temporaryRoot, { force: true, recursive: true })
+      }
+    },
+  )
+
   it("restores a replacement moved by a rename race and preserves the expected tree as evidence", async () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-rename-race-")))
     const source = path.join(temporaryRoot, "source")
     const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
     const capturedExpected = path.join(temporaryRoot, "captured-expected")
     let injected = false
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
       testHooks: {
         async adversarial(event, paths) {
           if (event !== "rename-after-mutation" || injected) return
@@ -1641,36 +1946,270 @@ describe("production Node promotion filesystem", () => {
     }
   })
 
-  it("uses Windows stat proofs without unsupported directory fsync or held mutation handles", async () => {
+  it("preserves native Windows identities through the composed promotion controller boundary", async () => {
+    const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-windows-controller-")))
+    const activePath = path.join(temporaryRoot, ACTIVE_SOURCE_NAME)
+    const candidatePath = path.join(temporaryRoot, `${CANDIDATE_SOURCE_PREFIX}${OPERATION_ID}`)
+    const windows = testWindowsFilesystemBoundary()
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
+      platform: "win32",
+      safeRemove: async ({ expected, quarantine, target }) => {
+        if (!expected.nativeIdentity) throw new Error("test native identity is missing")
+        return windows.quarantineDirectory({
+          expectedNativeIdentity: expected.nativeIdentity,
+          quarantine,
+          target,
+        })
+      },
+      windows,
+    })
+
+    try {
+      await mkdir(activePath)
+      await mkdir(candidatePath)
+      const originalActive = await fileSystem.inspectDirectory(activePath)
+      const candidate = await fileSystem.inspectDirectory(candidatePath)
+      if (!originalActive || !candidate) throw new Error("test Windows controller identities are missing")
+      const controller = createSourcePromotion({
+        fileSystem,
+        lifecycle: alwaysHealthyLifecycle(),
+        sourceRoot: temporaryRoot,
+      })
+
+      const outcome = await controller.promote(promotionRequest(candidatePath, {
+        candidate,
+        originalActive,
+      }))
+      expect(outcome).toMatchObject({ promotionId: OPERATION_ID, status: "promoted" })
+      if (outcome.status === "idle") throw new Error("promotion unexpectedly returned idle")
+      await acknowledge(controller, outcome)
+      expect(await fileSystem.inspectDirectory(activePath)).toMatchObject({
+        nativeIdentity: candidate.nativeIdentity,
+      })
+      expect(await fileSystem.readJournal(path.join(temporaryRoot, JOURNAL_NAME))).toBeNull()
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true })
+    }
+  })
+
+  it("tracks preserved Windows stale trees, recovers idempotently, and permits a later promotion", async () => {
+    const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-windows-preserved-")))
+    const activePath = path.join(temporaryRoot, ACTIVE_SOURCE_NAME)
+    const lastKnownGoodPath = path.join(temporaryRoot, LAST_KNOWN_GOOD_NAME)
+    const preservedInventoryPath = path.join(temporaryRoot, PRESERVED_QUARANTINE_INVENTORY_NAME)
+    const windows = testWindowsFilesystemBoundary()
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
+      platform: "win32",
+      safeRemove: async ({ expected, quarantine, target }) => {
+        if (!expected.nativeIdentity) throw new Error("test native identity is missing")
+        return windows.quarantineDirectory({
+          expectedNativeIdentity: expected.nativeIdentity,
+          quarantine,
+          target,
+        })
+      },
+      windows,
+    })
+    const controller = createSourcePromotion({
+      fileSystem,
+      lifecycle: alwaysHealthyLifecycle(),
+      platform: "win32",
+      sourceRoot: temporaryRoot,
+    })
+
+    const promoteCandidate = async (operationId: string) => {
+      const candidatePath = path.join(temporaryRoot, `${CANDIDATE_SOURCE_PREFIX}${operationId}`)
+      await mkdir(candidatePath)
+      const [candidate, originalActive] = await Promise.all([
+        fileSystem.inspectDirectory(candidatePath),
+        fileSystem.inspectDirectory(activePath),
+      ])
+      if (!candidate || !originalActive) throw new Error("test Windows promotion identity is missing")
+      const outcome = await controller.promote({
+        candidateContentIdentity: `git-tree:${operationId}`,
+        candidateDirectoryIdentity: candidate,
+        candidatePath,
+        originalActiveContentIdentity: `git-tree:active-${operationId}`,
+        originalActiveDirectoryIdentity: originalActive,
+      })
+      if (outcome.status === "idle") throw new Error("promotion unexpectedly returned idle")
+      await controller.acknowledge(outcome)
+      return outcome
+    }
+
+    try {
+      await mkdir(activePath)
+      await mkdir(lastKnownGoodPath)
+      await writeFile(path.join(lastKnownGoodPath, "ordinary.txt"), "first preserved stale tree")
+
+      const first = await promoteCandidate(OPERATION_ID)
+      expect(first).toMatchObject({
+        preservedQuarantine: expect.objectContaining({ nativeIdentity: expect.any(String) }),
+        status: "promoted",
+      })
+      const firstQuarantine = path.join(temporaryRoot, `${STALE_SOURCE_QUARANTINE_PREFIX}${OPERATION_ID}`)
+      await expect(readFile(path.join(firstQuarantine, "ordinary.txt"), "utf8")).resolves.toBe(
+        "first preserved stale tree",
+      )
+      await expect(controller.recover()).resolves.toEqual({ status: "idle" })
+
+      const second = await promoteCandidate(SECOND_OPERATION_ID)
+      expect(second).toMatchObject({ status: "promoted" })
+      const inventory = JSON.parse(await readFile(preservedInventoryPath, "utf8")) as {
+        entries: Array<{ operationId: string; quarantineName: string }>;
+      }
+      expect(inventory.entries).toEqual([
+        expect.objectContaining({ operationId: OPERATION_ID }),
+        expect.objectContaining({ operationId: SECOND_OPERATION_ID }),
+      ])
+
+      await rm(firstQuarantine, { force: true, recursive: true })
+      await expect(controller.recover()).resolves.toEqual({ status: "idle" })
+      const afterManualPurge = JSON.parse(await readFile(preservedInventoryPath, "utf8")) as {
+        entries: Array<{ operationId: string }>;
+      }
+      expect(afterManualPurge.entries).toEqual([
+        expect.objectContaining({ operationId: SECOND_OPERATION_ID }),
+      ])
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true })
+    }
+  })
+
+  it("uses exact Windows file IDs and native handle-bound mutations without held Node mutation handles", async () => {
     const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-promotion-windows-")))
     const source = path.join(temporaryRoot, "source")
     const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
     const journalPath = path.join(temporaryRoot, JOURNAL_NAME)
     const durabilityEvents: string[] = []
     const mutationProofs: string[] = []
-    const fileSystem = createNodeSourcePromotionFileSystem({
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
       platform: "win32",
+      safeRemove: async ({ expected, quarantine, target }) => {
+        if (!expected.nativeIdentity) throw new Error("test native identity is missing")
+        return testWindowsFilesystemBoundary().quarantineDirectory({
+          expectedNativeIdentity: expected.nativeIdentity,
+          quarantine,
+          target,
+        })
+      },
       testHooks: {
         durability: (event) => durabilityEvents.push(event),
         mutationProof: (strategy, operation) => mutationProofs.push(`${strategy}:${operation}`),
       },
+      windows: testWindowsFilesystemBoundary(),
     })
 
     try {
       await fileSystem.writeJournalAtomic(journalPath, "windows\n")
       expect(await fileSystem.readJournal(journalPath)).toBe("windows\n")
-      expect(durabilityEvents).toEqual(["journal-file-synced", "directory-sync-unavailable-windows"])
+      expect(durabilityEvents).toEqual(["journal-file-synced", "windows-native-parent-flushed"])
 
       await mkdir(source)
       const expected = await fileSystem.inspectDirectory(source)
       if (!expected) throw new Error("test source identity is missing")
       await fileSystem.renameDirectory(source, destination, expected)
-      await expect(fileSystem.removeDirectory(destination, expected)).rejects.toThrow(/safe-removal helper/i)
+      await fileSystem.removeDirectory(destination, expected)
       await fileSystem.syncDirectory(temporaryRoot)
 
-      expect(mutationProofs).toEqual(["windows-stable-stat:rename"])
-      expect(durabilityEvents.at(-1)).toBe("directory-sync-unavailable-windows")
-      expect(await fileSystem.inspectDirectory(destination)).toMatchObject({ dev: expected.dev, ino: expected.ino })
+      expect(mutationProofs).toEqual(["windows-native-file-id:rename"])
+      expect(durabilityEvents.at(-1)).toBe("windows-native-parent-flushed")
+      expect(await fileSystem.inspectDirectory(destination)).toBeNull()
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true })
+    }
+  })
+
+  it("preserves a moved Windows journal temporary and a foreign pathname replacement after commit refusal", async () => {
+    const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-windows-journal-refusal-")))
+    const journalPath = path.join(temporaryRoot, JOURNAL_NAME)
+    const authenticatedTemporary = path.join(temporaryRoot, "authenticated-temporary-held")
+    const base = testWindowsFilesystemBoundary()
+    let temporaryPath: string | undefined
+    const windows: WindowsSourceFilesystemBoundary = {
+      ...base,
+      async commitJournal({ temporary }) {
+        temporaryPath = temporary
+        await rename(temporary, authenticatedTemporary)
+        await writeFile(temporary, "foreign temporary replacement\n")
+        throw new Error("simulated native journal commit refusal")
+      },
+    }
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
+      platform: "win32",
+      windows,
+    })
+
+    try {
+      await expect(fileSystem.writeJournalAtomic(journalPath, "authenticated journal\n")).rejects.toThrow(
+        /commit refusal/i,
+      )
+      expect(temporaryPath).toBeDefined()
+      await expect(readFile(authenticatedTemporary, "utf8")).resolves.toBe("authenticated journal\n")
+      await expect(readFile(temporaryPath!, "utf8")).resolves.toBe("foreign temporary replacement\n")
+      await expect(lstat(journalPath)).rejects.toMatchObject({ code: "ENOENT" })
+    } finally {
+      await rm(temporaryRoot, { force: true, recursive: true })
+    }
+  })
+
+  it("uses native no-replace restoration and preserves a late Windows source plus foreign destination", async () => {
+    const temporaryRoot = await realpath(await mkdtemp(path.join(tmpdir(), "flinttrade-windows-rename-anomaly-")))
+    const source = path.join(temporaryRoot, "source")
+    const destination = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
+    const capturedExpected = path.join(temporaryRoot, "captured-expected")
+    const nativeRenames: Array<Parameters<WindowsSourceFilesystemBoundary["renameDirectory"]>[0]> = []
+    const base = testWindowsFilesystemBoundary()
+    const windows: WindowsSourceFilesystemBoundary = {
+      ...base,
+      async renameDirectory(input) {
+        nativeRenames.push(input)
+        if (nativeRenames.length === 2) {
+          await mkdir(input.destination)
+          await writeFile(path.join(input.destination, "late.txt"), "late source occupant")
+          const error = new Error("native no-replace destination occupied") as NodeJS.ErrnoException
+          error.code = "DESTINATION_OCCUPIED"
+          throw error
+        }
+        await base.renameDirectory(input)
+      },
+    }
+    let injected = false
+    const fileSystem = createTestNodeSourcePromotionFileSystem({
+      platform: "win32",
+      testHooks: {
+        async adversarial(event, paths) {
+          if (event !== "rename-after-mutation" || injected) return
+          injected = true
+          await rename(paths.destination, capturedExpected)
+          await mkdir(paths.destination)
+          await writeFile(path.join(paths.destination, "foreign.txt"), "foreign destination")
+        },
+      },
+      windows,
+    })
+
+    try {
+      await mkdir(source)
+      await writeFile(path.join(source, "expected.txt"), "journalled source")
+      const expected = await fileSystem.inspectDirectory(source)
+      if (!expected?.nativeIdentity) throw new Error("test native source identity is missing")
+
+      await expect(fileSystem.renameDirectory(source, destination, expected)).rejects.toThrow(/safely restored/i)
+      expect(nativeRenames).toHaveLength(2)
+      expect(nativeRenames[1]).toMatchObject({
+        destination: source,
+        source: destination,
+      })
+      const foreign = await base.inspectDirectory(destination)
+      expect(foreign).toMatchObject({ status: "present" })
+      if (foreign.status !== "present") throw new Error("foreign destination fixture disappeared")
+      expect(nativeRenames[1]?.expectedNativeIdentity).toBe(foreign.nativeIdentity)
+      await expect(readFile(path.join(source, "late.txt"), "utf8")).resolves.toBe("late source occupant")
+      await expect(readFile(path.join(destination, "foreign.txt"), "utf8")).resolves.toBe("foreign destination")
+      await expect(readFile(path.join(capturedExpected, "expected.txt"), "utf8")).resolves.toBe(
+        "journalled source",
+      )
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true })
     }
@@ -1684,7 +2223,7 @@ describe("production Node promotion filesystem", () => {
       const candidatePath = path.join(temporaryRoot, `FlintTrade.update-${OPERATION_ID}`)
       const lastKnownGoodPath = path.join(temporaryRoot, LAST_KNOWN_GOOD_NAME)
       const fixturePath = path.join(temporaryRoot, "promotion-crash-fixture.mjs")
-      const fileSystem = createNodeSourcePromotionFileSystem()
+      const fileSystem = createTestNodeSourcePromotionFileSystem()
 
       try {
         await mkdir(activePath)
@@ -1701,10 +2240,25 @@ describe("production Node promotion filesystem", () => {
           platform: "node",
           stdin: {
             contents: `
+              import { lstat, rename } from "node:fs/promises"
               import { createNodeSourcePromotionFileSystem, createSourcePromotion } from "./source-promotion"
 
               const [mode, sourceRoot, candidatePath] = process.argv.slice(2)
-              const fileSystem = createNodeSourcePromotionFileSystem()
+              const fileSystem = createNodeSourcePromotionFileSystem({
+                promoteAbsent: async (source, destination, expected) => {
+                  const metadata = await lstat(source)
+                  if (metadata.dev !== expected.dev || metadata.ino !== expected.ino) {
+                    throw new Error("fixture no-replace identity mismatch")
+                  }
+                  try {
+                    await lstat(destination)
+                    throw Object.assign(new Error("fixture destination exists"), { code: "EEXIST" })
+                  } catch (error) {
+                    if (error.code !== "ENOENT") throw error
+                  }
+                  await rename(source, destination)
+                },
+              })
               const controller = createSourcePromotion({
                 fileSystem,
                 lifecycle: {

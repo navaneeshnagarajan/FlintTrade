@@ -96,6 +96,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bundle Electron main and preload
         run: pnpm --filter @flinttrade/desktop bundle
+      - name: Exercise native POSIX no-replace promotion
+        if: runner.os != 'Windows'
+        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
+      - name: Exercise native Windows source promotion and preserve-only cleanup
+        if: runner.os == 'Windows'
+        run: pnpm --filter @flinttrade/desktop test:windows-source-fs
       - name: Package macOS Electron directory
         if: runner.os == 'macOS'
         run: >-

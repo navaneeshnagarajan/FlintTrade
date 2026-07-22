@@ -1,14 +1,23 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { lstat, open, realpath, rename, unlink } from "node:fs/promises"
+import { lstat, open, realpath } from "node:fs/promises"
 import path from "node:path"
 
 import type { FileSystemIdentity } from "./bootstrap"
+import {
+  createPosixAppendOnlyJournal,
+  type PosixAppendOnlyJournalAdversarialEvent,
+} from "./posix-append-only-journal"
 import { SourceOperationLeaseRetentionError, isSourceOperationLeaseRetentionError } from "./source-operation"
+import {
+  WINDOWS_NATIVE_IDENTITY_PATTERN,
+  type WindowsSourceFilesystemBoundary,
+} from "./windows-source-filesystem"
 
 export const ACTIVE_SOURCE_NAME = "FlintTrade"
 export const LAST_KNOWN_GOOD_NAME = "FlintTrade.last-known-good"
 export const JOURNAL_NAME = ".flinttrade-source-promotion.json"
+export const PRESERVED_QUARANTINE_INVENTORY_NAME = ".flinttrade-preserved-source-quarantines.json"
 export const CANDIDATE_SOURCE_PREFIX = "FlintTrade.update-"
 export const FAILED_SOURCE_PREFIX = "FlintTrade.failed-"
 export const STALE_SOURCE_QUARANTINE_PREFIX = ".FlintTrade.stale-quarantine-"
@@ -115,44 +124,56 @@ export interface DirectorySnapshot {
   canonicalPath: string
   dev: number
   ino: number
+  nativeIdentity?: string
 }
+
+export type DirectoryCleanupOutcome =
+  | { status: "removed" }
+  | { quarantine: DirectorySnapshot; status: "quarantined" }
 
 /**
  * Filesystem operations used by source promotion. Implementations must inspect
  * directories without following a final-component alias and must make
- * writeJournalAtomic durable before resolving. removeJournal acknowledges an
- * already-durable terminal event: it must reject before unlink on failure, but
- * must not reject after unlink has succeeded. An unflushed deletion can only
- * resurrect a recoverable outcome-pending journal after a crash.
+ * writeJournalAtomic durable before resolving. On POSIX, removeJournal appends
+ * a durable tombstone to the immutable journal chain; it never unlinks prior
+ * recovery evidence. Windows retains its native helper-owned sidecar protocol.
  */
 export interface SourcePromotionFileSystem {
+  /** True only when Windows namespace mutations use the packaged handle-bound helper. */
+  readonly supportsDurableWindowsMutations?: boolean
   inspectDirectory(target: string): Promise<DirectorySnapshot | null>
   readJournal(target: string): Promise<string | null>
   writeJournalAtomic(target: string, contents: string): Promise<void>
   removeJournal(target: string): Promise<void>
   renameDirectory(source: string, destination: string, expected: DirectorySnapshot): Promise<void>
-  removeDirectory(target: string, expected: DirectorySnapshot): Promise<void>
-  quarantineAndRemoveDirectory(target: string, quarantine: string, expected: DirectorySnapshot): Promise<void>
+  removeDirectory(target: string, expected: DirectorySnapshot): Promise<DirectoryCleanupOutcome>
+  settleDirectory(target: string, quarantine: string, expected: DirectorySnapshot): Promise<DirectoryCleanupOutcome>
   syncDirectory(target: string): Promise<void>
   delay(milliseconds: number): Promise<void>
 }
 
 export interface NodeSourcePromotionFileSystemOptions {
   platform?: NodeJS.Platform
+  promoteAbsent?: (source: string, destination: string, expected: FileSystemIdentity) => Promise<void>
+  windows?: WindowsSourceFilesystemBoundary
   safeRemove?: (request: {
     expected: DirectorySnapshot
     quarantine: string
     target: string
-  }) => Promise<void>
+  }) => Promise<{ status: "quarantined" | "removed" } | void>
   testHooks?: {
     durability?: (
-      event: "directory-sync-unavailable-windows" | "directory-synced" | "journal-file-synced",
+      event: "directory-synced" | "journal-file-synced" | "windows-native-parent-flushed",
       target: string,
     ) => void
     mutationProof?: (
-      strategy: "posix-pinned-handle" | "windows-stable-stat",
+      strategy: "posix-native-no-replace" | "windows-native-file-id",
       operation: "rename",
     ) => void
+    journalAdversarial?: (
+      event: PosixAppendOnlyJournalAdversarialEvent,
+      paths: { record?: string; stage?: string; target: string },
+    ) => Promise<void> | void
     adversarial?: (
       event: "rename-before-mutation" | "rename-after-mutation",
       paths: { destination: string; source: string },
@@ -210,12 +231,14 @@ export type CompletedPromotionOutcome =
   | {
       active: DirectorySnapshot
       lastKnownGood: DirectorySnapshot
+      preservedQuarantine?: DirectorySnapshot
       promotionId: string
       status: "promoted"
     }
   | {
       active: DirectorySnapshot
       failed: DirectorySnapshot
+      preservedQuarantine?: DirectorySnapshot
       promotionId: string
       status: "rolled-back"
     }
@@ -227,6 +250,7 @@ export type PromotionOutcome =
 interface BoundIdentity {
   dev: number
   ino: number
+  nativeIdentity?: string
 }
 
 interface PromotionJournal {
@@ -252,9 +276,17 @@ interface PromotionPaths {
   failed: string
   journal: string
   lastKnownGood: string
+  preservedInventory: string
   quarantine: string
   root: string
 }
+
+interface PreservedQuarantineEntry extends BoundIdentity {
+  operationId: string
+  quarantineName: string
+}
+
+const MAX_PRESERVED_QUARANTINES = 64
 
 interface RecoveryEvidence {
   active: DirectorySnapshot | null
@@ -300,6 +332,7 @@ class SourcePromotionController {
       active: path.join(root, ACTIVE_SOURCE_NAME),
       journal: path.join(root, JOURNAL_NAME),
       lastKnownGood: path.join(root, LAST_KNOWN_GOOD_NAME),
+      preservedInventory: path.join(root, PRESERVED_QUARANTINE_INVENTORY_NAME),
       root,
     }
     this.fileSystem = options.fileSystem
@@ -346,6 +379,7 @@ class SourcePromotionController {
     }
 
     const root = await this.requireManagedRoot()
+    await this.reconcilePreservedQuarantines(root)
     const originalActive = await this.requireDirectory(paths.active, root, "active source")
     const candidate = await this.requireDirectory(paths.candidate, root, "candidate source")
     if (!matches(originalActive, originalActiveDirectoryIdentity)) {
@@ -400,14 +434,31 @@ class SourcePromotionController {
 
   async recover(): Promise<PromotionOutcome> {
     const contents = await this.fileSystem.readJournal(this.paths.journal)
-    if (contents === null) return { status: "idle" }
+    if (contents === null) {
+      const preservedContents = await this.fileSystem.readJournal(this.paths.preservedInventory)
+      if (preservedContents === null) return { status: "idle" }
+      const root = await this.requireManagedRoot()
+      await this.reconcilePreservedQuarantines(root)
+      return { status: "idle" }
+    }
     this.requireSupportedDurability()
     this.requireLifecycleAvailable()
 
     const journal = parseJournal(contents)
+    if (this.platform === "win32") {
+      for (const identity of [journal.originalActive, journal.candidate, journal.staleLastKnownGood]) {
+        if (identity && !WINDOWS_NATIVE_IDENTITY_PATTERN.test(identity.nativeIdentity ?? "")) {
+          throw new SourcePromotionError(
+            "INVALID_JOURNAL",
+            "Windows promotion recovery requires exact native file identities in the durable journal",
+          )
+        }
+      }
+    }
     const paths = this.pathsForJournal(journal)
     const root = await this.requireManagedRoot()
     const evidence = await this.collectRecoveryEvidence(paths, root, journal)
+    const staleQuarantineSettled = this.matchesStaleQuarantine(evidence.quarantine, journal)
 
     if (journal.outcome !== null) {
       return this.captureCompletedOutcome(paths, root, journal, journal.outcome)
@@ -419,7 +470,7 @@ class SourcePromotionController {
         matches(evidence.lastKnownGood, journal.originalActive) &&
         evidence.candidate === null &&
         evidence.failed === null &&
-        evidence.quarantine === null
+        staleQuarantineSettled
       ) {
         await this.displaceFailedPromotion(paths, root, journal)
         await this.restoreLastKnownGood(paths, root, journal)
@@ -430,7 +481,7 @@ class SourcePromotionController {
         matches(evidence.lastKnownGood, journal.originalActive) &&
         evidence.candidate === null &&
         matches(evidence.failed, journal.candidate) &&
-        evidence.quarantine === null
+        staleQuarantineSettled
       ) {
         await this.restoreLastKnownGood(paths, root, journal)
         return this.bootRollback(paths, root, journal)
@@ -440,7 +491,7 @@ class SourcePromotionController {
         evidence.lastKnownGood === null &&
         evidence.candidate === null &&
         matches(evidence.failed, journal.candidate) &&
-        evidence.quarantine === null
+        staleQuarantineSettled
       ) {
         return this.bootRollback(paths, root, journal)
       }
@@ -476,7 +527,7 @@ class SourcePromotionController {
       matches(evidence.lastKnownGood, journal.originalActive) &&
       matches(evidence.candidate, journal.candidate) &&
       evidence.failed === null &&
-      evidence.quarantine === null
+      staleQuarantineSettled
     ) {
       await this.moveCandidateToActive(paths, root, journal, evidence.lastKnownGood, evidence.candidate)
       return this.bootPromotedOrRollback(paths, root, journal)
@@ -487,7 +538,7 @@ class SourcePromotionController {
       matches(evidence.lastKnownGood, journal.originalActive) &&
       evidence.candidate === null &&
       evidence.failed === null &&
-      evidence.quarantine === null
+      staleQuarantineSettled
     ) {
       return this.bootPromotedOrRollback(paths, root, journal)
     }
@@ -520,6 +571,7 @@ class SourcePromotionController {
     const paths = this.pathsForJournal(journal)
     const root = await this.requireManagedRoot()
     await this.captureCompletedOutcome(paths, root, journal, journal.outcome)
+    await this.recordPreservedQuarantine(paths, root, journal)
     await this.fileSystem.removeJournal(this.paths.journal)
   }
 
@@ -561,7 +613,7 @@ class SourcePromotionController {
   private async requireManagedRoot(): Promise<DirectorySnapshot> {
     const root = await this.fileSystem.inspectDirectory(this.paths.root)
     if (!root) throw new SourcePromotionError("SOURCE_ROOT_MISSING", `Managed source root is missing: ${this.paths.root}`)
-    validateSnapshot(root, "managed source root")
+    validateSnapshot(root, "managed source root", this.platform)
     if (!sameCanonicalPath(root.canonicalPath, this.paths.root, this.platform)) {
       throw new SourcePromotionError("PATH_ALIAS", `Managed source root is not canonical: ${this.paths.root}`)
     }
@@ -576,7 +628,7 @@ class SourcePromotionController {
     this.assertManagedPath(target)
     const snapshot = await this.fileSystem.inspectDirectory(target)
     if (!snapshot) return null
-    validateSnapshot(snapshot, label)
+    validateSnapshot(snapshot, label, this.platform)
     if (!sameCanonicalPath(snapshot.canonicalPath, target, this.platform)) {
       throw new SourcePromotionError("PATH_ALIAS", `${label} is not canonical at ${target}`)
     }
@@ -769,7 +821,14 @@ class SourcePromotionController {
             journal.originalActive,
             "last-known-good source",
           )
-          return { active, lastKnownGood, promotionId: journal.operationId, status: "promoted" }
+          const preservedQuarantine = await this.requireStaleQuarantine(paths, root, journal)
+          return {
+            active,
+            lastKnownGood,
+            ...(preservedQuarantine ? { preservedQuarantine } : {}),
+            promotionId: journal.operationId,
+            status: "promoted",
+          }
         })
       } catch (error) {
         this.retainLiveBoot("promoted", error)
@@ -837,7 +896,14 @@ class SourcePromotionController {
       return await this.complete(journal, "rolled-back", async () => {
         const active = await this.requireExpected(paths.active, root, journal.originalActive, "rolled-back active source")
         const failed = await this.requireExpected(paths.failed, root, journal.candidate, "failed forensic source")
-        return { active, failed, promotionId: journal.operationId, status: "rolled-back" }
+        const preservedQuarantine = await this.requireStaleQuarantine(paths, root, journal)
+        return {
+          active,
+          failed,
+          ...(preservedQuarantine ? { preservedQuarantine } : {}),
+          promotionId: journal.operationId,
+          status: "rolled-back",
+        }
       })
     } catch (error) {
       this.retainLiveBoot("rollback", error)
@@ -1018,6 +1084,7 @@ class SourcePromotionController {
     if (journal.phase !== "outcome-pending") {
       throw new SourcePromotionError("INVALID_JOURNAL", "A terminal promotion outcome is not outcome-pending")
     }
+    const preservedQuarantine = await this.requireStaleQuarantine(paths, root, journal)
     if (status === "promoted") {
       const active = await this.requireExpected(paths.active, root, journal.candidate, "promoted active source")
       const lastKnownGood = await this.requireExpected(
@@ -1028,16 +1095,145 @@ class SourcePromotionController {
       )
       await this.requireMissing(paths.candidate, root, "candidate source")
       await this.requireMissing(paths.failed, root, "failed forensic source")
-      await this.requireMissing(paths.quarantine, root, "stale-source quarantine")
-      return { active, lastKnownGood, promotionId: journal.operationId, status }
+      return {
+        active,
+        lastKnownGood,
+        ...(preservedQuarantine ? { preservedQuarantine } : {}),
+        promotionId: journal.operationId,
+        status,
+      }
     }
 
     const active = await this.requireExpected(paths.active, root, journal.originalActive, "rolled-back active source")
     const failed = await this.requireExpected(paths.failed, root, journal.candidate, "failed forensic source")
     await this.requireMissing(paths.candidate, root, "candidate source")
     await this.requireMissing(paths.lastKnownGood, root, "last-known-good source")
-    await this.requireMissing(paths.quarantine, root, "stale-source quarantine")
-    return { active, failed, promotionId: journal.operationId, status }
+    return {
+      active,
+      failed,
+      ...(preservedQuarantine ? { preservedQuarantine } : {}),
+      promotionId: journal.operationId,
+      status,
+    }
+  }
+
+  private matchesStaleQuarantine(
+    snapshot: DirectorySnapshot | null,
+    journal: PromotionJournal,
+  ): boolean {
+    return journal.staleLastKnownGood === null
+      ? snapshot === null
+      : this.platform === "win32"
+        ? matches(snapshot, journal.staleLastKnownGood)
+        : snapshot === null
+  }
+
+  private async requireStaleQuarantine(
+    paths: PromotionPaths,
+    root: DirectorySnapshot,
+    journal: PromotionJournal,
+  ): Promise<DirectorySnapshot | null> {
+    if (journal.staleLastKnownGood === null) {
+      await this.requireMissing(paths.quarantine, root, "stale-source quarantine")
+      return null
+    }
+    const snapshot = await this.optionalDirectory(paths.quarantine, root, "stale-source quarantine")
+    if (this.platform !== "win32") {
+      if (snapshot) {
+        throw new SourcePromotionError(
+          "DESTINATION_OCCUPIED",
+          `stale-source quarantine unexpectedly remains at ${paths.quarantine}`,
+        )
+      }
+      return null
+    }
+    if (!snapshot) {
+      throw new SourcePromotionError(
+        "DIRECTORY_MISSING",
+        `preserved stale-source quarantine is missing at ${paths.quarantine}`,
+      )
+    }
+    if (!matches(snapshot, journal.staleLastKnownGood)) {
+      throw new SourcePromotionError(
+        "IDENTITY_MISMATCH",
+        `preserved stale-source quarantine changed identity at ${paths.quarantine}`,
+      )
+    }
+    return snapshot
+  }
+
+  private async reconcilePreservedQuarantines(
+    root: DirectorySnapshot,
+  ): Promise<PreservedQuarantineEntry[]> {
+    const contents = await this.fileSystem.readJournal(this.paths.preservedInventory)
+    if (contents === null) return []
+    const entries = parsePreservedQuarantineInventory(contents, this.platform)
+    const retained: PreservedQuarantineEntry[] = []
+    for (const entry of entries) {
+      const target = path.join(this.paths.root, entry.quarantineName)
+      const snapshot = await this.optionalDirectory(target, root, "preserved stale-source quarantine")
+      if (!snapshot) continue
+      if (!matches(snapshot, entry)) {
+        throw new SourcePromotionError(
+          "IDENTITY_MISMATCH",
+          `Preserved stale-source quarantine changed identity at ${target}`,
+        )
+      }
+      retained.push(entry)
+    }
+    if (retained.length !== entries.length) {
+      await this.persistPreservedQuarantines(retained)
+    }
+    return retained
+  }
+
+  private async persistPreservedQuarantines(
+    entries: readonly PreservedQuarantineEntry[],
+  ): Promise<void> {
+    if (entries.length === 0) {
+      await this.fileSystem.removeJournal(this.paths.preservedInventory)
+      return
+    }
+    await this.fileSystem.writeJournalAtomic(
+      this.paths.preservedInventory,
+      `${JSON.stringify({ entries, schemaVersion: 1 })}\n`,
+    )
+    await this.fileSystem.syncDirectory(this.paths.root)
+  }
+
+  private async recordPreservedQuarantine(
+    paths: PromotionPaths,
+    root: DirectorySnapshot,
+    journal: PromotionJournal,
+  ): Promise<void> {
+    if (journal.staleLastKnownGood === null) return
+    const snapshot = await this.requireStaleQuarantine(paths, root, journal)
+    if (!snapshot) return
+    const entries = await this.reconcilePreservedQuarantines(root)
+    const entry: PreservedQuarantineEntry = {
+      dev: snapshot.dev,
+      ino: snapshot.ino,
+      ...(snapshot.nativeIdentity ? { nativeIdentity: snapshot.nativeIdentity } : {}),
+      operationId: journal.operationId,
+      quarantineName: journal.quarantineName,
+    }
+    const prior = entries.find((candidate) => candidate.operationId === journal.operationId)
+    if (prior) {
+      if (prior.quarantineName !== entry.quarantineName || !sameIdentity(prior, entry)) {
+        throw new SourcePromotionError("IDENTITY_MISMATCH", "Preserved quarantine inventory changed identity")
+      }
+      return
+    }
+    if (entries.some((candidate) => sameIdentity(candidate, entry))) {
+      throw new SourcePromotionError("IDENTITY_ALIAS", "Preserved quarantine inventory aliases an existing identity")
+    }
+    if (entries.length >= MAX_PRESERVED_QUARANTINES) {
+      throw new SourcePromotionError(
+        "PRESERVED_QUARANTINE_LIMIT",
+        "Preserved Windows source quarantine inventory is full; remove old quarantines before continuing",
+      )
+    }
+    await this.persistPreservedQuarantines([...entries, entry])
   }
 
   private async persist(journal: PromotionJournal, phase?: JournalPhase): Promise<void> {
@@ -1062,6 +1258,7 @@ class SourcePromotionController {
           canonicalPath: source,
           dev: expected.dev,
           ino: expected.ino,
+          ...(expected.nativeIdentity ? { nativeIdentity: expected.nativeIdentity } : {}),
         })
         return
       } catch (error) {
@@ -1112,7 +1309,7 @@ class SourcePromotionController {
         )
       }
       try {
-        await this.fileSystem.quarantineAndRemoveDirectory(target, quarantine, current)
+        await this.fileSystem.settleDirectory(target, quarantine, current)
         return
       } catch (error) {
         if (isSourceOperationLeaseRetentionError(error)) throw error
@@ -1149,10 +1346,10 @@ class SourcePromotionController {
   }
 
   private requireSupportedDurability(): void {
-    if (this.platform === "win32") {
+    if (this.platform === "win32" && this.fileSystem.supportsDurableWindowsMutations !== true) {
       throw new SourcePromotionError(
         "UNSUPPORTED_DURABILITY",
-        "Source promotion is disabled on Windows because Node cannot durably flush directory-entry mutations",
+        "Source promotion on Windows requires the packaged identity-bound handle-mutation filesystem helper",
       )
     }
   }
@@ -1205,9 +1402,10 @@ const MAX_CONTENT_IDENTITY_BYTES = 8 * 1024
 
 /**
  * Production filesystem boundary for source promotion. It rejects final-path
- * links and unstable identities, durably replaces the journal through a
- * same-directory temporary file, and verifies directory identities on both
- * sides of every rename/remove operation.
+ * links and unstable identities. POSIX journals are immutable append-only
+ * chains, while Windows journals remain helper-owned sidecars. Directory
+ * identities are verified on both sides of every no-replace rename or
+ * quarantine-settlement operation.
  */
 export function createNodeSourcePromotionFileSystem(
   options: NodeSourcePromotionFileSystemOptions = {},
@@ -1216,6 +1414,14 @@ export function createNodeSourcePromotionFileSystem(
   const durability = options.testHooks?.durability ?? (() => undefined)
   const mutationProof = options.testHooks?.mutationProof ?? (() => undefined)
   const adversarial = options.testHooks?.adversarial ?? (() => undefined)
+  const posixJournal = platform === "win32"
+    ? null
+    : createPosixAppendOnlyJournal({
+        durability,
+        ...(options.testHooks?.journalAdversarial
+          ? { testHooks: { adversarial: options.testHooks.journalAdversarial } }
+          : {}),
+      })
 
   const noFollowOpenFlags = (base: number, directory = false): number => {
     if (platform === "win32") return base
@@ -1244,29 +1450,55 @@ export function createNodeSourcePromotionFileSystem(
   }
 
   const inspectDirectory = async (target: string): Promise<DirectorySnapshot | null> => {
+    const nativeBefore = platform === "win32"
+      ? await options.windows?.inspectDirectory(target)
+      : undefined
+    if (platform === "win32" && !nativeBefore) {
+      throw new Error("Windows directory inspection requires the packaged native filesystem helper.")
+    }
     let metadata: Awaited<ReturnType<typeof lstat>>
     try {
       metadata = await stableLstat(target, "directory")
     } catch (error) {
-      if (missing(error)) return null
+      if (missing(error) && (!nativeBefore || nativeBefore.status === "missing")) return null
       throw error
+    }
+    if (nativeBefore?.status === "missing") {
+      throw new Error(`Windows native and Node directory evidence disagree: ${target}`)
     }
     const canonicalPath = await realpath(target)
     const finalMetadata = await stableLstat(target, "directory")
+    const nativeAfter = platform === "win32"
+      ? await options.windows!.inspectDirectory(target)
+      : undefined
     if (metadata.dev !== finalMetadata.dev || metadata.ino !== finalMetadata.ino) {
       throw new Error(`Directory identity changed while resolving its canonical path: ${target}`)
     }
-    return { canonicalPath, dev: Number(metadata.dev), ino: Number(metadata.ino) }
+    if (
+      nativeBefore?.status === "present" &&
+      (nativeAfter?.status !== "present" || nativeAfter.nativeIdentity !== nativeBefore.nativeIdentity)
+    ) {
+      throw new Error(`Windows native directory identity changed during inspection: ${target}`)
+    }
+    return {
+      canonicalPath,
+      dev: Number(metadata.dev),
+      ino: Number(metadata.ino),
+      ...(nativeBefore?.status === "present" ? { nativeIdentity: nativeBefore.nativeIdentity } : {}),
+    }
   }
 
   const syncDirectory = async (target: string): Promise<void> => {
     const expected = await inspectDirectory(target)
     if (!expected) throw new Error(`Cannot durably sync a missing directory: ${target}`)
     if (platform === "win32") {
-      // Node does not expose a supported durable directory flush on Windows.
-      // Journal file contents are flushed before replacement; recovery remains
-      // evidence-driven, but callers must not claim power-loss directory-sync proof.
-      durability("directory-sync-unavailable-windows", target)
+      if (!options.windows || !expected.nativeIdentity) {
+        throw new Error("Windows directory durability proof requires the packaged native filesystem helper.")
+      }
+      // Each Windows namespace mutation is committed by the native boundary
+      // through an exact pinned handle followed by a writable parent-directory
+      // FlushFileBuffers call. Re-prove the parent without claiming Node did it.
+      durability("windows-native-parent-flushed", target)
       return
     }
     const handle = await open(target, noFollowOpenFlags(constants.O_RDONLY, true))
@@ -1283,24 +1515,48 @@ export function createNodeSourcePromotionFileSystem(
   }
 
   const readJournal = async (target: string): Promise<string | null> => {
+    if (platform !== "win32") return posixJournal!.read(target)
+    const nativeBefore = platform === "win32"
+      ? await options.windows?.inspectJournal(target)
+      : undefined
+    if (platform === "win32" && !nativeBefore) {
+      throw new Error("Windows journal inspection requires the packaged native filesystem helper.")
+    }
+    const readTarget = target
     let expected: Awaited<ReturnType<typeof lstat>>
     try {
-      expected = await stableLstat(target, "journal")
+      expected = await stableLstat(readTarget, "journal")
     } catch (error) {
-      if (missing(error)) return null
+      if (missing(error) && (!nativeBefore || nativeBefore.status === "missing")) return null
       throw error
     }
+    if (nativeBefore?.status === "missing") {
+      throw new Error(`Windows native and Node journal evidence disagree: ${target}`)
+    }
     if (expected.size > MAX_JOURNAL_BYTES) throw new Error(`Promotion journal exceeds ${MAX_JOURNAL_BYTES} bytes`)
-    const handle = await open(target, noFollowOpenFlags(constants.O_RDONLY))
+    const handle = await open(readTarget, noFollowOpenFlags(constants.O_RDONLY))
     try {
       const opened = await handle.stat()
       if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) {
         throw new Error(`Promotion journal identity changed before read: ${target}`)
       }
       const contents = await handle.readFile({ encoding: "utf8" })
-      const finalMetadata = await stableLstat(target, "journal")
+      const finalMetadata = await stableLstat(readTarget, "journal")
+      const nativeAfter = platform === "win32"
+        ? await options.windows!.inspectJournal(target)
+        : undefined
       if (finalMetadata.dev !== opened.dev || finalMetadata.ino !== opened.ino) {
         throw new Error(`Promotion journal identity changed during read: ${target}`)
+      }
+      if (
+        nativeBefore?.status === "journal-present" &&
+        (nativeAfter?.status !== "journal-present" ||
+          nativeAfter.nativeIdentity !== nativeBefore.nativeIdentity ||
+          nativeAfter.sha256 !== nativeBefore.sha256 ||
+          nativeAfter.location !== nativeBefore.location ||
+          createHash("sha256").update(contents).digest("hex") !== nativeBefore.sha256)
+      ) {
+        throw new Error(`Windows promotion journal changed during native inspection: ${target}`)
       }
       return contents
     } finally {
@@ -1309,6 +1565,10 @@ export function createNodeSourcePromotionFileSystem(
   }
 
   const writeJournalAtomic = async (target: string, contents: string): Promise<void> => {
+    if (platform !== "win32") {
+      await posixJournal!.write(target, contents)
+      return
+    }
     if (Buffer.byteLength(contents) > MAX_JOURNAL_BYTES) {
       throw new Error(`Promotion journal exceeds ${MAX_JOURNAL_BYTES} bytes`)
     }
@@ -1320,55 +1580,34 @@ export function createNodeSourcePromotionFileSystem(
     const parent = path.dirname(target)
     const temporary = path.join(parent, `.${path.basename(target)}.${randomUUID()}.tmp`)
     const handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
-    let renamed = false
     try {
       await handle.writeFile(contents, { encoding: "utf8" })
       await handle.sync()
       durability("journal-file-synced", temporary)
       await handle.close()
-      await rename(temporary, target)
-      renamed = true
+      if (!options.windows) throw new Error("Windows journal commit requires the packaged native filesystem helper.")
+      await options.windows.commitJournal({
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        target,
+        temporary,
+      })
       await stableLstat(target, "journal")
       await syncDirectory(parent)
     } finally {
-      if (!renamed) {
-        await handle.close().catch(() => undefined)
-        await unlink(temporary).catch((error: unknown) => {
-          if (!missing(error)) throw error
-        })
-      }
+      // A failed native commit may have moved the authenticated temporary and
+      // left an unrelated replacement at its former name. Without a retained
+      // handle or native identity-bound removal primitive, preserve both.
+      await handle.close().catch(() => undefined)
     }
   }
 
   const removeJournal = async (target: string): Promise<void> => {
-    const expected = await stableLstat(target, "journal")
-    const handle = await open(target, noFollowOpenFlags(constants.O_RDONLY))
-    let removed = false
-    try {
-      const opened = await handle.stat()
-      const finalMetadata = await stableLstat(target, "journal")
-      if (
-        !opened.isFile() ||
-        opened.dev !== expected.dev ||
-        opened.ino !== expected.ino ||
-        finalMetadata.dev !== opened.dev ||
-        finalMetadata.ino !== opened.ino
-      ) {
-        throw new Error(`Promotion journal identity changed before removal: ${target}`)
-      }
-      await unlink(target)
-      removed = true
-    } finally {
-      if (removed) await handle.close().catch(() => undefined)
-      else await handle.close()
+    if (platform !== "win32") {
+      await posixJournal!.remove(target)
+      return
     }
-    try {
-      await syncDirectory(path.dirname(target))
-    } catch {
-      // Unlink is the completion commit point. If this directory flush did not
-      // become durable, a crash may resurrect the completion-before journal;
-      // recovery can safely validate and complete that outcome again.
-    }
+    if (!options.windows) throw new Error("Windows journal removal requires the packaged native filesystem helper.")
+    await options.windows.removeJournal({ target })
   }
 
   const renameDirectory = async (
@@ -1390,7 +1629,24 @@ export function createNodeSourcePromotionFileSystem(
       ])
       if (sourceNow || !destinationNow || !sameIdentity(destinationNow, observed)) return
       try {
-        await rename(destination, source)
+        if (platform === "win32") {
+          if (!options.windows || !observed.nativeIdentity) {
+            throw new Error("Windows directory restoration requires an exact native identity and packaged helper.")
+          }
+          await options.windows.renameDirectory({
+            destination: source,
+            expectedNativeIdentity: observed.nativeIdentity,
+            source: destination,
+          })
+        } else {
+          if (!options.promoteAbsent) {
+            throw new Error("POSIX directory restoration requires the native atomic no-replace promoter.")
+          }
+          await options.promoteAbsent(destination, source, {
+            dev: observed.dev,
+            ino: observed.ino,
+          })
+        }
         const [restored, destinationAfterRestore] = await Promise.all([
           inspectDirectory(source),
           inspectDirectory(destination),
@@ -1408,10 +1664,9 @@ export function createNodeSourcePromotionFileSystem(
     }
 
     if (platform === "win32") {
-      // Holding a directory handle across MoveFileEx can itself cause a sharing
-      // violation. Recheck the no-follow identity immediately before rename and
-      // prove the moved identity afterwards; the controller supplies bounded
-      // EPERM/EACCES/EBUSY retries without remove-around-rename.
+      if (!options.windows || !expected.nativeIdentity) {
+        throw new Error("Windows directory rename requires an exact native identity and packaged helper.")
+      }
       const immediatelyBefore = await inspectDirectory(source)
       if (!immediatelyBefore || !sameIdentity(immediatelyBefore, expected)) {
         throw new Error(`Rename source identity changed before mutation: ${source}`)
@@ -1424,8 +1679,12 @@ export function createNodeSourcePromotionFileSystem(
       if (!sourceAtMutation || !sameIdentity(sourceAtMutation, expected) || destinationAtMutation) {
         throw new Error(`Rename paths changed immediately before mutation: ${source}`)
       }
-      mutationProof("windows-stable-stat", "rename")
-      await rename(source, destination)
+      mutationProof("windows-native-file-id", "rename")
+      await options.windows.renameDirectory({
+        destination,
+        expectedNativeIdentity: expected.nativeIdentity,
+        source,
+      })
       await adversarial("rename-after-mutation", { destination, source })
       const [sourceAfter, destinationAfter] = await Promise.all([
         inspectDirectory(source),
@@ -1456,8 +1715,14 @@ export function createNodeSourcePromotionFileSystem(
       if (!sourceAtMutation || !sameIdentity(sourceAtMutation, expected) || destinationAtMutation) {
         throw new Error(`Rename paths changed immediately before mutation: ${source}`)
       }
-      mutationProof("posix-pinned-handle", "rename")
-      await rename(source, destination)
+      if (!options.promoteAbsent) {
+        throw new Error("POSIX directory rename requires the native atomic no-replace promoter.")
+      }
+      mutationProof("posix-native-no-replace", "rename")
+      await options.promoteAbsent(source, destination, {
+        dev: expected.dev,
+        ino: expected.ino,
+      })
       await adversarial("rename-after-mutation", { destination, source })
       const [sourceAfter, destinationAfter, pinnedAfter] = await Promise.all([
         inspectDirectory(source),
@@ -1479,11 +1744,11 @@ export function createNodeSourcePromotionFileSystem(
     }
   }
 
-  const quarantineAndRemoveDirectory = async (
+  const settleDirectory = async (
     target: string,
     quarantine: string,
     expected: DirectorySnapshot,
-  ): Promise<void> => {
+  ): Promise<DirectoryCleanupOutcome> => {
     const parent = path.dirname(target)
     if (
       path.dirname(quarantine) !== parent ||
@@ -1514,18 +1779,45 @@ export function createNodeSourcePromotionFileSystem(
     if (!options.safeRemove) {
       throw new Error("Identity-bound directory deletion requires the managed safe-removal helper.")
     }
-    await options.safeRemove({ expected, quarantine, target })
+    if (platform !== "win32" && targetBefore) {
+      if (!options.promoteAbsent) {
+        throw new Error("POSIX directory quarantine requires the native atomic no-replace promoter.")
+      }
+      await options.promoteAbsent(target, quarantine, {
+        dev: expected.dev,
+        ino: expected.ino,
+      })
+      const [targetAfterPromotion, quarantineAfterPromotion] = await Promise.all([
+        inspectDirectory(target),
+        inspectDirectory(quarantine),
+      ])
+      if (targetAfterPromotion || !quarantineAfterPromotion || !sameIdentity(quarantineAfterPromotion, expected)) {
+        throw new Error("POSIX native quarantine did not preserve the exact expected directory identity.")
+      }
+    }
+    const settlement = await options.safeRemove({ expected, quarantine, target })
     const [targetAfter, quarantineAfter] = await Promise.all([
       inspectDirectory(target),
       inspectDirectory(quarantine),
     ])
-    if (targetAfter || quarantineAfter) {
-      throw new Error("Managed safe-removal helper returned before both confined directory names were absent.")
+    if (targetAfter) {
+      throw new Error("Managed directory settlement returned before the owned target name was absent.")
+    }
+    if (settlement?.status === "quarantined") {
+      if (!quarantineAfter || !sameIdentity(quarantineAfter, expected)) {
+        throw new Error("Managed Windows quarantine did not preserve the exact owned directory identity.")
+      }
+      await syncDirectory(parent)
+      return { quarantine: quarantineAfter, status: "quarantined" }
+    }
+    if (quarantineAfter) {
+      throw new Error("Managed safe removal returned while quarantine evidence remained.")
     }
     await syncDirectory(parent)
+    return { status: "removed" }
   }
 
-  const removeDirectory = async (target: string, expected: DirectorySnapshot): Promise<void> => {
+  const removeDirectory = async (target: string, expected: DirectorySnapshot): Promise<DirectoryCleanupOutcome> => {
     const match = DISPOSABLE_SOURCE_NAME_PATTERN.exec(path.basename(target))
     if (!match) {
       throw new Error("Managed directory cleanup requires a UUID-bound candidate or health-isolation name.")
@@ -1548,19 +1840,20 @@ export function createNodeSourcePromotionFileSystem(
     // A retry after a helper completed but before the caller observed success
     // is idempotent. A helper interrupted after quarantine rename resumes from
     // the same UUID-derived name instead of leaking an untracked random tree.
-    if (!targetBefore && !quarantineBefore) return
-    await quarantineAndRemoveDirectory(target, quarantine, expected)
+    if (!targetBefore && !quarantineBefore) return { status: "removed" }
+    return settleDirectory(target, quarantine, expected)
   }
 
   return {
     delay: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     inspectDirectory,
-    quarantineAndRemoveDirectory,
+    settleDirectory,
     readJournal,
     removeDirectory,
     removeJournal,
     renameDirectory,
     syncDirectory,
+    supportsDurableWindowsMutations: platform === "win32" && options.windows !== undefined,
     writeJournalAtomic,
   }
 }
@@ -1634,6 +1927,69 @@ function parseJournal(contents: string): PromotionJournal {
   return journal
 }
 
+function parsePreservedQuarantineInventory(
+  contents: string,
+  platform: NodeJS.Platform,
+): PreservedQuarantineEntry[] {
+  let value: unknown
+  try {
+    value = JSON.parse(contents)
+  } catch (error) {
+    throw new SourcePromotionError(
+      "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+      "Preserved source quarantine inventory is not valid JSON",
+      { cause: error },
+    )
+  }
+  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.entries) || Object.keys(value).length !== 2) {
+    throw new SourcePromotionError(
+      "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+      "Preserved source quarantine inventory has an invalid schema",
+    )
+  }
+  if (value.entries.length > MAX_PRESERVED_QUARANTINES) {
+    throw new SourcePromotionError(
+      "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+      "Preserved source quarantine inventory exceeds its bounded entry limit",
+    )
+  }
+  const entries = value.entries.map((candidate): PreservedQuarantineEntry => {
+    if (!isRecord(candidate)) {
+      throw new SourcePromotionError(
+        "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+        "Preserved source quarantine entry must be an object",
+      )
+    }
+    const operationId = requireOperationId(candidate.operationId, "preserved quarantine")
+    const expectedKeys = platform === "win32"
+      ? ["dev", "ino", "nativeIdentity", "operationId", "quarantineName"]
+      : ["dev", "ino", "operationId", "quarantineName"]
+    if (
+      Object.keys(candidate).sort().join(",") !== expectedKeys.sort().join(",") ||
+      candidate.quarantineName !== `${STALE_SOURCE_QUARANTINE_PREFIX}${operationId}` ||
+      !isIdentity(candidate) ||
+      (platform === "win32" && !WINDOWS_NATIVE_IDENTITY_PATTERN.test(candidate.nativeIdentity as string)) ||
+      (platform !== "win32" && Object.hasOwn(candidate, "nativeIdentity"))
+    ) {
+      throw new SourcePromotionError(
+        "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+        "Preserved source quarantine entry has an invalid schema",
+      )
+    }
+    return candidate as unknown as PreservedQuarantineEntry
+  })
+  if (
+    new Set(entries.map((entry) => entry.operationId)).size !== entries.length ||
+    new Set(entries.map(identityKey)).size !== entries.length
+  ) {
+    throw new SourcePromotionError(
+      "INVALID_PRESERVED_QUARANTINE_INVENTORY",
+      "Preserved source quarantine inventory contains duplicate ownership evidence",
+    )
+  }
+  return entries
+}
+
 function requireOperationId(value: unknown, label: string): string {
   if (typeof value !== "string" || !new RegExp(`^${UUID_PATTERN}$`).test(value)) {
     throw new SourcePromotionError("INVALID_OPERATION_ID", `Invalid ${label} identifier`)
@@ -1678,11 +2034,15 @@ function operationIdFromCandidateName(candidateName: string): string {
 }
 
 function identityOf(snapshot: DirectorySnapshot): BoundIdentity {
-  return { dev: snapshot.dev, ino: snapshot.ino }
+  return {
+    dev: snapshot.dev,
+    ino: snapshot.ino,
+    ...(snapshot.nativeIdentity ? { nativeIdentity: snapshot.nativeIdentity } : {}),
+  }
 }
 
 function identityKey(identity: BoundIdentity): string {
-  return `${identity.dev}:${identity.ino}`
+  return identity.nativeIdentity ?? `${identity.dev}:${identity.ino}`
 }
 
 function matches(snapshot: DirectorySnapshot | null, identity: BoundIdentity): snapshot is DirectorySnapshot {
@@ -1690,16 +2050,21 @@ function matches(snapshot: DirectorySnapshot | null, identity: BoundIdentity): s
 }
 
 function sameIdentity(first: BoundIdentity, second: BoundIdentity): boolean {
-  return first.dev === second.dev && first.ino === second.ino
+  return (
+    first.dev === second.dev &&
+    first.ino === second.ino &&
+    (!first.nativeIdentity || !second.nativeIdentity || first.nativeIdentity === second.nativeIdentity)
+  )
 }
 
-function validateSnapshot(snapshot: DirectorySnapshot, label: string): void {
+function validateSnapshot(snapshot: DirectorySnapshot, label: string, platform: NodeJS.Platform): void {
   if (
     typeof snapshot.canonicalPath !== "string" ||
     !Number.isSafeInteger(snapshot.dev) ||
     snapshot.dev < 0 ||
     !Number.isSafeInteger(snapshot.ino) ||
-    snapshot.ino < 0
+    snapshot.ino < 0 ||
+    (platform === "win32" && !WINDOWS_NATIVE_IDENTITY_PATTERN.test(snapshot.nativeIdentity ?? ""))
   ) {
     throw new SourcePromotionError("INVALID_IDENTITY", `${label} returned an invalid directory identity`)
   }
@@ -1726,7 +2091,9 @@ function isIdentity(value: unknown): value is BoundIdentity {
     Number.isSafeInteger(value.dev) &&
     Number(value.dev) >= 0 &&
     Number.isSafeInteger(value.ino) &&
-    Number(value.ino) >= 0
+    Number(value.ino) >= 0 &&
+    (!("nativeIdentity" in value) ||
+      (typeof value.nativeIdentity === "string" && WINDOWS_NATIVE_IDENTITY_PATTERN.test(value.nativeIdentity)))
   )
 }
 

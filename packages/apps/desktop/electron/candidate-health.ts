@@ -9,6 +9,7 @@ const READY_LINE = /^FLINTTRADE_BACKEND_READY port=([1-9][0-9]{0,4})$/;
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_PING_INTERVAL_MS = 100;
 const MAX_PING_BODY_BYTES = 64 * 1024;
+const MAX_FRONTEND_BODY_BYTES = 2 * 1024 * 1024;
 
 export type CandidateHealthFailureReason = "cancelled" | "cleanup" | "early-exit" | "setup" | "timeout";
 export type CandidateHealthProcessInvocation = CommandInvocation;
@@ -31,6 +32,16 @@ export interface CandidateHealthPingBoundary {
   get(port: number, signal: AbortSignal): Promise<CandidatePingResponse>;
 }
 
+export interface CandidateFrontendResponse {
+  body: string;
+  contentType: string;
+  statusCode: number;
+}
+
+export interface CandidateHealthFrontendBoundary {
+  get(port: number, signal: AbortSignal): Promise<CandidateFrontendResponse>;
+}
+
 export interface CandidateHealthIsolation {
   flinttradeHome: string;
   home: string;
@@ -44,6 +55,7 @@ export interface CandidateHealthEnvironmentInput {
 
 export interface CandidateHealthOptions {
   candidateRoot: string;
+  frontend?: CandidateHealthFrontendBoundary;
   isolation: CandidateHealthIsolation;
   ping?: CandidateHealthPingBoundary;
   pingIntervalMs?: number;
@@ -150,6 +162,15 @@ function isHealthyPing(response: CandidatePingResponse): boolean {
   );
 }
 
+function isHealthyFrontend(response: CandidateFrontendResponse): boolean {
+  return (
+    response.statusCode === 200 &&
+    response.contentType.toLowerCase().split(";", 1)[0]?.trim() === "text/html" &&
+    /^\s*<!doctype\s+html(?:\s|>)/i.test(response.body) &&
+    /<html(?:\s|>)/i.test(response.body)
+  );
+}
+
 export function parseCandidateReadyLine(line: string): number | null {
   const match = READY_LINE.exec(line);
   if (!match) return null;
@@ -221,6 +242,56 @@ export function requestCandidatePing(port: number, signal: AbortSignal): Promise
             return;
           }
           finish(null, { body: parsed, statusCode: response.statusCode ?? 0 });
+        });
+      },
+    );
+    request.once("error", (error) => finish(error));
+  });
+}
+
+export function requestCandidateFrontend(port: number, signal: AbortSignal): Promise<CandidateFrontendResponse> {
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    return Promise.reject(new Error("Candidate frontend port is invalid."));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error: unknown, response?: CandidateFrontendResponse): void => {
+      if (settled) return;
+      settled = true;
+      if (error !== null) reject(error);
+      else resolve(response!);
+    };
+    const request = httpGet(
+      {
+        agent: false,
+        headers: { accept: "text/html", connection: "close" },
+        hostname: "127.0.0.1",
+        method: "GET",
+        path: "/",
+        port,
+        signal,
+      },
+      (response) => {
+        let body = "";
+        let bytes = 0;
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => {
+          bytes += Buffer.byteLength(chunk);
+          if (bytes > MAX_FRONTEND_BODY_BYTES) {
+            finish(new Error("Candidate frontend response exceeded its size limit."));
+            response.destroy();
+            return;
+          }
+          body += chunk;
+        });
+        response.once("aborted", () => finish(new Error("Candidate frontend response was interrupted.")));
+        response.once("error", (error) => finish(error));
+        response.once("end", () => {
+          finish(null, {
+            body,
+            contentType: String(response.headers["content-type"] ?? ""),
+            statusCode: response.statusCode ?? 0,
+          });
         });
       },
     );
@@ -314,8 +385,24 @@ export async function proveCandidateHealth(options: CandidateHealthOptions): Pro
         timedOut,
       ]);
       if (response.kind === "response" && isHealthyPing(response.value)) {
-        proof = { candidateRoot: options.candidateRoot, port };
-        break;
+        stage = "the terminal frontend";
+        const frontend = options.frontend ?? { get: requestCandidateFrontend };
+        const frontendResponse = await Promise.race([
+          Promise.resolve()
+            .then(() => frontend.get(port, ownedAbort.signal))
+            .then(
+              (value) => ({ kind: "response" as const, value }),
+              (error: unknown) => ({ error, kind: "error" as const }),
+            ),
+          processEnded,
+          cancelled,
+          timedOut,
+        ]);
+        if (frontendResponse.kind === "response" && isHealthyFrontend(frontendResponse.value)) {
+          proof = { candidateRoot: options.candidateRoot, port };
+          break;
+        }
+        stage = "the loopback ping and terminal frontend";
       }
       await Promise.race([wait(pingIntervalMs), processEnded, cancelled, timedOut]);
     }

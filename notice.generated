@@ -6,6 +6,6 @@ supply-chain/licence-allowlist.yml for the compatibility policy.
 
 - uv.lock: present (sha256: b056939319aef7a06d6c60b1e3aeb5e7ce591163a86f2382e307e89b901e826e)
 - requirements.lock: present (sha256: f69e3fad575d6c072558c0f74c951ed114a9e400edbbf3c3e4b300cd8a7a6df5)
-- pnpm-lock.yaml: present (sha256: ecfc5f964cf81d233c21703bde73e5fb28f94cb8ca1d75977d6d38c38276ba74)
+- pnpm-lock.yaml: present (sha256: be03447c7983461abd0255426a75692849fc85952da47c1f17cc1b39eef52bc6)
 - brokers.lock: present (sha256: 2605689bca7aefa5bcf65f8f347dbbe4be444039989b2909c67dfed06da7b6d1)
 - supply-chain/audit-tooling.lock: present (sha256: 9d01182598dd12f07df16712cde76b95bada4b8639973e25cb2cbfac66afc42a)

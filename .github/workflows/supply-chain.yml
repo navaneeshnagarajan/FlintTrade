@@ -190,6 +190,8 @@ jobs:
         run: pnpm --filter @flinttrade/desktop verify:bootstrap-manifest
       - name: Bundle Electron main and preload
         run: pnpm --filter @flinttrade/desktop bundle
+      - name: Exercise native POSIX no-replace promotion
+        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
       - name: Package Linux Electron directory
         run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
       - name: Verify packaged Electron security contract

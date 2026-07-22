@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapDependencies, BootstrapToolManifest } from "./bootstrap";
 import { createNodeBootstrapDependencies } from "./bootstrap-io";
 import { createSourceOperationCoordinator } from "./source-operation";
+import { createNodeSourcePromotionFileSystem } from "./source-promotion";
 import { SOURCE_CLEANUP_INVENTORY_NAME, createNodeSourceUpdaterCleanup } from "./source-update-io";
 import { createSourceUpdateRuntime, sourceUpdateIsolationRoot } from "./source-update-runtime";
 import { createUpdateState } from "./state";
@@ -343,6 +344,14 @@ describe("source update runtime composition", () => {
       platform: "win32",
       singletonAuthorised: true,
       state: createUpdateState("source"),
+      windowsSourceFilesystem: {
+        commitJournal: vi.fn(async () => undefined),
+        inspectDirectory: vi.fn(async () => ({ status: "missing" as const })),
+        inspectJournal: vi.fn(async () => ({ status: "missing" as const })),
+        quarantineDirectory: vi.fn(async () => ({ status: "quarantined" as const })),
+        removeJournal: vi.fn(async () => undefined),
+        renameDirectory: vi.fn(async () => undefined),
+      },
     });
 
     await runtime.prepare();
@@ -464,7 +473,8 @@ describe("source update runtime composition", () => {
       expect(recreatedRoot.isSymbolicLink()).toBe(false);
       expect(recreatedRoot.mode & 0o777).toBe(0o700);
       await expect(runtime.updater.recover()).resolves.toEqual({ status: "idle" });
-      await expect(access(inventoryPath)).rejects.toThrow();
+      await expect(createNodeSourcePromotionFileSystem().readJournal(inventoryPath)).resolves.toBeNull();
+      await expect(access(inventoryPath)).resolves.toBeUndefined();
       await expect(lstat(isolationRoot)).resolves.toMatchObject({ ino: recreatedRoot.ino });
     },
   );

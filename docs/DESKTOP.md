@@ -41,8 +41,20 @@ The shell and application runtime therefore have separate update lifecycles:
   rollback.
 - **Electron shell update:** select a newer release on the current stable or
   prerelease channel only when its canonical platform installer and
-  `SHA256SUMS.txt` are present, verify the installer, and hand off to the
-  packaged install script before the shell exits.
+  `SHA256SUMS.txt` are present, cryptographically verify the installer's GitHub
+  Sigstore provenance against the exact public repository, tag and release
+  workflow, and hand its attested name and digest to the packaged install
+  script before the shell exits. The script re-hashes the downloaded bytes
+  against that app-provided digest, so replacing the asset after attestation
+  verification cannot change what is installed.
+
+The app launches each shell installer from a unique owner-private directory
+under the shell profile. Failed, cancelled, pre-launch-failed and successful
+stages are all deliberately retained for forensic review. There is currently
+no automatic stage purge. Neither the app nor an exited installer treats a
+re-derived pathname as authority for recursive deletion after the original
+filesystem identity has been relinquished. Path replacements are therefore
+always preserved rather than treated as cleanup targets.
 
 There is no payload feed, rolling updater release, renderer-owned manifest, or
 generic native-command bridge.
@@ -125,10 +137,17 @@ irm https://flinttrade.vercel.app/install.ps1 | iex
 The scripts enumerate official GitHub releases, require an internally
 consistent semantic-version channel, verify that the current platform's exact
 canonical asset and `SHA256SUMS.txt` are both present, and verify the downloaded
-installer before changing the installed shell. `--ref <tag>` selects an exact
+installer before changing the installed shell. An in-app update additionally
+requires GitHub's Sigstore artifact attestation; a direct first install remains
+usable with the release checksum because no trusted FlintTrade app exists yet
+to perform that provenance check. `--ref <tag>` selects an exact
 release and fails closed when that release is incomplete. `--no-launch` skips
 the final launch. `--build-from-source` / `-BuildFromSource` is a separate
-contributor path that packages only the shell from a trusted checkout.
+contributor path that packages only the shell from a trusted checkout. That
+path also compiles the packaged native filesystem boundary: macOS requires the
+system `/usr/bin/clang` and Node's installed N-API headers, Linux requires
+`/usr/bin/cc` plus those headers, and Windows requires the x64 .NET Framework
+`csc.exe`. The installer checks these prerequisites before changing a checkout.
 
 The install scripts record exact shell identity in owner-private local state.
 Updates and ordinary uninstalls refuse unknown same-name applications, links,
@@ -155,6 +174,41 @@ The Windows asset is an Electron-builder NSIS x64 installer and installs per
 user. Windows 11 on ARM uses x64 emulation. Electron includes Chromium, so the
 shell does not download or depend on the retired WebView2-based desktop
 runtime. Authenticode signing is not currently configured.
+
+Source apply and rollback use a packaged native filesystem helper rather than
+claiming a Node directory-flush guarantee. The helper binds every managed
+directory to its Windows volume serial and 128-bit file ID, rejects reparse or
+aliased paths, and commits same-volume journal and promotion renames through
+exact no-delete-share handles plus a native parent-directory flush. Journal
+replacement and removal bind the target to its expected file ID and SHA-256
+digest, deny compatible writers while that evidence is authenticated, and
+require the reserved `.previous` name to be absent. A normal commit may use
+that name transiently for the already-pinned target, but deletes it through the
+same handle only after verifying the replacement. Any sidecar which predates
+the helper invocation is preserved and blocks mutation instead of being
+adopted as cleanup authority.
+
+Windows source cleanup is deliberately preserve-only. The helper pins the
+managed parent first, renames the exact identity-bound root to its deterministic
+quarantine, flushes the parent and stops. It never enumerates or deletes a child,
+so an ordinary child inserted or swapped during cleanup, including a reparse
+point, is retained with the quarantined root rather than becoming pathname-based
+deletion authority. The managed target is absent while the exact quarantine is
+tracked in `.flinttrade-source-cleanup.json` or
+`.flinttrade-preserved-source-quarantines.json`. Later updates may proceed with
+new UUID-bound quarantine names. A user may manually remove an old quarantine;
+the next recovery proves its absence before pruning the inventory row. Until
+then it consumes disk space. Each inventory is independently capped at 64
+entries. When either inventory has 64 retained entries, that source-update path
+stops rather than evicting evidence; an old deterministic quarantine must be
+removed manually and recovery must prove its absence and prune the row before
+another update can complete. A locked root, changed identity or ambiguous
+target/quarantine evidence retains the journal and fails closed.
+
+The helper executable is SHA-256-bound into the Electron main bundle at build
+time. The Windows Job supervisor opens and hashes that exact ordinary file,
+denies write/delete sharing, and retains the handle through `CreateProcess` so
+the verified helper cannot be replaced between authentication and execution.
 
 ### Linux boundary
 
@@ -236,7 +290,11 @@ runs:
 Each job installs the frozen JavaScript workspace, verifies the bootstrap tool
 manifest, bundles Electron, builds the installer and verifies the packaged
 security contract. Publication refuses an existing non-empty release, creates
-`SHA256SUMS.txt`, attests provenance, and rechecks the exact five-asset set.
+`SHA256SUMS.txt`, attests each asset's provenance, and rechecks the exact
+five-asset set. The in-app updater fetches attestations by exact installer
+digest and requires the `desktop-release.yml` `workflow_dispatch` identity at
+the selected tag, GitHub's public Fulcio issuer, and valid Rekor and certificate
+transparency proofs before installer handoff.
 
 `test.yml` runs the Electron TypeScript, Vitest, bundle and hardened Linux
 directory-package gate on normal code changes. The weekly/manual
@@ -267,6 +325,17 @@ single local Mac run is not cross-platform proof.
   failed candidate does not replace the active source.
 - **A source update is refused.** The updater rejects dirty, foreign or changed
   active checkouts. Keep personal source work outside the managed active path.
+  On Windows, close programs holding files in the managed checkout and retry;
+  FlintTrade preserves the journal instead of deleting around a lock. A
+  filesystem which refuses the native parent flush is unsupported and the
+  update remains fail-closed.
+- **Windows reports too many preserved source-operation lease quarantines.**
+  These are `.flinttrade-bootstrap-operation.lock.stale-*` directories left by
+  interrupted bootstrap or update ownership, not either source-cleanup
+  inventory. FlintTrade revalidates them but does not pathname-delete them on
+  Windows, and blocks after 64 are retained. Stop FlintTrade, archive the exact
+  directories for diagnosis, then remove only confirmed stale quarantine
+  directories; never remove the active `.flinttrade-bootstrap-operation.lock`.
 - **macOS reports an unidentified developer.** The current boundary is an
   ad-hoc seal, not Developer ID signing or notarisation. Use the documented
   Privacy & Security override for a locally built package.

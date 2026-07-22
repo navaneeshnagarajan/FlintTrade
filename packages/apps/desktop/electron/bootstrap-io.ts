@@ -1,14 +1,26 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
+  chmodSync,
   close as closeFd,
+  closeSync,
   constants,
   createReadStream,
   createWriteStream,
+  fchmodSync,
   fstat as fstatFd,
+  fstatSync,
+  fsyncSync,
   lstatSync,
+  mkdtempSync,
   open as openFd,
+  openSync,
+  readSync,
+  readFileSync,
   realpathSync,
+  rmdirSync,
+  unlinkSync,
+  writeSync,
 } from "node:fs";
 import {
   access,
@@ -32,7 +44,7 @@ import {
 } from "node:fs/promises";
 import https from "node:https";
 import type { IncomingMessage } from "node:http";
-import os from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -52,6 +64,7 @@ import type {
   OperationLeaseRequest,
   SourceTreeEntry,
   SourceTreeIdentity,
+  TemporaryDirectoryReservation,
   TextDownloadReceipt,
 } from "./bootstrap";
 
@@ -66,9 +79,83 @@ const ARCHIVE_LIMITS = Object.freeze({
   singleFileBytes: 256 * 1024 * 1024,
 });
 
-export function currentBootIdentity(platform: NodeJS.Platform = process.platform): string {
-  const startedAtSeconds = Math.round(Date.now() / 1_000 - os.uptime());
-  return `${platform}:${startedAtSeconds}`;
+export interface BootIdentityDependencies {
+  environment: NodeJS.ProcessEnv;
+  readTextFile(target: string): string;
+  runFile(command: string, args: readonly string[]): string;
+}
+
+const NODE_BOOT_IDENTITY_DEPENDENCIES: BootIdentityDependencies = {
+  environment: process.env,
+  readTextFile: (target) => readFileSync(target, "utf8"),
+  runFile: (command, args) => execFileSync(command, [...args], {
+    encoding: "utf8",
+    maxBuffer: 4096,
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 15_000,
+    windowsHide: true,
+  }),
+};
+
+function unavailableBootIdentity(platform: NodeJS.Platform, cause?: unknown): Error {
+  return new Error(`Authoritative ${platform} boot-session identity is unavailable.`, {
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+/** Return one kernel-owned identity that remains constant for the complete OS boot. */
+export function currentBootIdentity(
+  platform: NodeJS.Platform = process.platform,
+  dependencies: BootIdentityDependencies = NODE_BOOT_IDENTITY_DEPENDENCIES,
+): string {
+  try {
+    if (platform === "linux") {
+      const bootId = dependencies.readTextFile("/proc/sys/kernel/random/boot_id").trim();
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(bootId)) {
+        throw unavailableBootIdentity(platform);
+      }
+      return `linux:${bootId.toLowerCase()}`;
+    }
+
+    if (platform === "darwin") {
+      const bootId = dependencies.runFile("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"]).trim();
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(bootId)) {
+        throw unavailableBootIdentity(platform);
+      }
+      return `darwin:${bootId.toLowerCase()}`;
+    }
+
+    if (platform === "win32") {
+      const windowsRoot = dependencies.environment.SystemRoot ?? dependencies.environment.WINDIR ?? "";
+      if (windowsRoot.trim() !== windowsRoot || !path.win32.isAbsolute(windowsRoot)) {
+        throw unavailableBootIdentity(platform);
+      }
+      const powershell = path.win32.join(
+        windowsRoot,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      const command = [
+        "$boot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime",
+        "if ($null -eq $boot) { throw 'boot-time-unavailable' }",
+        "[Console]::Out.Write($boot.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture))",
+      ].join("; ");
+      const fileTime = dependencies.runFile(
+        powershell,
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+      ).trim();
+      if (!/^[1-9][0-9]{15,19}$/.test(fileTime) || BigInt(fileTime) > 9_223_372_036_854_775_807n) {
+        throw unavailableBootIdentity(platform);
+      }
+      return `win32:${fileTime}`;
+    }
+
+    throw unavailableBootIdentity(platform);
+  } catch (error) {
+    throw unavailableBootIdentity(platform, error);
+  }
 }
 
 const CHILD_ENVIRONMENT_KEYS = new Set([
@@ -214,6 +301,11 @@ async function waitForPosixProcessGroupExit(processGroupId: number, timeoutMs: n
 }
 
 interface BootstrapIoOptions {
+  atomicPromotion?: {
+    expectedHelperSha256: string;
+    helper: string;
+    protocol: "posix" | "windows-source-fs";
+  };
   canonicalisePath?: (target: string) => string;
   environment?: NodeJS.ProcessEnv;
   fileExists?: (target: string) => boolean;
@@ -224,9 +316,15 @@ interface BootstrapIoOptions {
     archiveSnapshotWriteChunkBytes?: number;
     beforeAppendOpen?: (target: string) => void;
     beforeAppendParentSync?: (target: string) => void;
+    beforeArchiveSnapshotSetup?: (
+      stage: "destination-open" | "directory-create" | "directory-inspect",
+    ) => void;
     beforeArchiveSnapshotVerify?: (target: string) => void;
+    beforeAtomicPromotion?: (source: string, destination: string) => Promise<void> | void;
+    afterAtomicPromotionModulePinned?: (target: string) => void;
     beforeDurableDirectorySync?: (target: string, kind: "directory" | "parent") => void;
     beforeDownloadTemporaryOpen?: (target: string) => void;
+    afterTemporaryDirectoryCreated?: (target: string) => void;
     beforeLeaseReleaseStage?: (
       stage: "directory-remove" | "directory-sync" | "owner-unlink" | "parent-sync",
     ) => void;
@@ -234,19 +332,39 @@ interface BootstrapIoOptions {
     onDownloadTemporaryLifecycle?: (
       event: "before-remove" | "handle-closed" | "handle-opened",
     ) => Promise<void> | void;
-    onArchiveSnapshotRemove?: () => void;
+    onArchiveSnapshotRemove?: (target: string, directory: string) => void;
     onArchiveEntry?: (index: number, kind: "tar.gz" | "zip") => void;
     onLeaseOwnerPublication?: (
       stage: "after-open" | "after-write" | "before-open",
       bytesWritten: number,
     ) => Promise<void> | void;
+    onPreLeaseCommandScope?: (operationLeaseTarget: string | undefined) => void;
     onZipSnapshotHandle?: (event: "closed" | "opened") => void;
     downloadWriteChunkBytes?: number;
     leaseOwnerWriteChunkBytes?: number;
     recordedProcessWaitMs?: number;
+    inspectTrustedGit?: (target: string, platform: NodeJS.Platform) => TrustedExecutableSnapshot | null;
+    testAtomicPromote?: (
+      source: string,
+      destination: string,
+      identity: FileSystemIdentity,
+    ) => Promise<void>;
+    testNativeDirectoryIdentity?: (target: string, identity: FileSystemIdentity) => Promise<string>;
+    temporaryDirectoryId?: () => string;
   };
+  trustedGitCandidates?: readonly string[];
   operationLeaseTarget?: string;
   windowsJobSupervisor?: string;
+}
+
+export interface TrustedExecutableSnapshot {
+  canonicalPath: string;
+  ctimeMs: number;
+  dev: number;
+  ino: number;
+  mode: number;
+  mtimeMs: number;
+  size: number;
 }
 
 const WINDOWS_SUPERVISOR_PREFIX = "FLINTTRADE_JOB_SUPERVISOR";
@@ -277,6 +395,7 @@ async function writeBufferCompletely(
 export function buildWindowsSupervisorInvocation(input: {
   args: readonly string[];
   cwd?: string;
+  expectedTargetSha256?: string;
   helper: string;
   parentPid: number;
   target: string;
@@ -291,6 +410,9 @@ export function buildWindowsSupervisorInvocation(input: {
   if (input.cwd && !path.win32.isAbsolute(input.cwd)) {
     throw new Error("Windows bootstrap working directory must be absolute.");
   }
+  if (input.expectedTargetSha256 !== undefined && !/^[0-9a-f]{64}$/.test(input.expectedTargetSha256)) {
+    throw new Error("Windows bootstrap target SHA-256 must be a lowercase digest.");
+  }
   if (!WINDOWS_SUPERVISOR_TOKEN.test(input.token) || !Number.isSafeInteger(input.parentPid) || input.parentPid <= 0) {
     throw new Error("Windows Job supervisor identity is invalid.");
   }
@@ -303,6 +425,7 @@ export function buildWindowsSupervisorInvocation(input: {
       "--parent-pid",
       String(input.parentPid),
       ...(input.cwd ? ["--cwd", input.cwd] : []),
+      ...(input.expectedTargetSha256 ? ["--target-sha256", input.expectedTargetSha256] : []),
       "--",
       input.target,
       ...input.args,
@@ -473,6 +596,40 @@ async function readNoFollowRegularText(target: string): Promise<string> {
       throw new Error("Trusted bootstrap metadata changed while it was read.");
     }
     return content;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writeTextAbsent(target: string, content: string): Promise<void> {
+  const parent = path.dirname(target);
+  const parentMetadata = await lstat(parent);
+  if (parentMetadata.isSymbolicLink() || !parentMetadata.isDirectory()) {
+    throw new Error("Exclusive bootstrap file parent must be a no-follow directory.");
+  }
+  const canonicalParent = await realpath(parent);
+  const handle = await open(
+    target,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile()) throw new Error("Exclusive bootstrap file was not a regular file.");
+    await writeBufferCompletely(handle, Buffer.from(content, "utf8"));
+    await handle.chmod(0o600);
+    await handle.sync();
+    const pathname = await lstat(target);
+    if (
+      pathname.isSymbolicLink() ||
+      !pathname.isFile() ||
+      pathname.dev !== opened.dev ||
+      pathname.ino !== opened.ino ||
+      (await realpath(path.dirname(target))) !== canonicalParent
+    ) {
+      throw new Error("Exclusive bootstrap file identity changed before settlement.");
+    }
+    await syncDirectoryForDurability(canonicalParent);
   } finally {
     await handle.close();
   }
@@ -730,6 +887,108 @@ done
 `;
 }
 
+function samePlatformPath(left: string, right: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+export function systemGitCandidates(
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv = process.env,
+): readonly string[] {
+  if (platform !== "win32") return ["/usr/bin/git"];
+  const systemRoot = environment.SystemRoot ?? environment.SYSTEMROOT ?? environment.WINDIR ?? "";
+  if (!path.win32.isAbsolute(systemRoot) || systemRoot.trim() !== systemRoot) return [];
+  const driveRoot = path.win32.parse(path.win32.normalize(systemRoot)).root;
+  if (!/^[A-Za-z]:\\$/.test(driveRoot)) return [];
+  return [
+    path.win32.join(driveRoot, "Program Files", "Git", "cmd", "git.exe"),
+    path.win32.join(driveRoot, "Program Files", "Git", "bin", "git.exe"),
+  ];
+}
+
+function inspectTrustedExecutable(
+  target: string,
+  platform: NodeJS.Platform,
+): TrustedExecutableSnapshot | null {
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  if (!pathApi.isAbsolute(target)) return null;
+  let canonicalPath: string;
+  try {
+    canonicalPath = realpathSync.native(target);
+  } catch {
+    return null;
+  }
+  if (!samePlatformPath(pathApi.normalize(target), pathApi.normalize(canonicalPath), platform)) return null;
+
+  let cursor = canonicalPath;
+  let fileMetadata: ReturnType<typeof lstatSync> | null = null;
+  for (;;) {
+    let metadata: ReturnType<typeof lstatSync>;
+    try {
+      metadata = lstatSync(cursor);
+    } catch {
+      return null;
+    }
+    if (metadata.isSymbolicLink()) return null;
+    if (cursor === canonicalPath) {
+      if (!metadata.isFile()) return null;
+      fileMetadata = metadata;
+    } else if (!metadata.isDirectory()) {
+      return null;
+    }
+    if (
+      platform !== "win32" &&
+      (metadata.uid !== 0 || (metadata.mode & 0o022) !== 0)
+    ) {
+      return null;
+    }
+    const parent = pathApi.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  if (!fileMetadata || (platform !== "win32" && (fileMetadata.mode & 0o111) === 0)) return null;
+  return {
+    canonicalPath,
+    ctimeMs: fileMetadata.ctimeMs,
+    dev: fileMetadata.dev,
+    ino: fileMetadata.ino,
+    mode: fileMetadata.mode,
+    mtimeMs: fileMetadata.mtimeMs,
+    size: fileMetadata.size,
+  };
+}
+
+function sameTrustedExecutable(
+  left: TrustedExecutableSnapshot,
+  right: TrustedExecutableSnapshot,
+  platform: NodeJS.Platform,
+): boolean {
+  return (
+    samePlatformPath(left.canonicalPath, right.canonicalPath, platform) &&
+    left.ctimeMs === right.ctimeMs &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.mtimeMs === right.mtimeMs &&
+    left.size === right.size
+  );
+}
+
+function resolveTrustedGit(
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv,
+  options: BootstrapIoOptions,
+): { inspect: (target: string, platform: NodeJS.Platform) => TrustedExecutableSnapshot | null; snapshot: TrustedExecutableSnapshot } | null {
+  const inspect = options.testHooks?.inspectTrustedGit ?? inspectTrustedExecutable;
+  const candidates = options.trustedGitCandidates ?? systemGitCandidates(platform, environment);
+  for (const candidate of candidates) {
+    const snapshot = inspect(candidate, platform);
+    if (!snapshot || !samePlatformPath(snapshot.canonicalPath, candidate, platform)) continue;
+    return { inspect, snapshot };
+  }
+  return null;
+}
+
 function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOptions): BootstrapDependencies["command"] {
   const environment = options.environment ?? process.env;
   const fileExists = options.fileExists ?? noFollowRegularFile;
@@ -763,6 +1022,7 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
     options.posixProcessEnumerators ?? ["/bin/ps", "/usr/bin/ps"],
     platform,
   );
+  const trustedGit = resolveTrustedGit(platform, environment, options);
   return {
     ...(options.operationLeaseTarget ? { operationLeaseTarget: options.operationLeaseTarget } : {}),
     ...(windowsPowerShell ? { windowsPowerShell } : {}),
@@ -801,6 +1061,22 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           });
           return;
         }
+        let invocationCommand = invocation.command;
+        if (invocationCommand === "git") {
+          const current = trustedGit?.inspect(trustedGit.snapshot.canonicalPath, platform) ?? null;
+          if (!trustedGit || !current || !sameTrustedExecutable(current, trustedGit.snapshot, platform)) {
+            resolve({
+              contained: true,
+              exitCode: 127,
+              stderr: "Verified system Git is unavailable.",
+              stderrTruncated: false,
+              stdout: "",
+              stdoutTruncated: false,
+            });
+            return;
+          }
+          invocationCommand = trustedGit.snapshot.canonicalPath;
+        }
         let stdout = "";
         let stderr = "";
         let stdoutTruncated = false;
@@ -834,7 +1110,7 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           posixProcessAnchor,
           "flinttrade-process-anchor",
           posixContainmentToken!,
-          invocation.command,
+          invocationCommand,
           ...invocation.args,
         ];
         const childEnvironment = minimalChildEnvironment(
@@ -843,7 +1119,7 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
           platform,
         );
         if (platform === "win32") {
-          const targetExecutable = resolveWindowsExecutable(invocation.command, childEnvironment, fileExists, canonicalise);
+          const targetExecutable = resolveWindowsExecutable(invocationCommand, childEnvironment, fileExists, canonicalise);
           if (!targetExecutable) {
             resolve({
               contained: true,
@@ -860,6 +1136,9 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
             const supervisor = buildWindowsSupervisorInvocation({
               args: invocation.args,
               ...(invocation.cwd ? { cwd: invocation.cwd } : {}),
+              ...(invocation.expectedExecutableSha256
+                ? { expectedTargetSha256: invocation.expectedExecutableSha256 }
+                : {}),
               helper: windowsJobSupervisor!,
               parentPid: process.pid,
               target: targetExecutable,
@@ -1311,7 +1590,7 @@ async function requestDownload(
     };
     const terminate = (error: Error): void => {
       terminalError ??= error;
-      activeResponse?.destroy(terminalError);
+      activeResponse?.destroy();
       request.destroy(terminalError);
     };
     const onAbort = (): void => terminate(abortError());
@@ -1405,39 +1684,41 @@ async function downloadFile(
   options: BootstrapIoOptions,
 ): Promise<DownloadReceipt> {
   await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
-  const temporary = `${destination}.download-${process.pid}-${randomUUID()}`;
-  await rm(temporary, { force: true });
-  try {
-    const receipt = await requestDownload(url, signal, policy, async (response) => {
-      const hash = createHash("sha256");
-      let bytes = 0;
-      options.testHooks?.beforeDownloadTemporaryOpen?.(temporary);
-      const handle = await open(temporary, "wx", 0o600);
-      await options.testHooks?.onDownloadTemporaryLifecycle?.("handle-opened");
-      try {
-        for await (const chunk of response) {
-          if (signal.aborted) throw abortError();
-          const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          bytes += value.length;
-          if (bytes > policy.maxBytes) throw new Error(`${policy.label} download exceeded its size limit.`);
-          hash.update(value);
-          await writeBufferCompletely(handle, value, options.testHooks?.downloadWriteChunkBytes);
-        }
-        await handle.sync();
-      } finally {
-        await handle.close();
-        await options.testHooks?.onDownloadTemporaryLifecycle?.("handle-closed");
+  const receipt = await requestDownload(url, signal, policy, async (response) => {
+    const hash = createHash("sha256");
+    let bytes = 0;
+    options.testHooks?.beforeDownloadTemporaryOpen?.(destination);
+    const handle = await open(destination, "wx", 0o600);
+    await options.testHooks?.onDownloadTemporaryLifecycle?.("handle-opened");
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile()) throw new Error("Bootstrap download destination was not a regular file.");
+      for await (const chunk of response) {
+        if (signal.aborted) throw abortError();
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        bytes += value.length;
+        if (bytes > policy.maxBytes) throw new Error(`${policy.label} download exceeded its size limit.`);
+        hash.update(value);
+        await writeBufferCompletely(handle, value, options.testHooks?.downloadWriteChunkBytes);
       }
-      return { bytes, sha256: hash.digest("hex") };
-    });
-    await rename(temporary, destination);
-    await syncDirectoryForDurability(path.dirname(destination));
-    return receipt;
-  } catch (error) {
-    await options.testHooks?.onDownloadTemporaryLifecycle?.("before-remove");
-    await rm(temporary, { force: true });
-    throw error;
-  }
+      await handle.sync();
+      const pathname = await lstat(destination);
+      if (
+        pathname.isSymbolicLink() ||
+        !pathname.isFile() ||
+        pathname.dev !== opened.dev ||
+        pathname.ino !== opened.ino
+      ) {
+        throw new Error("Bootstrap download destination identity changed before settlement.");
+      }
+    } finally {
+      await handle.close();
+      await options.testHooks?.onDownloadTemporaryLifecycle?.("handle-closed");
+    }
+    return { bytes, sha256: hash.digest("hex") };
+  });
+  await syncDirectoryForDurability(path.dirname(destination));
+  return receipt;
 }
 
 function createDownloader(options: BootstrapIoOptions): BootstrapDependencies["download"] {
@@ -1707,7 +1988,464 @@ async function verifySourceTree(
   }
 }
 
-async function promoteAbsent(source: string, destination: string, identity: FileSystemIdentity): Promise<void> {
+async function assertDirectoryIdentity(
+  target: string,
+  identity: FileSystemIdentity,
+  requireEmpty = false,
+): Promise<void> {
+  const inspect = async () => {
+    const metadata = await lstat(target);
+    if (
+      metadata.isSymbolicLink() ||
+      !metadata.isDirectory() ||
+      metadata.dev !== identity.dev ||
+      metadata.ino !== identity.ino
+    ) {
+      throw new Error("Reserved bootstrap directory identity changed before use.");
+    }
+  };
+  await inspect();
+  if (requireEmpty && (await readdir(target)).length !== 0) {
+    throw new Error("Reserved bootstrap directory was not empty before use.");
+  }
+  await inspect();
+}
+
+async function reserveTemporaryDirectory(
+  parent: string,
+  prefix: string,
+  platform: NodeJS.Platform,
+  command: BootstrapDependencies["command"],
+  options: BootstrapIoOptions,
+): Promise<TemporaryDirectoryReservation> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/.test(prefix)) {
+    throw new Error("Bootstrap temporary-directory prefix is invalid.");
+  }
+  const parentMetadata = await lstat(parent);
+  if (parentMetadata.isSymbolicLink() || !parentMetadata.isDirectory()) {
+    throw new Error("Bootstrap temporary-directory parent must be a no-follow directory.");
+  }
+  const canonicalParent = await realpath(parent);
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const id = options.testHooks?.temporaryDirectoryId?.() ?? randomUUID();
+    if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) {
+      throw new Error("Bootstrap temporary-directory identifier is invalid.");
+    }
+    const target = path.join(parent, `${prefix}-${id.toLowerCase()}`);
+    try {
+      await mkdir(target, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      throw error;
+    }
+    const created = await lstat(target);
+    if (created.isSymbolicLink() || !created.isDirectory()) {
+      throw new Error("Exclusive bootstrap temporary-directory reservation was not a directory.");
+    }
+    let identity: FileSystemIdentity = { dev: created.dev, ino: created.ino };
+    options.testHooks?.afterTemporaryDirectoryCreated?.(target);
+    await assertDirectoryIdentity(target, identity, true);
+    if ((await realpath(path.dirname(target))) !== canonicalParent) {
+      throw new Error("Bootstrap temporary-directory parent identity changed during reservation.");
+    }
+    await chmod(target, 0o700);
+    await syncDirectoryForDurability(target);
+    await syncDirectoryForDurability(canonicalParent);
+    await assertDirectoryIdentity(target, identity, true);
+    if (platform === "win32") {
+      const nativeIdentity = options.testHooks?.testNativeDirectoryIdentity
+        ? await options.testHooks.testNativeDirectoryIdentity(target, identity)
+        : await inspectWindowsNativeDirectoryIdentity(target, command, options);
+      if (!/^[0-9a-f]{16}:[0-9a-f]{32}$/.test(nativeIdentity)) {
+        throw new Error("Windows bootstrap reservation returned an invalid native directory identity.");
+      }
+      identity = { ...identity, nativeIdentity };
+      await assertDirectoryIdentity(target, identity, true);
+    }
+    return { identity, path: target };
+  }
+  throw new Error("Unable to reserve a unique bootstrap temporary directory without replacing existing data.");
+}
+
+interface NativePromotionResponse {
+  code?: string;
+  identity?: string;
+  native?: number;
+  ok: boolean;
+  status?: string;
+}
+
+function parseNativePromotionResponse(stdout: string): NativePromotionResponse {
+  const normalised = stdout.replaceAll("\r\n", "\n").trimEnd();
+  if (!normalised || normalised.includes("\n")) {
+    throw new Error("Atomic promotion helper returned an invalid response envelope.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalised);
+  } catch (error) {
+    throw new Error("Atomic promotion helper returned invalid JSON.", { cause: error });
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Atomic promotion helper returned an invalid response schema.");
+  }
+  const response = parsed as Record<string, unknown>;
+  if (response.ok === true && typeof response.status === "string") {
+    if (response.status === "present") {
+      if (
+        Object.keys(response).sort().join(",") !== "identity,ok,status" ||
+        typeof response.identity !== "string" ||
+        !/^[0-9a-f]{16}:[0-9a-f]{32}$/.test(response.identity)
+      ) {
+        throw new Error("Atomic promotion helper returned an invalid native identity.");
+      }
+    } else if (
+      !["promoted", "renamed"].includes(response.status) ||
+      Object.keys(response).sort().join(",") !== "ok,status"
+    ) {
+      throw new Error("Atomic promotion helper returned an invalid success response.");
+    }
+    return response as unknown as NativePromotionResponse;
+  }
+  if (
+    response.ok !== false ||
+    typeof response.code !== "string" ||
+    !/^[A-Z_]+$/.test(response.code) ||
+    !Number.isSafeInteger(response.native) ||
+    Number(response.native) < 0 ||
+    Object.keys(response).sort().join(",") !== "code,native,ok"
+  ) {
+    throw new Error("Atomic promotion helper returned an invalid error response.");
+  }
+  return response as unknown as NativePromotionResponse;
+}
+
+function requireAtomicPromotionConfiguration(
+  platform: NodeJS.Platform,
+  options: BootstrapIoOptions,
+): NonNullable<BootstrapIoOptions["atomicPromotion"]> {
+  const configured = options.atomicPromotion;
+  if (!configured || !/^[0-9a-f]{64}$/.test(configured.expectedHelperSha256)) {
+    throw new Error(`Native atomic no-replace promotion is unavailable on ${platform}.`);
+  }
+  const absolute = configured.protocol === "windows-source-fs"
+    ? path.win32.isAbsolute(configured.helper)
+    : path.posix.isAbsolute(configured.helper);
+  if (!absolute || (platform === "win32") !== (configured.protocol === "windows-source-fs")) {
+    throw new Error(`Native atomic no-replace promotion is misconfigured on ${platform}.`);
+  }
+  return configured;
+}
+
+async function runAtomicPromotionHelper(
+  platform: NodeJS.Platform,
+  command: BootstrapDependencies["command"],
+  options: BootstrapIoOptions,
+  args: string[],
+): Promise<NativePromotionResponse> {
+  const configured = requireAtomicPromotionConfiguration(platform, options);
+  if (platform !== "win32" || configured.protocol !== "windows-source-fs") {
+    throw new Error("External atomic promotion commands are supported only through the Windows source-filesystem helper.");
+  }
+  const result = await command.run({
+    args,
+    command: configured.helper,
+    env: {},
+    expectedExecutableSha256: configured.expectedHelperSha256,
+    inheritEnvironment: false,
+    timeoutMs: 60_000,
+  });
+  if (!result.contained) {
+    throw new Error("Atomic promotion helper process containment could not be proven.");
+  }
+  if (result.stdoutTruncated || result.stderrTruncated || result.stderr !== "") {
+    throw new Error("Atomic promotion helper returned truncated or unexpected output.");
+  }
+  const response = parseNativePromotionResponse(result.stdout);
+  if (response.ok !== (result.exitCode === 0)) {
+    throw new Error("Atomic promotion helper exit status contradicted its response.");
+  }
+  return response;
+}
+
+interface PosixAtomicPromoter {
+  promoteAbsent(
+    parent: string,
+    source: string,
+    destination: string,
+    expectedDev: string,
+    expectedIno: string,
+    expectedParentDev: string,
+    expectedParentIno: string,
+  ): void;
+}
+
+const MAX_ATOMIC_PROMOTER_BYTES = 4 * 1024 * 1024;
+
+function hashDescriptor(descriptor: number, size: number): string {
+  const digest = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let offset = 0;
+  while (offset < size) {
+    const bytesRead = readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset);
+    if (bytesRead <= 0) throw new Error("Packaged atomic promotion module ended before its proved size.");
+    digest.update(buffer.subarray(0, bytesRead));
+    offset += bytesRead;
+  }
+  return digest.digest("hex");
+}
+
+interface PinnedPosixAtomicPromoterSnapshot {
+  descriptor: number;
+  linkedDirectory: string | null;
+  linkedPath: string | null;
+}
+
+function disposePinnedPosixAtomicPromoterSnapshot(snapshot: PinnedPosixAtomicPromoterSnapshot): void {
+  if (snapshot.linkedPath) {
+    try {
+      unlinkSync(snapshot.linkedPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    snapshot.linkedPath = null;
+  }
+  if (snapshot.linkedDirectory) {
+    try {
+      rmdirSync(snapshot.linkedDirectory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    snapshot.linkedDirectory = null;
+  }
+}
+
+/**
+ * Copy a pinned module into a private read-only snapshot before dlopen.
+ * Linux unlinks the snapshot before loading; Darwin retains its random name
+ * only through synchronous dlopen because library validation rejects an
+ * unlinked Mach-O vnode. Loading the original descriptor is insufficient
+ * because an in-place writer can mutate that inode after its digest is checked.
+ */
+function snapshotPinnedPosixAtomicPromoter(
+  sourceDescriptor: number,
+  sourceSize: number,
+  expectedSha256: string,
+  platform: NodeJS.Platform,
+): PinnedPosixAtomicPromoterSnapshot {
+  let directory = "";
+  let snapshotPath = "";
+  let writer = -1;
+  let reader = -1;
+  try {
+    directory = mkdtempSync(path.join(tmpdir(), "flinttrade-native-module-"));
+    chmodSync(directory, 0o700);
+    const directoryMetadata = lstatSync(directory);
+    const effectiveUser = typeof process.geteuid === "function" ? process.geteuid() : directoryMetadata.uid;
+    if (
+      directoryMetadata.isSymbolicLink() ||
+      !directoryMetadata.isDirectory() ||
+      directoryMetadata.uid !== effectiveUser ||
+      (directoryMetadata.mode & 0o777) !== 0o700
+    ) {
+      throw new Error("Private atomic promotion snapshot directory was not owner-bound mode 0700.");
+    }
+
+    snapshotPath = path.join(directory, "module.node");
+    writer = openSync(
+      snapshotPath,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (offset < sourceSize) {
+      const bytesRead = readSync(
+        sourceDescriptor,
+        buffer,
+        0,
+        Math.min(buffer.length, sourceSize - offset),
+        offset,
+      );
+      if (bytesRead <= 0) throw new Error("Packaged atomic promotion module ended during private snapshot copy.");
+      let written = 0;
+      while (written < bytesRead) {
+        const bytesWritten = writeSync(writer, buffer, written, bytesRead - written, offset + written);
+        if (bytesWritten <= 0) throw new Error("Private atomic promotion module snapshot write did not progress.");
+        written += bytesWritten;
+      }
+      offset += bytesRead;
+    }
+    fsyncSync(writer);
+    fchmodSync(writer, 0o400);
+    fsyncSync(writer);
+    closeSync(writer);
+    writer = -1;
+
+    reader = openSync(snapshotPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const beforeHash = fstatSync(reader);
+    if (
+      !beforeHash.isFile() ||
+      beforeHash.size !== sourceSize ||
+      beforeHash.size <= 0 ||
+      beforeHash.size > MAX_ATOMIC_PROMOTER_BYTES ||
+      (beforeHash.mode & 0o222) !== 0
+    ) {
+      throw new Error("Private atomic promotion module snapshot was not a bounded read-only regular file.");
+    }
+    const digest = hashDescriptor(reader, sourceSize);
+    const afterHash = fstatSync(reader);
+    if (
+      afterHash.dev !== beforeHash.dev ||
+      afterHash.ino !== beforeHash.ino ||
+      afterHash.size !== beforeHash.size ||
+      afterHash.mtimeMs !== beforeHash.mtimeMs ||
+      afterHash.ctimeMs !== beforeHash.ctimeMs ||
+      digest !== expectedSha256
+    ) {
+      throw new Error("Private atomic promotion module snapshot failed its build-bound descriptor check.");
+    }
+
+    // Linux permits dyld-equivalent loading from an unlinked /proc descriptor.
+    // macOS library validation refuses an unlinked Mach-O vnode, so Darwin
+    // retains this random mode-0400 name inside the mode-0700 directory only
+    // through the synchronous dlopen call and removes it immediately after.
+    if (platform !== "darwin") {
+      unlinkSync(snapshotPath);
+      snapshotPath = "";
+      rmdirSync(directory);
+      directory = "";
+      const unlinked = fstatSync(reader);
+      if (unlinked.nlink !== 0 || (unlinked.mode & 0o222) !== 0) {
+        throw new Error("Private atomic promotion module snapshot was not unlinked and read-only.");
+      }
+    }
+    const result: PinnedPosixAtomicPromoterSnapshot = {
+      descriptor: reader,
+      linkedDirectory: directory || null,
+      linkedPath: snapshotPath || null,
+    };
+    reader = -1;
+    directory = "";
+    snapshotPath = "";
+    return result;
+  } finally {
+    if (writer >= 0) closeSync(writer);
+    if (reader >= 0) closeSync(reader);
+    if (snapshotPath) {
+      try {
+        unlinkSync(snapshotPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    if (directory) {
+      try {
+        rmdirSync(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+  }
+}
+
+function loadPinnedPosixAtomicPromoter(
+  platform: NodeJS.Platform,
+  options: BootstrapIoOptions,
+): PosixAtomicPromoter {
+  const configured = requireAtomicPromotionConfiguration(platform, options);
+  if (configured.protocol !== "posix") {
+    throw new Error("POSIX atomic promotion requires its packaged native module.");
+  }
+  const descriptor = openSync(configured.helper, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  let snapshot: PinnedPosixAtomicPromoterSnapshot | null = null;
+  try {
+    const metadata = fstatSync(descriptor);
+    if (!metadata.isFile() || metadata.size <= 0 || metadata.size > MAX_ATOMIC_PROMOTER_BYTES) {
+      throw new Error("Packaged atomic promotion module was not a bounded regular file.");
+    }
+    snapshot = snapshotPinnedPosixAtomicPromoter(
+      descriptor,
+      metadata.size,
+      configured.expectedHelperSha256,
+      platform,
+    );
+    const afterHash = fstatSync(descriptor);
+    if (
+      afterHash.dev !== metadata.dev ||
+      afterHash.ino !== metadata.ino ||
+      afterHash.size !== metadata.size ||
+      afterHash.mtimeMs !== metadata.mtimeMs ||
+      afterHash.ctimeMs !== metadata.ctimeMs ||
+      hashDescriptor(descriptor, metadata.size) !== configured.expectedHelperSha256
+    ) {
+      throw new Error("Packaged atomic promotion module failed its build-bound descriptor check.");
+    }
+    options.testHooks?.afterAtomicPromotionModulePinned?.(configured.helper);
+    const snapshotBeforeLoad = fstatSync(snapshot.descriptor);
+    if (
+      snapshotBeforeLoad.nlink !== (platform === "darwin" ? 1 : 0) ||
+      snapshotBeforeLoad.size !== metadata.size ||
+      (snapshotBeforeLoad.mode & 0o222) !== 0 ||
+      hashDescriptor(snapshot.descriptor, metadata.size) !== configured.expectedHelperSha256
+    ) {
+      throw new Error("Private atomic promotion module snapshot changed before load.");
+    }
+    const loaded = { exports: {} } as NodeModule;
+    const descriptorPath = platform === "darwin"
+      ? `/dev/fd/${snapshot.descriptor}`
+      : `/proc/self/fd/${snapshot.descriptor}`;
+    process.dlopen(loaded, descriptorPath);
+    disposePinnedPosixAtomicPromoterSnapshot(snapshot);
+    const exported = loaded.exports as Partial<PosixAtomicPromoter>;
+    if (
+      !exported ||
+      typeof exported !== "object" ||
+      Object.keys(exported).join(",") !== "promoteAbsent" ||
+      typeof exported.promoteAbsent !== "function"
+    ) {
+      throw new Error("Packaged atomic promotion module exposed an invalid N-API surface.");
+    }
+    return exported as PosixAtomicPromoter;
+  } finally {
+    if (snapshot) {
+      disposePinnedPosixAtomicPromoterSnapshot(snapshot);
+      closeSync(snapshot.descriptor);
+    }
+    closeSync(descriptor);
+  }
+}
+
+async function inspectWindowsNativeDirectoryIdentity(
+  target: string,
+  command: BootstrapDependencies["command"],
+  options: BootstrapIoOptions,
+): Promise<string> {
+  const configured = requireAtomicPromotionConfiguration("win32", options);
+  if (configured.protocol !== "windows-source-fs") {
+    throw new Error("Windows atomic promotion requires the packaged source-filesystem helper.");
+  }
+  const response = await runAtomicPromotionHelper(
+    "win32",
+    command,
+    options,
+    ["--source-fs", "1", "inspect", "--path", target],
+  );
+  if (!response.ok || response.status !== "present" || !response.identity) {
+    throw new Error("Windows bootstrap reservation disappeared before native identity capture.");
+  }
+  return response.identity;
+}
+
+async function promoteAbsent(
+  source: string,
+  destination: string,
+  identity: FileSystemIdentity,
+  platform: NodeJS.Platform,
+  command: BootstrapDependencies["command"],
+  options: BootstrapIoOptions,
+  getPosixPromoter: () => PosixAtomicPromoter,
+): Promise<void> {
   const sourceParent = await realpath(path.dirname(source));
   const destinationParent = await realpath(path.dirname(destination));
   if (sourceParent !== destinationParent) throw new Error("Candidate and active source must share one canonical parent.");
@@ -1722,13 +2460,56 @@ async function promoteAbsent(source: string, destination: string, identity: File
   }
   const parentMetadata = await stat(sourceParent);
   if (sourceMetadata.dev !== parentMetadata.dev) throw new Error("Candidate and active source must be on one filesystem.");
-  try {
-    await lstat(destination);
-    throw new Error("Active source already exists; refusing to replace it.");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  await options.testHooks?.beforeAtomicPromotion?.(source, destination);
+  if (options.testHooks?.testAtomicPromote) {
+    await options.testHooks.testAtomicPromote(source, destination, identity);
+  } else {
+    const configured = requireAtomicPromotionConfiguration(platform, options);
+    if (platform !== "win32") {
+      try {
+        getPosixPromoter().promoteAbsent(
+          sourceParent,
+          path.basename(source),
+          path.basename(destination),
+          String(identity.dev),
+          String(identity.ino),
+          String(parentMetadata.dev),
+          String(parentMetadata.ino),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          const occupied = new Error("Promotion destination already exists; refusing to replace it.") as NodeJS.ErrnoException;
+          occupied.code = "EEXIST";
+          throw occupied;
+        }
+        throw error;
+      }
+    } else {
+      const response = await runAtomicPromotionHelper(
+          platform,
+          command,
+          options,
+          [
+            "--source-fs", "1", "rename",
+            "--parent", sourceParent,
+            "--source", path.basename(source),
+            "--destination", path.basename(destination),
+            "--expected", identity.nativeIdentity ?? "",
+          ],
+        );
+      if (!response.ok) {
+        if (["DESTINATION_OCCUPIED", "DESTINATION_EXISTS"].includes(response.code ?? "")) {
+          const error = new Error("Promotion destination already exists; refusing to replace it.") as NodeJS.ErrnoException;
+          error.code = "EEXIST";
+          throw error;
+        }
+        throw new Error(`Native atomic promotion was refused (${response.code ?? "UNKNOWN"}).`);
+      }
+      if (response.status !== "renamed" || configured.protocol !== "windows-source-fs") {
+        throw new Error("Native atomic promotion returned an unexpected success status.");
+      }
+    }
   }
-  await rename(source, destination);
   const promotedMetadata = await lstat(destination);
   let sourceStillExists = true;
   try {
@@ -1751,6 +2532,8 @@ async function promoteAbsent(source: string, destination: string, identity: File
 interface StableArchiveSnapshot {
   dev: number;
   directory: string;
+  directoryDev: number;
+  directoryIno: number;
   ino: number;
   path: string;
   size: number;
@@ -1779,16 +2562,24 @@ async function createStableArchiveSnapshot(
     throw new Error("Bootstrap archive must be a no-follow regular file.");
   }
   const source = await openNoFollowRegular(archive);
-  const directory = await mkdtemp(path.join(path.dirname(archive), ".flinttrade-archive-snapshot-"));
-  const snapshotPath = path.join(directory, "archive");
-  const destination = await open(
-    snapshotPath,
-    constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
-    0o600,
-  );
-  const hash = createHash("sha256");
-  let bytes = 0;
+  let destination: FileHandle | null = null;
   try {
+    options.testHooks?.beforeArchiveSnapshotSetup?.("directory-create");
+    const directory = await mkdtemp(path.join(path.dirname(archive), ".flinttrade-archive-snapshot-"));
+    options.testHooks?.beforeArchiveSnapshotSetup?.("directory-inspect");
+    const directoryMetadata = await lstat(directory);
+    if (directoryMetadata.isSymbolicLink() || !directoryMetadata.isDirectory()) {
+      throw new Error("Private bootstrap archive snapshot directory was not an exclusive directory.");
+    }
+    const snapshotPath = path.join(directory, "archive");
+    options.testHooks?.beforeArchiveSnapshotSetup?.("destination-open");
+    destination = await open(
+      snapshotPath,
+      constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    const hash = createHash("sha256");
+    let bytes = 0;
     if (source.metadata.dev !== sourcePathMetadata.dev || source.metadata.ino !== sourcePathMetadata.ino) {
       throw new Error("Bootstrap archive identity changed before its stable snapshot opened.");
     }
@@ -1844,15 +2635,17 @@ async function createStableArchiveSnapshot(
     ) {
       throw new Error("Private bootstrap archive snapshot failed size or checksum verification.");
     }
-    return { dev: verifiedMetadata.dev, directory, ino: verifiedMetadata.ino, path: snapshotPath, size: copiedBytes };
-  } catch (error) {
-    await destination.close().catch(() => undefined);
-    await source.handle.close().catch(() => undefined);
-    await unlink(snapshotPath).catch(() => undefined);
-    await rmdir(directory).catch(() => undefined);
-    throw error;
+    return {
+      dev: verifiedMetadata.dev,
+      directory,
+      directoryDev: directoryMetadata.dev,
+      directoryIno: directoryMetadata.ino,
+      ino: verifiedMetadata.ino,
+      path: snapshotPath,
+      size: copiedBytes,
+    };
   } finally {
-    await destination.close().catch(() => undefined);
+    await destination?.close().catch(() => undefined);
     await source.handle.close().catch(() => undefined);
   }
 }
@@ -1870,24 +2663,32 @@ async function openStableSnapshot(snapshot: StableArchiveSnapshot) {
   return opened.handle;
 }
 
-async function removeStableSnapshot(
+async function preserveStableSnapshot(
   snapshot: StableArchiveSnapshot,
   hooks?: BootstrapIoOptions["testHooks"],
 ): Promise<void> {
-  hooks?.onArchiveSnapshotRemove?.();
-  await unlink(snapshot.path);
-  await rmdir(snapshot.directory);
-}
-
-async function removeOwnedExtraction(destination: string, dev: number, ino: number): Promise<void> {
-  try {
-    const metadata = await lstat(destination);
-    if (metadata.isDirectory() && !metadata.isSymbolicLink() && metadata.dev === dev && metadata.ino === ino) {
-      await rm(destination, { force: true, maxRetries: 8, recursive: true, retryDelay: 25 });
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  hooks?.onArchiveSnapshotRemove?.(snapshot.path, snapshot.directory);
+  const [snapshotMetadata, directoryMetadata] = await Promise.all([
+    lstat(snapshot.path),
+    lstat(snapshot.directory),
+  ]);
+  if (
+    snapshotMetadata.isSymbolicLink() ||
+    !snapshotMetadata.isFile() ||
+    snapshotMetadata.dev !== snapshot.dev ||
+    snapshotMetadata.ino !== snapshot.ino ||
+    snapshotMetadata.size !== snapshot.size ||
+    directoryMetadata.isSymbolicLink() ||
+    !directoryMetadata.isDirectory() ||
+    directoryMetadata.dev !== snapshot.directoryDev ||
+    directoryMetadata.ino !== snapshot.directoryIno
+  ) {
+    throw new Error("Private bootstrap archive snapshot cleanup identity changed; preserving all paths.");
   }
+  // Node does not expose an identity-bound unlink primitive. Even after the
+  // proof above, a pathname unlink would reopen a swap window and could remove
+  // a foreign replacement. Preserve this private, UUID-named snapshot instead;
+  // bounded user-mediated maintenance can clean it without risking data loss.
 }
 
 function tarEntryMetadata(entry: tar.ReadEntry): ValidatedArchiveEntry {
@@ -2088,6 +2889,7 @@ async function extractZipArchive(
   expected: ValidatedArchiveEntry[],
   signal: AbortSignal,
   hooks?: BootstrapIoOptions["testHooks"],
+  stripExpectedRoot?: string,
 ): Promise<void> {
   const zip = await openStableZip(snapshot, hooks);
   let index = 0;
@@ -2124,7 +2926,19 @@ async function extractZipArchive(
         if (!expectedEntry || JSON.stringify(expectedEntry) !== JSON.stringify(replayed)) {
           throw new Error("ZIP archive changed between validation and extraction.");
         }
-        const target = path.join(destination, ...name.split("/"));
+        const relativeName = stripExpectedRoot
+          ? name === stripExpectedRoot
+            ? ""
+            : name.slice(stripExpectedRoot.length + 1)
+          : name;
+        if (!relativeName) {
+          if (metadata.kind !== "directory") throw new Error("ZIP archive root was not a directory.");
+          index += 1;
+          working = false;
+          zip.readEntry();
+          return;
+        }
+        const target = path.join(destination, ...relativeName.split("/"));
         if (metadata.kind === "directory") {
           await mkdir(target, { mode: 0o700, recursive: true });
         } else {
@@ -2183,10 +2997,26 @@ async function extractTarArchive(
     preservePaths: false,
     strict: true,
   });
+  const extractorClosed = new Promise<void>((resolve) => {
+    extractor.once("close", resolve);
+  });
+  const onAbort = () => {
+    const error = new Error("Operation cancelled.");
+    error.name = "AbortError";
+    extractor.abort(error);
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
   const handle = await openStableSnapshot(snapshot);
   try {
-    await pipeline(handle.createReadStream({ autoClose: false }), extractor, { signal });
+    if (signal.aborted) onAbort();
+    try {
+      await pipeline(handle.createReadStream({ autoClose: false }), extractor, { signal });
+    } catch (error) {
+      await extractorClosed;
+      throw error;
+    }
   } finally {
+    signal.removeEventListener("abort", onAbort);
     await handle.close();
   }
   if (validationFailure) throw validationFailure;
@@ -2195,27 +3025,53 @@ async function extractTarArchive(
 }
 
 function createArchiveExtractor(options: BootstrapIoOptions): BootstrapDependencies["extractArchive"] {
-  return async ({ archive, destination, expectedRoot, expectedSha256, kind, signal }) => {
+  return async ({
+    archive,
+    destination,
+    destinationIdentity,
+    expectedRoot,
+    expectedSha256,
+    kind,
+    signal,
+    stripExpectedRoot,
+  }) => {
     const snapshot = await createStableArchiveSnapshot(archive, expectedSha256, signal, options);
-    let destinationIdentity: { dev: number; ino: number } | null = null;
     try {
-      await mkdir(destination, { mode: 0o700 });
-      const metadata = await lstat(destination);
-      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Extraction destination is not an owned directory.");
-      destinationIdentity = { dev: metadata.dev, ino: metadata.ino };
+      let ownedIdentity = destinationIdentity;
+      if (ownedIdentity) {
+        await assertDirectoryIdentity(destination, ownedIdentity, true);
+      } else {
+        await mkdir(destination, { mode: 0o700 });
+        const metadata = await lstat(destination);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+          throw new Error("Extraction destination is not an exclusively created directory.");
+        }
+        ownedIdentity = { dev: metadata.dev, ino: metadata.ino };
+      }
+      if (stripExpectedRoot && (!expectedRoot || kind !== "zip")) {
+        throw new Error("Archive root stripping requires one validated ZIP root.");
+      }
       const entries =
         kind === "tar.gz"
           ? await listTarArchive(snapshot, signal, expectedRoot, options.testHooks)
           : await listZipArchive(snapshot, signal, expectedRoot, options.testHooks);
+      await assertDirectoryIdentity(destination, ownedIdentity, true);
       if (kind === "tar.gz") await extractTarArchive(snapshot, destination, entries, signal);
-      else await extractZipArchive(snapshot, destination, entries, signal, options.testHooks);
+      else {
+        await extractZipArchive(
+          snapshot,
+          destination,
+          entries,
+          signal,
+          options.testHooks,
+          stripExpectedRoot ? expectedRoot : undefined,
+        );
+      }
+      await assertDirectoryIdentity(destination, ownedIdentity);
       await assertExtractedTreeConfined(destination);
       return entries.map((entry) => entry.name);
-    } catch (error) {
-      if (destinationIdentity) await removeOwnedExtraction(destination, destinationIdentity.dev, destinationIdentity.ino);
-      throw error;
     } finally {
-      await removeStableSnapshot(snapshot, options.testHooks);
+      await preserveStableSnapshot(snapshot, options.testHooks);
     }
   };
 }
@@ -2242,6 +3098,27 @@ interface OperationLeaseOwner {
 }
 
 const activeOperationLeases = new Map<string, string>();
+const MAX_PRESERVED_WINDOWS_OPERATION_LEASE_QUARANTINES = 64;
+
+function sameFileSystemIdentity(left: FileSystemIdentity, right: FileSystemIdentity): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.nativeIdentity === right.nativeIdentity
+  );
+}
+
+function sameLeaseRecoveryScope(left: OperationLeaseDirectory, right: OperationLeaseDirectory): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.ownerPresent === right.ownerPresent &&
+    JSON.stringify(left.owner) === JSON.stringify(right.owner) &&
+    JSON.stringify(left.processGroups) === JSON.stringify(right.processGroups) &&
+    JSON.stringify(left.processRecordNames) === JSON.stringify(right.processRecordNames) &&
+    JSON.stringify(left.supervisorPids) === JSON.stringify(right.supervisorPids)
+  );
+}
 
 function hasExactObjectKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
   return (
@@ -2818,9 +3695,11 @@ async function removeValidatedLeaseDirectory(
 async function reconcileOperationLeaseQuarantines(
   parent: string,
   targetName: string,
+  platform: NodeJS.Platform,
+  captureLeaseIdentity: (target: string, identity: FileSystemIdentity) => Promise<FileSystemIdentity>,
   recordedProcessWaitMs?: number,
   enumerators: readonly string[] = ["/bin/ps", "/usr/bin/ps"],
-): Promise<void> {
+): Promise<number> {
   const escaped = targetName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const quarantinePattern = new RegExp(
     `^${escaped}\\.stale-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`,
@@ -2829,20 +3708,42 @@ async function reconcileOperationLeaseQuarantines(
   const names = (await readdir(parent)).filter((name) => quarantinePattern.test(name)).sort();
   for (const name of names) {
     const quarantine = path.join(parent, name);
+    const named = await lstat(quarantine);
+    const captured = await captureLeaseIdentity(quarantine, { dev: named.dev, ino: named.ino });
     const stale = await validateOperationLeaseDirectory(quarantine, true);
+    if (stale.dev !== captured.dev || stale.ino !== captured.ino) {
+      throw new Error("Source operation lease quarantine changed after its native identity was captured.");
+    }
     await waitForRecordedProcessesGone(
       stale.processGroups,
       stale.supervisorPids,
       recordedProcessWaitMs,
       enumerators,
     );
-    await removeValidatedLeaseDirectory(quarantine, stale, enumerators);
-    await syncDirectoryForDurability(parent);
+    const settled = await validateOperationLeaseDirectory(quarantine, true);
+    const confirmed = await captureLeaseIdentity(quarantine, { dev: stale.dev, ino: stale.ino });
+    if (!sameLeaseRecoveryScope(stale, settled) || !sameFileSystemIdentity(captured, confirmed)) {
+      throw new Error("Source operation lease quarantine changed during containment reconciliation.");
+    }
+    if (platform !== "win32") {
+      await removeValidatedLeaseDirectory(quarantine, stale, enumerators);
+      await syncDirectoryForDurability(parent);
+    }
   }
+  if (platform === "win32" && names.length >= MAX_PRESERVED_WINDOWS_OPERATION_LEASE_QUARANTINES) {
+    throw new Error(
+      `Windows preserved source-operation lease quarantines reached ${MAX_PRESERVED_WINDOWS_OPERATION_LEASE_QUARANTINES}; ` +
+      "stop FlintTrade, archive the exact .stale-* directories, and manually remove only confirmed stale evidence before retrying.",
+    );
+  }
+  return platform === "win32" ? names.length : 0;
 }
 
 async function acquireOperationLease(
   request: OperationLeaseRequest,
+  platform: NodeJS.Platform,
+  captureLeaseIdentity: (target: string, identity: FileSystemIdentity) => Promise<FileSystemIdentity>,
+  promoteLeaseAbsent: BootstrapDependencies["fileSystem"]["promoteAbsent"],
   options: BootstrapIoOptions = {},
 ): Promise<() => Promise<void>> {
   if (!request.singletonAuthorised) {
@@ -2854,33 +3755,64 @@ async function acquireOperationLease(
   const reservationId = `publishing:${randomUUID()}`;
   activeOperationLeases.set(target, reservationId);
   try {
-    await reconcileOperationLeaseQuarantines(
+    const preservedWindowsQuarantines = await reconcileOperationLeaseQuarantines(
       parent,
       path.basename(target),
+      platform,
+      captureLeaseIdentity,
       options.testHooks?.recordedProcessWaitMs,
       options.posixProcessEnumerators,
     );
     try {
+      const named = await lstat(target);
+      const captured = await captureLeaseIdentity(target, { dev: named.dev, ino: named.ino });
       const stale = await validateOperationLeaseDirectory(target, true);
+      if (stale.dev !== captured.dev || stale.ino !== captured.ino) {
+        throw new Error("Source operation lease changed after its native identity was captured.");
+      }
       await waitForRecordedProcessesGone(
         stale.processGroups,
         stale.supervisorPids,
         options.testHooks?.recordedProcessWaitMs,
         options.posixProcessEnumerators,
       );
+      const settled = await validateOperationLeaseDirectory(target, true);
+      const confirmed = await captureLeaseIdentity(target, { dev: stale.dev, ino: stale.ino });
+      if (!sameLeaseRecoveryScope(stale, settled) || !sameFileSystemIdentity(captured, confirmed)) {
+        throw new Error("Source operation lease changed during containment reconciliation.");
+      }
       const quarantine = `${target}.stale-${randomUUID()}`;
-      await rename(target, quarantine);
+      await promoteLeaseAbsent(target, quarantine, captured);
       await syncDirectoryForDurability(parent);
       const quarantined = await validateOperationLeaseDirectory(quarantine, true);
-      if (quarantined.dev !== stale.dev || quarantined.ino !== stale.ino) {
+      const quarantinedIdentity = await captureLeaseIdentity(
+        quarantine,
+        { dev: quarantined.dev, ino: quarantined.ino },
+      );
+      if (
+        quarantined.dev !== stale.dev ||
+        quarantined.ino !== stale.ino ||
+        !sameLeaseRecoveryScope(settled, quarantined) ||
+        !sameFileSystemIdentity(captured, quarantinedIdentity)
+      ) {
         throw new Error("Source operation lease identity changed during quarantine.");
       }
-      await removeValidatedLeaseDirectory(
-        quarantine,
-        stale,
-        options.posixProcessEnumerators,
-      );
-      await syncDirectoryForDurability(parent);
+      if (platform === "win32") {
+        if (preservedWindowsQuarantines + 1 >= MAX_PRESERVED_WINDOWS_OPERATION_LEASE_QUARANTINES) {
+          throw new Error(
+            `Windows preserved source-operation lease quarantines reached ${MAX_PRESERVED_WINDOWS_OPERATION_LEASE_QUARANTINES}; ` +
+            `evidence remains at ${quarantine}. Stop FlintTrade, archive the exact .stale-* directories, and manually remove ` +
+            "only confirmed stale evidence before retrying.",
+          );
+        }
+      } else {
+        await removeValidatedLeaseDirectory(
+          quarantine,
+          stale,
+          options.posixProcessEnumerators,
+        );
+        await syncDirectoryForDurability(parent);
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -3150,10 +4082,64 @@ async function preparePrivateTree(
   await syncDirectoryForDurability(canonicalRoot);
 }
 
-function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["fileSystem"] {
+function createFileSystem(
+  platform: NodeJS.Platform,
+  command: BootstrapDependencies["command"],
+  options: BootstrapIoOptions,
+): BootstrapDependencies["fileSystem"] {
   const durableDirectoryStates = new Map<string, { anchor: string; complete: boolean }>();
+  let posixAtomicPromoter: PosixAtomicPromoter | null = null;
+  const getPosixAtomicPromoter = (): PosixAtomicPromoter => {
+    posixAtomicPromoter ??= loadPinnedPosixAtomicPromoter(platform, options);
+    return posixAtomicPromoter;
+  };
+  let preLeaseCommand = command;
+  if (platform === "win32") {
+    const preLeaseOptions = { ...options };
+    delete preLeaseOptions.operationLeaseTarget;
+    preLeaseCommand = createCommandRunner(platform, preLeaseOptions);
+    if (preLeaseCommand.operationLeaseTarget !== undefined) {
+      throw new Error("Windows pre-lease native runner retained an operation-lease registration target.");
+    }
+    options.testHooks?.onPreLeaseCommandScope?.(preLeaseCommand.operationLeaseTarget);
+  }
+  const captureLeaseIdentity = async (
+    target: string,
+    identity: FileSystemIdentity,
+  ): Promise<FileSystemIdentity> => {
+    await assertDirectoryIdentity(target, identity);
+    if (platform !== "win32") return identity;
+    const nativeIdentity = options.testHooks?.testNativeDirectoryIdentity
+      ? await options.testHooks.testNativeDirectoryIdentity(target, identity)
+      : await inspectWindowsNativeDirectoryIdentity(target, preLeaseCommand, options);
+    if (!/^[0-9a-f]{16}:[0-9a-f]{32}$/.test(nativeIdentity)) {
+      throw new Error("Windows stale operation lease returned an invalid native directory identity.");
+    }
+    await assertDirectoryIdentity(target, identity);
+    return { ...identity, nativeIdentity };
+  };
+  const promoteLeaseAbsent: BootstrapDependencies["fileSystem"]["promoteAbsent"] = async (
+    source,
+    destination,
+    identity,
+  ) => {
+    if (platform === "win32" && !identity.nativeIdentity) {
+      throw new Error("Windows stale operation lease promotion requires its pre-validation native identity.");
+    }
+    await promoteAbsent(
+      source,
+      destination,
+      identity,
+      platform,
+      preLeaseCommand,
+      options,
+      getPosixAtomicPromoter,
+    );
+  };
   return {
-    acquireOperationLock: (request) => acquireOperationLease(request, options),
+    acquireOperationLock: (request) =>
+      acquireOperationLease(request, platform, captureLeaseIdentity, promoteLeaseAbsent, options),
+    assertDirectoryIdentity,
     async appendText(target, content) {
       const parent = path.dirname(target);
       const parentMetadata = await lstat(parent);
@@ -3330,11 +4316,14 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
     },
     mkdir: (target) => mkdir(target, { recursive: true, mode: 0o700 }),
     preparePrivateTree,
-    promoteAbsent,
+    promoteAbsent: (source, destination, identity) =>
+      promoteAbsent(source, destination, identity, platform, command, options, getPosixAtomicPromoter),
     readText: (target) => readFile(target, "utf8"),
     readTextNoFollow: readNoFollowRegularText,
     realpath,
     remove: (target) => rm(target, { force: true, recursive: true }),
+    reserveTemporaryDirectory: (parent, prefix) =>
+      reserveTemporaryDirectory(parent, prefix, platform, command, options),
     async rename(source, destination) {
       await rename(source, destination);
       await syncDirectoryForDurability(path.dirname(destination));
@@ -3353,6 +4342,7 @@ function createFileSystem(options: BootstrapIoOptions): BootstrapDependencies["f
     },
     snapshotSourceTree,
     verifySourceTree,
+    writeTextAbsent,
     async writeTextAtomic(target, content) {
       await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
       const parent = path.dirname(target);
@@ -3432,6 +4422,6 @@ export function createNodeBootstrapDependencies(
     command,
     download: createDownloader(options),
     extractArchive: createArchiveExtractor(options),
-    fileSystem: createFileSystem(options),
+    fileSystem: createFileSystem(platform, command, options),
   };
 }

@@ -831,65 +831,63 @@ def recover_stale_desktop_record(
                 if record.launch_token is None or proof_token != record.launch_token:
                     raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
 
-            earlier_boot = (
-                record.boot_id is not None
-                and not hmac.compare_digest(record.boot_id.lower(), current_boot_id.lower())
-            )
-            if not earlier_boot:
-                if backend_image_hash is None:
-                    try:
-                        expected_backend_hash = _sha256_file(Path(sys.executable))
-                    except OSError as exc:
-                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
-                else:
-                    expected_backend_hash = backend_image_hash
-                states: dict[int, str] = {}
+            # A boot-identity mismatch is corroborating context, never proof that
+            # recorded process authority disappeared. Always re-prove every PID
+            # and containment group before deleting the recovery record.
+            if backend_image_hash is None:
+                try:
+                    expected_backend_hash = _sha256_file(Path(sys.executable))
+                except OSError as exc:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+            else:
+                expected_backend_hash = backend_image_hash
+            states: dict[int, str] = {}
 
-                def inspect(pid: int, *, shell: bool) -> str:
-                    if pid == (current_shell_pid if shell else this_pid):
-                        return _RECOVERY_PROCESS_REUSED
+            def inspect(pid: int, *, shell: bool) -> str:
+                if pid == (current_shell_pid if shell else this_pid):
+                    return _RECOVERY_PROCESS_REUSED
+                try:
+                    observed = process_probe(pid)
+                except (OSError, ValueError) as exc:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                if observed in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
+                    return str(observed)
+                if not isinstance(observed, _RecoveryProcessIdentity):
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                compatible = (
+                    _looks_like_recovery_shell(observed, expected_shell_hash)
+                    if shell
+                    else _looks_like_recovery_backend(observed, expected_backend_hash)
+                )
+                if compatible:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                return _RECOVERY_PROCESS_REUSED
+
+            inspect(record.shell_pid, shell=True)
+            process_pids = [record.guardian_pid]
+            if record.application_pid is not None and record.application_pid != record.guardian_pid:
+                process_pids.insert(0, record.application_pid)
+            for pid in process_pids:
+                states[pid] = inspect(pid, shell=False)
+
+            if record.spawn_contained and os.name != "nt":
+                # Legacy packaged-shell v4 groups were led by the launcher; source
+                # guardian v4 groups are led by the promoted application.
+                # Proving both possible group identifiers dead preserves
+                # the union during migration. A reused leader proves its
+                # former numeric group generation is gone.
+                containment_pids = {record.guardian_pid}
+                if record.application_pid is not None:
+                    containment_pids.add(record.application_pid)
+                for pgid in containment_pids:
+                    if states.get(pgid) == _RECOVERY_PROCESS_REUSED:
+                        continue
                     try:
-                        observed = process_probe(pid)
+                        group_state = group_probe(pgid)
                     except (OSError, ValueError) as exc:
                         raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
-                    if observed in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
-                        return str(observed)
-                    if not isinstance(observed, _RecoveryProcessIdentity):
+                    if group_state not in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
                         raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
-                    compatible = (
-                        _looks_like_recovery_shell(observed, expected_shell_hash)
-                        if shell
-                        else _looks_like_recovery_backend(observed, expected_backend_hash)
-                    )
-                    if compatible:
-                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
-                    return _RECOVERY_PROCESS_REUSED
-
-                inspect(record.shell_pid, shell=True)
-                process_pids = [record.guardian_pid]
-                if record.application_pid is not None and record.application_pid != record.guardian_pid:
-                    process_pids.insert(0, record.application_pid)
-                for pid in process_pids:
-                    states[pid] = inspect(pid, shell=False)
-
-                if record.spawn_contained and os.name != "nt":
-                    # Legacy packaged-shell v4 groups were led by the launcher; source
-                    # guardian v4 groups are led by the promoted application.
-                    # Proving both possible group identifiers dead preserves
-                    # the union during migration. A reused leader proves its
-                    # former numeric group generation is gone.
-                    containment_pids = {record.guardian_pid}
-                    if record.application_pid is not None:
-                        containment_pids.add(record.application_pid)
-                    for pgid in containment_pids:
-                        if states.get(pgid) == _RECOVERY_PROCESS_REUSED:
-                            continue
-                        try:
-                            group_state = group_probe(pgid)
-                        except (OSError, ValueError) as exc:
-                            raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
-                        if group_state not in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
-                            raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
 
             if not hmac.compare_digest(
                 _read_hardened_recovery_file(record_path, max_bytes=4096),

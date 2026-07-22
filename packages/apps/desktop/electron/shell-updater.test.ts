@@ -5,7 +5,7 @@ import { createUpdateState } from "./state";
 
 function asset(tag: string, name: string, overrides: Partial<{ digest: string | null; url: string }> = {}) {
   return {
-    digest: overrides.digest ?? null,
+    digest: overrides.digest === undefined ? `sha256:${"a".repeat(64)}` : overrides.digest,
     downloadUrl:
       overrides.url ?? `https://github.com/navaneeshnagarajan/FlintTrade/releases/download/${tag}/${name}`,
     name,
@@ -48,9 +48,21 @@ function fixture(input: Partial<{
     removeMarker: vi.fn(async () => undefined),
   };
   const lifecycle = { requestQuit: vi.fn(async () => undefined) };
+  const attestations = {
+    verify: vi.fn(async ({
+      assetName,
+      digest,
+      releaseTag,
+    }: { assetName: string; digest: string; releaseTag: string; signal: AbortSignal }) => ({
+      assetName,
+      digest,
+      releaseTag,
+    })),
+  };
   const state = createUpdateState("shell", input.currentVersion ?? "0.6.0-beta.13");
   const updater = createShellUpdater({
     arch: "arm64",
+    attestations,
     currentVersion: input.currentVersion ?? "0.6.0-beta.13",
     enabled: true,
     handoff,
@@ -67,6 +79,7 @@ function fixture(input: Partial<{
     },
   });
   return {
+    attestations,
     exit: exitResolve,
     handoff,
     installer,
@@ -175,12 +188,58 @@ describe("Electron shell installer handoff", () => {
     });
 
     expect(test.handoff.launch).toHaveBeenCalledWith({
+      assetName: "FlintTrade-0.6.0-beta.14-mac-universal.dmg",
+      digest: `sha256:${"a".repeat(64)}`,
       marker: "/workspace/shell-updates/handoff/marker",
       releaseTag: "v0.6.0-beta.14",
     });
+    expect(test.attestations.verify).toHaveBeenCalledBefore(test.handoff.createMarker);
     expect(test.handoff.removeMarker).toHaveBeenCalledBefore(test.lifecycle.requestQuit);
     expect(test.lifecycle.requestQuit).toHaveBeenCalledOnce();
     expect(test.installer.cancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps FlintTrade running when signed release provenance cannot be verified", async () => {
+    const test = fixture();
+    test.attestations.verify.mockRejectedValueOnce(new Error("untrusted release writer"));
+    await test.updater.check();
+
+    await expect(test.updater.apply()).resolves.toMatchObject({
+      failure: "Electron shell installation could not start. FlintTrade is still running.",
+      status: "failed",
+    });
+
+    expect(test.handoff.createMarker).not.toHaveBeenCalled();
+    expect(test.handoff.launch).not.toHaveBeenCalled();
+    expect(test.lifecycle.requestQuit).not.toHaveBeenCalled();
+  });
+
+  it("settles external quit while the underlying Sigstore verifier never settles", async () => {
+    let verificationStarted!: () => void;
+    const started = new Promise<void>((resolve) => { verificationStarted = resolve; });
+    const neverSettlingVerifier = new Promise<never>(() => undefined);
+    void neverSettlingVerifier.catch(() => undefined);
+    const test = fixture();
+    test.attestations.verify.mockImplementationOnce(async ({ signal }) => {
+      verificationStarted();
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const abort = (): void => reject(signal.reason);
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      });
+      return await Promise.race([neverSettlingVerifier, aborted]);
+    });
+    await test.updater.check();
+    const applying = test.updater.apply();
+    await started;
+
+    await expect(test.updater.settleForQuit()).resolves.toBeUndefined();
+    await expect(applying).resolves.toMatchObject({
+      failure: "Electron shell update was cancelled before installation.",
+      status: "failed",
+    });
+    expect(test.handoff.createMarker).not.toHaveBeenCalled();
+    expect(test.lifecycle.requestQuit).not.toHaveBeenCalled();
   });
 
   it("keeps FlintTrade running when the installer exits before signalling verification", async () => {

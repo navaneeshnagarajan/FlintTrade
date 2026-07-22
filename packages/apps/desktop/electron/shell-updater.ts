@@ -1,4 +1,5 @@
 import type { createUpdateState, UpdateSnapshot } from "./state";
+import type { ShellAttestationVerifier } from "./shell-attestation";
 
 const CHECKSUM_ASSET_NAME = "SHA256SUMS.txt";
 const RELEASE_DOWNLOAD_PREFIX = "/navaneeshnagarajan/FlintTrade/releases/download/";
@@ -32,13 +33,19 @@ export interface ShellInstallerAttempt {
 
 export interface ShellInstallerHandoff {
   createMarker(): Promise<string>;
-  launch(input: { marker: string; releaseTag: string }): Promise<ShellInstallerAttempt>;
+  launch(input: {
+    assetName: string;
+    digest: string;
+    marker: string;
+    releaseTag: string;
+  }): Promise<ShellInstallerAttempt>;
   markerExists(marker: string): Promise<boolean>;
   removeMarker(marker: string): Promise<void>;
 }
 
 export interface ShellUpdaterOptions {
   arch: string;
+  attestations: ShellAttestationVerifier;
   currentVersion: string;
   enabled: boolean;
   handoff: ShellInstallerHandoff;
@@ -190,7 +197,7 @@ function selectRelease(
     if (!expectedName) continue;
     const asset = exactUniqueAsset(release, expectedName);
     const checksum = exactUniqueAsset(release, CHECKSUM_ASSET_NAME);
-    if (asset && checksum) candidates.push({ asset, checksum, release, semver });
+    if (asset?.digest && checksum) candidates.push({ asset, checksum, release, semver });
   }
   candidates.sort((left, right) => compareSemver(right.semver, left.semver));
   return candidates[0] ?? null;
@@ -316,9 +323,26 @@ export function createShellUpdater(options: ShellUpdaterOptions): ShellUpdater {
     handoffInstaller = null;
     handoffInstallerExitCode = null;
     try {
+      options.state.publishForAttempt(attempt, {
+        message: "Verifying signed Electron shell provenance",
+        progress: null,
+        version: selected.semver.version,
+      });
+      const attested = await options.attestations.verify({
+        assetName: selected.asset.name,
+        digest: selected.asset.digest!,
+        releaseTag: selected.release.tagName,
+        signal,
+      });
+      if (signal.aborted) throw abortError();
       marker = await options.handoff.createMarker();
       if (signal.aborted) throw abortError();
-      installer = await options.handoff.launch({ marker, releaseTag: selected.release.tagName });
+      installer = await options.handoff.launch({
+        assetName: attested.assetName,
+        digest: attested.digest,
+        marker,
+        releaseTag: attested.releaseTag,
+      });
       const startedAt = now();
       let exitCode: number | null = null;
       const launchedInstaller = installer;

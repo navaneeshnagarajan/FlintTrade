@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,14 @@ def _run(
         sums_text=sums_text,
     )
     env.update(extra_env or {})
+    if "FLINTTRADE_UPDATE_HANDOFF" in env:
+        if os_name == "Darwin":
+            default_asset_name = "FlintTrade-9.9.9-beta.1-mac-universal.dmg"
+        else:
+            arch = "arm64" if machine in {"arm64", "aarch64"} else "x64"
+            default_asset_name = f"FlintTrade-9.9.9-beta.1-linux-{arch}.AppImage"
+        env.setdefault("FLINTTRADE_UPDATE_ASSET_NAME", default_asset_name)
+        env.setdefault("FLINTTRADE_UPDATE_ASSET_SHA256", hashlib.sha256(asset_bytes).hexdigest())
     return subprocess.run(
         ["bash", str(SH), *args],
         cwd=ROOT,
@@ -236,6 +245,19 @@ def test_installers_use_only_current_electron_shell_contract() -> None:
         assert retired not in combined
     assert "--package" not in unix
     assert ".deb" not in combined and ".rpm" not in combined
+
+
+@pytest.mark.unit
+def test_source_build_checks_native_helper_compilers_and_headers() -> None:
+    unix = SH.read_text(encoding="utf-8")
+    windows = PS1.read_text(encoding="utf-8")
+
+    assert "/usr/bin/clang" in unix
+    assert "/usr/bin/cc" in unix
+    assert "node_api.h" in unix
+    assert '"Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe"' in windows
+    assert "native compiler" in unix
+    assert "native compiler" in windows
 
 
 @pytest.mark.unit
@@ -418,6 +440,59 @@ def test_unix_installer_rejects_missing_or_wrong_release_checksums(tmp_path: Pat
 
 
 @pytest.mark.unit
+def test_unix_in_app_update_binds_download_to_app_attested_name_and_digest(tmp_path: Path) -> None:
+    asset = b"attested Electron shell"
+    digest = hashlib.sha256(asset).hexdigest()
+    name = "FlintTrade-9.9.9-beta.1-linux-x64.AppImage"
+    common_env = {
+        "FLINTTRADE_UPDATE_HANDOFF": str(tmp_path / "handoff"),
+        "FLINTTRADE_UPDATE_ASSET_NAME": name,
+    }
+    accepted = _run(
+        _case_dir(tmp_path, "accepted"),
+        "--update",
+        "--ref",
+        "v9.9.9-beta.1",
+        "--yes",
+        "--dry-run",
+        asset_bytes=asset,
+        extra_env={**common_env, "FLINTTRADE_UPDATE_ASSET_SHA256": digest},
+    )
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    assert f"would verify sha256 {digest}" in accepted.stdout
+
+    wrong_digest = _run(
+        _case_dir(tmp_path, "wrong-digest"),
+        "--update",
+        "--ref",
+        "v9.9.9-beta.1",
+        "--yes",
+        "--dry-run",
+        asset_bytes=asset,
+        extra_env={**common_env, "FLINTTRADE_UPDATE_ASSET_SHA256": "0" * 64},
+    )
+    assert wrong_digest.returncode != 0
+    assert "SHA256SUMS.txt did not match the app-verified" in wrong_digest.stderr
+
+    wrong_name = _run(
+        _case_dir(tmp_path, "wrong-name"),
+        "--update",
+        "--ref",
+        "v9.9.9-beta.1",
+        "--yes",
+        "--dry-run",
+        asset_bytes=asset,
+        extra_env={
+            **common_env,
+            "FLINTTRADE_UPDATE_ASSET_NAME": "FlintTrade-9.9.9-beta.1-linux-arm64.AppImage",
+            "FLINTTRADE_UPDATE_ASSET_SHA256": digest,
+        },
+    )
+    assert wrong_name.returncode != 0
+    assert "installer name did not match the app-verified" in wrong_name.stderr
+
+
+@pytest.mark.unit
 def test_unix_installer_rejects_cross_release_and_foreign_urls(tmp_path: Path) -> None:
     cross_release = _release("9.9.9-beta.1", prerelease=True)
     for asset in cross_release["assets"]:  # type: ignore[union-attr]
@@ -533,7 +608,7 @@ def test_unix_checksum_failure_exits_before_handoff_or_install(tmp_path: Path) -
     )
 
     assert result.returncode != 0
-    assert "Checksum mismatch" in result.stderr
+    assert "SHA256SUMS.txt did not match the app-verified" in result.stderr
     assert not handoff.exists()
     assert not (tmp_path / ".local" / "bin" / "flinttrade.AppImage").exists()
 
@@ -1109,6 +1184,148 @@ def test_source_build_default_beta_channel_excludes_newer_alpha_and_rc_tags(tmp_
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO regression")
+def test_posix_successful_detached_update_preserves_a_fifo_swapped_stage_path(tmp_path: Path) -> None:
+    staging_root = tmp_path / "private" / "shell-updates" / "staging"
+    stage = staging_root / "flinttrade-shell-update-running"
+    captured_stage = staging_root / "flinttrade-shell-update-captured"
+    stage.mkdir(parents=True, mode=0o700)
+    staging_root.chmod(0o700)
+    stage.chmod(0o700)
+    staged_script = stage / SH.name
+    shutil.copy2(SH, staged_script)
+    staged_script.chmod(0o700)
+    fifo = tmp_path / "release-tags.fifo"
+    os.mkfifo(fifo, mode=0o600)
+    started = tmp_path / "installer-started"
+    bash_env = tmp_path / "bash-env.sh"
+    bash_env.write_text('printf started > "$FLINTTRADE_TEST_STARTED"\n', encoding="utf-8")
+
+    anchor_fd = os.open(fifo, os.O_RDWR | os.O_NONBLOCK)
+    read_fd = os.open(fifo, os.O_RDONLY)
+    write_fd = os.open(fifo, os.O_WRONLY)
+    os.close(anchor_fd)
+    process: subprocess.Popen[str] | None = None
+    try:
+        with os.fdopen(read_fd, "r", encoding="utf-8") as read_stream:
+            process = subprocess.Popen(
+                ["bash", str(staged_script)],
+                cwd=ROOT,
+                env={
+                    "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                    "HOME": str(tmp_path),
+                    "BASH_ENV": str(bash_env),
+                    "FLINTTRADE_TEST_STARTED": str(started),
+                    "FLINTTRADE_RESOLVE_TAGS_ONLY": "1",
+                    # These recreate the old vulnerable cleanup inputs. They
+                    # are now ignored, so a swapped pathname is preserved.
+                    "FLINTTRADE_UPDATE_HANDOFF": str(tmp_path / "handoff"),
+                    "FLINTTRADE_UPDATE_STAGE_DIR": str(stage.resolve()),
+                    "FLINTTRADE_UPDATE_STAGE_ROOT": str(staging_root.resolve()),
+                },
+                stdin=read_stream,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        deadline = time.monotonic() + 5
+        while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert started.exists(), "staged installer did not reach its FIFO read boundary"
+
+        stage.rename(captured_stage)
+        stage.mkdir(mode=0o700)
+        replacement_script = stage / SH.name
+        shutil.copy2(SH, replacement_script)
+        replacement_script.chmod(0o700)
+        sentinel = stage / "foreign-sentinel"
+        sentinel.write_text("preserve me", encoding="utf-8")
+
+        with os.fdopen(write_fd, "w", encoding="utf-8") as writer:
+            writer.write("v9.9.9-beta.9\nv9.9.9-beta.10\n")
+        write_fd = -1
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if write_fd >= 0:
+            os.close(write_fd)
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0, stdout + stderr
+    assert stdout.strip() == "v9.9.9-beta.10"
+    assert sentinel.read_text(encoding="utf-8") == "preserve me"
+    assert replacement_script.is_file()
+    assert captured_stage.is_dir()
+
+
+@pytest.mark.unit
+def test_detached_installers_never_recursively_remove_their_staging_path() -> None:
+    unix = SH.read_text(encoding="utf-8")
+    windows = PS1.read_text(encoding="utf-8")
+
+    assert "FLINTTRADE_UPDATE_STAGE_DIR" not in unix
+    assert "FLINTTRADE_UPDATE_STAGE_ROOT" not in unix
+    assert "remove_verified_update_stage" not in unix
+    assert "FLINTTRADE_UPDATE_STAGE_DIR" not in windows
+    assert "FLINTTRADE_UPDATE_STAGE_ROOT" not in windows
+    assert "Remove-VerifiedUpdateStage" not in windows
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL or sys.platform != "win32", reason=NO_POWERSHELL_REASON)
+def test_windows_successful_detached_update_preserves_a_swapped_stage_path(tmp_path: Path) -> None:
+    staging_root = tmp_path / "private" / "shell-updates" / "staging"
+    stage = staging_root / "flinttrade-shell-update-running"
+    captured_stage = staging_root / "flinttrade-shell-update-captured"
+    stage.mkdir(parents=True)
+    staged_script = stage / PS1.name
+    started = tmp_path / "installer-started"
+    injected = PS1.read_text(encoding="utf-8").replace(
+        '$ProgressPreference = "SilentlyContinue"',
+        '$ProgressPreference = "SilentlyContinue"\n'
+        '[System.IO.File]::WriteAllText($env:FLINTTRADE_TEST_STARTED, "started")',
+        1,
+    )
+    staged_script.write_text(injected, encoding="utf-8")
+
+    process = subprocess.Popen(
+        [POWERSHELL, "-NoProfile", "-File", str(staged_script)],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "FLINTTRADE_TEST_STARTED": str(started),
+            "FLINTTRADE_RESOLVE_TAGS_ONLY": "1",
+            "FLINTTRADE_UPDATE_HANDOFF": str(tmp_path / "handoff"),
+            "FLINTTRADE_UPDATE_STAGE_DIR": str(stage.resolve()),
+            "FLINTTRADE_UPDATE_STAGE_ROOT": str(staging_root.resolve()),
+        },
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 10
+    while not started.exists() and process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert started.exists(), "staged PowerShell installer did not reach its stdin boundary"
+
+    stage.rename(captured_stage)
+    stage.mkdir()
+    replacement_script = stage / PS1.name
+    shutil.copy2(PS1, replacement_script)
+    sentinel = stage / "foreign-sentinel"
+    sentinel.write_text("preserve me", encoding="utf-8")
+    stdout, stderr = process.communicate("v9.9.9-beta.9\nv9.9.9-beta.10\n", timeout=20)
+
+    assert process.returncode == 0, stdout + stderr
+    assert stdout.strip() == "v9.9.9-beta.10"
+    assert sentinel.read_text(encoding="utf-8") == "preserve me"
+    assert replacement_script.is_file()
+    assert captured_stage.is_dir()
+
+
+@pytest.mark.unit
 @pytest.mark.skipif(not POWERSHELL, reason=NO_POWERSHELL_REASON)
 def test_windows_source_tag_resolution_orders_multidigit_prerelease_identifiers(tmp_path: Path) -> None:
     result = subprocess.run(
@@ -1258,10 +1475,16 @@ def test_windows_handoff_occurs_only_after_hash_verification_and_before_setup() 
     marker = function.index("Signal-UpdateHandoff")
     setup = function.index('Say "Running FlintTrade setup..."')
     assert checksum < marker < setup
+    binding = function.index("$expectedHash -cne $attestedHash")
+    assert binding < checksum < marker
+    assert "FLINTTRADE_UPDATE_ASSET_NAME" in function
+    assert "FLINTTRADE_UPDATE_ASSET_SHA256" in function
+    assert "$script:UpdateAttestationBound = $true" in function
     assert "[switch]$Update" in text
     handoff = text[text.index("function Signal-UpdateHandoff") : text.index("function Install-BinaryRelease")]
     assert "FLINTTRADE_UPDATE_PARENT_PID" in handoff
     assert "requires explicit -Update mode" in handoff
+    assert "app-verified release attestation binding" in handoff
     assert "StartTime.ToFileTimeUtc()" in handoff
     assert "$timeout = 3600" in handoff
     assert "$activeWaitIterations = $timeout * 5" in handoff

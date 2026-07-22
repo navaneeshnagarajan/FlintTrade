@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +29,9 @@ const SOURCE_BOOTSTRAP_FILES = [
 ].sort();
 const expectedBootstrapFiles = [
   ...SOURCE_BOOTSTRAP_FILES,
-  ...(process.platform === "win32" ? ["flinttrade-job-supervisor.exe"] : []),
+  ...(process.platform === "win32"
+    ? ["flinttrade-job-supervisor.exe", "flinttrade-source-fs.exe", "flinttrade-source-fs.sha256.json"]
+    : ["flinttrade-fs-promoter.node", "flinttrade-fs-promoter.sha256.json"]),
 ].sort();
 
 function walkManagedFiles(directory, root = directory) {
@@ -140,9 +143,64 @@ const packagedTrayIcon = readFileSync(path.join(resourcesDirectory, "icons", "tr
 const sourceTrayIcon = readFileSync(path.join(packageRoot, "resources", "icons", "32x32.png"));
 assert.deepEqual(packagedTrayIcon, sourceTrayIcon, "The packaged tray icon differs from its tracked source.");
 assert.deepEqual(walkManagedFiles(path.join(resourcesDirectory, "icons")), ["tray.png"]);
+let expectedWindowsSourceFilesystemSha256 = null;
+let expectedPosixAtomicPromoterSha256 = null;
 if (process.platform !== "win32") {
   const bootstrapMode = statSync(path.join(resourcesDirectory, "bootstrap", "flinttrade-bootstrap.sh")).mode;
   assert.notEqual(bootstrapMode & 0o111, 0, "The packaged POSIX bootstrap entrypoint is not executable.");
+  const nativeTarget = process.platform === "darwin" ? "darwin-universal" : `linux-${process.arch}`;
+  const packagedPromoterPath = path.join(resourcesDirectory, "bootstrap", "flinttrade-fs-promoter.node");
+  const builtPromoterPath = path.join(
+    packageRoot,
+    "dist",
+    "native",
+    nativeTarget,
+    "flinttrade-fs-promoter.node",
+  );
+  const packagedPromoter = readFileSync(packagedPromoterPath);
+  assert.deepEqual(
+    packagedPromoter,
+    readFileSync(builtPromoterPath),
+    "The packaged POSIX atomic promoter differs from the helper built in this job.",
+  );
+  assert.notEqual(
+    statSync(packagedPromoterPath).mode & 0o111,
+    0,
+    "The packaged POSIX atomic promoter is not executable.",
+  );
+  const packagedManifestPath = path.join(
+    resourcesDirectory,
+    "bootstrap",
+    "flinttrade-fs-promoter.sha256.json",
+  );
+  const builtManifestPath = path.join(
+    packageRoot,
+    "dist",
+    "native",
+    nativeTarget,
+    "flinttrade-fs-promoter.sha256.json",
+  );
+  const packagedManifestBytes = readFileSync(packagedManifestPath);
+  assert.deepEqual(
+    packagedManifestBytes,
+    readFileSync(builtManifestPath),
+    "The packaged POSIX atomic-promoter manifest differs from the build output.",
+  );
+  const packagedManifest = JSON.parse(packagedManifestBytes.toString("utf8"));
+  assert.deepEqual(
+    Object.keys(packagedManifest).sort(),
+    ["executable", "schemaVersion", "sha256", "target"],
+  );
+  assert.equal(packagedManifest.executable, "flinttrade-fs-promoter.node");
+  assert.equal(packagedManifest.schemaVersion, 1);
+  assert.equal(packagedManifest.target, nativeTarget);
+  assert.match(packagedManifest.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    packagedManifest.sha256,
+    createHash("sha256").update(packagedPromoter).digest("hex"),
+    "The packaged POSIX atomic promoter does not match its build-bound digest.",
+  );
+  expectedPosixAtomicPromoterSha256 = packagedManifest.sha256;
 } else {
   const packagedSupervisor = readFileSync(
     path.join(resourcesDirectory, "bootstrap", "flinttrade-job-supervisor.exe"),
@@ -155,6 +213,38 @@ if (process.platform !== "win32") {
     builtSupervisor,
     "The packaged Windows Job supervisor differs from the helper built in this job.",
   );
+  const packagedSourceFilesystem = readFileSync(
+    path.join(resourcesDirectory, "bootstrap", "flinttrade-source-fs.exe"),
+  );
+  const builtSourceFilesystem = readFileSync(
+    path.join(packageRoot, "dist", "native", "win32-x64", "flinttrade-source-fs.exe"),
+  );
+  assert.deepEqual(
+    packagedSourceFilesystem,
+    builtSourceFilesystem,
+    "The packaged Windows source filesystem helper differs from the helper built in this job.",
+  );
+  const packagedDigest = JSON.parse(readFileSync(
+    path.join(resourcesDirectory, "bootstrap", "flinttrade-source-fs.sha256.json"),
+    "utf8",
+  ));
+  const builtDigest = readFileSync(
+    path.join(packageRoot, "dist", "native", "win32-x64", "flinttrade-source-fs.sha256.json"),
+  );
+  assert.deepEqual(
+    readFileSync(path.join(resourcesDirectory, "bootstrap", "flinttrade-source-fs.sha256.json")),
+    builtDigest,
+    "The packaged Windows source helper digest manifest differs from the build output.",
+  );
+  assert.deepEqual(Object.keys(packagedDigest).sort(), ["executable", "schemaVersion", "sha256"]);
+  assert.equal(packagedDigest.executable, "flinttrade-source-fs.exe");
+  assert.equal(packagedDigest.schemaVersion, 1);
+  assert.equal(
+    packagedDigest.sha256,
+    createHash("sha256").update(packagedSourceFilesystem).digest("hex"),
+    "The packaged Windows source helper does not match its build-bound digest.",
+  );
+  expectedWindowsSourceFilesystemSha256 = packagedDigest.sha256;
 }
 
 const packagedNotice = readFileSync(path.join(resourcesDirectory, "NOTICE"));
@@ -167,7 +257,7 @@ const asarEntries = listPackage(asarPath);
 for (const entry of asarEntries) {
   assert.doesNotMatch(
     entry,
-    /(?:^|\/)(?:src-tauri|payload|__pycache__|\.venv)(?:\/|$)|\.pyc$|flinttrade-backend(?:\.exe)?$/i,
+    /(?:^|\/)(?:src-tauri|payload|__pycache__|\.venv)(?:\/|$)|^\/dist\/native(?:\/|$)|\.pyc$|flinttrade-backend(?:\.exe)?$/i,
     `The Electron application archive contains a retired desktop artefact: ${entry}.`,
   );
 }
@@ -179,6 +269,19 @@ const sourceMetadata = JSON.parse(readFileSync(path.join(packageRoot, "package.j
 assert.equal(packagedMetadata.name, "@flinttrade/desktop");
 assert.equal(packagedMetadata.main, "dist/electron-main.mjs");
 assert.equal(packagedMetadata.version, sourceMetadata.version);
+const packagedMain = extractFile(asarPath, "dist/electron-main.mjs").toString("utf8");
+if (expectedWindowsSourceFilesystemSha256) {
+  assert.ok(
+    packagedMain.includes(expectedWindowsSourceFilesystemSha256),
+    "The Electron main archive does not bind the packaged Windows source helper digest.",
+  );
+}
+if (expectedPosixAtomicPromoterSha256) {
+  assert.ok(
+    packagedMain.includes(expectedPosixAtomicPromoterSha256),
+    "The Electron main archive does not bind the packaged POSIX atomic-promoter digest.",
+  );
+}
 const packagedSplashHtml = extractFile(asarPath, "splash/index.html").toString("utf8");
 const sourceSplashHtml = readFileSync(path.join(packageRoot, "splash", "index.html"), "utf8");
 assert.equal(packagedSplashHtml, sourceSplashHtml, "The packaged splash HTML differs from its tracked source.");
@@ -218,6 +321,56 @@ if (process.platform === "darwin") {
     new Set(["arm64", "x86_64"]),
     "The macOS Electron package must contain both universal architectures.",
   );
+
+  const promoterArchitectures = spawnSync(
+    "/usr/bin/lipo",
+    ["-archs", path.join(resourcesDirectory, "bootstrap", "flinttrade-fs-promoter.node")],
+    { encoding: "utf8" },
+  );
+  assert.equal(promoterArchitectures.status, 0, promoterArchitectures.stderr);
+  assert.deepEqual(
+    new Set(promoterArchitectures.stdout.trim().split(/\s+/)),
+    new Set(["arm64", "x86_64"]),
+    "The packaged macOS atomic promoter must contain both universal architectures.",
+  );
+  const promoterSignature = spawnSync(
+    "/usr/bin/codesign",
+    ["--verify", "--strict", path.join(resourcesDirectory, "bootstrap", "flinttrade-fs-promoter.node")],
+    { encoding: "utf8" },
+  );
+  assert.equal(
+    promoterSignature.status,
+    0,
+    `The packaged macOS atomic promoter signature is invalid: ${promoterSignature.stderr.trim()}`,
+  );
+
+  if (process.env.FLINTTRADE_REQUIRE_DISTRIBUTION_SIGNATURE === "1") {
+    const applicationDetails = spawnSync("/usr/bin/codesign", ["--display", "--verbose=4", target], {
+      encoding: "utf8",
+    });
+    const promoterDetails = spawnSync(
+      "/usr/bin/codesign",
+      ["--display", "--verbose=4", path.join(resourcesDirectory, "bootstrap", "flinttrade-fs-promoter.node")],
+      { encoding: "utf8" },
+    );
+    assert.equal(applicationDetails.status, 0, applicationDetails.stderr);
+    assert.equal(promoterDetails.status, 0, promoterDetails.stderr);
+    const applicationSignature = `${applicationDetails.stdout}\n${applicationDetails.stderr}`;
+    const nativeSignature = `${promoterDetails.stdout}\n${promoterDetails.stderr}`;
+    for (const [label, details] of [
+      ["application", applicationSignature],
+      ["atomic promoter", nativeSignature],
+    ]) {
+      assert.doesNotMatch(details, /Signature=adhoc/i, `The distribution ${label} has only an ad-hoc seal.`);
+      assert.match(details, /^Authority=/m, `The distribution ${label} has no signing authority.`);
+      assert.match(details, /flags=.*runtime/i, `The distribution ${label} lacks hardened runtime.`);
+      assert.doesNotMatch(details, /TeamIdentifier=not set/i, `The distribution ${label} has no signing team.`);
+    }
+    const applicationTeam = applicationSignature.match(/^TeamIdentifier=(.+)$/m)?.[1];
+    const promoterTeam = nativeSignature.match(/^TeamIdentifier=(.+)$/m)?.[1];
+    assert.ok(applicationTeam && promoterTeam, "The distribution signing team could not be inspected.");
+    assert.equal(promoterTeam, applicationTeam, "The application and atomic promoter use different signing teams.");
+  }
 }
 
 console.log(`Verified packaged Electron security contract: ${target}`);

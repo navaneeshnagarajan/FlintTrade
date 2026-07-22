@@ -150,6 +150,14 @@ jobs:
       - name: Bundle Electron main and preload
         run: pnpm --filter @flinttrade/desktop bundle
 
+      - name: Exercise native POSIX no-replace promotion
+        if: runner.os != 'Windows'
+        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
+
+      - name: Exercise native Windows source promotion and preserve-only cleanup
+        if: matrix.label == 'windows-x64'
+        run: pnpm --filter @flinttrade/desktop test:windows-source-fs
+
       - name: Prepare Apple signing or ad-hoc sealing
         if: runner.os == 'macOS'
         shell: bash
@@ -230,6 +238,16 @@ jobs:
             echo "Apple notarisation credentials cannot be used with an ad-hoc application seal." >&2
             exit 1
           fi
+
+      - name: Rebuild and bind the macOS native promoter to the release identity
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FLINTTRADE_NATIVE_MAC_IDENTITY="$MAC_IDENTITY" \
+            FLINTTRADE_NATIVE_MAC_KEYCHAIN="${CSC_KEYCHAIN:-}" \
+            pnpm --filter @flinttrade/desktop bundle
+          pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
 
       - name: Build universal macOS DMG
         if: runner.os == 'macOS'
