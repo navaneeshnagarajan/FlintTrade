@@ -323,7 +323,7 @@ function fixture(options: FixtureOptions = {}) {
 
   const command = vi.fn<SourceProvenanceDependencies["command"]["run"]>(async (invocation) => {
     const commandIndex = invocation.args.findIndex((argument) =>
-      ["config", "diff-files", "diff-index", "ls-files", "rev-parse"].includes(argument),
+      ["config", "diff-index", "ls-files", "rev-parse", "status"].includes(argument),
     );
     const operation = invocation.args.slice(commandIndex).join(" ");
     const stdout =
@@ -339,17 +339,17 @@ function fixture(options: FixtureOptions = {}) {
               ? options.gitStatus?.startsWith("?? ")
                 ? `${options.gitStatus.slice(3).replace(/\0$/, "")}\0`
                 : ""
-              : operation.startsWith("diff-index ") || operation.startsWith("diff-files ")
+              : operation.startsWith("diff-index ")
                 ? ""
+              : operation.startsWith("status ")
+                ? options.gitStatus?.startsWith(" M") ? options.gitStatus : ""
               : (() => {
                   throw new Error(`Unexpected Git command: ${operation}`);
                 })();
     const exitCode =
       operation.startsWith("diff-index ") && options.gitStatus && !options.gitStatus.startsWith(" M") && !options.gitStatus.startsWith("?? ")
         ? 1
-        : operation.startsWith("diff-files ") && options.gitStatus?.startsWith(" M")
-          ? 1
-          : 0;
+        : 0;
     return {
       contained: options.gitContained ?? true,
       exitCode,
@@ -521,7 +521,7 @@ describe("active source provenance", () => {
       [...hardenedPrefix, "rev-parse", `${revision}^{tree}`],
       [...hardenedPrefix, "ls-files", "-v", "-z"],
       [...hardenedPrefix, "diff-index", "--cached", "--quiet", "--ignore-submodules=none", revision, "--"],
-      [...hardenedPrefix, "diff-files", "--quiet", "--ignore-submodules=none", "--"],
+      [...hardenedPrefix, "status", "--porcelain=v2", "-z", "--untracked-files=no", "--ignore-submodules=none"],
       [...hardenedPrefix, "ls-files", "--others", "--exclude-standard", "-z"],
       [...hardenedPrefix, "rev-parse", "HEAD"],
     ]);
@@ -640,6 +640,31 @@ describe("active source provenance", () => {
 
     await expect(validateActiveSourceProvenance(test.request)).rejects.toThrow(
       /dirty|untracked|source|change/i,
+    );
+  });
+
+  it("accepts mtime-only tracked files without rewriting the hardened Git index", async () => {
+    const test = await realGitFixture();
+    const fileSystem = createNodeBootstrapDependencies(process.platform).fileSystem;
+    const indexPath = path.join(test.activeSource, ".git", "index");
+    const initialIndexIdentity = await fileSystem.fileIdentity(indexPath);
+    const futureMtime = new Date(Date.now() + 60_000);
+    await utimes(path.join(test.activeSource, "uv.lock"), futureMtime, futureMtime);
+
+    await expect(validateActiveSourceProvenance(test.request)).resolves.toMatchObject({
+      contentIdentity: test.installedTree,
+      provenance: "git",
+      revision: test.installedRevision,
+    });
+    await expect(fileSystem.fileIdentity(indexPath)).resolves.toEqual(initialIndexIdentity);
+  });
+
+  it("rejects a real tracked content change after invalidating the stat cache", async () => {
+    const test = await realGitFixture();
+    await writeFile(path.join(test.activeSource, "uv.lock"), "version = 2\n");
+
+    await expect(validateActiveSourceProvenance(test.request)).rejects.toThrow(
+      /tracked|worktree|dirty|change/i,
     );
   });
 
@@ -1032,7 +1057,7 @@ describe("active source provenance", () => {
     if (!actualRun) throw new Error("Missing real Git fixture command implementation.");
     test.command.mockImplementation(async (invocation) => {
       const result = await actualRun(invocation);
-      if (invocation.args.includes("diff-files")) {
+      if (invocation.args.includes("status")) {
         await mkdir(path.dirname(controlPath), { recursive: true });
         await writeFile(controlPath, "../hostile\n");
       }
@@ -1081,7 +1106,7 @@ describe("active source provenance", () => {
     let branchChanged = false;
     test.command.mockImplementation(async (invocation) => {
       const result = await actualRun(invocation);
-      if (!branchChanged && invocation.args.includes("diff-files")) {
+      if (!branchChanged && invocation.args.includes("status")) {
         branchChanged = true;
         runFixtureGit(test.root, test.activeSource, ["update-ref", "refs/heads/main", otherRevision]);
       }

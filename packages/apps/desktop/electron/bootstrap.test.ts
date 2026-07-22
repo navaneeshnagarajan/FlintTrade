@@ -13,6 +13,7 @@ import {
   rename,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -354,6 +355,7 @@ interface FixtureOptions {
   rootAliasAtBoundary?: boolean;
   spuriousAbortError?: boolean;
   sourceMutationAtBoundary?: "after-marker" | "before-rename";
+  touchTrackedDuringBuild?: boolean;
   mutateTrackedDuringBuild?: boolean;
   uncontainedOnAbort?: boolean;
   onExtract?: BootstrapDependencies["extractArchive"];
@@ -390,7 +392,10 @@ async function fixture(options: FixtureOptions = {}) {
     markArchiveExtractionStarted = resolve;
   });
   const platform = options.platform ?? "darwin";
-  const useRealGitInspection = options.realGitInspection === true || options.realGitSwapFilter === true;
+  const useRealGitInspection =
+    options.realGitInspection === true ||
+    options.realGitSwapFilter === true ||
+    options.touchTrackedDuringBuild === true;
   const target = platform === "win32" ? "win32-x64" : "darwin-arm64";
   const nodeDependencies = createNodeBootstrapDependencies(platform, {
     operationLeaseTarget: path.join(sourceRoot, ".flinttrade-bootstrap-operation.lock"),
@@ -476,14 +481,14 @@ async function fixture(options: FixtureOptions = {}) {
         }
         const gitOperationIndex = path.basename(invocation.command) === "git"
           ? invocation.args.findIndex((argument) =>
-              ["config", "diff-files", "diff-index", "ls-files", "rev-parse"].includes(argument),
+              ["config", "diff-index", "ls-files", "rev-parse", "status"].includes(argument),
             )
           : -1;
         const gitOperation = gitOperationIndex >= 0 ? invocation.args.slice(gitOperationIndex) : [];
         if (useRealGitInspection && gitOperationIndex >= 0) {
           const candidate = invocation.cwd;
           const cleanlinessCommand = options.realGitSwapFilter === true &&
-            (gitOperation[0] === "diff-files" || gitOperation[0] === "status");
+            gitOperation[0] === "status";
           const configPath = candidate ? path.join(candidate, ".git", "config") : "";
           const attributesPath = candidate ? path.join(candidate, ".git", "info", "attributes") : "";
           const safeConfig = cleanlinessCommand ? await readFile(configPath, "utf8") : null;
@@ -544,12 +549,20 @@ async function fixture(options: FixtureOptions = {}) {
             stdout: options.nonIgnoredUntracked ? "injected.py\0" : "",
           };
         }
-        if (gitOperation[0] === "diff-index" || gitOperation[0] === "diff-files") {
+        if (gitOperation[0] === "diff-index") {
           return {
             contained: true,
-            exitCode: buildMutated && gitOperation[0] === "diff-files" ? 1 : 0,
+            exitCode: 0,
             stderr: "",
             stdout: "",
+          };
+        }
+        if (gitOperation[0] === "status") {
+          return {
+            contained: true,
+            exitCode: 0,
+            stderr: "",
+            stdout: buildMutated ? "1 .M N... 100644 100644 100644 fixture fixture uv.lock\0" : "",
           };
         }
         if (invocation.args[0] === "--version" && invocation.command.includes("uv")) {
@@ -581,6 +594,13 @@ async function fixture(options: FixtureOptions = {}) {
           if (options.mutateTrackedDuringBuild) {
             buildMutated = true;
             await writeFile(path.join(invocation.args[1]!, "uv.lock"), "mutated");
+          }
+          if (options.touchTrackedDuringBuild) {
+            const candidateIndex = invocation.args.includes("-Candidate")
+              ? invocation.args.indexOf("-Candidate") + 1
+              : 1;
+            const futureMtime = new Date(Date.now() + 60_000);
+            await utimes(path.join(invocation.args[candidateIndex]!, "uv.lock"), futureMtime, futureMtime);
           }
           if (options.realGitSwapFilter) {
             const candidateIndex = invocation.args.includes("-Candidate") ? invocation.args.indexOf("-Candidate") + 1 : 1;
@@ -1331,6 +1351,20 @@ describe("first-run source bootstrap", () => {
     });
     expect(await exists(test.activeSource)).toBe(false);
   });
+
+  it.runIf(process.platform !== "win32")(
+    "accepts a Git build hook which changes only a tracked source input mtime",
+    async () => {
+      const test = await fixture({ touchTrackedDuringBuild: true });
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        ok: true,
+        provenance: "git",
+        revision: expect.stringMatching(/^[0-9a-f]{40}$/),
+      });
+      expect(await exists(test.activeSource)).toBe(true);
+    },
+  );
 
   it.each(["tar.gz", "zip"] as const)(
     "classifies a mid-%s archive AbortError as cancellation",

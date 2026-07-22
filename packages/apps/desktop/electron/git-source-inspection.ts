@@ -694,15 +694,21 @@ export async function inspectHardenedGitCheckout(
   if (staged.exitCode === 1) throw new Error("The Git checkout has staged changes.");
   requiredGitResult(staged, "Git staged-content inspection");
 
+  // `diff-files --quiet` reports a stat-cache mismatch without proving that
+  // tracked content differs. Porcelain status refreshes that comparison in
+  // memory under `--no-optional-locks`; because it renders no patch, it does
+  // not invoke external diff or textconv drivers. Untracked inputs remain a
+  // separate bounded inspection below.
   const tracked = await runGit(
     request,
     common.commonDirectory.canonicalPath,
-    ["diff-files", "--quiet", "--ignore-submodules=none", "--"],
+    ["status", "--porcelain=v2", "-z", "--untracked-files=no", "--ignore-submodules=none"],
     30_000,
     "Git tracked-content inspection",
   );
-  if (tracked.exitCode === 1) throw new Error("The Git checkout has tracked worktree changes.");
-  requiredGitResult(tracked, "Git tracked-content inspection");
+  if (requiredGitResult(tracked, "Git tracked-content inspection") !== "") {
+    throw new Error("The Git checkout has tracked worktree changes.");
+  }
 
   const untracked = await runGit(
     request,
