@@ -90,14 +90,14 @@ jobs:
     timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Remove stale pip-audit evidence from checkout
         run: |
           rm -f pip-audit-report.json
           rm -f "${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - name: pip-audit (allowlist + offline fallback)
         id: pip_audit
@@ -105,7 +105,7 @@ jobs:
           FLINTTRADE_PIP_AUDIT_REPORT: ${{ runner.temp }}/flinttrade-pip-audit-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: python scripts/pip-audit-with-allowlist.py
       - name: Upload newly generated pip-audit evidence
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: ${{ always() && steps.pip_audit.outcome != 'skipped' }}
         with:
           name: pip-audit-report
@@ -135,23 +135,19 @@ jobs:
     timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
         with:
           toolchain: stable    # cargo-audit 0.22.x needs a newer compiler than tick-engine's pinned MSRV.
           rustflags: ""
       - run: cargo install cargo-audit --locked --version 0.22.2
       - name: cargo audit (tick engine)
         run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/core/ticks --report packages/core/ticks/cargo-audit-report.json
-      - name: cargo audit (desktop app)
-        run: python scripts/cargo-audit-with-allowlist.py --manifest-dir packages/apps/desktop/src-tauri --report packages/apps/desktop/src-tauri/cargo-audit-report.json
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
           name: cargo-audit-reports
-          path: |
-            packages/core/ticks/cargo-audit-report.json
-            packages/apps/desktop/src-tauri/cargo-audit-report.json
+          path: packages/core/ticks/cargo-audit-report.json
 
   node-audit:
     name: Node audit (pnpm audit)
@@ -159,12 +155,12 @@ jobs:
     timeout-minutes: 15
     if: ${{ !github.event.pull_request.draft }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
-      - uses: pnpm/action-setup@v5
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: pnpm
@@ -172,9 +168,34 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: pnpm audit (allowlist)
         run: python scripts/pnpm-audit-with-allowlist.py
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with: { name: pnpm-audit-report, path: pnpm-audit-report.json }
+
+  electron-package-verification:
+    name: Electron Linux directory verification
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Verify bootstrap resource manifest
+        run: pnpm --filter @flinttrade/desktop verify:bootstrap-manifest
+      - name: Bundle Electron main and preload
+        run: pnpm --filter @flinttrade/desktop bundle
+      - name: Exercise native POSIX no-replace promotion
+        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
+      - name: Package Linux Electron directory
+        run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
+      - name: Verify packaged Electron security contract
+        run: pnpm --filter @flinttrade/desktop verify:package
 
   transitive-licences:
     name: transitive dependency licence sweep
@@ -183,15 +204,15 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     continue-on-error: true       # informational; does not block merge in v1.0
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: pip install --require-hashes -r requirements.lock
       - run: pip-licenses --from=mixed --order=license --format=json --output-file=supply-chain/transitive-licences.json
       - run: python scripts/check-transitive-licences.py
         continue-on-error: true
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with: { name: transitive-licences-report, path: supply-chain/transitive-licences.json }
 
@@ -207,10 +228,10 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: uv sync --frozen
       - name: ACL test
         run: uv run python -m pytest tests/test_secure_file_windows_acl.py -v
@@ -225,10 +246,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: uv sync --frozen
       - run: uv run python -c "import flinttrade_core; print(flinttrade_core.__file__)"
 
@@ -239,9 +260,9 @@ jobs:
     # only fires on external PRs (forks); the founder's own branches are auto-attested
     if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with: { fetch-depth: 0 }   # full history for GPG signature verification
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: "3.12.8" }
       - run: pip install --require-hashes -r supply-chain/audit-tooling.lock
       - run: sudo apt-get install -y gnupg

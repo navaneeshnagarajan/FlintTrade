@@ -1,17 +1,16 @@
-"""Native-desktop backend entry point.
+"""Electron-desktop backend serving entry point.
 
-This is the process the Tauri desktop shell launches as a bundled *sidecar*.
+The Electron source guardian calls this module from the active source checkout.
 It serves the full FlintTrade backend — the gated order path, every REST
-blueprint, and the built React terminal — on a loopback port, then blocks
-until the parent process terminates it.
+blueprint, and the built React terminal — on a loopback port, then blocks until
+the desktop parent terminates it.
 
 Design goals (distinct from :func:`flinttrade_core.app.FlintTradeApp.run`):
 
-* **Lean and resilient when frozen.** PyInstaller bundles only what the
-  serving path needs; the heavy automation loops (cron scheduler, Telegram
-  bot, overnight optimiser) are deliberately *not* started here, so the
-  packaged binary stays small and never fails to boot because an optional
-  ML dependency could not be collected. Those features remain reachable
+* **Lean and resilient.** The heavy automation loops (cron scheduler,
+  Telegram bot, overnight optimiser) are deliberately *not* started here, so
+  the daily-driver backend never fails to boot because an optional ML
+  dependency is unavailable. Those features remain reachable
   per-request through their blueprints, which lazy-import their own deps and
   degrade gracefully when unavailable.
 * **No ``.env`` dependency.** Configuration comes from ``workspace.json``
@@ -24,7 +23,7 @@ Design goals (distinct from :func:`flinttrade_core.app.FlintTradeApp.run`):
   interface — so the desktop backend is unreachable from the network.
 * **Lifecycle handshake.** Once the listening socket is bound, a single
   ``FLINTTRADE_BACKEND_READY port=<port>`` line is written to stdout. The
-  Tauri shell waits for that line (and/or polls the health endpoint) before
+  desktop shell waits for that line (and/or polls the health endpoint) before
   pointing its window at ``http://127.0.0.1:<port>``.
 
 Usage::
@@ -47,8 +46,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
-# Importing the app module first applies the UTF-8 stdout reconfigure and the
-# frozen-mode sys.path / dist-path wiring (see ``flinttrade_core.app``).
+# Importing the app module first applies its UTF-8 stdout configuration.
 from .app import (
     _OrderFlowCheckpointOwner,
     _bind_runtime_emergency_dispatcher,
@@ -95,7 +93,7 @@ class DesktopBackendShutdownIncomplete(RuntimeError):
 #: ``FLINTTRADE_BACKEND_PORT`` environment variable.
 DEFAULT_PORT = 5100
 
-#: Stdout sentinel the Tauri shell waits for before loading the UI.
+#: Stdout sentinel the desktop shell waits for before loading the UI.
 READY_SENTINEL = "FLINTTRADE_BACKEND_READY"
 
 _CAPTURE_RUNTIME_CONFIG = "DESKTOP_TICK_CAPTURE_RUNTIME"
@@ -1959,16 +1957,25 @@ def serve(
     ready_writer: Callable[[str], None] | None = None,
     shutdown_signal: _ShutdownSignal | None = None,
     shutdown_deadline: float | None = None,
+    guardian_owned_lease: bool = False,
 ) -> None:
     """Serve while retaining exclusive ownership of the active workspace."""
+    if guardian_owned_lease:
+        _serve_owned(
+            port,
+            ready_writer=ready_writer,
+            shutdown_signal=shutdown_signal,
+            shutdown_deadline=shutdown_deadline,
+        )
+        return
+
     lease_failure_context: str | None = None
     try:
         backend_lease = acquire_backend_instance_lease()
     except BackendInstanceAlreadyRunning:
-        # The Tauri shell reads this sentinel to tell "another backend owns
-        # the workspace" apart from a broken payload. Without it, a lease
-        # conflict (a ``make start`` shell, an earlier session) demoted the
-        # healthy payload pin and each Retry re-downloaded the engine.
+        # Electron reads this sentinel to distinguish "another backend owns
+        # the workspace" from a failed source runtime. A lease conflict can be
+        # a ``make start`` shell or an earlier desktop session.
         print("FLINTTRADE_BACKEND_BLOCKED reason=instance-lease", flush=True)
         raise
     except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
@@ -2021,7 +2028,7 @@ def _serve_owned(
 
     Uses Waitress — the same production WSGI server the rest of FlintTrade
     runs on — created explicitly so the listening socket is open *before* the
-    ready handshake is emitted. This removes the race where the Tauri shell
+    ready handshake is emitted. This removes the race where the Electron shell
     would otherwise poll a port that is not yet accepting connections.
 
     Args:
@@ -2103,6 +2110,7 @@ def main(
     argv: list[str] | None = None,
     *,
     shutdown_signal: _ShutdownSignal | None = None,
+    guardian_owned_lease: bool = False,
 ) -> None:
     """CLI entry point — parse args, init workspace, serve.
 
@@ -2130,7 +2138,11 @@ def main(
         raise RuntimeError(
             f"Desktop backend startup failed ({workspace_failure_context})"
         ) from None
-    serve(_resolve_port(args.port), shutdown_signal=shutdown_signal)
+    serve(
+        _resolve_port(args.port),
+        shutdown_signal=shutdown_signal,
+        guardian_owned_lease=guardian_owned_lease,
+    )
 
 
 if __name__ == "__main__":

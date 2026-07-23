@@ -40,10 +40,10 @@ jobs:
     # hung cross-platform job long before the 6-hour runner default.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: '3.12' }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
 
@@ -56,10 +56,10 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: '3.12' }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 -k "not resource_module"
 
@@ -71,37 +71,49 @@ jobs:
     continue-on-error: true
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with: { python-version: '3.12' }
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
 
-  desktop-rust-tests:
+  desktop-electron-package-smoke:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-26.04]
+        os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    # The ubuntu-26.04 leg doubles as the webkit/glibc drift canary for the
-    # preview runner image; failures there must not fail the weekly run.
-    continue-on-error: ${{ matrix.os == 'ubuntu-26.04' }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - name: Install Tauri system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libgtk-3-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          workspaces: packages/apps/desktop/src-tauri -> target
-      - run: cargo test --manifest-path packages/apps/desktop/src-tauri/Cargo.toml
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Bundle Electron main and preload
+        run: pnpm --filter @flinttrade/desktop bundle
+      - name: Exercise native POSIX no-replace promotion
+        if: runner.os != 'Windows'
+        run: pnpm --filter @flinttrade/desktop exec node scripts/run-required-atomic-promoter-test.mjs
+      - name: Exercise native Windows source promotion and preserve-only cleanup
+        if: runner.os == 'Windows'
+        run: pnpm --filter @flinttrade/desktop test:windows-source-fs
+      - name: Package macOS Electron directory
+        if: runner.os == 'macOS'
+        run: >-
+          pnpm --filter @flinttrade/desktop exec electron-builder --dir --mac --universal --publish never
+          --config.mac.identity=- --config.mac.hardenedRuntime=false
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Package Windows Electron directory
+        if: runner.os == 'Windows'
+        run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --win --x64 --publish never
+      - name: Package Linux Electron directory
+        if: runner.os == 'Linux'
+        run: pnpm --filter @flinttrade/desktop exec electron-builder --dir --linux --x64 --publish never
+      - name: Verify packaged Electron security contract
+        run: pnpm --filter @flinttrade/desktop verify:package

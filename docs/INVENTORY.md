@@ -6,7 +6,7 @@ untested or only partially wired**, or **(c) referenced but not built / blocked*
 It is a living document — update it in the same change that moves a feature
 between buckets.
 
-`v0.6.0-beta.13` is not production ready. The native adapter code for the five
+`v0.0.1` is not production ready. The native adapter code for the five
 founder brokers (Dhan / Upstox / Kotak Neo / INDmoney / Groww) is present and
 mock-tested. Dhan and Upstox are the current connectable native set; INDmoney
 is read-verified with a locally verified fail-closed planner, but remains disabled

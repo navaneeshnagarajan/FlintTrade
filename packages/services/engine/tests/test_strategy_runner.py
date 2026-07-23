@@ -1,15 +1,18 @@
 """Tests for packages/services/engine/src/strategy_runner.py.
 
-Subprocess execution is mocked — we never actually launch Python processes
-in unit tests.  AST validation and file I/O are fully exercised against real
-temporary directories.
+Ordinary subprocess execution is mocked. AST validation and file I/O use real
+temporary directories, and a Linux-only integration test executes the exact
+bubblewrap namespace when that runtime is installed.
 """
 
 from __future__ import annotations
 
+import platform
+import shutil
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,6 +27,7 @@ import pytest
 def runner(tmp_path):
     """UserStrategyRunner backed by a temporary directory."""
     import flinttrade_engine.strategy_runner as _mod
+
     return _mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
 
 
@@ -501,6 +505,97 @@ class TestStartStop:
 
         popen.assert_not_called()
 
+    def test_posix_identity_failure_retains_a_blocked_child_until_adoption(self, runner, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("pending_identity", SAFE_CODE)
+        process = self._make_mock_process(pid=606)
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            patch.object(
+                mod,
+                "_create_process_tree",
+                side_effect=mod._ProcessTreeIdentityError("identity unavailable"),
+            ),
+            patch.object(mod, "_release_strategy_start_gate") as release_gate,
+            pytest.raises(mod._ProcessTreeIdentityError, match="identity unavailable"),
+        ):
+            runner.start(strategy_id)
+
+        entry = runner._running[strategy_id]
+        assert isinstance(entry.tree, mod._PendingPosixProcessGroup)
+        assert (entry.temp_dir / "_start_gate").read_text(encoding="utf-8") == ""
+        assert entry.log_file is not None and not entry.log_file.closed
+        release_gate.assert_not_called()
+        retained_temp_dir = entry.temp_dir
+
+        monkeypatch.setattr(mod, "_read_process_identity", lambda pid: float(pid))
+
+        def signal_group(_pgid: int, signum: int) -> None:
+            if signum == 0 and process.poll() is not None:
+                raise ProcessLookupError
+            if signum != 0:
+                process.poll.return_value = 0
+
+        monkeypatch.setattr(mod.os, "killpg", signal_group)
+        runner.stop(strategy_id)
+
+        assert strategy_id not in runner._running
+        assert retained_temp_dir is not None and not retained_temp_dir.exists()
+
+    def test_start_publishes_the_process_owner_before_releasing_uploaded_code(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("published_before_release", SAFE_CODE)
+        process = self._make_mock_process(pid=607)
+        observed_entry = None
+        original_release = mod._release_strategy_start_gate
+
+        def observed_release(gate_path: Path) -> None:
+            nonlocal observed_entry
+            observed_entry = runner._running[strategy_id]
+            assert observed_entry.process is process
+            assert gate_path.read_text(encoding="utf-8") == ""
+            original_release(gate_path)
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            patch.object(mod, "_release_strategy_start_gate", side_effect=observed_release),
+        ):
+            runner.start(strategy_id)
+
+        assert observed_entry is runner._running[strategy_id]
+        assert (observed_entry.temp_dir / "_start_gate").read_text(encoding="utf-8") == "start\n"
+        self._attach_tree(runner, strategy_id)
+        runner.stop(strategy_id)
+
+    def test_gate_release_failure_retains_the_published_owner_and_resources(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("release_failure", SAFE_CODE)
+        process = self._make_mock_process(pid=608)
+
+        def fail_after_partial_write(gate_path: Path) -> None:
+            gate_path.write_text("sta", encoding="utf-8")
+            raise OSError("gate write failed")
+
+        with (
+            patch("subprocess.Popen", return_value=process),
+            patch.object(mod, "_release_strategy_start_gate", side_effect=fail_after_partial_write),
+            pytest.raises(OSError, match="gate write failed"),
+        ):
+            runner.start(strategy_id)
+
+        entry = runner._running[strategy_id]
+        assert entry.process is process
+        assert entry.log_file is not None and not entry.log_file.closed
+        assert entry.temp_dir is not None and entry.temp_dir.exists()
+        assert (entry.temp_dir / "_start_gate").read_text(encoding="utf-8") == "sta"
+
+        self._attach_tree(runner, strategy_id)
+        runner.stop(strategy_id)
+
     def test_start_refuses_replacement_while_descendant_tree_survives_leader(self, runner):
         strategy_id = runner.upload("surviving_tree", SAFE_CODE)
         first = self._make_mock_process(pid=505, returncode=0)
@@ -702,15 +797,34 @@ class TestStartStop:
         )
         assert runner._running[strategy_id].tree is tree
 
-    def test_frozen_start_uses_child_mode_not_wrapper_script(self, runner):
+    def test_stale_sys_frozen_still_uses_source_sandbox_wrapper(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
-        strategy_id = runner.upload("frozen", SAFE_CODE)
+        strategy_id = runner.upload("source_only", SAFE_CODE)
         mock_proc = self._make_mock_process()
 
         with (
             patch.object(mod.sys, "frozen", True, create=True),
-            patch.object(mod, "_frozen_dispatch_checked", True),
+            patch.object(mod.platform, "system", return_value="Linux"),
+            patch.object(mod, "_is_bwrap_available", return_value=False),
+            patch("subprocess.Popen", return_value=mock_proc) as popen,
+        ):
+            runner.start(strategy_id)
+
+        command = popen.call_args.args[0]
+        assert command[0] == sys.executable
+        assert Path(command[1]).name == "_sandbox_wrapper.py"
+        assert Path(command[2]).name == "_start_gate"
+        assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
+        assert popen.call_args.kwargs["preexec_fn"] is not None
+
+    def test_linux_bwrap_binds_only_the_runtime_wrapper_and_strategy(self, runner):
+        import flinttrade_engine.strategy_runner as mod
+
+        strategy_id = runner.upload("bwrap_source", SAFE_CODE)
+        mock_proc = self._make_mock_process()
+
+        with (
             patch.object(mod.platform, "system", return_value="Linux"),
             patch.object(mod, "_is_bwrap_available", return_value=True),
             patch("subprocess.Popen", return_value=mock_proc) as popen,
@@ -718,145 +832,61 @@ class TestStartStop:
             runner.start(strategy_id)
 
         command = popen.call_args.args[0]
-        assert command[0] == sys.executable
-        assert command[1] == mod.FROZEN_STRATEGY_CHILD_ARG
-        assert command[2] == str(runner._strategies_dir / f"{strategy_id}.py")
-        assert "_sandbox_wrapper.py" not in command
+        separator = command.index("--")
+        sandbox_argv = command[separator + 1 :]
+        entry = runner._running[strategy_id]
+        wrapper = str((entry.temp_dir / "_sandbox_wrapper.py").resolve())
+        start_gate = str((entry.temp_dir / "_start_gate").resolve())
+        strategy = str((runner._strategies_dir / f"{strategy_id}.py").resolve())
+
+        assert command[0] == "bwrap"
+        assert ["--ro-bind", wrapper, "/run/flinttrade-strategy/_sandbox_wrapper.py"] == command[
+            command.index(wrapper) - 1 : command.index(wrapper) + 2
+        ]
+        assert ["--ro-bind", start_gate, "/run/flinttrade-strategy/_start_gate"] == command[
+            command.index(start_gate) - 1 : command.index(start_gate) + 2
+        ]
+        assert ["--ro-bind", strategy, "/run/flinttrade-strategy/strategy.py"] == command[
+            command.index(strategy) - 1 : command.index(strategy) + 2
+        ]
+        assert wrapper not in sandbox_argv
+        assert start_gate not in sandbox_argv
+        assert strategy not in sandbox_argv
+        assert sandbox_argv[0].startswith("/run/flinttrade-python/bin/python")
+        assert sandbox_argv[1:] == [
+            "/run/flinttrade-strategy/_sandbox_wrapper.py",
+            "/run/flinttrade-strategy/_start_gate",
+            "/run/flinttrade-strategy/strategy.py",
+        ]
+        assert "--clearenv" in command
+        assert "--unshare-net" in command
         assert popen.call_args.kwargs["preexec_fn"] is None
 
-    def test_frozen_start_fails_closed_until_parent_checks_dispatch(self, runner):
+    def test_stale_sys_frozen_does_not_expand_windows_job_process_limit(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
-        strategy_id = runner.upload("frozen_unwired", SAFE_CODE)
-        with (
-            patch.object(mod.sys, "frozen", True, create=True),
-            patch.object(mod, "_frozen_dispatch_checked", False, create=True),
-            patch.dict(
-                "os.environ",
-                {
-                    mod.PACKAGED_CHILD_EXECUTABLE_ENV: "",
-                    mod.PACKAGED_CHILD_ARG_ENV: "",
-                },
-            ),
-            patch("subprocess.Popen") as popen,
-            pytest.raises(
-                mod.PackagedChildConfigurationError,
-                match="dispatcher is not installed",
-            ),
-        ):
-            runner.start(strategy_id)
-
-        popen.assert_not_called()
-
-    def test_normal_parent_dispatch_check_arms_frozen_launch(self):
-        import flinttrade_engine.strategy_runner as mod
-
-        with patch.object(mod, "_frozen_dispatch_checked", False, create=True):
-            assert mod.dispatch_frozen_strategy_child([sys.executable]) is False
-            assert mod._frozen_dispatch_checked is True
-
-    def test_frozen_start_uses_parent_published_child_contract(self, runner):
-        import flinttrade_engine.strategy_runner as mod
-
-        strategy_id = runner.upload("frozen_contract", SAFE_CODE)
-        mock_proc = self._make_mock_process()
-        published_executable = "/bundle/flinttrade-backend"
-        boot_id_env = "FLINTTRADE_BOOT_ID"
-        with (
-            patch.object(mod.sys, "frozen", True, create=True),
-            patch.object(mod, "_frozen_dispatch_checked", False),
-            patch.object(mod.platform, "system", return_value="Linux"),
-            patch.dict(
-                "os.environ",
-                {
-                    mod.PACKAGED_CHILD_EXECUTABLE_ENV: published_executable,
-                    mod.PACKAGED_CHILD_ARG_ENV: mod.FROZEN_STRATEGY_CHILD_ARG,
-                    boot_id_env: "c" * 64,
-                },
-            ),
-            patch("subprocess.Popen", return_value=mock_proc) as popen,
-        ):
-            runner.start(strategy_id)
-
-        command = popen.call_args.args[0]
-        assert command[:2] == [published_executable, mod.FROZEN_STRATEGY_CHILD_ARG]
-        assert mod.PACKAGED_CHILD_EXECUTABLE_ENV not in popen.call_args.kwargs["env"]
-        assert mod.PACKAGED_CHILD_ARG_ENV not in popen.call_args.kwargs["env"]
-        assert boot_id_env not in popen.call_args.kwargs["env"]
-
-    def test_frozen_windows_job_allows_bootloader_plus_one_strategy_process(self, runner):
-        import flinttrade_engine.strategy_runner as mod
-
-        strategy_id = runner.upload("frozen_windows", SAFE_CODE)
+        strategy_id = runner.upload("source_windows", SAFE_CODE)
         process = self._make_mock_process(pid=919)
         tree = MagicMock()
         with (
             patch.object(mod.sys, "frozen", True, create=True),
-            patch.object(mod, "_frozen_dispatch_checked", True),
             patch.object(mod.platform, "system", return_value="Windows"),
             patch.object(mod, "_create_process_tree", return_value=tree) as create_tree,
-            patch("subprocess.Popen", return_value=process),
+            patch("subprocess.Popen", return_value=process) as popen,
         ):
             runner.start(strategy_id)
 
+        command = popen.call_args.args[0]
+        assert command[0] == sys.executable
+        assert Path(command[1]).name == "_sandbox_wrapper.py"
+        assert Path(command[2]).name == "_start_gate"
+        assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
         create_tree.assert_called_once_with(
             process,
             "Windows",
             memory_limit_bytes=256 * 1024 * 1024,
-            process_limit=2,
-        )
-
-    def test_frozen_child_dispatch_executes_strategy_without_sidecar_entry(self, tmp_path):
-        import flinttrade_engine.strategy_runner as mod
-
-        strategy_path = tmp_path / "strategy.py"
-        strategy_path.write_text("print('child')\n", encoding="utf-8")
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    mod.STRATEGY_MEMORY_LIMIT_ENV: str(128 * 1024 * 1024),
-                    mod.STRATEGY_PROCESS_LIMIT_ENV: "1",
-                },
-            ),
-            patch.object(mod, "_apply_uploaded_strategy_child_limits") as apply_limits,
-            patch.object(mod, "_execute_uploaded_strategy_file") as execute,
-        ):
-            dispatched = mod.dispatch_frozen_strategy_child(
-                [sys.executable, mod.FROZEN_STRATEGY_CHILD_ARG, str(strategy_path)]
-            )
-
-        assert dispatched is True
-        apply_limits.assert_called_once_with(
-            memory_limit_bytes=128 * 1024 * 1024,
             process_limit=1,
         )
-        execute.assert_called_once_with(strategy_path)
-
-    def test_frozen_windows_child_relies_on_parent_job_limits(self, tmp_path):
-        import flinttrade_engine.strategy_runner as mod
-
-        strategy_path = tmp_path / "strategy.py"
-        strategy_path.write_text("print('child')\n", encoding="utf-8")
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    mod.STRATEGY_MEMORY_LIMIT_ENV: str(128 * 1024 * 1024),
-                    mod.STRATEGY_PROCESS_LIMIT_ENV: "1",
-                },
-            ),
-            patch.object(mod.platform, "system", return_value="Windows"),
-            patch.object(mod, "_apply_uploaded_strategy_child_limits") as apply_limits,
-            patch.object(mod, "_execute_uploaded_strategy_file") as execute,
-        ):
-            dispatched = mod.dispatch_frozen_strategy_child(
-                [sys.executable, mod.FROZEN_STRATEGY_CHILD_ARG, str(strategy_path)]
-            )
-
-        assert dispatched is True
-        apply_limits.assert_not_called()
-        execute.assert_called_once_with(strategy_path)
 
     def test_stop_all_owns_every_uploaded_process(self, runner):
         first_id = runner.upload("first", SAFE_CODE)
@@ -903,6 +933,74 @@ class TestStartStop:
         assert first_entry.temp_dir == first_temp_dir
         assert first_temp_dir.exists()
         second_tree.terminate.assert_called_once_with()
+
+
+@pytest.mark.skipif(
+    platform.system() != "Linux" or shutil.which("bwrap") is None,
+    reason="requires a Linux bubblewrap runtime",
+)
+def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path) -> None:
+    import flinttrade_engine.strategy_runner as mod
+
+    work = tmp_path / "work"
+    work.mkdir()
+    wrapper = mod._create_sandbox_wrapper(work)
+    start_gate = mod._create_strategy_start_gate(work)
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text("print('sandbox-ok')\n", encoding="utf-8")
+    process = subprocess.Popen(  # noqa: S603
+        mod._build_bwrap_command(
+            sys.executable,
+            str(wrapper),
+            str(start_gate),
+            str(strategy),
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd="/",
+        text=True,
+    )
+    try:
+        threading.Event().wait(0.1)
+        assert process.poll() is None
+        mod._release_strategy_start_gate(start_gate)
+        stdout, stderr = process.communicate(timeout=15)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0, stderr
+    assert stdout == "sandbox-ok\n"
+
+
+def test_sandbox_wrapper_blocks_uploaded_code_until_the_parent_releases_it(tmp_path: Path) -> None:
+    import flinttrade_engine.strategy_runner as mod
+
+    work = tmp_path / "work"
+    work.mkdir()
+    wrapper = mod._create_sandbox_wrapper(work)
+    start_gate = mod._create_strategy_start_gate(work)
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text("print('released')\n", encoding="utf-8")
+    process = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(wrapper), str(start_gate), str(strategy)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        threading.Event().wait(0.1)
+        assert process.poll() is None
+        mod._release_strategy_start_gate(start_gate)
+        stdout, stderr = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0, stderr
+    assert stdout == "released\n"
 
 
 # ---------------------------------------------------------------------------

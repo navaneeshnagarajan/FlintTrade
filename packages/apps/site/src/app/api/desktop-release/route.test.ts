@@ -1,21 +1,8 @@
-import { FIXTURE_DESKTOP_RELEASE } from '../../../lib/desktop-release.fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {  DESKTOP_RELEASE_MANIFEST_ASSET } from '../../../lib/desktop-release';
+import { FIXTURE_DESKTOP_RELEASE, FIXTURE_GITHUB_RELEASE } from '../../../lib/desktop-release.fixtures';
+import { GITHUB_RELEASES_URL } from '../../../lib/desktop-release';
 import { GET, OPTIONS } from './route';
-
-const betaRelease = {
-  tag_name: FIXTURE_DESKTOP_RELEASE.tag,
-  prerelease: true,
-  draft: false,
-  published_at: FIXTURE_DESKTOP_RELEASE.published_at,
-  html_url: FIXTURE_DESKTOP_RELEASE.html_url,
-  assets: FIXTURE_DESKTOP_RELEASE.assets.map((asset) => ({
-    name: asset.name,
-    size: asset.size,
-    browser_download_url: asset.url,
-  })),
-};
 
 const stableWithoutDesktopAssets = {
   tag_name: 'v0.5.1',
@@ -31,50 +18,45 @@ describe('/api/desktop-release', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns the beta desktop release assets instead of relying on GitHub latest stable', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json([stableWithoutDesktopAssets, betaRelease])),
+  it('derives the beta Electron release, digests and checksum URL from one GitHub API response', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json([stableWithoutDesktopAssets, FIXTURE_GITHUB_RELEASE]),
     );
+    vi.stubGlobal('fetch', fetchMock);
 
-    const response = await GET(new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'));
-    const manifest = await response.json();
+    const response = await GET(
+      new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'),
+    );
+    const release = await response.json();
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
-    expect(manifest.tag).toBe(FIXTURE_DESKTOP_RELEASE.tag);
-    expect(manifest.assets).toHaveLength(9);
-    expect(manifest.assets).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ os: 'macos', kind: 'dmg' }),
-        expect.objectContaining({ os: 'windows', kind: 'nsis' }),
-        expect.objectContaining({ os: 'linux', kind: 'appimage' }),
-      ]),
+    expect(release).toEqual(FIXTURE_DESKTOP_RELEASE);
+    expect(release.assets).toHaveLength(4);
+    expect(release.assets.every((asset: { sha256?: string }) => /^[a-f0-9]{64}$/.test(asset.sha256 ?? ''))).toBe(
+      true,
     );
+    expect(release.checksum_url).toMatch(/\/v9\.9\.9-beta\.test\/SHA256SUMS\.txt$/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(GITHUB_RELEASES_URL, expect.any(Object));
   });
 
-  it('uses the uploaded desktop manifest when present so checksums reach clients', async () => {
-    const manifestAssetUrl = 'https://downloads.example.invalid/flinttrade-desktop-manifest.json';
-    const manifestWithChecksums = {
-      ...FIXTURE_DESKTOP_RELEASE,
-      assets: FIXTURE_DESKTOP_RELEASE.assets.map((asset, index) => ({
-        ...asset,
-        sha256: `${index}`.repeat(64).slice(0, 64).padEnd(64, 'a'),
-      })),
-    };
+  it('does not fetch or trust the retired uploaded desktop manifest', async () => {
+    const legacyManifestUrl =
+      'https://github.com/navaneeshnagarajan/FlintTrade/releases/download/v9.9.9-beta.test/flinttrade-desktop-manifest.json';
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === manifestAssetUrl) return Response.json(manifestWithChecksums);
+      if (String(input) !== GITHUB_RELEASES_URL) {
+        throw new Error(`unexpected second fetch: ${String(input)}`);
+      }
       return Response.json([
-        stableWithoutDesktopAssets,
         {
-          ...betaRelease,
+          ...FIXTURE_GITHUB_RELEASE,
           assets: [
-            ...betaRelease.assets,
+            ...(FIXTURE_GITHUB_RELEASE.assets ?? []),
             {
-              name: DESKTOP_RELEASE_MANIFEST_ASSET,
+              name: 'flinttrade-desktop-manifest.json',
               size: 1024,
-              browser_download_url: manifestAssetUrl,
+              browser_download_url: legacyManifestUrl,
             },
           ],
         },
@@ -82,50 +64,24 @@ describe('/api/desktop-release', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await GET(new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'));
-    const manifest = await response.json();
+    const response = await GET(
+      new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'),
+    );
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(manifestAssetUrl, expect.any(Object));
-    expect(manifest.assets[0].sha256).toMatch(/^[a-f0-9]{64}$/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toEqual(FIXTURE_DESKTOP_RELEASE);
   });
 
-  it('fails closed when a published desktop manifest asset is invalid', async () => {
-    const manifestAssetUrl = 'https://downloads.example.invalid/flinttrade-desktop-manifest.json';
+  it('does not fall back to beta when stable has no complete Electron release', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input) === manifestAssetUrl) return Response.json({ tag: FIXTURE_DESKTOP_RELEASE.tag, assets: [] });
-        return Response.json([
-          {
-            ...betaRelease,
-            assets: [
-              ...betaRelease.assets,
-              {
-                name: DESKTOP_RELEASE_MANIFEST_ASSET,
-                size: 1024,
-                browser_download_url: manifestAssetUrl,
-              },
-            ],
-          },
-        ]);
-      }),
+      vi.fn(async () => Response.json([stableWithoutDesktopAssets, FIXTURE_GITHUB_RELEASE])),
     );
 
-    const response = await GET(new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'));
-    const body = await response.json();
-
-    expect(response.status).toBe(503);
-    expect(body.error).toMatch(/Published desktop manifest/i);
-  });
-
-  it('does not fall back to beta when the stable channel has no desktop installers', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json([stableWithoutDesktopAssets, betaRelease])),
+    const response = await GET(
+      new Request('https://flinttrade.vercel.app/api/desktop-release?channel=stable'),
     );
-
-    const response = await GET(new Request('https://flinttrade.vercel.app/api/desktop-release?channel=stable'));
     const body = await response.json();
 
     expect(response.status).toBe(404);
@@ -135,7 +91,9 @@ describe('/api/desktop-release', () => {
   it('fails closed when GitHub release lookup fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429 })));
 
-    const response = await GET(new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'));
+    const response = await GET(
+      new Request('https://flinttrade.vercel.app/api/desktop-release?channel=beta'),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(503);

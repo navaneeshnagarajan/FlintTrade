@@ -41,11 +41,13 @@ allowlist:
   # installers ships it to OTHER people, which a use-clearance does not authorise
   # while the upstream repo carries no LICENSE file (all-rights-reserved by default,
   # confirmed 2026-07-06: GitHub reports license=null, no LICENSE in the repo root).
-  # So neo_api_client stays EXCLUDED from the PyInstaller sidecar
-  # (packaging/flinttrade-backend.spec) and the adapter fails closed to dormant when
-  # the SDK is absent; desktop operators who want Kotak native connect install it
-  # themselves under their own clearance. Revisit if Kotak adds a redistribution
-  # licence (MIT/Apache) or grants explicit bundling terms.
+  # So neo_api_client stays EXCLUDED from published desktop shell installers.
+  # The operator-directed source bootstrap installs it locally from the exact
+  # brokers.lock-pinned upstream commit as part of the operator-owned checkout;
+  # FlintTrade does not embed or redistribute that SDK in an installer. This local
+  # install relies on the operator USE-clearance above. Revisit installer bundling
+  # only if Kotak adds a redistribution licence (MIT/Apache) or grants explicit
+  # bundling terms.
   - "LicenseRef-operator-cleared-broker-sdk"
 
 # Explicit denylist for clarity. The gate is the positive allowlist check; this

@@ -21,7 +21,6 @@ PACKAGE_JSONS = [
 
 CARGO_MANIFESTS = [
     "packages/core/ticks/Cargo.toml",
-    "packages/apps/desktop/src-tauri/Cargo.toml",
 ]
 
 CURRENT_TAG_FILES = [
@@ -89,7 +88,9 @@ def _stale_current_pattern(version_tag: str) -> "re.Pattern[str] | None":
     if suffix is None:
         return re.compile(rf"\bv?{family}\.\d+\b")
     return re.compile(rf"\bv?{family}(?!\.{re.escape(suffix)}\b)\b")
-SEMVER_WITH_PRERELEASE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$")
+SEMVER_IDENTIFIER = r"(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+RELEASE_VERSION_PATTERN = rf"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-{SEMVER_IDENTIFIER}(?:\.{SEMVER_IDENTIFIER})*)?"
+SEMVER_WITH_PRERELEASE = re.compile(rf"^v?{RELEASE_VERSION_PATTERN}$")
 
 
 def _read_json(path: str) -> object:
@@ -126,15 +127,30 @@ def main() -> int:
         assert isinstance(package, dict)
         _fail(failures, f"{path} version", package.get("version"), bare_version)
 
+    desktop_package = _read_json("packages/apps/desktop/package.json")
+    assert isinstance(desktop_package, dict)
+    desktop_dependencies = desktop_package.get("devDependencies")
+    desktop_build = desktop_package.get("build")
+    assert isinstance(desktop_dependencies, dict)
+    assert isinstance(desktop_build, dict)
+    electron_version = desktop_dependencies.get("electron")
+    if not isinstance(electron_version, str) or re.fullmatch(r"\d+\.\d+\.\d+", electron_version) is None:
+        failures.append(
+            "packages/apps/desktop/package.json devDependencies.electron must be an exact version"
+        )
+    else:
+        _fail(
+            failures,
+            "packages/apps/desktop/package.json build.electronVersion",
+            desktop_build.get("electronVersion"),
+            electron_version,
+        )
+
     for path in sorted((ROOT / "packages").glob("*/*/pyproject.toml")):
         data = _read_toml(str(path.relative_to(ROOT)))
         project = data.get("project")
         if isinstance(project, dict):
             _fail(failures, f"{path.relative_to(ROOT)} project.version", project.get("version"), bare_version)
-
-    tauri = _read_json("packages/apps/desktop/src-tauri/tauri.conf.json")
-    assert isinstance(tauri, dict)
-    _fail(failures, "desktop tauri.conf.json version", tauri.get("version"), bare_version)
 
     for path in CARGO_MANIFESTS:
         data = _read_toml(path)

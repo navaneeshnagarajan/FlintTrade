@@ -80,23 +80,7 @@ const setupDocs = [
 ];
 
 const releaseDocs = [
-  ['docs/releases/v0.6.0-beta.13.md', 'releases/v0.6.0-beta.13', 'Releases', 'FlintTrade v0.6.0-beta.13 release notes'],
-  ['docs/releases/v0.6.0-beta.12.md', 'releases/v0.6.0-beta.12', 'Releases', 'FlintTrade v0.6.0-beta.12 release notes'],
-  ['docs/releases/v0.6.0-beta.11.md', 'releases/v0.6.0-beta.11', 'Releases', 'FlintTrade v0.6.0-beta.11 release notes'],
-  ['docs/releases/v0.6.0-beta.10.md', 'releases/v0.6.0-beta.10', 'Releases', 'FlintTrade v0.6.0-beta.10 release notes'],
-  ['docs/releases/v0.6.0-beta.9.md', 'releases/v0.6.0-beta.9', 'Releases', 'FlintTrade v0.6.0-beta.9 release notes'],
-  ['docs/releases/v0.6.0-beta.8.md', 'releases/v0.6.0-beta.8', 'Releases', 'FlintTrade v0.6.0-beta.8 release notes'],
-  ['docs/releases/v0.6.0-beta.7.md', 'releases/v0.6.0-beta.7', 'Releases', 'FlintTrade v0.6.0-beta.7 release notes'],
-  ['docs/releases/v0.6.0-beta.6.md', 'releases/v0.6.0-beta.6', 'Releases', 'FlintTrade v0.6.0-beta.6 release notes'],
-  ['docs/releases/v0.6.0-beta.5.md', 'releases/v0.6.0-beta.5', 'Releases', 'FlintTrade v0.6.0-beta.5 release notes'],
-  ['docs/releases/v0.6.0-beta.4.md', 'releases/v0.6.0-beta.4', 'Releases', 'FlintTrade v0.6.0-beta.4 release notes'],
-  ['docs/releases/v0.6.0-beta.3.md', 'releases/v0.6.0-beta.3', 'Releases', 'FlintTrade v0.6.0-beta.3 release notes'],
-  ['docs/releases/v0.6.0-beta.2.md', 'releases/v0.6.0-beta.2', 'Releases', 'FlintTrade v0.6.0-beta.2 release notes'],
-  ['docs/releases/v0.6.0-beta.1.md', 'releases/v0.6.0-beta.1', 'Releases', 'FlintTrade v0.6.0-beta.1 release notes'],
-  ['docs/releases/v0.6.0-beta.md', 'releases/v0.6.0-beta', 'Releases', 'FlintTrade v0.6.0 beta release notes'],
-  ['docs/releases/v0.6.0-alpha.md', 'releases/v0.6.0-alpha', 'Releases', 'FlintTrade v0.6.0 alpha release notes'],
-  ['docs/releases/v0.5.2-dev.md', 'releases/v0.5.2-dev', 'Releases', 'FlintTrade v0.5.2 development notes'],
-  ['docs/releases/v0.5.1.md', 'releases/v0.5.1', 'Releases', 'FlintTrade v0.5.1 release notes'],
+  ['docs/releases/v0.0.1.md', 'releases/v0.0.1', 'Releases', 'FlintTrade v0.0.1 release notes'],
 ];
 const releasePages = releaseDocs.map(([, slug]) => slug.replace(/^releases\//, ''));
 

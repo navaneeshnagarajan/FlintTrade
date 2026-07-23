@@ -74,4 +74,6 @@ def test_package_manager_pinned_with_sha512() -> None:
     pkg = json.loads((_REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     pm = pkg.get("packageManager", "")
     assert pm.startswith("pnpm@"), f"packageManager not pinned to pnpm: {pm!r}"
-    assert "+sha512-" in pm, "packageManager missing sha512 integrity (Security H13)"
+    assert re.fullmatch(r"pnpm@\d+\.\d+\.\d+\+sha512\.[0-9a-f]{128}", pm), (
+        "packageManager missing canonical sha512 integrity (Security H13)"
+    )

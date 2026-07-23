@@ -1,0 +1,245 @@
+:root {
+  --bg: #0b0d12;
+  --fg: #e6e8ee;
+  --muted: #8b91a1;
+  /* Brand green — matches the design-system flint spark (#22c55e / #4ade80)
+     and the terminal's Graphite accent, so the splash and the app are one
+     continuous brand surface. */
+  --accent: #22c55e;
+  --accent-2: #4ade80;
+  --error: #ff7a59;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(34, 197, 94, 0.1), transparent 60%),
+    var(--bg);
+}
+
+.mark {
+  width: 64px;
+  height: 64px;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+/* The real FlintTrade flint mark (F letterform + faceted green spark),
+   identical geometry to design-system/src/brand/Logo.tsx. */
+.mark svg {
+  width: 44px;
+  height: 44px;
+  filter: drop-shadow(0 0 18px rgba(34, 197, 94, 0.45));
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(34, 197, 94, 0.16);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+.title {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+
+.phase {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  min-height: 17px;
+}
+
+.status {
+  font-size: 12.5px;
+  color: var(--muted);
+  min-height: 16px;
+  max-width: 380px;
+  text-align: center;
+}
+
+/* First-run bootstrap and source-backend startup progress. */
+.progress {
+  width: 260px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(139, 145, 161, 0.18);
+  overflow: hidden;
+  display: none;
+}
+
+.progress.visible {
+  display: block;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.25s ease;
+}
+
+.progress.indeterminate .progress-fill {
+  animation: travel 1.35s ease-in-out infinite;
+}
+
+/* Bootstrap failure: actionable error state with a Retry button. */
+.error {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 380px;
+  text-align: center;
+}
+
+.error.visible {
+  display: flex;
+}
+
+.error-message {
+  font-size: 12.5px;
+  color: var(--error);
+  line-height: 1.5;
+}
+
+.actions {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 400px;
+}
+
+.actions.visible {
+  display: flex;
+}
+
+.action {
+  display: none;
+  min-height: 34px;
+  padding: 0 16px;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  border-radius: 6px;
+  color: var(--fg);
+  font: 600 12.5px "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  cursor: pointer;
+}
+
+.action.visible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action.primary {
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.action.primary:hover {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.action.secondary {
+  background: rgba(139, 145, 161, 0.1);
+  border-color: rgba(139, 145, 161, 0.35);
+}
+
+.action.danger {
+  background: rgba(255, 122, 89, 0.1);
+  border-color: rgba(255, 122, 89, 0.42);
+}
+
+.action:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.action-status {
+  flex-basis: 100%;
+  min-height: 15px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+body.errored .ring {
+  animation-play-state: paused;
+  border-top-color: var(--error);
+}
+
+body.errored .mark svg {
+  animation-play-state: paused;
+}
+
+body.errored .status,
+body.errored .progress {
+  display: none;
+}
+
+body.errored .phase {
+  color: var(--error);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(0.92);
+    opacity: 0.82;
+  }
+}
+
+@keyframes travel {
+  0% {
+    transform: translateX(-130%);
+  }
+  50% {
+    transform: translateX(90%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

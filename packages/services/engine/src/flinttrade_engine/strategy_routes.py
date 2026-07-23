@@ -18,7 +18,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 from flinttrade_core.rate_limiter import rate_limit
 
 from .mode_guard import require_non_explore
-from .strategy_runner import PackagedChildConfigurationError, StrategyNotRunningError
+from .strategy_runner import StrategyNotRunningError
 
 logger = logging.getLogger("flinttrade.engine.strategy_routes")
 
@@ -202,18 +202,6 @@ def start_strategy(strategy_id: str) -> Response:
         runner.start(strategy_id)
     except FileNotFoundError:
         return jsonify({"status": "error", "message": "Requested resource was not found"}), 404
-    except PackagedChildConfigurationError as exc:
-        logger.error("Packaged strategy launcher is unavailable for %s: %s", strategy_id, exc)
-        return (
-            jsonify(
-                {
-                    "status": "error",
-                    "code": "packaged_child_unavailable",
-                    "message": "Packaged strategy launcher is unavailable. Restart FlintTrade and try again.",
-                }
-            ),
-            503,
-        )
     except RuntimeError:
         return jsonify({"status": "error", "message": "Request conflicts with the current state"}), 409
     except Exception:

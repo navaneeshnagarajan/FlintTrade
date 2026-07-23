@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, jsonify
+from flinttrade_core.source_root import discover_source_root
 
 logger = logging.getLogger("flinttrade.screener.ipo_routes")
 
@@ -28,7 +29,13 @@ ipo_bp = Blueprint("ipo", __name__, url_prefix="/api/v1")
 # Data file path
 # ---------------------------------------------------------------------------
 
-_DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "ipo_calendar.json"
+def _default_ipo_data_file(module_file: Path | str | None = None) -> Path:
+    """Return the IPO calendar path inside the managed source checkout."""
+    source_root = discover_source_root(module_file=module_file or __file__)
+    return source_root / "packages" / "services" / "screener" / "data" / "ipo_calendar.json"
+
+
+_DATA_FILE = _default_ipo_data_file()
 
 # ---------------------------------------------------------------------------
 # In-memory cache (1 hour TTL)

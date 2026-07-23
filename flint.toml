@@ -4,7 +4,7 @@
 
 [project]
 name = "FlintTrade"
-version = "v0.6.0-beta.13"
+version = "v0.0.1"
 description = "Open-source self-hosted trading software with native backend and optional OpenAlgo-compatible integration"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
@@ -29,7 +29,7 @@ gateway = { path = "packages/integrations/gateway", lang = "python", description
 webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "TradingView, ChartInk, custom webhooks, and flow builder" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
-desktop = { path = "packages/apps/desktop", lang = "rust", description = "Tauri 2 native shell — backend sidecar + terminal in one cross-OS installer, close-to-tray background runtime" }
+desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 40 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }
 
 [groups]
 core = ["core", "data", "historical", "indicators", "ticks", "design-system"]

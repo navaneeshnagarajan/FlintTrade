@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import runpy
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -254,63 +257,339 @@ def test_server_installers_use_live_backend_entrypoint_and_optional_openalgo() -
 
 
 def test_desktop_release_workflow_is_manual_and_fail_closed() -> None:
-    """Desktop release CI runs only on explicit dispatch and fails if installers are missing."""
+    """Electron release CI publishes exactly the supported installers and provenance."""
     workflow = (ROOT / ".github" / "workflows" / "desktop-release.yml").read_text(encoding="utf-8")
-    desktop_docs = (ROOT / "docs" / "DESKTOP.md").read_text(encoding="utf-8")
+    release_please = (ROOT / ".github" / "workflows" / "release-please.yml").read_text(encoding="utf-8")
     vuln_refresh = (ROOT / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
 
     assert "workflow_dispatch:" in workflow
     assert "description: 'Release tag to publish under" in workflow
+    assert "expected_sha:" in workflow
+    assert "Required when publishing" in workflow
     assert "push:" not in workflow
     assert "tags:" not in workflow
+    assert "group: desktop-release-${{ inputs.tag || github.ref }}" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "Verify release tag matches package version" in workflow
     assert "DESKTOP_VERSION" in workflow
-    assert "TAURI_VERSION" in workflow
+    assert "VERSION_TAG" in workflow
+    assert "TAURI_VERSION" not in workflow
     assert "Release version mismatch" in workflow
     assert "Release tag $RELEASE_TAG points at $TAG_COMMIT" in workflow
-    assert "not this workflow run's commit $GITHUB_SHA" in workflow
-    assert "runner: macos-15-intel" in workflow
-    assert "runner: macos-13" not in workflow
-    assert "BUNDLE_ARGS+=(--bundles nsis)" in workflow
-    assert "WiX/MSI rejects beta SemVer" in workflow
-    assert "macOS Intel has no compatible llvmlite wheel" in workflow
-    assert "uv sync --frozen --extra desktop" in workflow
+    assert "not this workflow run's immutable commit $GITHUB_SHA" in workflow
+    assert "historical tags are never rebuilt" in workflow
+    assert "merge-base --is-ancestor" not in workflow
+    assert "source_sha: ${{ steps.release.outputs.source_sha }}" in workflow
+    assert 'echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"' in workflow
+    assert workflow.count("ref: ${{ needs.validate.outputs.source_sha }}") >= 2
+    assert workflow.count("Verify immutable tag and empty target release") == 1
+    assert workflow.count("ASSET_COUNT=") == 2
+    assert workflow.count("git fetch --force --no-tags origin") >= 3
+    for label in ("macos-universal", "windows-x64", "linux-x64", "linux-arm64"):
+        assert f"label: {label}" in workflow
+    for name in (
+        "FlintTrade-${VERSION}-mac-universal.dmg",
+        "FlintTrade-${VERSION}-win-x64.exe",
+        "FlintTrade-${VERSION}-linux-x64.AppImage",
+        "FlintTrade-${VERSION}-linux-arm64.AppImage",
+    ):
+        assert name in workflow
+    assert "SHA256SUMS.txt" in workflow
+    assert "actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1" in workflow
+    assert "permissions:\n  contents: read" in workflow
+    publish_job = workflow.split("\n  publish:\n", 1)[1]
+    assert "permissions:\n      contents: write\n      attestations: write\n      id-token: write" in publish_job
+    assert "attestations: write" in workflow
+    assert "id-token: write" in workflow
+    assert "APPLE_CERTIFICATE" in workflow
+    assert "APPLE_SIGNING_IDENTITY" in workflow
+    assert 'MAC_IDENTITY="-"' in workflow
+    assert "MAC_HARDENED_RUNTIME=false" in workflow
+    assert "--config.mac.hardenedRuntime=\"$MAC_HARDENED_RUNTIME\"" in workflow
+    assert "FLINTTRADE_REQUIRE_DISTRIBUTION_SIGNATURE=1" in workflow
+    assert 'if [[ "$MAC_IDENTITY" != "-" && "$present" -ne 3 ]]' in workflow
+    assert "Distribution-signed macOS releases require the complete Apple notarisation secret trio." in workflow
     assert 'if-no-files-found: error' in workflow
     assert 'fail_on_unmatched_files: true' in workflow
-    # Prerelease is derived from the tag (a '-' suffix ⇒ beta ⇒ prerelease) so a
-    # stable release is not wrongly flagged prerelease; beta tags still are.
-    assert "prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}" in workflow
-    assert 'prerelease = "-" in version' in workflow
-    assert 'overwrite_files: true' in workflow
+    assert "prerelease: ${{ contains(inputs.tag, '-') }}" in workflow
+    assert "target_commitish: ${{ needs.validate.outputs.source_sha }}" in workflow
+    assert 'overwrite_files: false' in workflow
+    assert 'overwrite_files: true' not in workflow
+    assert "Re-verify immutable tag and exact published asset set" in workflow
+    assert "Published release asset set is not canonical" in workflow
+    assert "--method DELETE" not in workflow
+    assert "Retire non-canonical" not in workflow
     assert "No installers were produced" in workflow
+    assert "sha: ${{ steps.release.outputs.sha }}" in release_please
+    assert "EXPECTED_SHA: ${{ needs.release-please.outputs.sha }}" in release_please
+    assert '--ref "$RELEASE_TAG"' in release_please
+    assert '-f expected_sha="$EXPECTED_SHA"' in release_please
+    forbidden_release_paths = (
+        "src-tauri",
+        "cargo",
+        "rust-toolchain",
+        "rust-cache",
+        "setup-python",
+        "python",
+        "setup-uv",
+        "pyinstaller",
+        "payload",
+        "minisign",
+        "latest.json",
+        "flinttrade-desktop-manifest",
+        "updater-beta",
+        "updater-stable",
+        "uv sync",
+    )
+    lower_workflow = workflow.lower()
+    for token in forbidden_release_paths:
+        assert token not in lower_workflow
     assert "--output \"supply-chain/vuln-snapshot-${DATE}.json\" || true" not in vuln_refresh
     assert "pip-audit did not write a usable snapshot" in vuln_refresh
     assert "exit 1" in vuln_refresh
     assert "pip-audit failed with status" in vuln_refresh
-    assert "dispatched automatically by `release-please.yml`" in desktop_docs
-    assert "Releases publish non-draft" in desktop_docs
-    assert "macOS x64 (`macos-15-intel`)" in desktop_docs
-    assert "macOS x64 (`macos-13`)" not in desktop_docs
-    assert "### Windows (`.exe`)" in desktop_docs
-    assert "does not publish\n  MSI assets" in desktop_docs
+
+
+def test_migration_workflows_pin_every_action_to_a_full_commit_sha() -> None:
+    """Mutable action tags must not control release artefacts or migration CI."""
+    workflow_names = (
+        "desktop-release.yml",
+        "nightly-cross-platform.yml",
+        "release-please.yml",
+        "supply-chain.yml",
+        "test.yml",
+    )
+    unpinned: list[str] = []
+    for name in workflow_names:
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        for action, reference in re.findall(r"uses:\s+([^@\s]+)@([^\s#]+)", text):
+            if re.fullmatch(r"[0-9a-f]{40}", reference) is None:
+                unpinned.append(f"{name}: {action}@{reference}")
+
+    assert unpinned == []
+
+
+def test_ci_runs_electron_desktop_build_and_cross_platform_package_smoke() -> None:
+    """Frequent and nightly desktop gates exercise Electron, not the retired Rust shell."""
+    test_workflow = (WORKFLOWS / "test.yml").read_text(encoding="utf-8")
+    nightly = (WORKFLOWS / "nightly-cross-platform.yml").read_text(encoding="utf-8")
+
+    assert "electron-desktop-tests:" in test_workflow
+    for command in ("typecheck", "test:electron", "bundle", "verify:package"):
+        assert command in test_workflow
+    assert "electron-builder --dir --linux --x64" in test_workflow
+    assert "rust-desktop-tests:" not in test_workflow
+    assert "packages/apps/desktop/src-tauri" not in test_workflow
+
+    assert "desktop-electron-package-smoke:" in nightly
+    for runner in ("macos-latest", "windows-latest", "ubuntu-latest"):
+        assert runner in nightly
+    for command in (
+        "electron-builder --dir --mac",
+        "electron-builder --dir --win --x64",
+        "electron-builder --dir --linux --x64",
+        "verify:package",
+    ):
+        assert command in nightly
+    assert "electron-builder --dir --mac --universal" in nightly
+    assert "desktop-rust-tests:" not in nightly
+    assert "packages/apps/desktop/src-tauri" not in nightly
+
+
+def test_native_promoter_harnesses_are_required_after_bundle() -> None:
+    """Every packaging lane must exercise the native promoter it just bundled."""
+    bundle = "pnpm --filter @flinttrade/desktop bundle"
+    posix_harness = (
+        "pnpm --filter @flinttrade/desktop exec node "
+        "scripts/run-required-atomic-promoter-test.mjs"
+    )
+    windows_harness = "pnpm --filter @flinttrade/desktop test:windows-source-fs"
+
+    workflows: dict[str, dict[str, object]] = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(document, dict), path
+        workflows[path.name] = document
+
+    required_posix = {
+        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-22.04"),
+        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-22.04"),
+        ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
+            "runner.os != 'Windows'",
+            None,
+        ),
+        ("desktop-release.yml", "build"): ("runner.os != 'Windows'", None),
+    }
+    required_windows = {
+        ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): "runner.os == 'Windows'",
+        ("desktop-release.yml", "build"): "matrix.label == 'windows-x64'",
+    }
+    observed_posix: list[tuple[str, str, object]] = []
+    observed_windows: list[tuple[str, str, object]] = []
+
+    for workflow_name, workflow in workflows.items():
+        jobs = workflow.get("jobs")
+        assert isinstance(jobs, dict), workflow_name
+        for job_name, raw_job in jobs.items():
+            if not isinstance(raw_job, dict):
+                continue
+            steps = raw_job.get("steps", [])
+            assert isinstance(steps, list), f"{workflow_name}:{job_name}"
+            for raw_step in steps:
+                if not isinstance(raw_step, dict):
+                    continue
+                run = raw_step.get("run")
+                if run == posix_harness:
+                    observed_posix.append((workflow_name, str(job_name), raw_step.get("if")))
+                if isinstance(run, str) and windows_harness in run:
+                    observed_windows.append((workflow_name, str(job_name), raw_step.get("if")))
+
+    assert sorted(observed_posix) == sorted(
+        (workflow_name, job_name, condition)
+        for (workflow_name, job_name), (condition, _runner) in required_posix.items()
+    )
+    assert sorted(observed_windows) == sorted(
+        (workflow_name, job_name, condition)
+        for (workflow_name, job_name), condition in required_windows.items()
+    )
+
+    for (workflow_name, job_name), (condition, runner) in required_posix.items():
+        jobs = workflows[workflow_name]["jobs"]
+        assert isinstance(jobs, dict)
+        job = jobs[job_name]
+        assert isinstance(job, dict)
+        if runner is not None:
+            assert job.get("runs-on") == runner
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        bundle_indexes = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("run") == bundle]
+        harness_steps = [
+            (index, step)
+            for index, step in enumerate(steps)
+            if isinstance(step, dict) and step.get("run") == posix_harness
+        ]
+        assert len(bundle_indexes) == 1, f"{workflow_name}:{job_name}"
+        assert len(harness_steps) == 1, f"{workflow_name}:{job_name}"
+        harness_index, harness_step = harness_steps[0]
+        assert bundle_indexes[0] < harness_index
+        assert harness_step.get("if") == condition
+        assert harness_step.get("continue-on-error") is not True
+
+    for (workflow_name, job_name), condition in required_windows.items():
+        jobs = workflows[workflow_name]["jobs"]
+        assert isinstance(jobs, dict)
+        job = jobs[job_name]
+        assert isinstance(job, dict)
+        steps = job.get("steps")
+        assert isinstance(steps, list)
+        bundle_indexes = [index for index, step in enumerate(steps) if isinstance(step, dict) and step.get("run") == bundle]
+        harness_steps = [
+            (index, step)
+            for index, step in enumerate(steps)
+            if isinstance(step, dict) and step.get("run") == windows_harness
+        ]
+        assert len(bundle_indexes) == 1, f"{workflow_name}:{job_name}"
+        assert len(harness_steps) == 1, f"{workflow_name}:{job_name}"
+        harness_index, harness_step = harness_steps[0]
+        assert bundle_indexes[0] < harness_index
+        assert harness_step.get("if") == condition
+        assert harness_step.get("continue-on-error") is not True
+
+    release_jobs = workflows["desktop-release.yml"]["jobs"]
+    assert isinstance(release_jobs, dict)
+    release_build = release_jobs["build"]
+    assert isinstance(release_build, dict)
+    release_steps = release_build["steps"]
+    assert isinstance(release_steps, list)
+    rebind_steps = [
+        step
+        for step in release_steps
+        if isinstance(step, dict)
+        and step.get("name") == "Rebuild and bind the macOS native promoter to the release identity"
+    ]
+    assert len(rebind_steps) == 1
+    rebind = rebind_steps[0]
+    assert rebind.get("if") == "runner.os == 'macOS'"
+    assert rebind.get("continue-on-error") is not True
+    rebind_run = rebind.get("run")
+    assert isinstance(rebind_run, str)
+    rebind_lines = [line.strip() for line in rebind_run.splitlines() if line.strip()]
+    identity_assignment = 'FLINTTRADE_NATIVE_MAC_IDENTITY="$MAC_IDENTITY" \\'
+    keychain_assignment = 'FLINTTRADE_NATIVE_MAC_KEYCHAIN="${CSC_KEYCHAIN:-}" \\'
+    assert (
+        rebind_lines.index(identity_assignment)
+        < rebind_lines.index(keychain_assignment)
+        < rebind_lines.index(bundle)
+        < rebind_lines.index(posix_harness)
+    )
 
 
 def test_release_versions_are_aligned() -> None:
-    """Release tags, package metadata, and desktop installer metadata should agree."""
+    """Release tags and Electron package metadata should agree."""
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     root_package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     desktop_package = json.loads((ROOT / "packages" / "apps" / "desktop" / "package.json").read_text(encoding="utf-8"))
-    tauri_config = json.loads(
-        (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"),
-    )
 
     assert version.startswith("v")
     bare_version = version.removeprefix("v")
     assert root_package["version"] == bare_version
     assert desktop_package["version"] == bare_version
-    assert tauri_config["version"] == bare_version
+    electron_version = desktop_package["devDependencies"]["electron"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", electron_version)
+    assert desktop_package["build"]["electronVersion"] == electron_version
+    nsis = desktop_package["build"]["nsis"]
+    assert nsis["oneClick"] is True
+    assert nsis["perMachine"] is False
+    assert "allowToChangeInstallationDirectory" not in nsis
+    assert nsis["uninstallDisplayName"] == "FlintTrade"
     for pyproject in sorted(ROOT.glob("packages/*/*/pyproject.toml")):
         assert f'version = "{bare_version}"' in pyproject.read_text(encoding="utf-8"), pyproject
+
+
+def test_version_scripts_do_not_mutate_retired_desktop_metadata() -> None:
+    """Version propagation treats package.json as the Electron desktop authority."""
+    checker = (ROOT / "scripts" / "check-version-consistency.py").read_text(encoding="utf-8")
+    apply_version = (ROOT / "scripts" / "apply-version.py").read_text(encoding="utf-8")
+
+    assert '"packages/apps/desktop/package.json"' in checker
+    assert "electronVersion" in checker
+    assert "src-tauri" not in checker
+    assert "src-tauri" not in apply_version
+    assert "flinttrade-desktop" not in apply_version
+
+
+def test_version_scripts_enforce_strict_release_semver_and_truthful_channel_copy() -> None:
+    """Release propagation must agree with downstream release discovery."""
+    checker = runpy.run_path(str(ROOT / "scripts" / "check-version-consistency.py"))
+    apply_version = runpy.run_path(str(ROOT / "scripts" / "apply-version.py"))
+    checker_pattern = checker["SEMVER_WITH_PRERELEASE"]
+    tag_pattern = apply_version["TAG_RE"]
+
+    for tag in ("v0.6.0", "v0.6.0-beta.14", "v10.20.30-beta.preview-1"):
+        assert checker_pattern.fullmatch(tag), tag
+        assert tag_pattern.fullmatch(tag), tag
+    for tag in (
+        "v01.2.3",
+        "v1.02.3",
+        "v1.2.03",
+        "v1.2.3-01",
+        "v1.2.3-beta..1",
+        "v1.2.3-beta.",
+    ):
+        assert checker_pattern.fullmatch(tag) is None, tag
+        assert tag_pattern.fullmatch(tag) is None, tag
+
+    disclaimer = apply_version["_release_disclaimer"]
+    assert "beta prerelease" in disclaimer("v0.7.0-beta.1")
+    # Pre-1.0 (0.x) is never labelled stable: SemVer treats 0.x as unstable and
+    # FlintTrade marks every 0.x release as a GitHub pre-release.
+    assert "pre-release" in disclaimer("v0.7.0")
+    assert "stable release" not in disclaimer("v0.7.0")
+    assert "beta prerelease" not in disclaimer("v0.7.0")
+    assert "not production ready" in disclaimer("v0.7.0")
+    # A post-1.0 non-prerelease tag is the only thing labelled a stable release.
+    assert "stable release" in disclaimer("v1.2.3")
+    assert "not production ready" not in disclaimer("v1.2.3")
 
 
 def test_version_consistency_guard_passes() -> None:
@@ -342,38 +621,24 @@ def test_current_beta_release_note_exists() -> None:
     assert f"docs/releases/{version}.md" in site_generator
 
 
-def test_supply_chain_covers_desktop_rust_lockfile() -> None:
-    """Rust audit CI should cover the desktop installer lockfile as well as ticks."""
+def test_supply_chain_audits_ticks_and_verifies_electron_package() -> None:
+    """Supply-chain CI retains tick Cargo audit and verifies the Electron directory."""
     workflow = (ROOT / ".github" / "workflows" / "supply-chain.yml").read_text(encoding="utf-8")
     cargo_allowlist = (ROOT / "supply-chain" / "cargo-audit-allowlist.yml").read_text(encoding="utf-8")
     cargo_script = (ROOT / "scripts" / "cargo-audit-with-allowlist.py").read_text(encoding="utf-8")
-    desktop_manifest = (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "Cargo.toml").read_text(
-        encoding="utf-8",
-    )
-    desktop_lock = (ROOT / "packages" / "apps" / "desktop" / "src-tauri" / "Cargo.lock").read_text(
-        encoding="utf-8",
-    )
-    vendored_plist_manifest = (ROOT / "supply-chain" / "vendor" / "plist-1.9.0" / "Cargo.toml").read_text(
-        encoding="utf-8",
-    )
-    vendored_plist_note = (ROOT / "supply-chain" / "vendor" / "plist-1.9.0" / "FLINTTRADE_PATCH.md").read_text(
-        encoding="utf-8",
-    )
 
     assert "scripts/cargo-audit-with-allowlist.py" in workflow
     assert "--manifest-dir packages/core/ticks" in workflow
-    assert "--manifest-dir packages/apps/desktop/src-tauri" in workflow
-    assert "packages/apps/desktop/src-tauri/cargo-audit-report.json" in workflow
-    assert "RUSTSEC-2024-0429" in cargo_allowlist
-    assert "glib" in cargo_allowlist
-    assert "expires:" in cargo_allowlist
+    assert "packages/core/ticks/cargo-audit-report.json" in workflow
+    assert "packages/apps/desktop/src-tauri" not in workflow
+    assert "electron-package-verification:" in workflow
+    assert "electron-builder --dir --linux --x64" in workflow
+    assert "verify:package" in workflow
+    assert "allowlist: []" in cargo_allowlist
+    assert "Tauri" not in cargo_allowlist
     assert "Vulnerabilities are never suppressed" in cargo_script
+    assert "Tauri" not in cargo_script
     assert "RUSTSEC-2026-0194" not in cargo_allowlist
-    assert 'plist = { path = "../../../../supply-chain/vendor/plist-1.9.0" }' in desktop_manifest
-    assert '[dependencies.quick_xml]\nversion = "0.41.0"' in vendored_plist_manifest
-    assert "RUSTSEC-2026-0194" in vendored_plist_note
-    assert 'name = "quick-xml"\nversion = "0.41.0"' in desktop_lock
-    assert 'name = "quick-xml"\nversion = "0.39.4"' not in desktop_lock
 
 
 def test_dependency_provenance_gate_accepts_repo_local_cargo_patches() -> None:

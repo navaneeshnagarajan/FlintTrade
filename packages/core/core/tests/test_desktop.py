@@ -151,7 +151,7 @@ def test_resolve_port_zero_means_os_chosen(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.unit
 def test_ready_sentinel_constant() -> None:
-    """The handshake sentinel is the exact string the Tauri shell scans for."""
+    """The handshake sentinel is the exact string the Electron guardian scans for."""
     assert desktop.READY_SENTINEL == "FLINTTRADE_BACKEND_READY"
 
 
@@ -160,10 +160,10 @@ def test_desktop_lease_conflict_prints_the_blocked_sentinel(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A lease conflict announces itself so the shell keeps the payload pin.
+    """A lease conflict announces itself so the shell offers an accurate retry.
 
-    Without the sentinel the Tauri shell treats the pre-ready exit as a broken
-    payload, demotes it, and each Retry re-downloads the engine.
+    Without the sentinel the Electron guardian would treat the pre-ready exit
+    as an ordinary source-runtime failure instead of an instance conflict.
     """
     from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning
 
@@ -257,6 +257,73 @@ def test_desktop_lease_release_failure_is_generic_and_retains_authority(
     finally:
         raw_lease.release_allowed = True
         backend_instance.release_retained_backend_instance_lease(lease)
+
+
+@pytest.mark.unit
+def test_guardian_owned_desktop_path_skips_only_the_second_lease_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(
+        desktop,
+        "acquire_backend_instance_lease",
+        MagicMock(side_effect=AssertionError("guardian already owns the lease")),
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_serve_owned",
+        lambda port, **_kwargs: events.append(f"serve:{port}"),
+    )
+
+    desktop.serve(5100, guardian_owned_lease=True)
+
+    assert events == ["serve:5100"]
+    desktop.acquire_backend_instance_lease.assert_not_called()
+
+
+@pytest.mark.unit
+def test_guardian_owned_desktop_path_does_not_swallow_incomplete_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recovery_owner = object()
+    monkeypatch.setattr(
+        desktop,
+        "acquire_backend_instance_lease",
+        MagicMock(side_effect=AssertionError("guardian already owns the lease")),
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_serve_owned",
+        MagicMock(
+            side_effect=desktop.DesktopBackendShutdownIncomplete(
+                "shutdown incomplete",
+                recovery_owner=recovery_owner,
+            )
+        ),
+    )
+
+    with pytest.raises(desktop.DesktopBackendShutdownIncomplete) as raised:
+        desktop.serve(5100, guardian_owned_lease=True)
+
+    assert raised.value.recovery_owner is recovery_owner
+    desktop.acquire_backend_instance_lease.assert_not_called()
+
+
+@pytest.mark.unit
+def test_desktop_main_forwards_guardian_lease_ownership_without_an_environment_bypass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(desktop, "_ensure_workspace", lambda: object())
+    serve = MagicMock()
+    monkeypatch.setattr(desktop, "serve", serve)
+
+    desktop.main(["--port", "0"], guardian_owned_lease=True)
+
+    serve.assert_called_once_with(
+        0,
+        shutdown_signal=None,
+        guardian_owned_lease=True,
+    )
 
 
 @pytest.mark.unit

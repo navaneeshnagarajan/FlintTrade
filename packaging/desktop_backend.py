@@ -1,12 +1,14 @@
-"""PyInstaller entry script for the native-desktop backend sidecar.
+"""Source guardian entry for the desktop backend.
 
-This thin wrapper is the ``__main__`` PyInstaller freezes. It exists (rather
-than pointing PyInstaller straight at ``flinttrade_core/desktop.py``) so that
-the entry runs as a proper package import — ``flinttrade_core.desktop`` uses
-relative imports (``from .app import …``) that only resolve when the module is
-imported by name, not executed as a loose script.
+Electron launches this file from the active source checkout. In source mode it
+validates the exact Electron parent, takes the workspace's kernel-backed
+backend lease, creates the boot-bound recovery record, and establishes process
+containment before importing the serving application. The outer POSIX guardian
+retains that lease until complete-tree cleanup and durable proof. A separate
+parent-authenticated finalisation invocation removes only that exact record
+after the shell has also observed guardian exit.
 
-It also hosts the desktop-only **parent-liveness watchdog**. The Tauri shell
+It also hosts the desktop-only **parent-liveness watchdog**. The desktop shell
 passes its own PID via ``FLINTTRADE_PARENT_PID``; a daemon thread watches that
 process and exits the sidecar cleanly when the shell dies (crash, force-quit,
 task-manager kill), so no orphaned backend keeps running and accumulating
@@ -14,18 +16,12 @@ across relaunches. The watchdog lives here — not in ``flinttrade_core`` —
 because it is desktop-shell behaviour: plain CLI/``make start`` runs never set
 the variable and are unaffected.
 
-PyInstaller one-file builds run this Python application below a separate
-bootloader process. Before importing the backend, this wrapper creates
-platform containment, promotes the shell's exact boot-bound recovery record to
-the backend leader PID, and announces that PID on stdout. On POSIX an external
-guardian remains alive until same-group and tracked new-session descendants are
-gone. On Windows a non-breakaway Job Object kills its complete tree when the
-last application handle closes.
-
-The frozen executable also exposes one explicit child mode for uploaded
-strategies. It is dispatched before sidecar control starts, strips desktop
-ownership variables, and replaces inherited stdin with the null device so a
-worker cannot consume shell shutdown commands or re-enter backend startup.
+Before importing the backend, this wrapper creates platform containment,
+promotes the shell's exact boot-bound recovery record to the backend leader
+PID, and announces that PID on stdout. On POSIX an external guardian remains
+alive until same-group and tracked new-session descendants are gone. On Windows
+a non-breakaway Job Object kills its complete tree when the last application
+handle closes.
 
 The real serving logic lives in :mod:`flinttrade_core.desktop`.
 """
@@ -33,10 +29,13 @@ The real serving logic lives in :mod:`flinttrade_core.desktop`.
 from __future__ import annotations
 
 import errno
+import hashlib
+import hmac
 import inspect
 import os
 import select
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -44,25 +43,24 @@ import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator, TextIO
+from typing import Iterator, NamedTuple, TextIO
 
-#: Environment variable the Tauri shell sets to its own OS process id.
+#: Environment variable the Electron shell sets to its own OS process id.
 PARENT_PID_ENV = "FLINTTRADE_PARENT_PID"
 PARENT_IDENTITY_ENV = "FLINTTRADE_PARENT_IDENTITY"
 
-#: Exact recovery record path and launch token supplied by the Tauri shell.
+#: Exact recovery record path and launch token supplied by the Electron shell.
 SIDECAR_RECORD_PATH_ENV = "FLINTTRADE_SIDECAR_RECORD_PATH"
 BOOT_ID_ENV = "FLINTTRADE_BOOT_ID"
 LAUNCH_TOKEN_ENV = "FLINTTRADE_LAUNCH_TOKEN"
 SIDECAR_RECORD_VERSION = "v4"
+RECOVERY_RECORD_BLOCKED_REASON = "recovery-record"
+PRINT_PARENT_IDENTITY_ARG = "--flinttrade-print-parent-identity"
+FINALISE_CLEANUP_ARG = "--flinttrade-finalise-cleanup"
+PARENT_IDENTITY_SENTINEL = "FLINTTRADE_PARENT_IDENTITY"
 
-#: Frozen-child execution contract published to backend code.
-PACKAGED_CHILD_EXECUTABLE_ENV = "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE"
-PACKAGED_CHILD_ARG_ENV = "FLINTTRADE_PACKAGED_CHILD_ARG"
-PACKAGED_CHILD_ARG = "--flinttrade-uploaded-strategy-child"
-
-#: Variables that belong only to the desktop sidecar control process. A
-#: packaged worker must not inherit them and impersonate the backend.
+#: Variables that belong only to the desktop source guardian. A strategy
+#: worker must not inherit them and impersonate the backend.
 DESKTOP_CONTROL_ENV = frozenset(
     {
         PARENT_PID_ENV,
@@ -70,15 +68,13 @@ DESKTOP_CONTROL_ENV = frozenset(
         SIDECAR_RECORD_PATH_ENV,
         BOOT_ID_ENV,
         LAUNCH_TOKEN_ENV,
-        PACKAGED_CHILD_EXECUTABLE_ENV,
-        PACKAGED_CHILD_ARG_ENV,
     }
 )
 
 #: How often (seconds) the POSIX watchdog polls for parent liveness.
 POLL_INTERVAL_SECONDS = 2.0
 
-#: Command the Tauri shell writes to stdin before its bounded hard-kill fallback.
+#: Command the Electron shell writes to stdin before its bounded hard-kill fallback.
 SHUTDOWN_COMMAND = "FLINTTRADE_SHUTDOWN"
 
 #: Exact-pipe hard stop used only for the application launched by this shell.
@@ -99,9 +95,9 @@ CLEANUP_COMPLETE_SENTINEL = "FLINTTRADE_BACKEND_CLEANUP_COMPLETE"
 #: Must cover the backend's own sequential shutdown budget
 #: (``flinttrade_core.desktop._DESKTOP_SHUTDOWN_TIMEOUT`` = 60s) plus margin —
 #: at the previous 12s the guardian SIGKILLed a mid-unwind trading backend
-#: (open-order handling, journal writes) whenever the shell crashed. The Rust
-#: shell's ``SIDECAR_WATCHDOG_GRACE_TIMEOUT`` derives from this value; keep
-#: them in step.
+#: (open-order handling, journal writes) whenever the shell crashed. The
+#: Electron supervisor's shutdown budget derives from this value; keep them in
+#: step.
 ORPHAN_GRACE_SECONDS = 75.0
 
 #: Grace between the guardian's escalation SIGTERM and its final SIGKILL of
@@ -113,7 +109,7 @@ FORCE_KILL_ESCALATION_SECONDS = 5.0
 #: Poll interval for forwarding a lock-free SIGTERM flag outside the handler.
 SIGNAL_RELAY_POLL_SECONDS = 0.05
 
-#: Brief wait for Rust to publish the pending record after spawning us.
+#: Brief wait for Electron to publish the pending record after spawning us.
 RECORD_PUBLISH_WAIT_SECONDS = 2.0
 RECORD_PUBLISH_POLL_SECONDS = 0.01
 
@@ -129,6 +125,34 @@ LINUX_PROC_ROOT = Path("/proc")
 
 _RECORD_TRANSITION_THREAD_LOCK = threading.Lock()
 
+_RECOVERY_PROCESS_DEAD = "dead"
+_RECOVERY_PROCESS_REUSED = "reused"
+
+
+class _RecoveryRecord(NamedTuple):
+    """Strictly parsed ownership fields needed only by startup recovery."""
+
+    version: str
+    guardian_pid: int
+    application_pid: int | None
+    shell_pid: int
+    boot_id: str | None
+    launch_token: str | None
+    spawn_contained: bool
+
+
+class _RecoveryProcessIdentity(NamedTuple):
+    """One generation-stable process image observation."""
+
+    start_token: str
+    image_path: Path
+    image_hash: str
+    command: str
+
+
+class _StaleRecoveryRecordBlocked(OSError):
+    """Signal an unresolved record without exposing process details to Electron."""
+
 
 def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
     return (
@@ -136,58 +160,6 @@ def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
         and len(value) % 2 == 0
         and all(character in "0123456789abcdefABCDEF" for character in value)
     )
-
-
-def publish_packaged_child_contract(
-    *,
-    environ: dict[str, str] | None = None,
-    executable: str | None = None,
-    frozen: bool | None = None,
-) -> bool:
-    """Publish the frozen executable + mode argument used for safe child work."""
-    env = os.environ if environ is None else environ
-    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
-    if not is_frozen:
-        return False
-    env[PACKAGED_CHILD_EXECUTABLE_ENV] = sys.executable if executable is None else executable
-    env[PACKAGED_CHILD_ARG_ENV] = PACKAGED_CHILD_ARG
-    return True
-
-
-def dispatch_packaged_child_mode(
-    *,
-    argv: list[str] | None = None,
-    dispatcher: Callable[[list[str]], bool] | None = None,
-) -> bool:
-    """Run an explicit frozen child before sidecar control threads can start.
-
-    The entrypoint enforces a detached stdin even if a caller forgets to do so,
-    and removes every sidecar-control variable before importing engine code.
-    """
-    arguments = list(sys.argv if argv is None else argv)
-    if len(arguments) < 2 or arguments[1] != PACKAGED_CHILD_ARG:
-        return False
-
-    for name in DESKTOP_CONTROL_ENV:
-        os.environ.pop(name, None)
-
-    if dispatcher is None:
-        from flinttrade_engine.strategy_runner import (  # noqa: PLC0415 - child-only import
-            dispatch_frozen_strategy_child,
-        )
-
-        dispatcher = dispatch_frozen_strategy_child
-
-    original_stdin = sys.stdin
-    with open(os.devnull, encoding="utf-8") as detached_stdin:
-        sys.stdin = detached_stdin
-        try:
-            handled = dispatcher(arguments)
-        finally:
-            sys.stdin = original_stdin
-    if not handled:
-        raise RuntimeError("packaged child dispatcher rejected the recognised child mode")
-    return True
 
 
 class _ShutdownCoordinator:
@@ -287,6 +259,185 @@ def _parent_pid_from_env(environ: dict[str, str] | None = None) -> int | None:
     return pid if pid > 0 else None
 
 
+def _sha256_file(path: Path) -> str:
+    """Hash one stable executable inode without trusting its path twice."""
+    with path.open("rb") as executable:
+        before = os.fstat(executable.fileno())
+        digest = hashlib.sha256()
+        while chunk := executable.read(1024 * 1024):
+            digest.update(chunk)
+        after = os.fstat(executable.fileno())
+    identity_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    identity_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    if identity_after != identity_before:
+        raise OSError("parent executable changed during identity capture")
+    return digest.hexdigest()
+
+
+def _windows_process_creation_and_image(pid: int) -> tuple[str, Path] | None:
+    """Read creation time and image path through one generation-bound handle."""
+    import ctypes  # noqa: PLC0415 - Windows-only
+    from ctypes import wintypes  # noqa: PLC0415 - Windows-only
+
+    process_query_limited_information = 0x1000
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.GetProcessTimes.restype = ctypes.c_int
+    kernel32.GetProcessTimes.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    kernel32.QueryFullProcessImageNameW.restype = ctypes.c_int
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_wchar_p,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == 87:  # ERROR_INVALID_PARAMETER: no such PID.
+            return None
+        raise ctypes.WinError(error)
+    try:
+        creation = wintypes.FILETIME()
+        exit_time = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            raise OSError(ctypes.get_last_error(), "GetProcessTimes failed")
+        creation_value = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+        capacity = ctypes.c_uint32(32768)
+        image = ctypes.create_unicode_buffer(capacity.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(capacity)):
+            raise OSError(ctypes.get_last_error(), "QueryFullProcessImageNameW failed")
+        return f"windows-creation-time:{creation_value}", Path(image.value)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _source_process_identity(pid: int) -> str | None:
+    """Return the source-shell v1 identity for one exact process generation."""
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        captured = _windows_process_creation_and_image(pid)
+        if captured is None:
+            return None
+        start_token, image_path = captured
+        image_hash = _sha256_file(image_path)
+        platform_name = "win32"
+    else:
+        before = _posix_process_start_token(pid)
+        if before is None:
+            return None
+        if sys.platform.startswith("linux"):
+            image_path = Path(f"/proc/{pid}/exe")
+            platform_name = "linux"
+        elif sys.platform == "darwin":
+            raw_image_path = _macos_process_command(pid)
+            if raw_image_path is None:
+                return None
+            image_path = Path(raw_image_path)
+            platform_name = "darwin"
+        else:
+            raise OSError(f"source parent identity is unsupported on {sys.platform}")
+        image_hash = _sha256_file(image_path)
+        after = _posix_process_start_token(pid)
+        if after is None or after != before:
+            return None
+        start_token = before
+    return f"v1|{platform_name}|{pid}|{start_token}|{image_hash}"
+
+
+def print_parent_identity(*, stream: TextIO | None = None) -> None:
+    """Print the exact direct-parent identity handshake for Electron."""
+    output = sys.stdout if stream is None else stream
+    parent_pid = os.getppid()
+    try:
+        identity = _source_process_identity(parent_pid)
+    except OSError as exc:
+        raise SystemExit(f"direct Electron parent identity is unavailable ({type(exc).__name__})") from None
+    if identity is None:
+        raise SystemExit("direct Electron parent identity is unavailable")
+    print(f"{PARENT_IDENTITY_SENTINEL} {identity}", file=output, flush=True)
+
+
+def validate_source_parent_identity(environ: dict[str, str] | None = None) -> str:
+    """Require the declared source-shell identity to match our direct parent."""
+    env = os.environ if environ is None else environ
+    direct_parent_pid = os.getppid()
+    declared_parent_pid = _parent_pid_from_env(env)
+    declared_identity = env.get(PARENT_IDENTITY_ENV) or ""
+    if declared_parent_pid != direct_parent_pid:
+        raise SystemExit("direct Electron parent identity validation failed")
+    if not _source_parent_identity_matches(direct_parent_pid, declared_identity):
+        raise SystemExit("direct Electron parent identity validation failed")
+    return declared_identity
+
+
+def _source_identity_parts(identity: str) -> tuple[str, int, str, str] | None:
+    """Parse one canonical source-parent identity without normalisation."""
+    fields = identity.split("|")
+    if len(fields) != 5 or fields[0] != "v1":
+        return None
+    platform_name, raw_pid, start_token, image_hash = fields[1:]
+    try:
+        pid = int(raw_pid)
+    except ValueError:
+        return None
+    if (
+        pid <= 0
+        or not start_token
+        or not _valid_hex_identity(image_hash, minimum=64, maximum=64)
+        or image_hash != image_hash.lower()
+    ):
+        return None
+    return platform_name, pid, start_token, image_hash
+
+
+def _source_parent_identity_matches(
+    pid: int,
+    expected_identity: str,
+    *,
+    identity_lookup: Callable[[int], str | None] | None = None,
+) -> bool:
+    """Compare a fresh generation/image capture with one canonical identity."""
+    parsed = _source_identity_parts(expected_identity)
+    if parsed is None or parsed[1] != pid:
+        return False
+    lookup = _source_process_identity if identity_lookup is None else identity_lookup
+    try:
+        return lookup(pid) == expected_identity
+    except OSError:
+        return False
+
+
 def announce_application_pid(*, stream: TextIO | None = None, pid: int | None = None) -> None:
     """Publish the real Python PID before backend boot or readiness work."""
     output = sys.stdout if stream is None else stream
@@ -294,84 +445,587 @@ def announce_application_pid(*, stream: TextIO | None = None, pid: int | None = 
     print(f"{APPLICATION_PID_SENTINEL} pid={application_pid}", file=output, flush=True)
 
 
-def _lock_record_guard_file(guard_file: BinaryIO) -> None:
-    """Take the cross-process record-transition lock."""
-    if os.name == "nt":
-        import msvcrt  # noqa: PLC0415 - Windows-only
-
-        guard_file.seek(0, os.SEEK_END)
-        if guard_file.tell() == 0:
-            guard_file.write(b"\0")
-            guard_file.flush()
-            os.fsync(guard_file.fileno())
-        guard_file.seek(0)
-        msvcrt.locking(guard_file.fileno(), msvcrt.LK_LOCK, 1)
-    else:
-        import fcntl  # noqa: PLC0415 - POSIX-only
-
-        fcntl.flock(guard_file.fileno(), fcntl.LOCK_EX)
-
-
-def _unlock_record_guard_file(guard_file: BinaryIO) -> None:
-    """Release the cross-process record-transition lock."""
-    if os.name == "nt":
-        import msvcrt  # noqa: PLC0415 - Windows-only
-
-        guard_file.seek(0)
-        msvcrt.locking(guard_file.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
-        import fcntl  # noqa: PLC0415 - POSIX-only
-
-        fcntl.flock(guard_file.fileno(), fcntl.LOCK_UN)
-
-
 @contextmanager
 def _record_transition_guard(path: Path) -> Iterator[None]:
-    """Serialise record promotion and cleanup across Rust and Python."""
+    """Serialise transitions on one persistent, owner-safe lock inode."""
+    from flinttrade_core.owner_file_lock import (  # noqa: PLC0415 - late desktop import
+        OwnerSafeFileLock,
+        UnsafeFileLockPathError,
+    )
+
     guard_path = path.with_name(f".{path.name}.lock")
-    with _RECORD_TRANSITION_THREAD_LOCK, guard_path.open("a+b") as guard_file:
-        if os.name != "nt":
-            os.chmod(guard_path, 0o600)
-        _lock_record_guard_file(guard_file)
-        try:
+    guard = OwnerSafeFileLock(
+        guard_path,
+        timeout=-1,
+        mode=0o600,
+        thread_local=False,
+    )
+    try:
+        with _RECORD_TRANSITION_THREAD_LOCK, guard:
+            # OwnerSafeFileLock proves the descriptor and directory entry are
+            # the same regular single-link inode. This second descriptor-bound
+            # check also requires the exact POSIX mode / Windows DACL without
+            # ever chmoding a path supplied by another process.
+            _read_hardened_recovery_file(guard_path, max_bytes=1)
             yield
-        finally:
-            _unlock_record_guard_file(guard_file)
+    except UnsafeFileLockPathError as exc:
+        raise OSError("recovery-record transition lock is unsafe") from exc
+
+
+def _read_hardened_recovery_file(path: Path, *, max_bytes: int) -> bytes:
+    """Read one hardened owner file without following or accepting links."""
+    from flinttrade_core import secure_file  # noqa: PLC0415 - late desktop import
+    from flinttrade_core.secure_file import (  # noqa: PLC0415 - late desktop import
+        InsecureFilePermissionsError,
+        read_hardened_owner_owned_bytes,
+    )
+
+    try:
+        return read_hardened_owner_owned_bytes(path, max_bytes=max_bytes)
+    except InsecureFilePermissionsError:
+        if os.name != "nt":
+            raise
+    # The legacy packaged Windows shell published its owner-owned record
+    # under an inherited workspace DACL. Repair that exact descriptor before
+    # reading so migration does not sacrifice compatibility or weaken the new
+    # current-user+SYSTEM policy.
+    parent_stat = path.parent.lstat()
+    path_stat = path.lstat()
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or secure_file._is_reparse_point(parent_stat)  # noqa: SLF001 - descriptor policy primitive
+        or not stat.S_ISREG(path_stat.st_mode)
+        or stat.S_ISLNK(path_stat.st_mode)
+        or secure_file._is_reparse_point(path_stat)  # noqa: SLF001 - descriptor policy primitive
+        or path_stat.st_nlink != 1
+    ):
+        raise OSError("recovery file path is unsafe")
+    descriptor = os.open(
+        path,
+        os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0),
+    )
+    try:
+        descriptor = secure_file._reopen_windows_descriptor_for_security(  # noqa: SLF001
+            descriptor,
+            write_dacl=True,
+        )
+        opened_stat = os.fstat(descriptor)
+        current_stat = path.lstat()
+        if (
+            not stat.S_ISREG(opened_stat.st_mode)
+            or opened_stat.st_nlink != 1
+            or (opened_stat.st_dev, opened_stat.st_ino) != (path_stat.st_dev, path_stat.st_ino)
+            or (current_stat.st_dev, current_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino)
+            or stat.S_ISLNK(current_stat.st_mode)
+            or secure_file._is_reparse_point(current_stat)  # noqa: SLF001
+        ):
+            raise OSError("recovery file changed before DACL repair")
+        secure_file._assert_current_user_owns(descriptor, opened_stat)  # noqa: SLF001
+        secure_file._install_exact_windows_descriptor_dacl(descriptor)  # noqa: SLF001
+        hardened, _reason = secure_file._verify_exact_windows_descriptor_dacl(descriptor)  # noqa: SLF001
+        final_stat = path.lstat()
+        if (
+            not hardened
+            or (final_stat.st_dev, final_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino)
+            or stat.S_ISLNK(final_stat.st_mode)
+            or secure_file._is_reparse_point(final_stat)  # noqa: SLF001
+            or final_stat.st_nlink != 1
+        ):
+            raise OSError("recovery file DACL repair could not be verified")
+    finally:
+        os.close(descriptor)
+    return read_hardened_owner_owned_bytes(path, max_bytes=max_bytes)
+
+
+def _write_hardened_recovery_file(path: Path, payload: bytes) -> None:
+    """Publish one exact owner-hardened file before its bytes become visible."""
+    from flinttrade_core.secure_file import write_secret_text  # noqa: PLC0415 - late desktop import
+
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError(path)
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise OSError("recovery payload is not ASCII") from exc
+    write_secret_text(path, text)
+    if not hmac.compare_digest(
+        _read_hardened_recovery_file(path, max_bytes=max(len(payload), 1)),
+        payload,
+    ):
+        raise OSError("hardened recovery-file verification failed")
+
+
+def _cleanup_proof_token(payload: bytes) -> str | None:
+    """Parse one exact durable cleanup proof without normalisation."""
+    prefix = f"{CLEANUP_COMPLETE_SENTINEL} token=".encode("ascii")
+    if not payload.startswith(prefix) or not payload.endswith(b"\n"):
+        return None
+    raw_token = payload[len(prefix) : -1]
+    try:
+        token = raw_token.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    if not _valid_hex_identity(token, minimum=64, maximum=64):
+        return None
+    return token
+
+
+def _reconcile_orphaned_cleanup_proof(record_path: Path) -> None:
+    """Remove only a crash-left exact proof while its bound record is absent."""
+    proof_path = _cleanup_complete_proof_path(record_path)
+    try:
+        payload = _read_hardened_recovery_file(proof_path, max_bytes=4096)
+    except FileNotFoundError:
+        return
+    if _cleanup_proof_token(payload) is None:
+        raise OSError("orphaned cleanup proof is malformed")
+    _durably_unlink_cleanup_file(proof_path)
+    try:
+        proof_path.lstat()
+    except FileNotFoundError:
+        return
+    raise OSError("orphaned cleanup proof remains after durable unlink")
+
+
+def _parse_recovery_record(payload: bytes) -> _RecoveryRecord | None:
+    """Parse current and safely recoverable legacy record shapes exactly."""
+    try:
+        contents = payload.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    lines = contents.splitlines()
+
+    def positive_pid(raw: str) -> int | None:
+        try:
+            value = int(raw.strip())
+        except ValueError:
+            return None
+        return value if value > 0 else None
+
+    if len(lines) == 6 and lines[0].strip() in {SIDECAR_RECORD_VERSION, "v3"}:
+        guardian_pid = positive_pid(lines[1])
+        raw_application = lines[2].strip()
+        application_pid = None if raw_application == "pending" else positive_pid(raw_application)
+        shell_pid = positive_pid(lines[3])
+        boot_id = lines[4]
+        launch_token = lines[5]
+        if (
+            guardian_pid is None
+            or (raw_application != "pending" and application_pid is None)
+            or shell_pid is None
+            or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord(
+            version=lines[0].strip(),
+            guardian_pid=guardian_pid,
+            application_pid=application_pid,
+            shell_pid=shell_pid,
+            boot_id=boot_id,
+            launch_token=launch_token,
+            spawn_contained=lines[0].strip() == SIDECAR_RECORD_VERSION,
+        )
+
+    if len(lines) == 5 and lines[0].strip() == "v2":
+        guardian_pid = positive_pid(lines[1])
+        raw_application = lines[2].strip()
+        application_pid = None if raw_application == "pending" else positive_pid(raw_application)
+        shell_pid = positive_pid(lines[3])
+        launch_token = lines[4]
+        if (
+            guardian_pid is None
+            or (raw_application != "pending" and application_pid is None)
+            or shell_pid is None
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord("v2", guardian_pid, application_pid, shell_pid, None, launch_token, False)
+
+    if len(lines) == 3:
+        guardian_pid = positive_pid(lines[0])
+        shell_pid = positive_pid(lines[1])
+        launch_token = lines[2]
+        if (
+            guardian_pid is None
+            or shell_pid is None
+            or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+        ):
+            return None
+        return _RecoveryRecord("v1", guardian_pid, None, shell_pid, None, launch_token, False)
+
+    if len(lines) == 2:
+        guardian_pid = positive_pid(lines[0])
+        shell_pid = positive_pid(lines[1])
+        if guardian_pid is None or shell_pid is None:
+            return None
+        return _RecoveryRecord("legacy", guardian_pid, None, shell_pid, None, None, False)
+    return None
+
+
+def _capture_recovery_process_identity(
+    pid: int,
+) -> _RecoveryProcessIdentity | str:
+    """Capture a stable start-token and image, or prove death/PID reuse."""
+    if pid <= 0:
+        raise OSError("recovery process PID is invalid")
+    if os.name == "nt":
+        try:
+            captured = _windows_process_creation_and_image(pid)
+        except PermissionError:
+            # A prior FlintTrade process belongs to this user. Access denial
+            # therefore proves that the numeric PID belongs to another owner.
+            return _RECOVERY_PROCESS_REUSED
+        if captured is None:
+            return _RECOVERY_PROCESS_DEAD
+        start_token, image_path = captured
+        image_hash = _sha256_file(image_path)
+        try:
+            after = _windows_process_creation_and_image(pid)
+        except PermissionError:
+            return _RECOVERY_PROCESS_REUSED
+        if after is None:
+            return _RECOVERY_PROCESS_DEAD
+        if after != captured:
+            return _RECOVERY_PROCESS_REUSED
+        return _RecoveryProcessIdentity(start_token, image_path, image_hash, str(image_path))
+
+    try:
+        before = _posix_process_start_token(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    if before is None:
+        return _RECOVERY_PROCESS_DEAD
+    try:
+        command = _posix_process_command(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    if command is None:
+        return _RECOVERY_PROCESS_DEAD
+    probe_image_path = Path(f"/proc/{pid}/exe") if sys.platform.startswith("linux") else Path(command)
+    try:
+        image_path = Path(os.readlink(probe_image_path)) if sys.platform.startswith("linux") else probe_image_path
+        image_hash = _sha256_file(probe_image_path)
+        after = _posix_process_start_token(pid)
+    except PermissionError:
+        return _RECOVERY_PROCESS_REUSED
+    except FileNotFoundError:
+        after = _posix_process_start_token(pid)
+        if after is None:
+            return _RECOVERY_PROCESS_DEAD
+        raise
+    if after is None:
+        return _RECOVERY_PROCESS_DEAD
+    if after != before:
+        return _RECOVERY_PROCESS_REUSED
+    return _RecoveryProcessIdentity(before, image_path, image_hash, command)
+
+
+def _recovery_process_group_liveness(pgid: int) -> str:
+    """Probe a POSIX containment group without delivering a signal."""
+    if os.name == "nt":
+        return _RECOVERY_PROCESS_DEAD
+    try:
+        os.kill(-pgid, 0)
+    except ProcessLookupError:
+        return _RECOVERY_PROCESS_DEAD
+    except PermissionError:
+        # Source guardian groups are same-user. A foreign-only numeric group
+        # is a recycled identifier, not surviving FlintTrade authority.
+        return _RECOVERY_PROCESS_REUSED
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return _RECOVERY_PROCESS_DEAD
+        if exc.errno in {errno.EPERM, errno.EACCES}:
+            return _RECOVERY_PROCESS_REUSED
+        raise
+    return "alive"
+
+
+def _looks_like_recovery_shell(identity: _RecoveryProcessIdentity, expected_hash: str) -> bool:
+    image_name = identity.image_path.name.lower()
+    command = identity.command.lower().strip()
+    command_executable = (
+        command.split('"', 2)[1]
+        if command.startswith('"') and '"' in command[1:]
+        else command.split(maxsplit=1)[0]
+    )
+    command_image_name = Path(command_executable).name
+    known_names = {
+        "flinttrade",
+        "flinttrade.exe",
+        "flinttrade-desktop",
+        "flinttrade-desktop.exe",
+    }
+    return identity.image_hash == expected_hash or image_name in known_names or command_image_name in known_names
+
+
+def _looks_like_recovery_backend(identity: _RecoveryProcessIdentity, expected_hash: str) -> bool:
+    command = identity.command.lower()
+    image_name = identity.image_path.name.lower()
+    return (
+        identity.image_hash == expected_hash
+        or "packaging/desktop_backend.py" in command.replace("\\", "/")
+        or "flinttrade-backend" in command
+        or "flinttrade-backend" in image_name
+    )
+
+
+def recover_stale_desktop_record(
+    *,
+    environ: dict[str, str] | None = None,
+    process_probe: Callable[[int], _RecoveryProcessIdentity | str] = _capture_recovery_process_identity,
+    group_probe: Callable[[int], str] = _recovery_process_group_liveness,
+    current_pid: int | None = None,
+    backend_image_hash: str | None = None,
+) -> bool:
+    """Durably remove only a conclusively stale pre-existing desktop record.
+
+    The caller must already hold the workspace backend lease. This function
+    never terminates a recorded process; any live, unreadable or changing
+    ownership state remains an explicit retryable startup block.
+    """
+    env = os.environ if environ is None else environ
+    raw_path = env.get(SIDECAR_RECORD_PATH_ENV) or ""
+    current_boot_id = env.get(BOOT_ID_ENV) or ""
+    current_shell_pid = _parent_pid_from_env(env)
+    parent_identity = _source_identity_parts(env.get(PARENT_IDENTITY_ENV) or "")
+    this_pid = os.getpid() if current_pid is None else current_pid
+    if (
+        not raw_path
+        or raw_path != raw_path.strip()
+        or current_shell_pid is None
+        or this_pid <= 0
+        or parent_identity is None
+        or parent_identity[1] != current_shell_pid
+        or not _valid_hex_identity(current_boot_id, minimum=16, maximum=512)
+    ):
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+    record_path = Path(raw_path)
+    if not record_path.is_absolute():
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+    expected_shell_hash = parent_identity[3]
+
+    try:
+        with _record_transition_guard(record_path):
+            try:
+                original_record = _read_hardened_recovery_file(record_path, max_bytes=4096)
+            except FileNotFoundError:
+                _reconcile_orphaned_cleanup_proof(record_path)
+                return False
+            record = _parse_recovery_record(original_record)
+            if record is None:
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            proof_path = _cleanup_complete_proof_path(record_path)
+            try:
+                original_proof = _read_hardened_recovery_file(proof_path, max_bytes=4096)
+            except FileNotFoundError:
+                original_proof = None
+            if original_proof is not None:
+                proof_token = _cleanup_proof_token(original_proof)
+                if record.launch_token is None or proof_token != record.launch_token:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            # A boot-identity mismatch is corroborating context, never proof that
+            # recorded process authority disappeared. Always re-prove every PID
+            # and containment group before deleting the recovery record.
+            if backend_image_hash is None:
+                try:
+                    expected_backend_hash = _sha256_file(Path(sys.executable))
+                except OSError as exc:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+            else:
+                expected_backend_hash = backend_image_hash
+            states: dict[int, str] = {}
+
+            def inspect(pid: int, *, shell: bool) -> str:
+                if pid == (current_shell_pid if shell else this_pid):
+                    return _RECOVERY_PROCESS_REUSED
+                try:
+                    observed = process_probe(pid)
+                except (OSError, ValueError) as exc:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                if observed in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
+                    return str(observed)
+                if not isinstance(observed, _RecoveryProcessIdentity):
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                compatible = (
+                    _looks_like_recovery_shell(observed, expected_shell_hash)
+                    if shell
+                    else _looks_like_recovery_backend(observed, expected_backend_hash)
+                )
+                if compatible:
+                    raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+                return _RECOVERY_PROCESS_REUSED
+
+            inspect(record.shell_pid, shell=True)
+            process_pids = [record.guardian_pid]
+            if record.application_pid is not None and record.application_pid != record.guardian_pid:
+                process_pids.insert(0, record.application_pid)
+            for pid in process_pids:
+                states[pid] = inspect(pid, shell=False)
+
+            if record.spawn_contained and os.name != "nt":
+                # Legacy packaged-shell v4 groups were led by the launcher; source
+                # guardian v4 groups are led by the promoted application.
+                # Proving both possible group identifiers dead preserves
+                # the union during migration. A reused leader proves its
+                # former numeric group generation is gone.
+                containment_pids = {record.guardian_pid}
+                if record.application_pid is not None:
+                    containment_pids.add(record.application_pid)
+                for pgid in containment_pids:
+                    if states.get(pgid) == _RECOVERY_PROCESS_REUSED:
+                        continue
+                    try:
+                        group_state = group_probe(pgid)
+                    except (OSError, ValueError) as exc:
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
+                    if group_state not in {_RECOVERY_PROCESS_DEAD, _RECOVERY_PROCESS_REUSED}:
+                        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            if not hmac.compare_digest(
+                _read_hardened_recovery_file(record_path, max_bytes=4096),
+                original_record,
+            ):
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+            if original_proof is not None and not hmac.compare_digest(
+                _read_hardened_recovery_file(proof_path, max_bytes=4096),
+                original_proof,
+            ):
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+
+            _durably_unlink_cleanup_file(record_path)
+            if original_proof is not None:
+                _durably_unlink_cleanup_file(proof_path)
+            try:
+                record_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved")
+            return True
+    except _StaleRecoveryRecordBlocked:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise _StaleRecoveryRecordBlocked("desktop recovery record is unresolved") from exc
 
 
 def _sync_parent_directory(path: Path) -> None:
     """Persist a record rename on filesystems that permit directory fsync."""
-    if os.name == "nt":
-        return
-    directory_fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
+    from flinttrade_core.secure_file import fsync_parent_directory  # noqa: PLC0415 - late desktop import
+
+    fsync_parent_directory(path)
 
 
 def _atomically_replace_record(path: Path, expected: bytes, replacement: bytes, token: str) -> bool:
     """Replace one exact record without exposing truncate/write crash states."""
     temporary = path.with_name(f".{path.name}.{token}.{os.getpid()}.tmp")
+    temporary_created = False
     try:
-        if path.read_bytes() != expected:
+        if not hmac.compare_digest(
+            _read_hardened_recovery_file(path, max_bytes=4096),
+            expected,
+        ):
             return False
-        with temporary.open("xb") as record_file:
-            record_file.write(replacement)
-            record_file.flush()
-            os.fsync(record_file.fileno())
-        if os.name != "nt":
-            os.chmod(temporary, 0o600)
-        if path.read_bytes() != expected:
+        _write_hardened_recovery_file(temporary, replacement)
+        temporary_created = True
+        if not hmac.compare_digest(
+            _read_hardened_recovery_file(path, max_bytes=4096),
+            expected,
+        ):
             return False
         os.replace(temporary, path)
+        temporary_created = False
         _sync_parent_directory(path)
+        if not hmac.compare_digest(
+            _read_hardened_recovery_file(path, max_bytes=4096),
+            replacement,
+        ):
+            return False
         return True
     finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        if temporary_created:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def create_pending_application_pid_record(
+    *,
+    environ: dict[str, str] | None = None,
+    guardian_pid: int | None = None,
+) -> bool:
+    """Durably create this source guardian's absent-only v4 recovery record."""
+    env = os.environ if environ is None else environ
+    raw_path = env.get(SIDECAR_RECORD_PATH_ENV) or ""
+    launch_token = env.get(LAUNCH_TOKEN_ENV) or ""
+    boot_id = env.get(BOOT_ID_ENV) or ""
+    shell_pid = _parent_pid_from_env(env)
+    launcher_pid = os.getpid() if guardian_pid is None else guardian_pid
+    if (
+        not raw_path
+        or raw_path != raw_path.strip()
+        or shell_pid is None
+        or launcher_pid <= 0
+        or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+        or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+    ):
+        return False
+
+    path = Path(raw_path)
+    if not path.is_absolute():
+        return False
+    payload = (
+        f"{SIDECAR_RECORD_VERSION}\n{launcher_pid}\npending\n"
+        f"{shell_pid}\n{boot_id}\n{launch_token}\n"
+    ).encode("ascii")
+    temporary = path.with_name(f".{path.name}.{launch_token}.{launcher_pid}.pending.tmp")
+    temporary_created = False
+    try:
+        with _record_transition_guard(path):
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                return False
+            # A finaliser crash after the record unlink but before proof unlink
+            # leaves an unbound exact proof. Reconcile only that hardened,
+            # single-link shape while record absence is held by this lock.
+            _reconcile_orphaned_cleanup_proof(path)
+            _write_hardened_recovery_file(temporary, payload)
+            temporary_created = True
+            if os.name == "nt":
+                # Windows rename is absent-only; unlike POSIX it refuses to
+                # replace an existing destination.
+                os.rename(temporary, path)
+                temporary_created = False
+            else:
+                os.link(temporary, path, follow_symlinks=False)
+                temporary.unlink()
+                temporary_created = False
+            _sync_parent_directory(path)
+            if not hmac.compare_digest(
+                _read_hardened_recovery_file(path, max_bytes=4096),
+                payload,
+            ):
+                raise OSError("pending recovery record changed after publication")
+            return True
+    except (OSError, UnicodeError):
+        return False
+    finally:
+        if temporary_created:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def promote_application_pid_record(
@@ -401,7 +1055,7 @@ def promote_application_pid_record(
     while True:
         try:
             with _record_transition_guard(path):
-                contents_bytes = path.read_bytes()
+                contents_bytes = _read_hardened_recovery_file(path, max_bytes=4096)
 
                 try:
                     contents = contents_bytes.decode("utf-8")
@@ -462,7 +1116,7 @@ def clear_pending_application_pid_record(
     path = Path(raw_path)
     try:
         with _record_transition_guard(path):
-            contents = path.read_text(encoding="utf-8")
+            contents = _read_hardened_recovery_file(path, max_bytes=4096).decode("utf-8")
             lines = contents.splitlines()
             if len(lines) != 6 or lines[0].strip() != SIDECAR_RECORD_VERSION:
                 return False
@@ -479,7 +1133,13 @@ def clear_pending_application_pid_record(
                 or lines[5] != launch_token
             ):
                 return False
-            path.unlink()
+            _durably_unlink_cleanup_file(path)
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                return False
     except (OSError, UnicodeError):
         return False
     return True
@@ -513,10 +1173,12 @@ def _cleanup_complete_proof_required(environ: dict[str, str] | None = None) -> b
     if not raw_path:
         return False
     try:
-        Path(raw_path).stat()
+        _read_hardened_recovery_file(Path(raw_path), max_bytes=4096)
     except FileNotFoundError:
         return False
     except OSError:
+        # An unsafe or unreadable record is still recovery authority. Never
+        # turn validation failure into permission to release the lease.
         return True
     return True
 
@@ -526,20 +1188,28 @@ def _atomically_write_cleanup_complete_proof(record_path: Path, token: str) -> N
     proof_path = _cleanup_complete_proof_path(record_path)
     temporary = proof_path.with_name(f".{proof_path.name}.{token}.{os.getpid()}.tmp")
     payload = f"{CLEANUP_COMPLETE_SENTINEL} token={token}\n".encode("ascii")
+    temporary_created = False
     try:
-        with temporary.open("xb") as proof_file:
-            proof_file.write(payload)
-            proof_file.flush()
-            os.fsync(proof_file.fileno())
-        if os.name != "nt":
-            os.chmod(temporary, 0o600)
-        os.replace(temporary, proof_path)
-        _sync_parent_directory(proof_path)
-    finally:
         try:
-            temporary.unlink()
+            _read_hardened_recovery_file(proof_path, max_bytes=4096)
         except FileNotFoundError:
             pass
+        _write_hardened_recovery_file(temporary, payload)
+        temporary_created = True
+        os.replace(temporary, proof_path)
+        temporary_created = False
+        _sync_parent_directory(proof_path)
+        if not hmac.compare_digest(
+            _read_hardened_recovery_file(proof_path, max_bytes=4096),
+            payload,
+        ):
+            raise OSError("cleanup proof changed after atomic replacement")
+    finally:
+        if temporary_created:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def publish_cleanup_complete_proof(
@@ -567,7 +1237,10 @@ def publish_cleanup_complete_proof(
     record_path = Path(raw_path)
     try:
         with _record_transition_guard(record_path):
-            lines = record_path.read_text(encoding="utf-8").splitlines()
+            lines = _read_hardened_recovery_file(
+                record_path,
+                max_bytes=4096,
+            ).decode("utf-8").splitlines()
             if len(lines) != 6 or lines[0] != SIDECAR_RECORD_VERSION:
                 return False
             try:
@@ -587,7 +1260,12 @@ def publish_cleanup_complete_proof(
     except (OSError, UnicodeError):
         return False
 
-    print(f"{CLEANUP_COMPLETE_SENTINEL} token={launch_token}", file=output, flush=True)
+    try:
+        print(f"{CLEANUP_COMPLETE_SENTINEL} token={launch_token}", file=output, flush=True)
+    except OSError:
+        # The durable owner-hardened proof remains authoritative after a shell
+        # pipe disappears; startup recovery can still finalise this launch.
+        pass
     return True
 
 
@@ -611,6 +1289,209 @@ def _publish_cleanup_complete_proof_with_retry(
             return False
         sleep(min(max(POSIX_GUARDIAN_POLL_SECONDS, 1.0), deadline - now))
     return True
+
+
+def _complete_guardian_cleanup(
+    application_pid: int,
+    cleanup_complete: Callable[[], None] | None = None,
+    *,
+    should_stop: Callable[[], bool] = lambda: False,
+) -> bool:
+    """Publish exact cleanup proof before releasing source guardian authority."""
+    if not _publish_cleanup_complete_proof_with_retry(
+        application_pid,
+        should_stop=should_stop,
+    ):
+        return False
+    if cleanup_complete is not None:
+        try:
+            cleanup_complete()
+        except Exception as exc:  # noqa: BLE001 - retain until process exit
+            try:
+                print(
+                    f"[desktop-sidecar] backend lease release failed ({type(exc).__name__}); "
+                    "retaining authority until guardian exit",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except OSError:
+                pass
+            return False
+    return True
+
+
+def _cleanup_pid_alive(pid: int) -> bool:
+    """Return whether a recorded cleanup PID still identifies a live process."""
+    if os.name == "nt":
+        return _windows_pid_alive(pid)
+    return _posix_pid_alive(pid)
+
+
+def _read_owner_cleanup_file(path: Path, *, max_bytes: int) -> bytes:
+    """Read a bounded hardened owner file without following links."""
+    return _read_hardened_recovery_file(path, max_bytes=max_bytes)
+
+
+def _durably_unlink_cleanup_file(path: Path) -> None:
+    """Remove one already-validated cleanup file with a persistence barrier."""
+    from flinttrade_core.secure_file import durable_unlink  # noqa: PLC0415
+
+    durable_unlink(path)
+
+
+def finalise_source_cleanup(
+    expected_guardian_pid: int,
+    expected_application_pid: int | None,
+    *,
+    environ: dict[str, str] | None = None,
+    pid_alive: Callable[[int], bool] = _cleanup_pid_alive,
+) -> bool:
+    """Remove only one exact, dead, proof-bound source recovery record."""
+    env = os.environ if environ is None else environ
+    raw_path = env.get(SIDECAR_RECORD_PATH_ENV) or ""
+    boot_id = env.get(BOOT_ID_ENV) or ""
+    launch_token = env.get(LAUNCH_TOKEN_ENV) or ""
+    shell_pid = _parent_pid_from_env(env)
+    application_field = "pending" if expected_application_pid is None else str(expected_application_pid)
+    if (
+        not raw_path
+        or raw_path != raw_path.strip()
+        or shell_pid is None
+        or expected_guardian_pid <= 0
+        or expected_guardian_pid in {shell_pid, os.getpid()}
+        or (
+            expected_application_pid is not None
+            and (
+                expected_application_pid <= 0
+                or expected_application_pid in {shell_pid, os.getpid()}
+            )
+        )
+        or not _valid_hex_identity(boot_id, minimum=16, maximum=512)
+        or not _valid_hex_identity(launch_token, minimum=64, maximum=64)
+    ):
+        return False
+
+    record_path = Path(raw_path)
+    if not record_path.is_absolute():
+        return False
+    guard_path = record_path.with_name(f".{record_path.name}.lock")
+    proof_path = _cleanup_complete_proof_path(record_path)
+    expected_record = (
+        f"{SIDECAR_RECORD_VERSION}\n{expected_guardian_pid}\n{application_field}\n"
+        f"{shell_pid}\n{boot_id}\n{launch_token}\n"
+    ).encode("ascii")
+    expected_proof = f"{CLEANUP_COMPLETE_SENTINEL} token={launch_token}\n".encode("ascii")
+    recorded_pids = [expected_guardian_pid]
+    if expected_application_pid is not None:
+        recorded_pids.append(expected_application_pid)
+
+    try:
+        # The guardian created this lock before publishing its record. Refuse
+        # to manufacture authority around a foreign standalone record.
+        _read_owner_cleanup_file(guard_path, max_bytes=1)
+        if any(pid_alive(pid) for pid in recorded_pids):
+            return False
+        with _record_transition_guard(record_path):
+            _read_owner_cleanup_file(guard_path, max_bytes=1)
+            try:
+                record_payload = _read_owner_cleanup_file(record_path, max_bytes=4096)
+            except FileNotFoundError:
+                # Python may have durably removed an exact pending record
+                # before flushing its token-bound pending-exit ACK. Managed
+                # finalisation is intentionally idempotent for that shape, but
+                # only under the persistent owner-safe guard and after the
+                # expected guardian PID is confirmed dead. A crash-left exact
+                # proof is removed here; foreign or unsafe proof state remains
+                # fail closed.
+                if expected_application_pid is not None:
+                    return False
+                try:
+                    absent_record_proof = _read_owner_cleanup_file(
+                        proof_path,
+                        max_bytes=4096,
+                    )
+                except FileNotFoundError:
+                    absent_record_proof = None
+                if absent_record_proof is not None and not hmac.compare_digest(
+                    absent_record_proof,
+                    expected_proof,
+                ):
+                    return False
+                if any(pid_alive(pid) for pid in recorded_pids):
+                    return False
+                _read_owner_cleanup_file(guard_path, max_bytes=1)
+                try:
+                    record_path.lstat()
+                except FileNotFoundError:
+                    pass
+                else:
+                    return False
+                if absent_record_proof is not None:
+                    if not hmac.compare_digest(
+                        _read_owner_cleanup_file(proof_path, max_bytes=4096),
+                        expected_proof,
+                    ):
+                        return False
+                    _durably_unlink_cleanup_file(proof_path)
+                try:
+                    record_path.lstat()
+                except FileNotFoundError:
+                    return True
+                return False
+            if not hmac.compare_digest(record_payload, expected_record):
+                return False
+
+            proof_exists = True
+            try:
+                proof_payload = _read_owner_cleanup_file(proof_path, max_bytes=4096)
+            except FileNotFoundError:
+                proof_exists = False
+                proof_payload = b""
+            if expected_application_pid is not None and not proof_exists:
+                return False
+            if proof_exists and not hmac.compare_digest(proof_payload, expected_proof):
+                return False
+
+            if any(pid_alive(pid) for pid in recorded_pids):
+                return False
+            # Re-read immediately before removal so a path substitution cannot
+            # turn an earlier valid comparison into broad unlink authority.
+            if not hmac.compare_digest(
+                _read_owner_cleanup_file(record_path, max_bytes=4096),
+                expected_record,
+            ):
+                return False
+            if proof_exists and not hmac.compare_digest(
+                _read_owner_cleanup_file(proof_path, max_bytes=4096),
+                expected_proof,
+            ):
+                return False
+
+            # Record absence is the launch gate. Remove it durably before the
+            # now-unbound proof; a crash can leave harmless token-bound proof,
+            # never an unproved launchable record.
+            _durably_unlink_cleanup_file(record_path)
+            if proof_exists:
+                _durably_unlink_cleanup_file(proof_path)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return True
+
+
+def _parse_finalise_cleanup_arguments(arguments: list[str]) -> tuple[int, int | None] | None:
+    """Parse the one exact token-free managed cleanup argv shape."""
+    if len(arguments) != 5 or arguments[0] != FINALISE_CLEANUP_ARG:
+        return None
+    if arguments[1] != "--guardian-pid" or arguments[3] != "--application-pid":
+        return None
+    try:
+        guardian_pid = int(arguments[2])
+        application_pid = None if arguments[4] == "pending" else int(arguments[4])
+    except ValueError:
+        return None
+    if guardian_pid <= 0 or (application_pid is not None and application_pid <= 0):
+        return None
+    return guardian_pid, application_pid
 
 
 def require_application_pid_record(
@@ -1873,38 +2754,103 @@ def _enable_linux_child_subreaper() -> bool:
     return prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER
 
 
+def _abort_posix_guardian_setup(
+    application_pid: int,
+    control_fd: int,
+    ready_fd: int,
+    lease_read_fd: int | None,
+    cleanup_complete: Callable[[], None] | None,
+    detail: str,
+) -> None:
+    """Contain a pre-import child and finalise its still-pending record."""
+    try:
+        print(f"[desktop-sidecar] containment setup failed ({detail})", file=sys.stderr, flush=True)
+    except OSError:
+        pass
+    for descriptor in (control_fd, ready_fd, lease_read_fd):
+        if descriptor is None:
+            continue
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    try:
+        os.kill(application_pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        print(
+            f"[desktop-sidecar] pre-import child containment failed ({type(exc).__name__})",
+            file=sys.stderr,
+            flush=True,
+        )
+    try:
+        os.waitpid(application_pid, 0)
+    except ChildProcessError:
+        pass
+    try:
+        cleanup_finished = _complete_guardian_cleanup(application_pid, cleanup_complete)
+    except BaseException:  # noqa: BLE001 - process exit remains the final lease release
+        cleanup_finished = False
+    if not cleanup_finished:
+        try:
+            print(
+                "[desktop-sidecar] pending recovery state remains after containment setup failure",
+                file=sys.stderr,
+                flush=True,
+            )
+        except OSError:
+            pass
+    os._exit(1)
+
+
 def _run_posix_containment_guardian(
     application_pid: int,
     control_fd: int,
     ready_fd: int,
     lease_read_fd: int | None = None,
+    cleanup_complete: Callable[[], None] | None = None,
 ) -> None:
     """Remain outside the backend group until its complete owned tree is gone."""
     try:
         os.close(0)
     except OSError:
         pass
-    os.set_blocking(control_fd, False)
     force_requested = False
 
     def request_force(_signum: int, _frame: object) -> None:
         nonlocal force_requested
         force_requested = True
 
-    signal.signal(signal.SIGTERM, request_force)
-    signal.signal(signal.SIGINT, request_force)
+    try:
+        os.set_blocking(control_fd, False)
+        signal.signal(signal.SIGTERM, request_force)
+        signal.signal(signal.SIGINT, request_force)
+    except BaseException as exc:  # noqa: BLE001 - guardian must not strand its lease
+        _abort_posix_guardian_setup(
+            application_pid,
+            control_fd,
+            ready_fd,
+            lease_read_fd,
+            cleanup_complete,
+            f"guardian-initialisation:{type(exc).__name__}",
+        )
+        raise AssertionError("POSIX guardian setup abort returned")
 
     try:
         application_start = _required_posix_process_start_token(application_pid)
         if application_start is None:
             raise OSError(f"backend leader {application_pid} exited before containment started")
-    except OSError as exc:
-        print(f"[desktop-sidecar] backend leader identity unavailable: {exc}", file=sys.stderr, flush=True)
-        os.close(control_fd)
-        os.close(ready_fd)
-        if lease_read_fd is not None:
-            os.close(lease_read_fd)
-        os._exit(1)
+    except BaseException as exc:  # noqa: BLE001 - guardian must not strand its lease
+        _abort_posix_guardian_setup(
+            application_pid,
+            control_fd,
+            ready_fd,
+            lease_read_fd,
+            cleanup_complete,
+            f"leader-identity:{type(exc).__name__}",
+        )
+        raise AssertionError("POSIX guardian setup abort returned")
     tracked: dict[int, str] = {application_pid: application_start}
     tracked_groups: dict[int, str] = {}
     owned_unique_ids: set[int] = set()
@@ -1914,18 +2860,26 @@ def _run_posix_containment_guardian(
                 application_pid,
                 expected_start=application_start,
             )
-        except OSError as exc:
-            print(f"[desktop-sidecar] backend unique identity unavailable: {exc}", file=sys.stderr, flush=True)
-            os.close(control_fd)
-            if lease_read_fd is not None:
-                os.close(lease_read_fd)
-            os._exit(1)
+        except BaseException as exc:  # noqa: BLE001 - guardian must not strand its lease
+            _abort_posix_guardian_setup(
+                application_pid,
+                control_fd,
+                ready_fd,
+                lease_read_fd,
+                cleanup_complete,
+                f"unique-identity:{type(exc).__name__}",
+            )
+            raise AssertionError("POSIX guardian setup abort returned")
         if application_generation is None:
-            print("[desktop-sidecar] backend unique identity disappeared", file=sys.stderr, flush=True)
-            os.close(control_fd)
-            if lease_read_fd is not None:
-                os.close(lease_read_fd)
-            os._exit(1)
+            _abort_posix_guardian_setup(
+                application_pid,
+                control_fd,
+                ready_fd,
+                lease_read_fd,
+                cleanup_complete,
+                "unique-identity-disappeared",
+            )
+            raise AssertionError("POSIX guardian setup abort returned")
         owned_unique_ids.add(application_generation[1])
     control_buffer = b""
     try:
@@ -2070,8 +3024,9 @@ def _run_posix_containment_guardian(
         ):
             break
 
-    if not _publish_cleanup_complete_proof_with_retry(
+    if not _complete_guardian_cleanup(
         application_pid,
+        cleanup_complete,
         should_stop=lambda: force_requested,
     ):
         print(
@@ -2088,6 +3043,8 @@ def _run_posix_containment_guardian(
 
 def _prepare_posix_owned_process_tree(
     publish_application_identity: Callable[[], None] | None = None,
+    *,
+    cleanup_complete: Callable[[], None] | None = None,
 ) -> Callable[[], bool] | None:
     """Fork an external guardian, then isolate the backend leader in a group."""
     if not _enable_linux_child_subreaper():
@@ -2115,7 +3072,13 @@ def _prepare_posix_owned_process_tree(
         os.close(ready_read_fd)
         if lease_write_fd is not None:
             os.close(lease_write_fd)
-        _run_posix_containment_guardian(application_pid, read_fd, ready_write_fd, lease_read_fd)
+        _run_posix_containment_guardian(
+            application_pid,
+            read_fd,
+            ready_write_fd,
+            lease_read_fd,
+            cleanup_complete,
+        )
         raise AssertionError("POSIX containment guardian returned")
 
     os.close(read_fd)
@@ -2141,8 +3104,6 @@ def _prepare_posix_owned_process_tree(
         if lease_write_fd is not None:
             os.close(lease_write_fd)
         return None
-    if publish_application_identity is not None:
-        publish_application_identity()
     try:
         os.setpgid(0, 0)
     except OSError:
@@ -2156,6 +3117,8 @@ def _prepare_posix_owned_process_tree(
         if lease_write_fd is not None:
             os.close(lease_write_fd)
         return None
+    if publish_application_identity is not None:
+        publish_application_identity()
 
     def register_spawn(pid: int, start_token: str) -> None:
         unique_suffix = ""
@@ -2309,6 +3272,8 @@ def _prepare_windows_owned_process_tree(
 
 def _prepare_owned_process_tree(
     publish_application_identity: Callable[[], None] | None = None,
+    *,
+    cleanup_complete: Callable[[], None] | None = None,
 ) -> Callable[[], bool] | None:
     """Prepare kernel/external containment before backend imports spawn children."""
     if os.name == "nt":
@@ -2316,7 +3281,10 @@ def _prepare_owned_process_tree(
         if terminate is not None and publish_application_identity is not None:
             publish_application_identity()
         return terminate
-    return _prepare_posix_owned_process_tree(publish_application_identity)
+    return _prepare_posix_owned_process_tree(
+        publish_application_identity,
+        cleanup_complete=cleanup_complete,
+    )
 
 
 def _handle_force_exit(
@@ -2389,7 +3357,7 @@ def _exit_orphaned(
         return
     request_shutdown()
 
-    # A crashed shell cannot provide Tauri's hard-kill fallback. Keep one
+    # A crashed shell cannot provide its hard-kill fallback. Keep one
     # bounded last resort so a wedged third-party server never becomes an orphan.
     def force_exit() -> None:
         time.sleep(ORPHAN_GRACE_SECONDS)
@@ -2543,7 +3511,7 @@ def _posix_process_identity(
     run: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> str | None:
     """Read native command, PID, and a kernel-resolution process identity."""
-    _ = run  # Retained for compatibility with callers from older frozen builds.
+    _ = run  # Retained for compatibility with callers from older desktop builds.
     before = _posix_process_start_token(pid)
     if before is None:
         return None
@@ -2569,9 +3537,9 @@ def _posix_parent_alive(
         parent_pid: PID the shell reported for itself.
         track_reparent: True when this process started as a direct child of
             ``parent_pid`` — the shell's death then re-parents us to
-            init/launchd, which is race-free against PID reuse. PyInstaller
-            grandchild topology instead compares ``expected_identity`` before
-            using ``kill(pid, 0)`` only as an indeterminate fallback.
+            init/launchd, which is race-free against PID reuse. Indirect-child
+            topology instead compares ``expected_identity`` before using
+            ``kill(pid, 0)`` only as an indeterminate fallback.
 
     Returns:
         True only while the exact shell identity remains confirmable.
@@ -2579,6 +3547,16 @@ def _posix_parent_alive(
     if track_reparent:
         return os.getppid() == parent_pid
     if expected_identity is not None:
+        source_identity = _source_identity_parts(expected_identity)
+        if source_identity is not None and identity_lookup is None:
+            platform_name, expected_pid, expected_start, _image_hash = source_identity
+            current_platform = "linux" if sys.platform.startswith("linux") else "darwin"
+            if expected_pid != parent_pid or platform_name != current_platform:
+                return False
+            try:
+                return _posix_process_start_token(parent_pid) == expected_start
+            except OSError:
+                return False
         lookup = _posix_process_identity if identity_lookup is None else identity_lookup
         try:
             current_identity = lookup(parent_pid)
@@ -2605,21 +3583,41 @@ def _watch_parent_posix(
 ) -> None:
     """Poll the shell process on macOS/Linux; exit when it disappears."""
     track_reparent = os.getppid() == parent_pid
-    if not track_reparent and parent_identity is None:
-        try:
-            parent_identity = _posix_process_identity(parent_pid)
-        except OSError as exc:
-            print(
-                f"[desktop-sidecar] POSIX parent identity unavailable; PID watchdog disabled: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return
+    #: Our direct POSIX parent when the shell (``parent_pid``) is *not* it — i.e.
+    #: the intermediate source guardian, which forked us and holds the workspace
+    #: instance lease. When ``track_reparent`` is True the shell is our direct
+    #: parent and ``_posix_parent_alive`` already covers its death race-free, so
+    #: there is no separate guardian to lose. A direct child of init (guardian
+    #: absent — CLI, ``make start``, tests) has ``getppid() <= 1`` and is skipped.
+    guardian_pid: int | None = None
+    if not track_reparent:
+        direct_parent = os.getppid()
+        if direct_parent > 1:
+            guardian_pid = direct_parent
         if parent_identity is None:
-            _exit_orphaned(request_shutdown, terminate_owned_tree)
-            return
+            try:
+                parent_identity = _posix_process_identity(parent_pid)
+            except OSError as exc:
+                print(
+                    f"[desktop-sidecar] POSIX parent identity unavailable; PID watchdog disabled: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+            if parent_identity is None:
+                _exit_orphaned(request_shutdown, terminate_owned_tree)
+                return
     while True:
         time.sleep(POLL_INTERVAL_SECONDS)
+        # Detect loss of the source guardian itself: if it dies while the shell
+        # and this backend both survive, neither the shell watch below nor stdin
+        # EOF fires, yet the kernel has reparented us away from the guardian
+        # (race-free, PID-reuse immune) and the guardian's death released the
+        # workspace instance lease — so a second shell could double-boot against
+        # this workspace. Fail closed rather than keep serving orphaned.
+        if guardian_pid is not None and os.getppid() != guardian_pid:
+            _exit_orphaned(request_shutdown, terminate_owned_tree)
+            return
         if not _posix_parent_alive(
             parent_pid,
             track_reparent=track_reparent,
@@ -2633,6 +3631,8 @@ def _watch_parent_windows(
     parent_pid: int,
     request_shutdown: Callable[[], object] | None = None,
     terminate_owned_tree: Callable[[], bool] | None = None,
+    *,
+    parent_identity: str | None = None,
 ) -> None:
     """Block on the shell's process handle on Windows; exit when it dies.
 
@@ -2665,6 +3665,13 @@ def _watch_parent_windows(
         _exit_orphaned(request_shutdown, terminate_owned_tree)
         return
     try:
+        if (
+            parent_identity is not None
+            and _source_identity_parts(parent_identity) is not None
+            and not _source_parent_identity_matches(parent_pid, parent_identity)
+        ):
+            _exit_orphaned(request_shutdown, terminate_owned_tree)
+            return
         result = kernel32.WaitForSingleObject(handle, infinite)
     finally:
         kernel32.CloseHandle(handle)
@@ -2688,7 +3695,12 @@ def _watchdog_body(
     """
     try:
         if os.name == "nt":
-            _watch_parent_windows(parent_pid, request_shutdown, terminate_owned_tree)
+            _watch_parent_windows(
+                parent_pid,
+                request_shutdown,
+                terminate_owned_tree,
+                parent_identity=parent_identity,
+            )
         else:
             _watch_parent_posix(
                 parent_pid,
@@ -2742,7 +3754,7 @@ def start_stdin_shutdown_listener(
                 return
             if command == SHUTDOWN_COMMAND:
                 request_shutdown()
-                # Keep the exact inherited pipe alive for Rust's bounded
+                # Keep the exact inherited pipe alive for Electron's bounded
                 # force-exit fallback if graceful server cleanup wedges.
         _exit_orphaned(request_shutdown, terminate_owned_tree)
 
@@ -2755,10 +3767,124 @@ def start_stdin_shutdown_listener(
     return thread
 
 
-if __name__ == "__main__":
-    if dispatch_packaged_child_mode():
-        raise SystemExit(0)
-    publish_packaged_child_contract()
+def _source_desktop_mode() -> bool:
+    """Return whether this invocation is owned by the desktop source guardian."""
+    return os.environ.get("FLINTTRADE_DESKTOP") == "1"
+
+
+def _acquire_source_guardian_lease() -> object:
+    """Acquire the workspace authority before record, containment or app import."""
+    from flinttrade_core.backend_instance import acquire_backend_instance_lease  # noqa: PLC0415
+
+    return acquire_backend_instance_lease()
+
+
+def _release_failed_source_start_lease(source_lease: object | None) -> bool:
+    """Release startup authority only from the process that acquired it."""
+    if source_lease is None:
+        return True
+    owner_pid = getattr(source_lease, "owner_pid", os.getpid())
+    if owner_pid != os.getpid():
+        # A POSIX application child has already detached its inherited
+        # descriptor. Its external guardian remains the sole lease owner.
+        return True
+    release = getattr(source_lease, "release", None)
+    if not callable(release):
+        return False
+    try:
+        release()
+    except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
+        print(
+            f"[desktop-sidecar] failed-start lease release failed ({type(exc).__name__})",
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    return True
+
+
+def _recover_pending_source_containment_failure(source_lease: object | None) -> bool:
+    """Leave an exact finalisable pending state, then release startup authority."""
+    owner_pid = getattr(source_lease, "owner_pid", os.getpid())
+    durable_proof = True
+    if owner_pid == os.getpid():
+        # No external POSIX guardian owns this failure. The current process has
+        # not imported the backend or spawned an application tree, so its exact
+        # pending record can be durably proved complete before releasing the
+        # workspace lease.
+        try:
+            durable_proof = publish_cleanup_complete_proof(os.getpid())
+        except OSError:
+            durable_proof = False
+    try:
+        pending_ack = announce_pending_record_exit_ack("promotion-failed")
+    except OSError:
+        pending_ack = False
+    lease_released = _release_failed_source_start_lease(source_lease)
+    return (durable_proof or pending_ack) and lease_released
+
+
+def _run_core_desktop(
+    argv: list[str],
+    *,
+    shutdown_signal: _ShutdownCoordinator,
+    guardian_owned_lease: bool,
+) -> None:
+    """Late-import and run the backend after all guardian authority exists."""
+    from flinttrade_core.desktop import main  # noqa: PLC0415 - guardian owns boot order
+
+    main(
+        argv,
+        shutdown_signal=shutdown_signal,
+        guardian_owned_lease=guardian_owned_lease,
+    )
+
+
+def run_desktop_backend(argv: list[str] | None = None) -> int:
+    """Run the source-owned desktop guardian or the plain CLI entrypoint."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == FINALISE_CLEANUP_ARG:
+        parsed_cleanup = _parse_finalise_cleanup_arguments(arguments)
+        if not _source_desktop_mode() or parsed_cleanup is None:
+            raise SystemExit("managed source cleanup arguments are invalid")
+        validate_source_parent_identity()
+        if not finalise_source_cleanup(*parsed_cleanup):
+            raise SystemExit("managed source cleanup validation failed; recovery state retained")
+        return 0
+    if arguments == [PRINT_PARENT_IDENTITY_ARG]:
+        print_parent_identity()
+        return 0
+    if PRINT_PARENT_IDENTITY_ARG in arguments:
+        raise SystemExit("parent identity probe does not accept backend arguments")
+    source_mode = _source_desktop_mode()
+    source_lease: object | None = None
+    if source_mode:
+        validate_source_parent_identity()
+        from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning  # noqa: PLC0415
+
+        try:
+            source_lease = _acquire_source_guardian_lease()
+        except BackendInstanceAlreadyRunning:
+            print("FLINTTRADE_BACKEND_BLOCKED reason=instance-lease", flush=True)
+            raise
+        except Exception as exc:  # noqa: BLE001 - desktop boundary exposes class only
+            raise RuntimeError(
+                f"Source guardian lease acquisition failed ({type(exc).__name__})"
+            ) from None
+        try:
+            recover_stale_desktop_record()
+        except _StaleRecoveryRecordBlocked:
+            print(
+                f"FLINTTRADE_BACKEND_BLOCKED reason={RECOVERY_RECORD_BLOCKED_REASON}",
+                flush=True,
+            )
+            _release_failed_source_start_lease(source_lease)
+            raise SystemExit(
+                "source guardian recovery record is unresolved; retry after the prior backend exits"
+            ) from None
+        if not create_pending_application_pid_record():
+            _release_failed_source_start_lease(source_lease)
+            raise SystemExit("source guardian recovery record creation failed; refusing backend boot")
 
     shutdown = _ShutdownCoordinator()
 
@@ -2766,9 +3892,20 @@ if __name__ == "__main__":
         require_application_pid_record()
         announce_application_pid()
 
-    terminate_owned_tree = _prepare_owned_process_tree(publish_application_identity)
+    cleanup_complete = getattr(source_lease, "release", None)
+    try:
+        terminate_owned_tree = _prepare_owned_process_tree(
+            cleanup_complete=cleanup_complete if callable(cleanup_complete) else None,
+        )
+    except BaseException:  # noqa: BLE001 - cleanup must cover every setup exit
+        if source_mode:
+            _recover_pending_source_containment_failure(source_lease)
+        raise
     if terminate_owned_tree is None:
+        if source_mode:
+            _recover_pending_source_containment_failure(source_lease)
         raise SystemExit("complete process-tree containment is unavailable; refusing backend boot")
+    publish_application_identity()
 
     # Start the watchdog before the (heavy) backend import so a shell that
     # dies during boot still gets its sidecar cleaned up promptly.
@@ -2776,6 +3913,21 @@ if __name__ == "__main__":
     start_stdin_shutdown_listener(shutdown.request, terminate_owned_tree=terminate_owned_tree)
     start_sigterm_shutdown_relay(shutdown.request)
 
-    from flinttrade_core.desktop import main  # noqa: PLC0415 - after watchdog start, see above
+    _run_core_desktop(
+        arguments,
+        shutdown_signal=shutdown,
+        guardian_owned_lease=source_mode,
+    )
 
-    main(shutdown_signal=shutdown)
+    if source_mode and os.name == "nt":
+        release = getattr(source_lease, "release", None)
+        if not _complete_guardian_cleanup(
+            os.getpid(),
+            release if callable(release) else None,
+        ):
+            raise SystemExit("source guardian cleanup proof failed; recovery state retained")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_desktop_backend())

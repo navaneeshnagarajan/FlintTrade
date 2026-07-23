@@ -1,6 +1,6 @@
 [project]
 name = "flinttrade-core"
-version = "0.6.0-beta.13"
+version = "0.0.1"
 description = "Framework, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions, auth"
 requires-python = ">=3.12"
 dependencies = [
@@ -32,8 +32,8 @@ dependencies = [
 ]
 
 [project.scripts]
-# Workspace CLI (init/status) and the native-desktop backend sidecar that the
-# Tauri shell launches. Both become console entry points on ``pip install``.
+# Workspace CLI (init/status) and the Electron-managed source backend. Both
+# become console entry points on ``pip install``.
 flinttrade = "flinttrade_core.cli:main"
 flinttrade-desktop-backend = "flinttrade_core.desktop:main"
 
@@ -45,12 +45,6 @@ migration = [
     "duckdb>=1.1",
     "pyarrow>=17.0",
     "pyrage>=1.1",
-]
-# Native-desktop packaging — PyInstaller freezes the backend sidecar that the
-# Tauri shell bundles. Build-time only; never shipped inside the binary.
-#   uv sync --extra desktop
-desktop = [
-    "pyinstaller>=6.10",
 ]
 
 [build-system]

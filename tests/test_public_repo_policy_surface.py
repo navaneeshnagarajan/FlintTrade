@@ -134,7 +134,7 @@ def test_public_descriptions_preserve_trading_software_identity() -> None:
         "docs index": ROOT / "docs/README.md",
         "site home": ROOT / "packages/apps/site/src/app/page.tsx",
         "site metadata": ROOT / "packages/apps/site/src/app/layout.tsx",
-        "desktop metadata": ROOT / "packages/apps/desktop/src-tauri/tauri.conf.json",
+        "desktop metadata": ROOT / "packages/apps/desktop/package.json",
         "project config": ROOT / "flint.toml",
     }
     combined = "\n".join(_read(path) for path in surfaces.values())

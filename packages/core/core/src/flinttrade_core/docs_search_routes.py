@@ -26,15 +26,13 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request, Response
 
+from .source_root import discover_source_root
+
 logger = logging.getLogger("flinttrade.docs_search")
 
 docs_search_bp = Blueprint("docs_search", __name__, url_prefix="/v1/docs")
 
-# ---------------------------------------------------------------------------
-# Repository root (4 levels above packages/core/core/src/)
-# ---------------------------------------------------------------------------
-
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = discover_source_root()
 _DOCS_DIR = _REPO_ROOT / "docs"
 _CHANGELOG_PATH = _REPO_ROOT / "changelog.md"
 

@@ -18,10 +18,11 @@ UI never receives a 5xx for these auxiliary calls.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
+
+from .source_root import discover_source_root
 
 logger = logging.getLogger("flinttrade.core.frontend_error_routes")
 
@@ -29,8 +30,7 @@ frontend_errors_bp = Blueprint(
     "frontend_errors", __name__, url_prefix="/v1"
 )
 
-# Repo root — four parents up from this file (packages/core/core/src/<file>.py).
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+_REPO_ROOT = discover_source_root()
 _CHANGELOG_PATH = _REPO_ROOT / "changelog.md"
 
 # Cap frontend error payloads so a runaway client can't flood the DB.

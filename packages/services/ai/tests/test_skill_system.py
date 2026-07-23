@@ -11,6 +11,7 @@ from flinttrade_ai.skill_system import (
     SkillConfig,
     SkillRegistry,
     SkillSummary,
+    _default_skills_dir,
     _parse_frontmatter,
     _load_skill_file,
 )
@@ -26,6 +27,21 @@ def _write_skill(directory: Path, filename: str, content: str) -> Path:
     path = directory / filename
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _source_checkout(root: Path) -> Path:
+    """Create the source-root markers needed by resource discovery."""
+    for relative in (
+        "VERSION",
+        "pyproject.toml",
+        "pnpm-workspace.yaml",
+        "packages/core/core/pyproject.toml",
+        "packages/apps/terminal/package.json",
+    ):
+        marker = root / relative
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("marker\n", encoding="utf-8")
+    return root
 
 
 VALID_SKILL_MD = textwrap.dedent("""\
@@ -161,6 +177,17 @@ def skills_dir(tmp_path: Path) -> Path:
 
 
 class TestSkillRegistry:
+    def test_default_skills_dir_resolves_from_windows_non_editable_layout(self, tmp_path: Path) -> None:
+        """Wheel-installed modules still load skills from the checkout."""
+        root = _source_checkout(tmp_path / "FlintTrade")
+        skills = root / "packages" / "services" / "ai" / "skills"
+        skills.mkdir(parents=True)
+        module = root / ".venv" / "Lib" / "site-packages" / "flinttrade_ai" / "skill_system.py"
+        module.parent.mkdir(parents=True, exist_ok=True)
+        module.write_text("# synthetic module\n", encoding="utf-8")
+
+        assert _default_skills_dir(module) == skills.resolve()
+
     def test_len(self, skills_dir: Path) -> None:
         registry = SkillRegistry(skills_dir=skills_dir)
         assert len(registry) == 2

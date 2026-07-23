@@ -1,207 +1,181 @@
-/**
- * UpdatesSection — in-app updater for the desktop shell (Settings -> Updates).
- *
- * Preferred path: the shell's signed native updater (check_native_update /
- * apply_native_update) downloads, verifies, and installs the update in place,
- * then restarts the app — one click, no OS installer. When the native check
- * fails (unsigned or dev builds, older shells, unsupported package formats)
- * the section falls back to the release manifest + bundled installer script,
- * and source rebuilds remain available when a source workspace exists.
- *
- * Independently of the shell update, the managed backend payload channel
- * (check_payload_update / apply_payload_update) offers the daily
- * backend+frontend payload: the shell downloads it into the workspace
- * runtime, verifies its sha256, and restarts onto it — no installer cycle. A
- * rejected payload check (older shell, offline, no payload for this
- * platform) is ignored; the payload path is additive, never blocking.
- */
+/** Settings -> Updates for the Electron source/runtime and shell update flows. */
 
-import { useEffect, useState } from "react";
-import { Check, Copy, Download, Hammer, Loader2, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Box, GitBranch, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { invokeDesktopCommand, isDesktopShell } from "@/lib/desktopShell";
-import { APP_VERSION_TAG } from "@/lib/appVersion";
+  applyShellUpdate,
+  applySourceUpdate,
+  checkShellUpdate,
+  checkSourceUpdate,
+  getUpdateState,
+  isDesktopShell,
+  onUpdateProgress,
+  type UpdateKind,
+  type UpdateSnapshot,
+} from "@/lib/desktopShell";
 import { SectionTitle } from "./shared";
 
-const UNIX_ONE_LINER = "curl -fsSL https://flinttrade.vercel.app/install.sh | bash";
-const WINDOWS_ONE_LINER = "irm https://flinttrade.vercel.app/install.ps1 | iex";
-
-/**
- * Rolling release-manifest URL for the running build's channel: beta when the
- * version tag carries a pre-release suffix, stable otherwise. Published by the
- * desktop-release workflow alongside the Tauri updater feed.
- */
-export function desktopReleaseManifestUrl(versionTag: string): string {
-  const channel = versionTag.includes("-") ? "beta" : "stable";
-  return `https://github.com/navaneeshnagarajan/FlintTrade/releases/download/updater-${channel}/flinttrade-desktop-manifest.json`;
+interface FlowState {
+  error: string | null;
+  loading: boolean;
+  pending: "check" | "apply" | null;
+  snapshot: Readonly<UpdateSnapshot> | null;
 }
 
-interface UpdaterShellState {
-  app_version: string;
-  platform_os?: string | null;
-  platform_arch?: string | null;
-  src_dir: string | null;
-  installer_script?: string | null;
-}
+type FlowStates = Record<UpdateKind, FlowState>;
 
-interface DesktopReleaseAsset {
-  os: "macos" | "windows" | "linux";
-  arch: "x64" | "arm64";
-  kind: "dmg" | "nsis" | "appimage" | "deb" | "rpm";
-  name: string;
-  size: number;
-  url: string;
-}
+const INITIAL_FLOW: FlowState = {
+  error: null,
+  loading: true,
+  pending: null,
+  snapshot: null,
+};
 
-interface DesktopReleaseManifest {
-  tag: string;
-  version: string;
-  channel: "beta" | "stable";
-  prerelease: boolean;
-  html_url: string;
-  assets: DesktopReleaseAsset[];
-}
-
-interface PlatformHint {
-  platform_os?: string | null;
-  platform_arch?: string | null;
-  os?: string | null;
-  arch?: string | null;
-}
-
-/** Payload of the shell's `check_native_update` command. */
-interface NativeUpdateCheck {
-  available: boolean;
-  version: string | null;
-  notes: string | null;
-}
-
-/** Payload of the shell's `check_payload_update` command. */
-interface PayloadUpdateCheck {
-  available: boolean;
-  version: string | null;
-  size: number | null;
-}
-
-type CheckState =
-  | { phase: "idle" }
-  | { phase: "checking" }
-  | { phase: "current"; tag: string }
-  | { phase: "native"; version: string | null; notes: string | null }
-  | { phase: "newer"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
-  | { phase: "indeterminate"; manifest: DesktopReleaseManifest; asset: DesktopReleaseAsset | null }
-  | { phase: "error"; message: string };
-
-type UpdateKind = "binary" | "source";
-
-interface ParsedVersion {
-  major: number;
-  minor: number;
-  patch: number;
-  prerelease: string[];
-}
-
-export function parseVersionTag(tag: string): ParsedVersion | null {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(tag.trim());
-  if (!match) return null;
+function initialFlows(): FlowStates {
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    prerelease: match[4] ? match[4].split(".") : [],
+    shell: { ...INITIAL_FLOW },
+    source: { ...INITIAL_FLOW },
   };
 }
 
-export function compareVersions(a: ParsedVersion, b: ParsedVersion): number {
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  if (a.patch !== b.patch) return a.patch - b.patch;
-  if (a.prerelease.length === 0 && b.prerelease.length === 0) return 0;
-  if (a.prerelease.length === 0) return 1;
-  if (b.prerelease.length === 0) return -1;
-  const len = Math.max(a.prerelease.length, b.prerelease.length);
-  for (let i = 0; i < len; i += 1) {
-    const ai = a.prerelease[i];
-    const bi = b.prerelease[i];
-    if (ai === undefined) return -1;
-    if (bi === undefined) return 1;
-    const aNum = /^\d+$/.test(ai);
-    const bNum = /^\d+$/.test(bi);
-    if (aNum && bNum) {
-      if (Number(ai) !== Number(bi)) return Number(ai) - Number(bi);
-    } else if (aNum !== bNum) {
-      return aNum ? -1 : 1;
-    } else if (ai !== bi) {
-      return ai < bi ? -1 : 1;
-    }
-  }
-  return 0;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-export function matchingPlatformAsset(
-  manifest: DesktopReleaseManifest,
-  platformOrUserAgent: PlatformHint | string = navigator.userAgent,
-  userAgent = navigator.userAgent,
-): DesktopReleaseAsset | null {
-  const platform = typeof platformOrUserAgent === "string" ? null : platformOrUserAgent;
-  const ua = (typeof platformOrUserAgent === "string" ? platformOrUserAgent : userAgent).toLowerCase();
-  const hintedOs = normalisePlatformOs(platform?.platform_os ?? platform?.os);
-  const hintedArch = normalisePlatformArch(platform?.platform_arch ?? platform?.arch);
-  const os = hintedOs ?? osFromUserAgent(ua);
-  const arch = hintedArch ?? archFromUserAgent(ua);
-  if (!os) return null;
-
-  const kinds: DesktopReleaseAsset["kind"][] =
-    os === "windows" ? ["nsis"] : os === "macos" ? ["dmg"] : ["appimage", "deb", "rpm"];
-  for (const kind of kinds) {
-    const exact = manifest.assets.find((asset) => asset.os === os && asset.arch === arch && asset.kind === kind);
-    if (exact) return exact;
-    if (!arch) {
-      const osMatch = manifest.assets.find((asset) => asset.os === os && asset.kind === kind);
-      if (osMatch) return osMatch;
-    }
-  }
-  return null;
+function shouldAcceptSnapshot(
+  current: Readonly<UpdateSnapshot> | null,
+  candidate: Readonly<UpdateSnapshot>,
+): boolean {
+  if (!current) return true;
+  if (candidate.attempt !== current.attempt) return candidate.attempt > current.attempt;
+  return candidate.heartbeatAt >= current.heartbeatAt;
 }
 
-function normalisePlatformOs(value: string | null | undefined): DesktopReleaseAsset["os"] | null {
-  const key = value?.toLowerCase();
-  if (key === "macos" || key === "darwin" || key === "mac") return "macos";
-  if (key === "windows" || key === "win32" || key === "win") return "windows";
-  if (key === "linux") return "linux";
-  return null;
+function shortRevision(revision: string | null): ReactNode {
+  if (!revision) return "Not reported";
+  return (
+    <span className="font-mono" title={revision}>
+      {revision.slice(0, 12)}
+    </span>
+  );
 }
 
-function normalisePlatformArch(value: string | null | undefined): DesktopReleaseAsset["arch"] | null {
-  const key = value?.toLowerCase();
-  if (key === "arm64" || key === "aarch64") return "arm64";
-  if (key === "x64" || key === "x86_64" || key === "amd64") return "x64";
-  return null;
+function shellVersion(version: string | null): ReactNode {
+  if (!version) return "Not reported";
+  return <span className="font-mono">v{version.replace(/^v/, "")}</span>;
 }
 
-function osFromUserAgent(userAgent: string): DesktopReleaseAsset["os"] | null {
-  if (userAgent.includes("windows")) return "windows";
-  if (userAgent.includes("mac")) return "macos";
-  if (userAgent.includes("linux")) return "linux";
-  return null;
+interface UpdateFlowCardProps {
+  applyLabel: string;
+  checkLabel: string;
+  currentLabel: string;
+  description: string;
+  flow: FlowState;
+  icon: ReactNode;
+  onApply: () => void;
+  onCheck: () => void;
+  renderVersion: (version: string | null) => ReactNode;
+  targetLabel: string;
+  title: string;
 }
 
-function archFromUserAgent(userAgent: string): DesktopReleaseAsset["arch"] | null {
-  if (userAgent.includes("arm64") || userAgent.includes("aarch64")) return "arm64";
-  if (userAgent.includes("x86_64") || userAgent.includes("amd64") || userAgent.includes("x64")) return "x64";
-  if (userAgent.includes("windows") || userAgent.includes("linux")) return "x64";
-  return null;
+function UpdateFlowCard({
+  applyLabel,
+  checkLabel,
+  currentLabel,
+  description,
+  flow,
+  icon,
+  onApply,
+  onCheck,
+  renderVersion,
+  targetLabel,
+  title,
+}: UpdateFlowCardProps) {
+  const snapshot = flow.snapshot;
+  const active = flow.pending !== null || snapshot?.status === "checking" || snapshot?.status === "applying";
+  const applying = flow.pending === "apply" || snapshot?.status === "applying";
+  const failure = flow.error ?? snapshot?.failure ?? null;
+  const statusMessage = flow.pending === "check"
+    ? "Checking for updates"
+    : flow.pending === "apply"
+      ? snapshot?.message ?? "Starting the update"
+      : flow.loading
+        ? "Reading updater state"
+        : snapshot?.message ?? "Updater state is unavailable";
+
+  return (
+    <section className="space-y-3 rounded-lg border border-border-default bg-surface-card p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-lg border border-accent/20 bg-accent/10 text-accent">
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+          <p className="mt-0.5 text-xs leading-relaxed text-text-secondary">{description}</p>
+        </div>
+      </div>
+
+      <dl className="grid gap-2 rounded-md border border-border-default bg-surface-base p-3 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-text-muted">{currentLabel}</dt>
+          <dd className="mt-0.5 text-text-primary">{renderVersion(snapshot?.currentVersion ?? null)}</dd>
+        </div>
+        <div>
+          <dt className="text-text-muted">{targetLabel}</dt>
+          <dd className="mt-0.5 text-text-primary">
+            {snapshot?.status === "available" || snapshot?.status === "applying"
+              ? renderVersion(snapshot.version)
+              : "None selected"}
+          </dd>
+        </div>
+      </dl>
+
+      {failure ? (
+        <p className="text-xs text-loss" role="alert">{failure}</p>
+      ) : (
+        <p
+          className="flex items-center gap-2 text-xs text-text-secondary"
+          role={active ? "status" : undefined}
+        >
+          {active ? <Loader2 size={13} className="animate-spin" /> : null}
+          {statusMessage}
+        </p>
+      )}
+
+      {snapshot?.progress != null && (snapshot.status === "applying" || snapshot.status === "complete") ? (
+        <div
+          aria-label={`${title} update progress`}
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={snapshot.progress}
+          className="h-1.5 overflow-hidden rounded-full bg-surface-hover"
+          role="progressbar"
+        >
+          <div
+            className="h-full rounded-full bg-accent transition-[width]"
+            style={{ width: `${Math.max(0, Math.min(100, snapshot.progress))}%` }}
+          />
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" size="sm" className="text-xs" onClick={onCheck} disabled={active}>
+          {flow.pending === "check" || snapshot?.status === "checking"
+            ? <Loader2 size={13} className="animate-spin" />
+            : <RefreshCw size={13} />}
+          {checkLabel}
+        </Button>
+        {snapshot?.status === "available" ? (
+          <Button type="button" size="sm" className="text-xs" onClick={onApply} disabled={active}>
+            {applying ? <Loader2 size={13} className="animate-spin" /> : null}
+            {applyLabel}
+          </Button>
+        ) : null}
+      </div>
+    </section>
+  );
 }
 
 export function UpdatesSection() {
@@ -210,437 +184,127 @@ export function UpdatesSection() {
 }
 
 function DesktopUpdatesSection() {
-  const [shell, setShell] = useState<UpdaterShellState | null>(null);
-  const [shellFailed, setShellFailed] = useState(false);
-  const [check, setCheck] = useState<CheckState>({ phase: "idle" });
-  const [updateStarted, setUpdateStarted] = useState<UpdateKind | null>(null);
-  const [nativeApplying, setNativeApplying] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [payload, setPayload] = useState<PayloadUpdateCheck | null>(null);
-  const [payloadApplying, setPayloadApplying] = useState(false);
-  const [payloadError, setPayloadError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [flows, setFlows] = useState<FlowStates>(initialFlows);
+  const mounted = useRef(true);
+  const requestIds = useRef<Record<UpdateKind, number>>({ shell: 0, source: 0 });
+  const snapshots = useRef<Record<UpdateKind, Readonly<UpdateSnapshot> | null>>({ shell: null, source: null });
 
-  useEffect(() => {
-    let mounted = true;
-    invokeDesktopCommand<UpdaterShellState>("updater_state")
-      .then((state) => {
-        if (mounted) setShell(state);
-      })
-      .catch(() => {
-        if (mounted) setShellFailed(true);
-      });
-    return () => {
-      mounted = false;
-    };
+  const acceptSnapshot = useCallback((snapshot: Readonly<UpdateSnapshot>) => {
+    if (!mounted.current) return;
+    const previous = snapshots.current[snapshot.kind];
+    if (!shouldAcceptSnapshot(previous, snapshot)) return;
+    snapshots.current[snapshot.kind] = snapshot;
+    setFlows((current) => {
+      const flow = current[snapshot.kind];
+      return {
+        ...current,
+        [snapshot.kind]: {
+          ...flow,
+          error: null,
+          loading: false,
+          pending: null,
+          snapshot,
+        },
+      };
+    });
   }, []);
 
-  const runningTag = shell ? `v${shell.app_version.replace(/^v/, "")}` : APP_VERSION_TAG;
-  const isWindows = navigator.userAgent.includes("Windows");
-  const oneLiner = isWindows ? WINDOWS_ONE_LINER : UNIX_ONE_LINER;
+  const fail = useCallback((kind: UpdateKind, error: unknown) => {
+    if (!mounted.current) return;
+    setFlows((current) => ({
+      ...current,
+      [kind]: {
+        ...current[kind],
+        error: errorMessage(error),
+        loading: false,
+        pending: null,
+      },
+    }));
+  }, []);
 
-  async function checkForUpdates(): Promise<void> {
-    setCheck({ phase: "checking" });
-    setUpdateError(null);
-    setPayload(null);
-    setPayloadError(null);
+  useEffect(() => {
+    mounted.current = true;
+    const unsubscribe = onUpdateProgress((snapshot) => {
+      acceptSnapshot(snapshot);
+    });
 
-    // Preferred path: the shell's signed native updater. When the check
-    // rejects (unsigned or dev build, older shell without the command,
-    // unsupported package format), fall back silently to the release
-    // manifest + installer-script flow below.
-    let native: NativeUpdateCheck | null = null;
-    try {
-      native = (await invokeDesktopCommand<NativeUpdateCheck | undefined>("check_native_update")) ?? null;
-    } catch {
-      native = null;
+    for (const kind of ["source", "shell"] as const) {
+      const requestId = ++requestIds.current[kind];
+      const baseline = snapshots.current[kind];
+      void getUpdateState(kind).then(
+        (snapshot) => {
+          if (requestIds.current[kind] === requestId) acceptSnapshot(snapshot);
+        },
+        (error: unknown) => {
+          if (requestIds.current[kind] === requestId && snapshots.current[kind] === baseline) {
+            fail(kind, error);
+          }
+        },
+      );
     }
 
-    // Independent of the shell update: the managed backend payload channel.
-    // A rejection (older shell without the command, offline, no payload for
-    // this platform) is ignored gracefully — the payload path is additive
-    // and both updates may be offered at once.
-    try {
-      const payloadCheck =
-        (await invokeDesktopCommand<PayloadUpdateCheck | undefined>("check_payload_update")) ?? null;
-      setPayload(payloadCheck?.available ? payloadCheck : null);
-    } catch {
-      setPayload(null);
-    }
+    return () => {
+      mounted.current = false;
+      unsubscribe();
+    };
+  }, [acceptSnapshot, fail]);
 
-    if (native) {
-      if (native.available) {
-        setCheck({ phase: "native", version: native.version, notes: native.notes });
-      } else {
-        setCheck({ phase: "current", tag: runningTag });
+  const run = useCallback(async (
+    kind: UpdateKind,
+    operation: "check" | "apply",
+    action: () => Promise<Readonly<UpdateSnapshot>>,
+  ) => {
+    const requestId = ++requestIds.current[kind];
+    const baseline = snapshots.current[kind];
+    setFlows((current) => ({
+      ...current,
+      [kind]: { ...current[kind], error: null, pending: operation },
+    }));
+    try {
+      const snapshot = await action();
+      if (requestIds.current[kind] === requestId) acceptSnapshot(snapshot);
+    } catch (error) {
+      if (requestIds.current[kind] === requestId && snapshots.current[kind] === baseline) {
+        fail(kind, error);
       }
-      return;
     }
-
-    let response: Response;
-    try {
-      response = await fetch(desktopReleaseManifestUrl(runningTag), {
-        headers: { Accept: "application/json" },
-      });
-    } catch {
-      setCheck({
-        phase: "error",
-        message: "Could not reach the FlintTrade release manifest — check your network connection and try again.",
-      });
-      return;
-    }
-    if (response.status === 403 || response.status === 429) {
-      setCheck({
-        phase: "error",
-        message: "Release lookup is rate limited — wait a few minutes and try again.",
-      });
-      return;
-    }
-    if (!response.ok) {
-      setCheck({ phase: "error", message: `Release lookup responded with HTTP ${response.status}.` });
-      return;
-    }
-    let manifest: DesktopReleaseManifest;
-    try {
-      manifest = (await response.json()) as DesktopReleaseManifest;
-    } catch {
-      setCheck({ phase: "error", message: "The release manifest returned an unexpected response." });
-      return;
-    }
-    const latestParsed = parseVersionTag(manifest.tag);
-    const runningParsed = parseVersionTag(runningTag);
-    const asset = matchingPlatformAsset(manifest, shell ?? undefined);
-    if (!latestParsed || !runningParsed) {
-      // Fail safe: an unparseable version tag must never be reported as "up to
-      // date" (that would silently hide a real update). Surface the uncertainty
-      // and still offer the update path — prefer showing it over hiding it.
-      setCheck({ phase: "indeterminate", manifest, asset });
-    } else if (compareVersions(latestParsed, runningParsed) > 0) {
-      setCheck({ phase: "newer", manifest, asset });
-    } else {
-      setCheck({ phase: "current", tag: manifest.tag });
-    }
-  }
-
-  async function startUpdate(kind: UpdateKind, tag?: string): Promise<void> {
-    setUpdateError(null);
-    try {
-      if (kind === "binary") {
-        await invokeDesktopCommand<void>("run_binary_update", tag ? { tag } : undefined);
-      } else {
-        await invokeDesktopCommand<void>("run_self_update");
-      }
-      setUpdateStarted(kind);
-    } catch (error) {
-      setUpdateError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function applyNativeUpdate(): Promise<void> {
-    setUpdateError(null);
-    setNativeApplying(true);
-    try {
-      // The shell restarts the app once the update is installed, so this
-      // promise normally never resolves — the busy state holds until the
-      // window is torn down.
-      await invokeDesktopCommand<void>("apply_native_update");
-    } catch (error) {
-      setNativeApplying(false);
-      setUpdateError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function applyPayloadUpdate(): Promise<void> {
-    setPayloadError(null);
-    setPayloadApplying(true);
-    try {
-      // The shell restarts the app once the payload is staged and pinned, so
-      // this promise normally never resolves — the busy state holds until
-      // the window is torn down.
-      await invokeDesktopCommand<void>("apply_payload_update");
-    } catch (error) {
-      setPayloadApplying(false);
-      setPayloadError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function copyOneLiner(): Promise<void> {
-    try {
-      await navigator.clipboard?.writeText(oneLiner);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard access denied — the command stays visible to copy manually.
-    }
-  }
-
-  const release = check.phase === "newer" || check.phase === "indeterminate" ? check : null;
-  const indeterminate = check.phase === "indeterminate";
-  // The bundled installer script resolves the correct release asset server-side,
-  // so a failed client-side platform match must NOT hide the one-click update —
-  // require only that a script is present. The website one-liner stays the
-  // fallback only when there is genuinely no in-app update path.
-  const showBinaryPath = release != null && shell?.installer_script != null;
-  const showSourcePath = release != null && shell?.src_dir != null;
-  const showOneLinerFallback = release != null && !showBinaryPath && !showSourcePath;
+  }, [acceptSnapshot, fail]);
 
   return (
     <div className="space-y-5">
       <SectionTitle>Updates</SectionTitle>
 
-      <div className="flex items-center gap-3 p-4 rounded-lg bg-surface-card border border-border-default">
-        <div className="flex-none w-10 h-10 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center">
-          <Download size={18} className="text-accent" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-text-primary">FlintTrade Desktop</div>
-          <div className="text-xs text-text-muted">
-            Running version <span className="font-mono text-text-secondary">{runningTag}</span>
-          </div>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="ml-auto text-xs"
-          onClick={() => void checkForUpdates()}
-          disabled={check.phase === "checking"}
-        >
-          {check.phase === "checking" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-          {check.phase === "checking" ? "Checking..." : "Check for updates"}
-        </Button>
-      </div>
+      <UpdateFlowCard
+        applyLabel="Stage, verify and restart"
+        checkLabel="Check source update"
+        currentLabel="Current revision"
+        description="Electron checks trusted main, stages a sibling checkout, builds the terminal, and verifies isolated health before it restarts onto the promoted source."
+        flow={flows.source}
+        icon={<GitBranch size={18} />}
+        onApply={() => void run("source", "apply", applySourceUpdate)}
+        onCheck={() => void run("source", "check", checkSourceUpdate)}
+        renderVersion={shortRevision}
+        targetLabel="Checked revision"
+        title="Source and runtime"
+      />
 
-      {shellFailed && (
-        <p className="text-xs text-loss">
-          The desktop shell did not report its updater state — the version shown comes from the
-          frontend build and in-app updating is unavailable.
-        </p>
-      )}
+      <UpdateFlowCard
+        applyLabel="Install and relaunch"
+        checkLabel="Check shell update"
+        currentLabel="Current shell version"
+        description="Shell release discovery and the packaged installer handoff are owned by Electron. Installation relaunches the app when the new shell is ready."
+        flow={flows.shell}
+        icon={<Box size={18} />}
+        onApply={() => void run("shell", "apply", applyShellUpdate)}
+        onCheck={() => void run("shell", "check", checkShellUpdate)}
+        renderVersion={shellVersion}
+        targetLabel="Available shell version"
+        title="Electron shell"
+      />
 
-      {check.phase === "error" && <p className="text-xs text-loss">{check.message}</p>}
-
-      {check.phase === "current" && (
-        <p className="text-xs text-text-secondary">
-          You are on the latest desktop release (<span className="font-mono">{check.tag}</span>).
-        </p>
-      )}
-
-      {check.phase === "native" && (
-        <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
-          <p className="text-xs text-text-primary">
-            {check.version ? (
-              <>
-                Version{" "}
-                <span className="font-mono font-semibold">v{check.version.replace(/^v/, "")}</span>{" "}
-                is available (you are on <span className="font-mono">{runningTag}</span>).
-              </>
-            ) : (
-              <>A newer desktop build is available (you are on <span className="font-mono">{runningTag}</span>).</>
-            )}
-          </p>
-
-          {check.notes && (
-            <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">{check.notes}</p>
-          )}
-
-          {nativeApplying ? (
-            <p className="flex items-center gap-2 text-xs text-text-secondary" role="status">
-              <Loader2 size={13} className="animate-spin" />
-              Updating — the app will restart itself.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                The update downloads in the background, verifies its signature, and installs in
-                place. The app restarts itself once it is ready.
-              </p>
-              <Button type="button" size="sm" className="text-xs" onClick={() => void applyNativeUpdate()}>
-                <Download size={13} />
-                Update and restart
-              </Button>
-            </>
-          )}
-
-          {updateError && <p className="text-xs text-loss">{updateError}</p>}
-        </div>
-      )}
-
-      {payload?.available && (
-        <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
-          <p className="text-xs text-text-primary">
-            {payload.version ? (
-              <>
-                Backend update{" "}
-                <span className="font-mono font-semibold">v{payload.version.replace(/^v/, "")}</span>{" "}
-                is available for the managed runtime.
-              </>
-            ) : (
-              <>A backend update is available for the managed runtime.</>
-            )}
-          </p>
-
-          {payloadApplying ? (
-            <p className="flex items-center gap-2 text-xs text-text-secondary" role="status">
-              <Loader2 size={13} className="animate-spin" />
-              Updating the backend — the app will restart itself.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                The backend payload
-                {payload.size != null
-                  ? ` (~${Math.max(1, Math.round(payload.size / (1024 * 1024)))} MB)`
-                  : ""}{" "}
-                downloads in the background, its checksum is verified, and the app restarts onto
-                the updated backend and terminal — no installer required.
-              </p>
-              <Button type="button" size="sm" className="text-xs" onClick={() => void applyPayloadUpdate()}>
-                <Download size={13} />
-                {payload.version ? `Update backend (v${payload.version.replace(/^v/, "")})` : "Update backend"}
-              </Button>
-            </>
-          )}
-
-          {payloadError && <p className="text-xs text-loss">{payloadError}</p>}
-        </div>
-      )}
-
-      {release && (
-        <div className="space-y-3 p-4 rounded-lg bg-surface-card border border-accent/30">
-          {indeterminate ? (
-            <p className="text-xs text-text-primary">
-              Could not determine whether{" "}
-              <span className="font-mono font-semibold">{release.manifest.tag}</span> is newer than
-              your current version (<span className="font-mono">{runningTag}</span>). Re-run the
-              check above, or install it below if you want the latest build.
-            </p>
-          ) : (
-            <p className="text-xs text-text-primary">
-              <span className="font-mono font-semibold">{release.manifest.tag}</span> is available
-              (you are on <span className="font-mono">{runningTag}</span>).
-            </p>
-          )}
-
-          {showBinaryPath && !updateStarted && (
-            <>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                {release.asset ? (
-                  <>
-                    The default update downloads the published installer asset for this machine:{" "}
-                    <span className="font-mono break-all">{release.asset.name}</span>.
-                  </>
-                ) : (
-                  <>The bundled installer script will download the matching desktop package for this machine.</>
-                )}{" "}
-                The app will close while the installer runs.
-              </p>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button type="button" size="sm" className="text-xs">
-                    <Download size={13} />
-                    Download &amp; install update
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Install {release.manifest.tag}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      FlintTrade will launch the bundled installer script, download the matching
-                      desktop package, close this app, and let the OS installer replace the old app.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void startUpdate("binary", release.manifest.tag)}>
-                      Install and relaunch
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </>
-          )}
-
-          {showSourcePath && !updateStarted && (
-            <div className="space-y-2">
-              <p className="text-xs text-text-secondary leading-relaxed">
-                Advanced fallback: rebuild FlintTrade from source in{" "}
-                <span className="font-mono break-all">{shell?.src_dir}</span>. This needs the full
-                developer toolchain and can take 10-20 minutes.
-              </p>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" className="text-xs">
-                    <Hammer size={13} />
-                    Rebuild from source
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Rebuild {release.manifest.tag} from source?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      FlintTrade will run the source-build installer from the local checkout. The app
-                      will close while the build runs and relaunch after installation.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void startUpdate("source")}>
-                      Rebuild and relaunch
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          )}
-
-          {updateError && <p className="text-xs text-loss">{updateError}</p>}
-
-          {updateStarted && (
-            <p className="text-xs text-text-secondary">
-              {updateStarted === "binary" ? "Installer update" : "Source rebuild"} started — the app
-              will close in a moment.{" "}
-              {isWindows ? (
-                <>A console or installer window may show progress.</>
-              ) : (
-                <>
-                  Output is written to <span className="font-mono">self_update.log</span> in the
-                  FlintTrade workspace directory when available.
-                </>
-              )}
-            </p>
-          )}
-
-          {showOneLinerFallback && (
-            <div className="space-y-2">
-              <p className="text-xs text-text-secondary leading-relaxed">
-                This desktop build does not include an updater script. Run the installer in a terminal:
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 px-3 py-2 rounded bg-surface-base border border-border-default text-xs font-mono text-text-primary overflow-x-auto whitespace-nowrap">
-                  {oneLiner}
-                </code>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="flex-none text-xs"
-                  onClick={() => void copyOneLiner()}
-                  aria-label="Copy install command"
-                >
-                  {copied ? <Check size={13} /> : <Copy size={13} />}
-                  {copied ? "Copied" : "Copy"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <p className="text-xs text-text-muted leading-relaxed">
-        Updates install signed desktop release builds in one click where supported, falling back to
-        the published installer assets. Source rebuilds remain available for contributor checkouts
-        and advanced operators.
+      <p className="text-xs leading-relaxed text-text-muted">
+        Source/runtime updates and Electron-shell installers are independent. Each check and apply
+        action stays in the desktop process; this page only presents its typed, redacted state.
       </p>
     </div>
   );

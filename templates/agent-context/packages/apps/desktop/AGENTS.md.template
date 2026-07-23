@@ -1,24 +1,31 @@
 # desktop — Agent Instructions
 
-Read `packages/apps/desktop/CLAUDE.md` first. This is the Tauri 2 native shell.
+Read `packages/apps/desktop/CLAUDE.md` first. This is the Electron 40 shell.
 
-## Key Facts
-- Framework: Tauri 2 (Rust) wrapping the built terminal + PyInstaller sidecar
-- Runtime file: `src-tauri/src/lib.rs` (sidecar spawn, tray, hotkey, notifications)
-- Background runtime: close-to-tray — window close must NOT kill the backend
-- Origin: single loopback origin only; no external listeners
-- Branch: main (pre-release, all commits to main)
+## Key facts
+
+- Runtime: strict TypeScript main/preload under `electron/`.
+- Authority: machine bootstrap, source lifecycle, native windows and updates;
+  never trading or broker writes.
+- Origin: exact packaged splash file or selected `127.0.0.1` backend only.
+- Background runtime: close hides to tray; explicit quit drains and stops the
+  owned guardian containment.
+- First launch: checksum-verified tools and frozen-lock source build under
+  `~/.flinttrade/src/FlintTrade`.
 
 ## Working here
-- `make desktop-dev` to run; `make desktop-build` for installers
-- Rust changes: `cargo check` + `cargo test --lib` in `src-tauri/` before done
-- Backend↔shell contracts: ready-port stdout handshake and the
-  `FLINTTRADE_NOTIFY\t<title>\t<body>` notification protocol — change both
-  sides together (producer `flinttrade_core/desktop_notify.py`)
-- Never bundle the Kotak Neo SDK into installers (no redistribution terms)
-- Conventional Commits with scope `desktop`
+
+- Run `make desktop-test`, `make desktop-build`, and the relevant package smoke.
+- Preserve the named `window.flintDesktop` bridge and per-handler sender
+  validation; never add a generic IPC escape hatch.
+- Keep the running checkout immutable. Source candidates use sibling paths and
+  an isolated health workspace; user data never moves with source.
+- Source/runtime and shell-installer updates remain separate operations.
+- Conventional Commits use scope `desktop`.
 
 ## Verification
-Local: cargo check + cargo test --lib green; `make desktop-build` end-to-end
-when touching packaging. Cross-OS proof lives in `nightly-cross-platform.yml`
-and `desktop-release.yml` (manual) — not per-push CI.
+
+Local Electron TypeScript, Vitest, bundle and host package must be green when
+their surfaces change. Windows/Linux package and process semantics require
+deterministic tests plus CI/contributor runs; one Mac is not cross-platform
+proof. Never push without explicit maintainer permission.

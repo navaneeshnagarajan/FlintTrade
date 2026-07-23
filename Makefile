@@ -44,7 +44,7 @@ else
   OPENALGO_PID := /tmp/flinttrade-openalgo.pid
 endif
 
-.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-backend desktop-build desktop-dev
+.PHONY: setup start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
 
 # ======================================================================
 # Setup
@@ -159,43 +159,40 @@ else
 endif
 
 # ======================================================================
-# Native desktop app (Tauri 2 shell + PyInstaller backend sidecar)
+# Native desktop app (Electron shell + first-run source bootstrap)
 # ======================================================================
-# Produces installable packages (.dmg, .exe, .deb/.rpm/.AppImage).
+# Produces the macOS DMG, Windows NSIS and Linux AppImage shell installers.
 # Each target builds for the CURRENT OS/arch; the full cross-platform matrix is
 # produced by .github/workflows/desktop-release.yml. See docs/DESKTOP.md.
 
 desktop-icons: ## Regenerate the desktop app icons from the brand mark
 	@$(PYTHON) packaging/make-icons.py
 
-desktop-backend: ## Freeze the backend into a Tauri sidecar (current OS/arch)
-	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
-
-desktop-build: ## Build native desktop installers for this OS (frontend + sidecar + bundle)
-	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
+desktop-test: ## Typecheck and test the Electron shell
 	@CI=true $(PNPM) install --frozen-lockfile
-	@set -e; \
-	  build_stamp="$$(mktemp)"; \
-	  trap 'rm -f "$$build_stamp"' EXIT; \
-	  touch "$$build_stamp"; \
-	  set +e; \
-	  (cd packages/apps/desktop && CI=true $(PNPM) tauri build); \
-	  build_status="$$?"; \
-	  set -e; \
-	  if [ "$$build_status" -ne 0 ]; then \
-	    if [ "$$(uname -s)" = "Darwin" ]; then \
-	      echo -e "$(YELLOW)Tauri DMG cosmetics failed; creating a headless-safe DMG from the fresh .app bundle.$(RESET)"; \
-	      bash scripts/package/create-macos-dmg.sh --stamp "$$build_stamp"; \
-	    else \
-	      exit "$$build_status"; \
-	    fi; \
-	  fi
-	@echo -e "$(GREEN)✓ Installers under packages/apps/desktop/src-tauri/target/release/bundle/$(RESET)"
+	@CI=true $(PNPM) --dir packages/apps/desktop run typecheck
+	@CI=true $(PNPM) --dir packages/apps/desktop run test:electron
 
-desktop-dev: ## Run the desktop app in dev mode (builds the sidecar first)
-	@PYTHON="$(PYTHON)" bash packaging/build-backend.sh
+desktop-build: ## Verify and bundle the Electron shell
 	@CI=true $(PNPM) install --frozen-lockfile
-	@cd packages/apps/desktop && $(PNPM) tauri dev
+	@CI=true $(PNPM) --dir packages/apps/desktop run build
+
+desktop-package: desktop-build ## Package and verify the Electron installer for this OS/arch
+ifeq ($(OS),Windows_NT)
+	@CI=true $(PNPM) --dir packages/apps/desktop run pack:win
+else
+	@case "$$(uname -s):$$(uname -m)" in \
+	  Darwin:*) CI=true $(PNPM) --dir packages/apps/desktop run pack:mac ;; \
+	  Linux:x86_64|Linux:amd64) CI=true $(PNPM) --dir packages/apps/desktop run pack:linux:x64 ;; \
+	  Linux:arm64|Linux:aarch64) CI=true $(PNPM) --dir packages/apps/desktop run pack:linux:arm64 ;; \
+	  *) echo -e "$(RED)Unsupported desktop package target: $$(uname -s)/$$(uname -m)$(RESET)"; exit 1 ;; \
+	 esac
+endif
+	@echo -e "$(GREEN)✓ Electron package under packages/apps/desktop/release/electron/$(RESET)"
+
+desktop-dev: ## Run the Electron shell against its managed source bootstrap
+	@CI=true $(PNPM) install --frozen-lockfile
+	@CI=true $(PNPM) --dir packages/apps/desktop run dev
 
 # ======================================================================
 # Maintenance

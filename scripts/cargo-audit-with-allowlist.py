@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run cargo-audit and fail on unreviewed advisories.
 
-Vulnerabilities are never suppressed. The tick engine has no accepted RustSec warnings. The desktop app currently
-inherits warning-class advisories through Tauri's Linux GTK/WebKit stack; those
-are tracked in supply-chain/cargo-audit-allowlist.yml with expiry dates so CI
-keeps covering the desktop lockfile without silently accepting new findings.
+Vulnerabilities are never suppressed. The PyO3 tick engine currently has no
+accepted RustSec warnings; any future warning must be explicitly reviewed and
+time-bounded in supply-chain/cargo-audit-allowlist.yml.
 """
 
 from __future__ import annotations

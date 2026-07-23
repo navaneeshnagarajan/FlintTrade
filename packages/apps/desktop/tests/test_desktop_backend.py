@@ -40,6 +40,13 @@ TEST_BOOT_ID = "c" * 64
 POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS = 30
 
 
+def _write_hardened_text(path: Path, value: str) -> None:
+    """Create a fixture with the recovery boundary's exact owner policy."""
+    from flinttrade_core.secure_file import write_secret_text
+
+    write_secret_text(path, value)
+
+
 def _load_entry_module() -> ModuleType:
     """Import the entry script from its file path (it is not a package)."""
     spec = importlib.util.spec_from_file_location("desktop_backend_entry", ENTRY_SCRIPT)
@@ -137,13 +144,1333 @@ def test_parent_pid_parsing(entry: ModuleType, raw: str | None, expected: int | 
 
 
 @pytest.mark.unit
+def test_source_parent_identity_probe_prints_one_exact_line(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.StringIO()
+    monkeypatch.setattr(entry.os, "getppid", lambda: 77)
+    monkeypatch.setattr(
+        entry,
+        "_source_process_identity",
+        lambda pid: f"v1|darwin|{pid}|macos-start-time:1:2|{'a' * 64}",
+    )
+
+    entry.print_parent_identity(stream=stream)
+
+    assert stream.getvalue() == (
+        f"FLINTTRADE_PARENT_IDENTITY v1|darwin|77|macos-start-time:1:2|{'a' * 64}\n"
+    )
+
+
+@pytest.mark.unit
+def test_source_parent_identity_validation_binds_the_direct_parent(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = f"v1|darwin|77|macos-start-time:1:2|{'a' * 64}"
+    monkeypatch.setattr(entry.os, "getppid", lambda: 77)
+    monkeypatch.setattr(entry, "_source_process_identity", lambda pid: identity if pid == 77 else None)
+
+    assert entry.validate_source_parent_identity(
+        {
+            entry.PARENT_PID_ENV: "77",
+            entry.PARENT_IDENTITY_ENV: identity,
+        }
+    ) == identity
+
+    with pytest.raises(SystemExit, match="direct Electron parent identity"):
+        entry.validate_source_parent_identity(
+            {
+                entry.PARENT_PID_ENV: "88",
+                entry.PARENT_IDENTITY_ENV: identity,
+            }
+        )
+
+
+@pytest.mark.unit
+def test_source_parent_identity_validation_rejects_generation_or_image_change(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = f"v1|darwin|77|macos-start-time:1:2|{'a' * 64}"
+    current = f"v1|darwin|77|macos-start-time:1:3|{'a' * 64}"
+    monkeypatch.setattr(entry.os, "getppid", lambda: 77)
+    monkeypatch.setattr(entry, "_source_process_identity", lambda _pid: current)
+
+    with pytest.raises(SystemExit, match="direct Electron parent identity"):
+        entry.validate_source_parent_identity(
+            {
+                entry.PARENT_PID_ENV: "77",
+                entry.PARENT_IDENTITY_ENV: expected,
+            }
+        )
+
+
+@pytest.mark.unit
+def test_source_parent_identity_match_is_exact_and_rejects_pid_reuse(
+    entry: ModuleType,
+) -> None:
+    expected = f"v1|win32|77|windows-creation-time:123|{'a' * 64}"
+
+    assert entry._source_parent_identity_matches(
+        77,
+        expected,
+        identity_lookup=lambda _pid: expected,
+    ) is True
+    assert entry._source_parent_identity_matches(
+        77,
+        expected,
+        identity_lookup=lambda _pid: expected.replace(":123|", ":124|"),
+    ) is False
+    assert entry._source_parent_identity_matches(
+        88,
+        expected,
+        identity_lookup=lambda _pid: expected,
+    ) is False
+
+
+@pytest.mark.unit
+def test_source_parent_watch_uses_the_bound_kernel_generation_without_rehashing(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_name = "linux" if sys.platform.startswith("linux") else "darwin"
+    expected = f"v1|{platform_name}|77|kernel-start:1:2|{'a' * 64}"
+    monkeypatch.setattr(
+        entry,
+        "_posix_process_start_token",
+        lambda pid: "kernel-start:1:2" if pid == 77 else None,
+    )
+    monkeypatch.setattr(
+        entry,
+        "_source_process_identity",
+        lambda _pid: (_ for _ in ()).throw(AssertionError("polling must not rehash Electron")),
+    )
+
+    assert entry._posix_parent_alive(
+        77,
+        track_reparent=False,
+        expected_identity=expected,
+    ) is True
+
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: "kernel-start:1:3")
+    assert entry._posix_parent_alive(
+        77,
+        track_reparent=False,
+        expected_identity=expected,
+    ) is False
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX source-guardian topology")
+def test_posix_watchdog_exits_when_the_source_guardian_parent_dies(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Indirect topology: the source guardian (pid 100) is our direct POSIX
+    # parent and Electron (pid 77) is the shell we watch by identity. The
+    # guardian dying while Electron and this backend both survive reparents us
+    # to init (getppid 1) — the watchdog must fail closed even though Electron
+    # is still alive, because the guardian released the workspace lease.
+    ppids = iter([100, 100, 1])
+    monkeypatch.setattr(entry.os, "getppid", lambda: next(ppids))
+    monkeypatch.setattr(entry.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(entry, "_posix_parent_alive", lambda *a, **k: True)
+    calls: list[str] = []
+    monkeypatch.setattr(entry, "_exit_orphaned", lambda *a, **k: calls.append("orphaned"))
+
+    entry._watch_parent_posix(77, parent_identity=f"v1|darwin|77|start|{'a' * 64}")
+
+    assert calls == ["orphaned"]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX source-guardian topology")
+def test_posix_watchdog_does_not_exit_while_the_guardian_and_shell_survive(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A stable guardian (getppid never changes) and a live shell must not cause
+    # a spurious orphan exit; the only exit is the shell's own death.
+    monkeypatch.setattr(entry.os, "getppid", lambda: 100)
+    shell_alive = iter([True, True, False])
+    monkeypatch.setattr(entry, "_posix_parent_alive", lambda *a, **k: next(shell_alive))
+    sleeps = {"count": 0}
+
+    def _count_sleep(_seconds: float) -> None:
+        sleeps["count"] += 1
+
+    monkeypatch.setattr(entry.time, "sleep", _count_sleep)
+    calls: list[str] = []
+    monkeypatch.setattr(entry, "_exit_orphaned", lambda *a, **k: calls.append("orphaned"))
+
+    entry._watch_parent_posix(77, parent_identity=f"v1|darwin|77|start|{'a' * 64}")
+
+    # It polled three times (guardian stable throughout) and only exited when the
+    # shell itself died — never early via a false guardian-reparent trigger.
+    assert sleeps["count"] == 3
+    assert calls == ["orphaned"]
+
+
+@pytest.mark.unit
+def test_source_guardian_creates_exact_pending_record(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    token = "a" * 64
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: token,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is True
+    assert record.read_text(encoding="ascii") == (
+        f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    )
+    if os.name != "nt":
+        assert record.stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.unit
+def test_source_guardian_refuses_to_replace_existing_recovery_record(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    record.write_text("existing recovery authority\n", encoding="ascii")
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: "a" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is False
+    assert record.read_text(encoding="ascii") == "existing recovery authority\n"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw_path", ["desktop_backend.pid", " /tmp/desktop_backend.pid "])
+def test_source_guardian_requires_an_exact_absolute_record_path(
+    entry: ModuleType,
+    raw_path: str,
+) -> None:
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: "a" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: raw_path,
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is False
+
+
+@pytest.mark.unit
+def test_source_guardian_fails_closed_on_a_stale_pre_existing_v4_record(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    stale = f"v4\n9001\n9002\n77\n{'d' * 64}\n{'b' * 64}\n"
+    record.write_text(stale, encoding="ascii")
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: "a" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is False
+    assert record.read_text(encoding="ascii") == stale
+    assert entry._cleanup_complete_proof_path(record).exists() is False
+
+
+def _recovery_environment(
+    entry: ModuleType,
+    record: Path,
+    *,
+    boot_id: str = TEST_BOOT_ID,
+    shell_pid: int = 88,
+    shell_hash: str = "e" * 64,
+) -> dict[str, str]:
+    return {
+        entry.PARENT_PID_ENV: str(shell_pid),
+        entry.PARENT_IDENTITY_ENV: f"v1|darwin|{shell_pid}|shell-start|{shell_hash}",
+        entry.BOOT_ID_ENV: boot_id,
+        entry.LAUNCH_TOKEN_ENV: "f" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+
+@pytest.mark.unit
+def test_stale_recovery_removes_an_earlier_boot_record_only_after_process_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    token = "a" * 64
+    _write_hardened_text(record, f"v4\n1234\npending\n77\n{'d' * 64}\n{token}\n")
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(proof, f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={token}\n")
+    process_pids: list[int] = []
+    group_pids: list[int] = []
+
+    assert entry.recover_stale_desktop_record(
+        environ=_recovery_environment(entry, record),
+        process_probe=lambda pid: process_pids.append(pid) or entry._RECOVERY_PROCESS_DEAD,
+        group_probe=lambda pgid: group_pids.append(pgid) or entry._RECOVERY_PROCESS_DEAD,
+        current_pid=99,
+        backend_image_hash="f" * 64,
+    ) is True
+    assert process_pids == [77, 1234]
+    assert group_pids == [1234]
+    assert record.exists() is False
+    assert proof.exists() is False
+
+
+@pytest.mark.unit
+def test_stale_recovery_removes_a_same_boot_conclusively_dead_v4_tree_without_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(
+        record,
+        f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n",
+    )
+    process_pids: list[int] = []
+    group_pids: list[int] = []
+
+    assert entry.recover_stale_desktop_record(
+        environ=_recovery_environment(entry, record),
+        process_probe=lambda pid: process_pids.append(pid) or entry._RECOVERY_PROCESS_DEAD,
+        group_probe=lambda pgid: group_pids.append(pgid) or entry._RECOVERY_PROCESS_DEAD,
+        current_pid=99,
+        backend_image_hash="f" * 64,
+    ) is True
+    assert process_pids == [77, 5678, 1234]
+    assert sorted(group_pids) == [1234, 5678]
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+def test_stale_recovery_removes_conclusively_reused_pids_without_signalling_their_groups(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(
+        record,
+        f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n",
+    )
+
+    def unrelated(pid: int) -> object:
+        return entry._RecoveryProcessIdentity(
+            f"start:{pid}",
+            Path(f"/usr/bin/unrelated-{pid}"),
+            "b" * 64,
+            f"/usr/bin/unrelated-{pid}",
+        )
+
+    assert entry.recover_stale_desktop_record(
+        environ=_recovery_environment(entry, record),
+        process_probe=unrelated,
+        group_probe=lambda _pgid: pytest.fail("a reused leader's numeric group must not be probed"),
+        current_pid=99,
+        backend_image_hash="f" * 64,
+    ) is True
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "record_boot_id",
+    [TEST_BOOT_ID, "d" * 64],
+    ids=["same-boot", "mismatched-boot"],
+)
+def test_stale_recovery_retains_a_live_backend_regardless_of_boot_identity(
+    entry: ModuleType,
+    tmp_path: Path,
+    record_boot_id: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    contents = f"v4\n1234\n1234\n77\n{record_boot_id}\n{'a' * 64}\n"
+    _write_hardened_text(record, contents)
+
+    def process(pid: int) -> object:
+        if pid == 77:
+            return entry._RECOVERY_PROCESS_DEAD
+        return entry._RecoveryProcessIdentity(
+            "backend-start",
+            Path("/private/venv/bin/python"),
+            "f" * 64,
+            "python packaging/desktop_backend.py --port 0",
+        )
+
+    with pytest.raises(entry._StaleRecoveryRecordBlocked) as raised:
+        entry.recover_stale_desktop_record(
+            environ=_recovery_environment(entry, record),
+            process_probe=process,
+            group_probe=lambda _pgid: entry._RECOVERY_PROCESS_DEAD,
+            current_pid=99,
+            backend_image_hash="f" * 64,
+        )
+
+    assert str(raised.value) == "desktop recovery record is unresolved"
+    assert "1234" not in str(raised.value)
+    assert record.read_text(encoding="ascii") == contents
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["unknown-probe", "live-group"])
+@pytest.mark.parametrize(
+    "record_boot_id",
+    [TEST_BOOT_ID, "d" * 64],
+    ids=["same-boot", "mismatched-boot"],
+)
+def test_stale_recovery_retains_unknown_process_or_live_containment_state(
+    entry: ModuleType,
+    tmp_path: Path,
+    failure: str,
+    record_boot_id: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    contents = f"v4\n1234\npending\n77\n{record_boot_id}\n{'a' * 64}\n"
+    _write_hardened_text(record, contents)
+
+    def process(pid: int) -> str:
+        if failure == "unknown-probe" and pid == 1234:
+            raise OSError("secret probe failure")
+        return entry._RECOVERY_PROCESS_DEAD
+
+    with pytest.raises(entry._StaleRecoveryRecordBlocked, match="desktop recovery record is unresolved"):
+        entry.recover_stale_desktop_record(
+            environ=_recovery_environment(entry, record),
+            process_probe=process,
+            group_probe=lambda _pgid: "alive" if failure == "live-group" else entry._RECOVERY_PROCESS_DEAD,
+            current_pid=99,
+            backend_image_hash="f" * 64,
+        )
+    assert record.read_text(encoding="ascii") == contents
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "malformed recovery authority\n",
+        f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\nshort-token\n",
+    ],
+)
+def test_stale_recovery_retains_malformed_records(
+    entry: ModuleType,
+    tmp_path: Path,
+    contents: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(record, contents)
+
+    with pytest.raises(entry._StaleRecoveryRecordBlocked, match="desktop recovery record is unresolved"):
+        entry.recover_stale_desktop_record(
+            environ=_recovery_environment(entry, record),
+            process_probe=lambda _pid: pytest.fail("malformed authority must block before PID probes"),
+            current_pid=99,
+            backend_image_hash="f" * 64,
+        )
+    assert record.read_text(encoding="ascii") == contents
+
+
+@pytest.mark.unit
+def test_stale_recovery_retains_a_mismatched_cleanup_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    contents = f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n"
+    _write_hardened_text(record, contents)
+    proof = entry._cleanup_complete_proof_path(record)
+    mismatched = f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'b' * 64}\n"
+    _write_hardened_text(proof, mismatched)
+
+    with pytest.raises(entry._StaleRecoveryRecordBlocked, match="desktop recovery record is unresolved"):
+        entry.recover_stale_desktop_record(
+            environ=_recovery_environment(entry, record),
+            process_probe=lambda _pid: pytest.fail("proof mismatch must block before PID probes"),
+            current_pid=99,
+            backend_image_hash="f" * 64,
+        )
+    assert record.read_text(encoding="ascii") == contents
+    assert proof.read_text(encoding="ascii") == mismatched
+
+
+@pytest.mark.unit
+def test_stale_recovery_rechecks_the_record_under_transition_authority_before_unlink(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    original = f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n"
+    changed = f"v4\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n"
+    _write_hardened_text(record, original)
+
+    def process(pid: int) -> str:
+        if pid == 1234:
+            record.write_text(changed, encoding="ascii")
+        return entry._RECOVERY_PROCESS_REUSED
+
+    with pytest.raises(entry._StaleRecoveryRecordBlocked, match="desktop recovery record is unresolved"):
+        entry.recover_stale_desktop_record(
+            environ=_recovery_environment(entry, record),
+            process_probe=process,
+            group_probe=lambda _pgid: pytest.fail("reused leaders do not need group probes"),
+            current_pid=99,
+            backend_image_hash="f" * 64,
+        )
+    assert record.read_text(encoding="ascii") == changed
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "contents",
+    [
+        f"v3\n1234\n5678\n77\n{TEST_BOOT_ID}\n{'a' * 64}\n",
+        f"v2\n1234\n5678\n77\n{'a' * 64}\n",
+        f"1234\n77\n{'a' * 64}\n",
+        "1234\n77\n",
+    ],
+)
+def test_stale_recovery_preserves_safe_v1_to_v3_and_bare_record_reclamation(
+    entry: ModuleType,
+    tmp_path: Path,
+    contents: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(record, contents)
+
+    assert entry.recover_stale_desktop_record(
+        environ=_recovery_environment(entry, record),
+        process_probe=lambda _pid: entry._RECOVERY_PROCESS_DEAD,
+        group_probe=lambda _pgid: pytest.fail("legacy records never asserted source containment"),
+        current_pid=99,
+        backend_image_hash="f" * 64,
+    ) is True
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+def test_stale_recovery_treats_the_current_shell_and_guardian_pid_as_reused_generations(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(
+        record,
+        f"v4\n99\npending\n88\n{TEST_BOOT_ID}\n{'a' * 64}\n",
+    )
+
+    assert entry.recover_stale_desktop_record(
+        environ=_recovery_environment(entry, record),
+        process_probe=lambda _pid: pytest.fail("current generations must not be attributed to the old record"),
+        group_probe=lambda _pgid: pytest.fail("reused leaders do not need group probes"),
+        current_pid=99,
+        backend_image_hash="f" * 64,
+    ) is True
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="POSIX start-token bracket")
+def test_stale_recovery_process_capture_classifies_a_mid_probe_generation_change_as_reuse(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    starts = iter(["start:old", "start:new"])
+    monkeypatch.setattr(entry, "_posix_process_start_token", lambda _pid: next(starts))
+    monkeypatch.setattr(entry, "_posix_process_command", lambda _pid: "python packaging/desktop_backend.py")
+    monkeypatch.setattr(entry, "_sha256_file", lambda _path: "f" * 64)
+    if sys.platform.startswith("linux"):
+        monkeypatch.setattr(entry.os, "readlink", lambda _path: "/usr/bin/python3")
+
+    assert entry._capture_recovery_process_identity(1234) == entry._RECOVERY_PROCESS_REUSED
+
+
+@pytest.mark.unit
+def test_stale_recovery_recognises_an_older_shell_image_by_its_executable_name(
+    entry: ModuleType,
+) -> None:
+    identity = entry._RecoveryProcessIdentity(
+        "old-shell-start",
+        Path("/Applications/FlintTrade.app/Contents/MacOS/FlintTrade"),
+        "a" * 64,
+        "/Applications/FlintTrade.app/Contents/MacOS/FlintTrade",
+    )
+
+    assert entry._looks_like_recovery_shell(identity, "b" * 64) is True
+
+
+@pytest.mark.unit
+def test_source_guardian_surfaces_stale_recovery_as_a_stable_retryable_block(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[str] = []
+
+    class Lease:
+        owner_pid = os.getpid()
+
+        def release(self) -> None:
+            events.append("release")
+
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "validate_source_parent_identity", lambda: events.append("parent") or "v1|test")
+    monkeypatch.setattr(entry, "_acquire_source_guardian_lease", lambda: events.append("lease") or Lease())
+    monkeypatch.setattr(
+        entry,
+        "recover_stale_desktop_record",
+        lambda: (_ for _ in ()).throw(entry._StaleRecoveryRecordBlocked("private detail 1234")),
+    )
+    monkeypatch.setattr(
+        entry,
+        "create_pending_application_pid_record",
+        lambda: events.append("create") or True,
+    )
+
+    with pytest.raises(SystemExit, match="recovery record is unresolved; retry") as raised:
+        entry.run_desktop_backend(["--port", "0"])
+
+    assert events == ["parent", "lease", "release"]
+    assert "private detail" not in str(raised.value)
+    assert capsys.readouterr().out == "FLINTTRADE_BACKEND_BLOCKED reason=recovery-record\n"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="link fixtures require POSIX ownership semantics")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_source_guardian_refuses_unsafe_transition_lock_without_chmoding_target(
+    entry: ModuleType,
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    guard = record.with_name(f".{record.name}.lock")
+    target = tmp_path / "foreign-lock-target"
+    target.write_text("foreign authority\n", encoding="ascii")
+    target.chmod(0o644)
+    if link_kind == "symlink":
+        guard.symlink_to(target)
+    else:
+        os.link(target, guard)
+    original_mode = target.stat().st_mode
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: "a" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is False
+    assert target.read_text(encoding="ascii") == "foreign authority\n"
+    assert target.stat().st_mode == original_mode
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="link fixtures require POSIX ownership semantics")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_new_pending_record_refuses_linked_orphaned_cleanup_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    proof = entry._cleanup_complete_proof_path(record)
+    target = tmp_path / "old-proof-target"
+    old_payload = f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'b' * 64}\n"
+    _write_hardened_text(target, old_payload)
+    if link_kind == "symlink":
+        proof.symlink_to(target)
+    else:
+        os.link(target, proof)
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: "a" * 64,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.create_pending_application_pid_record(environ=environ, guardian_pid=1234) is False
+    assert target.read_text(encoding="ascii") == old_payload
+    assert record.exists() is False
+
+
+def _write_cleanup_fixture(
+    entry: ModuleType,
+    tmp_path: Path,
+    *,
+    application: str = "5678",
+    token: str = "a" * 64,
+) -> tuple[Path, dict[str, str]]:
+    record = tmp_path / "desktop_backend.pid"
+    _write_hardened_text(
+        record,
+        f"v4\n1234\n{application}\n77\n{TEST_BOOT_ID}\n{token}\n",
+    )
+    guard = record.with_name(f".{record.name}.lock")
+    _write_hardened_text(guard, "")
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: token,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+    return record, environ
+
+
+@pytest.mark.unit
+def test_managed_cleanup_removes_exact_promoted_record_and_token_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(
+        proof,
+        f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n",
+    )
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+    assert record.exists() is False
+    assert proof.exists() is False
+
+
+@pytest.mark.unit
+def test_managed_cleanup_allows_exact_dead_pending_record_without_a_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path, application="pending")
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        None,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+def test_managed_pending_cleanup_is_idempotent_after_python_already_cleared_record(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path, application="pending")
+
+    assert entry.clear_pending_application_pid_record(environ=environ) is True
+    assert record.exists() is False
+    monkeypatch.setattr(entry.os, "getpid", lambda: 999_999)
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        None,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+
+
+@pytest.mark.unit
+def test_managed_pending_cleanup_refuses_absent_record_with_mismatched_crash_left_proof(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path, application="pending")
+    assert entry.clear_pending_application_pid_record(environ=environ) is True
+    proof = entry._cleanup_complete_proof_path(record)
+    foreign_proof = f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'b' * 64}\n"
+    _write_hardened_text(proof, foreign_proof)
+    monkeypatch.setattr(entry.os, "getpid", lambda: 999_999)
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        None,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record.exists() is False
+    assert proof.read_text(encoding="ascii") == foreign_proof
+
+
+@pytest.mark.unit
+def test_managed_pending_cleanup_finalises_record_when_python_clear_failed(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path, application="pending")
+    stream = io.StringIO()
+    monkeypatch.setattr(entry, "promote_application_pid_record", lambda **_kwargs: False)
+    monkeypatch.setattr(entry, "clear_pending_application_pid_record", lambda **_kwargs: False)
+
+    with pytest.raises(SystemExit, match="application PID record promotion failed"):
+        entry.require_application_pid_record(environ=environ, stream=stream)
+    assert record.exists() is True
+    assert stream.getvalue() == (
+        f"FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={'a' * 64} reason=promotion-failed\n"
+    )
+
+    monkeypatch.setattr(entry.os, "getpid", lambda: 999_999)
+    assert entry.finalise_source_cleanup(
+        1234,
+        None,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+    assert record.exists() is False
+
+
+@pytest.mark.unit
+def test_new_pending_record_reconciles_proof_left_by_finaliser_crash(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    record, old_environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(
+        proof,
+        f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n",
+    )
+    durable_unlink = entry._durably_unlink_cleanup_file
+
+    def crash_after_record_unlink(path: Path) -> None:
+        if path == proof:
+            raise OSError("injected finaliser crash")
+        durable_unlink(path)
+
+    monkeypatch.setattr(entry, "_durably_unlink_cleanup_file", crash_after_record_unlink)
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=old_environ,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record.exists() is False
+    assert proof.exists() is True
+
+    monkeypatch.setattr(entry, "_durably_unlink_cleanup_file", durable_unlink)
+    new_environ = old_environ | {
+        entry.LAUNCH_TOKEN_ENV: "b" * 64,
+        entry.BOOT_ID_ENV: "d" * 64,
+    }
+    assert entry.create_pending_application_pid_record(
+        environ=new_environ,
+        guardian_pid=4321,
+    ) is True
+    assert proof.exists() is False
+    assert record.read_text(encoding="ascii") == (
+        f"v4\n4321\npending\n77\n{'d' * 64}\n{'b' * 64}\n"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("guardian_pid", "application_pid", "mutate_proof"),
+    [
+        (9999, 5678, False),
+        (1234, 9999, False),
+        (1234, 5678, True),
+    ],
+)
+def test_managed_cleanup_refuses_mismatched_record_or_proof(
+    entry: ModuleType,
+    tmp_path: Path,
+    guardian_pid: int,
+    application_pid: int,
+    mutate_proof: bool,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    proof_token = "b" * 64 if mutate_proof else "a" * 64
+    _write_hardened_text(
+        proof,
+        f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={proof_token}\n",
+    )
+    original_record = record.read_bytes()
+
+    assert entry.finalise_source_cleanup(
+        guardian_pid,
+        application_pid,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record.read_bytes() == original_record
+    assert proof.exists() is True
+
+
+@pytest.mark.unit
+def test_managed_cleanup_refuses_a_live_recorded_process(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(
+        proof,
+        f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n",
+    )
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda pid: pid == 5678,
+    ) is False
+    assert record.exists() is True
+    assert proof.exists() is True
+
+
+@pytest.mark.unit
+def test_managed_cleanup_refuses_record_and_proof_symlinks(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("symlink creation requires optional Windows privileges")
+    target_dir = tmp_path / "targets"
+    target_dir.mkdir()
+    record_target, environ = _write_cleanup_fixture(entry, target_dir)
+    proof_target = entry._cleanup_complete_proof_path(record_target)
+    _write_hardened_text(
+        proof_target,
+        f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n",
+    )
+    record_link = tmp_path / "desktop_backend.pid"
+    record_link.symlink_to(record_target)
+    link_guard = record_link.with_name(f".{record_link.name}.lock")
+    _write_hardened_text(link_guard, "")
+    record_env = environ | {entry.SIDECAR_RECORD_PATH_ENV: str(record_link)}
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=record_env,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record_target.exists() is True
+
+    proof_link = entry._cleanup_complete_proof_path(record_target)
+    proof_elsewhere = tmp_path / "proof-elsewhere"
+    _write_hardened_text(proof_elsewhere, proof_target.read_text(encoding="ascii"))
+    proof_link.unlink()
+    proof_link.symlink_to(proof_elsewhere)
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record_target.exists() is True
+    assert proof_elsewhere.exists() is True
+
+
+@pytest.mark.unit
+def test_managed_cleanup_command_validates_parent_and_emits_no_token(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[object] = []
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(
+        entry,
+        "validate_source_parent_identity",
+        lambda: events.append("validate-parent") or "v1|test",
+    )
+    monkeypatch.setattr(
+        entry,
+        "finalise_source_cleanup",
+        lambda guardian_pid, application_pid: events.append(
+            (guardian_pid, application_pid)
+        )
+        or True,
+    )
+
+    assert entry.run_desktop_backend(
+        [
+            "--flinttrade-finalise-cleanup",
+            "--guardian-pid",
+            "1234",
+            "--application-pid",
+            "5678",
+        ]
+    ) == 0
+    assert events == ["validate-parent", (1234, 5678)]
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hard-link publication boundary")
+@pytest.mark.parametrize(
+    ("boundary", "exit_code", "record_exists"),
+    [
+        ("before-publish", 41, False),
+        ("after-publish", 42, True),
+    ],
+)
+def test_source_guardian_pending_record_crash_boundary_is_absent_or_complete(
+    tmp_path: Path,
+    boundary: str,
+    exit_code: int,
+    record_exists: bool,
+) -> None:
+    record = tmp_path / "desktop_backend.pid"
+    token = "a" * 64
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, os
+        spec = importlib.util.spec_from_file_location("desktop_backend_entry", {str(ENTRY_SCRIPT)!r})
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if {boundary!r} == "before-publish":
+            mod.os.link = lambda *_args, **_kwargs: os._exit(41)
+        else:
+            mod._sync_parent_directory = lambda _path: os._exit(42)
+        environ = {{
+            "FLINTTRADE_PARENT_PID": "77",
+            "FLINTTRADE_BOOT_ID": {TEST_BOOT_ID!r},
+            "FLINTTRADE_LAUNCH_TOKEN": {token!r},
+            "FLINTTRADE_SIDECAR_RECORD_PATH": {str(record)!r},
+        }}
+        mod.create_pending_application_pid_record(environ=environ, guardian_pid=1234)
+        raise SystemExit(99)
+        """
+    )
+
+    completed = subprocess.run([sys.executable, "-c", script], timeout=10, check=False)
+
+    assert completed.returncode == exit_code
+    assert record.exists() is record_exists
+    if record_exists:
+        assert record.read_text(encoding="ascii") == (
+            f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+        )
+
+
+@pytest.mark.unit
+def test_source_guardian_acquires_lease_before_record_containment_and_backend_import(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    cleanup_callbacks: list[object] = []
+
+    class Lease:
+        owner_pid = os.getpid()
+
+        def release(self) -> None:
+            events.append("release-lease")
+
+    monkeypatch.setenv(entry.PARENT_PID_ENV, str(os.getppid()))
+    monkeypatch.setenv(entry.PARENT_IDENTITY_ENV, "v1|test")
+    monkeypatch.setenv(entry.BOOT_ID_ENV, TEST_BOOT_ID)
+    monkeypatch.setenv(entry.LAUNCH_TOKEN_ENV, "a" * 64)
+    monkeypatch.setenv(entry.SIDECAR_RECORD_PATH_ENV, str(tmp_path / "desktop_backend.pid"))
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(
+        entry,
+        "validate_source_parent_identity",
+        lambda: events.append("validate-parent") or "v1|test",
+    )
+    monkeypatch.setattr(
+        entry,
+        "_acquire_source_guardian_lease",
+        lambda: events.append("acquire-lease") or Lease(),
+    )
+    monkeypatch.setattr(
+        entry,
+        "recover_stale_desktop_record",
+        lambda: events.append("recover-record") or False,
+    )
+    monkeypatch.setattr(
+        entry,
+        "create_pending_application_pid_record",
+        lambda: events.append("create-record") or True,
+    )
+    monkeypatch.setattr(
+        entry,
+        "require_application_pid_record",
+        lambda: events.append("promote-record"),
+    )
+    monkeypatch.setattr(entry, "announce_application_pid", lambda: events.append("announce-pid"))
+
+    def prepare(
+        publish_application_identity: object | None = None,
+        *,
+        cleanup_complete: object | None = None,
+    ) -> object:
+        events.append("prepare-containment")
+        assert publish_application_identity is None
+        assert callable(cleanup_complete)
+        cleanup_callbacks.append(cleanup_complete)
+        return lambda: True
+
+    monkeypatch.setattr(entry, "_prepare_owned_process_tree", prepare)
+    monkeypatch.setattr(entry, "start_parent_watchdog", lambda *_args, **_kwargs: events.append("watch-parent"))
+    monkeypatch.setattr(entry, "start_stdin_shutdown_listener", lambda *_args, **_kwargs: events.append("watch-stdin"))
+    monkeypatch.setattr(entry, "start_sigterm_shutdown_relay", lambda *_args, **_kwargs: events.append("watch-sigterm"))
+    monkeypatch.setattr(
+        entry,
+        "_run_core_desktop",
+        lambda argv, **kwargs: events.append(f"core:{argv}:{kwargs['guardian_owned_lease']}"),
+    )
+
+    assert entry.run_desktop_backend(["--port", "0"]) == 0
+    assert events == [
+        "validate-parent",
+        "acquire-lease",
+        "recover-record",
+        "create-record",
+        "prepare-containment",
+        "promote-record",
+        "announce-pid",
+        "watch-parent",
+        "watch-stdin",
+        "watch-sigterm",
+        "core:['--port', '0']:True",
+    ]
+
+    cleanup_callbacks[0]()
+    assert events[-1] == "release-lease"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["return-none", "raise"])
+def test_source_guardian_containment_setup_failure_is_proved_finalisable_and_releases_lease(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    guardian_pid = os.getpid()
+    released: list[str] = []
+
+    class Lease:
+        owner_pid = guardian_pid
+
+        def release(self) -> None:
+            released.append("released")
+
+    monkeypatch.setenv(entry.PARENT_PID_ENV, str(os.getppid()))
+    monkeypatch.setenv(entry.PARENT_IDENTITY_ENV, "v1|test")
+    monkeypatch.setenv(entry.BOOT_ID_ENV, TEST_BOOT_ID)
+    monkeypatch.setenv(entry.LAUNCH_TOKEN_ENV, token)
+    monkeypatch.setenv(entry.SIDECAR_RECORD_PATH_ENV, str(record))
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "validate_source_parent_identity", lambda: "v1|test")
+    monkeypatch.setattr(entry, "_acquire_source_guardian_lease", Lease)
+    monkeypatch.setattr(entry, "recover_stale_desktop_record", lambda: False)
+
+    def fail_containment(**_kwargs: object) -> None:
+        if failure == "raise":
+            raise OSError("injected containment failure")
+        return None
+
+    monkeypatch.setattr(entry, "_prepare_owned_process_tree", fail_containment)
+    if failure == "raise":
+        with pytest.raises(OSError, match="injected containment failure"):
+            entry.run_desktop_backend(["--port", "0"])
+    else:
+        with pytest.raises(SystemExit, match="complete process-tree containment is unavailable"):
+            entry.run_desktop_backend(["--port", "0"])
+
+    expected_record = f"v4\n{guardian_pid}\npending\n{os.getppid()}\n{TEST_BOOT_ID}\n{token}\n"
+    expected_proof = f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={token}\n"
+    assert released == ["released"]
+    assert record.read_text(encoding="ascii") == expected_record
+    assert entry._cleanup_complete_proof_path(record).read_text(encoding="ascii") == expected_proof
+    assert capsys.readouterr().out == (
+        expected_proof
+        + f"FLINTTRADE_BACKEND_PENDING_EXIT_ACK token={token} reason=promotion-failed\n"
+    )
+
+    monkeypatch.setattr(entry.os, "getpid", lambda: 999_999)
+    assert entry.finalise_source_cleanup(
+        guardian_pid,
+        None,
+        pid_alive=lambda _pid: False,
+    ) is True
+    assert record.exists() is False
+    assert entry._cleanup_complete_proof_path(record).exists() is False
+
+
+@pytest.mark.unit
+def test_source_guardian_lease_contention_blocks_before_record_publication(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from flinttrade_core.backend_instance import BackendInstanceAlreadyRunning
+
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "validate_source_parent_identity", lambda: "v1|test")
+    monkeypatch.setattr(
+        entry,
+        "_acquire_source_guardian_lease",
+        lambda: (_ for _ in ()).throw(BackendInstanceAlreadyRunning("occupied")),
+    )
+    marker: list[str] = []
+    monkeypatch.setattr(entry, "create_pending_application_pid_record", lambda: marker.append("record"))
+
+    with pytest.raises(BackendInstanceAlreadyRunning):
+        entry.run_desktop_backend(["--port", "0"])
+
+    assert marker == []
+    assert capsys.readouterr().out == "FLINTTRADE_BACKEND_BLOCKED reason=instance-lease\n"
+
+
+@pytest.mark.unit
+def test_source_guardian_lease_failure_exposes_only_the_exception_class(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "lease-provider-secret"
+
+    class ExternalLeaseError(RuntimeError):
+        pass
+
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "validate_source_parent_identity", lambda: "v1|test")
+    monkeypatch.setattr(
+        entry,
+        "_acquire_source_guardian_lease",
+        lambda: (_ for _ in ()).throw(ExternalLeaseError(secret)),
+    )
+    create_record = []
+    monkeypatch.setattr(
+        entry,
+        "create_pending_application_pid_record",
+        lambda: create_record.append("record"),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Source guardian lease acquisition failed \(ExternalLeaseError\)",
+    ) as raised:
+        entry.run_desktop_backend(["--port", "0"])
+
+    assert secret not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert create_record == []
+
+
+@pytest.mark.unit
+def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class Lease:
+        owner_pid = os.getpid()
+
+        def release(self) -> None:
+            events.append("release-lease")
+
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        entry,
+        "validate_source_parent_identity",
+        lambda: events.append("validate-parent") or "v1|test",
+    )
+    monkeypatch.setattr(
+        entry,
+        "_acquire_source_guardian_lease",
+        lambda: events.append("acquire-lease") or Lease(),
+    )
+    monkeypatch.setattr(entry, "recover_stale_desktop_record", lambda: events.append("recover-record") or False)
+    monkeypatch.setattr(
+        entry,
+        "create_pending_application_pid_record",
+        lambda: events.append("create-record") or True,
+    )
+    monkeypatch.setattr(
+        entry,
+        "_prepare_owned_process_tree",
+        lambda **_kwargs: events.append("prepare-containment") or (lambda: True),
+    )
+    monkeypatch.setattr(entry, "require_application_pid_record", lambda: events.append("promote-record"))
+    monkeypatch.setattr(entry, "announce_application_pid", lambda: events.append("announce-pid"))
+    monkeypatch.setattr(entry, "start_parent_watchdog", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(entry, "start_stdin_shutdown_listener", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(entry, "start_sigterm_shutdown_relay", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        entry,
+        "_run_core_desktop",
+        lambda argv, **kwargs: events.append(f"core:{argv}:{kwargs['guardian_owned_lease']}"),
+    )
+
+    assert entry.run_desktop_backend(["--port", "0"]) == 0
+    assert events == [
+        "validate-parent",
+        "acquire-lease",
+        "recover-record",
+        "create-record",
+        "prepare-containment",
+        "promote-record",
+        "announce-pid",
+        "core:['--port', '0']:True",
+    ]
+
+
+@pytest.mark.unit
+def test_posix_guardian_releases_source_lease_only_after_cleanup_proof(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    released: list[str] = []
+    monkeypatch.setattr(entry, "_publish_cleanup_complete_proof_with_retry", lambda _pid, **_kwargs: False)
+
+    def release() -> None:
+        released.append("cleanup-proved")
+
+    assert entry._complete_guardian_cleanup(5678, release) is False
+    assert released == []
+
+    monkeypatch.setattr(entry, "_publish_cleanup_complete_proof_with_retry", lambda _pid, **_kwargs: True)
+    assert entry._complete_guardian_cleanup(5678, release) is True
+    assert released == ["cleanup-proved"]
+
+
+@pytest.mark.unit
 def test_application_promotes_exact_pending_record_before_handshake(
     entry: ModuleType,
     tmp_path: Path,
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    _write_hardened_text(record, f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -164,7 +1491,7 @@ def test_application_pid_promotion_requires_the_exact_boot_bound_record(
     token = "a" * 64
     boot_id = "c" * 64
     pending = f"v4\n1234\npending\n77\n{boot_id}\n{token}\n"
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": boot_id,
@@ -185,7 +1512,7 @@ def test_application_pid_promotion_keeps_pending_record_when_atomic_replace_fail
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
     pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -207,7 +1534,7 @@ def test_application_pid_promotion_is_valid_after_post_replace_sync_failure(
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
-    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    _write_hardened_text(record, f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -242,7 +1569,7 @@ def test_application_pid_promotion_crash_boundary_keeps_a_complete_record(
     record = tmp_path / "desktop_backend.pid"
     token = "a" * 64
     pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     script = textwrap.dedent(
         f"""
         import importlib.util, os
@@ -285,9 +1612,9 @@ def test_application_refuses_to_promote_another_launch_record(
     tmp_path: Path,
 ) -> None:
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(
+    _write_hardened_text(
+        record,
         f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{'b' * 64}\n",
-        encoding="utf-8",
     )
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
@@ -308,7 +1635,7 @@ def test_application_token_comparisons_do_not_normalise_whitespace(
     token = "a" * 64
     pending = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -340,7 +1667,7 @@ def test_promotion_failure_clears_exact_pending_record_before_refusing_boot(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    _write_hardened_text(record, f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -403,11 +1730,11 @@ def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
 
     monkeypatch.setattr(entry, "_record_transition_guard", record_guard)
 
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     assert entry.promote_application_pid_record(environ=environ, pid=5678) is True
     assert guarded == [record]
 
-    record.write_text(pending, encoding="utf-8")
+    _write_hardened_text(record, pending)
     assert entry.clear_pending_application_pid_record(environ=environ) is True
     assert guarded == [record, record]
 
@@ -420,9 +1747,9 @@ def test_guardian_publishes_durable_exact_token_cleanup_proof(
     token = "a" * 64
     application_pid = 5678
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(
+    _write_hardened_text(
+        record,
         f"v4\n1234\n{application_pid}\n77\n{TEST_BOOT_ID}\n{token}\n",
-        encoding="utf-8",
     )
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
@@ -449,9 +1776,9 @@ def test_guardian_refuses_cleanup_proof_for_another_record(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(
+    _write_hardened_text(
+        record,
         f"v4\n1234\n9999\n77\n{TEST_BOOT_ID}\n{token}\n",
-        encoding="utf-8",
     )
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
@@ -462,6 +1789,68 @@ def test_guardian_refuses_cleanup_proof_for_another_record(
 
     assert entry.publish_cleanup_complete_proof(5678, environ=environ, stream=io.StringIO()) is False
     assert entry._cleanup_complete_proof_path(record).exists() is False
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="link fixtures require POSIX ownership semantics")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_record_transitions_refuse_linked_recovery_record(
+    entry: ModuleType,
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    token = "a" * 64
+    payload = f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n"
+    target = tmp_path / "record-target"
+    _write_hardened_text(target, payload)
+    record = tmp_path / "desktop_backend.pid"
+    if link_kind == "symlink":
+        record.symlink_to(target)
+    else:
+        os.link(target, record)
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: token,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+
+    assert entry.promote_application_pid_record(environ=environ, pid=5678) is False
+    assert entry.clear_pending_application_pid_record(environ=environ) is False
+    assert entry.publish_cleanup_complete_proof(5678, environ=environ, stream=io.StringIO()) is False
+    assert target.read_text(encoding="ascii") == payload
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(os.name == "nt", reason="link fixtures require POSIX ownership semantics")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_cleanup_proof_publication_refuses_linked_proof_target(
+    entry: ModuleType,
+    tmp_path: Path,
+    link_kind: str,
+) -> None:
+    token = "a" * 64
+    record = tmp_path / "desktop_backend.pid"
+    environ = {
+        entry.PARENT_PID_ENV: "77",
+        entry.BOOT_ID_ENV: TEST_BOOT_ID,
+        entry.LAUNCH_TOKEN_ENV: token,
+        entry.SIDECAR_RECORD_PATH_ENV: str(record),
+    }
+    assert entry.create_pending_application_pid_record(
+        environ=environ,
+        guardian_pid=1234,
+    ) is True
+    proof = entry._cleanup_complete_proof_path(record)
+    target = tmp_path / "proof-target"
+    _write_hardened_text(target, "foreign proof\n")
+    if link_kind == "symlink":
+        proof.symlink_to(target)
+    else:
+        os.link(target, proof)
+
+    assert entry.publish_cleanup_complete_proof(5678, environ=environ, stream=io.StringIO()) is False
+    assert target.read_text(encoding="ascii") == "foreign proof\n"
 
 
 @pytest.mark.unit
@@ -534,72 +1923,6 @@ def test_guardian_cleanup_proof_retry_honours_force_request(
 def test_watchdog_off_without_env(entry: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(entry.PARENT_PID_ENV, raising=False)
     assert entry.start_parent_watchdog() is None
-
-
-@pytest.mark.unit
-def test_packaged_child_contract_is_published_only_for_frozen_sidecars(entry: ModuleType) -> None:
-    environ: dict[str, str] = {}
-
-    assert (
-        entry.publish_packaged_child_contract(
-            environ=environ,
-            executable="/Applications/FlintTrade/flinttrade-backend",
-            frozen=False,
-        )
-        is False
-    )
-    assert environ == {}
-
-    assert (
-        entry.publish_packaged_child_contract(
-            environ=environ,
-            executable="/Applications/FlintTrade/flinttrade-backend",
-            frozen=True,
-        )
-        is True
-    )
-    assert environ == {
-        "FLINTTRADE_PACKAGED_CHILD_EXECUTABLE": "/Applications/FlintTrade/flinttrade-backend",
-        "FLINTTRADE_PACKAGED_CHILD_ARG": "--flinttrade-uploaded-strategy-child",
-    }
-
-
-@pytest.mark.unit
-def test_packaged_child_dispatch_prevents_sidecar_reentry_and_shared_stdin(
-    entry: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    shared_stdin = io.StringIO("FLINTTRADE_FORCE_EXIT\n")
-    monkeypatch.setattr(entry.sys, "stdin", shared_stdin)
-    for name in entry.DESKTOP_CONTROL_ENV:
-        monkeypatch.setenv(name, "must-not-reach-child")
-    observed: list[tuple[list[str], str, dict[str, str | None]]] = []
-
-    def dispatch(argv: list[str]) -> bool:
-        observed.append(
-            (
-                argv,
-                entry.sys.stdin.read(),
-                {name: entry.os.environ.get(name) for name in entry.DESKTOP_CONTROL_ENV},
-            )
-        )
-        return True
-
-    argv = ["flinttrade-backend", "--flinttrade-uploaded-strategy-child", "/tmp/strategy.py"]
-    assert entry.dispatch_packaged_child_mode(argv=argv, dispatcher=dispatch) is True
-    assert observed == [(argv, "", {name: None for name in entry.DESKTOP_CONTROL_ENV})]
-    assert shared_stdin.tell() == 0
-
-
-@pytest.mark.unit
-def test_normal_sidecar_arguments_do_not_enter_packaged_child_mode(entry: ModuleType) -> None:
-    assert (
-        entry.dispatch_packaged_child_mode(
-            argv=["flinttrade-backend", "--port", "0"],
-            dispatcher=lambda _argv: pytest.fail("normal sidecar startup must not dispatch a child"),
-        )
-        is False
-    )
 
 
 @pytest.mark.unit
@@ -1944,7 +3267,7 @@ def test_pending_force_exit_clears_exact_record_and_acknowledges_before_exit(
 ) -> None:
     token = "a" * 64
     record = tmp_path / "desktop_backend.pid"
-    record.write_text(f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n", encoding="utf-8")
+    _write_hardened_text(record, f"v4\n1234\npending\n77\n{TEST_BOOT_ID}\n{token}\n")
     environ = {
         "FLINTTRADE_PARENT_PID": "77",
         "FLINTTRADE_BOOT_ID": TEST_BOOT_ID,
@@ -2327,7 +3650,7 @@ def test_sidecar_exits_when_parent_dies(tmp_path: Path, serial_posix_guardian: N
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process-tree containment")
-def test_posix_application_identity_is_published_before_group_escape(serial_posix_guardian: None) -> None:
+def test_posix_application_identity_is_published_after_group_isolation(serial_posix_guardian: None) -> None:
     script = textwrap.dedent(
         f"""
         import importlib.util, os
@@ -2356,7 +3679,7 @@ def test_posix_application_identity_is_published_before_group_escape(serial_posi
     _, isolated_pid, isolated_group = isolated_line.split()
 
     assert publish_pid == isolated_pid
-    assert publish_pid != publish_group
+    assert publish_pid == publish_group
     assert isolated_pid == isolated_group
 
 

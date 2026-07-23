@@ -271,8 +271,8 @@ export function BrokerConnect() {
           ...(label ? { label } : {}),
         };
         const started = await oauthStartNativeAccount(payload);
-        // The Tauri webview has no window.open handler — the desktop shell
-        // routes this through the scoped opener plugin (system browser).
+        // The Electron bridge routes OAuth through the operator's system
+        // browser instead of navigating the protected desktop renderer.
         await openExternalUrl(started.auth_url);
         const postback = started.postback_uri ?? brokerPostbackUri;
         return {

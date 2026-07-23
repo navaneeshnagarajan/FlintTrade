@@ -48,6 +48,146 @@ def test_write_secret_text_creates_hardened_file(tmp_path) -> None:
     assert ok, reason
 
 
+def test_read_hardened_owner_owned_text_roundtrips_a_secure_file(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+    write_secret_text(secret, "secret-value")
+
+    assert secure_file.read_hardened_owner_owned_text(secret) == "secret-value"
+
+
+def test_windows_hardened_validation_uses_the_open_descriptor(tmp_path, monkeypatch) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.write_text("secret-value", encoding="utf-8")
+    path_stat = secret.stat()
+    inspected_descriptors: list[int] = []
+
+    monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        secure_file,
+        "_verify_exact_windows_descriptor_dacl",
+        lambda descriptor: (inspected_descriptors.append(descriptor) or True, ""),
+    )
+
+    secure_file._assert_hardened_descriptor(73, path_stat, path=secret)
+
+    assert inspected_descriptors == [73]
+
+
+@pytest.mark.parametrize("write_dacl", [False, True])
+@pytest.mark.parametrize("allow_delete_sharing", [False, True])
+def test_windows_security_reopen_requests_rights_on_the_same_handle(
+    monkeypatch,
+    write_dacl,
+    allow_delete_sharing,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class FakeKernel32:
+        def ReOpenFile(self, handle, desired_access, share_mode, flags):  # type: ignore[no-untyped-def]
+            calls.append(("reopen", handle.value, desired_access, share_mode, flags))
+            return 222
+
+        def CloseHandle(self, handle):  # type: ignore[no-untyped-def]
+            calls.append(("close-handle", handle.value))
+
+    fake_msvcrt = type(
+        "FakeMsvcrt",
+        (),
+        {
+            "get_osfhandle": staticmethod(lambda descriptor: 111 if descriptor == 17 else -1),
+            "open_osfhandle": staticmethod(lambda handle, _flags: 23 if handle == 222 else -1),
+        },
+    )
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(
+        secure_file,
+        "_windows_security_libraries",
+        lambda: (FakeKernel32(), object()),
+    )
+    monkeypatch.setattr(secure_file.os, "close", lambda descriptor: calls.append(("close-fd", descriptor)))
+
+    reopened = secure_file._reopen_windows_descriptor_for_security(
+        17,
+        allow_delete_sharing=allow_delete_sharing,
+        write_dacl=write_dacl,
+    )
+
+    assert reopened == 23
+    reopen_call = calls[0]
+    assert reopen_call[0:2] == ("reopen", 111)
+    assert reopen_call[2] & secure_file._READ_CONTROL
+    assert bool(reopen_call[2] & secure_file._WRITE_DAC) is write_dacl
+    assert bool(reopen_call[2] & secure_file._GENERIC_WRITE) is write_dacl
+    expected_share_mode = secure_file._FILE_SHARE_READ | secure_file._FILE_SHARE_WRITE
+    if allow_delete_sharing:
+        expected_share_mode |= secure_file._FILE_SHARE_DELETE
+    assert reopen_call[3] == expected_share_mode
+    assert calls[-1] == ("close-fd", 17)
+    assert all(call[0] != "close-handle" for call in calls)
+
+
+def test_read_hardened_owner_owned_text_rejects_a_symlink(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.write_text("secret-value", encoding="utf-8")
+    target.chmod(0o600)
+    link = tmp_path / "jwt_secret"
+    link.symlink_to(target)
+
+    with pytest.raises(OSError, match="unsafe"):
+        secure_file.read_hardened_owner_owned_text(link)
+
+
+def test_read_hardened_owner_owned_text_rejects_a_directory(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.mkdir()
+
+    with pytest.raises(OSError):
+        secure_file.read_hardened_owner_owned_text(secret)
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX owner and mode semantics")
+def test_read_hardened_owner_owned_text_rejects_another_owner(tmp_path, monkeypatch) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.write_text("secret-value", encoding="utf-8")
+    secret.chmod(0o600)
+    actual_user = secret.stat().st_uid
+    monkeypatch.setattr(secure_file.os, "geteuid", lambda: actual_user + 1)
+
+    with pytest.raises(PermissionError, match="owned by the current user"):
+        secure_file.read_hardened_owner_owned_text(secret)
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit semantics")
+def test_read_hardened_owner_owned_text_rejects_broad_mode(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.write_text("secret-value", encoding="utf-8")
+    secret.chmod(0o640)
+
+    with pytest.raises(PermissionError, match="not hardened"):
+        secure_file.read_hardened_owner_owned_text(secret)
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit semantics")
+def test_read_hardened_owner_owned_text_requires_exact_0600(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.write_text("secret-value", encoding="utf-8")
+    secret.chmod(0o400)
+
+    with pytest.raises(PermissionError, match="not hardened"):
+        secure_file.read_hardened_owner_owned_text(secret)
+
+
+@pytest.mark.skipif(_IS_WIN, reason="POSIX hard-link semantics")
+def test_read_hardened_owner_owned_text_rejects_a_hard_link(tmp_path) -> None:
+    secret = tmp_path / "jwt_secret"
+    secret.write_text("secret-value", encoding="utf-8")
+    secret.chmod(0o600)
+    os.link(secret, tmp_path / "second-name")
+
+    with pytest.raises(OSError, match="one directory entry"):
+        secure_file.read_hardened_owner_owned_text(secret)
+
+
 @pytest.mark.skipif(_IS_WIN, reason="POSIX mode-bit semantics")
 def test_assert_hardened_posix_roundtrip(tmp_path) -> None:
     f = tmp_path / "jwt_secret"

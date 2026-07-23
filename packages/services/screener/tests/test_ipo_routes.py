@@ -16,6 +16,36 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 
+def _source_checkout(root: Path) -> Path:
+    """Create the source-root markers needed by resource discovery."""
+    for relative in (
+        "VERSION",
+        "pyproject.toml",
+        "pnpm-workspace.yaml",
+        "packages/core/core/pyproject.toml",
+        "packages/apps/terminal/package.json",
+    ):
+        marker = root / relative
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("marker\n", encoding="utf-8")
+    return root
+
+
+def test_data_file_resolves_from_windows_non_editable_layout(tmp_path: Path) -> None:
+    """Wheel-installed modules still load the calendar from the checkout."""
+    from flinttrade_screener.ipo_routes import _default_ipo_data_file
+
+    root = _source_checkout(tmp_path / "FlintTrade")
+    asset = root / "packages" / "services" / "screener" / "data" / "ipo_calendar.json"
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("{}\n", encoding="utf-8")
+    module = root / ".venv" / "Lib" / "site-packages" / "flinttrade_screener" / "ipo_routes.py"
+    module.parent.mkdir(parents=True, exist_ok=True)
+    module.write_text("# synthetic module\n", encoding="utf-8")
+
+    assert _default_ipo_data_file(module) == asset.resolve()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

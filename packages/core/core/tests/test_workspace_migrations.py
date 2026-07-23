@@ -461,8 +461,18 @@ def test_lmstudio_stage_rename_failure_cleans_the_journal_and_preserves_the_secr
             raise PermissionError("secret staging rename failed")
         return real_replace(source, destination)
 
+    def portable_windows_reopen(descriptor, **_kwargs):
+        reopened = os.dup(descriptor)
+        os.close(descriptor)
+        return reopened
+
     monkeypatch.setattr(secure_file, "_is_windows", lambda: True)
     monkeypatch.setattr(secure_file, "_assert_current_user_owns", lambda *_args: None)
+    monkeypatch.setattr(
+        secure_file,
+        "_reopen_windows_descriptor_for_security",
+        portable_windows_reopen,
+    )
     monkeypatch.setattr(secure_file, "_windows_replace_write_through", reject_secret_staging)
     monkeypatch.setattr(secure_file, "_windows_delete_file", lambda path: path.unlink())
 

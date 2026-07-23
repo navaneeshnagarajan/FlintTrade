@@ -5,7 +5,7 @@ and Live-mode safeguard verification. The default reading order is top-to-bottom
 — every section builds on the one before it. If you already have FlintTrade running, jump to the
 [Workspace tour](#workspace-tour) or use the section list in the sidebar.
 
-> **Beta software.** FlintTrade `v0.6.0-beta.13` is not production ready and
+> **Beta software.** FlintTrade `v0.0.1` is not production ready and
 > does not provide financial advice. Read [disclaimer.md](../disclaimer.md)
 > before connecting a broker or switching to Live mode.
 
@@ -36,14 +36,21 @@ make start        # backend + terminal UI on http://127.0.0.1:5100
 Or run it in Docker with `make docker-up`. Open the printed URL in a browser
 and follow the first-time Setup flow — no `.env` file is required.
 
-### Native desktop (convenience installs)
+### Native desktop (Electron convenience shell)
 
-Releases ship one installer per OS: a universal macOS `.dmg` (Apple Silicon
-and Intel in one app), a Windows NSIS `x64-setup.exe` (per-user, no admin
-needed), and a Linux `.AppImage` delivered by the install script. The
-one-command installs are the recommended way in, because the beta builds are
-unsigned and the scripts avoid the Gatekeeper/SmartScreen walls that manual
-downloads hit:
+The desktop package is a small Electron shell. It verifies pinned tools and
+builds an inspectable local source checkout on first launch instead of
+downloading a frozen backend payload. Its release contract is one universal
+macOS DMG, one Windows x64 NSIS installer, Linux x64 and ARM64 AppImages, and
+`SHA256SUMS.txt`.
+
+No complete, checksum-published Electron release exists yet. The
+branch-local [download page](https://flinttrade.vercel.app/download) will hide
+the commands below until all five assets are present once this branch is
+deployed. The currently deployed beta.13 page predates that gate and still
+advertises the retired packaging; do not use those instructions as an Electron
+source-bootstrap install. After the cutover and the gate opens, the supported
+commands are:
 
 ```bash
 # macOS / Linux
@@ -55,20 +62,24 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
 
-The installed shell downloads the hash-verified engine payload on first
-launch (progress on the splash; needs internet), creates the OS workspace,
-and opens Setup. Manual downloads and per-OS caveats are covered in the
-platform guides below and in [docs/DESKTOP.md](DESKTOP.md). Advanced users
-can build the installer from source:
+The installed shell builds the hash-verified, integrity-locked source on first
+launch (progress on the splash; needs internet), creates the OS workspace, and
+opens Setup only after the source guardian is healthy. Source/runtime updates
+are staged and health-proved separately from Electron-shell installer updates.
+Manual downloads and per-OS caveats are covered in [DESKTOP.md](DESKTOP.md).
+
+Contributors can package the shell locally:
 
 ```bash
-uv sync && uv pip install pyinstaller && pnpm install
-make desktop-build
+pnpm install --frozen-lockfile
+make desktop-test
+make desktop-package
 ```
 
-Install the generated package from
-`packages/apps/desktop/src-tauri/target/release/bundle/`, launch FlintTrade,
-and follow the first-time Setup flow.
+Install the generated package from `packages/apps/desktop/release/electron/`,
+launch FlintTrade, and follow the first-time Setup flow. Local macOS output is
+always ad-hoc sealed and has no Developer ID trust. Only release CI can use
+complete Apple distribution-signing and notarisation secrets.
 
 ### Contributor source mode
 

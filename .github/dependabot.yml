@@ -1,0 +1,60 @@
+# Dependabot version updates. Security updates are enabled separately in the
+# repository security settings; this file adds scheduled version-bump PRs for the
+# monorepo's four ecosystems. Updates are grouped to keep PR volume low, and the
+# Conventional-Commit prefix keeps release-please's changelog accurate.
+version: 2
+updates:
+  # Pinned GitHub Actions (all workflows pin by commit SHA) — keep them current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # JavaScript/TypeScript pnpm workspace (terminal, site, desktop, design-system).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      js-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Python uv workspace (13 packages via the root uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      py-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Rust/PyO3 ticks crate.
+  - package-ecosystem: "cargo"
+    directory: "/packages/core/ticks"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      rust-minor-patch:
+        update-types: ["minor", "patch"]

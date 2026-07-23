@@ -1,7 +1,7 @@
 # FlintTrade Architecture
 
-> Reflects `v0.6.0-beta.13`. 18 package surfaces (13 Python + 3 apps: React
-> terminal, Tauri desktop shell, Next.js site + 1 shared TypeScript
+> Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React
+> terminal, Electron desktop shell, Next.js site + 1 shared TypeScript
 > design-system package + 1 Rust/PyO3 tick engine).
 > Run `make test` and terminal Vitest locally for the current test counts.
 
@@ -16,10 +16,22 @@ WebSocket contracts, see [API.md](API.md). For repo conventions, see
 
 ```mermaid
 flowchart LR
-    subgraph Browser["Browser / app shell"]
+    subgraph Clients["Browser / Electron client"]
         T[Terminal React App]
+        DESKTOP[Electron 40 shell]
         SITE[Public docs site]
         DS[Design system]
+        DESKTOP --> T
+    end
+
+    subgraph ManagedDesktop["Managed desktop source · user home"]
+        TOOLS[Checksum-verified tools]
+        SOURCE[Active source checkout]
+        GUARDIAN[Python source guardian]
+        DESKTOP -- "bootstrap / update" --> TOOLS
+        DESKTOP -- "build / promote" --> SOURCE
+        DESKTOP -- "start / drain" --> GUARDIAN
+        SOURCE --> GUARDIAN
     end
 
     subgraph Backend["FlintTrade backend (Python)"]
@@ -59,6 +71,7 @@ flowchart LR
     end
 
     T -- "/api/v1/* + /ft-api/v1/* (HTTP)" --> F
+    GUARDIAN --> F
     T -- "WS /ws (port 8765 via proxy)" --> OA
     SITE -- "generated docs + read-only MCP" --> DS
     T --> DS
@@ -83,9 +96,12 @@ flowchart LR
     OA --> B1
 ```
 
-The terminal always talks to FlintTrade on port 5100 through `/ft-api`.
-OpenAlgo on 5000 and its WebSocket on 8765 are optional external integration
-origins, proxied through Vite only when that bridge is enabled. The native
+Source/browser deployments default to the FlintTrade backend on port 5100 and
+reach it through `/ft-api`. The Electron guardian instead starts its managed
+backend with `--port 0`, consumes the announced dynamic loopback port, and
+loads the terminal from that selected origin. OpenAlgo on 5000 and its
+WebSocket on 8765 are optional external integration origins, proxied through
+Vite only when that bridge is enabled. The native
 gateway contract and routing are present, and the five founder-broker adapters
 (Dhan, Upstox, Kotak Neo, INDmoney, Groww) remain dormant unless their activation
 gates pass. The current connectable native set is Dhan and Upstox
@@ -101,6 +117,27 @@ live adapter login/read probe and order-safety proof, while Groww
 has approved-key login/account-read proof but still needs market-data/API
 permission, static-IP resolution, and order-safety proof.
 Portal/static-IP evidence is not enough by itself to promote them.
+
+The Electron shell has machine authority but no trading authority. It owns
+tool acquisition, the managed checkout, source promotion, the source guardian,
+native windows and shell updates. The renderer receives named
+`window.flintDesktop` methods only. The Python backend continues to own all
+trading, authentication, configuration and durable user data.
+
+Desktop source lives at `~/.flinttrade/src/FlintTrade` and verified tools at
+`~/.flinttrade/tools`. User data remains in the platform workspace. First
+launch builds a sibling candidate with the frozen repository locks, promotes it
+only after the build completes, then requires both the guardian's exact ready
+sentinel and a loopback `/api/v1/ping` response before the main window opens.
+Updates use the same separation: the running checkout is immutable, candidate
+health proof uses an isolated temporary workspace, and promotion retains one
+last-known-good source for rollback.
+
+The Electron installer is not the application runtime. A release contains the
+shell and bootstrap resources only. Source/runtime updates and shell-installer
+updates are separate flows. No Electron installer release is published yet; the
+previous Tauri and PyInstaller release assets have been retired and do not
+satisfy this architecture.
 
 When the operator selects managed Ollama, the backend owns an on-demand sidecar
 process. FlintTrade selects an unpredictable free high loopback port, starts
@@ -143,6 +180,8 @@ been reaped.
 
 ```mermaid
 flowchart TD
+    desktop -. "boots managed source" .-> terminal
+    desktop -. "starts source guardian" .-> core
     terminal --> core
     terminal --> ditto
     terminal --> screener
@@ -190,7 +229,8 @@ flowchart TD
     gateway --> core
 ```
 
-Arrows point from dependent to dependency. Runtime code now lives under
+Solid arrows point from dependent to dependency. The dashed desktop edges are
+runtime orchestration, not JavaScript or Python package imports. Runtime code lives under
 `packages/{apps,core,integrations,services}`. The public site and terminal
 both consume the shared design-system package; the site also consumes
 repository docs and package READMEs to generate its pages, docs MCP, and
@@ -296,9 +336,11 @@ documented, and limited to analysis modules.
 ## 4. Backend architecture
 
 FlintTrade's backend is a single Flask application registered as
-`packages/core/core/src/flinttrade_core/app.py`. It binds to port 5100, mounts every package's
-blueprints behind `/v1/*`, and exposes them externally under
-`/ft-api/v1/*` thanks to the WSGI prefix-strip middleware (see §6).
+`packages/core/core/src/flinttrade_core/app.py`. Source/browser mode defaults to
+port 5100; the Electron source guardian explicitly selects a dynamic loopback
+port instead. The application mounts every package's blueprints behind
+`/v1/*`, and exposes them externally under `/ft-api/v1/*` thanks to the WSGI
+prefix-strip middleware (see §6).
 
 **One backend process per workspace.** In-memory job/runner state (scheduler
 jobs, download queues, sandbox runtime, session registries) assumes a single

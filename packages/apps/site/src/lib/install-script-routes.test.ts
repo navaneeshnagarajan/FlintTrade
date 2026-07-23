@@ -1,37 +1,57 @@
 import { describe, expect, it } from 'vitest';
 
-import { INSTALL_SCRIPTS, installScriptRedirect } from './install-script-routes';
+import {
+  installScriptRedirect,
+  installScriptUrl,
+  siteSourceSha,
+} from './install-script-routes';
+
+const SOURCE_SHA = '0123456789abcdef0123456789abcdef01234567';
 
 describe('install script routes', () => {
-  it('redirects /install.sh to the raw GitHub script on main', () => {
-    const res = installScriptRedirect('sh');
+  it('redirects /install.sh to the raw GitHub script at the exact deployment commit', () => {
+    const res = installScriptRedirect('sh', SOURCE_SHA);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(INSTALL_SCRIPTS.sh);
-    expect(INSTALL_SCRIPTS.sh).toMatch(
-      /^https:\/\/raw\.githubusercontent\.com\/.+\/main\/scripts\/install\/flinttrade-install\.sh$/,
+    expect(res.headers.get('location')).toBe(
+      `https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/${SOURCE_SHA}/scripts/install/flinttrade-install.sh`,
     );
+    expect(res.headers.get('location')).not.toContain('/main/');
   });
 
-  it('redirects /install.ps1 to the raw GitHub script on main', () => {
-    const res = installScriptRedirect('ps1');
+  it('redirects /install.ps1 to the same immutable deployment commit', () => {
+    const res = installScriptRedirect('ps1', SOURCE_SHA);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(INSTALL_SCRIPTS.ps1);
-    expect(INSTALL_SCRIPTS.ps1).toMatch(/flinttrade-install\.ps1$/);
+    expect(res.headers.get('location')).toBe(installScriptUrl('ps1', SOURCE_SHA));
+    expect(res.headers.get('location')).toMatch(/flinttrade-install\.ps1$/);
   });
 
-  it('redirects /uninstall.sh to the raw GitHub script on main', () => {
-    const res = installScriptRedirect('uninstall-sh');
+  it('redirects /uninstall.sh to the same immutable deployment commit', () => {
+    const res = installScriptRedirect('uninstall-sh', SOURCE_SHA);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(INSTALL_SCRIPTS['uninstall-sh']);
-    expect(INSTALL_SCRIPTS['uninstall-sh']).toMatch(
-      /^https:\/\/raw\.githubusercontent\.com\/.+\/main\/scripts\/install\/flinttrade-uninstall\.sh$/,
-    );
+    expect(res.headers.get('location')).toBe(installScriptUrl('uninstall-sh', SOURCE_SHA));
   });
 
-  it('redirects /uninstall.ps1 to the raw GitHub script on main', () => {
-    const res = installScriptRedirect('uninstall-ps1');
+  it('redirects /uninstall.ps1 to the same immutable deployment commit', () => {
+    const res = installScriptRedirect('uninstall-ps1', SOURCE_SHA);
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe(INSTALL_SCRIPTS['uninstall-ps1']);
-    expect(INSTALL_SCRIPTS['uninstall-ps1']).toMatch(/flinttrade-uninstall\.ps1$/);
+    expect(res.headers.get('location')).toBe(installScriptUrl('uninstall-ps1', SOURCE_SHA));
+    expect(res.headers.get('location')).toMatch(/flinttrade-uninstall\.ps1$/);
+  });
+
+  it('uses an explicit self-hosted SHA before the Vercel deployment SHA', () => {
+    expect(siteSourceSha({
+      FLINTTRADE_SITE_SOURCE_SHA: SOURCE_SHA.toUpperCase(),
+      VERCEL_GIT_COMMIT_SHA: 'f'.repeat(40),
+    })).toBe(SOURCE_SHA);
+  });
+
+  it('fails closed when no exact immutable source SHA is available', async () => {
+    const missing = installScriptRedirect('sh', null);
+    const malformed = installScriptUrl('sh', 'main');
+
+    expect(missing.status).toBe(503);
+    expect(missing.headers.get('cache-control')).toBe('no-store');
+    await expect(missing.text()).resolves.toContain('immutable FlintTrade install-script source is unavailable');
+    expect(malformed).toBeNull();
   });
 });

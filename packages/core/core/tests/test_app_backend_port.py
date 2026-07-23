@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from flinttrade_core import app as app_module
+from flinttrade_core.source_root import discover_source_root
 
 APP_PY = Path(__file__).resolve().parents[1] / "src" / "flinttrade_core" / "app.py"
 
@@ -19,6 +20,21 @@ def _find_method(tree: ast.AST, class_name: str, method_name: str) -> ast.AST | 
                 if isinstance(sub, (ast.AsyncFunctionDef, ast.FunctionDef)) and sub.name == method_name:
                     return sub
     return None
+
+
+@pytest.mark.unit
+def test_app_runtime_uses_only_the_source_checkout_layout() -> None:
+    source = APP_PY.read_text(encoding="utf-8")
+    expected_root = str(discover_source_root(module_file=APP_PY))
+
+    assert app_module._REPO_ROOT == expected_root
+    assert "discover_source_root()" in source
+    assert "sys.frozen" not in source
+    assert "sys._MEIPASS" not in source
+    assert "_FROZEN" not in source
+    assert "_BUNDLE_DIR" not in source
+    assert 'os.environ.get("FLINTTRADE_FRONTEND_DIST")' in source
+    assert 'Path(_REPO_ROOT) / "packages" / "apps" / "terminal" / "dist"' in source
 
 
 @pytest.mark.unit

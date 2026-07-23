@@ -82,7 +82,8 @@ describe('docs index generation', () => {
     const downloadSource = readFileSync(resolve(process.cwd(), 'src/app/download/page.tsx'), 'utf8');
     const desktopDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/DESKTOP.md');
 
-    // Primary install path: the /download page (one-command, release asset first).
+    // The download page remains the release gate and carries the commands only
+    // inside the complete Electron-release branch.
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
     expect(pageSource).toContain('Install desktop app');
@@ -91,8 +92,10 @@ describe('docs index generation', () => {
     // The desktop guide stays reachable from the homepage, footer, and docs.
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');
-    expect(desktopDoc?.content).toContain('desktop release manifest');
-    expect(desktopDoc?.content).toContain('Launch FlintTrade and complete the in-app Setup flow');
+    expect(desktopDoc?.content).toContain('exactly four shell installers plus one checksum');
+    expect(desktopDoc?.content).toContain('no desktop installer release is published yet');
+    expect(desktopDoc?.content).toContain('inspectable source checkout on first launch');
+    expect(desktopDoc?.content).not.toContain('desktop release manifest');
   });
 });
 

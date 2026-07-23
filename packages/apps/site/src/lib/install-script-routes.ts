@@ -2,26 +2,54 @@
  * Shared handler for the `/install.sh`, `/install.ps1`, `/uninstall.sh`, and
  * `/uninstall.ps1` bootstrap-script routes.
  *
- * The site never snapshots the scripts: it redirects to the raw GitHub copy on
- * `main`, so `curl -fsSL https://<site>/install.sh | bash` always fetches the
- * current script without a site redeploy. The install scripts resolve the
- * current desktop-release manifest at run time and install the matching release
- * asset by default, with source builds available only via explicit flags. The
- * uninstall scripts remove the app plus its disposable residue and keep BOTH
- * the workspace and the WebView storage (in-app saved content) unless
- * explicitly purged.
+ * The site redirects to the script from the exact commit that produced the
+ * deployment. This keeps the one-command bootstrap auditable even if `main`
+ * or a release tag changes later. The install scripts then resolve the current
+ * versioned GitHub release and install the matching small Electron shell after
+ * verification, then leave the local source build to the shell's first run.
+ * The uninstall scripts remove the app plus its disposable residue and keep the
+ * workspace unless explicitly purged.
  */
 
-const RAW_BASE =
-  'https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install';
+const RAW_REPOSITORY =
+  'https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade';
+const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
-export const INSTALL_SCRIPTS = {
-  sh: `${RAW_BASE}/flinttrade-install.sh`,
-  ps1: `${RAW_BASE}/flinttrade-install.ps1`,
-  'uninstall-sh': `${RAW_BASE}/flinttrade-uninstall.sh`,
-  'uninstall-ps1': `${RAW_BASE}/flinttrade-uninstall.ps1`,
+export const INSTALL_SCRIPT_NAMES = {
+  sh: 'flinttrade-install.sh',
+  ps1: 'flinttrade-install.ps1',
+  'uninstall-sh': 'flinttrade-uninstall.sh',
+  'uninstall-ps1': 'flinttrade-uninstall.ps1',
 } as const;
 
-export function installScriptRedirect(kind: keyof typeof INSTALL_SCRIPTS): Response {
-  return Response.redirect(INSTALL_SCRIPTS[kind], 302);
+export type InstallScriptKind = keyof typeof INSTALL_SCRIPT_NAMES;
+
+export function siteSourceSha(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  for (const value of [environment.FLINTTRADE_SITE_SOURCE_SHA, environment.VERCEL_GIT_COMMIT_SHA]) {
+    const candidate = value?.trim().toLowerCase() ?? '';
+    if (SOURCE_SHA_PATTERN.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function installScriptUrl(kind: InstallScriptKind, sourceSha: string): string | null {
+  const candidate = sourceSha.trim().toLowerCase();
+  if (!SOURCE_SHA_PATTERN.test(candidate)) return null;
+  return `${RAW_REPOSITORY}/${candidate}/scripts/install/${INSTALL_SCRIPT_NAMES[kind]}`;
+}
+
+export function installScriptRedirect(
+  kind: InstallScriptKind,
+  sourceSha: string | null = siteSourceSha(),
+): Response {
+  const url = sourceSha === null ? null : installScriptUrl(kind, sourceSha);
+  if (url === null) {
+    return new Response('The immutable FlintTrade install-script source is unavailable.\n', {
+      headers: { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' },
+      status: 503,
+    });
+  }
+  return Response.redirect(url, 302);
 }

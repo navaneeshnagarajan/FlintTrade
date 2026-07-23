@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Tauri desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12` (no upper bound; the repo currently runs 3.14), Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
+FlintTrade is open-source, self-hosted trading software for manual, automated, algorithmic, and AI-assisted workflows. It runs **its own native backend first** and treats OpenAlgo as one optional (bridge) broker adapter. Monorepo of **18 package surfaces** in a fat-core 4-way nest: 13 Python, 1 Rust/PyO3 (`ticks`), 1 shared TypeScript design-system, 1 React terminal, 1 Electron desktop shell, 1 Next.js site. Licensed AGPL-3.0. Target Python `>=3.12` (no upper bound; the repo currently runs 3.14), Node `>=22`. The full architectural reference is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); contributor mechanics are [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md); CI is [docs/CI.md](docs/CI.md); the live roadmap is [PLAN.md](PLAN.md). Read those before non-trivial work.
 
-Version: **v0.6.0-beta.13** (beta restructure; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
+Version: **v0.0.1** (clean-slate pre-1.0 baseline after the 2026-07-23 release reset; not production-ready). Python tooling is **uv** (workspace lockfile `uv.lock`); JS is **pnpm** (workspace lockfile `pnpm-lock.yaml`).
 
 ## Commands
 
@@ -29,11 +29,12 @@ cd packages/apps/terminal && npm run typecheck                     # tsc --noEmi
 # Build
 cd packages/apps/terminal && npm run build                         # tsc --noEmit + vite build
 cd packages/core/ticks && cargo build --release                    # Rust/PyO3 wheel
-make desktop-build                                                 # native desktop installers (frontend + backend sidecar + Tauri bundle)
+make desktop-build                                                 # verify/test/bundle the Electron shell
+make desktop-package                                               # package + verify this host's Electron installer
 
 # Dev / run
 make dev                                                           # terminal dev server + backend
-make desktop-dev                                                  # run the native desktop app in dev (builds the sidecar first)
+make desktop-dev                                                  # run Electron against its managed source bootstrap
 make start                                                         # FlintTrade backend (port 5100)
 make docker-up | docker-down | docker-build
 make full-check                                                    # tests + lint + typecheck snapshot
@@ -88,10 +89,13 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | TradingView/ChartInk/GoCharting/custom webhooks + flow builder (n8n + WhatsApp bridges actually live in `automation`) |
 | `terminal` | apps | TS/React | SPA: Dockview workspace, 102 widgets, routes — single source of truth for UI |
-| `desktop` | apps | TS/Rust | Tauri 2 native shell — bundles the PyInstaller-frozen backend sidecar + built terminal into one cross-OS installer (Linux/Windows/macOS), served from a single loopback origin |
+| `desktop` | apps | TS/Electron | Sandboxed Electron 40 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
-(`chrome-extension` was dropped in the v0.6.0 restructure; the Tauri `desktop` shell was re-added and first shipped in the v0.6.0 beta line — see [docs/DESKTOP.md](docs/DESKTOP.md).)
+(`chrome-extension` was dropped in the v0.6.0 restructure. The Tauri shell was
+first shipped in the beta line and is now retired in favour of the Electron
+source-bootstrap architecture; no complete Electron installer release is
+published yet. See [docs/DESKTOP.md](docs/DESKTOP.md).)
 
 ## House rules that bite
 
@@ -121,7 +125,7 @@ Apply to anyone touching the order/data path (the OpenAlgo bridge adapter):
 
 ## CI shape (so you know what's running)
 
-`test.yml` runs nine parallel Ubuntu jobs on push to `main`/`dev` and non-draft PRs: `python-tests`, `node-core-tests`, four `node-widget-tests-*` shards (1, 2a, 2b, 3), `secrets-check` (a grep-based two-pattern scan — NOT gitleaks), `rust-ticks-tests` (`cargo test` on the `ticks` crate — the only job that runs the crate's unit tests; `cargo audit` in `supply-chain.yml` checks advisories, not behaviour), and `rust-desktop-tests` (`cargo test` on the Tauri shell crate, pinned to ubuntu-22.04 to match the release floor). The vitest shards are hand-maintained path lists, but `tests/test_ci_vitest_shard_coverage.py` (in `python-tests`) now fails CI if any terminal `*.test.ts(x)` runs in no shard — so coverage is complete apart from `TradeIdea` (OOMs the 7GB runner; allowlisted in that guard's `DOCUMENTED_EXCLUSIONS`). The hook, `src/chrome`, `src/widgets/orders/`, `src/widgets/account/`, AITeam, Obsidian and TradeJournal suites all now run (in `node-core-tests` / `node-widget-tests-2b` / `node-widget-tests-3`); `packages/core/core/tests/test_contract_mock_drift.py` pins the async OpenAlgoClient shape and asserts every ftApi-called URL maps to a real route. Other workflows: `supply-chain.yml`, `refresh-vuln-snapshot.yml`, `site.yml`, `status-report.yml`, `desktop-release.yml` (manual trigger), plus the claude review workflows. Doc-only commits skip the matrix via `paths-ignore`. `concurrency: cancel-in-progress: true` means a follow-up push cancels the previous run. Per-push macOS/Windows jobs are a regression — cross-platform belongs in the weekly `nightly-cross-platform.yml`. To debug: `gh run view <id> --log-failed`.
+`test.yml` runs nine parallel Ubuntu jobs on push to `main`/`dev` and non-draft PRs: `python-tests`, `node-core-tests`, four `node-widget-tests-*` shards (1, 2a, 2b, 3), `secrets-check` (a grep-based two-pattern scan — NOT gitleaks), `rust-ticks-tests` (`cargo test` on the `ticks` crate — the only job that runs the crate's unit tests; `cargo audit` in `supply-chain.yml` checks advisories, not behaviour), and `electron-desktop-tests` (strict TypeScript, full Electron Vitest, main/preload bundle, Linux directory package and packaged-contract verification on Ubuntu 22.04). The vitest shards are hand-maintained path lists, but `tests/test_ci_vitest_shard_coverage.py` (in `python-tests`) now fails CI if any terminal `*.test.ts(x)` runs in no shard — so coverage is complete apart from `TradeIdea` (OOMs the 7GB runner; allowlisted in that guard's `DOCUMENTED_EXCLUSIONS`). The hook, `src/chrome`, `src/widgets/orders/`, `src/widgets/account/`, AITeam, Obsidian and TradeJournal suites all now run (in `node-core-tests` / `node-widget-tests-2b` / `node-widget-tests-3`); `packages/core/core/tests/test_contract_mock_drift.py` pins the async OpenAlgoClient shape and asserts every ftApi-called URL maps to a real route. Other workflows: `supply-chain.yml`, `refresh-vuln-snapshot.yml`, `site.yml`, `status-report.yml`, `desktop-release.yml` (manual trigger and Release Please dispatch), plus the claude review workflows. Doc-only commits skip the `test.yml` matrix via `paths-ignore`, while changes under `docs/**` still run `site.yml`. `concurrency: cancel-in-progress: true` means a follow-up push cancels the previous run. Per-push macOS/Windows jobs are a regression — cross-platform belongs in the weekly `nightly-cross-platform.yml`; the four-build-leg installer matrix is manual-dispatch-only. To debug: `gh run view <id> --log-failed`.
 
 ## External test deps (not bundled)
 

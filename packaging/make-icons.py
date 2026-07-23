@@ -1,6 +1,6 @@
 """Generate the FlintTrade desktop app icons from a single vector-style render.
 
-Produces, under ``packages/apps/desktop/src-tauri/icons/``:
+Produces, under ``packages/apps/desktop/resources/icons/``:
   * icon.png (512), 32x32.png, 128x128.png, 128x128@2x.png (256)
   * icon.ico (multi-size, Windows)
   * icon.icns (macOS)
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
-ICONS_DIR = Path(__file__).resolve().parent.parent / "packages" / "apps" / "desktop" / "src-tauri" / "icons"
+ICONS_DIR = Path(__file__).resolve().parent.parent / "packages" / "apps" / "desktop" / "resources" / "icons"
 
 # Brand palette (matches splash/index.html).
 BG = (11, 13, 18, 255)          # #0b0d12
@@ -89,7 +89,7 @@ def main() -> None:
     ICONS_DIR.mkdir(parents=True, exist_ok=True)
     master = render_master()
 
-    # Square PNGs Tauri references directly.
+    # Square PNGs used by electron-builder and the runtime tray.
     master.resize((512, 512), Image.LANCZOS).save(ICONS_DIR / "icon.png")
     master.resize((32, 32), Image.LANCZOS).save(ICONS_DIR / "32x32.png")
     master.resize((128, 128), Image.LANCZOS).save(ICONS_DIR / "128x128.png")
