@@ -182,8 +182,9 @@ make desktop-package    # build and verify this host's installer
 
 Output lands in `packages/apps/desktop/release/electron/`. The release workflow
 produces a universal macOS DMG, Windows x64 NSIS installer, and x64/ARM64 Linux
-AppImages. No complete Electron release is published yet; the current
-`v0.6.0-beta.13` assets use the retired packaging. The local macOS packaging
+AppImages. No Electron release is published yet; the prior Tauri/PyInstaller
+releases were deleted in the 2026-07-23 release reset to a clean `v0.0.1`
+baseline. The local macOS packaging
 target always uses an ad-hoc seal, which verifies bundle integrity but does not
 provide Developer ID trust or notarisation. Only release CI can use complete
 Apple distribution-signing and notarisation secret sets.

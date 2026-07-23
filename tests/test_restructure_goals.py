@@ -581,9 +581,15 @@ def test_version_scripts_enforce_strict_release_semver_and_truthful_channel_copy
 
     disclaimer = apply_version["_release_disclaimer"]
     assert "beta prerelease" in disclaimer("v0.7.0-beta.1")
-    assert "stable release" in disclaimer("v0.7.0")
+    # Pre-1.0 (0.x) is never labelled stable: SemVer treats 0.x as unstable and
+    # FlintTrade marks every 0.x release as a GitHub pre-release.
+    assert "pre-release" in disclaimer("v0.7.0")
+    assert "stable release" not in disclaimer("v0.7.0")
     assert "beta prerelease" not in disclaimer("v0.7.0")
     assert "not production ready" in disclaimer("v0.7.0")
+    # A post-1.0 non-prerelease tag is the only thing labelled a stable release.
+    assert "stable release" in disclaimer("v1.2.3")
+    assert "not production ready" not in disclaimer("v1.2.3")
 
 
 def test_version_consistency_guard_passes() -> None:

@@ -93,7 +93,7 @@ describe('docs index generation', () => {
     expect(pageSource).toContain('href="/docs/desktop"');
     expect(footerSource).toContain('href="/docs/desktop"');
     expect(desktopDoc?.content).toContain('exactly four shell installers plus one checksum');
-    expect(desktopDoc?.content).toContain('no complete, checksum-published Electron release');
+    expect(desktopDoc?.content).toContain('no desktop installer release is published yet');
     expect(desktopDoc?.content).toContain('inspectable source checkout on first launch');
     expect(desktopDoc?.content).not.toContain('desktop release manifest');
   });

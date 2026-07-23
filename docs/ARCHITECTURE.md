@@ -1,6 +1,6 @@
 # FlintTrade Architecture
 
-> Reflects `v0.6.0-beta.13`. 18 package surfaces (13 Python + 3 apps: React
+> Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React
 > terminal, Electron desktop shell, Next.js site + 1 shared TypeScript
 > design-system package + 1 Rust/PyO3 tick engine).
 > Run `make test` and terminal Vitest locally for the current test counts.
@@ -135,9 +135,9 @@ last-known-good source for rollback.
 
 The Electron installer is not the application runtime. A release contains the
 shell and bootstrap resources only. Source/runtime updates and shell-installer
-updates are separate flows. No complete Electron installer release is published
-yet; existing `v0.6.0-beta.13` desktop assets belong to the retired packaging
-and do not satisfy this architecture.
+updates are separate flows. No Electron installer release is published yet; the
+previous Tauri and PyInstaller release assets have been retired and do not
+satisfy this architecture.
 
 When the operator selects managed Ollama, the backend owns an on-demand sidecar
 process. FlintTrade selects an unpredictable free high loopback port, starts

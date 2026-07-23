@@ -5,15 +5,14 @@ API from one origin, and a normal browser remains the primary supported way to
 run it. The desktop package is a small Electron 40 shell around that same local
 application.
 
-> **Installer availability:** no complete, checksum-published Electron release
-> exists yet. The assets attached to `v0.6.0-beta.13` use the retired desktop
-> packaging and are not selected by the new installer. Once this branch is
-> deployed, the [download page](https://flinttrade.vercel.app/download) will
-> withhold commands and download buttons until one release contains the
-> complete Electron asset set. The currently deployed beta.13 page predates
-> that gate and still advertises the retired install path. Until the cutover,
-> use the [source web-app setup](setup/QUICKSTART.md) or build the Electron shell
-> locally.
+> **Installer availability:** no desktop installer release is published yet; the
+> current source baseline is `v0.0.1`, and the previous Tauri and PyInstaller
+> releases and their assets have been retired.
+> When the Electron pipeline publishes its first release, the
+> [download page](https://flinttrade.vercel.app/download) will withhold commands
+> and download buttons until one release contains the complete Electron asset
+> set (four installers plus `SHA256SUMS.txt`). Until then, use the
+> [source web-app setup](setup/QUICKSTART.md) or build the Electron shell locally.
 
 ## Delivery model
 

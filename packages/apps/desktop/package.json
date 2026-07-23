@@ -1,6 +1,6 @@
 {
   "name": "@flinttrade/desktop",
-  "version": "0.6.0-beta.13",
+  "version": "0.0.1",
   "private": true,
   "description": "FlintTrade Electron desktop shell.",
   "author": "Navaneesh Nagarajan",

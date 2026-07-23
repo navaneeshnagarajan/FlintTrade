@@ -11,7 +11,7 @@ services, and developer documentation.
 
 ## Beta disclaimer
 
-FlintTrade `v0.6.0-beta.13` is **not production ready**. It is educational,
+FlintTrade `v0.0.1` is **not production ready**. It is educational,
 self-hosted software for research, sandbox workflows, and contributor
 development first. Nothing in this repository is financial, investment, tax,
 legal, or regulatory advice. Read [disclaimer.md](disclaimer.md) before
@@ -66,14 +66,12 @@ inspectable local source checkout under `~/.flinttrade/src/FlintTrade`, starts
 the source guardian, and opens the terminal only after its loopback health
 check passes.
 
-No complete, checksum-published Electron installer release exists yet. The
-assets attached to `v0.6.0-beta.13` use the retired desktop packaging. Once
-this branch is deployed, the
+No desktop installer release is published yet; the previous Tauri and
+PyInstaller releases and their assets have been retired. When the Electron
+pipeline publishes its first release, the
 [download page](https://flinttrade.vercel.app/download) will withhold
 one-command installs until all four Electron installers and `SHA256SUMS.txt`
-are available together. The currently deployed beta.13 page predates that gate
-and still advertises the retired install path; do not treat it as an Electron
-source-bootstrap installer:
+are available together:
 
 | OS | Electron installer | Architectures |
 |---|---|---|

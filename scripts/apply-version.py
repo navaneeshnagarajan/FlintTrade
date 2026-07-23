@@ -74,6 +74,10 @@ def _release_disclaimer(tag: str) -> str:
     major = int(core.split(".", maxsplit=1)[0])
     if separator:
         channel = "a beta prerelease" if prerelease.split(".", maxsplit=1)[0].lower() == "beta" else "a prerelease"
+    elif major == 0:
+        # Pre-1.0 versions are never "stable": 0.x is unstable by SemVer definition
+        # and FlintTrade marks every 0.x release as a GitHub pre-release.
+        channel = "a pre-release"
     else:
         channel = "a stable release"
     safety = (

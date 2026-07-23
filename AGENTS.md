@@ -53,11 +53,11 @@ installer contains the shell and bootstrap resources only; first launch builds
 the managed checkout at `~/.flinttrade/src/FlintTrade`, and source/runtime
 updates are distinct from Electron-shell installer updates. Task 8
 installed-app validation, the settled full gate and adversarial closeout remain
-before the migration can be called done. No complete Electron installer
-release is published; `v0.6.0-beta.13` assets use the retired packaging and the
-branch-local site withholds install commands once deployed. The currently
-deployed beta.13 page predates that gate and still describes the retired
-packaging. Local macOS output is always ad-hoc sealed; release CI alone can use
+before the migration can be called done. No desktop installer release is
+published; the prior Tauri/PyInstaller releases were deleted in the 2026-07-23
+release reset to a clean `v0.0.1` baseline, and the site withholds install
+commands until the four Electron installers plus `SHA256SUMS.txt` exist together.
+Local macOS output is always ad-hoc sealed; release CI alone can use
 complete Apple signing and notarisation secrets. Count pins remain 102
 widgets, 35 brokers and 18 packages. `PLAN.md` is the roadmap of record — resume
 from its phase tracker, never restart planning, and never push without explicit
