@@ -37,10 +37,12 @@ describe("splash protocol", () => {
     expect(SPLASH_CONTENT_SECURITY_POLICY).not.toMatch(/unsafe-inline|unsafe-eval|https?:|\*/);
   });
 
-  it("attaches the CSP and nosniff headers while preserving the asset's own headers", () => {
-    const headers = splashSecurityHeaders(new Headers({ "content-type": "text/html" }));
-    expect(headers.get("content-type")).toBe("text/html");
+  it("attaches the CSP while preserving the asset's own headers and not overriding its content-type", () => {
+    const headers = splashSecurityHeaders(new Headers({ "content-type": "text/css" }));
+    // The CSP governs sources by origin, not MIME, so the asset's own content-type
+    // is preserved and never made load-bearing (no nosniff).
+    expect(headers.get("content-type")).toBe("text/css");
     expect(headers.get("content-security-policy")).toBe(SPLASH_CONTENT_SECURITY_POLICY);
-    expect(headers.get("x-content-type-options")).toBe("nosniff");
+    expect(headers.get("x-content-type-options")).toBeNull();
   });
 });

@@ -29,11 +29,15 @@ export const SPLASH_CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
 ].join("; ");
 
-/** Security headers attached to every splash response served over the scheme. */
+/**
+ * Security headers attached to every splash response served over the scheme.
+ * Only the CSP is added: it governs script/style/frame sources by origin, not by
+ * MIME, so it cannot be defeated by content sniffing and does not make the file
+ * loader's content-type load-bearing for the three static same-origin assets.
+ */
 export function splashSecurityHeaders(base?: Headers): Headers {
   const headers = new Headers(base);
   headers.set("Content-Security-Policy", SPLASH_CONTENT_SECURITY_POLICY);
-  headers.set("X-Content-Type-Options", "nosniff");
   return headers;
 }
 
