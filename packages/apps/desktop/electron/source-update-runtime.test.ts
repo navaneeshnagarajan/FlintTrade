@@ -349,6 +349,7 @@ describe("source update runtime composition", () => {
         inspectDirectory: vi.fn(async () => ({ status: "missing" as const })),
         inspectJournal: vi.fn(async () => ({ status: "missing" as const })),
         quarantineDirectory: vi.fn(async () => ({ status: "quarantined" as const })),
+        removeQuarantinedDirectory: vi.fn(async () => ({ status: "removed" as const })),
         removeJournal: vi.fn(async () => undefined),
         renameDirectory: vi.fn(async () => undefined),
       },

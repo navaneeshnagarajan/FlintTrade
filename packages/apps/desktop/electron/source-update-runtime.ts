@@ -6,8 +6,9 @@ import type { BootstrapDependencies, BootstrapToolManifest } from "./bootstrap";
 import { candidatePythonPath } from "./candidate-health";
 import { createSafeDirectoryRemover } from "./safe-directory-removal";
 import { createSourceCandidateStager } from "./source-candidate";
-import type { SourceOperationCoordinator } from "./source-operation";
+import { isSourceOperationLeaseRetentionError, type SourceOperationCoordinator } from "./source-operation";
 import { createNodeSourcePromotionFileSystem, createSourcePromotion } from "./source-promotion";
+import { createSourceUpdateIdentityDependencies } from "./source-update-identity";
 import {
   FLINTTRADE_SOURCE_REPOSITORY,
   createDurableSourceUpdaterEventRecorder,
@@ -28,6 +29,16 @@ import {
 } from "./windows-source-filesystem";
 
 type SourceUpdateState = ReturnType<typeof createUpdateState>;
+
+const WINDOWS_RECLAMATION_PRESERVE_CODES = new Set([
+  "ALIASED_PATH",
+  "DIRECTORY_CHANGED",
+  "EBUSY",
+  "PATH_ESCAPE",
+  "RECLAMATION_BUDGET_EXCEEDED",
+  "REPARSE_POINT",
+  "UNEXPECTED_ENTRY_TYPE",
+]);
 
 function isPathWithin(parent: string, child: string, platform: NodeJS.Platform): boolean {
   const comparisonParent = platform === "win32" ? parent.toLowerCase() : parent;
@@ -125,12 +136,18 @@ export function createSourceUpdateRuntime(options: SourceUpdateRuntimeOptions): 
         operationLease,
       })
     : undefined;
+  const sourceUpdateIdentityDependencies = createSourceUpdateIdentityDependencies({
+    dependencies: options.dependencies,
+    operationLease,
+    platform: options.platform,
+    ...(windowsSourceFilesystem ? { windowsSourceFilesystem } : {}),
+  });
   const safeRemove = options.platform === "win32"
     ? async ({ expected, quarantine, target }: {
         expected: { nativeIdentity?: string };
         quarantine: string;
         target: string;
-      }): Promise<{ status: "quarantined" }> => {
+      }): Promise<{ status: "quarantined" | "removed" }> => {
         if (!windowsSourceFilesystem || !expected.nativeIdentity) {
           throw new Error("Windows source cleanup requires an exact native directory identity.");
         }
@@ -139,7 +156,22 @@ export function createSourceUpdateRuntime(options: SourceUpdateRuntimeOptions): 
           quarantine,
           target,
         });
-        return { status: "quarantined" };
+        try {
+          await windowsSourceFilesystem.removeQuarantinedDirectory({
+            expectedNativeIdentity: expected.nativeIdentity,
+            quarantine,
+          });
+          return { status: "removed" };
+        } catch (error) {
+          if (isSourceOperationLeaseRetentionError(error)) throw error;
+          if (WINDOWS_RECLAMATION_PRESERVE_CODES.has((error as NodeJS.ErrnoException).code ?? "")) {
+            const retained = await windowsSourceFilesystem.inspectDirectory(quarantine);
+            if (retained.status === "present" && retained.nativeIdentity === expected.nativeIdentity) {
+              return { status: "quarantined" };
+            }
+          }
+          throw error;
+        }
       }
     : createSafeDirectoryRemover({
         bootstrapResources: options.bootstrapResources,
@@ -170,7 +202,7 @@ export function createSourceUpdateRuntime(options: SourceUpdateRuntimeOptions): 
   };
   const provenance = createSourceUpdaterProvenance({
     bootstrapResources: options.bootstrapResources,
-    dependencies: options.dependencies,
+    dependencies: sourceUpdateIdentityDependencies,
     expected: {
       archiveOrigin: new URL(FLINTTRADE_SOURCE_REPOSITORY.archiveBaseUrl).origin,
       branch: FLINTTRADE_SOURCE_REPOSITORY.branch,
@@ -227,7 +259,7 @@ export function createSourceUpdateRuntime(options: SourceUpdateRuntimeOptions): 
       arch: options.arch,
       bootIdentity: options.bootIdentity,
       bootstrapResources: options.bootstrapResources,
-      dependencies: options.dependencies,
+      dependencies: sourceUpdateIdentityDependencies,
       manifest: options.manifest,
       paths: options.paths,
       platform: options.platform,

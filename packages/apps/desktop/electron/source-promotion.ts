@@ -2009,18 +2009,25 @@ function requireContentIdentity(value: unknown, label: string): string {
 
 function requireBoundIdentity(value: unknown, label: string): BoundIdentity {
   if (
-    typeof value !== "object" ||
-    value === null ||
+    !isRecord(value) ||
     !("dev" in value) ||
     !Number.isSafeInteger(value.dev) ||
     (value.dev as number) < 0 ||
     !("ino" in value) ||
     !Number.isSafeInteger(value.ino) ||
-    (value.ino as number) < 0
+    (value.ino as number) < 0 ||
+    ("nativeIdentity" in value && (
+      typeof value.nativeIdentity !== "string" ||
+      !WINDOWS_NATIVE_IDENTITY_PATTERN.test(value.nativeIdentity)
+    ))
   ) {
     throw new SourcePromotionError("INVALID_DIRECTORY_IDENTITY", `Invalid ${label}`)
   }
-  return { dev: value.dev as number, ino: value.ino as number }
+  return {
+    dev: value.dev as number,
+    ino: value.ino as number,
+    ...(typeof value.nativeIdentity === "string" ? { nativeIdentity: value.nativeIdentity } : {}),
+  }
 }
 
 function isContentIdentity(value: unknown): value is string {
@@ -2053,7 +2060,14 @@ function sameIdentity(first: BoundIdentity, second: BoundIdentity): boolean {
   return (
     first.dev === second.dev &&
     first.ino === second.ino &&
-    (!first.nativeIdentity || !second.nativeIdentity || first.nativeIdentity === second.nativeIdentity)
+    (
+      (first.nativeIdentity === undefined && second.nativeIdentity === undefined) ||
+      (
+        first.nativeIdentity !== undefined &&
+        second.nativeIdentity !== undefined &&
+        first.nativeIdentity === second.nativeIdentity
+      )
+    )
   )
 }
 

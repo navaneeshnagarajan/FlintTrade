@@ -485,7 +485,18 @@ function samePath(left: string, right: string, platform: NodeJS.Platform): boole
 }
 
 function sameIdentity(left: FileSystemIdentity, right: FileSystemIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    (
+      (left.nativeIdentity === undefined && right.nativeIdentity === undefined) ||
+      (
+        left.nativeIdentity !== undefined &&
+        right.nativeIdentity !== undefined &&
+        left.nativeIdentity === right.nativeIdentity
+      )
+    )
+  );
 }
 
 function sameDirectoryMetadata(
@@ -1021,7 +1032,11 @@ export async function validateActiveSourceProvenance(
   return {
     ...identity,
     canonicalPath: active.canonicalPath,
-    directoryIdentity: { dev: active.metadata.dev, ino: active.metadata.ino },
+    directoryIdentity: {
+      dev: active.metadata.dev,
+      ino: active.metadata.ino,
+      ...(active.metadata.nativeIdentity ? { nativeIdentity: active.metadata.nativeIdentity } : {}),
+    },
   };
 }
 

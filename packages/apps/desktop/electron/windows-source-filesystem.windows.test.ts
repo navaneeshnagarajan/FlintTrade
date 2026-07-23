@@ -109,10 +109,14 @@ function productionFileSystem(
     platform: "win32",
     safeRemove: async ({ expected, quarantine, target }) => {
       if (!expected.nativeIdentity) throw new Error("Windows integration cleanup identity is missing.");
-      return windows.quarantineDirectory({
+      await windows.quarantineDirectory({
         expectedNativeIdentity: expected.nativeIdentity,
         quarantine,
         target,
+      });
+      return windows.removeQuarantinedDirectory({
+        expectedNativeIdentity: expected.nativeIdentity,
+        quarantine,
       });
     },
     ...(testHooks ? { testHooks } : {}),
@@ -194,7 +198,7 @@ describe.skipIf(process.platform !== "win32")("compiled Windows source filesyste
     expect((await readdir(rolledBackRoot)).some((entry) => entry.startsWith(FAILED_SOURCE_PREFIX))).toBe(true);
   });
 
-  it("rejects a reparse swap and preserves every ordinary, swapped and reparse child in exact quarantine", async () => {
+  it("rejects a reparse swap and reclaims an exact quarantine without traversing its reparse child", async () => {
     const root = await temporarySourceRoot("adversarial");
     const boundary = await realBoundary(root);
     const external = await temporarySourceRoot("external");
@@ -240,10 +244,14 @@ describe.skipIf(process.platform !== "win32")("compiled Windows source filesyste
           await mkdir(path.join(target, "foreign-tree"));
           await writeFile(path.join(target, "foreign-tree", "late.txt"), "late ordinary child");
         }
-        return boundary.quarantineDirectory({
+        await boundary.quarantineDirectory({
           expectedNativeIdentity: cleanupExpected.nativeIdentity,
           quarantine: cleanupQuarantine,
           target,
+        });
+        return boundary.removeQuarantinedDirectory({
+          expectedNativeIdentity: cleanupExpected.nativeIdentity,
+          quarantine: cleanupQuarantine,
         });
       },
       windows: boundary,
@@ -251,23 +259,10 @@ describe.skipIf(process.platform !== "win32")("compiled Windows source filesyste
     const expected = await fileSystem.inspectDirectory(candidate);
     if (!expected?.nativeIdentity) throw new Error("Windows cleanup fixture identity is missing.");
 
-    await expect(fileSystem.removeDirectory(candidate, expected)).resolves.toMatchObject({ status: "quarantined" });
+    await expect(fileSystem.removeDirectory(candidate, expected)).resolves.toMatchObject({ status: "removed" });
     expect(await fileSystem.inspectDirectory(candidate)).toBeNull();
-    expect(await fileSystem.inspectDirectory(quarantine)).toMatchObject({ nativeIdentity: expected.nativeIdentity });
-    expect(await readFile(path.join(quarantine, "nested", "owned-held.txt"), "utf8")).toBe(
-      "owned before settlement",
-    );
-    expect(await readFile(path.join(quarantine, "nested", "ordinary.txt"), "utf8")).toBe(
-      "foreign replacement",
-    );
-    expect(await readFile(path.join(quarantine, "foreign-tree", "late.txt"), "utf8")).toBe(
-      "late ordinary child",
-    );
-    expect(await readFile(path.join(quarantine, "external-junction", "retain.txt"), "utf8")).toBe(
-      "outside quarantine",
-    );
-    await expect(fileSystem.removeDirectory(candidate, expected)).resolves.toMatchObject({ status: "quarantined" });
-    expect(await fileSystem.inspectDirectory(quarantine)).toMatchObject({ nativeIdentity: expected.nativeIdentity });
+    expect(await fileSystem.inspectDirectory(quarantine)).toBeNull();
+    await expect(fileSystem.removeDirectory(candidate, expected)).resolves.toMatchObject({ status: "removed" });
     expect(await readFile(path.join(external, "retain.txt"), "utf8")).toBe("outside quarantine");
   });
 

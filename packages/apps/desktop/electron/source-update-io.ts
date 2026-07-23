@@ -1087,7 +1087,6 @@ export function createNodeSourceUpdaterCleanup(
       return;
     }
     const pendingKeys = remaining
-      .filter((entry) => entry.state !== "preserved")
       .map((entry) => `${entry.kind}:${entry.operationId}`)
       .filter((key) => selected === null || selected.has(key));
     for (const key of pendingKeys) {

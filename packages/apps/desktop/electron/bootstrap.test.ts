@@ -1165,6 +1165,131 @@ describe("first-run source bootstrap", () => {
     expect(await exists(foreignToolTemporary)).toBe(true);
   });
 
+  it.each(["darwin", "win32"] as const)(
+    "bounds retained first-run attempts on %s without deleting foreign lookalikes",
+    async (platform) => {
+      const test = await fixture({ platform, virtualEnvironment: "nonrelocatable" });
+      const foreignId = "123e4567-e89b-42d3-a456-426614174000";
+      const foreignCandidate = `${test.activeSource}.candidate-99-${foreignId}`;
+      const foreignSnapshot = path.join(
+        test.root,
+        "source",
+        ".downloads",
+        ".flinttrade-archive-snapshot-Ab12z9",
+      );
+      await mkdir(foreignCandidate, { recursive: true });
+      await mkdir(foreignSnapshot, { recursive: true });
+      await writeFile(path.join(foreignCandidate, "foreign-sentinel"), "candidate-foreign");
+      await writeFile(path.join(foreignSnapshot, "foreign-sentinel"), "snapshot-foreign");
+
+      await expect(test.controller.start()).resolves.toMatchObject({
+        error: expect.stringMatching(/relocat|virtual environment/i),
+        ok: false,
+      });
+      await expect(test.controller.retry()).resolves.toMatchObject({
+        error: expect.stringMatching(/relocat|virtual environment/i),
+        ok: false,
+      });
+      await expect(test.controller.retry()).resolves.toMatchObject({
+        error: expect.stringMatching(/relocat|virtual environment/i),
+        ok: false,
+      });
+      const allocatedBeforeLimit = {
+        builds: test.builtCandidates.length,
+        downloads: test.downloadDestinations.length,
+        extractions: test.extractionDestinations.length,
+      };
+
+      await expect(test.controller.retry()).resolves.toMatchObject({
+        error: expect.stringMatching(/retained first-run attempt limit|explicit purge/i),
+        ok: false,
+      });
+      expect({
+        builds: test.builtCandidates.length,
+        downloads: test.downloadDestinations.length,
+        extractions: test.extractionDestinations.length,
+      }).toEqual(allocatedBeforeLimit);
+      expect(
+        (await test.dependencies.fileSystem.listNames(
+          path.join(test.root, "source", ".flinttrade-bootstrap-retained-attempts"),
+        )).filter((name) => /^attempt-[1-3]\.json$/.test(name)),
+      ).toHaveLength(3);
+      expect(await readFile(path.join(foreignCandidate, "foreign-sentinel"), "utf8")).toBe(
+        "candidate-foreign",
+      );
+      expect(await readFile(path.join(foreignSnapshot, "foreign-sentinel"), "utf8")).toBe(
+        "snapshot-foreign",
+      );
+    },
+  );
+
+  it("fails closed on a foreign retained-attempt ledger alias without touching its target", async () => {
+    const test = await fixture();
+    const sourceRoot = path.join(test.root, "source");
+    const foreignLedger = path.join(test.root, "foreign-retained-attempts");
+    const ledger = path.join(sourceRoot, ".flinttrade-bootstrap-retained-attempts");
+    await mkdir(sourceRoot, { recursive: true });
+    await mkdir(foreignLedger);
+    await writeFile(path.join(foreignLedger, "sentinel"), "foreign-retention-evidence\n");
+    await symlink(foreignLedger, ledger, "dir");
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/no-follow directory|private root|retained first-run attempt/i),
+      ok: false,
+    });
+    expect(test.builtCandidates).toHaveLength(0);
+    expect(test.downloadDestinations).toHaveLength(0);
+    expect(test.extractionDestinations).toHaveLength(0);
+    expect(await readFile(path.join(foreignLedger, "sentinel"), "utf8")).toBe("foreign-retention-evidence\n");
+    expect((await lstat(ledger)).isSymbolicLink()).toBe(true);
+  });
+
+  it("honours retained attempts from a prior process before allocating new bootstrap paths", async () => {
+    const test = await fixture();
+    const ledger = path.join(test.root, "source", ".flinttrade-bootstrap-retained-attempts");
+    await mkdir(ledger, { recursive: true });
+    for (let index = 1; index <= 3; index += 1) {
+      const operationId = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      await writeFile(
+        path.join(ledger, `attempt-${index}.json`),
+        `${JSON.stringify({ operationId, schemaVersion: 1, slot: index })}\n`,
+        { mode: 0o600 },
+      );
+    }
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/retained first-run attempt limit|explicit purge/i),
+      ok: false,
+    });
+    expect(test.builtCandidates).toHaveLength(0);
+    expect(test.downloadDestinations).toHaveLength(0);
+    expect(test.extractionDestinations).toHaveLength(0);
+  });
+
+  it("does not apply the first-run retention budget to an exact-revision update candidate build", async () => {
+    const test = await fixture({ expectedRevision: revision });
+    const sourceRoot = path.join(test.root, "source");
+    const ledger = path.join(sourceRoot, ".flinttrade-bootstrap-retained-attempts");
+    const operationIds = Array.from(
+      { length: 3 },
+      (_value, index) => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    );
+    await mkdir(ledger, { recursive: true });
+    for (const [index, operationId] of operationIds.entries()) {
+      const slot = index + 1;
+      await writeFile(
+        path.join(ledger, `attempt-${slot}.json`),
+        `${JSON.stringify({ operationId, schemaVersion: 1, slot })}\n`,
+        { mode: 0o600 },
+      );
+    }
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    expect((await test.dependencies.fileSystem.listNames(ledger)).sort()).toEqual(
+      operationIds.map((_operationId, index) => `attempt-${index + 1}.json`),
+    );
+  });
+
   it("leaves canonical foreign archive files byte-for-byte unchanged while downloading unique assets", async () => {
     const test = await fixture({ gitAvailable: false });
     const sourceDownloads = path.join(test.root, "source", ".downloads");

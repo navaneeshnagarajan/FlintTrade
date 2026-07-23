@@ -144,6 +144,14 @@ function testWindowsFilesystemBoundary(): WindowsSourceFilesystemBoundary {
       if (atTarget.status === "present") await rename(target, quarantine)
       return { status: "quarantined" as const }
     },
+    async removeQuarantinedDirectory({ expectedNativeIdentity, quarantine }) {
+      const atQuarantine = await inspect(quarantine)
+      if (atQuarantine.status !== "present" || atQuarantine.nativeIdentity !== expectedNativeIdentity) {
+        throw new Error("Windows removal fixture identity mismatch")
+      }
+      await rm(quarantine, { recursive: true })
+      return { status: "removed" as const }
+    },
     async removeJournal({ target }) {
       await rm(`${target}.previous`, { force: true })
       await rm(target, { force: true })
@@ -510,6 +518,27 @@ describe("source promotion", () => {
     await expect(controller.promote({ ...promotionRequest(candidatePath), ...override })).rejects.toMatchObject({
       code: "IDENTITY_MISMATCH",
     })
+    expect(mutationCalls(fileSystem)).toEqual([])
+  })
+
+  it.each([
+    ["missing", { dev: 7, ino: 3 }],
+    ["different", { dev: 7, ino: 3, nativeIdentity: "0000000000000007:00000000000000000000000000000063" }],
+  ] as const)("rejects a %s captured Windows candidate native identity before journal or mutation", async (_label, capturedCandidate) => {
+    const { activePath, candidatePath, fileSystem } = fixture({ windows: true })
+    const originalActive = await fileSystem.inspectDirectory(activePath)
+    if (!originalActive?.nativeIdentity) throw new Error("test Windows active identity is missing")
+    const controller = createSourcePromotion({
+      fileSystem,
+      lifecycle: alwaysHealthyLifecycle(),
+      platform: "win32",
+      sourceRoot: SOURCE_ROOT,
+    })
+
+    await expect(controller.promote(promotionRequest(candidatePath, {
+      candidate: capturedCandidate,
+      originalActive,
+    }))).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" })
     expect(mutationCalls(fileSystem)).toEqual([])
   })
 
@@ -1389,6 +1418,11 @@ describe("source promotion", () => {
 
   it("retries locked Windows native renames and journals exact file IDs", async () => {
     const { activePath, candidatePath, fileSystem, lastKnownGoodPath } = fixture({ windows: true })
+    const originalActive = await fileSystem.inspectDirectory(activePath)
+    const candidate = await fileSystem.inspectDirectory(candidatePath)
+    if (!originalActive?.nativeIdentity || !candidate?.nativeIdentity) {
+      throw new Error("test Windows promotion identities are missing")
+    }
     fileSystem.failRename(activePath, lastKnownGoodPath, "EBUSY", "EACCES")
     const controller = createSourcePromotion({
       fileSystem,
@@ -1398,7 +1432,7 @@ describe("source promotion", () => {
       sourceRoot: SOURCE_ROOT,
     })
 
-    const outcome = await controller.promote(promotionRequest(candidatePath))
+    const outcome = await controller.promote(promotionRequest(candidatePath, { candidate, originalActive }))
     expect(outcome).toMatchObject({ status: "promoted" })
     expect(fileSystem.calls.filter((call) => call.kind === "delay")).toHaveLength(2)
     expect(JSON.parse(fileSystem.journal!)).toMatchObject({
@@ -1409,6 +1443,11 @@ describe("source promotion", () => {
 
   it("recovers Windows handle-bound evidence after a crash during candidate promotion", async () => {
     const { activePath, candidatePath, fileSystem, lastKnownGoodPath } = fixture({ windows: true })
+    const originalActive = await fileSystem.inspectDirectory(activePath)
+    const candidate = await fileSystem.inspectDirectory(candidatePath)
+    if (!originalActive?.nativeIdentity || !candidate?.nativeIdentity) {
+      throw new Error("test Windows promotion identities are missing")
+    }
     const crashing = createSourcePromotion({
       fileSystem,
       lifecycle: alwaysHealthyLifecycle(),
@@ -1416,7 +1455,9 @@ describe("source promotion", () => {
       platform: "win32",
       sourceRoot: SOURCE_ROOT,
     })
-    await expect(crashing.promote(promotionRequest(candidatePath))).rejects.toThrow(/simulated crash/i)
+    await expect(crashing.promote(promotionRequest(candidatePath, { candidate, originalActive }))).rejects.toThrow(
+      /simulated crash/i,
+    )
 
     const recovering = createSourcePromotion({
       fileSystem,
@@ -1431,6 +1472,11 @@ describe("source promotion", () => {
 
   it("recovers a Windows promoted-boot failure and completes identity-bound rollback", async () => {
     const { activePath, candidatePath, failedPath, fileSystem } = fixture({ windows: true })
+    const originalActive = await fileSystem.inspectDirectory(activePath)
+    const candidate = await fileSystem.inspectDirectory(candidatePath)
+    if (!originalActive?.nativeIdentity || !candidate?.nativeIdentity) {
+      throw new Error("test Windows promotion identities are missing")
+    }
     const crashing = createSourcePromotion({
       fileSystem,
       lifecycle: identityAwareLifecycle(fileSystem, activePath, 3),
@@ -1438,7 +1484,9 @@ describe("source promotion", () => {
       platform: "win32",
       sourceRoot: SOURCE_ROOT,
     })
-    await expect(crashing.promote(promotionRequest(candidatePath))).rejects.toThrow(/simulated crash/i)
+    await expect(crashing.promote(promotionRequest(candidatePath, { candidate, originalActive }))).rejects.toThrow(
+      /simulated crash/i,
+    )
 
     const recovering = createSourcePromotion({
       fileSystem,

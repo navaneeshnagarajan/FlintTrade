@@ -184,26 +184,36 @@ replacement and removal bind the target to its expected file ID and SHA-256
 digest, deny compatible writers while that evidence is authenticated, and
 require the reserved `.previous` name to be absent. A normal commit may use
 that name transiently for the already-pinned target, but deletes it through the
-same handle only after verifying the replacement. Any sidecar which predates
-the helper invocation is preserved and blocks mutation instead of being
-adopted as cleanup authority.
+same handle only after verifying the replacement. Before inspecting or mutating
+the logical journal, the helper reconciles only an exact canonical transaction
+receipt whose recorded target, temporary replacement, prior identity and
+replacement identity match the files still present. This lets a crash after
+`.previous` was published finish or roll back deterministically. A `.previous`
+without that complete receipt-bound evidence, an invalid or changed fixed
+`.transaction` receipt, or an ambiguous target/previous/temporary state is
+preserved and blocks mutation instead of being adopted as cleanup authority.
 
-Windows source cleanup is deliberately preserve-only. The helper pins the
-managed parent first, renames the exact identity-bound root to its deterministic
-quarantine, flushes the parent and stops. It never enumerates or deletes a child,
-so an ordinary child inserted or swapped during cleanup, including a reparse
-point, is retained with the quarantined root rather than becoming pathname-based
-deletion authority. The managed target is absent while the exact quarantine is
-tracked in `.flinttrade-source-cleanup.json` or
-`.flinttrade-preserved-source-quarantines.json`. Later updates may proceed with
-new UUID-bound quarantine names. A user may manually remove an old quarantine;
-the next recovery proves its absence before pruning the inventory row. Until
-then it consumes disk space. Each inventory is independently capped at 64
-entries. When either inventory has 64 retained entries, that source-update path
-stops rather than evicting evidence; an old deterministic quarantine must be
-removed manually and recovery must prove its absence and prune the row before
-another update can complete. A locked root, changed identity or ambiguous
-target/quarantine evidence retains the journal and fails closed.
+Windows source cleanup pins the managed parent, renames the exact
+identity-bound root to its deterministic quarantine and flushes the parent
+before reclamation. The packaged helper then snapshots every direct child by
+native file ID, reopens that exact identity without following reparse points,
+and deletes only handles whose canonical parent remains inside the pinned
+quarantine. A reparse entry itself may be removed, but its external target is
+never traversed. Late, changed, locked, over-budget or ambiguous evidence leaves
+the exact quarantine in place rather than widening deletion authority.
+
+The managed target is absent while retained evidence is tracked in
+`.flinttrade-source-cleanup.json` or
+`.flinttrade-preserved-source-quarantines.json`. Startup and the next source
+apply retry entries in the source-cleanup inventory; a successful native
+reclamation prunes its row, so ordinary failed candidates and staging roots do
+not accumulate until the metadata cap denies future updates. Preserved
+last-known-good promotion evidence remains manual-forensics evidence: recovery
+only proves an already removed quarantine absent before pruning that inventory.
+Each inventory remains independently capped at 64 entries as an integrity
+bound. Evidence which stays locked or changes identity may still require the
+documented manual archive-and-remove procedure. A changed identity or ambiguous
+target/quarantine arrangement is never adopted as deletion authority.
 
 The helper executable is SHA-256-bound into the Electron main bundle at build
 time. The Windows Job supervisor opens and hashes that exact ordinary file,
@@ -322,7 +332,11 @@ single local Mac run is not cross-platform proof.
   the first complete Electron release is published.
 - **First launch remains on the splash.** Read the redacted bootstrap log in
   the workspace's `logs/` directory. Retry resumes through a new attempt; a
-  failed candidate does not replace the active source.
+  failed candidate does not replace the active source. FlintTrade durably caps
+  first-run allocation at three retained attempts (the initial attempt plus two
+  retries) and stops before allocating another candidate, download, snapshot or
+  extraction tree. The app never pathname-deletes this forensic evidence; use
+  the explicit uninstall purge flow if all three attempts fail.
 - **A source update is refused.** The updater rejects dirty, foreign or changed
   active checkouts. Keep personal source work outside the managed active path.
   On Windows, close programs holding files in the managed checkout and retry;

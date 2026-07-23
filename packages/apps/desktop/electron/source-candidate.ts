@@ -13,6 +13,7 @@ import {
   type SourceOperationLeaseProof,
 } from "./source-operation";
 import { createBootstrapState } from "./state";
+import { WINDOWS_NATIVE_IDENTITY_PATTERN } from "./windows-source-filesystem";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const UPDATE_CANDIDATE_PATTERN = /^FlintTrade\.update-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -64,6 +65,31 @@ function requireRevision(value: string): string {
   return revision;
 }
 
+function validDirectoryIdentity(identity: FileSystemIdentity, platform: NodeJS.Platform): boolean {
+  return (
+    Number.isSafeInteger(identity.dev) &&
+    identity.dev >= 0 &&
+    Number.isSafeInteger(identity.ino) &&
+    identity.ino >= 0 &&
+    (platform !== "win32" || WINDOWS_NATIVE_IDENTITY_PATTERN.test(identity.nativeIdentity ?? ""))
+  );
+}
+
+function sameDirectoryIdentity(left: FileSystemIdentity, right: FileSystemIdentity): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    (
+      (left.nativeIdentity === undefined && right.nativeIdentity === undefined) ||
+      (
+        left.nativeIdentity !== undefined &&
+        right.nativeIdentity !== undefined &&
+        left.nativeIdentity === right.nativeIdentity
+      )
+    )
+  );
+}
+
 export function createSourceCandidateStager(options: SourceCandidateStagerOptions): SourceCandidateStager {
   const createBootstrap = options.createBootstrap ?? createFirstRunBootstrap;
   const sourceRoot = options.bootstrap.paths.sourceRoot;
@@ -109,8 +135,12 @@ export function createSourceCandidateStager(options: SourceCandidateStagerOption
           const published: SourceCandidateOwnedPath[] = [];
           for (const owned of ownedPaths) {
             if (!(await options.bootstrap.dependencies.fileSystem.existsNoFollow(owned.path))) continue;
+            const identity = await options.bootstrap.dependencies.fileSystem.directoryIdentity(owned.path);
+            if (!validDirectoryIdentity(identity, options.bootstrap.platform)) {
+              throw new Error("Source candidate staging returned invalid exact directory ownership.");
+            }
             const prepared = {
-              identity: await options.bootstrap.dependencies.fileSystem.directoryIdentity(owned.path),
+              identity,
               kind: owned.kind,
               path: owned.path,
             };
@@ -153,18 +183,10 @@ export function createSourceCandidateStager(options: SourceCandidateStagerOption
           throw new Error("Completed source staging did not create its exact owned destination.");
         }
         if (result.revision !== revision) throw new Error("Staged source candidate does not match the requested revision.");
-        if (
-          !Number.isSafeInteger(result.sourceIdentity.dev) ||
-          result.sourceIdentity.dev < 0 ||
-          !Number.isSafeInteger(result.sourceIdentity.ino) ||
-          result.sourceIdentity.ino < 0
-        ) {
+        if (!validDirectoryIdentity(result.sourceIdentity, options.bootstrap.platform)) {
           throw new Error("Staged source candidate has an invalid directory identity.");
         }
-        if (
-          result.sourceIdentity.dev !== destinationOwnership.identity.dev ||
-          result.sourceIdentity.ino !== destinationOwnership.identity.ino
-        ) {
+        if (!sameDirectoryIdentity(result.sourceIdentity, destinationOwnership.identity)) {
           throw new Error("Staged source candidate result does not match its no-follow directory identity.");
         }
         return { identity: result.sourceIdentity, path: destination, provenance: result.provenance, revision };

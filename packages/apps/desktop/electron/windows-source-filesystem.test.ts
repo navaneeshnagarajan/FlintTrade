@@ -8,7 +8,6 @@ const HELPER = "C:\\Program Files\\FlintTrade\\bootstrap\\flinttrade-source-fs.e
 const HELPER_SHA256 = "cd".repeat(32);
 const PARENT = "C:\\Users\\trader\\.flinttrade\\src";
 const NATIVE_ID = "0123456789abcdef:0123456789abcdef0123456789abcdef";
-const PREVIOUS_NATIVE_ID = "fedcba9876543210:fedcba9876543210fedcba9876543210";
 
 function result(overrides: Partial<CommandResult> = {}): CommandResult {
   return {
@@ -88,8 +87,10 @@ describe("Windows source filesystem command boundary", () => {
 
   it("accepts only exact native identity and digest evidence for journal reads", async () => {
     const digest = "ab".repeat(32);
-    const test = fixture(vi.fn(async () => result({
-      stdout: `${JSON.stringify({
+    const test = fixture(vi.fn(async (request: Parameters<BootstrapDependencies["command"]["run"]>[0]) => result({
+      stdout: request.args[2] === "recover-journal"
+        ? '{"ok":true,"status":"journal-recovered"}\n'
+        : `${JSON.stringify({
         identity: NATIVE_ID,
         location: "target",
         ok: true,
@@ -111,8 +112,10 @@ describe("Windows source filesystem command boundary", () => {
       ],
     }));
 
-    const previous = fixture(vi.fn(async () => result({
-      stdout: `${JSON.stringify({
+    const previous = fixture(vi.fn(async (request: Parameters<BootstrapDependencies["command"]["run"]>[0]) => result({
+      stdout: request.args[2] === "recover-journal"
+        ? '{"ok":true,"status":"journal-recovered"}\n'
+        : `${JSON.stringify({
         identity: NATIVE_ID,
         location: "previous",
         ok: true,
@@ -125,6 +128,39 @@ describe("Windows source filesystem command boundary", () => {
     ).rejects.toThrow(/invalid journal evidence/i);
   });
 
+  it("reconciles an interrupted helper-owned journal transaction before inspecting the logical journal", async () => {
+    const target = `${PARENT}\\.flinttrade-source-promotion.json`;
+    const digest = "ab".repeat(32);
+    const run = vi.fn(async (request: Parameters<BootstrapDependencies["command"]["run"]>[0]) => {
+      if (request.args[2] === "recover-journal") {
+        return result({ stdout: '{"ok":true,"status":"journal-recovered"}\n' });
+      }
+      if (request.args[2] === "inspect-journal") {
+        return result({
+          stdout: `${JSON.stringify({
+            identity: NATIVE_ID,
+            location: "target",
+            ok: true,
+            sha256: digest,
+            status: "journal-present",
+          })}\n`,
+        });
+      }
+      throw new Error(`unexpected test command: ${request.args[2]}`);
+    });
+    const test = fixture(run);
+
+    await expect(test.boundary.inspectJournal(target)).resolves.toMatchObject({
+      nativeIdentity: NATIVE_ID,
+      sha256: digest,
+      status: "journal-present",
+    });
+    expect(run.mock.calls.map(([request]) => request.args)).toEqual([
+      ["--source-fs", "1", "recover-journal", "--parent", PARENT, "--target", ".flinttrade-source-promotion.json"],
+      ["--source-fs", "1", "inspect-journal", "--path", target],
+    ]);
+  });
+
   it("binds journal commit and removal to the exact target and proved sidecar absence", async () => {
     const target = `${PARENT}\\.flinttrade-source-promotion.json`;
     const temporary = `${target}.tmp`;
@@ -132,6 +168,9 @@ describe("Windows source filesystem command boundary", () => {
     const replacementSha256 = "34".repeat(32);
     const run = vi.fn(async (request: Parameters<BootstrapDependencies["command"]["run"]>[0]) => {
       const command = request.args[2];
+      if (command === "recover-journal") {
+        return result({ stdout: '{"ok":true,"status":"journal-recovered"}\n' });
+      }
       if (command === "inspect-journal-entry") {
         const inspected = request.args[4];
         if (inspected === target) {
@@ -182,21 +221,14 @@ describe("Windows source filesystem command boundary", () => {
 
   it("preserves and refuses every pre-existing reserved journal sidecar", async () => {
     const target = `${PARENT}\\.flinttrade-source-promotion.json`;
-    const targetSha256 = "ab".repeat(32);
-    const previousSha256 = "ef".repeat(32);
     const run = vi.fn(async (request: Parameters<BootstrapDependencies["command"]["run"]>[0]) => {
-      if (request.args[2] !== "inspect-journal-entry") {
-        throw new Error(`unexpected mutation command: ${request.args[2]}`);
+      if (request.args[2] === "recover-journal") {
+        return result({
+          exitCode: 4,
+          stdout: '{"ok":false,"code":"RESERVED_SIDECAR_OCCUPIED","native":0}\n',
+        });
       }
-      const inspected = request.args[4];
-      return result({
-        stdout: `${JSON.stringify({
-          identity: inspected === `${target}.previous` ? PREVIOUS_NATIVE_ID : NATIVE_ID,
-          ok: true,
-          sha256: inspected === `${target}.previous` ? previousSha256 : targetSha256,
-          status: "journal-entry-present",
-        })}\n`,
-      });
+      throw new Error(`unexpected command after foreign sidecar refusal: ${request.args[2]}`);
     });
     const test = fixture(run);
 
@@ -208,28 +240,33 @@ describe("Windows source filesystem command boundary", () => {
     await expect(test.boundary.removeJournal({ target })).rejects.toThrow(
       /previous sidecar.*refusing to adopt or delete/i,
     );
-    expect(run.mock.calls.map(([request]) => request.args[2])).toEqual([
-      "inspect-journal-entry",
-      "inspect-journal-entry",
-      "inspect-journal-entry",
-      "inspect-journal-entry",
-    ]);
+    expect(run.mock.calls.map(([request]) => request.args[2])).toEqual(["recover-journal", "recover-journal"]);
   });
 
-  it("uses the preserve-only quarantine command for exact directory identity settlement", async () => {
-    const test = fixture(vi.fn(async () => result({
-      stdout: '{"ok":true,"status":"quarantined"}\n',
+  it("quarantines and reclaims only an exact managed directory identity", async () => {
+    const test = fixture(vi.fn(async (request) => result({
+      stdout: request.args[2] === "remove-quarantined-directory"
+        ? '{"ok":true,"status":"removed"}\n'
+        : '{"ok":true,"status":"quarantined"}\n',
     })));
+    const quarantine = `${PARENT}\\.FlintTrade.cleanup-quarantine-candidate-123e4567-e89b-42d3-a456-426614174000`;
 
     await expect(test.boundary.quarantineDirectory({
       expectedNativeIdentity: NATIVE_ID,
-      quarantine: `${PARENT}\\.FlintTrade.cleanup-quarantine-candidate-123e4567-e89b-42d3-a456-426614174000`,
+      quarantine,
       target: `${PARENT}\\FlintTrade.update-123e4567-e89b-42d3-a456-426614174000`,
     })).resolves.toEqual({ status: "quarantined" });
-    expect(test.run).toHaveBeenCalledWith(expect.objectContaining({
-      args: expect.arrayContaining(["quarantine-directory", "--expected", NATIVE_ID]),
+    await expect(test.boundary.removeQuarantinedDirectory({
+      expectedNativeIdentity: NATIVE_ID,
+      quarantine,
+    })).resolves.toEqual({ status: "removed" });
+    expect(test.run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      args: [
+        "--source-fs", "1", "remove-quarantined-directory", "--parent", PARENT,
+        "--quarantine", ".FlintTrade.cleanup-quarantine-candidate-123e4567-e89b-42d3-a456-426614174000",
+        "--expected", NATIVE_ID,
+      ],
     }));
-    expect(test.run.mock.calls.flatMap(([request]) => request.args)).not.toContain("remove-directory");
   });
 
   it.each([

@@ -25,6 +25,10 @@ export interface WindowsSourceFilesystemBoundary {
     quarantine: string;
     target: string;
   }): Promise<{ status: "quarantined" }>;
+  removeQuarantinedDirectory(input: {
+    expectedNativeIdentity: string;
+    quarantine: string;
+  }): Promise<{ status: "removed" }>;
   removeJournal(input: { target: string }): Promise<void>;
   renameDirectory(input: {
     destination: string;
@@ -51,7 +55,10 @@ type NativeResponse =
       sha256: string;
       status: "journal-present";
     }
-  | { ok: true; status: "missing" | "renamed" | "journal-committed" | "journal-removed" | "quarantined" }
+  | {
+      ok: true;
+      status: "missing" | "renamed" | "journal-committed" | "journal-recovered" | "journal-removed" | "quarantined" | "removed";
+    }
   | { code: string; native: number; ok: false };
 type NativeSuccessStatus =
   | "present"
@@ -60,8 +67,15 @@ type NativeSuccessStatus =
   | "missing"
   | "renamed"
   | "journal-committed"
+  | "journal-recovered"
   | "journal-removed"
-  | "quarantined";
+  | "quarantined"
+  | "removed";
+
+const WINDOWS_SOURCE_QUARANTINE_NAME_PATTERN = new RegExp(
+  String.raw`^\.FlintTrade\.(?:stale-quarantine-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|cleanup-quarantine-(?:candidate|isolation|staging-(?:candidate|unpack)-[1-9][0-9]*)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$`,
+  "i",
+);
 
 function sameFileIdentity(left: FileSystemFileIdentity, right: FileSystemFileIdentity): boolean {
   return (
@@ -168,7 +182,15 @@ function parseResponse(stdout: string): NativeResponse {
     }
   } else if (
     Object.keys(response).length !== 2 ||
-    !["missing", "renamed", "journal-committed", "journal-removed", "quarantined"].includes(response.status)
+    ![
+      "missing",
+      "renamed",
+      "journal-committed",
+      "journal-recovered",
+      "journal-removed",
+      "quarantined",
+      "removed",
+    ].includes(response.status)
   ) {
     throw new Error("Windows source filesystem helper returned an invalid success status.");
   }
@@ -249,7 +271,10 @@ export function createWindowsSourceFilesystemBoundary(
       );
     }
     if (response.ok === false) {
-      const error = new Error(`Windows source filesystem helper refused the operation (${response.code}).`) as NodeJS.ErrnoException;
+      const message = response.code === "RESERVED_SIDECAR_OCCUPIED"
+        ? "Reserved Windows journal .previous sidecar is occupied; refusing to adopt or delete it."
+        : `Windows source filesystem helper refused the operation (${response.code}).`;
+      const error = new Error(message) as NodeJS.ErrnoException;
       if (response.code === "LOCKED") error.code = "EBUSY";
       else error.code = response.code;
       throw error;
@@ -281,11 +306,19 @@ export function createWindowsSourceFilesystemBoundary(
   ): string[] => evidence.status === "missing"
     ? [`--${prefix}-identity`, "missing", `--${prefix}-sha256`, "missing"]
     : [`--${prefix}-identity`, evidence.identity, `--${prefix}-sha256`, evidence.sha256];
+  const recoverJournal = async (target: string): Promise<void> => {
+    const normalisedTarget = requireWindowsPath(target, "Windows journal recovery target");
+    await run([
+      "recover-journal", "--parent", path.win32.dirname(normalisedTarget),
+      "--target", path.win32.basename(normalisedTarget),
+    ], "journal-recovered");
+  };
 
   return {
     async commitJournal({ sha256, target, temporary }) {
       if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Windows journal commit requires a SHA-256 digest.");
       const names = sameParentEntries(temporary, target, "Windows journal commit");
+      await recoverJournal(target);
       const [targetBefore, previousBefore] = await Promise.all([
         inspectJournalEntry(target),
         inspectJournalEntry(`${target}.previous`),
@@ -312,6 +345,7 @@ export function createWindowsSourceFilesystemBoundary(
       throw new Error("Windows source filesystem helper returned an invalid inspection result.");
     },
     async inspectJournal(target) {
+      await recoverJournal(target);
       const response = await run(
         ["inspect-journal", "--path", requireWindowsPath(target, "Windows journal inspection path")],
         ["journal-present", "missing"],
@@ -329,15 +363,33 @@ export function createWindowsSourceFilesystemBoundary(
     },
     async quarantineDirectory({ expectedNativeIdentity, quarantine, target }) {
       const names = sameParentEntries(target, quarantine, "Windows directory quarantine");
+      if (!WINDOWS_SOURCE_QUARANTINE_NAME_PATTERN.test(names.secondName)) {
+        throw new Error("Windows directory quarantine requires an exact managed quarantine name.");
+      }
       await run([
         "quarantine-directory", "--parent", names.parent, "--target", names.firstName,
         "--quarantine", names.secondName, "--expected", requireIdentity(expectedNativeIdentity),
       ], "quarantined");
       return { status: "quarantined" };
     },
+    async removeQuarantinedDirectory({ expectedNativeIdentity, quarantine }) {
+      const normalisedQuarantine = requireWindowsPath(quarantine, "Windows quarantine removal target");
+      const quarantineName = path.win32.basename(normalisedQuarantine);
+      if (!WINDOWS_SOURCE_QUARANTINE_NAME_PATTERN.test(quarantineName)) {
+        throw new Error("Windows quarantine removal requires an exact managed quarantine name.");
+      }
+      await run([
+        "remove-quarantined-directory",
+        "--parent", path.win32.dirname(normalisedQuarantine),
+        "--quarantine", quarantineName,
+        "--expected", requireIdentity(expectedNativeIdentity),
+      ], "removed");
+      return { status: "removed" };
+    },
     async removeJournal({ target }) {
       const normalisedTarget = requireWindowsPath(target, "Windows journal removal target");
       const parent = path.win32.dirname(normalisedTarget);
+      await recoverJournal(normalisedTarget);
       const [targetBefore, previousBefore] = await Promise.all([
         inspectJournalEntry(normalisedTarget),
         inspectJournalEntry(`${normalisedTarget}.previous`),

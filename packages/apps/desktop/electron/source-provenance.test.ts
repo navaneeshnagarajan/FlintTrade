@@ -621,6 +621,38 @@ describe("active source provenance", () => {
     expect(configInvocation?.signal).toBe(test.controller.signal);
   });
 
+  it("preserves a stable native directory identity in active-source provenance", async () => {
+    const test = fixture();
+    const nativeIdentity = "0000000000000009:0000000000000000000000000000005a";
+    const directoryMetadata = test.dependencies.fileSystem.directoryMetadata;
+    test.dependencies.fileSystem.directoryMetadata = async (target) => ({
+      ...await directoryMetadata(target),
+      nativeIdentity,
+    });
+
+    await expect(validateActiveSourceProvenance(test.request)).resolves.toMatchObject({
+      directoryIdentity: { dev: 9, ino: 90, nativeIdentity },
+    });
+  });
+
+  it("rejects missing or changed native identity across Node provenance metadata reads", async () => {
+    const test = fixture();
+    const directoryMetadata = test.dependencies.fileSystem.directoryMetadata;
+    let activeReads = 0;
+    test.dependencies.fileSystem.directoryMetadata = async (target) => {
+      const metadata = await directoryMetadata(target);
+      if (target !== activeSource) return metadata;
+      activeReads += 1;
+      return activeReads === 1
+        ? { ...metadata, nativeIdentity: "0000000000000009:0000000000000000000000000000005a" }
+        : metadata;
+    };
+
+    await expect(validateActiveSourceProvenance(test.request)).rejects.toThrow(
+      /aliased|changed|canonical inspection/i,
+    );
+  });
+
   it("retains the operation lease when an in-flight Git provenance command rejects during cancellation", async () => {
     const test = fixture();
     test.command.mockImplementationOnce((invocation) => new Promise((_resolve, reject) => {

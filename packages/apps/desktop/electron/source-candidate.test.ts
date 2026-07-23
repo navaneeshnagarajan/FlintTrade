@@ -10,6 +10,8 @@ import {
 import { SourceOperationLeaseRetentionError } from "./source-operation";
 
 const revision = "a".repeat(40);
+const windowsNativeIdentity = "0000000000000001:00000000000000000000000000000002";
+const changedWindowsNativeIdentity = "0000000000000001:00000000000000000000000000000009";
 
 function fixture(overrides: {
   failedKinds?: readonly SourceCandidateOwnedPathKind[];
@@ -108,6 +110,56 @@ describe("source candidate staging", () => {
       paths: { activeSource: destination, sourceRoot: test.sourceRoot },
     });
     expect(test.operationLease.assertHeld).toHaveBeenCalledOnce();
+  });
+
+  it("preserves exact Windows native ownership through composed candidate staging", async () => {
+    const test = fixture({ result: { sourceIdentity: { dev: 1, ino: 2, nativeIdentity: windowsNativeIdentity } } });
+    test.bootstrap.platform = "win32";
+    vi.mocked(test.bootstrap.dependencies.fileSystem.directoryIdentity).mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      nativeIdentity: windowsNativeIdentity,
+    });
+    const destination = path.join(
+      test.sourceRoot,
+      "FlintTrade.update-123e4567-e89b-42d3-a456-426614174000",
+    );
+
+    await expect(test.stage({ destination, revision })).resolves.toMatchObject({
+      identity: { dev: 1, ino: 2, nativeIdentity: windowsNativeIdentity },
+    });
+    expect(test.prepared).toHaveBeenCalledWith({
+      identity: { dev: 1, ino: 2, nativeIdentity: windowsNativeIdentity },
+      kind: "candidate",
+      path: destination,
+    });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["changed", changedWindowsNativeIdentity],
+  ])("rejects %s Windows native ownership proof", async (_label, resultNativeIdentity) => {
+    const test = fixture({
+      result: {
+        sourceIdentity: {
+          dev: 1,
+          ino: 2,
+          ...(resultNativeIdentity ? { nativeIdentity: resultNativeIdentity } : {}),
+        },
+      },
+    });
+    test.bootstrap.platform = "win32";
+    vi.mocked(test.bootstrap.dependencies.fileSystem.directoryIdentity).mockResolvedValue({
+      dev: 1,
+      ino: 2,
+      nativeIdentity: windowsNativeIdentity,
+    });
+    const destination = path.join(
+      test.sourceRoot,
+      "FlintTrade.update-123e4567-e89b-42d3-a456-426614174000",
+    );
+
+    await expect(test.stage({ destination, revision })).rejects.toThrow(/directory identity|does not match/i);
   });
 
   it.each([

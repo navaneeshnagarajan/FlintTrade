@@ -16,6 +16,16 @@ const latestRevision = "b".repeat(40);
 const operationId = "123e4567-e89b-42d3-a456-426614174000";
 const isolationIdentity = { dev: 1, ino: 4 };
 
+function directoryIdentity(ino: number, platform: NodeJS.Platform) {
+  return {
+    dev: 1,
+    ino,
+    ...(platform === "win32"
+      ? { nativeIdentity: `0000000000000001:${ino.toString(16).padStart(32, "0")}` }
+      : {}),
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -44,10 +54,11 @@ function fixture(configuration: {
   const state = createUpdateState("source");
   const coordinator = createSourceOperationCoordinator();
   const resolvedRevision = configuration.latestRevision ?? latestRevision;
+  const platform = configuration.platform ?? process.platform;
   const activeIdentity = {
     canonicalPath: activeSource,
     contentIdentity: "1".repeat(40),
-    directoryIdentity: { dev: 1, ino: 1 },
+    directoryIdentity: directoryIdentity(1, platform),
     provenance: "git" as const,
     requiresRebuild: configuration.activeRequiresRebuild ?? false,
     revision: currentRevision,
@@ -55,7 +66,7 @@ function fixture(configuration: {
   const candidateIdentity = {
     canonicalPath: candidate,
     contentIdentity: "2".repeat(40),
-    directoryIdentity: { dev: 1, ino: 3 },
+    directoryIdentity: directoryIdentity(3, platform),
     provenance: "git" as const,
     requiresRebuild: false,
     revision: resolvedRevision,
@@ -99,11 +110,16 @@ function fixture(configuration: {
       stage: vi.fn(async ({ destination, onOwnedPathPrepared, revision }) => {
         trace.push("stage");
         await onOwnedPathPrepared({
-          identity: { dev: 1, ino: 3 },
+          identity: directoryIdentity(3, platform),
           kind: "candidate",
           path: destination,
         });
-        return { identity: { dev: 1, ino: 3 }, path: destination, provenance: "git" as const, revision };
+        return {
+          identity: directoryIdentity(3, platform),
+          path: destination,
+          provenance: "git" as const,
+          revision,
+        };
       }),
     },
     cleanup,
@@ -178,7 +194,7 @@ function fixture(configuration: {
     ...(configuration.redactedPaths ? { redactedPaths: configuration.redactedPaths } : {}),
     sourceRoot,
     state,
-    ...(configuration.platform ? { platform: configuration.platform } : {}),
+    platform,
     uuid: vi.fn(() => operationId),
   };
   const updater = createSourceUpdater(options);
@@ -380,8 +396,51 @@ describe("source update orchestration", () => {
     expect(at("stage")).toBeLessThan(at("health"));
     expect(at("health")).toBeLessThan(at("drain"));
     expect(at("drain")).toBeLessThan(at("promote"));
-    expect(test.options.cleanup.inventoryOwnedPaths).toHaveBeenCalled();
+    expect(test.options.cleanup.inventoryOwnedPaths).toHaveBeenCalledWith({
+      candidate: {
+        candidatePath: test.candidate,
+        identity: directoryIdentity(3, "win32"),
+        operationId,
+      },
+    });
+    expect(test.options.promotion.promote).toHaveBeenCalledWith(expect.objectContaining({
+      candidateDirectoryIdentity: directoryIdentity(3, "win32"),
+      originalActiveDirectoryIdentity: directoryIdentity(1, "win32"),
+    }));
     expect(test.options.operationLease.assertHeld).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["changed", "0000000000000001:00000000000000000000000000000009"],
+  ])("rejects %s Windows native staging proof before candidate validation", async (_label, resultNativeIdentity) => {
+    const test = fixture({ platform: "win32" });
+    await test.prepare();
+    test.options.candidateStager.stage = vi.fn(async ({ destination, onOwnedPathPrepared, revision }) => {
+      await onOwnedPathPrepared({
+        identity: directoryIdentity(3, "win32"),
+        kind: "candidate",
+        path: destination,
+      });
+      return {
+        identity: {
+          dev: 1,
+          ino: 3,
+          ...(resultNativeIdentity ? { nativeIdentity: resultNativeIdentity } : {}),
+        },
+        path: destination,
+        provenance: "git" as const,
+        revision,
+      };
+    });
+
+    await expect(test.updater.apply()).resolves.toMatchObject({
+      failure: expect.stringMatching(/staged source candidate|directory identity/i),
+      status: "failed",
+    });
+    expect(test.options.health.prove).not.toHaveBeenCalled();
+    expect(test.options.lifecycle.drainCurrent).not.toHaveBeenCalled();
+    expect(test.options.promotion.promote).not.toHaveBeenCalled();
   });
 
   it("retains a completed promotion journal when its terminal event cannot be made durable", async () => {

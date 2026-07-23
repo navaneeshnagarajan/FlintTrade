@@ -21,8 +21,13 @@ const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const TOOL_VERSION_PATTERN = /^(?!0\.0\.0(?:$|-))(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 const PACKAGE_MANAGER_PATTERN = /^pnpm@((?!0\.0\.0(?:$|-))(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?)(?:\+sha512\.[0-9A-Za-z_-]+)?$/;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_FRONTEND_OUTPUT_ENTRIES = 20_000;
 const MAX_FRONTEND_OUTPUT_MANIFEST_BYTES = 32 * 1024 * 1024;
+const MAX_RETAINED_FIRST_RUN_ATTEMPTS = 3;
+const MAX_RETAINED_FIRST_RUN_RECORD_BYTES = 128;
+const RETAINED_FIRST_RUN_DIRECTORY = ".flinttrade-bootstrap-retained-attempts";
+const RETAINED_FIRST_RUN_RECORD_PATTERN = /^attempt-([1-9]\d*)\.json$/;
 const ARCHIVE_GENERATED_ROOTS = Object.freeze([
   ".venv",
   "node_modules",
@@ -490,6 +495,117 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   const uniqueDownloadPath = (directory: string, name: string, attempt: number): string =>
     path.join(directory, `${name}.bootstrap-${attempt}-${randomUUID()}`);
 
+  const readRetainedFirstRunAttempts = async (): Promise<Array<{ operationId: string; slot: number }>> => {
+    const directory = path.join(desktopPaths.sourceRoot, RETAINED_FIRST_RUN_DIRECTORY);
+    const directoryBefore = await dependencies.fileSystem.directoryMetadata(directory);
+    const records = (await dependencies.fileSystem.listNames(directory))
+      .map((name) => ({ match: RETAINED_FIRST_RUN_RECORD_PATTERN.exec(name), name }))
+      .filter((entry): entry is { match: RegExpExecArray; name: string } => entry.match !== null)
+      .sort((left, right) => left.name.localeCompare(right.name));
+    if (records.length > MAX_RETAINED_FIRST_RUN_ATTEMPTS) {
+      throw new Error("The retained first-run attempt ledger exceeds its bounded entry limit; explicit purge is required.");
+    }
+    const attempts = await Promise.all(records.map(async ({ match, name }): Promise<{
+      operationId: string;
+      slot: number;
+    }> => {
+      const slot = Number(match[1]);
+      if (!Number.isSafeInteger(slot) || slot < 1 || slot > MAX_RETAINED_FIRST_RUN_ATTEMPTS) {
+        throw new Error("A retained first-run attempt record uses an invalid slot; explicit purge is required.");
+      }
+      const target = path.join(directory, name);
+      const before = await dependencies.fileSystem.fileIdentity(target);
+      if (before.size <= 0 || before.size > MAX_RETAINED_FIRST_RUN_RECORD_BYTES) {
+        throw new Error("A retained first-run attempt record is invalid; explicit purge is required.");
+      }
+      const content = await dependencies.fileSystem.readTextNoFollow(target);
+      const after = await dependencies.fileSystem.fileIdentity(target);
+      if (
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.size !== after.size ||
+        before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs ||
+        Buffer.byteLength(content, "utf8") !== before.size ||
+        !content.endsWith("\n")
+      ) {
+        throw new Error("A retained first-run attempt record changed while it was read; explicit purge is required.");
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(content);
+      } catch (error) {
+        throw new Error("A retained first-run attempt record is not valid JSON; explicit purge is required.", {
+          cause: error,
+        });
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("A retained first-run attempt record is invalid; explicit purge is required.");
+      }
+      const candidate = value as Record<string, unknown>;
+      if (
+        Object.keys(candidate).length !== 3 ||
+        candidate.schemaVersion !== 1 ||
+        candidate.slot !== slot ||
+        typeof candidate.operationId !== "string" ||
+        !UUID_V4_PATTERN.test(candidate.operationId) ||
+        !Object.hasOwn(candidate, "operationId") ||
+        !Object.hasOwn(candidate, "schemaVersion") ||
+        !Object.hasOwn(candidate, "slot")
+      ) {
+        throw new Error("A retained first-run attempt record is invalid; explicit purge is required.");
+      }
+      return { operationId: candidate.operationId, slot };
+    }));
+    const directoryAfter = await dependencies.fileSystem.directoryMetadata(directory);
+    if (directoryBefore.dev !== directoryAfter.dev || directoryBefore.ino !== directoryAfter.ino) {
+      throw new Error("The retained first-run attempt directory changed while it was read; explicit purge is required.");
+    }
+    if (new Set(attempts.map(({ operationId }) => operationId)).size !== attempts.length) {
+      throw new Error("The retained first-run attempt ledger repeats an operation identity; explicit purge is required.");
+    }
+    if (new Set(attempts.map(({ slot }) => slot)).size !== attempts.length) {
+      throw new Error("The retained first-run attempt ledger repeats a reservation slot; explicit purge is required.");
+    }
+    return attempts;
+  };
+
+  const reserveRetainedFirstRunAttempt = async (): Promise<void> => {
+    for (let reservationAttempt = 0; reservationAttempt < 16; reservationAttempt += 1) {
+      const prior = await readRetainedFirstRunAttempts();
+      if (prior.length >= MAX_RETAINED_FIRST_RUN_ATTEMPTS) {
+        throw new Error(
+          "The retained first-run attempt limit has been reached; preserve diagnostics and use the explicit purge flow before retrying.",
+        );
+      }
+      const occupiedSlots = new Set(prior.map(({ slot }) => slot));
+      const slot = Array.from(
+        { length: MAX_RETAINED_FIRST_RUN_ATTEMPTS },
+        (_value, index) => index + 1,
+      ).find((candidate) => !occupiedSlots.has(candidate));
+      if (!slot) {
+        throw new Error("The retained first-run attempt ledger has no free bounded slot; explicit purge is required.");
+      }
+      const directory = path.join(desktopPaths.sourceRoot, RETAINED_FIRST_RUN_DIRECTORY);
+      const operationId = randomUUID();
+      try {
+        await dependencies.fileSystem.writeTextAbsent(
+          path.join(directory, `attempt-${slot}.json`),
+          `${JSON.stringify({ operationId, schemaVersion: 1, slot })}\n`,
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+        throw error;
+      }
+      const settled = await readRetainedFirstRunAttempts();
+      if (!settled.some((candidate) => candidate.operationId === operationId && candidate.slot === slot)) {
+        throw new Error("The retained first-run attempt reservation did not settle durably; explicit purge is required.");
+      }
+      return;
+    }
+    throw new Error("A unique retained first-run attempt reservation could not be created; explicit purge is required.");
+  };
+
   const prepareManagedUserEnvironment = async (): Promise<void> => {
     await dependencies.fileSystem.preparePrivateTree(
       managedUserRoot,
@@ -855,6 +971,10 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       env: { GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
       timeoutMs: 15_000,
     });
+    if (!expectedRevision) {
+      await reserveRetainedFirstRunAttempt();
+      assertAttempt(attempt, signal);
+    }
     if (gitProbe.exitCode !== 0) return acquireFreshArchive();
 
     await publish(attempt, "cloning-source", "Cloning the public source checkout", 12);
@@ -1200,7 +1320,11 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     assertLogging(attempt);
     await dependencies.fileSystem.mkdir(desktopPaths.sourceRoot);
     await dependencies.fileSystem.mkdir(desktopPaths.toolsRoot);
-    await dependencies.fileSystem.preparePrivateTree(desktopPaths.sourceRoot, [".downloads"], []);
+    await dependencies.fileSystem.preparePrivateTree(
+      desktopPaths.sourceRoot,
+      [".downloads", RETAINED_FIRST_RUN_DIRECTORY],
+      [],
+    );
     await dependencies.fileSystem.preparePrivateTree(
       desktopPaths.toolsRoot,
       [

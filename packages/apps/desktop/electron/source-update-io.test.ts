@@ -97,7 +97,10 @@ async function writeLogicalJournal(target: string, contents: string): Promise<vo
   await cleanupFileSystem().writeJournalAtomic(target, contents);
 }
 
-function windowsCleanupFileSystem(options: { failOnceAfterQuarantine?: { value: boolean } } = {}) {
+function windowsCleanupFileSystem(options: {
+  failOnceAfterQuarantine?: { value: boolean };
+  reclaimQuarantines?: boolean;
+} = {}) {
   const inspect = async (target: string) => {
     try {
       const metadata = await lstat(target);
@@ -147,6 +150,14 @@ function windowsCleanupFileSystem(options: { failOnceAfterQuarantine?: { value: 
       }
       return { status: "quarantined" as const };
     },
+    async removeQuarantinedDirectory(input: { expectedNativeIdentity: string; quarantine: string }) {
+      const atQuarantine = await inspect(input.quarantine);
+      if (atQuarantine.status !== "present" || atQuarantine.nativeIdentity !== input.expectedNativeIdentity) {
+        throw new Error("native fixture identity mismatch");
+      }
+      await rm(input.quarantine, { recursive: true });
+      return { status: "removed" as const };
+    },
     async removeJournal({ target }: { target: string }) {
       await rm(`${target}.previous`, { force: true });
       await rm(target, { force: true });
@@ -159,7 +170,12 @@ function windowsCleanupFileSystem(options: { failOnceAfterQuarantine?: { value: 
     platform: "win32",
     safeRemove: async ({ expected, quarantine, target }) => {
       if (!expected.nativeIdentity) throw new Error("fixture native identity missing");
-      return windows.quarantineDirectory({ expectedNativeIdentity: expected.nativeIdentity, quarantine, target });
+      await windows.quarantineDirectory({ expectedNativeIdentity: expected.nativeIdentity, quarantine, target });
+      if (!options.reclaimQuarantines) return { status: "quarantined" as const };
+      return windows.removeQuarantinedDirectory({
+        expectedNativeIdentity: expected.nativeIdentity,
+        quarantine,
+      });
     },
     windows,
   });
@@ -1187,6 +1203,50 @@ describe("source update production I/O", () => {
     await recovering.recover();
     await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(path.join(external, "outside.txt"), "utf8")).resolves.toBe("preserve reparse target");
+  });
+
+  it("reclaims the full preserved Windows inventory before admitting another failed-update batch", async () => {
+    const layout = await temporaryLayout();
+    const inventoryPath = path.join(layout.sourceRoot, SOURCE_CLEANUP_INVENTORY_NAME);
+    const external = path.join(layout.root, "foreign-tree");
+    await mkdir(external);
+    await writeFile(path.join(external, "outside.txt"), "outside retained tree");
+    const entries: Array<Record<string, unknown>> = [];
+    for (let index = 0; index < 64; index += 1) {
+      const retainedOperationId = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
+      const quarantine = path.join(
+        layout.sourceRoot,
+        `${CLEANUP_QUARANTINE_PREFIX}candidate-${retainedOperationId}`,
+      );
+      await mkdir(quarantine);
+      await writeFile(path.join(quarantine, "evidence.txt"), `failed update ${index}`);
+      if (index === 0) await symlink(external, path.join(quarantine, "outside-link"), "dir");
+      const metadata = await lstat(quarantine);
+      entries.push({
+        dev: metadata.dev,
+        ino: metadata.ino,
+        kind: "candidate",
+        nativeIdentity: `${metadata.dev.toString(16).padStart(16, "0")}:${metadata.ino.toString(16).padStart(32, "0")}`,
+        operationId: retainedOperationId,
+        state: "preserved",
+      });
+    }
+    await writeFile(inventoryPath, `${JSON.stringify({ entries, schemaVersion: 2 })}\n`);
+
+    const cleanup = createNodeSourceUpdaterCleanup({
+      ...layout,
+      fileSystem: windowsCleanupFileSystem({ reclaimQuarantines: true }),
+      platform: "win32",
+    });
+    await cleanup.recover();
+    await expect(lstat(inventoryPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(external, "outside.txt"), "utf8")).resolves.toBe("outside retained tree");
+
+    const nextOperationId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    await expect(cleanup.reserveOwnedPaths({
+      kinds: ["candidate", "isolation", "staging-candidate", "staging-unpack"],
+      operationId: nextOperationId,
+    })).resolves.toBeUndefined();
   });
 
   it("resumes deterministic candidate cleanup after the quarantine rename", async () => {

@@ -245,14 +245,26 @@ exit 0
     expect(helper).toContain("DURABILITY_UNAVAILABLE");
     expect(helper).toContain("AMBIGUOUS_EVIDENCE");
     expect(helper).toContain('options.Command == "quarantine-directory"');
+    expect(helper).toContain('options.Command == "recover-journal"');
+    expect(helper).toContain('options.Command == "remove-quarantined-directory"');
+    expect(helper).toContain("RequireExpected(child, evidence.Identity)");
+    expect(helper).toContain("evidence.IsDirectory && !evidence.IsReparsePoint");
+    expect(helper).toContain("MAX_RECLAMATION_ENTRIES - reclaimedEntries");
+    expect(helper).toContain("observedEntries >= remainingEntryBudget");
+    expect(helper).toContain("FILE_FLAG_OPEN_REPARSE_POINT");
+    expect(helper).toContain("RequireWithinCanonicalRoot(canonicalRoot, child.CanonicalPath)");
     expect(helper).toContain("OpenExpectedJournalEntry(target, expectedTarget)");
     expect(helper).toContain("RequireExpectedJournalState(");
+    expect(helper).toContain("CreateJournalTransactionReceipt(");
+    expect(helper).toContain("ReconcileJournalTransaction(");
+    expect(helper).toContain("JournalTransaction.ReceiptPath(");
+    expect(helper).toContain("DeletePinnedEntry(receiptEntry, parentEntry, receipt)");
     expect(helper.match(/if \(!expectedPrevious\.IsMissing\)/g)).toHaveLength(2);
     expect(helper).not.toContain("MarkDelete(previousEntry)");
     expect(helper).toContain("Marshal.AllocHGlobal(1)");
     expect(helper).toContain("Marshal.WriteByte(information, 0, 1)");
-    expect(helper).not.toContain("FindFirstFileW");
-    expect(helper).not.toContain("FindNextFileW");
+    expect(helper).toContain("FindFirstFileW");
+    expect(helper).toContain("FindNextFileW");
     expect(helper).not.toContain("DeleteFileW");
     expect(helper).not.toContain("RemoveDirectoryW");
     expect(metadata.build.win.extraResources).toContainEqual({

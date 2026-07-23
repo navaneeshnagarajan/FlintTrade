@@ -25,6 +25,7 @@ import {
   type ExactSourceRevision,
 } from "./source-provenance";
 import type { createUpdateState, UpdateSnapshot } from "./state";
+import { WINDOWS_NATIVE_IDENTITY_PATTERN } from "./windows-source-filesystem";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -284,7 +285,18 @@ function sameIdentity(left: ActiveSourceIdentity, right: ActiveSourceIdentity): 
 }
 
 function sameDirectoryIdentity(left: FileSystemIdentity, right: FileSystemIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    (
+      (left.nativeIdentity === undefined && right.nativeIdentity === undefined) ||
+      (
+        left.nativeIdentity !== undefined &&
+        right.nativeIdentity !== undefined &&
+        left.nativeIdentity === right.nativeIdentity
+      )
+    )
+  );
 }
 
 function cancellation(message: string): DOMException {
@@ -848,13 +860,23 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
                     !Number.isSafeInteger(prepared.identity.dev) ||
                     prepared.identity.dev < 0 ||
                     !Number.isSafeInteger(prepared.identity.ino) ||
-                    prepared.identity.ino < 0
+                    prepared.identity.ino < 0 ||
+                    (
+                      options.platform === "win32" &&
+                      !WINDOWS_NATIVE_IDENTITY_PATTERN.test(prepared.identity.nativeIdentity ?? "")
+                    )
                   ) {
                     throw new SourceOperationLeaseRetentionError(
                       "Source candidate staging published invalid owned-path evidence.",
                     );
                   }
-                  const identity = { dev: prepared.identity.dev, ino: prepared.identity.ino };
+                  const identity = {
+                    dev: prepared.identity.dev,
+                    ino: prepared.identity.ino,
+                    ...(options.platform === "win32"
+                      ? { nativeIdentity: prepared.identity.nativeIdentity! }
+                      : {}),
+                  };
                   const priorIdentities = [
                     ...(owned.candidateIdentity ? [owned.candidateIdentity] : []),
                     ...owned.staging.map((entry) => entry.identity),
@@ -905,6 +927,10 @@ export function createSourceUpdater(options: SourceUpdaterOptions): SourceUpdate
               staged.identity.dev < 0 ||
               !Number.isSafeInteger(staged.identity.ino) ||
               staged.identity.ino < 0 ||
+              (
+                options.platform === "win32" &&
+                !WINDOWS_NATIVE_IDENTITY_PATTERN.test(staged.identity.nativeIdentity ?? "")
+              ) ||
               exactRevision(staged.revision, "The staged source revision") !== revision ||
               !owned.candidateIdentity ||
               !sameDirectoryIdentity(owned.candidateIdentity, staged.identity)
