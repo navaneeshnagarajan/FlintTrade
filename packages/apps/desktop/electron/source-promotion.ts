@@ -145,6 +145,12 @@ export interface SourcePromotionFileSystem {
   readJournal(target: string): Promise<string | null>
   writeJournalAtomic(target: string, contents: string): Promise<void>
   removeJournal(target: string): Promise<void>
+  /**
+   * Finalise a settled promotion journal without unbounded growth. On POSIX the
+   * whole immutable chain is atomically archived and a fresh chain begins on the
+   * next operation; on Windows the size-bounded sidecar journal is cleared.
+   */
+  compactJournal(target: string): Promise<void>
   renameDirectory(source: string, destination: string, expected: DirectorySnapshot): Promise<void>
   removeDirectory(target: string, expected: DirectorySnapshot): Promise<DirectoryCleanupOutcome>
   settleDirectory(target: string, quarantine: string, expected: DirectorySnapshot): Promise<DirectoryCleanupOutcome>
@@ -572,7 +578,10 @@ class SourcePromotionController {
     const root = await this.requireManagedRoot()
     await this.captureCompletedOutcome(paths, root, journal, journal.outcome)
     await this.recordPreservedQuarantine(paths, root, journal)
-    await this.fileSystem.removeJournal(this.paths.journal)
+    // The terminal outcome and any preserved-quarantine record are now durable,
+    // so the settled journal chain can be archived and the next promotion starts
+    // a fresh chain — bounding growth without unlinking any recovery evidence.
+    await this.fileSystem.compactJournal(this.paths.journal)
   }
 
   private pathsForCandidate(candidatePath: string): PromotionPaths {
@@ -1610,6 +1619,16 @@ export function createNodeSourcePromotionFileSystem(
     await options.windows.removeJournal({ target })
   }
 
+  const compactJournal = async (target: string): Promise<void> => {
+    if (platform !== "win32") {
+      await posixJournal!.compact(target)
+      return
+    }
+    // The Windows sidecar journal is size-bounded by its native helper, so a
+    // finalising clear is sufficient — there is no unbounded append-only chain.
+    await removeJournal(target)
+  }
+
   const renameDirectory = async (
     source: string,
     destination: string,
@@ -1845,6 +1864,7 @@ export function createNodeSourcePromotionFileSystem(
   }
 
   return {
+    compactJournal,
     delay: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     inspectDirectory,
     settleDirectory,

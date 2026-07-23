@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -402,7 +403,12 @@ it.runIf(process.platform !== "win32")(
       if (promotionOutcome.status === "idle") throw new Error("Promotion unexpectedly returned idle.");
       await promotion.acknowledge(promotionOutcome);
       await expect(promotionFileSystem.readJournal(path.join(sourceRoot, JOURNAL_NAME))).resolves.toBeNull();
-      await expect(lstat(path.join(sourceRoot, JOURNAL_NAME))).resolves.toBeDefined();
+      // The settled journal chain is compacted: the active journal path is absent
+      // (no operation in progress) and its records are archived intact beside it.
+      await expect(lstat(path.join(sourceRoot, JOURNAL_NAME))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(
+        (await readdir(sourceRoot)).filter((name) => name.startsWith(`${JOURNAL_NAME}.archived-`)),
+      ).toHaveLength(1);
       await expect(lstat(promotedIsolationPath)).rejects.toMatchObject({ code: "ENOENT" });
       await operationLease.assertHeld();
     } finally {

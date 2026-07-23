@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, open, opendir, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 
 const OWNER_NAME = "owner.json";
@@ -87,6 +87,7 @@ export interface PosixAppendOnlyJournalOptions {
 }
 
 export interface PosixAppendOnlyJournal {
+  compact(target: string): Promise<void>;
   read(target: string): Promise<string | null>;
   remove(target: string): Promise<void>;
   write(target: string, contents: string): Promise<void>;
@@ -604,6 +605,30 @@ export function createPosixAppendOnlyJournal(
   };
 
   return {
+    async compact(target) {
+      // Bound the append-only chain across operations without ever unlinking a
+      // record (the "never unlinks prior" contract). The caller invokes compact
+      // only once an operation's terminal outcome is already durable, so a
+      // settled-present journal and an absent journal are BOTH safe recovery
+      // states. Atomically relocate the whole settled chain to an archive
+      // sibling — a single rename pivot that makes `target` absent — so the next
+      // operation starts a fresh chain (constant scan cost) while the archived
+      // chain is retained intact as forensic evidence. A crash before the rename
+      // leaves the settled journal (recovery re-finalises, idempotent); a crash
+      // after it leaves an absent journal (no operation in progress). Archived
+      // chains accumulate like the retained failed-source trees and are pruned
+      // by the same operator forensics policy.
+      // openJournalDirectory binds the owner metadata to this exact path, so an
+      // already-archived chain (whose owner records the original path) cannot be
+      // reopened here and can never be re-archived.
+      const pin = await openJournalDirectory(target, false);
+      if (!pin) return;
+      try {
+        await rename(pin.target, `${pin.target}.archived-${randomUUID()}`);
+      } finally {
+        await pin.handle.close();
+      }
+    },
     async read(target) {
       const pin = await openJournalDirectory(target, false);
       if (!pin) return null;

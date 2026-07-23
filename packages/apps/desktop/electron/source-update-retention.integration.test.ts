@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -348,7 +348,14 @@ it.runIf(process.platform !== "win32")(
           outcomeStatus: scenario === "promoted" ? "promoted" : "rolled-back",
         });
         await expect(createNodeSourcePromotionFileSystem().readJournal(journalPath)).resolves.toBeNull();
-        await expect(access(journalPath)).resolves.toBeUndefined();
+        // The settled journal chain is compacted (archived), so the active journal
+        // path is absent while its records are retained intact in an archive sibling.
+        await expect(access(journalPath)).rejects.toMatchObject({ code: "ENOENT" });
+        expect(
+          (await readdir(path.dirname(journalPath))).filter((name) =>
+            name.startsWith(`${path.basename(journalPath)}.archived-`),
+          ),
+        ).toHaveLength(1);
         await expect(access(operationLeaseTarget)).rejects.toMatchObject({ code: "ENOENT" });
         await expect(readFile(path.join(activeSource, "release.txt"), "utf8")).resolves.toBe(
           scenario === "promoted" ? "candidate\n" : "original\n",

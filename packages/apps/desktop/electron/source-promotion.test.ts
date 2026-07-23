@@ -167,6 +167,7 @@ function testWindowsFilesystemBoundary(): WindowsSourceFilesystemBoundary {
 }
 
 type Call =
+  | { kind: "compact-journal"; target: string }
   | { kind: "delay"; milliseconds: number }
   | { kind: "remove-directory"; target: string }
   | { kind: "remove-journal"; target: string }
@@ -239,6 +240,13 @@ class FakeFileSystem implements SourcePromotionFileSystem {
       this.preservedInventory = null
       return
     }
+    expect(target).toBe(path.join(SOURCE_ROOT, JOURNAL_NAME))
+    this.journal = null
+    this.journalRemoved = true
+  }
+
+  async compactJournal(target: string): Promise<void> {
+    this.calls.push({ kind: "compact-journal", target })
     expect(target).toBe(path.join(SOURCE_ROOT, JOURNAL_NAME))
     this.journal = null
     this.journalRemoved = true
@@ -421,7 +429,7 @@ function crashingAt(boundary: PromotionBoundary, mutate?: () => void) {
 
 function mutationCalls(fileSystem: FakeFileSystem): Call[] {
   return fileSystem.calls.filter((call) =>
-    ["remove-directory", "remove-journal", "rename", "write-journal"].includes(call.kind),
+    ["compact-journal", "remove-directory", "remove-journal", "rename", "write-journal"].includes(call.kind),
   )
 }
 
@@ -671,7 +679,7 @@ describe("source promotion", () => {
         expect(fileSystem.calls[index - 1]).toEqual({ kind: "sync", target: SOURCE_ROOT })
         expect(fileSystem.calls[index + 1]).toEqual({ kind: "sync", target: SOURCE_ROOT })
       }
-      if (call.kind === "remove-journal") {
+      if (call.kind === "compact-journal") {
         expect(fileSystem.calls[index - 1]).toEqual({ kind: "sync", target: SOURCE_ROOT })
         expect(index).toBe(fileSystem.calls.length - 1)
       }
@@ -703,7 +711,7 @@ describe("source promotion", () => {
     if (outcome.status === "idle") throw new Error("promotion unexpectedly returned idle")
     await acknowledge(controller, outcome)
     expect(fileSystem.journal).toBeNull()
-    expect(fileSystem.calls.at(-1)).toEqual({ kind: "remove-journal", target: path.join(SOURCE_ROOT, JOURNAL_NAME) })
+    expect(fileSystem.calls.at(-1)).toEqual({ kind: "compact-journal", target: path.join(SOURCE_ROOT, JOURNAL_NAME) })
   })
 
   it("replays an outcome-pending journal without validating or rebooting the completed tree", async () => {
@@ -752,14 +760,14 @@ describe("source promotion", () => {
     })
     const outcome = await controller.promote(promotionRequest(candidatePath))
     if (outcome.status !== "promoted") throw new Error("promotion unexpectedly failed")
-    const removalsBefore = fileSystem.calls.filter((call) => call.kind === "remove-journal").length
+    const clearsBefore = fileSystem.calls.filter((call) => call.kind === "compact-journal").length
 
     await expect(controller.acknowledge({
       ...outcome,
       promotionId: "123e4567-e89b-42d3-a456-426614174001",
     })).rejects.toMatchObject({ code: "ACKNOWLEDGEMENT_MISMATCH" })
     expect(fileSystem.journal).not.toBeNull()
-    expect(fileSystem.calls.filter((call) => call.kind === "remove-journal")).toHaveLength(removalsBefore)
+    expect(fileSystem.calls.filter((call) => call.kind === "compact-journal")).toHaveLength(clearsBefore)
   })
 
   it.each(SUCCESS_CRASH_BOUNDARIES)("recovers a healthy promotion after a crash at %s", async (boundary) => {

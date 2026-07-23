@@ -3583,21 +3583,41 @@ def _watch_parent_posix(
 ) -> None:
     """Poll the shell process on macOS/Linux; exit when it disappears."""
     track_reparent = os.getppid() == parent_pid
-    if not track_reparent and parent_identity is None:
-        try:
-            parent_identity = _posix_process_identity(parent_pid)
-        except OSError as exc:
-            print(
-                f"[desktop-sidecar] POSIX parent identity unavailable; PID watchdog disabled: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return
+    #: Our direct POSIX parent when the shell (``parent_pid``) is *not* it — i.e.
+    #: the intermediate source guardian, which forked us and holds the workspace
+    #: instance lease. When ``track_reparent`` is True the shell is our direct
+    #: parent and ``_posix_parent_alive`` already covers its death race-free, so
+    #: there is no separate guardian to lose. A direct child of init (guardian
+    #: absent — CLI, ``make start``, tests) has ``getppid() <= 1`` and is skipped.
+    guardian_pid: int | None = None
+    if not track_reparent:
+        direct_parent = os.getppid()
+        if direct_parent > 1:
+            guardian_pid = direct_parent
         if parent_identity is None:
-            _exit_orphaned(request_shutdown, terminate_owned_tree)
-            return
+            try:
+                parent_identity = _posix_process_identity(parent_pid)
+            except OSError as exc:
+                print(
+                    f"[desktop-sidecar] POSIX parent identity unavailable; PID watchdog disabled: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return
+            if parent_identity is None:
+                _exit_orphaned(request_shutdown, terminate_owned_tree)
+                return
     while True:
         time.sleep(POLL_INTERVAL_SECONDS)
+        # Detect loss of the source guardian itself: if it dies while the shell
+        # and this backend both survive, neither the shell watch below nor stdin
+        # EOF fires, yet the kernel has reparented us away from the guardian
+        # (race-free, PID-reuse immune) and the guardian's death released the
+        # workspace instance lease — so a second shell could double-boot against
+        # this workspace. Fail closed rather than keep serving orphaned.
+        if guardian_pid is not None and os.getppid() != guardian_pid:
+            _exit_orphaned(request_shutdown, terminate_owned_tree)
+            return
         if not _posix_parent_alive(
             parent_pid,
             track_reparent=track_reparent,

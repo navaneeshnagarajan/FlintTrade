@@ -221,4 +221,49 @@ describe.runIf(process.platform !== "win32")("POSIX append-only source journal",
     expect(entries.filter((name) => name.startsWith("revision-"))).toHaveLength(1);
     expect(entries.filter((name) => name.startsWith(".stage-"))).toHaveLength(1);
   });
+
+  it("compacts a settled chain by archiving it intact so the next operation starts fresh", async () => {
+    const { journal, root } = await fixture("journal-compaction");
+    const posix = createPosixAppendOnlyJournal();
+    await posix.write(journal, "first\n");
+    await posix.write(journal, "second\n");
+    await expect(posix.read(journal)).resolves.toBe("second\n");
+
+    await posix.compact(journal);
+
+    // The active journal path is now absent — a settled or absent journal are
+    // both safe "no operation in progress" recovery states.
+    await expect(posix.read(journal)).resolves.toBeNull();
+    await expect(lstat(journal)).rejects.toMatchObject({ code: "ENOENT" });
+
+    // The whole chain was archived intact — no record was unlinked.
+    const archives = (await readdir(root)).filter((name) => name.includes(".archived-"));
+    expect(archives).toHaveLength(1);
+    const archived = await readdir(path.join(root, archives[0]!));
+    expect(archived.filter((name) => name.startsWith("revision-"))).toHaveLength(2);
+    expect(archived).toContain("owner.json");
+
+    // The next operation starts a fresh, bounded chain rather than extending the
+    // archived one, so scan cost stays constant across operations.
+    await posix.write(journal, "third\n");
+    await expect(posix.read(journal)).resolves.toBe("third\n");
+    expect((await readdir(journal)).filter((name) => name.startsWith("revision-"))).toHaveLength(1);
+  });
+
+  it("treats compaction of an absent journal as a no-op", async () => {
+    const { journal } = await fixture("journal-compaction-absent");
+    await createPosixAppendOnlyJournal().compact(journal);
+    await expect(lstat(journal)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("cannot re-compact an archived journal because its owner metadata binds the original path", async () => {
+    const { journal, root } = await fixture("journal-compaction-guard");
+    const posix = createPosixAppendOnlyJournal();
+    await posix.write(journal, "value\n");
+    await posix.compact(journal);
+    const archive = (await readdir(root)).find((name) => name.includes(".archived-"));
+    if (!archive) throw new Error("archived journal is missing");
+
+    await expect(posix.compact(path.join(root, archive))).rejects.toThrow(/logical path|owner/i);
+  });
 });

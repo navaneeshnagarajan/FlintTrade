@@ -263,6 +263,57 @@ def test_source_parent_watch_uses_the_bound_kernel_generation_without_rehashing(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX source-guardian topology")
+def test_posix_watchdog_exits_when_the_source_guardian_parent_dies(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Indirect topology: the source guardian (pid 100) is our direct POSIX
+    # parent and Electron (pid 77) is the shell we watch by identity. The
+    # guardian dying while Electron and this backend both survive reparents us
+    # to init (getppid 1) — the watchdog must fail closed even though Electron
+    # is still alive, because the guardian released the workspace lease.
+    ppids = iter([100, 100, 1])
+    monkeypatch.setattr(entry.os, "getppid", lambda: next(ppids))
+    monkeypatch.setattr(entry.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(entry, "_posix_parent_alive", lambda *a, **k: True)
+    calls: list[str] = []
+    monkeypatch.setattr(entry, "_exit_orphaned", lambda *a, **k: calls.append("orphaned"))
+
+    entry._watch_parent_posix(77, parent_identity=f"v1|darwin|77|start|{'a' * 64}")
+
+    assert calls == ["orphaned"]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX source-guardian topology")
+def test_posix_watchdog_does_not_exit_while_the_guardian_and_shell_survive(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A stable guardian (getppid never changes) and a live shell must not cause
+    # a spurious orphan exit; the only exit is the shell's own death.
+    monkeypatch.setattr(entry.os, "getppid", lambda: 100)
+    shell_alive = iter([True, True, False])
+    monkeypatch.setattr(entry, "_posix_parent_alive", lambda *a, **k: next(shell_alive))
+    sleeps = {"count": 0}
+
+    def _count_sleep(_seconds: float) -> None:
+        sleeps["count"] += 1
+
+    monkeypatch.setattr(entry.time, "sleep", _count_sleep)
+    calls: list[str] = []
+    monkeypatch.setattr(entry, "_exit_orphaned", lambda *a, **k: calls.append("orphaned"))
+
+    entry._watch_parent_posix(77, parent_identity=f"v1|darwin|77|start|{'a' * 64}")
+
+    # It polled three times (guardian stable throughout) and only exited when the
+    # shell itself died — never early via a false guardian-reparent trigger.
+    assert sleeps["count"] == 3
+    assert calls == ["orphaned"]
+
+
+@pytest.mark.unit
 def test_source_guardian_creates_exact_pending_record(
     entry: ModuleType,
     tmp_path: Path,
