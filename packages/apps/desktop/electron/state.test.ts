@@ -193,6 +193,21 @@ describe("update state", () => {
     });
   });
 
+  it("seeds the installed source revision while idle so it is reported before the first check", () => {
+    const store = createUpdateState("source");
+    expect(store.getSnapshot().currentVersion).toBeNull();
+
+    expect(store.noteCurrentVersion("a".repeat(40))).toBe(true);
+    expect(store.getSnapshot()).toMatchObject({ currentVersion: "a".repeat(40), status: "idle" });
+
+    // Idempotent for the same revision and does not disturb an in-flight check.
+    expect(store.noteCurrentVersion("a".repeat(40))).toBe(false);
+    const attempt = store.begin("checking", "Checking source updates");
+    expect(store.noteCurrentVersion("b".repeat(40))).toBe(false);
+    expect(store.getSnapshot()).toMatchObject({ currentVersion: "a".repeat(40), status: "checking" });
+    expect(store.unavailable(attempt, "The source is current")).toBe(true);
+  });
+
   it("preserves a shell-owned current version when later callers omit it", () => {
     const availableStore = createUpdateState("shell", "0.6.0-beta.13");
     const availableAttempt = availableStore.begin("checking", "Checking Electron shell updates");

@@ -530,9 +530,20 @@ describe("source promotion", () => {
   })
 
   it.each([
-    ["missing", { dev: 7, ino: 3 }],
-    ["different", { dev: 7, ino: 3, nativeIdentity: "0000000000000007:00000000000000000000000000000063" }],
-  ] as const)("rejects a %s captured Windows candidate native identity before journal or mutation", async (_label, capturedCandidate) => {
+    // A win32 candidate with no native File-ID fails closed at the identity
+    // boundary; one with a present-but-wrong native File-ID fails the capture
+    // comparison. Both are rejected before any journal write or mutation.
+    ["missing", { dev: 7, ino: 3 }, "INVALID_DIRECTORY_IDENTITY"],
+    [
+      "different",
+      { dev: 7, ino: 3, nativeIdentity: "0000000000000007:00000000000000000000000000000063" },
+      "IDENTITY_MISMATCH",
+    ],
+  ] as const)("rejects a %s captured Windows candidate native identity before journal or mutation", async (
+    _label,
+    capturedCandidate,
+    expectedCode,
+  ) => {
     const { activePath, candidatePath, fileSystem } = fixture({ windows: true })
     const originalActive = await fileSystem.inspectDirectory(activePath)
     if (!originalActive?.nativeIdentity) throw new Error("test Windows active identity is missing")
@@ -546,7 +557,7 @@ describe("source promotion", () => {
     await expect(controller.promote(promotionRequest(candidatePath, {
       candidate: capturedCandidate,
       originalActive,
-    }))).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" })
+    }))).rejects.toMatchObject({ code: expectedCode })
     expect(mutationCalls(fileSystem)).toEqual([])
   })
 
@@ -2029,6 +2040,7 @@ describe("production Node promotion filesystem", () => {
       const controller = createSourcePromotion({
         fileSystem,
         lifecycle: alwaysHealthyLifecycle(),
+        platform: "win32",
         sourceRoot: temporaryRoot,
       })
 

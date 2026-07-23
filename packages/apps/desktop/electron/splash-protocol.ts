@@ -9,6 +9,34 @@ const SPLASH_ASSETS = new Map([
   ["/splash.js", "splash.js"],
 ]);
 
+/**
+ * Restrictive Content-Security-Policy for the local splash document. The splash
+ * loads only its own same-origin assets (index.html, splash.css, splash.js) over
+ * the flinttrade:// scheme and takes no remote content or user input, so 'self'
+ * (plus data: images for inline icons) is sufficient and everything else is
+ * denied. This is an Electron-layer backstop: the renderer is already confined to
+ * the splash origin and the terminal is served its own policy by the backend.
+ */
+export const SPLASH_CONTENT_SECURITY_POLICY = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+/** Security headers attached to every splash response served over the scheme. */
+export function splashSecurityHeaders(base?: Headers): Headers {
+  const headers = new Headers(base);
+  headers.set("Content-Security-Policy", SPLASH_CONTENT_SECURITY_POLICY);
+  headers.set("X-Content-Type-Options", "nosniff");
+  return headers;
+}
+
 export function resolveSplashRequest(requestUrl: string, splashDirectory: string): string | null {
   let url: URL;
   try {

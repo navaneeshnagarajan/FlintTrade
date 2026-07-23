@@ -258,6 +258,17 @@ export function createUpdateState(kind: UpdateKind, currentVersion: string | nul
   return {
     getSnapshot: state.getSnapshot,
     subscribe: state.subscribe,
+    /**
+     * Seed the known current version before any check has run, so the UI reports
+     * the real installed revision instead of "Not reported" on first open. Only
+     * applied while idle so it never overrides an in-flight or completed check.
+     */
+    noteCurrentVersion(currentVersion: string): boolean {
+      const current = state.getSnapshot();
+      if (current.status !== "idle" || current.currentVersion === currentVersion) return false;
+      state.publish({ currentVersion, heartbeatAt: nextHeartbeatAt() });
+      return true;
+    },
     available(
       attempt: number,
       version: string,

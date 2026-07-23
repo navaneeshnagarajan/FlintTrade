@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
+import {
+  resolveSplashRequest,
+  SPLASH_CONTENT_SECURITY_POLICY,
+  splashSecurityHeaders,
+  SPLASH_URL,
+} from "./splash-protocol";
 
 describe("splash protocol", () => {
   it("maps only the three packaged splash assets", () => {
@@ -21,5 +26,21 @@ describe("splash protocol", () => {
     "not a url",
   ])("rejects an unrecognised or decorated URL: %s", (url) => {
     expect(resolveSplashRequest(url, "/app/splash")).toBeNull();
+  });
+
+  it("serves a restrictive default-deny Content-Security-Policy that allows only same-origin assets", () => {
+    expect(SPLASH_CONTENT_SECURITY_POLICY).toContain("default-src 'none'");
+    expect(SPLASH_CONTENT_SECURITY_POLICY).toContain("script-src 'self'");
+    expect(SPLASH_CONTENT_SECURITY_POLICY).toContain("style-src 'self'");
+    expect(SPLASH_CONTENT_SECURITY_POLICY).toContain("frame-ancestors 'none'");
+    // No remote origin, inline execution, or object/base hijack is permitted.
+    expect(SPLASH_CONTENT_SECURITY_POLICY).not.toMatch(/unsafe-inline|unsafe-eval|https?:|\*/);
+  });
+
+  it("attaches the CSP and nosniff headers while preserving the asset's own headers", () => {
+    const headers = splashSecurityHeaders(new Headers({ "content-type": "text/html" }));
+    expect(headers.get("content-type")).toBe("text/html");
+    expect(headers.get("content-security-policy")).toBe(SPLASH_CONTENT_SECURITY_POLICY);
+    expect(headers.get("x-content-type-options")).toBe("nosniff");
   });
 });

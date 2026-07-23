@@ -41,7 +41,7 @@ import { createGithubShellAttestationVerifier } from "./shell-attestation";
 import { createGithubShellReleaseSource, createNodeShellInstallerHandoff } from "./shell-update-io";
 import { assertShellUserDataSeparated, resolveShellUserDataPath } from "./shell-paths";
 import { createShellUpdater } from "./shell-updater";
-import { FLINTTRADE_SCHEME, resolveSplashRequest, SPLASH_URL } from "./splash-protocol";
+import { FLINTTRADE_SCHEME, resolveSplashRequest, splashSecurityHeaders, SPLASH_URL } from "./splash-protocol";
 import { createStartupRecoveryController } from "./startup-recovery";
 import { createBackendState, createBootstrapState, createUpdateState, type UpdateKind } from "./state";
 import { createDesktopTray } from "./tray";
@@ -386,6 +386,9 @@ if (!hasSingleInstanceLock) {
           lifecycle!.markBackendFailed();
           return false;
         }
+        // Seed the known installed source revision so Settings -> Updates reports
+        // it before the user runs a manual check, instead of "Not reported".
+        if (result.revision !== undefined) sourceUpdateState.noteCurrentVersion(result.revision);
         await backendRuntime.start();
         return true;
       } catch {
@@ -438,10 +441,15 @@ if (!hasSingleInstanceLock) {
 
   void app.whenReady().then(async () => {
     app.setName("FlintTrade");
-    session.defaultSession.protocol.handle(FLINTTRADE_SCHEME, (request) => {
+    session.defaultSession.protocol.handle(FLINTTRADE_SCHEME, async (request) => {
       const splashAsset = resolveSplashRequest(request.url, splashDirectory);
       if (!splashAsset || request.method !== "GET") return new Response(null, { status: 404 });
-      return net.fetch(pathToFileURL(splashAsset).href);
+      const asset = await net.fetch(pathToFileURL(splashAsset).href);
+      return new Response(asset.body, {
+        headers: splashSecurityHeaders(asset.headers),
+        status: asset.status,
+        statusText: asset.statusText,
+      });
     });
     installSessionHardening(session.defaultSession);
     app.on("web-contents-created", (_event, contents) => {

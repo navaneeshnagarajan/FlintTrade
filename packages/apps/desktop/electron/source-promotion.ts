@@ -372,10 +372,12 @@ class SourcePromotionController {
     const originalActiveDirectoryIdentity = requireBoundIdentity(
       request.originalActiveDirectoryIdentity,
       "original active directory identity",
+      this.platform,
     )
     const candidateDirectoryIdentity = requireBoundIdentity(
       request.candidateDirectoryIdentity,
       "candidate directory identity",
+      this.platform,
     )
     if ((await this.fileSystem.readJournal(paths.journal)) !== null) {
       throw new SourcePromotionError(
@@ -2027,7 +2029,7 @@ function requireContentIdentity(value: unknown, label: string): string {
   return value
 }
 
-function requireBoundIdentity(value: unknown, label: string): BoundIdentity {
+function requireBoundIdentity(value: unknown, label: string, platform: NodeJS.Platform): BoundIdentity {
   if (
     !isRecord(value) ||
     !("dev" in value) ||
@@ -2036,10 +2038,14 @@ function requireBoundIdentity(value: unknown, label: string): BoundIdentity {
     !("ino" in value) ||
     !Number.isSafeInteger(value.ino) ||
     (value.ino as number) < 0 ||
-    ("nativeIdentity" in value && (
-      typeof value.nativeIdentity !== "string" ||
-      !WINDOWS_NATIVE_IDENTITY_PATTERN.test(value.nativeIdentity)
-    ))
+    // Mandate the exact 128-bit native File-ID on win32 and forbid it elsewhere,
+    // matching parsePreservedQuarantine so the invariant "win32 directory
+    // identities always carry native evidence" is enforced at the boundary rather
+    // than relied on by construction (a native-less operand must never silently
+    // pass a fail-closed identity comparison).
+    (platform === "win32"
+      ? typeof value.nativeIdentity !== "string" || !WINDOWS_NATIVE_IDENTITY_PATTERN.test(value.nativeIdentity)
+      : "nativeIdentity" in value)
   ) {
     throw new SourcePromotionError("INVALID_DIRECTORY_IDENTITY", `Invalid ${label}`)
   }
