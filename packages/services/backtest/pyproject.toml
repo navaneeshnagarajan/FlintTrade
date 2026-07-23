@@ -13,7 +13,7 @@ dependencies = [
     "pandas>=2.0.0",
     "pydantic>=2.0",
     "flask>=3.0",
-    "scipy>=1.12",
+    "scipy>=1.18.0",
     "quantstats>=0.0.62",
 ]
 

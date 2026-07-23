@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-numba = ["numba>=0.59"]
+numba = ["numba>=0.66.0"]
 
 [build-system]
 requires = ["hatchling"]
