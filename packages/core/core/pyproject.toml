@@ -43,7 +43,7 @@ flinttrade-desktop-backend = "flinttrade_core.desktop:main"
 #   uv sync --extra migration
 migration = [
     "duckdb>=1.1",
-    "pyarrow>=17.0",
+    "pyarrow>=25.0.0",
     "pyrage>=1.1",
 ]
 
