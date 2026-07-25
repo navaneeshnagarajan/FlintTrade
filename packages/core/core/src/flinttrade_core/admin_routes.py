@@ -95,7 +95,6 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "instrumentcompare", "name": "Instrument Compare", "category": "Analysis", "status": "live"},
     {"id": "greeksheatmap", "name": "Greeks Matrix", "category": "Analysis", "status": "live"},
     {"id": "gapanalysis", "name": "Gap Analysis", "category": "Analysis", "status": "live"},
-    {"id": "optionsflow", "name": "Options Flow", "category": "Analysis", "status": "live"},
     {"id": "correlationmatrix", "name": "Correlation Matrix", "category": "Analysis", "status": "live"},
     {"id": "sectorperformance", "name": "Sector Performance", "category": "Analysis", "status": "live"},
     {"id": "domheatmap", "name": "DOM Heatmap", "category": "Analysis", "status": "live"},

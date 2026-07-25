@@ -753,7 +753,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "ivsmile", "optionsflow", "volatilitycone",
+    "ivsmile", "volatilitycone",
   ] as const) {
     api.addPanel({
       id: pid(comp),

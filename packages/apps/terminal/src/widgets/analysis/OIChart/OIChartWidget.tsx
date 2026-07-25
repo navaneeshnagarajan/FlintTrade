@@ -86,6 +86,7 @@ import {
   type StrikeCell,
 } from "./oiStrikes";
 import { SAMPLE_ATM, SAMPLE_MAX_PAIN, SAMPLE_STRIKE_CELLS } from "./sampleData";
+import { FlowTapeSection } from "./FlowTape";
 import { SAMPLE_ANALYSIS, SAMPLE_UNUSUAL } from "./oiSignalsSample";
 import { SPOT_INTERVALS, type SpotInterval } from "./spotIntervals";
 import type { Data, Layout } from "plotly.js";
@@ -1033,6 +1034,10 @@ function OIChartWidget(props: IDockviewPanelProps) {
           </div>
         )}
       </div>
+
+      {/* Large-trade tape — folded in from the retired Options Flow widget
+          (ruling D1); collapsed and sample-labelled, see FlowTape.tsx. */}
+      <FlowTapeSection />
     </div>
   );
 

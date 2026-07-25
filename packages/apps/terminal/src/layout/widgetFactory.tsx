@@ -118,7 +118,6 @@ const lazyWidgets = {
 
   // Wave 31 widgets
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
-  optionsflow: lazy(() => import("@/widgets/analysis/OptionsFlow/OptionsFlowWidget")),
   tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
 
   // Wave 32 widgets
@@ -198,6 +197,16 @@ export function isMovedWidget(spec: RetiredWidget): spec is RetiredMovedWidget {
 }
 
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  optionsflow: {
+    component: "oichart",
+    params: { view: "signals" },
+    note:
+      "Folded into OI Analytics' Signals view (ruling D1, 2026-07-26). It had "
+      + "no data source at all — an unconditional hardcoded sample — and its "
+      + "unusual-OI third was already dominated by the signals view's real "
+      + "/v1/oi/unusual feed. The sweep/block tape presentation survives as "
+      + "the collapsed, sample-labelled FlowTape section there.",
+  },
   health: {
     movedTo: { destination: "Settings → Monitoring", route: "/settings#monitoring" },
     note:
@@ -446,7 +455,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis", description: "Percentage-change overlay of up to four instruments rebased to a common start — sample series only, no live price feed is wired yet" },
   { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Gap-up/gap-down events with fill rate and average gap size — sample events only, no gap-history source is wired yet" },
-  { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Large options trades tagged sweep, block or unusual OI and sortable by premium — sample flow only, no options-flow source is wired yet" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Nifty sectoral indices ranked best to worst over 1D/1W/1M/3M/1Y — sample data only, no sectoral-index source is wired yet" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
