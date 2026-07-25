@@ -718,8 +718,71 @@ containment_marker=FLINTTRADE_PROCESS_ANCHOR=$containment_token
 target=
 watchdog=
 enumerator=
+containment_cgroup=
 ${probes}
 fi
+# Linux cgroup v2 containment.
+#
+# The marker sweep below finds processes that left the process group via
+# setsid(). It is inherently racy: it can only kill what it can SEE, so a
+# descendant that appears after the sweep has gone quiet survives. cgroup
+# membership is inherited and an unprivileged process cannot leave it, so a
+# scope removes the escape route entirely rather than trying to out-run it.
+#
+# Delegation is not guaranteed (containers, non-systemd sessions, cgroup v1),
+# so this is best-effort: on failure containment_cgroup stays empty and the
+# sweep remains the mechanism. Nothing here weakens the sweep.
+if [ -w /sys/fs/cgroup/cgroup.procs ] || [ -d /sys/fs/cgroup/cgroup.controllers ]; then
+  for cgroup_base in \
+    "/sys/fs/cgroup$(cat /proc/self/cgroup 2>/dev/null | sed -n 's/^0:://p')" \
+    /sys/fs/cgroup
+  do
+    [ -d "$cgroup_base" ] || continue
+    candidate_cgroup=$cgroup_base/flinttrade-$containment_token
+    if mkdir "$candidate_cgroup" 2>/dev/null; then
+      # The scope must contain ONLY the target tree. The supervisor and its
+      # watchdog stay outside it, or cgroup.kill would take them down too.
+      if [ -w "$candidate_cgroup/cgroup.procs" ]; then
+        containment_cgroup=$candidate_cgroup
+      else
+        rmdir "$candidate_cgroup" 2>/dev/null || :
+      fi
+      break
+    fi
+  done
+fi
+cgroup_contain() {
+  # cgroup.kill (Linux 5.14+) terminates every member atomically, including
+  # processes that appeared a moment ago — no scan window, no race.
+  [ -n "$containment_cgroup" ] || return 1
+  if [ -w "$containment_cgroup/cgroup.kill" ]; then
+    printf '1\n' > "$containment_cgroup/cgroup.kill" 2>/dev/null || :
+    return 0
+  fi
+  # Older kernels: signal the exact membership list instead. Still exact —
+  # cgroup.procs is authoritative, unlike a ps snapshot.
+  cgroup_rounds=0
+  while [ "$cgroup_rounds" -lt 50 ]; do
+    cgroup_members=$(cat "$containment_cgroup/cgroup.procs" 2>/dev/null) || return 0
+    cgroup_remaining=
+    for cgroup_member in $cgroup_members; do
+      cgroup_remaining=1
+      if [ "$cgroup_rounds" -gt 10 ]; then
+        /bin/kill -KILL "$cgroup_member" 2>/dev/null || :
+      else
+        /bin/kill -TERM "$cgroup_member" 2>/dev/null || :
+      fi
+    done
+    [ -n "$cgroup_remaining" ] || return 0
+    cgroup_rounds=$((cgroup_rounds + 1))
+    /bin/sleep 0.02
+  done
+  return 0
+}
+cgroup_release() {
+  [ -n "$containment_cgroup" ] || return 0
+  rmdir "$containment_cgroup" 2>/dev/null || :
+}
 proc_tr=
 proc_grep=
 for candidate_tr in /usr/bin/tr /bin/tr; do
@@ -781,6 +844,10 @@ trap on_term TERM
   trap '' TERM HUP INT
   if IFS= read -r _ <&4; then exit 0; fi
   /bin/kill -TERM -$$ 2>/dev/null || :
+  # Exact containment first where the kernel can give it to us. When this
+  # succeeds nothing can have escaped, so the sweep below has nothing left to
+  # find; when it is unavailable the sweep is unchanged.
+  cgroup_contain || :
   watchdog_attempts=0
   watchdog_empty_scans=0
   while [ "$watchdog_attempts" -lt 150 ]; do
@@ -801,6 +868,8 @@ trap on_term TERM
     fi
     /bin/sleep 0.02
   done
+  cgroup_contain || :
+  cgroup_release
   /bin/kill -KILL -$$ 2>/dev/null || :
 ) &
 watchdog=$!
@@ -829,6 +898,12 @@ fi
   trap - TERM HUP INT
   FLINTTRADE_PROCESS_ANCHOR=$containment_token
   export FLINTTRADE_PROCESS_ANCHOR
+  # Join the containment scope before exec. Everything this process spawns
+  # inherits the membership, and an unprivileged process cannot leave it —
+  # which is what closes the setsid() escape the marker sweep cannot win.
+  if [ -n "$containment_cgroup" ]; then
+    printf '%s\n' "$$" > "$containment_cgroup/cgroup.procs" 2>/dev/null || :
+  fi
   exec "$@" </dev/null 3>&- 4<&-
 ) &
 target=$!
