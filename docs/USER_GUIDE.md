@@ -263,7 +263,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (82)
+### The widgets (71)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are generated
@@ -495,7 +495,7 @@ sections:
 | **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | Managed Ollama runtime plus OpenAI, Anthropic, Groq, Hermes, and custom endpoints. |
-| **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
+| **Notifications** | `telegram.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
 | **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
 

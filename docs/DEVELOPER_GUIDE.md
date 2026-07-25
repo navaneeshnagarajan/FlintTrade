@@ -28,7 +28,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | `indicators` | Python | Pure-NumPy batch indicators (110 exports; no TA-Lib) + streaming classes (optional Numba on 3 kernels) + PineTS (Pine Script conversion) | `packages/core/indicators/tests/` |
 | `ticks` | Rust + PyO3 | High-performance tick processing engine, Python-callable via wheel | `packages/core/ticks/tests/` (cargo) |
 | `gateway` | Python | OpenAlgo-compatible bridge support, native broker adapter contract/routing, founder-broker adapter code (Dhan and Upstox connectable; INDmoney, Kotak Neo, and Groww built but coming soon), credential store, and WebSocket bridge | `packages/integrations/gateway/tests/` |
-| `webhooks` | Python | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
+| `webhooks` | Python | Generic HMAC-signed custom webhooks, flow builder, alerter, Excel bridge | `packages/integrations/webhooks/tests/` |
 | `ai` | Python | LLM client (multi-provider), optional RAG/vector store, signals, sentiment, MCP bridge, advisor | `packages/services/ai/tests/` |
 | `automation` | Python | Cron manager, Telegram bot with kill-switch, post-market analysis, voice-order intent extraction | `packages/services/automation/tests/` |
 | `backtest` | Python | Simulator, metrics (Sharpe, Sortino, drawdown), walk-forward, Monte Carlo, 96 strategy templates | `packages/services/backtest/tests/` |
