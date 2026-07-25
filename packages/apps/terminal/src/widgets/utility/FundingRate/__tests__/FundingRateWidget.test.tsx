@@ -16,6 +16,12 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
 
+// Ruling D2: the live surface exists only for crypto brokers. Connected-state
+// tests below model a crypto broker unless they exercise the gate itself.
+vi.mock("@/hooks/useBrokerCapabilities", () => ({
+  useIsCryptoBroker: vi.fn().mockReturnValue(true),
+}));
+
 vi.mock("@/components/teasers", () => ({
   FeatureTeaser: ({
     children,
@@ -39,11 +45,13 @@ vi.mock("@/services/ftApi", async (importOriginal) => {
 });
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useIsCryptoBroker } from "@/hooks/useBrokerCapabilities";
 import { getCryptoFundingRates } from "@/services/ftApi";
 import FundingRateWidget from "../FundingRateWidget";
 import { SAMPLE_FUNDING_RATES } from "../sampleData";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
+const mockUseIsCryptoBroker = useIsCryptoBroker as ReturnType<typeof vi.fn>;
 const mockGetCryptoFundingRates = getCryptoFundingRates as ReturnType<typeof vi.fn>;
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -62,6 +70,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mockUseBrokerConnected.mockReturnValue(false);
+    mockUseIsCryptoBroker.mockReturnValue(true);
 });
 
 
@@ -319,6 +328,28 @@ describe("FundingRateWidget", () => {
     expect(btcRow).toBeTruthy();
     // Rate text should include "+"
     expect(btcRow?.textContent).toContain("+");
+  });
+
+  // Ruling D2 (2026-07-26): funding is a crypto-perpetual concept. A connected
+  // NON-crypto broker gets the gate notice and no fetch; Explore keeps the
+  // badged sample preview as a learning affordance.
+  it("gates a connected non-crypto broker with an honest notice and no fetch", async () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseIsCryptoBroker.mockReturnValue(false);
+    render(<FundingRateWidget />, { wrapper });
+
+    expect(await screen.findByTestId("fundingrate-crypto-gate")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(mockGetCryptoFundingRates).not.toHaveBeenCalled();
+  });
+
+  it("keeps the badged sample preview in Explore regardless of the gate", async () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUseIsCryptoBroker.mockReturnValue(false);
+    render(<FundingRateWidget />, { wrapper });
+
+    expect(await screen.findByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByTestId("fundingrate-crypto-gate")).not.toBeInTheDocument();
   });
 });
 

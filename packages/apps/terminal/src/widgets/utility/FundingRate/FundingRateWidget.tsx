@@ -23,6 +23,7 @@ import { SAMPLE_FUNDING_RATES } from "./sampleData";
 import { useCountdown } from "./useCountdown";
 import { FeatureTeaser } from "@/components/teasers";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useIsCryptoBroker } from "@/hooks/useBrokerCapabilities";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,12 @@ function FundingRateWidget() {
   const [sortMode, setSortMode] = useState<SortMode>("magnitude");
 
   const isConnected = useBrokerConnected();
+  // Maintainer ruling D2 (2026-07-26): funding rates are a crypto-perpetual
+  // concept, so the live surface is gated on the connected broker actually
+  // being a crypto broker. A connected equity broker sees the gate notice, not
+  // a stub fetch; Explore keeps the clearly-badged sample preview.
+  const isCrypto = useIsCryptoBroker(isConnected);
+  const cryptoGateBlocked = isConnected && !isCrypto;
 
   const {
     data: liveData,
@@ -209,7 +216,7 @@ function FundingRateWidget() {
   } = useQuery({
     queryKey: ["cryptoFundingRates"],
     queryFn: getCryptoFundingRates,
-    enabled: isConnected,
+    enabled: isConnected && isCrypto,
     refetchInterval: (query) =>
       isConnected && query.state.data?.is_sample_data === false ? 60_000 : false,
     staleTime: 55_000,
@@ -238,6 +245,24 @@ function FundingRateWidget() {
     rate: "Sort: Rate ↑",
     alpha: "Sort: A–Z",
   };
+
+  if (cryptoGateBlocked) {
+    return (
+      <div
+        className="h-full flex flex-col items-center justify-center gap-2 bg-surface-base px-4 text-center"
+        data-testid="fundingrate-crypto-gate"
+      >
+        <TrendingUp size={20} className="text-text-muted" aria-hidden="true" />
+        <span className="text-sm font-medium text-text-primary">
+          Funding rates need a crypto broker
+        </span>
+        <span className="text-xs text-text-muted max-w-64">
+          Perpetual funding applies to crypto derivatives only. Your connected
+          broker trades other segments, so there is nothing live to show here.
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">

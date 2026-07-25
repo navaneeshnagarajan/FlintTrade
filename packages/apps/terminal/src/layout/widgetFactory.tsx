@@ -430,7 +430,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Last-traded-price alerts — above, below, crosses above, crosses below — armed in this browser and polled while the panel is open, with a log of the ones that fired" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
-  { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates across exchanges for arbitrage tracking" },
+  { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates — needs a connected crypto broker; sample preview in Explore" },
   { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Convert between INR, USD, EUR, GBP, JPY, SGD and AED — static reference rates only, no FX feed is wired yet" },
   { id: "earningscalendar", name: "Earnings Calendar", icon: "CalendarDays", category: "Utility", description: "Upcoming earnings announcements and results calendar for NSE stocks" },
   { id: "globalindices", name: "Global Indices", icon: "Globe", category: "Utility", description: "World index levels grouped by region — GIFT Nifty, Dow, S&P, Nasdaq and the rest. The backend feed is a stub today, so rows stay sample-badged until a real source is wired" },
