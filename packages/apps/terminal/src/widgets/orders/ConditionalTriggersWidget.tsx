@@ -45,7 +45,9 @@ import {
   parsePriceValue,
   parseWholeNumber,
   useBrokerOrderTarget,
+  useResolvedLotSize,
 } from "./OrdersManagerShared";
+import { checkLotMultiple } from "@/lib/orderGuards";
 
 // --- Dhan v2 condition vocabulary (see broker docs: conditional-trigger) ----
 
@@ -153,6 +155,12 @@ export default function ConditionalTriggersWidget() {
   const limitPrice = parsePriceValue(price);
   const needsLimitPrice = priceType === "LIMIT" || priceType === "SL";
   const submitting = placeMutation.isPending || modifyMutation.isPending;
+  // The order leg fires unattended when the condition is met, so a quantity
+  // that is not a whole number of lots is only rejected at trigger time.
+  const lotState = useResolvedLotSize(symbol, legExchange);
+  const lotError = qty === null
+    ? null
+    : checkLotMultiple(legExchange, qty, lotState, symbol.trim().toUpperCase());
   const canSubmit =
     isLive &&
     !submitting &&
@@ -160,6 +168,7 @@ export default function ConditionalTriggersWidget() {
     (!needsValue(comparisonType) || value !== null) &&
     symbol.trim().length > 0 &&
     qty !== null &&
+    lotError === null &&
     (!needsLimitPrice || limitPrice !== null);
 
   function buildCondition(): TriggerCondition {
@@ -526,6 +535,11 @@ export default function ConditionalTriggersWidget() {
               >
                 Stop modifying
               </Button>
+            )}
+            {lotError && (
+              <span role="status" className="text-xxs text-warning">
+                {lotError}
+              </span>
             )}
             <Button type="submit" size="sm" disabled={!canSubmit} className="gap-1.5 h-7">
               {submitting ? (

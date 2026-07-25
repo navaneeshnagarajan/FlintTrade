@@ -40,6 +40,9 @@ import {
   type BrokerOrderRow,
   type BrokerTarget,
 } from "@/lib/brokerOrdersApi";
+import { useQuery } from "@tanstack/react-query";
+import { getLotSize } from "@/services/ftApi";
+import { DERIVATIVE_EXCHANGES, type LotSizeState } from "@/lib/orderGuards";
 
 // ---------------------------------------------------------------------------
 // Strict numeric parsers — one implementation in @/lib/orderGuards, shared
@@ -48,6 +51,48 @@ import {
 // ---------------------------------------------------------------------------
 
 export { parseWholeNumber, parsePriceValue } from "@/lib/orderGuards";
+
+// ---------------------------------------------------------------------------
+// Lot-size resolution for the broker-order widgets
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the contract lot size for a typed symbol, failing closed.
+ *
+ * Forever (GTT) and conditional-trigger orders both accept derivative
+ * exchanges and both validated quantity with `parseWholeNumber` alone, so a
+ * GTT sized in shares could rest against an NFO contract until it triggered.
+ * They need the same `checkLotMultiple` treatment as the immediate order
+ * paths, which needs a lot size to check against.
+ *
+ * Provenance is required to be positively live: the resolver route flags a
+ * fallback-table hit with `is_sample_data`, and a guessed lot size is worse
+ * than none because it validates a wrong quantity.
+ *
+ * @param symbol Raw symbol text as typed (trimmed and upper-cased here).
+ * @param exchange Exchange code the order will be routed to.
+ * @returns Lot state suitable for `checkLotMultiple` / `checkLotSizeVerified`.
+ */
+export function useResolvedLotSize(symbol: string, exchange: string): LotSizeState {
+  const trimmed = symbol.trim().toUpperCase();
+  const isDerivative = DERIVATIVE_EXCHANGES.has(exchange);
+  const { data } = useQuery({
+    queryKey: ["orders", "lot-size", trimmed, exchange],
+    queryFn: () => getLotSize(trimmed, exchange),
+    // Equities are not lot-multiplied, so there is nothing to resolve.
+    enabled: isDerivative && trimmed.length > 0,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+
+  return useMemo(() => {
+    if (!isDerivative) return { lotSize: null, verified: true };
+    if (!data || data.lot_size <= 0 || data.is_sample_data !== false) {
+      return { lotSize: null, verified: false };
+    }
+    return { lotSize: data.lot_size, verified: true };
+  }, [data, isDerivative]);
+}
 
 // ---------------------------------------------------------------------------
 // Defensive row plucking — adapter rows are broker-specific

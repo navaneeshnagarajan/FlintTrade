@@ -112,8 +112,29 @@ let listRows: unknown[] = [LIST_ROW];
 let listStatus = 200;
 let listMessage = "";
 
-const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+/**
+ * Lot-size resolver payload for the derivative-quantity guard.
+ *
+ * `null` models a route that answers nothing, which must leave the lot size
+ * unverified rather than defaulting to a tradable multiplier.
+ */
+let lotSizeResponse: {
+  symbol: string;
+  exchange: string;
+  lot_size: number;
+  is_sample_data: boolean;
+} | null = null;
+
+const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
   const method = init?.method ?? "GET";
+  const url = typeof input === "string" ? input : input.toString();
+  if (method === "GET" && url.includes("screener/lot-size")) {
+    return Promise.resolve(
+      lotSizeResponse === null
+        ? jsonResponse({ status: "error", message: "no lot size" }, 404)
+        : jsonResponse({ status: "success", data: lotSizeResponse }),
+    );
+  }
   if (method === "GET") {
     if (listStatus !== 200) {
       return Promise.resolve(jsonResponse({ status: "error", message: listMessage }, listStatus));
@@ -138,8 +159,15 @@ function renderWidget() {
   );
 }
 
+/** Open the exchange dropdown and pick an option by its visible label. */
+async function selectExchange(code: string): Promise<void> {
+  fireEvent.click(screen.getByLabelText("Exchange"));
+  fireEvent.click(await screen.findByRole("option", { name: code }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  lotSizeResponse = null;
   mockMode = "live";
   mockConnectionState.apiKey = "test-openalgo-key";
   mockBrokerState.accounts = [
@@ -545,5 +573,55 @@ describe("ForeverOrdersWidget", () => {
     await waitFor(() =>
       expect(screen.getByText(/serves live mode only/i)).toBeInTheDocument(),
     );
+  });
+
+  // A GTT rests for days before it fires, so an NFO quantity that is not a
+  // whole multiple of the lot size is only rejected at trigger time -- long
+  // after the operator stopped watching. The widget validated quantity with
+  // parseWholeNumber alone until this guard was added.
+  it("blocks a derivative GTT whose quantity is not a lot multiple", async () => {
+    lotSizeResponse = { symbol: "NIFTY", exchange: "NFO", lot_size: 75, is_sample_data: false };
+    renderWidget();
+
+    fireEvent.change(await screen.findByLabelText("GTT symbol"), { target: { value: "NIFTY" } });
+    fireEvent.change(screen.getByLabelText("GTT quantity"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("GTT trigger price"), { target: { value: "100" } });
+    await selectExchange("NFO");
+
+    await waitFor(() =>
+      expect(screen.getByText(/multiple of the lot size \(75\)/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
+  });
+
+  it("allows a derivative GTT sized in whole lots", async () => {
+    lotSizeResponse = { symbol: "NIFTY", exchange: "NFO", lot_size: 75, is_sample_data: false };
+    renderWidget();
+
+    fireEvent.change(await screen.findByLabelText("GTT symbol"), { target: { value: "NIFTY" } });
+    fireEvent.change(screen.getByLabelText("GTT quantity"), { target: { value: "150" } });
+    fireEvent.change(screen.getByLabelText("GTT trigger price"), { target: { value: "100" } });
+    await selectExchange("NFO");
+
+    await waitFor(() =>
+      expect(screen.queryByText(/multiple of the lot size/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  // A fallback-table lot size is flagged is_sample_data by the resolver route.
+  // Validating a quantity against a guessed multiplier is worse than refusing.
+  it("refuses a derivative GTT when the lot size is only a sample", async () => {
+    lotSizeResponse = { symbol: "NIFTY", exchange: "NFO", lot_size: 75, is_sample_data: true };
+    renderWidget();
+
+    fireEvent.change(await screen.findByLabelText("GTT symbol"), { target: { value: "NIFTY" } });
+    fireEvent.change(screen.getByLabelText("GTT quantity"), { target: { value: "150" } });
+    fireEvent.change(screen.getByLabelText("GTT trigger price"), { target: { value: "100" } });
+    await selectExchange("NFO");
+
+    await waitFor(() =>
+      expect(screen.getByText(/lot size for NIFTY is unverified/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /place gtt/i })).toBeDisabled();
   });
 });

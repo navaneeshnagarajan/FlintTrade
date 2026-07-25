@@ -44,8 +44,10 @@ import {
   parsePriceValue,
   parseWholeNumber,
   pickField,
+  useResolvedLotSize,
   useSupportedNativeBrokerOrderTarget,
 } from "./OrdersManagerShared";
+import { checkLotMultiple } from "@/lib/orderGuards";
 
 const SUPPORTED_GTT_BROKERS = ["dhan", "upstox"] as const;
 const EXCHANGES = ["NSE", "NFO", "BSE", "BFO", "MCX", "CDS"] as const;
@@ -177,12 +179,20 @@ export default function ForeverOrdersWidget() {
       parseWholeNumber(ocoQuantity) !== null);
   const stopLossValid = !stopLossEnabled || (parsePriceValue(stopLossPrice) ?? 0) > 0;
   const targetValid = !targetEnabled || (parsePriceValue(targetPrice) ?? 0) > 0;
+  // A GTT can rest for days before it fires, so a quantity that is not a whole
+  // number of lots is not rejected until it triggers — long after the operator
+  // has stopped looking at this panel.
+  const lotState = useResolvedLotSize(symbol, exchange);
+  const lotError = qty === null
+    ? null
+    : checkLotMultiple(exchange, qty, lotState, symbol.trim().toUpperCase());
   const canPlace =
     isLive &&
     target !== null &&
     !placeMutation.isPending &&
     symbol.trim().length > 0 &&
     qty !== null &&
+    lotError === null &&
     trigger !== null && trigger > 0 &&
     ((isDhan && (!needsLimitPrice || limitPrice !== null) && ocoValid) ||
       (isUpstox && stopLossValid && targetValid));
@@ -580,6 +590,11 @@ export default function ForeverOrdersWidget() {
                   Target
                 </label>
               </>
+            )}
+            {lotError && (
+              <span role="status" className="text-xxs text-warning">
+                {lotError}
+              </span>
             )}
             <div className="flex-1" />
             <Button type="submit" size="sm" disabled={!canPlace} className="gap-1.5 h-7">
