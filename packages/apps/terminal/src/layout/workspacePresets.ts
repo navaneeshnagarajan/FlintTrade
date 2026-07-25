@@ -518,8 +518,8 @@ function applyOrderAutomation(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyPortfolioManager(api: DockviewApi): void {
   const portfolioAllocId = pid("portfolioallocation");
-  const netPositionId = pid("netposition");
-  const positionHeatmapId = pid("positionheatmap");
+  const netPositionId = pid("positions");
+  const positionHeatmapId = pid("positions");
   const riskDashboardId = pid("riskdashboard");
   const tradePerformanceId = pid("tradeperformance");
 
@@ -531,7 +531,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 
   api.addPanel({
     id: netPositionId,
-    component: "netposition",
+    component: "positions",
+    params: { view: "net" },
     title: "Net Positions",
     position: { referencePanel: portfolioAllocId, direction: "right" },
     initialWidth: 340,
@@ -539,7 +540,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 
   api.addPanel({
     id: positionHeatmapId,
-    component: "positionheatmap",
+    component: "positions",
+    params: { view: "heat" },
     title: "Position Heat Map",
     position: { referencePanel: portfolioAllocId, direction: "below" },
     initialHeight: 220,
@@ -799,9 +801,8 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "positions", "orders", "holdings", "tradebook", "intradaypnl",
-    "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition", "sessionstats",
-    "tradeperformance", "tradelog", "riskdashboard", "actioncenter", "strategymonitor",
-    "tradecopier",
+    "mtmmonitor", "portfolioallocation", "sessionstats", "tradeperformance", "tradelog",
+    "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -822,11 +823,10 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "calculator", "news", "ticker", "aiadvisor", "scanner",
+    "calculator", "news", "ticker", "aiadvisor", "conditionscanner",
     "alerts", "health", "fundingrate", "currencyconverter", "earningscalendar",
-    "globalindices", "strategytemplates", "audittrail", "economiccalendar", "profittarget",
-    "expirycountdown", "positionsizing", "marketclock", "tradeidea", "tickspeed",
-    "marketsummary",
+    "globalindices", "strategytemplates", "audittrail", "economiccalendar", "expirycountdown",
+    "marketclock", "tradeidea", "tickspeed", "marketsummary",
   ] as const) {
     api.addPanel({
       id: pid(comp),

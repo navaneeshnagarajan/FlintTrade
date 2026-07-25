@@ -42,7 +42,6 @@ const lazyWidgets = {
   intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
   mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
-  positionheatmap: lazy(() => import("@/widgets/trading/PositionHeatMap/PositionHeatMapWidget")),
 
   // New analysis widgets
   sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
@@ -58,7 +57,6 @@ const lazyWidgets = {
   orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
 
   // Utility widgets (new)
-  scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
   alerts: lazy(() => import("@/widgets/utility/Alerts/AlertsWidget")),
   health: lazy(() => import("@/widgets/utility/Health/HealthWidget")),
 
@@ -102,7 +100,6 @@ const lazyWidgets = {
   marketbreadth: lazy(() => import("@/widgets/analysis/MarketBreadth/MarketBreadthWidget")),
   quicktrade: lazy(() => import("@/widgets/trading/QuickTrade/QuickTradeWidget")),
   volatilitycone: lazy(() => import("@/widgets/analysis/VolatilityCone/VolatilityConeWidget")),
-  profittarget: lazy(() => import("@/widgets/utility/ProfitTarget/ProfitTargetWidget")),
 
   // Wave 28 widgets
   heatcalendar: lazy(() => import("@/widgets/analysis/HeatCalendar/HeatCalendarWidget")),
@@ -129,13 +126,11 @@ const lazyWidgets = {
 
   // Wave 32 widgets
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
-  positionsizing: lazy(() => import("@/widgets/utility/PositionSizing/PositionSizingWidget")),
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
 
   // Wave 33 widgets
   marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
   strategymonitor: lazy(() => import("@/widgets/trading/StrategyMonitor/StrategyMonitorWidget")),
-  netposition: lazy(() => import("@/widgets/trading/NetPosition/NetPositionWidget")),
 
   // Wave 34 widgets
   tradeidea: lazy(() => import("@/widgets/utility/TradeIdea/TradeIdeaWidget")),
@@ -241,6 +236,47 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
       + "widget's REAL tick prints already support, so the merge makes them "
       + "real rather than preserving a fabricated surface.",
   },
+  scanner: {
+    component: "conditionscanner",
+    params: { view: "scans", scan: "pre_market_movers" },
+    note:
+      "Merged into Condition Scanner. Same client function, same endpoint, "
+      + "same row type — it simply hardcoded two of the backend's eight "
+      + "prebuilt scan keys into a tab enum while the canonical fetches the "
+      + "whole catalogue. Its unusual-OI tab did not come across: that "
+      + "endpoint already lives in OI Analytics, which this widget links to.",
+  },
+  positionsizing: {
+    component: "calculator",
+    params: { tab: "sizing" },
+    note:
+      "Merged into Calculator. Its fixed-fractional sizing was algebraically "
+      + "identical to Profit Target's and to the Calculator's own risk tab.",
+  },
+  profittarget: {
+    component: "calculator",
+    params: { tab: "target" },
+    note:
+      "Merged into Calculator. Same shared sizing kernel; its reward-side "
+      + "analysis becomes the Target tab.",
+  },
+  netposition: {
+    component: "positions",
+    params: { view: "net" },
+    note:
+      "Merged into Positions. All three position renderings read the same "
+      + "cache, so they were one book behind three widgets. Its grouping "
+      + "function also split on whitespace, making it a no-op on every real "
+      + "broker symbol.",
+  },
+  positionheatmap: {
+    component: "positions",
+    params: { view: "heat" },
+    note:
+      "Merged into Positions as the heat-map view. Its P&L percentage "
+      + "recompute guarded only the entry price, so any row with a zero LTP "
+      + "was painted a fabricated -100%.",
+  },
   oiprofile: {
     component: "oichart",
     params: { view: "butterfly" },
@@ -304,7 +340,7 @@ export const widgetCatalog: WidgetMeta[] = [
   // Trading
   { id: "dashboard", name: "Dashboard", icon: "LayoutDashboard", category: "Trading", description: "Overview of open positions, real-time P&L, and market status" },
   { id: "scalper", name: "Scalper", icon: "Zap", category: "Trading", description: "One-click order entry panel optimised for intraday F&O scalping" },
-  { id: "positions", name: "Positions", icon: "Table2", category: "Trading", description: "Live position book with MTM P&L, quantity, and average price" },
+  { id: "positions", name: "Positions", icon: "Table2", category: "Trading", description: "The open position book of the selected account in three views — a sortable table with square-off, convert and exit-all, a net view that groups legs by underlying, and a P&L heat map — all from one broker read, so the three cannot disagree" },
   { id: "orders", name: "Orders", icon: "ClipboardList", category: "Trading", description: "Order book showing pending, executed, and rejected orders" },
   { id: "holdings", name: "Holdings", icon: "Wallet", category: "Trading", description: "Long-term equity and mutual fund holdings with current value" },
   { id: "tradebook", name: "Trade Book", icon: "BookOpen", category: "Trading", description: "Executed trade history for the current session" },
@@ -312,7 +348,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "intradaypnl", name: "Intraday P&L", icon: "TrendingUp", category: "Trading", description: "Intraday profit and loss chart updated tick by tick" },
   { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading", description: "Mark-to-market monitor with target and stop-loss level alerts" },
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "One-click emergency actions: exit all, cancel all, flatten book" },
-  { id: "positionheatmap", name: "Position Heat Map", icon: "SquareStack", category: "Trading", description: "Heat map of current positions coloured by unrealised P&L" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
   { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
@@ -322,7 +357,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading", description: "Annotated trade journal with entry/exit reasons and screenshots" },
   { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading", description: "Performance analytics: expectancy, Sharpe ratio, and streak analysis" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
-  { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading", description: "Aggregated net position across all accounts for a given instrument" },
   { id: "orderladder", name: "DOM / Ladder", icon: "ArrowUpDown", category: "Trading", description: "Level-2 book and order ladder in one surface — real resting bid/ask sizes and order counts on the rows you click to place and cancel limit orders through the safety gate" },
   { id: "foreverorders", name: "Forever (GTT) Orders", icon: "Clock", category: "Trading", description: "Place and manage forever/GTT orders incl. OCO legs and validity — native brokers only" },
   { id: "superorders", name: "Super Orders", icon: "Target", category: "Trading", description: "Bracket-style super orders with leg-aware modify and cancel — native brokers only" },
@@ -349,7 +383,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis", description: "Real-time buy/sell order flow footprint for active F&O contracts" },
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis", description: "Three synchronised chart panels for multi-instrument comparison" },
   { id: "portfoliooptimiser", name: "Portfolio Optimiser", icon: "PieChart", category: "Analysis", description: "Mean-variance (Markowitz) optimal weights for a basket, with expected return / volatility / Sharpe" },
-  { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
+  { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run the backend's prebuilt indicator condition scans (RSI extremes, volume breakout, pre-market movers, 52-week breakouts) across a symbol universe — sortable matches with their matched conditions and one-click watchlist adds, plus live NIFTY 50 sector movers" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
   { id: "marketbreadth", name: "Market Breadth", icon: "BarChart4", category: "Analysis", description: "Advance/decline ratio, new highs/lows, and breadth oscillators for NSE" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis", description: "Volatility cone comparing current IV against historical percentiles" },
@@ -369,14 +403,13 @@ export const widgetCatalog: WidgetMeta[] = [
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },
-  { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility", description: "Options payoff and break-even calculator with strategy builder" },
+  { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility", description: "Position sizing (fixed %, Kelly, ATR), risk/reward targets, brokerage charges and live margin" },
   { id: "news", name: "News Feed", icon: "Newspaper", category: "Utility", description: "Curated market news and announcements relevant to your watchlist" },
   { id: "ticker", name: "Ticker", icon: "TrendingUp", category: "Utility", description: "Horizontal scrolling ticker bar showing live prices for key indices" },
   { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility", description: "AI-powered trade assistant for strategy ideas, analysis, and Q&A" },
   { id: "aibackends", name: "AI Backends", icon: "Layers", category: "Utility", description: "Detect and run supported AI backends — Claude Code, Cerebras, Codex, and other CLI/ACP agents" },
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
-  { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Gap and volume-breakout scans over the NIFTY 50 plus live sector movers; OI change stays sample-labelled" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
   { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
@@ -387,9 +420,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "strategytemplates", name: "Strategy Templates", icon: "BookOpen", category: "Utility", description: "Library of pre-built option strategy templates to launch from one click" },
   { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility", description: "Append-only audit log of all orders and account events" },
   { id: "economiccalendar", name: "Economic Calendar", icon: "CalendarClock", category: "Utility", description: "Macro economic event calendar with market impact ratings" },
-  { id: "profittarget", name: "Profit Target Calc", icon: "Target", category: "Utility", description: "Position-aware profit target and stop-loss calculator with R:R ratio" },
   { id: "expirycountdown", name: "Expiry Countdown", icon: "Timer", category: "Utility", description: "Countdown timers to weekly and monthly expiry across all segments" },
-  { id: "positionsizing", name: "Position Sizing", icon: "Ruler", category: "Utility", description: "Kelly criterion and fixed-risk position sizing calculator" },
   { id: "marketclock", name: "Market Clock", icon: "Clock", category: "Utility", description: "Multi-timezone market clock showing session open/close for NSE, NYSE, etc." },
   { id: "tradeidea", name: "Trade Ideas", icon: "Lightbulb", category: "Utility", description: "AI-generated trade ideas based on screener signals and market regime" },
   { id: "tickspeed", name: "Tick Speed", icon: "Gauge", category: "Utility", description: "Tick arrival rate gauge for detecting unusual activity in F&O instruments" },

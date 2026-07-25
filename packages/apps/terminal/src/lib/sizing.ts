@@ -1,11 +1,12 @@
 /**
  * sizing.ts — the single position-sizing and risk/reward kernel.
  *
- * Every calculator surface in the terminal (Calculator → Risk/Reward,
- * PositionSizing, ProfitTarget) sizes positions through these functions so
- * that the same inputs always produce the same recommendation. Before this
- * module there were three independent implementations that disagreed with
- * each other in two user-visible ways; both are resolved here.
+ * Every calculator surface in the terminal (Calculator → Sizing and
+ * Calculator → Target/R:R, which absorbed the retired PositionSizing and
+ * ProfitTarget widgets) sizes positions through these functions so that the
+ * same inputs always produce the same recommendation. Before this module
+ * there were three independent implementations that disagreed with each
+ * other in two user-visible ways; both are resolved here.
  *
  * ## Decision 1 — over-budget positions are reported, never hidden
  *

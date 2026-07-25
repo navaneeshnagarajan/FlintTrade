@@ -1,9 +1,10 @@
 /**
  * sizing.test.ts — unit tests for the shared position-sizing kernel.
  *
- * The numeric cases here mirror the characterisation pins in the Calculator,
- * PositionSizing and ProfitTarget widget suites, so a change to the kernel
- * fails here first with a much smaller reproduction.
+ * The numeric cases here mirror the characterisation pins in the Calculator
+ * widget suite — which now carries the pins of the retired PositionSizing and
+ * ProfitTarget widgets too — so a change to the kernel fails here first with a
+ * much smaller reproduction.
  */
 
 import { describe, it, expect } from "vitest";

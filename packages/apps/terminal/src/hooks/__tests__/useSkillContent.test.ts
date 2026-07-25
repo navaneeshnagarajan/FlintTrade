@@ -151,7 +151,7 @@ describe("useSkillContent — advanced", () => {
     // depthheatmap merged into domheatmap (its gamma-scale look).
     expect(availableWidgets).toContain("domheatmap");
     expect(availableWidgets).not.toContain("depthheatmap");
-    expect(availableWidgets).toContain("scanner");
+    expect(availableWidgets).toContain("conditionscanner");
     // Order-flow widgets. `footprint` merged into `orderflow` (its
     // "footprint+delta" view mode), so the canonical id is what the picker can reach
     // them (they were registered + functional but in no skill tier).
