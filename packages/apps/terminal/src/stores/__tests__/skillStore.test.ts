@@ -63,6 +63,41 @@ describe("skillStore", () => {
     expect(useSkillStore.getState().metrics.trade.ordersPlaced).toBe(before);
   });
 
+  // 8b. trackAction — widget-view events feed widgetsUsed, once per widget.
+  // Every widget emits widget_view_<name> on mount and for months they were
+  // ALL silently dropped: widgetsUsed gates the trade intermediate→advanced
+  // suggestion at 15, so that suggestion could never fire.
+  it("counts each distinct widget_view_* action into widgetsUsed exactly once", () => {
+    expect(useSkillStore.getState().metrics.trade.widgetsUsed).toBe(0);
+
+    useSkillStore.getState().trackAction("trade", "widget_view_tick_speed");
+    useSkillStore.getState().trackAction("trade", "widget_view_tick_speed");
+    useSkillStore.getState().trackAction("trade", "widget_view_market_clock");
+
+    expect(useSkillStore.getState().metrics.trade.widgetsUsed).toBe(2);
+    expect(useSkillStore.getState().seenWidgetActions).toEqual([
+      "widget_view_tick_speed",
+      "widget_view_market_clock",
+    ]);
+  });
+
+  it("makes the widgetsUsed:15 advanced threshold actually reachable", () => {
+    // Drive the exact conditions of the trade intermediate→advanced rule
+    // through the PUBLIC api — this is the path that was dead.
+    useSkillStore.getState().setGlobalLevel("intermediate");
+    for (let i = 0; i < 100; i++) {
+      useSkillStore.getState().trackAction("trade", "ordersPlaced");
+    }
+    for (let i = 0; i < 15; i++) {
+      useSkillStore.getState().trackAction("trade", `widget_view_w${i}`);
+    }
+
+    const suggestions = useSkillStore.getState().getSuggestions();
+    expect(
+      suggestions.some((s) => s.domain === "trade" && s.toLevel === "advanced"),
+    ).toBe(true);
+  });
+
   // 9. setHelpPref
   it("setHelpPref toggles individual help preferences", () => {
     expect(useSkillStore.getState().helpPrefs.inlineHints).toBe(true);
