@@ -151,7 +151,10 @@ function ScalperWidget(_props: WidgetProps) {
   const refreshLotSize = useCallback((signal?: { cancelled: boolean }) => {
     getLotSize(symbol, optExch)
       .then((res) => {
-        if (signal?.cancelled || res.lot_size <= 0 || res.is_sample_data === true) return;
+        // A missing flag is treated as sample: this value multiplies real order
+        // quantities, so the resolver must positively assert the lot size came
+        // from the broker symbol master before it is trusted.
+        if (signal?.cancelled || res.lot_size <= 0 || res.is_sample_data !== false) return;
         // The symbol master is the audited source — never override it with
         // the resolver route.
         setResolvedLot((prev) =>
