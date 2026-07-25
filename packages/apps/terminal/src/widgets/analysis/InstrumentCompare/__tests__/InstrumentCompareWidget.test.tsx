@@ -110,3 +110,19 @@ describe("InstrumentCompareWidget", () => {
     expect(screen.getByText("% change from open")).toBeTruthy();
   });
 });
+
+describe("InstrumentCompareWidget — no invented series", () => {
+  it("names a symbol it has no series for instead of drawing a fabricated line", () => {
+    // This used to synthesise `100 + idx * 0.5` for any unknown symbol, so
+    // typing a real ticker produced a smooth rising line that read as that
+    // instrument's performance. A "Sample data" badge does not excuse a
+    // fabricated series attributed to a named instrument.
+    render(<InstrumentCompareWidget />);
+
+    const firstSlot = screen.getAllByRole("textbox")[0];
+    fireEvent.change(firstSlot, { target: { value: "RELIANCE" } });
+
+    expect(screen.getByRole("note").textContent).toContain("RELIANCE");
+    expect(screen.getByRole("note").textContent).toMatch(/no live price source/i);
+  });
+});

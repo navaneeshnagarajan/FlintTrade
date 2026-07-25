@@ -515,6 +515,42 @@ class TestIVSmileEndpoint:
         })
         assert resp.status_code == 200
 
+    def test_ivsmile_returns_one_curve_per_requested_expiry(self, client):
+        """Several expiries in, several curves out.
+
+        This route read a single expiry via ``_body_expiry`` and always
+        answered with exactly one curve, so a caller asking for a term
+        structure had every expiry past the first dropped in silence — the
+        terminal even allocated a three-colour palette for curves that could
+        never arrive.
+        """
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiry_dates": ["26MAR26", "30APR26", "28MAY26"],
+        })
+        curves = body["data"]["curves"]
+        assert len(curves) == 3
+        assert [c["expiry"] for c in curves] == ["26MAR26", "30APR26", "28MAY26"]
+
+    def test_ivsmile_deduplicates_and_caps_expiries(self, client):
+        """Each expiry is its own chain read, so the fan-out is bounded."""
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiry_dates": ["26MAR26", "26MAR26", "30APR26", "28MAY26", "25JUN26"],
+        })
+        curves = body["data"]["curves"]
+        assert len(curves) == 3, "duplicates collapse and the list is capped"
+        assert [c["expiry"] for c in curves] == ["26MAR26", "30APR26", "28MAY26"]
+
+    def test_ivsmile_single_expiry_still_returns_one_curve(self, client):
+        """The single-expiry contract every existing caller relies on."""
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
+        })
+        assert len(body["data"]["curves"]) == 1
+
     def test_ivsmile_status_ok(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["status"] == "success"

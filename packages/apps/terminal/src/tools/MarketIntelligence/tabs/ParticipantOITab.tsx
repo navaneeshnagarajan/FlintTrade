@@ -81,7 +81,12 @@ export function ParticipantOITab() {
             <Table>
               <TableHeader>
                 <TableRow className="border-border-default hover:bg-transparent">
-                  {["Participant", "Long Calls", "Short Calls", "Long Puts", "Short Puts", "Net"].map((h) => (
+                  {/* The dataset carries aggregate index-option OI per side —
+                      it does NOT split calls from puts. The table used to show
+                      four columns by inventing the put pair as 0.48x and 0.52x
+                      of the call figures: arbitrary multipliers rendered as
+                      data. Two columns, both real. */}
+                  {["Participant", "Long Index Options", "Short Index Options", "Net"].map((h) => (
                     <TableHead key={h} className="text-xs text-text-muted h-8 px-3">{h}</TableHead>
                   ))}
                 </TableRow>
@@ -96,8 +101,6 @@ export function ParticipantOITab() {
                       </TableCell>
                       <TableCell className="px-3 py-2 font-mono text-xs text-profit">{formatOI(row.long_index_opt)}</TableCell>
                       <TableCell className="px-3 py-2 font-mono text-xs text-loss">{formatOI(row.short_index_opt)}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-profit">{formatOI(Math.round(row.long_index_opt * 0.48))}</TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-xs text-loss">{formatOI(Math.round(row.short_index_opt * 0.52))}</TableCell>
                       <TableCell className={`px-3 py-2 font-mono text-xs font-semibold ${netColor(net)}`}>
                         {net >= 0 ? "+" : ""}{formatOI(Math.abs(net))}
                       </TableCell>

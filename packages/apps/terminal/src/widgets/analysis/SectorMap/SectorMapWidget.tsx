@@ -118,6 +118,13 @@ function SectorMapWidget(_props: WidgetProps) {
 
   const { data: positionsData } = usePositions({ enabled: accountReadsEnabled });
   const isSampleSectorData = mode === "explore";
+  /**
+   * What the colours actually encode. The explore sample carries day-change
+   * figures; the live path is built from the operator's own positions, so it
+   * is unrealised P&L against entry. Naming it stops the live view being read
+   * as market performance.
+   */
+  const metricLabel = isSampleSectorData ? "day change %" : "unrealised P&L % vs entry";
 
   // Memoized callback ref for treemap container (adapted from source)
   const setTreemapRef = useCallback((node: HTMLDivElement | null): void => {
@@ -169,6 +176,12 @@ function SectorMapWidget(_props: WidgetProps) {
       ];
     }
 
+    // NOTE ON WHAT THIS METRIC IS. Against live data this widget maps the
+    // operator's OWN POSITIONS, so `change` here is unrealised P&L percent
+    // against the average entry price — NOT the instrument's move on the day.
+    // The two are unrelated: a stock up 2% today can sit at -15% against an
+    // entry from last month. The legend and the header say which one is on
+    // screen so the colours cannot be read as market performance.
     return ((positionsData ?? []) as Position[]).map((p) => {
       const ltp = p.ltp ?? 0;
       const avgPrice = p.averagePrice ?? 0;
@@ -371,7 +384,9 @@ function SectorMapWidget(_props: WidgetProps) {
           </div>
         </div>
         <span className="text-xxs text-text-disabled">
-          {(activeMode === "rrg" || activeMode === "portfolio") ? "RS-Ratio (x) vs RS-Momentum (y) · 100 = neutral" : activeMode === "treemap" ? "Tile = equal weight · Color = change %" : "Color = change %"}
+          {(activeMode === "rrg" || activeMode === "portfolio") ? "RS-Ratio (x) vs RS-Momentum (y) · 100 = neutral" : activeMode === "treemap"
+              ? `Tile = equal weight · Colour = ${metricLabel}`
+              : `Colour = ${metricLabel}`}
         </span>
       </div>
     </div>

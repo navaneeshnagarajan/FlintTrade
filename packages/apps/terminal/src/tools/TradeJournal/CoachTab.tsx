@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Brain, AlertCircle, Loader2 } from "lucide-react";
 import { computeAnalytics } from "@/lib/journalAnalytics";
 import { type JournalTrade } from "@/services/ftApi";
-import { getBase } from "@/services/ftApi.helpers";
+import { getBase, buildHeaders } from "@/services/ftApi.helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,7 +57,11 @@ export function CoachTab({ trades }: { trades: JournalTrade[] }) {
       const base = getBase();
       const res = await fetch(`${base}/api/v1/advisor`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // buildHeaders, not a bare Content-Type. This was the only advisor
+        // caller sending no X-API-Key and no session JWT, so it depended on
+        // the route being unauthenticated — which is not something a caller
+        // should assume, and not something that stays true.
+        headers: buildHeaders(true),
         body: JSON.stringify({
           message: `Analyse my recent trading behaviour. Win rate: ${winRate}%, Average win: ₹${avgWin}, Average loss: ₹${avgLoss}, Current streak: ${streak}. What patterns do you see and what should I improve?`,
         }),

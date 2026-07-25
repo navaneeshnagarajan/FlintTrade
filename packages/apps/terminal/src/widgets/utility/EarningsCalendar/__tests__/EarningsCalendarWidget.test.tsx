@@ -187,6 +187,10 @@ describe("EarningsCalendarWidget — honest data", () => {
     const liveDate = `${year}-${String(month + 1).padStart(2, "0")}-15`;
     mockConnected.mockReturnValue(true);
     mockEarnings.mockResolvedValue({
+      // The explicit live flag the real route sends. Provenance now fails
+      // closed, so a payload that omits it reads as sample — which is the
+      // point: a backend that stops flagging must not silently read as live.
+      is_sample_data: false,
       entries: [
         { symbol: "ZOMATO", company: "Zomato", date: liveDate, result: "beat", sector: "Consumer" },
       ],

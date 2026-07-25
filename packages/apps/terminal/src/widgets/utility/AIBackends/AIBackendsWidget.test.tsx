@@ -132,7 +132,10 @@ describe("AIBackendsWidget", () => {
     fireEvent.change(screen.getByLabelText("Prompt for Codex CLI"), {
       target: { value: "summarise the repo" },
     });
+    // Running an agent starts a local process, so it is confirmed first: the
+    // Run button opens the dialog, and the dialog's action actually runs it.
     fireEvent.click(screen.getByRole("button", { name: /Run agent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Run agent$/ }));
 
     const pane = await screen.findByTestId("agent-output");
     await waitFor(() => expect(pane).toHaveTextContent("Hello world"));
@@ -154,7 +157,10 @@ describe("AIBackendsWidget", () => {
     fireEvent.change(screen.getByLabelText("Prompt for Codex CLI"), {
       target: { value: "do it" },
     });
+    // Running an agent starts a local process, so it is confirmed first: the
+    // Run button opens the dialog, and the dialog's action actually runs it.
     fireEvent.click(screen.getByRole("button", { name: /Run agent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Run agent$/ }));
 
     expect(await screen.findByText("read_file(app.py)")).toBeInTheDocument();
     const alert = await screen.findByRole("alert");
@@ -175,7 +181,10 @@ describe("AIBackendsWidget", () => {
     fireEvent.change(screen.getByLabelText("Prompt for Codex CLI"), {
       target: { value: "go" },
     });
+    // Running an agent starts a local process, so it is confirmed first: the
+    // Run button opens the dialog, and the dialog's action actually runs it.
     fireEvent.click(screen.getByRole("button", { name: /Run agent/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Run agent$/ }));
 
     expect(await screen.findByText(/is not installed on this host/i)).toBeInTheDocument();
   });

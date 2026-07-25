@@ -506,7 +506,7 @@ const DrillDownPanel = memo(function DrillDownPanel({ sector, onBack }: DrillDow
         </Button>
         <span className="text-xs font-semibold text-text-primary font-mono">{sector}</span>
         <span className="text-xxs text-text-muted">Constituents</span>
-        {data?.is_sample_data === true && (
+        {data != null && data.is_sample_data !== false && (
           <Badge
             variant="outline"
             className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"
@@ -660,7 +660,7 @@ export const PortfolioRRGTab = memo(function PortfolioRRGTab() {
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} />
           </Button>
         )}
-        {data?.is_sample_data === true && (
+        {data != null && data.is_sample_data !== false && (
           <Badge
             variant="outline"
             className="text-xxs px-1.5 py-0 border-warning/30 text-warning bg-warning/10"

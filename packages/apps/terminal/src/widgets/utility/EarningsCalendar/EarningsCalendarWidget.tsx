@@ -193,7 +193,9 @@ function EarningsCalendarWidget() {
   // connected.
   const liveEntries = (liveData?.entries as EarningsEntry[] | undefined) ?? [];
   const usingLocalSample = !isConnected;
-  const showingSample = usingLocalSample || liveData?.is_sample_data === true;
+  // Fail closed: a present payload without an explicit `false` is sample.
+  const showingSample =
+    usingLocalSample || (liveData != null && liveData.is_sample_data !== false);
   const allEntries: EarningsEntry[] = usingLocalSample ? SAMPLE_EARNINGS : liveEntries;
   const hasEntries = allEntries.length > 0;
 

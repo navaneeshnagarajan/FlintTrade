@@ -9,11 +9,16 @@
  *   - Sample data when broker disconnected
  */
 
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Activity, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import {
+  listUploadedStrategies,
+  type UploadedStrategyStatus,
+} from "@/services/ftApi.backtest";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -260,10 +265,53 @@ const HEALTH_LABEL: Record<OverallHealth, string> = {
 // Main widget
 // ---------------------------------------------------------------------------
 
+/**
+ * Map an engine strategy-runner status onto the widget's row shape.
+ *
+ * The runner reports process facts (state, pid, memory, uptime) — it does not
+ * track per-strategy P&L, trade counts or signal counts. Those are left at
+ * zero and labelled rather than invented, which is why the table shows a
+ * "not reported" dash for them instead of a plausible number.
+ */
+function toStrategyRow(status: UploadedStrategyStatus): Strategy {
+  const state = status.state?.toLowerCase() ?? "";
+  const mapped: StrategyStatus =
+    state === "running" ? "running"
+    : state === "crashed" ? "error"
+    : "stopped";
+  return {
+    id: status.strategy_id,
+    name: status.name || status.strategy_id,
+    status: mapped,
+    symbol: "—",
+    pnl: 0,
+    tradesToday: 0,
+    signalsGenerated: 0,
+    logs: [],
+  };
+}
+
 function StrategyMonitorWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
-  const strategies = isConnected ? [] : SAMPLE_STRATEGIES;
+
+  // Real uploaded strategies from the engine's runner. This widget used to
+  // render `isConnected ? [] : SAMPLE_STRATEGIES` — so a connected operator
+  // with strategies running saw a permanently empty list, and nobody could
+  // tell that from "no strategies uploaded".
+  const strategiesQuery = useQuery({
+    queryKey: ["strategies", "uploaded"],
+    queryFn: listUploadedStrategies,
+    enabled: isConnected,
+    refetchInterval: isConnected ? 15_000 : false,
+    retry: false,
+  });
+
+  const liveStrategies = useMemo(
+    () => (strategiesQuery.data ?? []).map(toStrategyRow),
+    [strategiesQuery.data],
+  );
+  const strategies = isConnected ? liveStrategies : SAMPLE_STRATEGIES;
 
   useEffect(() => {
     track("trade", "widget_view_strategy_monitor");

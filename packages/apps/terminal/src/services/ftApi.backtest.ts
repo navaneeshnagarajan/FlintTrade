@@ -567,3 +567,29 @@ export const runPermutationTest = (returns: number[], config?: PermutationConfig
     returns,
     ...(config ? { config } : {}),
   });
+
+// ---------------------------------------------------------------------------
+// Uploaded-strategy listing — GET /api/v1/strategies
+// ---------------------------------------------------------------------------
+
+/** One uploaded strategy's runtime status, as the engine's runner reports it. */
+export interface UploadedStrategyStatus {
+  strategy_id: string;
+  name: string;
+  /** running | stopped | crashed */
+  state: string;
+  pid: number | null;
+  memory_mb: number | null;
+  uptime_seconds: number | null;
+  log_path?: string | null;
+}
+
+/**
+ * List uploaded strategies with their live runtime status.
+ *
+ * The Strategy Monitor widget rendered a hardcoded sample when disconnected
+ * and an unconditionally EMPTY list when connected, because nothing called
+ * this route — so a connected operator with running strategies saw nothing.
+ */
+export const listUploadedStrategies = () =>
+  get<{ strategies: UploadedStrategyStatus[] }>("strategies").then((r) => r.strategies);

@@ -65,7 +65,7 @@ export const GLOBAL_INDICES: GlobalIndex[] = [
   { name: "Hang Seng", region: "Hong Kong", ltp: 16524.33, change: -132.60, change_pct: -0.80, currency: "HKD" },
   { name: "DAX", region: "Germany", ltp: 16751.48, change: 84.20, change_pct: 0.50, currency: "EUR" },
   { name: "Shanghai Comp.", region: "China", ltp: 2962.28, change: -8.44, change_pct: -0.28, currency: "CNY" },
-  { name: "SGX Nifty", region: "Singapore", ltp: 21842.0, change: 108.5, change_pct: 0.50, currency: "USD" },
+  { name: "GIFT Nifty", region: "India (NSE IX)", ltp: 21842.0, change: 108.5, change_pct: 0.50, currency: "USD" },
 ];
 
 export const PARTICIPANT_OI: ParticipantOI[] = [
@@ -130,9 +130,17 @@ export const OI_BUILDUP_COLORS: Record<OIBuildUp, string> = {
   "Neutral": "text-text-muted border-border-default",
 };
 
+/**
+ * Tabs whose content is static illustrative data.
+ *
+ * `fiidii` is deliberately NOT here: it fetches `getFiiDiiData(10)` and renders
+ * real rows, hiding its own DataNotice when the payload is live. Listing it
+ * made the tool header stamp a "Sample Data" badge over genuinely live
+ * figures — a badge that lies in the safe direction is still a badge that
+ * lies, and it trains the operator to ignore the one that matters.
+ */
 export const SAMPLE_DATA_TABS: TabId[] = [
   "breadth",
-  "fiidii",
   "sectors",
   "heatmap",
   "vix",

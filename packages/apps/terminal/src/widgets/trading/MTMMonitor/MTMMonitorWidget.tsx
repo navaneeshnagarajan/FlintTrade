@@ -149,7 +149,10 @@ function MTMMonitorWidget(_props: WidgetProps) {
     isFetching: isPositionsFetching,
     dataUpdatedAt,
   } = usePositions({ enabled: accountReadsEnabled });
-  const { data: _funds } = useFunds({ enabled: accountReadsEnabled }); // keeps store updated
+  // Subscribed for its side effect only: the hook mirrors funds into the
+  // trading store, which the risk surfaces read. The payload is deliberately
+  // unused here — naming it `_funds` looked like an oversight.
+  useFunds({ enabled: accountReadsEnabled });
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
   const [nowMs, setNowMs] = useState(() => Date.now());

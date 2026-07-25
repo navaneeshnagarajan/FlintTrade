@@ -222,6 +222,11 @@ describe("TradeCopierWidget", () => {
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
 
+    // Arming a live multi-account mirror is confirmed first: the button opens
+    // the dialog, and only the dialog's action arms it.
+    expect(mockStart).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: /^Start mirror$/ }));
+
     await waitFor(() => {
       expect(mockStart).toHaveBeenCalledWith("master", ["target"], "equal");
     });
