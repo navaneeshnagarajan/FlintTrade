@@ -112,6 +112,7 @@ const lazyWidgets = {
   // Wave 32 widgets
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
+  deliverydata: lazy(() => import("@/widgets/analysis/DeliveryData/DeliveryDataWidget")),
 
   // Wave 33 widgets
   marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
@@ -578,6 +579,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Gap-up/gap-down events with fill rate and average gap size — sample events only, no gap-history source is wired yet" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
+  { id: "deliverydata", name: "Delivery Data", icon: "Package", category: "Analysis", description: "Delivery percentage per scrip with open/high/low/close and traded volume, sorted into conviction bands — sample data only, no delivery source is wired yet" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
 
   // Utility

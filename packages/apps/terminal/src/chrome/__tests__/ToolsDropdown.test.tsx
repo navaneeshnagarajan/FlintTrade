@@ -42,9 +42,9 @@ describe("ToolsDropdown", () => {
   });
 
   it("cannot be brought back by a stale skill allowlist entry", () => {
-    // `useSkillContent` still lists "market-intelligence" for advanced users.
-    // The allowlist FILTERS the tool table; it cannot add to it, so a stale
-    // entry is inert rather than a way back in.
+    // A persisted skill allowlist can still carry the retired
+    // "market-intelligence" id. The allowlist FILTERS the tool table; it
+    // cannot add to it, so a stale entry is inert rather than a way back in.
     renderDropdown("/trade", ["market-intelligence", "settings"]);
     expect(screen.queryByRole("menuitem", { name: /market intelligence/i })).toBeNull();
     expect(screen.getByRole("menuitem", { name: /settings/i })).toBeInTheDocument();

@@ -103,7 +103,6 @@ const ADVANCED_WIDGETS: string[] = Array.from(
 const BEGINNER_TOOLS: string[] = ["settings"];
 const INTERMEDIATE_TOOLS: string[] = ["trade-journal", "settings"];
 const ADVANCED_TOOLS: string[] = [
-  "market-intelligence",
   "trade-journal",
   "settings",
 ];

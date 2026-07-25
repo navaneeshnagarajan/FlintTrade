@@ -24,5 +24,4 @@ export interface WidgetProps extends IDockviewPanelProps {
 
 export type ToolId =
   | "settings"
-  | "trade-journal"
-  | "market-intelligence";
+  | "trade-journal";

@@ -45,7 +45,6 @@ describe("useSkillContent — beginner", () => {
   it("returns settings-only tools", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("market-intelligence");
     expect(result.current.availableTools).not.toContain("trade-journal");
   });
 
@@ -104,7 +103,6 @@ describe("useSkillContent — intermediate", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("market-intelligence");
   });
 
   it("returns detailed tooltip level", () => {
@@ -163,7 +161,6 @@ describe("useSkillContent — advanced", () => {
 
   it("includes all tools", () => {
     const { result } = renderHook(() => useSkillContent());
-    expect(result.current.availableTools).toContain("market-intelligence");
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");
   });

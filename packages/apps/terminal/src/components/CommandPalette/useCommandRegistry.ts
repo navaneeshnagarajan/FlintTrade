@@ -189,19 +189,6 @@ export function useCommandRegistry() {
           );
         },
       },
-      {
-        id:          "tool:market-intelligence",
-        title:       "Open Market Intelligence",
-        description: "AI-powered market insights",
-        category:    "tool",
-        action:      () => {
-          window.dispatchEvent(
-            new CustomEvent("flinttrade:open-tool", {
-              detail: { toolId: "market-intelligence" },
-            }),
-          );
-        },
-      },
     ];
 
     // ----- Navigate commands -----

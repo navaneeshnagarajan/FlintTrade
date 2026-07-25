@@ -86,6 +86,7 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "greeksheatmap", "name": "Greeks Matrix", "category": "Analysis", "status": "live"},
     {"id": "gapanalysis", "name": "Gap Analysis", "category": "Analysis", "status": "live"},
     {"id": "correlationmatrix", "name": "Correlation Matrix", "category": "Analysis", "status": "live"},
+    {"id": "deliverydata", "name": "Delivery Data", "category": "Analysis", "status": "live"},
     {"id": "domheatmap", "name": "DOM Heatmap", "category": "Analysis", "status": "live"},
     # Utility
     {"id": "watchlist", "name": "Watchlist", "category": "Utility", "status": "live"},

@@ -263,7 +263,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (68)
+### The widgets (69)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are generated
@@ -280,7 +280,7 @@ from the widget registry
   Skew, Straddle P&L, Order Flow, Portfolio Optimiser, Condition Scanner,
   Pivot Points, Volatility Cone, VWAP Bands, Correlation Pairs, Multi-
   Timeframe, PCR Trend, Instrument Compare, Greeks Matrix, Gap Analysis,
-  Correlation Matrix, and DOM Heatmap
+  Correlation Matrix, Delivery Data, and DOM Heatmap
 - **Utility** — Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
   Advisor, AI Backends, AI Team, Obsidian Vault, Price Alerts,
   Reconciliation, Funding Rates, Currency Converter, Earnings Calendar,

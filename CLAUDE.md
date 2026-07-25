@@ -88,7 +88,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | Generic HMAC-signed custom webhooks + flow builder (the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed on 2026-07-26; a retired provider source now 404s) |
-| `terminal` | apps | TS/React | SPA: Dockview workspace, 68 widgets, routes — single source of truth for UI |
+| `terminal` | apps | TS/React | SPA: Dockview workspace, 69 widgets, routes — single source of truth for UI |
 | `desktop` | apps | TS/Electron | Sandboxed Electron 40 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
