@@ -283,14 +283,23 @@ exit 0
       const executable = process.platform === "win32" ? "powershell.exe" : "pwsh";
       const probe = spawnSync(executable, ["-NoProfile", "-NonInteractive", "-Command", "exit 0"]);
       if (probe.error) return;
-      const parsed = spawnSync(executable, [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `[void][scriptblock]::Create((Get-Content -Raw -LiteralPath $args[0]))`,
-        powershellScript,
-      ]);
-      expect(parsed.status).toBe(0);
+      // The script path travels in the environment, not as a trailing argv
+      // entry: in -Command mode PowerShell does NOT populate $args from
+      // trailing arguments, so `$args[0]` was null and Get-Content failed with
+      // exit 1. This test only runs on CI (or Windows), so that never surfaced
+      // locally. An environment variable also sidesteps quoting for paths
+      // containing spaces.
+      const parsed = spawnSync(
+        executable,
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[void][scriptblock]::Create((Get-Content -Raw -LiteralPath $env:FLINTTRADE_PS_SCRIPT))",
+        ],
+        { env: { ...process.env, FLINTTRADE_PS_SCRIPT: powershellScript } },
+      );
+      expect(parsed.status, parsed.stderr?.toString() ?? "").toBe(0);
     },
   );
 });
