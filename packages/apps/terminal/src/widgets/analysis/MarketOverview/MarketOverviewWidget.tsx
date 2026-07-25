@@ -25,8 +25,10 @@
  *   SectorMap         squarified treemap/grid/table with drill-down, the RRG
  *                     canvases, and the metric-labelling fix (live colours
  *                     are position P&L%, not day change — and say so)
- *   SectorPerformance the timeframe-ranked bar view, which gains a live path
- *                     through sectors/rotation here
+ *   SectorPerformance the timeframe-ranked bar view. It reads
+ *                     sectors/rotation, which is still a BACKEND STUB
+ *                     (unconditional is_sample_data), so the bars stay
+ *                     honestly badged sample until that route is built
  *   GlobalIndices     the world-indices table with the codebase's best
  *                     fail-closed provenance handling
  *   FiiLongShort      the futures-bias gauge and FII segment table

@@ -571,3 +571,25 @@ describe("PnLMonitorWidget — provenance badge", () => {
     expect(screen.queryByText("Practice data")).not.toBeInTheDocument();
   });
 });
+
+describe("PnLMonitor — drawdown on a never-positive curve", () => {
+  // The retired MTM Monitor's `peak > 0` guard reported a flat 0 for a book
+  // that fell straight from flat into loss, and rendered it in PROFIT GREEN.
+  // Percent-of-peak is genuinely undefined there, so the view reports rupees.
+  it("reports rupees, not a false 0.00%, when the curve never rose above zero", async () => {
+    mockGetTradebook.mockResolvedValue([
+      { action: "BUY", exchange: "NSE", orderId: "o-1", price: 100, quantity: 10, symbol: "NIFTY", timestamp: "2026-05-29T09:30:00.000Z", tradeId: "t-1" },
+      { action: "SELL", exchange: "NSE", orderId: "o-2", price: 90, quantity: 10, symbol: "NIFTY", timestamp: "2026-05-29T15:00:00.000Z", tradeId: "t-2" },
+    ]);
+
+    renderWidget();
+    await waitFor(() => expect(mockGetTradebook).toHaveBeenCalled());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Drawdown" }));
+
+    expect(await screen.findByText("Max Drawdown")).toBeInTheDocument();
+    expect(screen.queryByText("0.00%")).not.toBeInTheDocument();
+    expect(screen.getByText(/percent-of-peak has no meaning/i)).toBeInTheDocument();
+  });
+});

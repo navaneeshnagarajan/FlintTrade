@@ -257,9 +257,10 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
     component: "marketoverview",
     params: { tab: "sectors", view: "bars" },
     note:
-      "Merged into Market Overview as the Sectors bars view — which gains the "
-      + "live path this widget never had; its sample table collapsed into the "
-      + "widget's single sample sector dataset, still badged fail-closed.",
+      "Merged into Market Overview as the Sectors bars view. It is wired to "
+      + "the sectors/rotation endpoint, but that route is still a backend "
+      + "stub, so the bars remain honestly badged sample; its own sample "
+      + "table collapsed into the widget's single sample sector dataset.",
   },
   globalindices: {
     component: "marketoverview",

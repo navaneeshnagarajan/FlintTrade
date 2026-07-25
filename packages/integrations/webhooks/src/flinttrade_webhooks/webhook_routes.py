@@ -116,8 +116,14 @@ def _get_receiver() -> WebhookReceiver:
 # ---------------------------------------------------------------------------
 
 
-def _parse_request_body() -> tuple[bytes, dict[str, Any] | str | None]:
+def _parse_request_body() -> tuple[bytes, dict[str, Any] | None]:
     """Read the raw request body and attempt JSON decoding.
+
+    Only a JSON OBJECT is accepted. The plain-text branch existed for the
+    ChartInk CSV and TradingView text payloads; with those providers removed
+    (ruling D3) a non-JSON body has no parser, and returning the raw string
+    let it travel as far as the dispatcher before failing with an unrelated
+    422. It now fails at the door with an accurate message.
 
     Returns:
         Tuple of (raw_bytes, parsed_dict_or_None).
@@ -132,7 +138,7 @@ def _parse_request_body() -> tuple[bytes, dict[str, Any] | str | None]:
     try:
         decoded = json.loads(text)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return raw, text
+        return raw, None
     return raw, decoded if isinstance(decoded, dict) else None
 
 
@@ -286,7 +292,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
     if body_dict is None:
         return jsonify({
             "status": "error",
-            "message": "Request body must be a JSON object or supported text payload",
+            "message": "Request body must be a JSON object",
         }), 400
 
     # Signature verification

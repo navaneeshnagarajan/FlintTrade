@@ -7,10 +7,13 @@
  *     day-change labelling fix — against live data the colours encode
  *     unrealised P&L % vs entry (a portfolio map), NOT the day's market
  *     move, and the legend says which is on screen.
- *   - SectorPerformance: the timeframe-ranked sector bar view. It was
- *     sample-only; here it gains a live path through the backend
- *     `sectors/rotation` endpoint, with the widget's single sample sector
- *     dataset as the disclosed fail-closed fallback.
+ *   - SectorPerformance: the timeframe-ranked sector bar view. It reads the
+ *     backend `sectors/rotation` endpoint, which is STILL A STUB — it returns
+ *     `is_sample_data: true` unconditionally
+ *     (screener/sample_data_routes.py). So the bars are wired for live data
+ *     but remain honestly badged sample in production until that route is
+ *     built; the widget's single sample sector dataset is the disclosed
+ *     fail-closed fallback.
  *   - Market Intelligence's sector rotation tab is dominated by the bar view
  *     over the same rotation rows (its INDIA_SECTORS table collapses into
  *     ../sampleSectors.ts). Its sector HEATMAP is not: the market-cap-weighted

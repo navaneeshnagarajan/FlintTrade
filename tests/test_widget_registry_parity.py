@@ -133,3 +133,32 @@ def test_builtin_presets_have_no_duplicate_widgets() -> None:
     for preset in _BUILTIN_PRESETS:
         duplicates = {wid for wid in preset.widgets if preset.widgets.count(wid) > 1}
         assert not duplicates, f"{preset.id} lists the same widget twice: {duplicates}"
+
+
+def _terminal_preset_ids() -> list[str]:
+    """Parse the preset ids out of the terminal's workspacePresets.ts."""
+    source = (ROOT / "packages/apps/terminal/src/layout/workspacePresets.ts").read_text(
+        encoding="utf-8",
+    )
+    return re.findall(r'\n  \{\n    id: "([\w-]+)",\n    name: "', source)
+
+
+def test_builtin_presets_match_the_terminal_preset_list() -> None:
+    """The two preset surfaces must offer the same set.
+
+    Settings -> Presets reads the BACKEND list (for fork/edit/delete) while the
+    workspace picker applies the TERMINAL list. They drifted: the backend had
+    the original six while the terminal had seventeen, so the retirement
+    pointers for `dashboard` and `threepanel` sent the operator to Trading Desk
+    and Three Panel -- presets the manager they'd open could not show them.
+    """
+    from flinttrade_core.preset_routes import _BUILTIN_PRESETS
+
+    terminal = _terminal_preset_ids()
+    assert len(terminal) > 5, "workspacePresets.ts parse returned too few rows"
+
+    backend_ids = sorted(preset.id for preset in _BUILTIN_PRESETS)
+    missing = sorted(set(terminal) - set(backend_ids))
+    stale = sorted(set(backend_ids) - set(terminal))
+    assert not missing, f"presets the terminal offers but the manager cannot show: {missing}"
+    assert not stale, f"presets the manager lists but the terminal cannot apply: {stale}"

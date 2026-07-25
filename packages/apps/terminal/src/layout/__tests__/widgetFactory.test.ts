@@ -216,11 +216,35 @@ describe("widgetFactory catalogue wiring", () => {
       positions: { view: ["table", "net", "heat"], group: ["sector", "exchange", "flat"] },
       calculator: { tab: ["sizing", "target", "brokerage", "margin"] },
       conditionscanner: { view: ["scans", "sectors"] },
+      marketoverview: {
+        tab: ["breadth", "sectors", "rotation", "flows", "indices", "contribution"],
+        view: ["treemap", "grid", "table", "bars", "heatmap", "sectors", "portfolio"],
+      },
+      pnlmonitor: { view: ["live", "summary", "drawdown"] },
+      // Param-free canonicals — listed so the completeness check below can
+      // tell "no params to check" apart from "someone forgot to add a row".
+      fills: {},
+      indexstrip: {},
+      // Chart's params (symbol, interval, syncGroup, optionLeg) are free-form
+      // rather than a closed vocabulary, so there is nothing to enumerate.
+      chart: {},
+      // Option Chain and Risk take no closed-vocabulary view params.
+      optionchain: {},
+      riskdashboard: {},
+      orderladder: {},
     };
 
     for (const [retiredId, spec] of Object.entries(RETIRED_WIDGET_IDS)) {
       if (isMovedWidget(spec)) continue; // pointer panels take no params
       const accepted = ACCEPTED[spec.component];
+      // An unlisted canonical used to `continue` silently, which is how seven
+      // Market Overview retirements and both P&L Monitor ones skipped the very
+      // check this test exists for. A missing row is now a failure.
+      expect(
+        accepted,
+        `${retiredId} → ${spec.component} has no ACCEPTED vocabulary row, so `
+        + "its params are unchecked — add one (use {} if it takes none)",
+      ).toBeDefined();
       if (!accepted || !spec.params) continue;
       for (const [key, value] of Object.entries(spec.params)) {
         const vocabulary = accepted[key];

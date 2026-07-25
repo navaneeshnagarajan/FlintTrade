@@ -205,7 +205,7 @@ Two-tier config. No exceptions.
 | Package | Description |
 |---|---|
 | `integrations/gateway` | Native broker gateway: `BrokerAdapter` Protocol (`adapter.py`), per-broker adapters in `brokers/` (35 in `BROKER_CATALOG`), `registry.py`, `BrokerRouter` (`router.py`); five founder-broker native adapters exist (Dhan, Upstox, Kotak Neo, INDmoney, Groww), but only Dhan and Upstox are connectable while the other three retain declared activation blockers; required SDKs are pinned in `brokers.lock` and attested before activation; OpenAlgo is the optional primary bridge adapter; `shims/` holds OpenAlgo infra shims only |
-| `integrations/webhooks` | TradingView webhooks, ChartInk, custom webhooks, flow builder, alerter |
+| `integrations/webhooks` | Generic HMAC-signed custom webhooks, flow builder, alerter |
 
 #### `packages/apps/` — front-ends (2)
 
@@ -219,9 +219,9 @@ Two-tier config. No exceptions.
 ≈90 widgets (all TSX) + 7 tools + 13 workspace presets. Widgets registered in `src/layout/widgetFactory.tsx` (run the registry for the exact count).
 
 - **Widgets:** `src/widgets/` — Trading / Analysis / Utility. See `packages/apps/terminal/src/widgets/{trading,analysis,utility}/` for the full set.
-- **Tools:** `src/tools/` — BacktestLab, FlowBuilder, MarketIntelligence, PnLDashboard, Settings, StrategyBuilder, TradeJournal.
+- **Tools:** `src/tools/` — BacktestLab, FlowBuilder, Settings, StrategyBuilder, TradeJournal (displayed as "Trade Review").
 - **Full-page routes:** /lab (Backtest + Forward Test), /automate (Flows + Cron + Monitors), /ai (Chat + Signals + Sentiment + RAG).
-- **Workspace presets:** 13 presets in `packages/apps/terminal/src/layout/workspacePresets.ts` (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Investor View, plus 7 more). Serialised via Dockview API.
+- **Workspace presets:** 17 presets in `packages/apps/terminal/src/layout/workspacePresets.ts` (Scalper Zone, Options Desk, Market Watch, Analysis, Risk Monitor, Trading Desk, Three Panel, Investor View, plus 9 more). Serialised via Dockview API.
 
 ## Current State
 

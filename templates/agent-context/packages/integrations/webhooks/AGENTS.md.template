@@ -1,6 +1,6 @@
 # FlintTrade — integration
 
-> TradingView webhooks, ChartInk alerts, custom webhooks, visual flow builder (54 flow nodes), alerter
+> Generic HMAC-signed custom webhooks, visual flow builder (54 flow nodes), alerter
 
 ## Absorb from (reference only, not built features)
 - openalgo-flow → Visual strategy builder (N8N-style, React)

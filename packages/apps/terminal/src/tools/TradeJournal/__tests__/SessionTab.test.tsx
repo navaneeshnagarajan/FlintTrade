@@ -305,4 +305,41 @@ describe("SessionTab live mode", () => {
       expect(log.textContent).not.toContain(sample.symbol);
     }
   });
+
+  // The Orders bar has its own data source, so it needs its own provenance:
+  // real closed round trips plus an empty order book used to render the sample
+  // 14/12/1/1 counts underneath a green "Live" badge.
+  it("badges the Orders bar when only the order book is unavailable", () => {
+    mockTradebook.mockReturnValue({
+      data: [
+        { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "BUY", quantity: 75, price: 100, timestamp: "2026-07-19T09:20:00" },
+        { tradeId: "t2", orderId: "o2", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "SELL", quantity: 75, price: 110, timestamp: "2026-07-19T09:50:00" },
+      ],
+    });
+    mockOrders.mockReturnValue({ data: [] });
+    render(<SessionTab />);
+
+    // The header stays Live — the trade metrics genuinely are.
+    expect(screen.getByText("Live")).toBeTruthy();
+    // But the Orders section discloses that its counts are not.
+    expect(screen.getByLabelText(/sample order counts/i)).toBeTruthy();
+  });
+
+  it("shows no Orders badge when the order book is real", () => {
+    mockTradebook.mockReturnValue({
+      data: [
+        { tradeId: "t1", orderId: "o1", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "BUY", quantity: 75, price: 100, timestamp: "2026-07-19T09:20:00" },
+        { tradeId: "t2", orderId: "o2", symbol: "NIFTY24JUL24000CE", exchange: "NFO",
+          action: "SELL", quantity: 75, price: 110, timestamp: "2026-07-19T09:50:00" },
+      ],
+    });
+    mockOrders.mockReturnValue({ data: [{ status: "complete" }, { status: "rejected" }] });
+    render(<SessionTab />);
+
+    expect(screen.getByText("Live")).toBeTruthy();
+    expect(screen.queryByLabelText(/sample order counts/i)).toBeNull();
+  });
 });

@@ -269,6 +269,11 @@ export function SessionTab() {
 
   const isLive = liveTrades !== null;
   const sessionTrades = liveTrades ?? SAMPLE_SESSION_TRADES;
+  // The Orders bar carries its OWN provenance. `isLive` is derived from the
+  // tradebook alone, so a session with real closed round trips but an empty or
+  // failed order book used to render the sample 14/12/1/1 counts underneath a
+  // green "Live" badge — the same fail-open the trade log below was fixed for.
+  const ordersAreLive = liveOrderSummary !== null;
   const orderSummary = liveOrderSummary ?? SAMPLE_ORDER_SUMMARY;
 
   const metrics = useMemo(() => computeSessionMetrics(sessionTrades), [sessionTrades]);
@@ -316,9 +321,20 @@ export function SessionTab() {
 
         {/* Orders */}
         <section aria-labelledby="ss-orders">
-          <p id="ss-orders" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1">
-            Orders
-          </p>
+          <div className="flex items-center gap-1.5 mb-1">
+            <p id="ss-orders" className="text-xxs font-medium text-text-muted uppercase tracking-wide">
+              Orders
+            </p>
+            {isLive && !ordersAreLive && (
+              <span
+                className="px-1.5 py-0.5 text-xxs rounded border bg-warning/10 text-warning border-warning/30"
+                role="status"
+                aria-label="Sample order counts — today's order book is empty or unavailable"
+              >
+                Sample
+              </span>
+            )}
+          </div>
           <OrderBar summary={orderSummary} />
         </section>
 

@@ -52,18 +52,39 @@ function computeDailyPnl(trades: Trade[]): DailyPnl[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function computeDrawdown(daily: DailyPnl[]): { drawdowns: { date: string; dd: number }[]; maxDrawdown: number } {
+interface DrawdownResult {
+  drawdowns: { date: string; dd: number }[];
+  /** Worst percent-of-peak drawdown, or null when no positive peak existed. */
+  maxDrawdownPct: number | null;
+  /** Worst rupee drawdown from the running peak. Always well defined. */
+  maxDrawdownRupees: number;
+}
+
+/**
+ * Drawdown from the running peak, in percent and in rupees.
+ *
+ * Percent-of-peak is undefined until the equity curve has been positive, so a
+ * book that never rose above zero reports rupees instead of a percentage. The
+ * retired MTM Monitor short-circuited that case to a flat `0`, which rendered
+ * "Max Drawdown 0.00%" in PROFIT GREEN for a session that fell straight from
+ * flat into loss — the drawdown that matters most.
+ */
+function computeDrawdown(daily: DailyPnl[]): DrawdownResult {
   let peak = 0;
   let cum = 0;
-  let maxDrawdown = 0;
+  let maxDrawdownPct: number | null = null;
+  let maxDrawdownRupees = 0;
   const drawdowns = daily.map(({ date, pnl }) => {
     cum += pnl;
     if (cum > peak) peak = cum;
-    const dd = peak > 0 ? ((cum - peak) / peak) * 100 : 0;
-    if (dd < maxDrawdown) maxDrawdown = dd;
+    const rupees = cum - peak;
+    if (rupees < maxDrawdownRupees) maxDrawdownRupees = rupees;
+    // Only meaningful once the curve has been above water.
+    const dd = peak > 0 ? (rupees / peak) * 100 : 0;
+    if (peak > 0 && (maxDrawdownPct === null || dd < maxDrawdownPct)) maxDrawdownPct = dd;
     return { date, dd };
   });
-  return { drawdowns, maxDrawdown };
+  return { drawdowns, maxDrawdownPct, maxDrawdownRupees };
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +164,10 @@ export interface DrawdownViewProps {
 
 export function DrawdownView({ trades }: DrawdownViewProps) {
   const daily = useMemo(() => computeDailyPnl(trades), [trades]);
-  const { drawdowns, maxDrawdown } = useMemo(() => computeDrawdown(daily), [daily]);
+  const { drawdowns, maxDrawdownPct, maxDrawdownRupees } = useMemo(
+    () => computeDrawdown(daily),
+    [daily],
+  );
 
   const cumulativeSeries = useMemo(() => {
     let cum = 0;
@@ -175,9 +199,21 @@ export function DrawdownView({ trades }: DrawdownViewProps) {
         <Card className="bg-surface-card border-border-default">
           <CardContent className="p-3">
             <div className="text-xs text-text-secondary uppercase tracking-wider mb-1">Max Drawdown</div>
-            <div className={`text-xl font-bold font-mono tabular-nums ${maxDrawdown < 0 ? "text-loss" : "text-profit"}`}>
-              {maxDrawdown.toFixed(2)}%
+            <div
+              className={`text-xl font-bold font-mono tabular-nums ${
+                (maxDrawdownPct ?? 0) < 0 || maxDrawdownRupees < 0 ? "text-loss" : "text-profit"
+              }`}
+            >
+              {maxDrawdownPct !== null
+                ? `${maxDrawdownPct.toFixed(2)}%`
+                : formatCompactINR(maxDrawdownRupees)}
             </div>
+            {maxDrawdownPct === null && maxDrawdownRupees < 0 && (
+              <div className="text-xxs text-text-muted mt-0.5">
+                Shown in rupees — the curve never rose above zero, so
+                percent-of-peak has no meaning.
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card className="bg-surface-card border-border-default">
