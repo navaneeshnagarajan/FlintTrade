@@ -11,9 +11,10 @@ const lazyWidgets = {
   dashboard: lazy(() => import("@/widgets/trading/Dashboard/DashboardWidget")),
   scalper: lazy(() => import("@/widgets/trading/Scalper/ScalperWidget")),
   positions: lazy(() => import("@/widgets/trading/Positions/PositionsWidget")),
+  fills: lazy(() => import("@/widgets/trading/Fills/FillsWidget")),
+  pnlmonitor: lazy(() => import("@/widgets/trading/PnLMonitor/PnLMonitorWidget")),
   orders: lazy(() => import("@/widgets/trading/Orders/OrdersWidget")),
   holdings: lazy(() => import("@/widgets/trading/Holdings/HoldingsWidget")),
-  tradebook: lazy(() => import("@/widgets/trading/TradeBook/TradeBookWidget")),
   orderpad: lazy(() => import("@/widgets/trading/OrderPad/OrderPadWidget")),
   foreverorders: lazy(() => import("@/widgets/orders/ForeverOrdersWidget")),
   superorders: lazy(() => import("@/widgets/orders/SuperOrdersWidget")),
@@ -38,8 +39,6 @@ const lazyWidgets = {
   obsidian: lazy(() => import("@/widgets/utility/Obsidian/ObsidianWidget")),
 
   // New trading widgets
-  intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
-  mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
 
   // New analysis widgets
@@ -118,7 +117,6 @@ const lazyWidgets = {
 
   // Wave 31 widgets
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
-  tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
 
   // Wave 32 widgets
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
@@ -197,6 +195,42 @@ export function isMovedWidget(spec: RetiredWidget): spec is RetiredMovedWidget {
 }
 
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  tradebook: {
+    component: "fills",
+    note:
+      "Merged into Fills. Its TanStack table engine, permissive raw-tradebook "
+      + "parsing, value column, side pills, refresh/clock and honest "
+      + "error/empty states survive unchanged; Fills adds the journal "
+      + "enrichment it never had.",
+  },
+  tradelog: {
+    component: "fills",
+    note:
+      "Merged into Fills. CSV export, symbol search and the stats footer "
+      + "carry over. Dropped: the Type/Status/fill-time columns (never "
+      + "populated by real data — the journal records fills, not orders) and "
+      + "the computeStats /2 halving (the sample fixture now puts P&L on the "
+      + "closing leg only, so totals are a direct sum).",
+  },
+  intradaypnl: {
+    component: "pnlmonitor",
+    params: { view: "live" },
+    note:
+      "Merged into P&L Monitor. Its realised/unrealised split, tradebook "
+      + "partial-close booking and peak/drawdown maths are the canonical "
+      + "figures (every semantic pin survives); its baseline sparkline gave "
+      + "way to the MTM chart, which now plots the same corrected series.",
+  },
+  mtmmonitor: {
+    component: "pnlmonitor",
+    params: { view: "live" },
+    note:
+      "Merged into P&L Monitor. Contributed the Lightweight Charts curve, "
+      + "target/SL price lines, staleness chip and error banner + retry; its "
+      + "raw totalPositionMtm plot (blind to booked partial-close realised) "
+      + "and its peak>0 drawdown guard (zero drawdown for a book that fell "
+      + "straight underwater) were both corrected to the IntradayPnL maths.",
+  },
   optionsflow: {
     component: "oichart",
     params: { view: "signals" },
@@ -402,12 +436,11 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "dashboard", name: "Dashboard", icon: "LayoutDashboard", category: "Trading", description: "Overview of open positions, real-time P&L, and market status" },
   { id: "scalper", name: "Scalper", icon: "Zap", category: "Trading", description: "One-click order entry panel optimised for intraday F&O scalping" },
   { id: "positions", name: "Positions", icon: "Table2", category: "Trading", description: "The open position book of the selected account in three views — a sortable table with square-off, convert and exit-all, a net view that groups legs by underlying, and a P&L heat map — all from one broker read, so the three cannot disagree" },
+  { id: "fills", name: "Fills", icon: "ArrowRightLeft", category: "Trading", description: "Executed fills for the session — broker tradebook joined with journal entry/exit, realised P&L, fees and screenshots; filter, sort and CSV export" },
+  { id: "pnlmonitor", name: "P&L Monitor", icon: "TrendingUp", category: "Trading", description: "Day P&L with realised/unrealised split, MTM chart with target and stop-loss lines, and summary and drawdown views from positions, tradebook and funds" },
   { id: "orders", name: "Orders", icon: "ClipboardList", category: "Trading", description: "Order book showing pending, executed, and rejected orders" },
   { id: "holdings", name: "Holdings", icon: "Wallet", category: "Trading", description: "Long-term equity and mutual fund holdings with current value" },
-  { id: "tradebook", name: "Trade Book", icon: "BookOpen", category: "Trading", description: "Executed trade history for the current session" },
   { id: "orderpad", name: "Order Pad", icon: "FileEdit", category: "Trading", description: "Full-featured order entry form with limit, market, and bracket orders" },
-  { id: "intradaypnl", name: "Intraday P&L", icon: "TrendingUp", category: "Trading", description: "Intraday profit and loss chart updated tick by tick" },
-  { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading", description: "Mark-to-market monitor with target and stop-loss level alerts" },
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "Approval queue for orders the safety system has held back — review each pending intent and approve or reject it before it reaches a broker" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
   { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
@@ -415,7 +448,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading", description: "Minimal order ticket for fast order placement without leaving the chart" },
   { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading", description: "Today's session from the round trips closed in your tradebook — count, win rate, max drawdown, best and worst trade, hold versus idle time and order status counts" },
   { id: "riskdashboard", name: "Risk", icon: "ShieldAlert", category: "Trading", description: "Margin utilisation gauge with exposure, open positions and available cash, plus daily MTM against your local target and stop-loss references" },
-  { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading", description: "Read-only execution history of the fills FlintTrade recorded — filter by status or symbol, with filled count, realised P&L and CSV export. Writes nothing: your own notes live in Journal Entries" },
   { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading", description: "Performance analytics over recorded trades: equity curve, win rate, average R:R, profit factor, expectancy, win/loss streaks, monthly returns and trades by weekday" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
   { id: "orderladder", name: "DOM / Ladder", icon: "ArrowUpDown", category: "Trading", description: "Level-2 book and order ladder in one surface — real resting bid/ask sizes and order counts on the rows you click to place and cancel limit orders through the safety gate" },

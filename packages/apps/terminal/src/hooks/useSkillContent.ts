@@ -73,7 +73,7 @@ const INTERMEDIATE_WIDGETS: string[] = [
   "news",
   "calculator",
   "ticker",
-  "mtmmonitor",
+  "pnlmonitor",
 ];
 
 /**

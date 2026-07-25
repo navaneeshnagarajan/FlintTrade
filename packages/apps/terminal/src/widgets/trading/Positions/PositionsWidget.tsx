@@ -28,6 +28,12 @@
  * from a widget-local map. The header's P&L figure is the whole book's, in
  * every view.
  *
+ * FROM THE RETIRED DASHBOARD (ruling D5). The table view also carries the two
+ * position-facing capabilities the Dashboard widget uniquely had: the per-row
+ * P&L% column and the FlintSegmentTracker position-status strip. Both render
+ * the kernel's numbers (`pnlPercent`, `mtm`) — the Dashboard recomputed them
+ * locally from the raw broker fields.
+ *
  * WRITES STAY ON THE TABLE. Square-off and convert act on a broker row, which
  * only the table view shows; a net row is an aggregate of rows and squaring one
  * off would mean inventing a multi-leg plan, which this widget does not do.
@@ -70,6 +76,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FlintSegmentTracker } from "@flinttrade/design-system";
 import { downloadExcel } from "@/services/ftApi.data";
 import { post } from "@/services/ftApi.helpers";
 import { placeOrder } from "@/services/api";
@@ -103,6 +110,7 @@ import { usePositions } from "@/hooks/usePositions";
 import type { WidgetProps } from "@/types/widgets";
 import {
   fmtPnl,
+  fmtPnlPct,
   fmtPrice,
   fmtUpdatedAt,
   netPositions,
@@ -665,6 +673,22 @@ function PositionsWidget(props: WidgetProps) {
         ),
       },
       {
+        // Absorbed from the retired Dashboard widget's positions table. The
+        // number is the kernel's `pnlPercent` (broker-supplied, else derived
+        // once in `normalisePosition`), never a widget-local formula.
+        accessorKey: "pnlPercent",
+        header: "P&L%",
+        cell: ({ row }) => (
+          <span
+            className={`font-mono tabular-nums ${
+              row.original.pnlPercent >= 0 ? "text-profit" : "text-loss"
+            }`}
+          >
+            {fmtPnlPct(row.original.pnlPercent)}
+          </span>
+        ),
+      },
+      {
         id: "actions",
         header: "",
         enableSorting: false,
@@ -889,7 +913,37 @@ function PositionsWidget(props: WidgetProps) {
           onOpenChart={handleOpenChart}
         />
       ) : (
-        <div className="flex-1 overflow-auto min-h-0">
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Position-status tracker — absorbed from the retired Dashboard
+              widget. One segment per broker row, toned by the row's kernel
+              mark-to-market (never the raw broker `pnl`, which is wrong for
+              some brokers). Table view only: the net view has its own totals
+              footer and the heat map IS a status visual. */}
+          <div className="px-3 pt-2 shrink-0">
+            <FlintSegmentTracker
+              ariaLabel="Position status tracker"
+              segments={rows.map((row) => ({
+                key: `${row.symbol}-${row.exchange}-${row.product}`,
+                label: `${row.symbol}: ${fmtPnl(row.mtm)}`,
+                tone:
+                  row.mtm > 0
+                    ? ("profit" as const)
+                    : row.mtm < 0
+                      ? ("loss" as const)
+                      : ("neutral" as const),
+              }))}
+            />
+            <div className="flex gap-3 mt-1 text-xxs text-text-muted">
+              <span className="text-profit">
+                {rows.filter((row) => row.mtm > 0).length} profit
+              </span>
+              <span className="text-loss">
+                {rows.filter((row) => row.mtm < 0).length} loss
+              </span>
+              <span>{rows.filter((row) => row.mtm === 0).length} flat</span>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto min-h-0">
           <div className="overflow-x-auto min-w-0">
           <Table>
             <TableHeader className="sticky top-0 bg-surface-card z-10">
@@ -934,6 +988,7 @@ function PositionsWidget(props: WidgetProps) {
               ))}
             </TableBody>
           </Table>
+          </div>
           </div>
         </div>
       )}

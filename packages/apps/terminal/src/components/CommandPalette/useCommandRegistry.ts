@@ -70,11 +70,10 @@ export const INTERMEDIATE_WIDGET_IDS = new Set([
   "orderladder",
   "optionchain",
   "greeks",
-  // `pnl` was never a catalogue id — the intraday P&L widget is `intradaypnl`,
+  // `pnl` was never a catalogue id — the P&L surface is `pnlmonitor`,
   // so this tier silently shipped one widget short of its intent.
-  "intradaypnl",
+  "pnlmonitor",
   "riskdashboard",
-  "mtmmonitor",
   "alerts",
 ]);
 

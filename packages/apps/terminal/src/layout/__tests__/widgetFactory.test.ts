@@ -244,10 +244,10 @@ describe("widgetFactory catalogue wiring", () => {
     // Counts drop as widgets merge. docs/ARCHITECTURE.md, docs/USER_GUIDE.md
     // and the site's capabilities test pin these same numbers — update all
     // four together.
-    expect(widgetCatalog).toHaveLength(80);
+    expect(widgetCatalog).toHaveLength(78);
     expect(counts).toEqual({
       Analysis: 34,
-      Trading: 23,
+      Trading: 21,
       Utility: 23,
     });
   });
@@ -362,17 +362,16 @@ describe("widgetFactory catalogue wiring", () => {
   });
 
   it("keeps the two journal surfaces distinguishable in the picker", () => {
-    // Both used to open with "Annotated trade journal…" while reading
-    // different stores: Trade Log is read-only over the auto-recorded fills
-    // (/api/v1/trades/journal); Journal Entries is full CRUD over the
-    // annotated SQLite+FTS5 store (/api/v1/journal/entries).
-    const tradeLog = widgetCatalog.find((widget) => widget.id === "tradelog");
+    // Fills (which absorbed Trade Log) reads the auto-recorded fills
+    // (/api/v1/trades/journal + tradebook); Journal Entries is full CRUD over
+    // the annotated SQLite+FTS5 store (/api/v1/journal/entries). The fills
+    // surface must not present itself as somewhere you write journal entries.
+    const fills = widgetCatalog.find((widget) => widget.id === "fills");
     const journal = widgetCatalog.find((widget) => widget.id === "tradejournal");
 
-    expect(tradeLog?.name).not.toBe(journal?.name);
-    expect(tradeLog?.description).not.toBe(journal?.description);
-    // The read-only one must not present itself as somewhere you write.
-    expect(tradeLog?.description).toMatch(/read-only/i);
+    expect(fills?.name).not.toBe(journal?.name);
+    expect(fills?.description).not.toBe(journal?.description);
+    expect(fills?.description).not.toMatch(/write|create entries/i);
     expect(journal?.description).toMatch(/write|edit|annotat/i);
   });
 

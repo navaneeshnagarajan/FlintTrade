@@ -261,7 +261,7 @@ function applyAnalysis(api: DockviewApi): void {
 function applyRiskMonitor(api: DockviewApi): void {
   const dashboardId = pid("dashboard");
   const riskPanelId = pid("riskdashboard");
-  const mtmMonitorId = pid("mtmmonitor");
+  const mtmMonitorId = pid("pnlmonitor");
   const positionsId = pid("positions");
   const ordersId = pid("orders");
 
@@ -277,7 +277,7 @@ function applyRiskMonitor(api: DockviewApi): void {
 
   api.addPanel({
     id: mtmMonitorId,
-    component: "mtmmonitor",
+    component: "pnlmonitor",
     title: "MTM Monitor",
     position: { referencePanel: dashboardId, direction: "below" },
   });
@@ -644,7 +644,7 @@ function applyQuickScalper(api: DockviewApi): void {
   const tickSpeedId = pid("tickspeed");
   const orderLadderId = pid("orderladder");
   const microstructureId = pid("timesales");
-  const intradayPnlId = pid("intradaypnl");
+  const intradayPnlId = pid("pnlmonitor");
 
   api.addPanel({
     id: quickTradeId,
@@ -689,7 +689,7 @@ function applyQuickScalper(api: DockviewApi): void {
 
   api.addPanel({
     id: intradayPnlId,
-    component: "intradaypnl",
+    component: "pnlmonitor",
     title: "Intraday P&L",
     position: { referencePanel: orderLadderId, direction: "below" },
     initialHeight: 180,
@@ -800,9 +800,7 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "positions", "orders", "holdings", "tradebook", "intradaypnl",
-    "mtmmonitor", "portfolioallocation", "sessionstats", "tradeperformance", "tradelog",
-    "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+    "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation", "sessionstats", "tradeperformance", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
   ] as const) {
     api.addPanel({
       id: pid(comp),

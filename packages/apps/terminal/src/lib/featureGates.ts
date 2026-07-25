@@ -17,7 +17,7 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // ---------------------------------------------------------------
   "widget:orders":      { beginner: "preview", intermediate: "visible", advanced: "visible" },
   "widget:holdings":    { beginner: "preview", intermediate: "visible", advanced: "visible" },
-  "widget:tradebook":   { beginner: "preview", intermediate: "visible", advanced: "visible" },
+  "widget:fills":       { beginner: "preview", intermediate: "visible", advanced: "visible" },
   "widget:scalper":     { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:optionchain": { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oichart":     { beginner: "locked",  intermediate: "visible", advanced: "visible" },
@@ -27,7 +27,11 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   "widget:ticker":      { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:calculator":  { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:aiadvisor":   { beginner: "visible", intermediate: "visible", advanced: "visible" },
-  "widget:mtmmonitor":  { beginner: "locked",  intermediate: "visible", advanced: "visible" },
+  // NOTE: `widget:mtmmonitor` removed with the P&L merge. The canonical
+  // (pnlmonitor) is deliberately UNGATED: IntradayPnL was the beginner-facing
+  // P&L surface and the merged default view opens on that headline; the MTM
+  // chart content that motivated the old lock is a read-only projection of
+  // settingsStore.riskLimits, not an order surface.
   // NOTE: `widget:riskpanel` removed with the Risk merge. The canonical
   // (riskdashboard) is deliberately left UNGATED — a margin and daily-stop
   // readout is the last thing to hide from a beginner.

@@ -345,6 +345,87 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("P&L: +₹640")).toBeInTheDocument();
   });
 
+  // ── Absorbed from the retired Dashboard widget (ruling D5) ───────────────
+
+  it("shows the P&L% column with the kernel's derived percentage", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        // No broker pnlPercent → the kernel derives (150 − 134) / 134 × 100
+        // × sign(qty) = +11.94%. The retired Dashboard recomputed this
+        // per-row; the column now renders the ONE normalised figure.
+        data: [{ symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, average_price: 134 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByRole("columnheader", { name: /P&L%/ })).toBeInTheDocument();
+    expect(screen.getByText("+11.94%")).toBeInTheDocument();
+  });
+
+  it("prefers a broker-supplied P&L% over the derivation, like every other view", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "INFY", pnl: 3000, quantity: 100, ltp: 1510, average_price: 1480, pnlPercent: 5.5 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("+5.50%")).toBeInTheDocument();
+    // The derivation would have said +2.03% — the broker figure wins.
+    expect(screen.queryByText("+2.03%")).not.toBeInTheDocument();
+  });
+
+  it("signs a losing row's P&L% as a loss", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "TCS", pnl: -4000, quantity: 50, ltp: 3820, average_price: 3900 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const pct = screen.getByText("-2.05%");
+    expect(pct).toBeInTheDocument();
+    expect(pct).toHaveClass("text-loss");
+  });
+
+  it("renders the position-status tracker with counts from the shared mark-to-market", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          // (100 − 90) × 10 = +100 → profit.
+          { symbol: "A", pnl: 100, quantity: 10, ltp: 100, average_price: 90 },
+          // (50 − 65) × 20 = −300 → loss, even though the broker's own `pnl`
+          // says +1000: the tracker tones by the kernel mtm, not the raw field.
+          { symbol: "B", pnl: 1000, quantity: 20, ltp: 50, average_price: 65 },
+          // (2500 − 2500) × 10 = 0 → flat.
+          { symbol: "C", pnl: 0, quantity: 10, ltp: 2500, average_price: 2500 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByRole("img", { name: "Position status tracker" })).toBeInTheDocument();
+    expect(screen.getByText("1 profit")).toBeInTheDocument();
+    expect(screen.getByText("1 loss")).toBeInTheDocument();
+    expect(screen.getByText("1 flat")).toBeInTheDocument();
+  });
+
+  it("keeps the tracker off the net and heat views and off the empty book", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+    expect(screen.queryByRole("img", { name: "Position status tracker" })).not.toBeInTheDocument();
+
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "A", pnl: 100, quantity: 10, ltp: 100, average_price: 90, exchange: "NSE", product: "MIS" }],
+      }),
+    );
+    render(<PositionsWidget {...viewProps("net")} />);
+    expect(screen.queryByRole("img", { name: "Position status tracker" })).not.toBeInTheDocument();
+  });
+
   // ── Interaction tests ────────────────────────────────────────────────────
 
   it("shows error banner and Retry button when data fetch fails", () => {

@@ -168,9 +168,9 @@ export const ADMIN_WIDGET_SHOWCASE: readonly {
   { id: "positions", status: "live" },
   { id: "orders", status: "live" },
   { id: "holdings", status: "live" },
-  { id: "tradebook", status: "live" },
+  { id: "fills", status: "live" },
   { id: "orderpad", status: "live" },
-  { id: "mtmmonitor", status: "live" },
+  { id: "pnlmonitor", status: "live" },
   { id: "riskdashboard", status: "live" },
   { id: "actioncenter", status: "live" },
   // Trading, not Analysis: the merged DOM / Ladder carries a live order-entry
