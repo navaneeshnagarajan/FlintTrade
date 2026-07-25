@@ -156,7 +156,6 @@ const lazyWidgets = {
   orderladder: lazy(() => import("@/widgets/trading/OrderLadder/OrderLadderWidget")),
 
   // Wave 35 — order flow visualisation
-  footprint: lazy(() => import("@/widgets/analysis/Footprint/FootprintWidget")),
   domheatmap: lazy(() => import("@/widgets/analysis/DOMHeatmap/DOMHeatmapWidget")),
 
   // Wave 36 — historical option-chain archive
@@ -194,7 +193,16 @@ export interface RetiredWidget {
 }
 
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
-  // (populated as merges land)
+  footprint: {
+    component: "orderflow",
+    params: { view: "footprint+delta" },
+    note:
+      "Merged into Order Flow. The two widgets were ~90% identical — same "
+      + "useOrderFlow call, same symbols and intervals, a copy-pasted "
+      + "formatIntervalLabel and a near byte-identical DPR effect. Footprint's "
+      + "per-cell delta text and cumulative-delta strip are now the "
+      + "'footprint+delta' view mode.",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -277,7 +285,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "ivskew", name: "IV Skew", icon: "Activity", category: "Analysis", description: "Skew chart showing the difference in IV between OTM puts and calls" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },
-  { id: "footprint", name: "Footprint Chart", icon: "BarChart2", category: "Analysis", description: "Footprint chart with per-cell buy/sell volume, delta, POC, and cumulative delta strip" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Historical depth-of-market heatmap showing where large orders sit and are pulled over time" },
 
   // Utility
