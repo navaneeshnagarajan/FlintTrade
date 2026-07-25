@@ -24,6 +24,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { RefreshCw, AlertCircle, Loader2, TrendingUp, TrendingDown } from "lucide-react";
 import { getOptionChain, getExpiry } from "@/services/api";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useModeStore } from "@/stores/modeStore";
 import { FeatureTeaser } from "@/components/teasers";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { isMarketHours } from "@/lib/market";
@@ -106,20 +107,37 @@ function peColour(intensity: number): string {
 // Sample data (used when broker is disconnected)
 // ---------------------------------------------------------------------------
 
-function buildSampleChain(baseStrike: number, step: number, count: number): SampleStrike[] {
+/**
+ * Deterministic pseudo-random source.
+ *
+ * The sample chain used to be built with `Math.random()` at module scope, so
+ * the same "sample" showed different open interest on every page load and no
+ * test could pin it. A seeded generator keeps the shape illustrative while
+ * making it reproducible.
+ */
+function seeded(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+}
+
+export function buildSampleChain(baseStrike: number, step: number, count: number): SampleStrike[] {
+  const rand = seeded(20_260_725);
   return Array.from({ length: count }, (_, i) => {
     const strike = baseStrike - Math.floor(count / 2) * step + i * step;
     const distFromATM = Math.abs(i - Math.floor(count / 2));
-    const ceOi = Math.round((500_000 - distFromATM * 30_000) * (0.8 + Math.random() * 0.4));
-    const peOi = Math.round((480_000 - distFromATM * 25_000) * (0.8 + Math.random() * 0.4));
+    const ceOi = Math.round((500_000 - distFromATM * 30_000) * (0.8 + rand() * 0.4));
+    const peOi = Math.round((480_000 - distFromATM * 25_000) * (0.8 + rand() * 0.4));
     return {
       strike,
       ceOi: Math.max(10_000, ceOi),
       peOi: Math.max(10_000, peOi),
-      ceOiChange: Math.round((Math.random() - 0.5) * 40_000),
-      peOiChange: Math.round((Math.random() - 0.5) * 35_000),
-      ceVolume: Math.round(ceOi * 0.3 * Math.random()),
-      peVolume: Math.round(peOi * 0.3 * Math.random()),
+      ceOiChange: Math.round((rand() - 0.5) * 40_000),
+      peOiChange: Math.round((rand() - 0.5) * 35_000),
+      ceVolume: Math.round(ceOi * 0.3 * rand()),
+      peVolume: Math.round(peOi * 0.3 * rand()),
     };
   });
 }
@@ -276,6 +294,10 @@ function OIHeatmapWidget() {
   const requestGenerationRef = useRef(0);
   const inFlightRequestKeysRef = useRef(new Map<string, number>());
   const isConnected = useBrokerConnected();
+  const isExplore = useModeStore((s) => s.mode) === "explore";
+  // Explore mode reports a connection while `services/api` serves a mock
+  // option chain, so "connected" alone is not evidence of live data.
+  const showingSampleData = !isConnected || isExplore;
   const symDef = SYMBOLS[symbolIdx];
   const identityKey = `${isConnected}:${symDef.label}:${symDef.exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
@@ -655,6 +677,21 @@ function OIHeatmapWidget() {
 
       {/* Header */}
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default flex-wrap">
+        {/* Provenance. This widget previously rendered fabricated open
+            interest with no affordance at all — the "In Development" teaser
+            below is a roadmap label, not a data-provenance disclosure. In
+            Explore mode a broker reads as connected while the API serves a
+            mock chain, so that case must be badged too. */}
+        {showingSampleData && (
+          <span
+            className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            role="status"
+            aria-label="Showing sample data, not live open interest"
+            title="Sample data — illustrative values, not a live option chain."
+          >
+            Sample data
+          </span>
+        )}
         <Select value={String(symbolIdx)} onValueChange={(v) => setSymbolIdx(Number(v))}>
           <SelectTrigger className="h-7 px-2 text-xs w-36" data-testid="symbol-select">
             <SelectValue />

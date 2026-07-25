@@ -26,6 +26,8 @@ vi.mock("@/hooks/useSectorMovers", () => ({
   useSectorMovers: () => mockSectorMovers() as unknown,
 }));
 
+import { createStore, Provider } from "jotai";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
 import MarketSummaryWidget from "../MarketSummaryWidget";
 
 beforeAll(() => {
@@ -36,12 +38,21 @@ beforeAll(() => {
   };
 });
 
+/** Jotai store seeded per test so index cards can be given a live tick. */
+let store = createStore();
+
+function seedTick(key: string, tick: { ltp: number; prevClose?: number }) {
+  store.set(tickAtomFamily(key), tick as never);
+}
+
 function renderWidget() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <MarketSummaryWidget />
-    </QueryClientProvider>,
+    <Provider store={store}>
+      <QueryClientProvider client={qc}>
+        <MarketSummaryWidget />
+      </QueryClientProvider>
+    </Provider>,
   );
 }
 
@@ -57,6 +68,7 @@ const SAMPLE_MOVERS_STATE = {
 
 describe("MarketSummaryWidget", () => {
   beforeEach(() => {
+    store = createStore();
     mockBreadth.mockReset();
     mockFiiDii.mockReset();
     mockSectorMovers.mockReset();
@@ -145,12 +157,27 @@ describe("MarketSummaryWidget", () => {
     expect(screen.getByText("Banking")).toBeInTheDocument();
   });
 
-  it("keeps the index cards sample-chipped (no verified live source yet)", () => {
+  it("shows an awaiting-tick state for the index cards rather than a fabricated level", () => {
+    // These cards used to render a hardcoded SAMPLE_INDICES array with the
+    // chip pinned to "Sample" forever — fabricated index levels a connected
+    // operator could never replace. They now read the live tick atoms, so
+    // with no tick they must say so instead of inventing a number.
     renderWidget();
     expect(screen.getByText("NIFTY")).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/awaiting live price/i).length).toBeGreaterThan(0);
     const indicesHeading = screen.getByText("Indices");
     expect(indicesHeading.querySelector("span")?.textContent).toBe("Sample");
+  });
+
+  it("renders a live index level once a tick arrives", () => {
+    // 22150.4 against a 21965.15 previous close = +185.25 (+0.84%).
+    seedTick("NSE_INDEX:NIFTY", { ltp: 22150.4, prevClose: 21965.15 });
+    renderWidget();
+
+    expect(screen.getByText("22,150.4")).toBeInTheDocument();
+    const indicesHeading = screen.getByText("Indices");
+    expect(indicesHeading.querySelector("span")?.textContent).toBe("Live");
   });
 
   it("renders no refresh control or timestamp implying live data", () => {

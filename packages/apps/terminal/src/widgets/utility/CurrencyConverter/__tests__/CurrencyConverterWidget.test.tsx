@@ -49,13 +49,15 @@ describe("CurrencyConverterWidget", () => {
     expect(screen.getByLabelText("Swap currencies")).toBeTruthy();
   });
 
-  it("renders 30-day sparkline", () => {
+  it("states that no rate history exists instead of plotting a fabricated one", () => {
+    // This slot used to render a sin/cos curve labelled "30-day trend" with a
+    // signed percentage change. The conversion table is a hardcoded constant,
+    // so no such series exists and none may be implied.
     render(<CurrencyConverterWidget />);
-    const sparkline = screen.getByRole("img", { name: /30-day rate history sparkline/i });
 
-    expect(sparkline).toHaveAttribute("viewBox", "0 0 160 42");
-    expect(sparkline.querySelector("polyline")).not.toBeInTheDocument();
-    expect(sparkline.querySelectorAll("path").length).toBeGreaterThan(0);
+    expect(screen.getByText(/no historical series/i)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /rate history sparkline/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/30-day trend/i)).not.toBeInTheDocument();
   });
 
   it("shows exchange rate info section", () => {

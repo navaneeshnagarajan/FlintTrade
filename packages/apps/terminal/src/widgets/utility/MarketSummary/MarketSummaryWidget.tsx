@@ -11,17 +11,22 @@
  * PROVENANCE: breadth (/v1/breadth/current), FII/DII (/screener/fii-dii),
  * and movers/sectors (the NIFTY 50 quote sweep via useSectorMovers) are
  * live-backed with PER-SECTION Sample/Live chips driven by each source's own
- * flag. The index cards remain sample-only (chipped) until an index-quote
- * source is verified. SAMPLE_* constants stay as the disclosed fallbacks.
+ * flag. The index cards now read the live WebSocket tick atoms — the same
+ * source Dashboard and the Ticker consume — and show an explicit "awaiting
+ * tick" state rather than a fabricated level. The remaining SAMPLE_*
+ * constants stay as the disclosed fallbacks for their own sections.
  */
 
 import { useEffect, memo } from "react";
+import { useAtomValue } from "jotai";
 import { useQuery } from "@tanstack/react-query";
 import { getBreadthCurrent, getFiiDiiData } from "@/services/ftApi.screener";
 import { useSectorMovers } from "@/hooks/useSectorMovers";
 import { LayoutDashboard, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { tickKeyFor } from "@/lib/market";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,11 +65,18 @@ interface SectorData {
 // Sample data
 // ---------------------------------------------------------------------------
 
-const SAMPLE_INDICES: IndexData[] = [
-  { symbol: "NIFTY",    ltp: 22150.40, change:  185.25, changePct:  0.84 },
-  { symbol: "BANKNIFTY", ltp: 47830.60, change: -210.50, changePct: -0.44 },
-  { symbol: "NIFTYIT",  ltp: 36420.80, change:  520.30, changePct:  1.45 },
-  { symbol: "INDIA VIX", ltp:  14.82,  change:  -0.63,  changePct: -4.08 },
+/**
+ * Indices shown in the summary strip, read from the live tick stream.
+ *
+ * This replaces a hardcoded SAMPLE_INDICES array that was rendered
+ * unconditionally with the provenance chip pinned to "sample" — fabricated
+ * index levels that a connected operator could never replace with real ones.
+ */
+const LIVE_INDICES: ReadonlyArray<{ symbol: string; exchange: string }> = [
+  { symbol: "NIFTY", exchange: "NSE_INDEX" },
+  { symbol: "BANKNIFTY", exchange: "NSE_INDEX" },
+  { symbol: "NIFTYIT", exchange: "NSE_INDEX" },
+  { symbol: "INDIAVIX", exchange: "NSE_INDEX" },
 ];
 
 const SAMPLE_BREADTH: BreadthData = {
@@ -140,6 +152,41 @@ function IndexCard({ d }: { d: IndexData }) {
       </span>
     </div>
   );
+}
+
+/**
+ * A single index card backed by the live WebSocket tick stream.
+ *
+ * These cards used to render `SAMPLE_INDICES` unconditionally with the
+ * provenance chip hardwired to `live={false}` — permanently fabricated index
+ * levels with no path to real data, even for a connected operator. The tick
+ * atoms that Dashboard and Ticker already consume carry exactly this data, so
+ * the honest fix is to read them rather than to invent numbers.
+ *
+ * Renders an explicit waiting state rather than a fabricated level when no
+ * tick has arrived.
+ */
+function LiveIndexCard({ symbol, exchange }: { symbol: string; exchange: string }) {
+  const tick = useAtomValue(tickAtomFamily(tickKeyFor(symbol, exchange)));
+  const ltp = tick?.ltp ?? 0;
+  // prevClose is REST-fetched; tick.close covers quote/fallback modes.
+  const prevClose = tick?.prevClose ?? tick?.close ?? 0;
+
+  if (!tick || ltp <= 0 || prevClose <= 0) {
+    return (
+      <div
+        className="flex flex-col gap-0.5 bg-surface-hover rounded px-2.5 py-2 min-w-28"
+        aria-label={`${symbol} awaiting live price`}
+      >
+        <span className="text-xxs text-text-muted font-medium">{symbol}</span>
+        <span className="text-sm font-semibold font-mono text-text-muted">—</span>
+        <span className="text-xxs text-text-muted">Awaiting tick</span>
+      </div>
+    );
+  }
+
+  const change = ltp - prevClose;
+  return <IndexCard d={{ symbol, ltp, change, changePct: (change / prevClose) * 100 }} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +362,16 @@ function MarketSummaryWidget() {
     ? sectorMovers.data.map((s) => ({ name: s.sector, changePct: s.avgChange }))
     : SAMPLE_SECTORS;
 
-  const anyLive = breadthLive || fiiDiiLive || moversLive || sectorsLive;
+  // Index cards read the live tick stream directly; a tick for the lead index
+  // is the evidence that the strip is live. Each card still renders its own
+  // "awaiting tick" state, so a partially-populated strip never claims data
+  // it does not have.
+  const niftyTick = useAtomValue(
+    tickAtomFamily(tickKeyFor(LIVE_INDICES[0].symbol, LIVE_INDICES[0].exchange)),
+  );
+  const indicesLive = (niftyTick?.ltp ?? 0) > 0;
+
+  const anyLive = indicesLive || breadthLive || fiiDiiLive || moversLive || sectorsLive;
   const fiiPositive = fiiDii.fii >= 0;
   const diiPositive = fiiDii.dii >= 0;
 
@@ -348,11 +404,14 @@ function MarketSummaryWidget() {
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-3">
 
-        {/* Indices */}
+        {/* Indices — live WebSocket ticks, the same source Dashboard and the
+            Ticker read. Previously a hardcoded sample with no path to live. */}
         <section aria-labelledby="ms-indices">
-          <SectionHeading id="ms-indices">Indices<ProvChip live={false} /></SectionHeading>
+          <SectionHeading id="ms-indices">Indices<ProvChip live={indicesLive} /></SectionHeading>
           <div className="flex gap-2 flex-wrap">
-            {SAMPLE_INDICES.map((d) => <IndexCard key={d.symbol} d={d} />)}
+            {LIVE_INDICES.map((idx) => (
+              <LiveIndexCard key={idx.symbol} symbol={idx.symbol} exchange={idx.exchange} />
+            ))}
           </div>
         </section>
 

@@ -237,4 +237,26 @@ describe("SessionStatsWidget live mode", () => {
     render(<SessionStatsWidget />);
     expect(screen.getByText("Sample data")).toBeTruthy();
   });
+
+  it("shows the operator's real round trips in the trade log, never the sample rows", () => {
+    // Regression: the trade log rendered SAMPLE_SESSION_TRADES unconditionally
+    // while the header showed a Live badge — a connected operator saw seven
+    // invented trades presented as today's fills.
+    mockTradebook.mockReturnValue({
+      data: [
+        { tradeId: "t1", orderId: "o1", symbol: "BANKNIFTY24JUL52000PE", exchange: "NFO",
+          action: "BUY", quantity: 15, price: 200, timestamp: "2026-07-19T10:00:00" },
+        { tradeId: "t2", orderId: "o2", symbol: "BANKNIFTY24JUL52000PE", exchange: "NFO",
+          action: "SELL", quantity: 15, price: 220, timestamp: "2026-07-19T10:30:00" },
+      ],
+    });
+    render(<SessionStatsWidget />);
+
+    const log = screen.getByLabelText("Today's trade log");
+    expect(log.textContent).toContain("BANKNIFTY24JUL52000PE");
+    // Not one of the invented sample symbols.
+    for (const sample of SAMPLE_SESSION_TRADES) {
+      expect(log.textContent).not.toContain(sample.symbol);
+    }
+  });
 });

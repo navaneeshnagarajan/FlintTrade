@@ -14,6 +14,13 @@ vi.mock("@/services/api", () => ({
 vi.mock("@/lib/market", () => ({ isMarketHours: vi.fn().mockReturnValue(false) }));
 
 // Mock broker connected — default: disconnected → sample data path
+const mockMode = vi.hoisted(() => ({ current: "live" }));
+
+vi.mock("@/stores/modeStore", () => ({
+  useModeStore: (selector: (s: { mode: string }) => unknown) =>
+    selector({ mode: mockMode.current }),
+}));
+
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
 }));
@@ -35,7 +42,7 @@ vi.mock("@/components/teasers", () => ({
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getOptionChain, getExpiry } from "@/services/api";
-import OIHeatmapWidget from "../OIHeatmapWidget";
+import OIHeatmapWidget, { buildSampleChain } from "../OIHeatmapWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockGetOptionChain = getOptionChain as ReturnType<typeof vi.fn>;
@@ -530,5 +537,48 @@ describe("OIHeatmapWidget — colour scale logic (unit)", () => {
         /\d/.test(el.textContent ?? ""),
       );
     expect(cells.length).toBeGreaterThan(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Data provenance. This widget rendered fabricated open interest with no
+// affordance at all: the FeatureTeaser wrapper says "In Development", which
+// is a roadmap label, not a statement about the data. In Explore mode the
+// broker reads as connected while the API serves a mock chain, so that case
+// needs badging too.
+// ---------------------------------------------------------------------------
+
+describe("OIHeatmapWidget data provenance", () => {
+  beforeEach(() => {
+    mockMode.current = "live";
+  });
+
+  it("badges the sample chain when no broker is connected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    render(<OIHeatmapWidget />);
+    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+  });
+
+  it("badges Explore mode even though a broker reads as connected", () => {
+    // services/api serves makeMockOptionChain in Explore — connected alone is
+    // not evidence of live data.
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockMode.current = "explore";
+    render(<OIHeatmapWidget />);
+    expect(screen.getByRole("status", { name: /sample data/i })).toBeTruthy();
+  });
+
+  it("drops the badge on a live connected read", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockMode.current = "live";
+    render(<OIHeatmapWidget />);
+    expect(screen.queryByRole("status", { name: /sample data/i })).toBeNull();
+  });
+
+  it("builds a deterministic sample chain so the same figures render every load", () => {
+    const first = buildSampleChain(24_750, 50, 21);
+    const second = buildSampleChain(24_750, 50, 21);
+    expect(first).toEqual(second);
+    expect(first.every((row) => row.ceOi > 0 && row.peOi > 0)).toBe(true);
   });
 });

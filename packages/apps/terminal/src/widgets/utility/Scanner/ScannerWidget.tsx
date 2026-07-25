@@ -48,8 +48,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { z } from "zod";
-import { safeParse } from "@/lib/safeParse";
+import { addSymbolToWatchlist } from "@/widgets/utility/Watchlist/types";
 import { type SectorMoverEntry } from "./sampleData";
 import { runPrebuiltScan, type ScannerResultRow } from "@/services/ftApi";
 import { getUnusualOI, type UnusualOIRow } from "@/services/ftApi.analysis";
@@ -172,24 +171,26 @@ function SortableTable<T>({ data, columns }: SortableTableProps<T>) {
 
 function AddToWatchlistBtn({ symbol, exchange }: { symbol: string; exchange: string }) {
   const [added, setAdded] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const handleAdd = useCallback(() => {
-    try {
-      const LS_KEY = "flinttrade:watchlist";
-      const list = safeParse(
-        localStorage.getItem(LS_KEY),
-        z.array(z.object({ symbol: z.string(), exchange: z.string() })),
-      ) ?? [];
-      const exists = list.some((w) => w.symbol === symbol && w.exchange === exchange);
-      if (!exists) {
-        list.push({ symbol, exchange });
-        localStorage.setItem(LS_KEY, JSON.stringify(list));
-      }
-      setAdded(true);
-    } catch {
-      // localStorage unavailable
-    }
+    // Writes through the Watchlist's own helper. This used to write straight
+    // to the LEGACY localStorage key, which the Watchlist only reads when the
+    // canonical multi-tab key is absent — so on any already-migrated install
+    // the symbol silently never appeared, while the button still reported
+    // success.
+    const ok = addSymbolToWatchlist({ symbol, exchange });
+    setAdded(ok);
+    setFailed(!ok);
   }, [symbol, exchange]);
+
+  if (failed) {
+    return (
+      <Badge variant="outline" className="text-xxs h-5 text-loss border-loss/30">
+        Not saved
+      </Badge>
+    );
+  }
 
   if (added) {
     return (

@@ -422,7 +422,12 @@ function SessionStatsWidget() {
               </tr>
             </thead>
             <tbody>
-              {SAMPLE_SESSION_TRADES.map((t) => (
+              {/* sessionTrades, NOT the sample array. This table used to render
+                  SAMPLE_SESSION_TRADES unconditionally while the header above
+                  it showed a Live badge computed from real round trips — a
+                  connected operator saw seven invented trades presented as
+                  today's fills. */}
+              {sessionTrades.map((t) => (
                 <tr key={t.id} className="border-b border-border-subtle hover:bg-surface-hover transition-colors">
                   <td className="py-1 text-text-secondary truncate max-w-24" title={t.symbol}>{t.symbol}</td>
                   <td className="py-1 text-center font-mono text-text-muted text-xxs">{t.entryTime}</td>
@@ -434,6 +439,11 @@ function SessionStatsWidget() {
               ))}
             </tbody>
           </table>
+          {sessionTrades.length === 0 && (
+            <p className="text-xxs text-text-muted py-2 text-center">
+              No round trips closed yet today.
+            </p>
+          )}
         </section>
       </div>
     </div>

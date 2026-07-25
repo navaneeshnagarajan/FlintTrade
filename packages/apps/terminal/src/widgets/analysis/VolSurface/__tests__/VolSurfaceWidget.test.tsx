@@ -126,3 +126,42 @@ describe("VolSurfaceWidget", () => {
     expect(screen.getByTestId("plotly-chart")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Provenance. This widget was the sole fail-open member of the IV/greeks
+// family: it tested `is_sample_data === true`, so a payload that omitted the
+// flag entirely rendered as live.
+// ---------------------------------------------------------------------------
+
+describe("VolSurfaceWidget provenance fails closed", () => {
+  const surface = {
+    symbol: "NIFTY",
+    expiries: ["24-APR-25"],
+    strikes: [24000, 24100],
+    iv_matrix: [[15.5, 16.1]],
+  };
+
+  it("treats a connected payload with no provenance flag as sample", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    // No is_sample_data at all — a stub backend, a shape change, or a proxy
+    // that dropped the field must not read as live.
+    mockUseVolSurface.mockReturnValue({ data: surface, isLoading: false, error: null });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.getByText(/sample|demo/i)).toBeTruthy();
+  });
+
+  it("accepts an explicit live flag", () => {
+    mockUseBrokerConnected.mockReturnValue(true);
+    mockUseVolSurface.mockReturnValue({
+      data: { ...surface, is_sample_data: false },
+      isLoading: false,
+      error: null,
+    });
+
+    render(<VolSurfaceWidget />, { wrapper });
+
+    expect(screen.queryByText(/demo data/i)).toBeNull();
+  });
+});
