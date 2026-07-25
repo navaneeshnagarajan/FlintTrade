@@ -231,7 +231,15 @@ function dedupeAndSort(items: NewsItem[]): NewsItem[] {
  * RSS feeds server-side (avoids CORS entirely). The CORS proxy fallback
  * remains for when the backend is not running.
  */
-async function fetchAllFeeds(): Promise<NewsItem[]> {
+/** Where the rendered headlines actually came from. */
+export type NewsOrigin = "backend" | "third-party-proxy";
+
+export interface NewsFetchResult {
+  items: NewsItem[];
+  origin: NewsOrigin;
+}
+
+async function fetchAllFeeds(): Promise<NewsFetchResult> {
   // Attempt 1: backend server-side RSS proxy
   try {
     const result = await getNews();
@@ -247,7 +255,7 @@ async function fetchAllFeeds(): Promise<NewsItem[]> {
           sentiment: classifySentiment(a.title),
         };
       });
-      return dedupeAndSort(items);
+      return { items: dedupeAndSort(items), origin: "backend" };
     }
   } catch {
     // Backend not yet available — fall through to CORS proxy
@@ -261,7 +269,7 @@ async function fetchAllFeeds(): Promise<NewsItem[]> {
       items.push(...r.value);
     }
   }
-  return dedupeAndSort(items);
+  return { items: dedupeAndSort(items), origin: "third-party-proxy" };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,14 +414,19 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
   const [status, setStatus] = useState<FetchStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  // When the backend is unreachable the widget falls back to a third-party
+  // CORS proxy, which sees the operator's IP and which feeds they read. That
+  // is a reasonable degraded path but not one to take silently.
+  const [origin, setOrigin] = useState<NewsOrigin>("backend");
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setStatus("loading");
     try {
-      const data = await fetchAllFeeds();
+      const { items: data, origin } = await fetchAllFeeds();
       setItems(data);
+      setOrigin(origin);
       setLastUpdated(Date.now());
       setStatus(data.length > 0 ? "success" : "error");
       if (data.length === 0) {
@@ -491,6 +504,20 @@ function NewsWidget({ node: _node }: NewsWidgetProps) {
         {lastUpdated !== null && !isLoading && (
           <span className="text-xxs text-text-muted">
             {fmtTimeAgo(lastUpdated)}
+          </span>
+        )}
+
+        {origin === "third-party-proxy" && items.length > 0 && (
+          <span
+            className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+            title={
+              "Your backend was unreachable, so these headlines were fetched "
+              + "through a third-party CORS proxy. That proxy sees your IP "
+              + "address and which feeds you read. Start the FlintTrade "
+              + "backend to fetch them yourself."
+            }
+          >
+            Via proxy
           </span>
         )}
 

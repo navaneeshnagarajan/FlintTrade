@@ -186,19 +186,19 @@ describe("SAMPLE_TRADES", () => {
 
 describe("computeStats", () => {
   it("returns zero stats for empty array", () => {
-    const stats = computeStats([]);
+    const stats = computeStats([], true);
     expect(stats.totalFilled).toBe(0);
     expect(stats.avgFillTimeMs).toBe(0);
   });
 
   it("totalFilled counts only filled entries", () => {
-    const stats = computeStats(SAMPLE_TRADES);
+    const stats = computeStats(SAMPLE_TRADES, true);
     const expected = SAMPLE_TRADES.filter((t) => t.status === "filled").length;
     expect(stats.totalFilled).toBe(expected);
   });
 
   it("avgFillTimeMs is positive when filled entries exist", () => {
-    const stats = computeStats(SAMPLE_TRADES);
+    const stats = computeStats(SAMPLE_TRADES, true);
     expect(stats.avgFillTimeMs).toBeGreaterThan(0);
   });
 
@@ -207,7 +207,7 @@ describe("computeStats", () => {
       { id: "a", time: "", symbol: "X", action: "BUY" as const, qty: 1, price: 1, orderType: "—" as const, status: "filled" as const, strategy: "", pnl: 100, fillTimeMs: null },
       { id: "b", time: "", symbol: "X", action: "SELL" as const, qty: 1, price: 1, orderType: "—" as const, status: "filled" as const, strategy: "", pnl: 100, fillTimeMs: null },
     ];
-    expect(computeStats(rows).totalPnl).toBe(100); // paired → /2
+    expect(computeStats(rows, true).totalPnl).toBe(100); // paired → /2
     expect(computeStats(rows, false).totalPnl).toBe(200); // journal → sum
   });
 });

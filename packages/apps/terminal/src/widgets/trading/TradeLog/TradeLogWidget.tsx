@@ -76,12 +76,23 @@ export const SAMPLE_TRADES: TradeLogEntry[] = [
 // Computed stats
 // ---------------------------------------------------------------------------
 
-export function computeStats(entries: TradeLogEntry[], pairedPnl = true): TradeLogStats {
+/**
+ * Aggregate fill count, P&L and average fill time.
+ *
+ * `pairedPnl` is deliberately REQUIRED. It used to default to `true`, which
+ * meant a caller that forgot the argument silently halved real journalled
+ * P&L — the wrong default for every path except the sample fixture. The one
+ * production caller passes `!isConnected`, so the halving has only ever
+ * applied to sample rows; making the choice explicit keeps it that way.
+ *
+ * @param entries Rows to aggregate; only `filled` rows count.
+ * @param pairedPnl True when both legs of a round trip repeat the same P&L
+ *   (the sample fixture). False for journalled rows, which carry per-row
+ *   realised P&L and are summed directly.
+ */
+export function computeStats(entries: TradeLogEntry[], pairedPnl: boolean): TradeLogStats {
   const filled = entries.filter((e) => e.status === "filled");
   const totalFilled = filled.length;
-  // Sample rows log both legs with the same round-trip P&L, so halve to avoid
-  // double-counting. Real journalled rows carry per-row realised P&L (null on
-  // the open leg) → sum directly.
   const rawPnl = filled.reduce((s, e) => s + (e.pnl ?? 0), 0);
   const totalPnl = pairedPnl ? rawPnl / 2 : rawPnl;
   const fillTimes = filled.map((e) => e.fillTimeMs).filter((t): t is number => t !== null);
