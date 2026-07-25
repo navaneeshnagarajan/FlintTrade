@@ -78,7 +78,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 |---|---|---|
 | Preset layouts (14) | ✅ | Dockview workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
-| Trading + dashboard widgets (101 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
+| Trading + dashboard widgets (82 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
 | Screens: welcome / dashboard / explore / demo | ✅ | Demo mode feeds widgets + dashboard cards from `MockDataEngine` |
 | TradingView professional charts + indicators | ✅ | `components/tradingview/` + lightweight-charts |
 | Native sandbox + virtual capital + paper orders | ✅ | `SandboxControls` (capital + place paper order) |

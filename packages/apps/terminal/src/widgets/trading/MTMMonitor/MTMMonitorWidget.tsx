@@ -12,7 +12,10 @@
  *
  * Adaptations:
  * - Data source: usePositions() + useFunds() instead of OpenAlgo-internal API
- * - MTM built by summing position.pnl at each refresh tick
+ * - MTM built at each refresh tick from the shared `totalPositionMtm` helper,
+ *   not by summing the raw broker `pnl` field — that field is wrong for some
+ *   brokers, and this widget and Intraday P&L disagreed on the same book while
+ *   each summed it independently
  * - Target / stoploss price lines on chart from settingsStore.riskLimits
  * - shadcn Card for stat display, Badge for status indicators
  * - Tailwind CSS v4, no external html2canvas

@@ -45,21 +45,34 @@ export interface GroupedCommands {
 
 const RECENT_KEY = "flinttrade:recentCommands";
 const MAX_RECENT = 5;
-const BEGINNER_WIDGET_IDS = new Set([
+/**
+ * Skill-tier gates for the widget commands. Both are keyed by catalogue id, so
+ * a retired or invented id does not degrade gracefully — it silently removes a
+ * widget from that tier. `useCommandRegistry.test.ts` pins every id against
+ * `widgetCatalog`; exported for that guard.
+ */
+export const BEGINNER_WIDGET_IDS = new Set([
   "dashboard",
   "chart",
   "watchlist",
   "orderpad",
   "positions",
 ]);
-const INTERMEDIATE_WIDGET_IDS = new Set([
+export const INTERMEDIATE_WIDGET_IDS = new Set([
   ...BEGINNER_WIDGET_IDS,
   "orders",
   "ticker",
-  "depth",
+  // `depth` was retired into `orderladder` by the widget merge. Because this
+  // gate is by id, leaving the retired id here removed the DOM / Ladder from
+  // the intermediate tier entirely — the retired id matches no catalogue entry
+  // and the canonical was never added. Same failure `useSkillContent.ts` fixed
+  // for its own list.
+  "orderladder",
   "optionchain",
   "greeks",
-  "pnl",
+  // `pnl` was never a catalogue id — the intraday P&L widget is `intradaypnl`,
+  // so this tier silently shipped one widget short of its intent.
+  "intradaypnl",
   "riskdashboard",
   "mtmmonitor",
   "alerts",

@@ -28,7 +28,8 @@ vi.stubGlobal("fetch", mockFetch);
 // ---------------------------------------------------------------------------
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import AdminRoute from "../AdminRoute";
+import { widgetCatalog } from "@/layout/widgetFactory";
+import AdminRoute, { ADMIN_WIDGET_SHOWCASE } from "../AdminRoute";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const Wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -67,5 +68,21 @@ describe("AdminRoute", () => {
     render(<AdminRoute />, { wrapper: Wrapper });
 
     expect(screen.getByText("DEV")).toBeInTheDocument();
+  });
+
+  it("only showcases widget ids the catalogue still carries", () => {
+    // This panel used to hand-copy id, name AND category, so it drifted into a
+    // third parallel widget list: it advertised the retired `oiprofile` id as
+    // live, and named three merged widgets by their pre-merge titles. Names and
+    // categories now come from `widgetCatalog`; a retired id would silently
+    // drop its row instead, so pin the ids here.
+    const catalogIds = new Set(widgetCatalog.map((widget) => widget.id));
+    const retired = ADMIN_WIDGET_SHOWCASE
+      .map((widget) => widget.id)
+      .filter((id) => !catalogIds.has(id));
+
+    expect(retired).toEqual([]);
+    // Deriving from the catalogue is pointless if the shortlist empties out.
+    expect(ADMIN_WIDGET_SHOWCASE.length).toBeGreaterThan(20);
   });
 });

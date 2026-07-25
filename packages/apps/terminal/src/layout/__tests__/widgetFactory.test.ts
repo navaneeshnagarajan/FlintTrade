@@ -116,6 +116,48 @@ const CAPABILITY_CLAIMS: readonly CapabilityClaim[] = [
   { claim: /\bema\b/i, evidence: /ema/i, why: "a named indicator must appear in the widget" },
 ];
 
+// ---------------------------------------------------------------------------
+// Live-data claim guard — helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Words that promise a moving data source rather than a fixed table. Written
+ * so that spacing and hyphenation cannot defeat them ("real time", "real-time",
+ * "realtime" all match) and so that they only fire on whole words — "delivery"
+ * must not read as "live".
+ */
+const LIVE_DATA_CLAIM =
+  /\b(?:live|real[\s-]*time|realtime|intraday|streaming|tick[\s-]*by[\s-]*tick|updated\s+tick)\b/i;
+
+/**
+ * A token that only appears in a widget that actually reaches for data: a
+ * service module, a TanStack Query/mutation hook, a raw fetch, a WebSocket
+ * atom, or one of the shared broker-read hooks. Deliberately broad — the point
+ * is to separate "this widget talks to something" from "this widget renders a
+ * hardcoded array", not to audit how well it does it.
+ *
+ * One known blind spot: `widgetSource` reads a single file for widgets that
+ * share a directory (`widgets/orders/`, `widgets/account/`), so a sibling that
+ * keeps its data calls in a shared module reads as fetching nothing. None of
+ * those descriptions claim live data today; if one starts to, exempt it here
+ * with that as the reason rather than widening the evidence regex.
+ */
+const LIVE_DATA_EVIDENCE =
+  /@\/services\/(?:api|ftApi|websocket)|\buseQuery\b|\buseMutation\b|\bfetch\(|\buseAtomValue\b|\buseLtp\b|\buseQuote\b|\buseDepth\b|\buseOptionChain\b|\buseMarketData\b|\buseOrderFlow\b|\buse(?:Positions|Funds|Holdings|Orders|Tradebook)\b/;
+
+/**
+ * Widgets allowed to use a live-data word with no data call behind it, each
+ * with the reason. An entry is only ever legitimate when the word appears
+ * inside the widget's own *disclosure* of not being live — never in a promise.
+ *
+ * Keep this list short. Rewording the description is almost always the right
+ * fix; the catalogue entry is the only promise most operators ever read.
+ */
+const LIVE_CLAIM_EXEMPTIONS: Readonly<Record<string, string>> = {
+  instrumentcompare:
+    "the only 'live' in its description is the disclaimer 'no live price feed is wired yet'",
+};
+
 describe("widgetFactory catalogue wiring", () => {
   it("resolves every catalogue widget, and every extra component is a documented retirement", () => {
     // This used to assert a strict bijection. Merged widgets break that by
@@ -256,6 +298,60 @@ describe("widgetFactory catalogue wiring", () => {
     }
 
     expect(failures).toEqual([]);
+  });
+
+  it("never promises live data from a widget that fetches nothing", () => {
+    // The sibling guard above pins *named* capabilities (Telegram, Sharpe,
+    // Kelly…). It said nothing about the broadest claim of all — that the
+    // numbers move — so a batch of hardcoded-array widgets shipped describing
+    // themselves as "Live currency converter", "Real-time large options trade
+    // scanner" and "intraday performance" while carrying a permanent
+    // sample-data badge in their own header. A description that promises a
+    // feed must come from a widget that has one.
+    const failures: string[] = [];
+
+    for (const widget of widgetCatalog) {
+      const description = widget.description ?? "";
+      if (!LIVE_DATA_CLAIM.test(description)) continue;
+      if (LIVE_DATA_EVIDENCE.test(widgetSource(widget.id))) continue;
+      const reason = LIVE_CLAIM_EXEMPTIONS[widget.id];
+      if (reason) continue;
+      failures.push(
+        `${widget.id}: description claims live/real-time/intraday data `
+        + `("${description}") but its source has no data call `
+        + `(${String(LIVE_DATA_EVIDENCE)}). Reword the description to disclose `
+        + "the static/sample source, or add an entry to LIVE_CLAIM_EXEMPTIONS "
+        + "with the reason.",
+      );
+    }
+
+    expect(failures.sort()).toEqual([]);
+  });
+
+  it("keeps every live-claim exemption real, needed and documented", () => {
+    // An exemption that outlives its reason is worse than no guard: it reads
+    // as "audited and fine". Pin all three ways one can rot — a stale id, a
+    // widget that has since grown a data call, and a description that no
+    // longer contains the word the exemption was granted for.
+    const stale: string[] = [];
+
+    for (const [id, reason] of Object.entries(LIVE_CLAIM_EXEMPTIONS)) {
+      expect(reason.trim().length, `${id} needs a written reason`).toBeGreaterThan(0);
+
+      const widget = widgetCatalog.find((entry) => entry.id === id);
+      if (!widget) {
+        stale.push(`${id}: exempted but no longer in the catalogue — drop the entry`);
+        continue;
+      }
+      if (!LIVE_DATA_CLAIM.test(widget.description ?? "")) {
+        stale.push(`${id}: description no longer claims live data — drop the entry`);
+      }
+      if (LIVE_DATA_EVIDENCE.test(widgetSource(id))) {
+        stale.push(`${id}: widget now has a data call — drop the entry, it is covered`);
+      }
+    }
+
+    expect(stale.sort()).toEqual([]);
   });
 
   it("keeps the two journal surfaces distinguishable in the picker", () => {

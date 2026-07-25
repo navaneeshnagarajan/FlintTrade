@@ -12,6 +12,7 @@ import { safeParse } from "@/lib/safeParse";
 import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
+import { widgetCatalog } from "@/layout/widgetFactory";
 import { useAuthStore } from "@/stores/authStore";
 
 // ---------------------------------------------------------------------------
@@ -144,41 +145,68 @@ function useIntrospect(): { data: IntrospectData | null; loading: boolean; error
 // Static Data (widgets & features — change rarely)
 // ---------------------------------------------------------------------------
 
-const WIDGETS: WidgetInfo[] = [
+/**
+ * The curated shortlist this panel shows, by id and status only.
+ *
+ * Names and categories are deliberately NOT repeated here — they are read from
+ * `widgetCatalog`, the catalogue of record. Hand-copying them made this a third
+ * parallel copy of the widget list and it rotted exactly as you would expect:
+ * long after the widget merge it still advertised "OI Chart", "Straddle" and
+ * "IV Smile" under their pre-merge names, and listed the retired `oiprofile` id
+ * as live (it is now a view of `oichart`, already on this list).
+ *
+ * The shortlist itself stays hand-picked — this panel is a sample of the
+ * registry, not a mirror of all 82 widgets.
+ */
+export const ADMIN_WIDGET_SHOWCASE: readonly {
+  id: string;
+  status: WidgetInfo["status"];
+}[] = [
   // Trading
-  { id: "dashboard", name: "Dashboard", category: "Trading", status: "live" },
-  { id: "scalper", name: "Scalper", category: "Trading", status: "live" },
-  { id: "positions", name: "Positions", category: "Trading", status: "live" },
-  { id: "orders", name: "Orders", category: "Trading", status: "live" },
-  { id: "holdings", name: "Holdings", category: "Trading", status: "live" },
-  { id: "tradebook", name: "Trade Book", category: "Trading", status: "live" },
-  { id: "orderpad", name: "Order Pad", category: "Trading", status: "live" },
-  { id: "mtmmonitor", name: "MTM Monitor", category: "Trading", status: "live" },
-  { id: "riskdashboard", name: "Risk", category: "Trading", status: "live" },
-  { id: "actioncenter", name: "Action Center", category: "Trading", status: "live" },
+  { id: "dashboard", status: "live" },
+  { id: "scalper", status: "live" },
+  { id: "positions", status: "live" },
+  { id: "orders", status: "live" },
+  { id: "holdings", status: "live" },
+  { id: "tradebook", status: "live" },
+  { id: "orderpad", status: "live" },
+  { id: "mtmmonitor", status: "live" },
+  { id: "riskdashboard", status: "live" },
+  { id: "actioncenter", status: "live" },
   // Trading, not Analysis: the merged DOM / Ladder carries a live order-entry
-  // surface, so it sits with the widgets that can write to the broker.
-  { id: "orderladder", name: "DOM / Ladder", category: "Trading", status: "live" },
+  // surface, so it sits with the widgets that can write to the broker. The
+  // catalogue agrees, which is why reading the category from it is safe.
+  { id: "orderladder", status: "live" },
   // Analysis
-  { id: "chart", name: "Chart", category: "Analysis", status: "live" },
-  { id: "optionchain", name: "Option Chain", category: "Analysis", status: "live" },
-  { id: "oichart", name: "OI Chart", category: "Analysis", status: "live" },
-  { id: "straddle", name: "Straddle", category: "Analysis", status: "live" },
-  { id: "greeks", name: "Greeks", category: "Analysis", status: "live" },
-  { id: "sectormap", name: "Sector Map", category: "Analysis", status: "live" },
-  { id: "gammadensity", name: "Dealer Gamma", category: "Analysis", status: "live" },
-  { id: "volsurface", name: "Vol Surface", category: "Analysis", status: "live" },
-  { id: "ivsmile", name: "IV Smile", category: "Analysis", status: "live" },
-  { id: "straddlepnl", name: "Straddle P&L", category: "Analysis", status: "live" },
-  { id: "oiprofile", name: "OI Profile", category: "Analysis", status: "live" },
-  { id: "orderflow", name: "Order Flow", category: "Analysis", status: "live" },
+  { id: "chart", status: "live" },
+  { id: "optionchain", status: "live" },
+  { id: "oichart", status: "live" },
+  { id: "straddle", status: "live" },
+  { id: "greeks", status: "live" },
+  { id: "sectormap", status: "live" },
+  { id: "gammadensity", status: "live" },
+  { id: "volsurface", status: "live" },
+  { id: "ivsmile", status: "live" },
+  { id: "straddlepnl", status: "live" },
+  { id: "orderflow", status: "live" },
   // Utility
-  { id: "watchlist", name: "Watchlist", category: "Utility", status: "live" },
-  { id: "calculator", name: "Calculator", category: "Utility", status: "live" },
-  { id: "news", name: "News Feed", category: "Utility", status: "live" },
-  { id: "ticker", name: "Ticker", category: "Utility", status: "live" },
-  { id: "aiadvisor", name: "AI Advisor", category: "Utility", status: "live" },
+  { id: "watchlist", status: "live" },
+  { id: "calculator", status: "live" },
+  { id: "news", status: "live" },
+  { id: "ticker", status: "live" },
+  { id: "aiadvisor", status: "live" },
 ];
+
+/**
+ * The shortlist resolved against the catalogue. An id that has since been
+ * retired in a merge drops out rather than rendering a row for a widget the
+ * operator can no longer dock; `AdminRoute.test.tsx` fails if that ever
+ * silently happens.
+ */
+const WIDGETS: WidgetInfo[] = ADMIN_WIDGET_SHOWCASE.flatMap(({ id, status }) => {
+  const meta = widgetCatalog.find((widget) => widget.id === id);
+  return meta ? [{ id, name: meta.name, category: meta.category, status }] : [];
+});
 
 const FEATURES: FeatureInfo[] = [
   { name: "Dockview Workspace", status: "live", route: "/trade" },
