@@ -105,8 +105,8 @@ _BUILTIN_PRESETS: list[WorkspacePreset] = [
     WorkspacePreset(
         id="scalper-zone",
         name="Scalper Zone",
-        description="High-frequency intraday scalping layout with chart, depth, and order pad",
-        widgets=["chart", "depth", "orderpad", "positions", "scalper", "mtmmonitor"],
+        description="High-frequency intraday scalping layout with chart, order ladder, and order pad",
+        widgets=["chart", "orderladder", "orderpad", "positions", "scalper", "mtmmonitor"],
         layout={},
         is_builtin=True,
         created_at=_EPOCH,
@@ -115,8 +115,8 @@ _BUILTIN_PRESETS: list[WorkspacePreset] = [
     WorkspacePreset(
         id="options-desk",
         name="Options Desk",
-        description="Full options workflow — chain, straddle, greeks, and risk panel",
-        widgets=["optionchain", "straddle", "greeks", "ivsmile", "volsurface", "riskpanel"],
+        description="Full options workflow — chain, straddle, greeks, and risk",
+        widgets=["optionchain", "straddle", "greeks", "ivsmile", "volsurface", "riskdashboard"],
         layout={},
         is_builtin=True,
         created_at=_EPOCH,
@@ -135,8 +135,8 @@ _BUILTIN_PRESETS: list[WorkspacePreset] = [
     WorkspacePreset(
         id="analysis",
         name="Analysis",
-        description="Deep technical analysis with chart, GEX, OI profile, and order flow",
-        widgets=["chart", "gex", "oiprofile", "orderflow", "straddlepnl"],
+        description="Deep technical analysis with chart, dealer gamma, OI analytics, and order flow",
+        widgets=["chart", "gammadensity", "oichart", "orderflow", "straddlepnl"],
         layout={},
         is_builtin=True,
         created_at=_EPOCH,
@@ -145,8 +145,8 @@ _BUILTIN_PRESETS: list[WorkspacePreset] = [
     WorkspacePreset(
         id="risk-monitor",
         name="Risk Monitor",
-        description="Portfolio-level risk view — MTM, risk panel, positions, and action centre",
-        widgets=["mtmmonitor", "riskpanel", "positions", "actioncenter", "dashboard"],
+        description="Portfolio-level risk view — MTM, risk, positions, and action centre",
+        widgets=["mtmmonitor", "riskdashboard", "positions", "actioncenter", "dashboard"],
         layout={},
         is_builtin=True,
         created_at=_EPOCH,

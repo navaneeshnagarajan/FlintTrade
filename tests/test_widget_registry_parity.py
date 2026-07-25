@@ -93,3 +93,43 @@ def test_backend_registry_has_no_duplicate_ids() -> None:
     ids = [w["id"] for w in _WIDGET_REGISTRY]
     duplicates = {wid for wid in ids if ids.count(wid) > 1}
     assert not duplicates, f"duplicate ids in the backend registry: {duplicates}"
+
+
+def test_builtin_presets_only_reference_live_widgets() -> None:
+    """Built-in presets must name widgets the terminal can still offer.
+
+    `_BUILTIN_PRESETS` carried the same four retired ids as the admin registry
+    did, for the same reason — two hand-maintained Python copies of a
+    TypeScript list, neither checked. The user-visible symptom is quiet: the
+    preset editor's selector grid iterates `widgetCatalog`, so a retired id has
+    no tile to tick. "Risk Monitor" counted five widgets and showed four
+    selected, and saving the fork silently dropped the fifth.
+    """
+    from flinttrade_core.preset_routes import _BUILTIN_PRESETS
+
+    catalogue_ids = {w["id"] for w in _terminal_catalogue()}
+    offenders: dict[str, list[str]] = {}
+    for preset in _BUILTIN_PRESETS:
+        unknown = [wid for wid in preset.widgets if wid not in catalogue_ids]
+        if unknown:
+            offenders[preset.id] = unknown
+
+    assert not offenders, (
+        "built-in presets reference widget ids the terminal no longer offers "
+        f"(retired or misspelt): {offenders}"
+    )
+
+
+def test_builtin_presets_have_no_duplicate_widgets() -> None:
+    """A merge can collapse two preset entries onto one canonical id.
+
+    Rewriting a retired id to its canonical target is only safe if the preset
+    did not already list that target: `oiprofile` and `oiheatmap` both resolve
+    to `oichart`, so a preset naming both would silently become a preset with
+    the same panel twice.
+    """
+    from flinttrade_core.preset_routes import _BUILTIN_PRESETS
+
+    for preset in _BUILTIN_PRESETS:
+        duplicates = {wid for wid in preset.widgets if preset.widgets.count(wid) > 1}
+        assert not duplicates, f"{preset.id} lists the same widget twice: {duplicates}"
