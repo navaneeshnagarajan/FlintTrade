@@ -24,42 +24,17 @@ import {
 } from "@/components/ui/select";
 import { getDepth } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import {
+  normaliseDepth,
+  type DepthLevel,
+  type NormalisedDepth,
+  type RawDepth,
+} from "@/lib/depth";
 import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface DepthLevel {
-  price: number;
-  qty: number;
-  orders: number;
-}
-
-interface NormalisedDepth {
-  bids: DepthLevel[];
-  asks: DepthLevel[];
-}
-
-/** Raw level shape from OpenAlgo — field names vary across brokers */
-interface RawDepthLevel {
-  price?: number;
-  p?: number;
-  quantity?: number;
-  qty?: number;
-  q?: number;
-  orders?: number;
-  num_orders?: number;
-  o?: number;
-}
-
-/** Raw depth response from OpenAlgo API */
-interface RawDepth {
-  bids?: RawDepthLevel[];
-  asks?: RawDepthLevel[];
-  buy?: RawDepthLevel[];
-  sell?: RawDepthLevel[];
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,29 +53,6 @@ function fmtQty(v: number | null | undefined): string {
   const n = Number(v);
   if (n >= 1_00_000) return `${(n / 1_00_000).toFixed(1)}L`;
   return NUM0.format(n);
-}
-
-/**
- * Normalise depth response from OpenAlgo.
- * The API may return arrays directly, or wrapped inside { bids, asks }.
- * Each level may be { price, orders, quantity } or { price, qty, num_orders }.
- */
-function normaliseDepth(raw: RawDepth | null | undefined): NormalisedDepth {
-  if (!raw) return { bids: [], asks: [] };
-
-  const bids: RawDepthLevel[] = raw.bids ?? raw.buy ?? [];
-  const asks: RawDepthLevel[] = raw.asks ?? raw.sell ?? [];
-
-  const norm = (arr: RawDepthLevel[]): DepthLevel[] =>
-    Array.isArray(arr)
-      ? arr.map((lvl) => ({
-          price:  Number(lvl.price  ?? lvl.p  ?? 0),
-          qty:    Number(lvl.quantity ?? lvl.qty ?? lvl.q ?? 0),
-          orders: Number(lvl.orders ?? lvl.num_orders ?? lvl.o ?? 0),
-        }))
-      : [];
-
-  return { bids: norm(bids).slice(0, 5), asks: norm(asks).slice(0, 5) };
 }
 
 // ---------------------------------------------------------------------------

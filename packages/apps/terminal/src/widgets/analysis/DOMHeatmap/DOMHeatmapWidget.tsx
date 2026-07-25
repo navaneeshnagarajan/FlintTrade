@@ -45,7 +45,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getDepth } from "@/services/api";
-import type { MarketDepth, DepthLevel } from "@/types/api";
+import type { MarketDepth } from "@/types/api";
+import {
+  normaliseDepth,
+  type DepthLevel as SharedDepthLevel,
+  type RawDepth,
+} from "@/lib/depth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +90,8 @@ const EXCHANGES: Record<string, string> = {
 
 /** Maximum number of snapshots kept in the ring buffer */
 const MAX_SNAPSHOTS = 60;
+/** Fallback price increment when the instrument's own tick is unknown. */
+const DEFAULT_TICK_SIZE = 0.05;
 
 /** Poll interval in ms — 1 s during market hours */
 const POLL_INTERVAL_MS = 1_000;
@@ -148,25 +155,33 @@ function colorFromRamp(ramp: RGB[], intensity: number): string {
 
 // ─── Snapshot builder ─────────────────────────────────────────────────────────
 
-function buildSnapshot(depth: MarketDepth): DOMSnapshot {
+function buildSnapshot(depth: MarketDepth, tickSize = DEFAULT_TICK_SIZE): DOMSnapshot {
   const levels = new Map<number, DOMCell>();
 
-  const applyLevels = (rows: DepthLevel[], side: "bid" | "ask") => {
+  // Normalise through the shared depth module. This widget previously read
+  // `row.price`/`row.quantity` straight off the payload, so any bridge that
+  // emitted the short field names (p / qty / q, num_orders / o) produced an
+  // empty heatmap with no error shown.
+  const book = normaliseDepth(depth as unknown as RawDepth, Number.MAX_SAFE_INTEGER);
+
+  const applyLevels = (rows: SharedDepthLevel[], side: "bid" | "ask") => {
     for (const row of rows) {
       if (!row.price || row.price <= 0) continue;
-      const price = Math.round(row.price * 20) / 20; // 0.05 tick rounding
+      // Round to the instrument's tick so levels aggregate. A hardcoded 0.05
+      // was wrong for MCX and CDS contracts.
+      const price = Math.round(row.price / tickSize) * tickSize;
       const existing = levels.get(price) ?? { bidQty: 0, askQty: 0 };
       if (side === "bid") {
-        existing.bidQty += row.quantity;
+        existing.bidQty += row.qty;
       } else {
-        existing.askQty += row.quantity;
+        existing.askQty += row.qty;
       }
       levels.set(price, existing);
     }
   };
 
-  applyLevels(depth.buy, "bid");
-  applyLevels(depth.sell, "ask");
+  applyLevels(book.bids, "bid");
+  applyLevels(book.asks, "ask");
 
   const now = Date.now();
   const d = new Date(now);
