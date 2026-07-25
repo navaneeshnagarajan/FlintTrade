@@ -174,6 +174,12 @@ export interface PlaceOrderParams {
   strategy?: string;
   /** Enable Market Price Protection — converts MARKET to LIMIT with price buffer. */
   marketProtection?: boolean;
+  /**
+   * Quantity shown publicly on the exchange order book; the remainder stays
+   * hidden. Zero (the default) discloses the whole order. Carried through to
+   * the backend as `disclosed_quantity`.
+   */
+  disclosedQuantity?: number;
 }
 
 export interface SmartOrderParams extends PlaceOrderParams {

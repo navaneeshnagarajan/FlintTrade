@@ -25,6 +25,13 @@ import { placeOrder, getSymbol } from "@/services/api";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { useModeStore } from "@/stores/modeStore";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import {
+  checkOrderEntryMode,
+  checkPriceForOrderType,
+  needsLargeOrderConfirmation,
+  resolveLotQuantity,
+  LARGE_ORDER_LOTS,
+} from "@/lib/orderGuards";
 import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
@@ -40,11 +47,8 @@ type ProductType = (typeof PRODUCT_TYPES)[number];
 const ORDER_TYPES = ["MARKET", "LIMIT"] as const;
 type OrderType = (typeof ORDER_TYPES)[number];
 
-/** Orders of this many lots or more require confirmation. */
-const LARGE_ORDER_THRESHOLD = 10;
-
-/** Exchanges where contracts trade in lots — a real lot size is mandatory. */
-const DERIVATIVE_EXCHANGES = new Set(["NFO", "BFO", "MCX", "CDS", "BCD"]);
+// Lot-size, price, mode and large-order rules live in @/lib/orderGuards so
+// every order-entry surface refuses the same things for the same reasons.
 
 // ---------------------------------------------------------------------------
 // Pill selector component
@@ -133,7 +137,7 @@ function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }:
         (<span className="font-semibold text-text-primary">{quantity} qty</span>) of{" "}
         <span className="font-semibold text-text-primary">{symbol}</span>?
         <br />
-        <span className="text-warning">Large order ({LARGE_ORDER_THRESHOLD}+ lots)</span>
+        <span className="text-warning">Large order ({LARGE_ORDER_LOTS}+ lots)</span>
       </div>
       <div className="flex gap-2">
         <Button
@@ -215,17 +219,19 @@ function QuickTradeWidget(props: WidgetProps) {
     };
   }, [symbol, exchange]);
 
-  const isDerivative = DERIVATIVE_EXCHANGES.has(exchange);
-
   /**
    * Resolve the real order quantity (lots × lot size), or null when the lot
    * size is not yet confirmed for a derivatives contract — in which case no
    * order may be sent.
    */
-  const resolveQuantity = useCallback((): number | null => {
-    if (isDerivative && (lotSize == null || lotSize <= 0)) return null;
-    return lots * (lotSize != null && lotSize > 0 ? lotSize : 1);
-  }, [isDerivative, lotSize, lots]);
+  const resolveQuantity = useCallback(
+    (): number | null =>
+      resolveLotQuantity(exchange, lots, {
+        lotSize,
+        verified: lotSize != null && lotSize > 0,
+      }),
+    [exchange, lotSize, lots],
+  );
 
   const executeOrder = useCallback(
     async (action: "BUY" | "SELL") => {
@@ -237,10 +243,18 @@ function QuickTradeWidget(props: WidgetProps) {
         });
         return;
       }
+      // A LIMIT order must carry a real price. Sending ₹0 is a guaranteed
+      // broker rejection, and a lenient bridge could treat it as marketable —
+      // silently turning a price-protected order into a market order.
+      const price = orderType === "LIMIT" ? parseFloat(limitPrice) : 0;
+      const priceRefusal = checkPriceForOrderType(orderType, orderType === "LIMIT" ? price : 1);
+      if (priceRefusal) {
+        setStatus({ type: "error", message: priceRefusal });
+        return;
+      }
       setIsPending(true);
       setStatus(null);
       try {
-        const price = orderType === "LIMIT" ? parseFloat(limitPrice) || 0 : 0;
         await placeOrder({
           symbol,
           exchange,
@@ -276,8 +290,9 @@ function QuickTradeWidget(props: WidgetProps) {
         setStatus({ type: "error", message: "Select an instrument first — order not sent" });
         return;
       }
-      if (mode === "explore") {
-        setStatus({ type: "error", message: "Connect a broker to place orders" });
+      const modeRefusal = checkOrderEntryMode(mode);
+      if (modeRefusal) {
+        setStatus({ type: "error", message: modeRefusal });
         return;
       }
       if (resolveQuantity() == null) {
@@ -287,7 +302,7 @@ function QuickTradeWidget(props: WidgetProps) {
         });
         return;
       }
-      if (lots >= LARGE_ORDER_THRESHOLD) {
+      if (needsLargeOrderConfirmation(lots)) {
         setPendingAction(action);
         setShowConfirm(true);
         return;

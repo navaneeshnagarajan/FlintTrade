@@ -42,24 +42,12 @@ import {
 } from "@/lib/brokerOrdersApi";
 
 // ---------------------------------------------------------------------------
-// Strict numeric parsers (same contract as SmartOrderWidget's): explicit
-// zero stays zero, garbage is rejected — never parseInt-truncated.
+// Strict numeric parsers — one implementation in @/lib/orderGuards, shared
+// with Smart Order (which carried its own byte-identical copy). Explicit zero
+// stays zero, garbage is rejected — never parseInt-truncated.
 // ---------------------------------------------------------------------------
 
-/** Parse a positive whole number ("1,000" → 1000); null for anything else. */
-export function parseWholeNumber(raw: string): number | null {
-  const digits = raw.trim().replace(/,/g, "");
-  if (!/^\d+$/.test(digits)) return null;
-  const value = Number.parseInt(digits, 10);
-  return value > 0 ? value : null;
-}
-
-/** Parse a non-negative price ("123.45"); null for garbage or negatives. */
-export function parsePriceValue(raw: string): number | null {
-  const trimmed = raw.trim().replace(/,/g, "");
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
-  return Number.parseFloat(trimmed);
-}
+export { parseWholeNumber, parsePriceValue } from "@/lib/orderGuards";
 
 // ---------------------------------------------------------------------------
 // Defensive row plucking — adapter rows are broker-specific

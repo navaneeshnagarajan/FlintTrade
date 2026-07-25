@@ -208,4 +208,33 @@ describe("QuickTradeWidget", () => {
       expect(screen.getByText(/Connection refused/i)).toBeTruthy();
     });
   });
+
+  it("refuses a LIMIT order with no price instead of sending it at zero", async () => {
+    // A ₹0 limit price is a guaranteed broker rejection, and a lenient bridge
+    // could treat it as marketable — turning a price-protected order into an
+    // unprotected market order.
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /LIMIT/i }));
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/price above zero/i)).toBeTruthy();
+    });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("sends a LIMIT order once a real price is entered", async () => {
+    renderQuickTrade({ symbol: "NIFTY", exchange: "NSE" });
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+    fireEvent.click(screen.getByRole("button", { name: /LIMIT/i }));
+    fireEvent.change(screen.getByPlaceholderText("0.00"), {
+      target: { value: "22150.5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /buy 1 lots/i }));
+    await waitFor(() => {
+      expect(mockPlaceOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderType: "LIMIT", price: 22150.5 }),
+      );
+    });
+  });
 });

@@ -30,7 +30,13 @@ import useWebSocket from "@/hooks/useWebSocket";
 import { useOrders } from "@/hooks/useOrders";
 import { useModeStore } from "@/stores/modeStore";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
-import { placeOrder, cancelOrder } from "@/services/api";
+import { placeOrder, cancelOrder, getSymbol } from "@/services/api";
+import {
+  checkLotMultiple,
+  checkOrderEntryMode,
+  extractBrokerOrderId,
+  isTerminalOrderStatus,
+} from "@/lib/orderGuards";
 import type { Order, WsInstrument } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -56,35 +62,11 @@ interface LadderLevel  { price: number; bidQty: number; askQty: number }
  * for lenient bridges); anything else yields null so the caller can fail
  * closed rather than fabricate an id.
  */
-export function extractBrokerOrderId(result: unknown): string | null {
-  if (typeof result === "string") return result.trim() !== "" ? result : null;
-  if (result == null || typeof result !== "object") return null;
-  const rec = result as { orderId?: unknown; orderid?: unknown; order_id?: unknown };
-  const candidate = rec.orderId ?? rec.orderid ?? rec.order_id;
-  if (typeof candidate === "string" && candidate.trim() !== "") return candidate;
-  if (typeof candidate === "number") return String(candidate);
-  return null;
-}
-
-/**
- * Whether a broker order status is terminal — the order has left the book
- * (filled, rejected or cancelled) and can no longer be cancelled/modified.
- *
- * Pending variants ("open pending", "trigger pending", "cancel pending") and
- * partial fills are NOT terminal: the order is still live at the broker.
- */
-export function isTerminalOrderStatus(status: string): boolean {
-  const s = status.toLowerCase();
-  if (s.includes("pending") || s.includes("partial")) return false;
-  return (
-    s.includes("complete") ||
-    s.includes("filled") ||
-    s.includes("executed") ||
-    s.includes("rejected") ||
-    s.includes("cancelled") ||
-    s.includes("canceled")
-  );
-}
+// Both helpers now live in @/lib/orderGuards so every surface that reads a
+// broker order id or classifies an order status agrees. Re-exported here
+// because the ladder's own tests and reconciliation logic are their
+// long-standing home.
+export { extractBrokerOrderId, isTerminalOrderStatus };
 
 /**
  * Reconcile the ladder's local pending rows against the live orderbook.
@@ -253,6 +235,32 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
+  // Real lot size for the contract. The ladder previously placed a free
+  // integer quantity on any exchange; on a derivative that is exactly the
+  // non-lot-multiple order every other ticket refuses. Reset before each
+  // lookup so a failed fetch never reuses the previous instrument's lot.
+  const [lotSize, setLotSize] = useState(0);
+  const [lotSizeKnown, setLotSizeKnown] = useState(false);
+  useEffect(() => {
+    if (!symbol || !exchange) return;
+    let cancelled = false;
+    setLotSize(0);
+    setLotSizeKnown(false);
+    getSymbol(symbol, exchange)
+      .then((info) => {
+        if (cancelled) return;
+        const ls = Number(info?.lotsize ?? 0);
+        if (Number.isFinite(ls) && ls > 0) {
+          setLotSize(ls);
+          setLotSizeKnown(true);
+        }
+      })
+      .catch(() => {
+        // Stays unknown — derivative orders remain blocked (fail closed).
+      });
+    return () => { cancelled = true; };
+  }, [symbol, exchange]);
+
   useEffect(() => { track("trade", "widget_view_order_ladder"); }, [track]);
 
   const showMsg = useCallback((msg: string) => { setStatusMsg(msg); setTimeout(() => setStatusMsg(null), 3000); }, []);
@@ -291,10 +299,21 @@ function OrderLadderWidget({ symbol = "NIFTY", exchange = "NSE" }: Props) {
   const orderMap = useMemo(() => { const m = new Map<number, PendingOrder>(); for (const o of pendingOrders) m.set(o.price, o); return m; }, [pendingOrders]);
 
   const sendOrder = useCallback(async (action: "BUY" | "SELL", price: number) => {
-    if (mode === "explore") { showMsg("Connect a broker to place orders"); return; }
+    const modeRefusal = checkOrderEntryMode(mode);
+    if (modeRefusal) { showMsg(modeRefusal); return; }
     // Defence in depth: rows are disabled without a live price, but guard the
     // submit path too so a stale click can never place an order at a made-up price.
     if (liveLtp == null) { showMsg("Waiting for a live price before orders can be placed"); return; }
+    // The ladder ships a free integer quantity and a hardcoded default. On a
+    // derivative that is a non-lot-multiple order every other ticket refuses —
+    // the ladder used to send it.
+    const lotRefusal = checkLotMultiple(
+      exchange,
+      qty,
+      { lotSize, verified: lotSizeKnown },
+      symbol,
+    );
+    if (lotRefusal) { showMsg(lotRefusal); return; }
     const localId = `lo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const order: PendingOrder = { localId, brokerOrderId: null, side: action === "BUY" ? "buy" : "sell", price, qty, status: "placing" };
     setPendingOrders((p) => [...p, order]);

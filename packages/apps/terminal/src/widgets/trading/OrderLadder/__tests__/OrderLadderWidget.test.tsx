@@ -9,6 +9,11 @@ import type { Order } from "@/types/api";
 const mockMode = vi.hoisted(() => ({ value: "explore" }));
 const mockWsTicks = vi.hoisted(() => ({ value: {} as Record<string, { ltp: number }> }));
 const mockPlaceOrder = vi.hoisted(() => vi.fn());
+// The ladder resolves a real lot size before it will place a derivative
+// order; equity instruments report 1.
+const mockGetSymbol = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve({ symbol: "NIFTY", exchange: "NSE", lotsize: 1, tick_size: 0.05 })),
+);
 const mockCancelOrder = vi.hoisted(() => vi.fn());
 // Live orderbook feed the widget reconciles its rows against (useOrders).
 // null = no book response yet; set an Order[] to drive reconciliation.
@@ -34,6 +39,7 @@ vi.mock("@/hooks/useOrders", () => ({
 vi.mock("@/services/api", () => ({
   placeOrder: mockPlaceOrder,
   cancelOrder: mockCancelOrder,
+  getSymbol: mockGetSymbol,
 }));
 
 beforeAll(() => {
@@ -412,5 +418,49 @@ describe("OrderLadderWidget orderbook reconciliation", () => {
       ).toBe(false);
     });
     expect(screen.queryByText(/left the book/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lot-size validation. The ladder ships a free integer quantity and a
+// hardcoded default of 25; on a derivative that is the non-lot-multiple order
+// every other order ticket refuses. It used to send it.
+// ---------------------------------------------------------------------------
+
+describe("OrderLadderWidget derivative lot validation", () => {
+  it("refuses a non-lot-multiple quantity on a derivative exchange", async () => {
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY", exchange: "NFO", lotsize: 75, tick_size: 0.05,
+    });
+    mockMode.value = "live";
+    mockWsTicks.value = { "NFO:NIFTY": { ltp: 100 } };
+    render(<OrderLadderWidget symbol="NIFTY" exchange="NFO" />);
+
+    // Default quantity is 25 — not a multiple of the 75 lot size. The lot
+    // lookup is async, so retry the click until it has resolved; until then
+    // the widget fails closed on the unverified lot size instead.
+    await waitFor(() => {
+      const askBtn = screen
+        .getAllByRole("button")
+        .find((b) => b.getAttribute("title")?.startsWith("BUY"));
+      fireEvent.click(askBtn as HTMLElement);
+      expect(screen.getByText(/multiple of the lot size \(75\)/i)).toBeTruthy();
+    });
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("fails closed while the derivative lot size is unconfirmed", async () => {
+    mockGetSymbol.mockRejectedValue(new Error("symbol master unavailable"));
+    mockMode.value = "live";
+    mockWsTicks.value = { "NFO:BANKNIFTY": { ltp: 100 } };
+    render(<OrderLadderWidget symbol="BANKNIFTY" exchange="NFO" />);
+
+    const askBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.getAttribute("title")?.startsWith("BUY"));
+    fireEvent.click(askBtn as HTMLElement);
+
+    expect(await screen.findByText(/unverified/i)).toBeTruthy();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 });
