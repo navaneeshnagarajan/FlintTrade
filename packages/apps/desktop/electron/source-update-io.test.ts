@@ -76,6 +76,46 @@ const testOnlySafeRemove: NonNullable<NodeSourcePromotionFileSystemOptions["safe
   await rm(quarantine, { recursive: true });
 };
 
+/**
+ * Recreate `target` as a directory whose identity differs from `previous`.
+ *
+ * These tests deliberately destroy a recorded directory and put a DIFFERENT
+ * one back, to prove the identity guard refuses to act on the impostor. On
+ * APFS that is automatic — inode numbers keep climbing — but ext4 and
+ * overlayfs recycle a freed inode immediately, so on Linux the "replacement"
+ * was handed back the SAME (dev, ino) and the guard correctly saw no
+ * mismatch. The test then failed on Linux for the wrong reason: not because
+ * the guard is broken, but because the precondition was never established.
+ *
+ * Holding the recycled inode open with a decoy directory forces the kernel to
+ * allocate a fresh one, so the precondition is guaranteed on every filesystem
+ * rather than assumed.
+ */
+async function recreateWithDistinctIdentity(
+  target: string,
+  previous: { dev: number; ino: number },
+): Promise<{ dev: number; ino: number }> {
+  const decoys: string[] = [];
+  try {
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      await mkdir(target);
+      const replacement = await lstat(target);
+      if (replacement.dev !== previous.dev || replacement.ino !== previous.ino) {
+        return { dev: replacement.dev, ino: replacement.ino };
+      }
+      // The freed inode came straight back. Park it behind a decoy and retry.
+      const decoy = `${target}.identity-decoy-${attempt}`;
+      await rename(target, decoy);
+      decoys.push(decoy);
+    }
+    throw new Error(`Could not obtain a distinct directory identity for ${target}`);
+  } finally {
+    for (const decoy of decoys) {
+      await rm(decoy, { force: true, recursive: true });
+    }
+  }
+}
+
 function cleanupFileSystem() {
   return createNodeSourcePromotionFileSystem({
     promoteAbsent: testOnlyPromoteAbsent,
@@ -960,8 +1000,7 @@ describe("source update production I/O", () => {
       },
     });
     await rm(candidate, { recursive: true });
-    await mkdir(candidate);
-    const replacement = await lstat(candidate);
+    const replacement = await recreateWithDistinctIdentity(candidate, original);
     const inventoryBefore = await readRequiredLogicalJournal(inventoryPath);
 
     const freshRuntime = createNodeSourceUpdaterCleanup({ ...layout, fileSystem: cleanupFileSystem() });
@@ -1491,8 +1530,7 @@ describe("source update production I/O", () => {
     await mkdir(candidate);
     const original = await lstat(candidate);
     await rm(candidate, { recursive: true });
-    await mkdir(candidate);
-    const replacement = await lstat(candidate);
+    const replacement = await recreateWithDistinctIdentity(candidate, original);
     const cleanup = createNodeSourceUpdaterCleanup(layout);
 
     await expect(cleanup.removeOwnedCandidate({
@@ -1510,8 +1548,7 @@ describe("source update production I/O", () => {
     await mkdir(isolationPath);
     const original = await lstat(isolationPath);
     await rm(isolationPath, { recursive: true });
-    await mkdir(isolationPath);
-    const replacement = await lstat(isolationPath);
+    const replacement = await recreateWithDistinctIdentity(isolationPath, original);
     const cleanup = createNodeSourceUpdaterCleanup(layout);
 
     await expect(cleanup.removeIsolation({
