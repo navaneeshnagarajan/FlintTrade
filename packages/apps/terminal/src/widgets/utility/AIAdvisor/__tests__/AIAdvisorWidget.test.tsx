@@ -5,7 +5,7 @@
  * Verifies rendering, not-configured state, and chat input.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -70,6 +70,7 @@ import AIAdvisorWidget, {
   normaliseToolEndpoint,
   toPlaceOrderParams,
 } from "../AIAdvisorWidget";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -167,8 +168,15 @@ describe("toPlaceOrderParams", () => {
 });
 
 describe("executeApprovedToolCall", () => {
+  // The store defaults to `explore`, and these tests ran in it — one asserted
+  // the BACKEND refusal message, which is precisely how the missing client
+  // mode gate stayed invisible.
   beforeEach(() => {
     mockPlaceOrder.mockReset();
+    useModeStore.setState({ mode: "live" });
+  });
+  afterEach(() => {
+    useModeStore.setState({ mode: "explore" });
   });
 
   const orderCall = {
@@ -194,6 +202,49 @@ describe("executeApprovedToolCall", () => {
     );
     expect(outcome.executed).toBe(true);
     expect(outcome.message).toContain("FT-123");
+  });
+
+  it("refuses to dispatch in Explore mode", async () => {
+    useModeStore.setState({ mode: "explore" });
+    const outcome = await executeApprovedToolCall(orderCall);
+
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(outcome.executed).toBe(false);
+    expect(outcome.message).toContain("Connect a broker");
+  });
+
+  it("refuses a LIMIT order priced at zero", async () => {
+    // A model-composed LIMIT with price 0 passed every field check: the price
+    // branch rejected only negatives. The operator would have approved a card
+    // showing "LIMIT" with no price to sanity-check.
+    const outcome = await executeApprovedToolCall({
+      ...orderCall,
+      payload: { ...orderCall.payload, orderType: "LIMIT", price: 0 },
+    });
+
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(outcome.executed).toBe(false);
+  });
+
+  it("refuses an SL order with no trigger price", async () => {
+    const outcome = await executeApprovedToolCall({
+      ...orderCall,
+      payload: { ...orderCall.payload, orderType: "SL", price: 100 },
+    });
+
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+    expect(outcome.executed).toBe(false);
+  });
+
+  it("still dispatches a well-formed LIMIT order", async () => {
+    mockPlaceOrder.mockResolvedValueOnce({ orderId: "FT-9" });
+    const outcome = await executeApprovedToolCall({
+      ...orderCall,
+      payload: { ...orderCall.payload, orderType: "LIMIT", price: 123.5 },
+    });
+
+    expect(mockPlaceOrder).toHaveBeenCalledOnce();
+    expect(outcome.executed).toBe(true);
   });
 
   it("refuses a non-allowlisted endpoint without any dispatch", async () => {
