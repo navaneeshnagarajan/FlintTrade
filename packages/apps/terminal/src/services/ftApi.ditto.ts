@@ -1,4 +1,22 @@
 import { del, get, isDemoAuthSession, post } from "./ftApi.helpers";
+import { assertNativeWriteTargetReadyOrThrow } from "@/services/brokerTargets";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useModeStore } from "@/stores/modeStore";
+
+/**
+ * Fail closed before arming a live multi-account order path.
+ *
+ * Starting the mirror, or enabling an account inside it, turns every
+ * subsequent source-account fill into orders on other real accounts. Those
+ * child orders are placed by the backend through the usual gated chain, but
+ * the ARMING decision must not be taken while the native write target is
+ * still hydrating — the same rule `postOrder` applies before a single order.
+ */
+function assertMirrorArmingAllowed(): void {
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+}
 
 export interface DittoAccount {
   id: string;
@@ -86,10 +104,16 @@ export const getDittoAccounts = () =>
 export const addDittoAccount = (account: DittoAccountCreatePayload) =>
   post<{ account: DittoAccount }>("ditto/accounts", account).then((res) => res.account);
 
-export const setDittoAccountEnabled = (accountId: string, enabled: boolean) =>
-  post<{ account: DittoAccount }>(
+export const setDittoAccountEnabled = async (accountId: string, enabled: boolean) => {
+  // Enabling widens the live mirror's blast radius; disabling narrows it and
+  // is always allowed (a risk-reducing action must never be gated). Async so
+  // the refusal surfaces as a rejected promise, like every other write path.
+  if (enabled) assertMirrorArmingAllowed();
+  const res = await post<{ account: DittoAccount }>(
     `ditto/accounts/${encodeURIComponent(accountId)}/${enabled ? "enable" : "disable"}`,
-  ).then((res) => res.account);
+  );
+  return res.account;
+};
 
 export const removeDittoAccount = (accountId: string) =>
   del<{ id: string; removed: boolean }>(`ditto/accounts/${encodeURIComponent(accountId)}`);
@@ -108,17 +132,25 @@ export const getDittoMirrorStatus = () =>
     : get<Omit<MirrorStatus, "mode"> & { mode: unknown }>("ditto/mirror/status")
       .then((status) => ({ ...status, mode: normaliseMirrorMode(status.mode) }));
 
-export const startDittoMirror = (
+export const startDittoMirror = async (
   source_account: string,
   target_accounts: string[],
   mode: MirrorMode,
-) =>
-  post<Omit<MirrorStartResult, "mode"> & { mode: unknown }>("ditto/mirror/start", {
-    source_account,
-    target_accounts,
-    mode,
-  }).then((result) => ({ ...result, mode: normaliseMirrorMode(result.mode) }));
+) => {
+  // Async so an unready write target surfaces as a rejected promise rather
+  // than a synchronous throw the caller's .catch() would miss.
+  assertMirrorArmingAllowed();
+  const result = await post<Omit<MirrorStartResult, "mode"> & { mode: unknown }>(
+    "ditto/mirror/start",
+    { source_account, target_accounts, mode },
+  );
+  return { ...result, mode: normaliseMirrorMode(result.mode) };
+};
 
+/**
+ * Stop the mirror. Deliberately NOT write-target gated: disarming a live
+ * order path is risk-reducing and must never be blocked by hydration state.
+ */
 export const stopDittoMirror = () =>
   post<{ active: boolean; stopped_at: string }>("ditto/mirror/stop");
 
