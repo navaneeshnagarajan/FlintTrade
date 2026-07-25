@@ -28,10 +28,8 @@ import {
   AlertTriangle,
   CheckCircle,
   RefreshCw,
-  WifiOff,
   Server,
   Cpu,
-  HardDrive,
   Lock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -503,6 +501,3 @@ export default memo(HealthWidget);
 
 // Named exports for convenience in tests
 export { HealthWidget };
-
-// Icons re-exported so test can verify they're present without importing lucide
-export { WifiOff, HardDrive };

@@ -28,7 +28,14 @@ _STATUS_FILE = _REPO_ROOT / ".local" / "reference" / "absorption-status.json"
 
 
 # ---------------------------------------------------------------------------
-# Widget registry — mirrors widgetFactory.tsx
+# Widget registry
+#
+# This mirrors the terminal's `widgetCatalog` in
+# packages/apps/terminal/src/layout/widgetFactory.tsx. It is hand-maintained
+# across the language boundary, so it drifted badly before
+# tests/test_widget_registry_parity.py was added to compare the two — it was
+# carrying retired ids and pre-merge names long after the widgets were gone.
+# Regenerate it from the catalogue rather than editing rows by hand.
 # ---------------------------------------------------------------------------
 
 _WIDGET_REGISTRY: list[dict[str, str]] = [
@@ -40,29 +47,83 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "holdings", "name": "Holdings", "category": "Trading", "status": "live"},
     {"id": "tradebook", "name": "Trade Book", "category": "Trading", "status": "live"},
     {"id": "orderpad", "name": "Order Pad", "category": "Trading", "status": "live"},
+    {"id": "intradaypnl", "name": "Intraday P&L", "category": "Trading", "status": "live"},
     {"id": "mtmmonitor", "name": "MTM Monitor", "category": "Trading", "status": "live"},
-    {"id": "riskpanel", "name": "Risk Panel", "category": "Trading", "status": "live"},
     {"id": "actioncenter", "name": "Action Center", "category": "Trading", "status": "live"},
+    {"id": "tradecopier", "name": "Trade Copier", "category": "Trading", "status": "live"},
+    {"id": "smartorder", "name": "Smart Order", "category": "Trading", "status": "live"},
+    {"id": "portfolioallocation", "name": "Portfolio Allocation", "category": "Trading", "status": "live"},
+    {"id": "quicktrade", "name": "Quick Trade", "category": "Trading", "status": "live"},
+    {"id": "sessionstats", "name": "Session Stats", "category": "Trading", "status": "live"},
+    {"id": "riskdashboard", "name": "Risk", "category": "Trading", "status": "live"},
+    {"id": "tradelog", "name": "Trade Log", "category": "Trading", "status": "live"},
+    {"id": "tradeperformance", "name": "Trade Performance", "category": "Trading", "status": "live"},
+    {"id": "strategymonitor", "name": "Strategy Monitor", "category": "Trading", "status": "live"},
+    {"id": "orderladder", "name": "DOM / Ladder", "category": "Trading", "status": "live"},
+    {"id": "foreverorders", "name": "Forever (GTT) Orders", "category": "Trading", "status": "live"},
+    {"id": "superorders", "name": "Super Orders", "category": "Trading", "status": "live"},
+    {"id": "conditionaltriggers", "name": "Conditional Triggers", "category": "Trading", "status": "live"},
     # Analysis
     {"id": "chart", "name": "Chart", "category": "Analysis", "status": "live"},
     {"id": "optionchain", "name": "Option Chain", "category": "Analysis", "status": "live"},
-    {"id": "oichart", "name": "OI Chart", "category": "Analysis", "status": "live"},
-    {"id": "straddle", "name": "Straddle", "category": "Analysis", "status": "live"},
-    {"id": "depth", "name": "Depth", "category": "Analysis", "status": "live"},
+    {"id": "historicalchain", "name": "Historical Chain", "category": "Analysis", "status": "live"},
+    {"id": "oichart", "name": "OI Analytics", "category": "Analysis", "status": "live"},
+    {"id": "straddle", "name": "Straddle & Implied Move", "category": "Analysis", "status": "live"},
     {"id": "greeks", "name": "Greeks", "category": "Analysis", "status": "live"},
     {"id": "sectormap", "name": "Sector Map", "category": "Analysis", "status": "live"},
-    {"id": "gex", "name": "GEX Dashboard", "category": "Analysis", "status": "live"},
+    {"id": "fiilongshort", "name": "FII Long/Short", "category": "Analysis", "status": "live"},
+    {"id": "gammadensity", "name": "Dealer Gamma", "category": "Analysis", "status": "live"},
+    {"id": "arbitragescanner", "name": "Arbitrage Scanner", "category": "Analysis", "status": "live"},
+    {"id": "indexcontribution", "name": "Index Contribution", "category": "Analysis", "status": "live"},
+    {"id": "patterndetection", "name": "Pattern Detection", "category": "Analysis", "status": "live"},
+    {"id": "timesales", "name": "Tape & Microstructure", "category": "Analysis", "status": "live"},
     {"id": "volsurface", "name": "Vol Surface", "category": "Analysis", "status": "live"},
-    {"id": "ivsmile", "name": "IV Smile", "category": "Analysis", "status": "live"},
+    {"id": "ivsmile", "name": "IV Smile & Skew", "category": "Analysis", "status": "live"},
     {"id": "straddlepnl", "name": "Straddle P&L", "category": "Analysis", "status": "live"},
-    {"id": "oiprofile", "name": "OI Profile", "category": "Analysis", "status": "live"},
     {"id": "orderflow", "name": "Order Flow", "category": "Analysis", "status": "live"},
+    {"id": "threepanel", "name": "Three-Panel Chart", "category": "Analysis", "status": "live"},
+    {"id": "portfoliooptimiser", "name": "Portfolio Optimiser", "category": "Analysis", "status": "live"},
+    {"id": "conditionscanner", "name": "Condition Scanner", "category": "Analysis", "status": "live"},
+    {"id": "pivotpoints", "name": "Pivot Points", "category": "Analysis", "status": "live"},
+    {"id": "marketbreadth", "name": "Market Breadth", "category": "Analysis", "status": "live"},
+    {"id": "volatilitycone", "name": "Volatility Cone", "category": "Analysis", "status": "live"},
+    {"id": "heatcalendar", "name": "Heat Calendar", "category": "Analysis", "status": "live"},
+    {"id": "vwapbands", "name": "VWAP Bands", "category": "Analysis", "status": "live"},
+    {"id": "correlationpairs", "name": "Correlation Pairs", "category": "Analysis", "status": "live"},
+    {"id": "multitimeframe", "name": "Multi-Timeframe", "category": "Analysis", "status": "live"},
+    {"id": "pcrtrend", "name": "PCR Trend", "category": "Analysis", "status": "live"},
+    {"id": "instrumentcompare", "name": "Instrument Compare", "category": "Analysis", "status": "live"},
+    {"id": "greeksheatmap", "name": "Greeks Matrix", "category": "Analysis", "status": "live"},
+    {"id": "gapanalysis", "name": "Gap Analysis", "category": "Analysis", "status": "live"},
+    {"id": "optionsflow", "name": "Options Flow", "category": "Analysis", "status": "live"},
+    {"id": "correlationmatrix", "name": "Correlation Matrix", "category": "Analysis", "status": "live"},
+    {"id": "sectorperformance", "name": "Sector Performance", "category": "Analysis", "status": "live"},
+    {"id": "domheatmap", "name": "DOM Heatmap", "category": "Analysis", "status": "live"},
     # Utility
     {"id": "watchlist", "name": "Watchlist", "category": "Utility", "status": "live"},
     {"id": "calculator", "name": "Calculator", "category": "Utility", "status": "live"},
     {"id": "news", "name": "News Feed", "category": "Utility", "status": "live"},
     {"id": "ticker", "name": "Ticker", "category": "Utility", "status": "live"},
     {"id": "aiadvisor", "name": "AI Advisor", "category": "Utility", "status": "live"},
+    {"id": "aibackends", "name": "AI Backends", "category": "Utility", "status": "live"},
+    {"id": "aiteam", "name": "AI Team", "category": "Utility", "status": "live"},
+    {"id": "obsidian", "name": "Obsidian Vault", "category": "Utility", "status": "live"},
+    {"id": "alerts", "name": "Price Alerts", "category": "Utility", "status": "live"},
+    {"id": "health", "name": "System Health", "category": "Utility", "status": "live"},
+    {"id": "reconciliation", "name": "Reconciliation", "category": "Utility", "status": "live"},
+    {"id": "fundingrate", "name": "Funding Rates", "category": "Utility", "status": "live"},
+    {"id": "currencyconverter", "name": "Currency Converter", "category": "Utility", "status": "live"},
+    {"id": "earningscalendar", "name": "Earnings Calendar", "category": "Utility", "status": "live"},
+    {"id": "globalindices", "name": "Global Indices", "category": "Utility", "status": "live"},
+    {"id": "strategytemplates", "name": "Strategy Templates", "category": "Utility", "status": "live"},
+    {"id": "audittrail", "name": "Audit Trail", "category": "Utility", "status": "live"},
+    {"id": "economiccalendar", "name": "Economic Calendar", "category": "Utility", "status": "live"},
+    {"id": "expirycountdown", "name": "Expiry Countdown", "category": "Utility", "status": "live"},
+    {"id": "marketclock", "name": "Market Clock", "category": "Utility", "status": "live"},
+    {"id": "tradeidea", "name": "Trade Ideas", "category": "Utility", "status": "live"},
+    {"id": "tickspeed", "name": "Tick Speed", "category": "Utility", "status": "live"},
+    {"id": "marketsummary", "name": "Market Summary", "category": "Utility", "status": "live"},
+    {"id": "tradejournal", "name": "Journal Entries", "category": "Utility", "status": "live"},
 ]
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,120 @@
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { ICON_MAP } from "@/chrome/WidgetPicker";
 import { widgetCatalog, widgetComponents, RETIRED_WIDGET_IDS } from "../widgetFactory";
+
+// ---------------------------------------------------------------------------
+// Catalogue-truth guard — helpers
+// ---------------------------------------------------------------------------
+
+const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const FACTORY_FILE = join(SRC_ROOT, "layout", "widgetFactory.tsx");
+
+/**
+ * `widget id → "widgets/<group>/<Name>/<Name>Widget"`, parsed out of the
+ * `lazyWidgets` import map in widgetFactory.tsx. Parsing the source (rather
+ * than exporting the map) keeps the runtime surface unchanged — the lazy
+ * imports must stay statically analysable for Vite's code splitting anyway.
+ */
+const WIDGET_MODULES: ReadonlyMap<string, string> = new Map(
+  [
+    ...readFileSync(FACTORY_FILE, "utf8").matchAll(
+      /(\w+):\s*lazy\(\(\)\s*=>\s*import\("@\/(widgets\/[^"]+)"\)\)/g,
+    ),
+  ].map((match) => [match[1], match[2]] as const),
+);
+
+/** Every non-test `.ts`/`.tsx` file under a directory, recursively. */
+function sourceFilesUnder(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    if (entry === "__tests__") continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      files.push(...sourceFilesUnder(full));
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
+    files.push(full);
+  }
+  return files;
+}
+
+/**
+ * The widget's own source text. Widgets that share a directory with siblings
+ * (`widgets/orders/`, `widgets/account/`) are read file-by-file, so one
+ * widget's code can never vouch for a neighbour's description.
+ */
+function widgetSource(id: string): string {
+  const modulePath = WIDGET_MODULES.get(id);
+  if (!modulePath) return "";
+  const moduleFile = join(SRC_ROOT, `${modulePath}.tsx`);
+  if (!existsSync(moduleFile)) return "";
+  const dir = dirname(moduleFile);
+  const widgetsInDir = readdirSync(dir).filter((entry) => /Widget\.tsx$/.test(entry));
+  const files = widgetsInDir.length > 1 ? [moduleFile] : sourceFilesUnder(dir);
+  return files.map((file) => readFileSync(file, "utf8")).join("\n");
+}
+
+interface CapabilityClaim {
+  /** Matched against a catalogue description. */
+  readonly claim: RegExp;
+  /** Must match the widget's own source when the claim fires. */
+  readonly evidence: RegExp;
+  /** Why this phrase is pinned — read by whoever trips it. */
+  readonly why: string;
+}
+
+/**
+ * Phrases that name a concrete capability, each paired with the token its
+ * implementation would have to contain.
+ *
+ * Most entries are here because the catalogue once made exactly this claim
+ * with nothing behind it: Price Alerts advertised "Telegram and in-app
+ * notifications" (no Telegram call, no Notification API), Trade Ideas
+ * advertised "AI-generated" ideas (zero network calls), Trade Performance
+ * advertised a Sharpe ratio it never computed, Session Stats advertised
+ * turnover it never summed, and Trade Log advertised screenshots it cannot
+ * store. The rest are tripwires for the same failure mode in phrases we do
+ * currently claim truthfully.
+ */
+const CAPABILITY_CLAIMS: readonly CapabilityClaim[] = [
+  { claim: /telegram/i, evidence: /telegram/i, why: "a Telegram claim needs a Telegram call" },
+  {
+    claim: /\bnotification/i,
+    evidence: /Notification|notify|toast|useNotification/i,
+    why: "a notification claim needs a notification path",
+  },
+  { claim: /\bsharpe\b/i, evidence: /sharpe/i, why: "Sharpe must actually be computed" },
+  { claim: /\bvpin\b/i, evidence: /vpin/i, why: "VPIN must actually be computed" },
+  { claim: /\bkelly\b/i, evidence: /kelly/i, why: "Kelly sizing must actually be implemented" },
+  { claim: /monte[\s-]?carlo/i, evidence: /monte[\s_-]?carlo/i, why: "Monte Carlo must be simulated" },
+  { claim: /\bturnover\b/i, evidence: /turnover/i, why: "turnover must actually be summed" },
+  { claim: /\bexpectancy\b/i, evidence: /expectancy/i, why: "expectancy must actually be computed" },
+  { claim: /profit factor/i, evidence: /profit[^A-Za-z0-9]?factor/i, why: "profit factor must be computed" },
+  { claim: /\bcamarilla\b/i, evidence: /camarilla/i, why: "a named pivot method must exist" },
+  { claim: /\bwoodie/i, evidence: /woodie/i, why: "a named pivot method must exist" },
+  { claim: /\bfibonacci\b/i, evidence: /fibonacci|\bfib\b/i, why: "a named pivot method must exist" },
+  { claim: /\bdemark\b/i, evidence: /demark/i, why: "a named pivot method must exist" },
+  { claim: /screenshot/i, evidence: /screenshot/i, why: "screenshots need a screenshot path" },
+  { claim: /full-text search/i, evidence: /search/i, why: "search claims need a search call" },
+  { claim: /\bcsv\b/i, evidence: /csv/i, why: "a CSV export claim needs an export path" },
+  { claim: /\btwap\b/i, evidence: /twap/i, why: "a TWAP slicing claim needs TWAP code" },
+  { claim: /\bgtt\b/i, evidence: /gtt/i, why: "a GTT claim needs the GTT surface" },
+  { claim: /kill switch/i, evidence: /kill/i, why: "a kill-switch claim needs the kill switch" },
+  {
+    claim: /\bAI-(generated|powered|driven)\b/i,
+    evidence: /advisor|agent|llm|prompt|anthropic|openai|cerebras|chat/i,
+    why: "an AI claim needs a model/agent call — a localStorage notebook is not AI",
+  },
+  { claim: /\brsi\b/i, evidence: /rsi/i, why: "a named indicator must appear in the widget" },
+  { claim: /\bmacd\b/i, evidence: /macd/i, why: "a named indicator must appear in the widget" },
+  { claim: /\bema\b/i, evidence: /ema/i, why: "a named indicator must appear in the widget" },
+];
 
 describe("widgetFactory catalogue wiring", () => {
   it("resolves every catalogue widget, and every extra component is a documented retirement", () => {
@@ -58,6 +171,67 @@ describe("widgetFactory catalogue wiring", () => {
       .map((w) => w.icon)
       .filter((icon) => !(icon in ICON_MAP));
     expect(missing).toEqual([]);
+  });
+
+  it("resolves every catalogue widget to a source file on disk", () => {
+    // The capability scan below reads these files. If an id stopped resolving
+    // the scan would silently pass on an empty string, so pin resolution
+    // separately and loudly.
+    const unresolved = widgetCatalog
+      .map((widget) => widget.id)
+      .filter((id) => {
+        const modulePath = WIDGET_MODULES.get(id);
+        return !modulePath || !existsSync(join(SRC_ROOT, `${modulePath}.tsx`));
+      });
+    expect(unresolved).toEqual([]);
+  });
+
+  it("never advertises a capability the widget's own source has no trace of", () => {
+    // Catalogue-truth guard. The picker's description is the only promise most
+    // operators ever read, and it drifted badly: Telegram alerts with no
+    // Telegram, AI-generated ideas with no network call, a Sharpe ratio that
+    // was never computed.
+    //
+    // LIMITS — this is a heuristic, deliberately:
+    //   * It only checks the phrases in CAPABILITY_CLAIMS. A false claim
+    //     phrased in words nobody listed still sails through; add the phrase
+    //     when you find one.
+    //   * Evidence is a token in the source, not behaviour. A comment, a dead
+    //     import or a variable name satisfies it — it catches "this widget has
+    //     no idea what that word means", not "this widget does it correctly".
+    //   * It says nothing about claims of *scale* ("up to five instruments"
+    //     when MAX_SLOTS is 4) or of *form* ("four charts" for a table), which
+    //     need a human reading the widget.
+    const failures: string[] = [];
+
+    for (const widget of widgetCatalog) {
+      const description = widget.description ?? "";
+      const source = widgetSource(widget.id);
+      for (const { claim, evidence, why } of CAPABILITY_CLAIMS) {
+        if (!claim.test(description)) continue;
+        if (evidence.test(source)) continue;
+        failures.push(
+          `${widget.id}: description matches ${String(claim)} but its source has no ${String(evidence)} — ${why}`,
+        );
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps the two journal surfaces distinguishable in the picker", () => {
+    // Both used to open with "Annotated trade journal…" while reading
+    // different stores: Trade Log is read-only over the auto-recorded fills
+    // (/api/v1/trades/journal); Journal Entries is full CRUD over the
+    // annotated SQLite+FTS5 store (/api/v1/journal/entries).
+    const tradeLog = widgetCatalog.find((widget) => widget.id === "tradelog");
+    const journal = widgetCatalog.find((widget) => widget.id === "tradejournal");
+
+    expect(tradeLog?.name).not.toBe(journal?.name);
+    expect(tradeLog?.description).not.toBe(journal?.description);
+    // The read-only one must not present itself as somewhere you write.
+    expect(tradeLog?.description).toMatch(/read-only/i);
+    expect(journal?.description).toMatch(/write|edit|annotat/i);
   });
 
   it("keeps Spread View out of the catalogue after its demotion to template data", () => {

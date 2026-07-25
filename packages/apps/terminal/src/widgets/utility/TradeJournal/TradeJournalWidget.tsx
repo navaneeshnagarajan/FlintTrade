@@ -472,7 +472,11 @@ function TradeJournalWidget() {
       {/* Header */}
       <div className="flex-none flex items-center gap-2 px-3 py-2 bg-surface-card border-b border-border-default">
         <NotebookPen size={13} className="text-text-muted" aria-hidden="true" />
-        <span className="text-xs font-medium text-text-primary">Trade Journal</span>
+        {/* Named "Journal Entries" to separate three surfaces that all used to
+            read "trade journal": the read-only Trade Log widget (recorded
+            fills), this CRUD widget over /api/v1/journal/entries, and the
+            Trade Journal canvas tool. The widget id is unchanged. */}
+        <span className="text-xs font-medium text-text-primary">Journal Entries</span>
         <div className="flex-1" />
         <Button
           variant="outline"
