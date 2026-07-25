@@ -36,8 +36,17 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // ---------------------------------------------------------------
   "widget:sectormap":   { beginner: "locked",  intermediate: "preview", advanced: "visible" },
   "widget:greeks":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
-  "widget:gex":         { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // NOTE: `widget:gex` was removed when GEX merged into Dealer Gamma
+  // (`gammadensity`). The canonical is deliberately left UNGATED: gammadensity
+  // was already visible at every level, so adopting GEX's advanced-only gate
+  // would have TAKEN a surface away from beginners. That is the opposite
+  // direction from the Order Flow merge, where the canonical was already the
+  // stricter of the two.
   "widget:volsurface":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Retired id — resolves to `ivsmile`, which is advanced-only. Without its
+  // own row an absent widget: id defaults to visible, so a saved `ivskew`
+  // panel would bypass the gate its canonical carries.
+  "widget:ivskew":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },

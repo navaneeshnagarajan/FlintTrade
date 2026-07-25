@@ -54,13 +54,11 @@ const lazyWidgets = {
   indexcontribution: lazy(() => import("@/widgets/analysis/IndexContribution/IndexContributionWidget")),
   patterndetection: lazy(() => import("@/widgets/analysis/PatternDetection/PatternDetectionWidget")),
   timesales: lazy(() => import("@/widgets/analysis/TimeSales/TimeSalesWidget")),
-  gex: lazy(() => import("@/widgets/analysis/GEX/GEXWidget")),
   volsurface: lazy(() => import("@/widgets/analysis/VolSurface/VolSurfaceWidget")),
   ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
   straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
   oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
   orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
-  depthheatmap: lazy(() => import("@/widgets/analysis/DepthHeatmap/DepthHeatmapWidget")),
 
   // Utility widgets (new)
   scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
@@ -105,7 +103,6 @@ const lazyWidgets = {
   pivotpoints: lazy(() => import("@/widgets/analysis/PivotPoints/PivotPointsWidget")),
   economiccalendar: lazy(() => import("@/widgets/utility/EconomicCalendar/EconomicCalendarWidget")),
   portfolioallocation: lazy(() => import("@/widgets/trading/PortfolioAllocation/PortfolioAllocationWidget")),
-  orderbookreplay: lazy(() => import("@/widgets/analysis/OrderBookReplay/OrderBookReplayWidget")),
 
   // Wave 27 widgets
   marketbreadth: lazy(() => import("@/widgets/analysis/MarketBreadth/MarketBreadthWidget")),
@@ -144,7 +141,6 @@ const lazyWidgets = {
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
 
   // Wave 33 widgets
-  ivskew: lazy(() => import("@/widgets/analysis/IVSkew/IVSkewWidget")),
   marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
   strategymonitor: lazy(() => import("@/widgets/trading/StrategyMonitor/StrategyMonitorWidget")),
   netposition: lazy(() => import("@/widgets/trading/NetPosition/NetPositionWidget")),
@@ -193,6 +189,46 @@ export interface RetiredWidget {
 }
 
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  gex: {
+    component: "gammadensity",
+    params: { view: "exposure" },
+    note:
+      "Merged into Dealer Gamma. The gammadensity backend endpoint reuses the "
+      + "very option-chain snapshot the GEX endpoint builds, so the two were "
+      + "one data plane behind two widgets. GEX's call/put decomposition and "
+      + "signed Net GEX area are now the 'exposure' view; its gamma-flip "
+      + "annotation is dropped because the server returns that field as null "
+      + "unconditionally.",
+  },
+  depthheatmap: {
+    component: "domheatmap",
+    // Its identity was the gamma power-scale look, not a distinct view.
+    params: { scale: "gamma" },
+    note:
+      "Merged into DOM Heatmap. Same visual, byte-identical colour ramps, same "
+      + "layered-canvas architecture and the same Flame icon — the only real "
+      + "difference was that this one was entirely synthetic. Its deterministic "
+      + "generator survives as the labelled demo provider.",
+  },
+  orderbookreplay: {
+    component: "domheatmap",
+    params: { view: "replay" },
+    note:
+      "Merged into DOM Heatmap as its 'replay' view. It owned a good transport "
+      + "and scrubber but played over a Math.random() sample; DOM Heatmap "
+      + "already kept a real 60-snapshot ring buffer, which is what a scrubber "
+      + "wants.",
+  },
+  ivskew: {
+    component: "ivsmile",
+    params: { view: "skew" },
+    note:
+      "Merged into IV Smile & Skew. Both read the same getFtIVSmile payload "
+      + "with the same palette, symbols, axis toggle and ATM/25-delta metrics; "
+      + "only the projection differed. IV Skew's four-state fail-closed "
+      + "provenance badge and its percent-vs-decimal normalisation became the "
+      + "canonical behaviour, because they were the stricter of the two.",
+  },
   footprint: {
     component: "orderflow",
     params: { view: "footprint+delta" },
@@ -247,19 +283,17 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 bid/ask depth from the active broker snapshot feed" },
   { id: "greeks", name: "Greeks", icon: "Sigma", category: "Analysis", description: "Position-level Delta, Gamma, Theta, and Vega summary" },
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis", description: "Colour-coded sector tree map showing intraday performance by industry" },
-  { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis", description: "Gamma Exposure (GEX) by strike to identify key support and resistance levels" },
   { id: "fiilongshort", name: "FII Long/Short", icon: "TrendingUp", category: "Analysis", description: "FII long/short positioning across F&O segments with an aggregate futures directional bias, derived from NSE participant OI" },
-  { id: "gammadensity", name: "Gamma Density", icon: "BarChart2", category: "Analysis", description: "Dealer gamma density (Γ×OI) by strike at intraday and to-expiry horizons, with the ±1σ/±2σ convexity-zone expected-move band" },
+  { id: "gammadensity", name: "Dealer Gamma", icon: "BarChart2", category: "Analysis", description: "Dealer gamma from one option-chain snapshot, in two views: gamma-weighted open interest by strike at intraday and to-expiry horizons with the ±1σ convexity zone, or call/put gamma-exposure bars with signed net exposure and the dealer long/short-gamma zone" },
   { id: "arbitragescanner", name: "Arbitrage Scanner", icon: "ArrowLeftRight", category: "Analysis", description: "Cash-future basis dislocations vs cost-of-carry plus cross-exchange (NSE/BSE) price gaps, ranked by annualised edge" },
   { id: "indexcontribution", name: "Index Contribution", icon: "BarChart3", category: "Analysis", description: "Index movers ranked by constituent point contribution (free-float weight × return), with advancers/decliners and per-name push" },
   { id: "patterndetection", name: "Pattern Detection", icon: "CandlestickChart", category: "Analysis", description: "Detects the six candlestick patterns FlintTrade backtests (doji, hammer, engulfing, morning/evening star, three soldiers) on a symbol's recent bars" },
   { id: "timesales", name: "Time & Sales", icon: "ClipboardList", category: "Analysis", description: "Streaming tape of trade prints inferred from live quote ticks (tick-rule side, volume-delta size) with a buy/sell pressure bar" },
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis", description: "3-D implied volatility surface across strikes and expiries" },
-  { id: "ivsmile", name: "IV Smile", icon: "TrendingUp", category: "Analysis", description: "Implied volatility smile curve for a selected expiry date" },
+  { id: "ivsmile", name: "IV Smile & Skew", icon: "TrendingUp", category: "Analysis", description: "Implied volatility across strikes for the nearest expiries, as the call/put smile curves or the 25-delta put-minus-call skew" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis", description: "Payoff diagram for straddle positions with breakeven markers" },
   { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis", description: "OI distribution profile across strikes to identify congestion zones" },
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis", description: "Real-time buy/sell order flow footprint for active F&O contracts" },
-  { id: "depthheatmap", name: "Depth Heatmap", icon: "Flame", category: "Analysis", description: "Heatmap of order book depth changes over time" },
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis", description: "Three synchronised chart panels for multi-instrument comparison" },
   { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis", description: "Heat map of open interest changes across strikes and expiries" },
   { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
@@ -267,7 +301,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
   { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis", description: "3-D surface plot of option Greeks across strikes and days to expiry" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
-  { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis", description: "Historical replay of the order book for post-session microstructure analysis" },
   { id: "marketbreadth", name: "Market Breadth", icon: "BarChart4", category: "Analysis", description: "Advance/decline ratio, new highs/lows, and breadth oscillators for NSE" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis", description: "Volatility cone comparing current IV against historical percentiles" },
   { id: "heatcalendar", name: "Heat Calendar", icon: "Calendar", category: "Analysis", description: "Calendar heat map of daily P&L or returns for pattern spotting" },
@@ -283,9 +316,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Real-time large options trade scanner showing unusual activity" },
   { id: "microstructure", name: "Market Microstructure", icon: "Microscope", category: "Analysis", description: "Tick-level microstructure analysis: trade clustering, aggressor ratio, VPIN" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
-  { id: "ivskew", name: "IV Skew", icon: "Activity", category: "Analysis", description: "Skew chart showing the difference in IV between OTM puts and calls" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },
-  { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Historical depth-of-market heatmap showing where large orders sit and are pulled over time" },
+  { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },

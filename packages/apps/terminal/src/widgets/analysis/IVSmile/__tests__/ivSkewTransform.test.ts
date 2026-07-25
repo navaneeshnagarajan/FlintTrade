@@ -1,3 +1,10 @@
+/**
+ * ivSkewTransform tests — moved here with the module when IVSkew merged into
+ * IVSmile (merge 2.1). The scale-detection cases are the reason the transform
+ * had to survive the merge: without them a percentage-points payload renders at
+ * 100×, and the IVSmile widget had no equivalent normalisation of its own.
+ */
+
 import { describe, it, expect } from "vitest";
 import type { IVSmileData } from "@/types/api";
 import { normaliseIv, mapIVSmileToSkew } from "../ivSkewTransform";
@@ -53,7 +60,7 @@ function smile(): IVSmileData {
 
 describe("mapIVSmileToSkew", () => {
   it("maps curves, points, spot and symbol from the IV-smile payload", () => {
-    const data = mapIVSmileToSkew(smile(), "2026-04-09T10:15:00")!;
+    const data = mapIVSmileToSkew(smile())!;
     expect(data.symbol).toBe("NIFTY");
     expect(data.spot).toBe(22400);
     expect(data.curves).toHaveLength(2);
@@ -77,7 +84,7 @@ describe("mapIVSmileToSkew", () => {
       call_iv: p.call_iv * 100,
       put_iv: p.put_iv * 100,
     }));
-    const data = mapIVSmileToSkew(pct, "t")!;
+    const data = mapIVSmileToSkew(pct)!;
     expect(data.curves[0].atm_iv).toBeCloseTo(0.148, 6);
     expect(data.curves[0].points[0].call_iv).toBeLessThan(1);
     // skew must be scaled with the IVs → 2.0 percentage points → 0.02 (renders +2 %).
@@ -85,7 +92,7 @@ describe("mapIVSmileToSkew", () => {
   });
 
   it("leaves an already-decimal payload (incl. skew) unscaled", () => {
-    const data = mapIVSmileToSkew(smile(), "t")!;
+    const data = mapIVSmileToSkew(smile())!;
     // smile() is decimal: skew 0.032 stays 0.032 (renders +3.2 %).
     expect(data.curves[0].skew_25delta).toBeCloseTo(0.032, 6);
   });
@@ -99,19 +106,19 @@ describe("mapIVSmileToSkew", () => {
       call_iv: p.call_iv * 100,
       put_iv: p.put_iv * 100,
     }));
-    const data = mapIVSmileToSkew(pct, "t")!;
+    const data = mapIVSmileToSkew(pct)!;
     expect(data.curves[0].skew_25delta).toBeCloseTo(-0.015, 6);
   });
 
   it("returns null when there are no curves", () => {
-    expect(mapIVSmileToSkew(null, "t")).toBeNull();
-    expect(mapIVSmileToSkew(undefined, "t")).toBeNull();
+    expect(mapIVSmileToSkew(null)).toBeNull();
+    expect(mapIVSmileToSkew(undefined)).toBeNull();
     expect(mapIVSmileToSkew({
       underlying: "X",
       spot_price: 0,
       curves: [],
       is_sample_data: false,
-    }, "t")).toBeNull();
+    })).toBeNull();
   });
 
   it("drops curves whose points carry no positive IV", () => {
@@ -130,7 +137,7 @@ describe("mapIVSmileToSkew", () => {
         },
       ],
     };
-    expect(mapIVSmileToSkew(empty, "t")).toBeNull();
+    expect(mapIVSmileToSkew(empty)).toBeNull();
   });
 
   it("drops curves whose points carry IV for only one option leg", () => {
@@ -141,6 +148,6 @@ describe("mapIVSmileToSkew", () => {
         points: [{ strike: 22400, call_iv: 0.15, put_iv: 0, moneyness: 1 }],
       },
     ];
-    expect(mapIVSmileToSkew(incomplete, "t")).toBeNull();
+    expect(mapIVSmileToSkew(incomplete)).toBeNull();
   });
 });

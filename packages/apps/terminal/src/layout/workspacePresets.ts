@@ -349,7 +349,7 @@ function applyInvestorView(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyOptionsAnalysis(api: DockviewApi): void {
   const optionChainId = pid("optionchain");
-  const ivSkewId = pid("ivskew");
+  const ivSkewId = pid("ivsmile");
   const greeksHeatmapId = pid("greeksheatmap");
   const impliedMoveId = pid("impliedmove");
   const straddlePnlId = pid("straddlepnl");
@@ -363,7 +363,9 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: ivSkewId,
-    component: "ivskew",
+    component: "ivsmile",
+    // The skew projection is what this preset slot has always shown.
+    params: { view: "skew" },
     title: "IV Skew",
     position: { referencePanel: optionChainId, direction: "below" },
     initialWidth: 340,
@@ -620,7 +622,7 @@ function applyMarketOverview(api: DockviewApi): void {
 // Preset 12 — Quick Scalper
 //
 // ┌────────────┬──────────────┬──────────┐
-// │ Quick Trade│DepthHeatmap  │TickSpeed │
+// │ Quick Trade│DOM Heatmap   │TickSpeed │
 // ├────────────┼──────────────┴──────────┤
 // │ Order Lad. │   Microstructure        │
 // ├────────────┴─────────────────────────┤
@@ -629,7 +631,7 @@ function applyMarketOverview(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyQuickScalper(api: DockviewApi): void {
   const quickTradeId = pid("quicktrade");
-  const depthHeatmapId = pid("depthheatmap");
+  const depthHeatmapId = pid("domheatmap");
   const tickSpeedId = pid("tickspeed");
   const orderLadderId = pid("orderladder");
   const microstructureId = pid("microstructure");
@@ -644,8 +646,10 @@ function applyQuickScalper(api: DockviewApi): void {
 
   api.addPanel({
     id: depthHeatmapId,
-    component: "depthheatmap",
-    title: "Depth Heatmap",
+    component: "domheatmap",
+    title: "DOM Heatmap",
+    // The gamma power-scale is the look the retired Depth Heatmap had.
+    params: { scale: "gamma" },
     position: { referencePanel: quickTradeId, direction: "right" },
   });
 
@@ -734,7 +738,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "greekssurface", "ivsmile", "ivskew", "oiprofile", "oiheatmap",
+    "greekssurface", "ivsmile", "oiprofile", "oiheatmap",
     "impliedmove", "optionsflow", "volatilitycone",
   ] as const) {
     api.addPanel({
@@ -756,11 +760,11 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "depthheatmap", "gex", "volsurface", "orderflow", "sectormap",
+    "domheatmap", "gammadensity", "volsurface", "orderflow", "sectormap",
     "sectorperformance", "marketbreadth", "correlationpairs",
     "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend",
     "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
-    "orderbookreplay", "microstructure",
+    "microstructure",
   ] as const) {
     api.addPanel({
       id: pid(comp),

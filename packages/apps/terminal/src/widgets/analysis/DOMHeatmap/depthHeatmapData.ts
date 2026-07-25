@@ -1,8 +1,14 @@
 /**
- * Depth heatmap synthetic data generation and types.
+ * Depth heatmap demo data generation and types.
  *
  * Generates a 2D grid of bid/ask volumes at different price levels over time.
- * Used for initial implementation before live WebSocket depth data is wired.
+ *
+ * This was the ENTIRE data path of the retired `depthheatmap` widget, which
+ * had no network at all. It survives as the DOM Heatmap's explicit Explore-mode
+ * provider: `DOMHeatmapWidget` adapts the grid onto its live snapshot shape
+ * (`demoSnapshots`) so demo and live share one renderer, and renders it behind
+ * a permanent "Demo data" badge. It is deterministic — same seed, same book —
+ * which is what makes it assertable, unlike a `Math.random()` sample.
  *
  * Grid: Y-axis = price levels (200 levels), X-axis = time columns (50 columns).
  * Each cell holds bid volume and ask volume at that price/time intersection.

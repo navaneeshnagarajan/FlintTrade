@@ -148,7 +148,9 @@ describe("useSkillContent — advanced", () => {
     expect(availableWidgets).toContain("volsurface");
     expect(availableWidgets).toContain("scalper");
     expect(availableWidgets).toContain("orderflow");
-    expect(availableWidgets).toContain("depthheatmap");
+    // depthheatmap merged into domheatmap (its gamma-scale look).
+    expect(availableWidgets).toContain("domheatmap");
+    expect(availableWidgets).not.toContain("depthheatmap");
     expect(availableWidgets).toContain("scanner");
     // Order-flow widgets. `footprint` merged into `orderflow` (its
     // "footprint+delta" view mode), so the canonical id is what the picker can reach
