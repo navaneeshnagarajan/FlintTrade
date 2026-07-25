@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -28,6 +29,7 @@ const marketIntelMocks = vi.hoisted(() => ({
       }
     | undefined,
   gexIsError: false,
+  fiiDiiData: undefined as { is_sample_data?: boolean } | undefined,
   ivSmileData: undefined as
     | {
         is_sample_data: boolean;
@@ -108,12 +110,32 @@ vi.mock("@/services/api", () => ({
   getExpiry: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/services/ftApi.screener", () => ({
+  getFiiDiiData: () => Promise.resolve(marketIntelMocks.fiiDiiData),
+}));
+
 // ---------------------------------------------------------------------------
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
 import MarketIntelligenceTool from "../MarketIntelligenceTool";
 import { useModeStore } from "@/stores/modeStore";
+
+/**
+ * Render the tool inside a query client.
+ *
+ * Only the FII/DII tab reaches TanStack Query directly — every other tab goes
+ * through the mocked useMarketIntel hooks — so the rest of this suite renders
+ * bare.
+ */
+function renderWithQuery() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MarketIntelligenceTool />
+    </QueryClientProvider>,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -123,6 +145,7 @@ describe("MarketIntelligenceTool", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     marketIntelMocks.gexData = undefined;
+    marketIntelMocks.fiiDiiData = undefined;
     marketIntelMocks.gexIsError = false;
     marketIntelMocks.ivSmileData = undefined;
     marketIntelMocks.ivSmileIsError = false;
@@ -155,6 +178,47 @@ describe("MarketIntelligenceTool", () => {
     fireEvent.click(screen.getByRole("button", { name: "GEX" }));
 
     expect(screen.getByText("Sample Data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  // The header badge and the tab body must never contradict each other. They
+  // did: `fiidii` was dropped from SAMPLE_DATA_TABS when its rows became live,
+  // but it was not added to the provenance-reporting list, so the header
+  // asserted "Live" unconditionally while the body rendered its sample notice.
+  it("does not label sample FII/DII rows as live", async () => {
+    useModeStore.setState({ mode: "live" });
+    marketIntelMocks.fiiDiiData = {
+      is_sample_data: true,
+    };
+    renderWithQuery();
+
+    fireEvent.click(screen.getByRole("button", { name: "FII/DII Flows" }));
+
+    expect(await screen.findByText("Sample Data")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("labels FII/DII rows live only when the backend says so", async () => {
+    useModeStore.setState({ mode: "live" });
+    marketIntelMocks.fiiDiiData = {
+      is_sample_data: false,
+    };
+    renderWithQuery();
+
+    fireEvent.click(screen.getByRole("button", { name: "FII/DII Flows" }));
+
+    expect(await screen.findByText("Live")).toBeInTheDocument();
+    expect(screen.queryByText("Sample Data")).not.toBeInTheDocument();
+  });
+
+  it("treats FII/DII rows with no provenance flag as sample", async () => {
+    useModeStore.setState({ mode: "live" });
+    marketIntelMocks.fiiDiiData = {};
+    renderWithQuery();
+
+    fireEvent.click(screen.getByRole("button", { name: "FII/DII Flows" }));
+
+    expect(await screen.findByText("Sample Data")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 

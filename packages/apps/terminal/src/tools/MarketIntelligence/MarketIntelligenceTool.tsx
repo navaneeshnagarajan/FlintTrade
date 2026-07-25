@@ -65,7 +65,11 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
   const isExploreMode = useModeStore((s) => s.mode === "explore");
 
   const currentTab = TABS.find((t) => t.id === activeTab);
-  const hasResponseProvenance = ["gex", "ivsmile", "maxpain", "oiprofile"].includes(activeTab);
+  // Tabs that report their own response provenance upward. `fiidii` belongs
+  // here: it was dropped from SAMPLE_DATA_TABS when its rows became live, but
+  // nothing replaced that with a real signal, so the header asserted "Live"
+  // unconditionally while the tab body rendered its own sample notice.
+  const hasResponseProvenance = ["gex", "ivsmile", "maxpain", "oiprofile", "fiidii"].includes(activeTab);
   const isSampleData = (
     isExploreMode
     || SAMPLE_DATA_TABS.includes(activeTab)
@@ -75,7 +79,9 @@ export default function MarketIntelligenceTool({ onClose }: Props) {
     !isSampleData
     && (!hasResponseProvenance || optionTabIsSampleData === false)
   );
-  const activeContent = activeTab === "gex"
+  const activeContent = activeTab === "fiidii"
+    ? <FiiDiiFlowsTab onSampleDataChange={setOptionTabIsSampleData} />
+    : activeTab === "gex"
     ? <GexTab onSampleDataChange={setOptionTabIsSampleData} />
     : activeTab === "ivsmile"
       ? <IVSmileTab onSampleDataChange={setOptionTabIsSampleData} />

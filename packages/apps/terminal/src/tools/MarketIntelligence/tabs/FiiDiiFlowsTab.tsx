@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Globe } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -106,7 +107,11 @@ function DerivativeStatsTable({ snapshot }: { snapshot: FiiDiiSnapshot }) {
   );
 }
 
-export function FiiDiiFlowsTab() {
+interface FiiDiiFlowsTabProps {
+  onSampleDataChange?: (isSampleData: boolean | null) => void;
+}
+
+export function FiiDiiFlowsTab({ onSampleDataChange }: FiiDiiFlowsTabProps = {}) {
   const { data, isLoading } = useQuery({
     queryKey: ["screener", "fii-dii", FII_DII_DAYS],
     queryFn: () => getFiiDiiData(FII_DII_DAYS),
@@ -117,6 +122,17 @@ export function FiiDiiFlowsTab() {
   // The backend flags sample data explicitly; only then do we show the demo
   // affordance. Live data renders without it.
   const isSample = data?.is_sample_data ?? true;
+
+  // Report provenance up so the tool header agrees with this body. It did not
+  // before: the header treated this tab as having no provenance to report, so
+  // it stamped a green "Live" badge over rows this tab was labelling sample.
+  useEffect(() => {
+    onSampleDataChange?.(isLoading ? null : isSample);
+  }, [onSampleDataChange, isLoading, isSample]);
+
+  useEffect(() => () => {
+    onSampleDataChange?.(null);
+  }, [onSampleDataChange]);
   const snapshots: FiiDiiSnapshot[] = data?.trend?.snapshots?.length
     ? data.trend.snapshots
     : data?.latest
