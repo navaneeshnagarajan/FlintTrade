@@ -243,6 +243,11 @@ function IntradayPnLWidget() {
   // Shared caches — the same positions/tradebook entries every other widget
   // consumes, on the shared refetch cadence. Invalidating the shared keys
   // (e.g. after an order) updates this widget too.
+  // Deliberately ungated: this widget renders an Explore preview from the
+  // API's labelled mock positions behind a "Sample data" badge, the same
+  // policy Dashboard uses. Gating it to accountReadsEnabled would remove that
+  // preview, so the enablement asymmetry with Positions/Holdings is intended
+  // rather than an oversight.
   const positionsQuery = usePositions();
   const tradebookQuery = useTradebook();
 
