@@ -47,6 +47,7 @@ import { usePositions } from "@/hooks/usePositions";
 import { useFunds } from "@/hooks/useFunds";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { totalPositionMtm } from "@/lib/pnl";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
@@ -324,9 +325,11 @@ function MTMMonitorWidget(_props: WidgetProps) {
   useEffect(() => {
     if (!positions) return;
 
-    const rawPnl = (positions as Position[]).reduce((sum, p) => {
-      return sum + (p.pnl ?? 0);
-    }, 0);
+    // Shared definition. This used to sum the raw broker `pnl` field, which
+    // is wrong for some brokers (CLAUDE.md quirk 4) — so this widget and the
+    // Intraday P&L widget reported different totals for the same book when
+    // docked side by side.
+    const rawPnl = totalPositionMtm(positions as Position[]);
 
     const nowSec = Math.floor(Date.now() / 1000) as UTCTimestamp;
     const point: MtmPoint = { time: nowSec, value: rawPnl };

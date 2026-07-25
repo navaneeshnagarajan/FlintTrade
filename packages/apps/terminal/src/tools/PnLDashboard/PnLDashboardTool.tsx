@@ -15,7 +15,7 @@ import { useModeData } from "@/hooks/useModeData";
 import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
 import { useModeStore } from "@/stores/modeStore";
 import type { Funds, Position, Trade } from "@/types/api";
-import { realisedFromTrades } from "@/lib/pnl";
+import { realisedFromTrades, totalPositionMtm } from "@/lib/pnl";
 import type { Time } from "lightweight-charts";
 
 interface Props {
@@ -230,7 +230,10 @@ function PnlBarList({
 // ---- Sub-tabs ----
 
 function SummaryTab({ positions, funds }: { positions: Position[]; funds: { availableCash: number; usedMargin: number; totalBalance: number } | undefined }) {
-  const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
+  // Shared MTM definition — this summed the raw broker `pnl`, which is
+  // wrong for some brokers (CLAUDE.md quirk 4) and disagreed with the
+  // Intraday P&L widget for the same book.
+  const totalPnl = totalPositionMtm(positions);
   const positivePos = positions.filter((p) => p.pnl > 0);
   const negativePos = positions.filter((p) => p.pnl < 0);
 
@@ -559,7 +562,10 @@ export default function PnLDashboardTool({ onClose }: Props) {
   const isLoading = positionsResult.isLoading || fundsResult.isLoading || tradesResult.isLoading;
   const isError = positionsResult.error !== null;
 
-  const totalPnl = positions.reduce((s, p) => s + p.pnl, 0);
+  // Shared MTM definition — this summed the raw broker `pnl`, which is
+  // wrong for some brokers (CLAUDE.md quirk 4) and disagreed with the
+  // Intraday P&L widget for the same book.
+  const totalPnl = totalPositionMtm(positions);
 
   return (
     <div className="h-full flex flex-col bg-surface-base">

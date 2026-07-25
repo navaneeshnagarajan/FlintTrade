@@ -32,7 +32,7 @@ import { FlintBaselineSparkline } from "@flinttrade/design-system";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { usePositions } from "@/hooks/usePositions";
 import { useTradebook } from "@/hooks/useTradebook";
-import { realisedBySymbol } from "@/lib/pnl";
+import { realisedBySymbol, positionMtm as effectivePnL } from "@/lib/pnl";
 import type { Position } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -98,12 +98,6 @@ function strategyOf(pos: Position): string {
   return (pos as Position & { strategy?: string }).strategy ?? "default";
 }
 
-/**
- * Positionbook rows arrive unnormalised from the wire: real adapters send
- * numerics as strings and some use snake_case field names.
- */
-type WirePosition = Position & { average_price?: string | number };
-
 /** Coerce a possibly string-typed broker numeric to a finite number, else null. */
 function toFiniteNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -119,41 +113,6 @@ function quantityOf(pos: Position): number {
 /** Instrument symbol, matching the tradebook's ``symbol`` field for attribution. */
 function symbolOf(pos: Position): string {
   return String(pos.symbol ?? (pos as Position & { tradingsymbol?: string }).tradingsymbol ?? "");
-}
-
-/**
- * Effective P&L for a position. OpenAlgo's pnl field is wrong for some
- * brokers (CLAUDE.md quirk 4), so for open positions we compute the
- * mark-to-market locally as (LTP − average price) × quantity whenever those
- * inputs are genuinely available, and fall back to the broker-supplied pnl
- * when the local computation is impossible or untrustworthy.
- *
- * Fall-back cases (all defer to the broker pnl, never fabricate a figure):
- *   - closed position (qty === 0);
- *   - LTP or average price missing;
- *   - LTP ≤ 0 or average price ≤ 0 — several brokers report ltp: 0 for an
- *     open position (illiquid option with no trade yet, pre-market, or a
- *     positionbook that simply does not populate LTP). Treating that literal
- *     0 as valid produced a fabricated (0 − avg)×qty loss that overrode the
- *     correct broker figure, so non-positive inputs are treated as missing.
- *
- * Scope: the local MTM is the *unrealised* P&L on the currently open quantity
- * only. A position partially closed earlier in the session has booked realised
- * that positionbook cannot separate from unrealised; the widget restores it
- * from the tradebook (CLAUDE.md quirk 4) via ``realisedBySymbol`` rather than
- * from this figure. All inputs are coerced defensively — adapters send
- * string-typed numerics.
- */
-function effectivePnL(pos: Position): number {
-  const qty = quantityOf(pos);
-  const ltp = toFiniteNumber(pos.ltp);
-  const avg = toFiniteNumber(
-    (pos as WirePosition).averagePrice ?? (pos as WirePosition).average_price,
-  );
-  if (qty !== 0 && ltp !== null && ltp > 0 && avg !== null && avg > 0) {
-    return (ltp - avg) * qty;
-  }
-  return toFiniteNumber(pos.pnl) ?? 0;
 }
 
 /** Build per-strategy P&L map from positions */
