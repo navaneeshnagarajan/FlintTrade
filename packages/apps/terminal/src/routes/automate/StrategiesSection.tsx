@@ -50,6 +50,16 @@ import {
   type StrategyLogEntry,
 } from "@/services/ftApi";
 import { InlineToast, useInlineToast } from "./shared";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ---------------------------------------------------------------------------
 // Status badge
@@ -264,6 +274,10 @@ export default function StrategiesSection() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast, setToast, dismissToast } = useInlineToast();
+  // Starting an uploaded strategy hands an automated process the order path.
+  // That is a larger side effect than arming the account mirror, which already
+  // confirms, so it gets the same treatment.
+  const [pendingStart, setPendingStart] = useState<UploadedStrategy | null>(null);
 
   const { data: strategies, isLoading, isError } = useQuery({
     queryKey: ["uploadedStrategies"],
@@ -461,7 +475,7 @@ export default function StrategiesSection() {
                   <StrategyRow
                     key={strategy.id}
                     strategy={strategy}
-                    onStart={(id) => startMutation.mutate(id)}
+                    onStart={() => setPendingStart(strategy)}
                     onStop={(id) => stopMutation.mutate(id)}
                     actionPending={actionPending}
                   />
@@ -472,6 +486,37 @@ export default function StrategiesSection() {
         </GlassCard>
 
       </StaggeredList>
+
+      {/* Starting a strategy runs operator-supplied Python that can place
+          orders on its own. The confirmation names the file, because the
+          strategy list shows display names and two uploads can share one. */}
+      <AlertDialog
+        open={pendingStart != null}
+        onOpenChange={(open) => { if (!open) setPendingStart(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start {pendingStart?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{pendingStart?.filename}</strong> will run continuously and
+              may place orders without further prompting. Every order it sends
+              still passes the full safety gate, but nothing else asks you
+              first. Stop it from this table when you are done.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingStart) startMutation.mutate(pendingStart.id);
+                setPendingStart(null);
+              }}
+            >
+              Start strategy
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

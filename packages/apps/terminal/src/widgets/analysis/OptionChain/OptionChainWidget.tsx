@@ -657,7 +657,10 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
           ref={legBuilderRef}
           strikes={strikes}
           atmStrike={atmStrike}
-          lotSize={symbolDetails?.lotsize ?? 1}
+          // 0, not 1, when the symbol master has not resolved: the single-leg
+          // path above already refuses on this condition, and the basket path
+          // multiplies the value across every leg.
+          lotSize={symbolDetails?.lotsize ?? 0}
           symLabel={symDef.label}
           exchange={exchange}
           expiry={selectedExpiry}

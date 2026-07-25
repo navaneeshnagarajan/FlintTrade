@@ -26,6 +26,9 @@ import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
 import { basketOrder, OrderApiError } from "@/services/api";
 import type { BasketOrderResult } from "@/types/api";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
+import { checkLotSizeVerified, checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
+import { cn } from "@/lib/utils";
+import { useModeStore } from "@/stores/modeStore";
 import {
   builderLegsFor,
   getStrategyTemplate,
@@ -400,6 +403,10 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   { strikes, atmStrike, lotSize, symLabel, exchange, expiry, onClose, spotPrice },
   ref,
 ) {
+  // A lot size of 0 means the symbol master has not resolved yet. It is NOT a
+  // tradable multiplier, so placement is refused rather than defaulted to 1.
+  const lotSizeVerified = lotSize > 0;
+  const mode = useModeStore((s) => s.mode);
   const [legs, setLegs]           = useState<OptionLeg[]>([]);
   const [activeTemplate, setActiveTemplate] = useState<string>(DEFAULT_TEMPLATE_ID);
   const [placing, setPlacing]     = useState(false);
@@ -605,17 +612,54 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
       return;
     }
 
+    // The same three gates the single-leg path in OptionChainWidget applies.
+    // This button sends SEVERAL orders per click, so an unverified lot size is
+    // multiplied across every leg — it needs the guards more, not less.
+    const modeBlock = checkOrderEntryMode(mode);
+    if (modeBlock) {
+      showOrderMsg({ text: modeBlock, ok: false });
+      return;
+    }
+    const lotBlock = checkLotSizeVerified(
+      exchange,
+      { lotSize, verified: lotSizeVerified },
+      symLabel,
+    );
+    if (lotBlock) {
+      showOrderMsg({ text: lotBlock, ok: false });
+      return;
+    }
+
+    // Resolve every leg before sending any of them: a basket is placed
+    // leg-by-leg server-side, so a quantity that fails halfway leaves a
+    // partially-filled strategy.
+    const quantities: number[] = [];
+    for (const leg of legs) {
+      const quantity = resolveLotQuantity(exchange, leg.lots, {
+        lotSize,
+        verified: lotSizeVerified,
+      });
+      if (quantity == null) {
+        showOrderMsg({
+          text: `Lot size for ${symLabel} is unverified — no legs sent`,
+          ok: false,
+        });
+        return;
+      }
+      quantities.push(quantity);
+    }
+
     setPlacing(true);
 
     try {
       // All legs are MARKET/MIS — price and trigger price are intentionally
       // omitted so the backend BasketLeg parses them as None.
-      const orders = legs.map((leg) => ({
+      const orders = legs.map((leg, i) => ({
         symbol:    buildCompactOptionSymbol(symLabel, expiry, leg.strike, leg.optionType)
           ?? `${symLabel}${expiry}${leg.strike}${leg.optionType}`,
         exchange,
         action:    leg.side,
-        quantity:  leg.lots * lotSize,
+        quantity:  quantities[i],
         orderType: "MARKET" as const,
         product:   "MIS" as const,
       }));
@@ -642,7 +686,11 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   // ---------------------------------------------------------------------------
 
   const canAddLeg = legs.length < 4;
-  const canPlace  = STRATEGY_PLACEMENT_AVAILABLE && legs.length >= 1 && !placing;
+  const canPlace  = STRATEGY_PLACEMENT_AVAILABLE
+    && legs.length >= 1
+    && !placing
+    && lotSizeVerified
+    && checkOrderEntryMode(mode) == null;
 
   const isDebit       = metrics.netPremiumRupees >= 0;
   const netPremLabel  = isDebit ? "Debit" : "Credit";
@@ -802,9 +850,15 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             </div>
           )}
 
-          {/* Lot size note */}
-          <span className="text-xxs text-text-muted font-mono ml-auto">
-            Lot {lotSize}
+          {/* Lot size note — an unresolved symbol master says so rather than
+              printing "Lot 0", which reads like a real contract size. */}
+          <span
+            className={cn(
+              "text-xxs font-mono ml-auto",
+              lotSizeVerified ? "text-text-muted" : "text-warning",
+            )}
+          >
+            {lotSizeVerified ? `Lot ${lotSize}` : "Lot size unverified"}
           </span>
 
           {/* Place Strategy — dispatches the gated basket route; the "Coming

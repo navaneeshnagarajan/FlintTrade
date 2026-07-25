@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -50,11 +50,12 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }));
 
 const mockGetUploadedStrategies = vi.fn().mockResolvedValue([]);
+const mockStartUploadedStrategy = vi.fn().mockResolvedValue({ status: "started" });
 
 vi.mock("@/services/ftApi", () => ({
   getUploadedStrategies: () => mockGetUploadedStrategies(),
   uploadStrategy: vi.fn(),
-  startUploadedStrategy: vi.fn(),
+  startUploadedStrategy: (id: string) => mockStartUploadedStrategy(id),
   stopUploadedStrategy: vi.fn(),
   getStrategyLogs: vi.fn().mockResolvedValue([]),
 }));
@@ -120,5 +121,55 @@ describe("StrategiesSection", () => {
     expect(screen.getByText("mean-reversion.py")).toBeInTheDocument();
     expect(screen.getAllByText("Running")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Stop Mean Reversion" })).toBeEnabled();
+  });
+
+  // Starting an uploaded strategy hands operator-supplied Python the order
+  // path. It used to fire straight from the row button with no prompt, which
+  // was a larger unconfirmed side effect than any other button in the app.
+  it("confirms before starting a strategy, and does not start on cancel", async () => {
+    mockGetUploadedStrategies.mockResolvedValue([
+      {
+        id: "breakout",
+        name: "Breakout",
+        filename: "breakout.py",
+        status: "stopped",
+        uploaded_at: "",
+        started_at: null,
+        error_message: null,
+      },
+    ]);
+    render(<StrategiesSection />, { wrapper: createWrapper() });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start Breakout" }));
+    expect(mockStartUploadedStrategy).not.toHaveBeenCalled();
+
+    // The dialog names the file, not just the display name — scoped to the
+    // dialog because the table row shows the filename too.
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Start Breakout?");
+    expect(dialog).toHaveTextContent("breakout.py");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(mockStartUploadedStrategy).not.toHaveBeenCalled());
+  });
+
+  it("starts the strategy once the confirmation is accepted", async () => {
+    mockGetUploadedStrategies.mockResolvedValue([
+      {
+        id: "breakout",
+        name: "Breakout",
+        filename: "breakout.py",
+        status: "stopped",
+        uploaded_at: "",
+        started_at: null,
+        error_message: null,
+      },
+    ]);
+    render(<StrategiesSection />, { wrapper: createWrapper() });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Start Breakout" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start strategy" }));
+
+    await waitFor(() => expect(mockStartUploadedStrategy).toHaveBeenCalledWith("breakout"));
   });
 });

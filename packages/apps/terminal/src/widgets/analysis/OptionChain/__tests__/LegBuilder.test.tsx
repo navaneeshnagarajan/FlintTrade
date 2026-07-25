@@ -6,7 +6,7 @@
  * and strategy placement through the gated basket API (mocked).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -59,6 +59,7 @@ vi.mock("@/services/api", () => ({
 
 import LegBuilder, { type LegBuilderHandle } from "../LegBuilder";
 import type { StrikeRow } from "../types";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -88,6 +89,22 @@ function renderLegBuilder(props = {}) {
     <LegBuilder ref={ref} {...defaultProps} {...props} />,
   );
   return { ...utils, ref };
+}
+
+/**
+ * Put the store in a mode that permits order entry.
+ *
+ * The store defaults to `explore`, and every placement test below used to run
+ * in it — which is exactly how the missing mode gate went unnoticed: the suite
+ * was dispatching basket orders from the one mode that must never place them.
+ */
+function useTradingMode(): void {
+  beforeEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+  afterEach(() => {
+    useModeStore.setState({ mode: "explore" });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +360,8 @@ describe("LegBuilder — metrics", () => {
 });
 
 describe("LegBuilder — order placement (gated basket path)", () => {
+  useTradingMode();
+
   // Strategy placement dispatches basketOrder → POST /api/v1/orders/basket,
   // which is live-gated server-side (require_live_unlocked → SafetySystem
   // L1–L5 → gate_order → BrokerRouter per leg, atomic with rollback). The
@@ -530,5 +549,64 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
     expect(basketOrderMock).not.toHaveBeenCalled();
     expect(await screen.findByRole("status")).toHaveTextContent("Select an expiry first");
+  });
+});
+
+describe("LegBuilder — pre-trade guards", () => {
+  // The basket path sends SEVERAL orders per click off one lot size, so a
+  // missing guard is multiplied across every leg. These pin the two gates the
+  // single-leg path in OptionChainWidget has always applied.
+  beforeEach(() => vi.clearAllMocks());
+
+  it("refuses every leg when the lot size is unverified", async () => {
+    useModeStore.setState({ mode: "practice" });
+    try {
+      // 0 is what OptionChainWidget passes while the symbol master is still
+      // resolving. It used to arrive as 1, which silently sent one-unit MARKET
+      // orders against NFO option contracts.
+      renderLegBuilder({ lotSize: 0 });
+      await userEvent.click(screen.getByText("SSTR"));
+
+      expect(screen.getByText("Lot size unverified")).toBeInTheDocument();
+      const place = screen.getByRole("button", { name: "Place strategy" });
+      expect(place).toBeDisabled();
+
+      await userEvent.click(place);
+      expect(basketOrderMock).not.toHaveBeenCalled();
+    } finally {
+      useModeStore.setState({ mode: "explore" });
+    }
+  });
+
+  it("refuses to place in Explore mode", async () => {
+    // The store's default. Every placement test in the suite above ran in this
+    // mode before the gate existed.
+    useModeStore.setState({ mode: "explore" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+
+    const place = screen.getByRole("button", { name: "Place strategy" });
+    expect(place).toBeDisabled();
+    await userEvent.click(place);
+    expect(basketOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("multiplies lots by the verified lot size on every leg", async () => {
+    useModeStore.setState({ mode: "practice" });
+    try {
+      renderLegBuilder({ lotSize: 75 });
+      await userEvent.click(screen.getByText("SSTR"));
+      await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+      const payload = basketOrderMock.mock.calls[0][0] as {
+        orders: { quantity: number }[];
+      };
+      expect(payload.orders).toHaveLength(2);
+      for (const order of payload.orders) {
+        expect(order.quantity).toBe(75);
+      }
+    } finally {
+      useModeStore.setState({ mode: "explore" });
+    }
   });
 });
