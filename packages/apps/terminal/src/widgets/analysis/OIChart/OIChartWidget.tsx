@@ -12,6 +12,14 @@
  *     per-cell hover readout and the colour legend.
  *   • "signals"        — the retired OI Signals widget's per-strike
  *     LB/SC/SB/LU table plus the z-score unusual-OI chips.
+ *   • "pain"           — the retired Market Intelligence Max Pain tab: the
+ *     per-strike call/put pain distribution with the max-pain strike called
+ *     out. `getMaxPain` has always returned this curve (`strikes[]` with
+ *     `call_pain`/`put_pain`/`total_pain`) and every consumer threw all of it
+ *     away except `max_pain_strike` — this widget included. The curve is what
+ *     says whether the level is a sharp pin or a flat basin, so it is now
+ *     drawn from the SAME 60 s max-pain response the butterfly rule uses; no
+ *     endpoint and no poll was added.
  *
  * WHY THEY ARE ONE WIDGET. All four answer the same question — where open
  * interest is concentrated across strikes right now. The bar chart and the heat
@@ -61,7 +69,7 @@ import {
   getUnusualOI,
   type OIChangeSignalRow,
 } from "@/services/ftApi";
-import type { Quote } from "@/types/api";
+import type { MaxPainData, Quote } from "@/types/api";
 import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
 import { SYMBOLS } from "@/widgets/analysis/OptionChain/types";
 import { isMarketHours } from "@/lib/market";
@@ -85,7 +93,7 @@ import {
   type OIFilter,
   type StrikeCell,
 } from "./oiStrikes";
-import { SAMPLE_ATM, SAMPLE_MAX_PAIN, SAMPLE_STRIKE_CELLS } from "./sampleData";
+import { SAMPLE_ATM, SAMPLE_MAX_PAIN, SAMPLE_PAIN_ROWS, SAMPLE_STRIKE_CELLS } from "./sampleData";
 import { FlowTapeSection } from "./FlowTape";
 import { SAMPLE_ANALYSIS, SAMPLE_UNUSUAL } from "./oiSignalsSample";
 import { SPOT_INTERVALS, type SpotInterval } from "./spotIntervals";
@@ -116,15 +124,16 @@ const STRIKES_AROUND_ATM = 15;
 /** Underlyings, and their F&O + spot exchanges, from the canonical table. */
 const SYMBOL_CHOICES = SYMBOLS;
 
-type ViewMode = "bars" | "butterfly" | "heat" | "signals";
+type ViewMode = "bars" | "butterfly" | "heat" | "signals" | "pain";
 
-const VIEW_MODES: readonly ViewMode[] = ["bars", "butterfly", "heat", "signals"];
+const VIEW_MODES: readonly ViewMode[] = ["bars", "butterfly", "heat", "signals", "pain"];
 
 const VIEW_LABELS: Record<ViewMode, string> = {
   bars: "Bars",
   butterfly: "Butterfly",
   heat: "Heat",
   signals: "Signals",
+  pain: "Max Pain",
 };
 
 function isViewMode(value: unknown): value is ViewMode {
@@ -355,6 +364,9 @@ function OIChartWidget(props: IDockviewPanelProps) {
   const [chain, setChain] = useState<RawOptionChain | null>(null);
   const [spot, setSpot] = useState<Quote | null>(null);
   const [maxPainStrike, setMaxPainStrike] = useState<number | null>(null);
+  // The pain distribution behind that strike. Held separately so the existing
+  // max-pain rule keeps its exact fail-closed semantics.
+  const [maxPainRows, setMaxPainRows] = useState<MaxPainData["strikes"] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -386,6 +398,7 @@ function OIChartWidget(props: IDockviewPanelProps) {
     setChain(null);
     setSpot(null);
     setMaxPainStrike(null);
+    setMaxPainRows(null);
     setLoading(false);
     setError(null);
     setLastRefresh(null);
@@ -400,6 +413,7 @@ function OIChartWidget(props: IDockviewPanelProps) {
     setChain(null);
     setSpot(null);
     setMaxPainStrike(null);
+    setMaxPainRows(null);
     setLoading(false);
     setError(null);
     setLastRefresh(null);
@@ -480,21 +494,33 @@ function OIChartWidget(props: IDockviewPanelProps) {
     const ticket = maxPainRequests.begin(requestKey);
     if (!ticket) return;
     setMaxPainStrike(null);
+    setMaxPainRows(null);
     try {
       const data = await getMaxPain(symDef.label, exchange, selectedExpiry);
       if (!ticket.isCurrent()) return;
       // Fail closed: a max pain that is not explicitly attested live is not
       // drawn at all, rather than drawn as if it were the real level.
+      const isLive = data.is_sample_data === false;
       setMaxPainStrike(
-        data.is_sample_data === false
+        isLive
           && typeof data.max_pain_strike === "number"
           && Number.isFinite(data.max_pain_strike)
           && data.max_pain_strike > 0
           ? data.max_pain_strike
           : null,
       );
+      // The curve is held to the SAME attestation as the strike — a pain
+      // distribution that is not explicitly live is not charted at all. The
+      // array is checked, not assumed: a broker/backend that answers with only
+      // a strike must render the empty state, not crash the widget.
+      setMaxPainRows(
+        isLive && Array.isArray(data.strikes) && data.strikes.length > 0 ? data.strikes : null,
+      );
     } catch {
-      if (ticket.isCurrent()) setMaxPainStrike(null);
+      if (ticket.isCurrent()) {
+        setMaxPainStrike(null);
+        setMaxPainRows(null);
+      }
     } finally {
       ticket.settle();
     }
@@ -557,6 +583,23 @@ function OIChartWidget(props: IDockviewPanelProps) {
     : chain !== null && !loading && !error && chainHasPositiveOi(allCells)
       ? maxPainStrike
       : null;
+
+  // ---- Max pain curve (the "pain" view) ------------------------------------
+  // The sample curve rides the sample chain, exactly as the sample max-pain
+  // rule does, so the two can never disagree about the sample.
+  const painRows: MaxPainData["strikes"] = usingSampleCells
+    ? SAMPLE_PAIN_ROWS
+    : maxPainRows ?? [];
+  const painMax = useMemo(
+    () => painRows.reduce((max, row) => Math.max(max, row.total_pain), 0),
+    [painRows],
+  );
+  /** True when every row carries the call/put split, so the stack is honest. */
+  const painHasSplit = useMemo(
+    () => painRows.length > 0
+      && painRows.every((row) => row.call_pain !== undefined && row.put_pain !== undefined),
+    [painRows],
+  );
 
   // ---- Provenance ----------------------------------------------------------
   const analysisIsLive = isConnected
@@ -1041,6 +1084,111 @@ function OIChartWidget(props: IDockviewPanelProps) {
     </div>
   );
 
+  // ---- Max Pain view -------------------------------------------------------
+  // The pain curve, with the max-pain strike called out. Rows arrive already
+  // gated on an explicit `is_sample_data: false`, so an unattested or failed
+  // response renders the empty state rather than an unlabelled curve.
+  const painBody = (
+    <div className="flex-1 min-h-0 overflow-auto">
+      {painRows.length === 0 ? (
+        <p className="text-xs text-text-muted text-center py-8">
+          {isConnected && !selectedExpiry
+            ? "Select an expiry to load the pain distribution"
+            : `No attested max-pain distribution for ${symDef.label}.`}
+        </p>
+      ) : (
+        <>
+          <div className="px-2 py-2 space-y-1">
+            {painRows.map((row) => {
+              const isMax = visibleMaxPainStrike != null && row.strike === visibleMaxPainStrike;
+              const callPct = painMax > 0 && painHasSplit ? ((row.call_pain ?? 0) / painMax) * 100 : 0;
+              const putPct = painMax > 0 && painHasSplit ? ((row.put_pain ?? 0) / painMax) * 100 : 0;
+              const totalPct = painMax > 0 ? (row.total_pain / painMax) * 100 : 0;
+              return (
+                <div
+                  key={row.strike}
+                  className="flex items-center gap-2"
+                  aria-label={`Strike ${row.strike} total pain ${row.total_pain}${isMax ? " (max pain)" : ""}`}
+                >
+                  <span
+                    className={`w-20 shrink-0 text-xxs font-mono tabular-nums ${
+                      isMax ? "text-accent font-semibold" : "text-text-secondary"
+                    }`}
+                  >
+                    {NUM0.format(row.strike)}
+                    {isMax && <span className="ml-1 text-xxs">MAX</span>}
+                  </span>
+                  <div className="flex-1 h-3 bg-surface-hover rounded-sm overflow-hidden flex">
+                    {painHasSplit ? (
+                      <>
+                        <div className="h-full bg-profit/60" style={{ width: `${callPct}%` }} />
+                        <div className="h-full bg-loss/60" style={{ width: `${putPct}%` }} />
+                      </>
+                    ) : (
+                      <div className="h-full bg-accent/50" style={{ width: `${totalPct}%` }} />
+                    )}
+                  </div>
+                  <span className="w-16 shrink-0 text-right text-xxs font-mono tabular-nums text-text-muted">
+                    {fmtOi(row.total_pain)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border-default hover:bg-transparent">
+                <TableHead className="text-xxs text-text-muted font-medium">Strike</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">CE OI</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">PE OI</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">Call pain</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">Put pain</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">Total pain</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {painRows.map((row) => {
+                const isMax = visibleMaxPainStrike != null && row.strike === visibleMaxPainStrike;
+                return (
+                  <TableRow
+                    key={row.strike}
+                    className={`border-border-subtle hover:bg-surface-hover ${isMax ? "bg-accent/5" : ""}`}
+                  >
+                    <TableCell className="text-xs font-mono text-text-primary py-1">
+                      {NUM0.format(row.strike)}
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-loss py-1 text-right tabular-nums">
+                      {row.call_oi === undefined ? "--" : fmtOi(row.call_oi)}
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-profit py-1 text-right tabular-nums">
+                      {row.put_oi === undefined ? "--" : fmtOi(row.put_oi)}
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-text-secondary py-1 text-right tabular-nums">
+                      {row.call_pain === undefined ? "--" : fmtOi(row.call_pain)}
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-text-secondary py-1 text-right tabular-nums">
+                      {row.put_pain === undefined ? "--" : fmtOi(row.put_pain)}
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-text-primary py-1 text-right tabular-nums font-semibold">
+                      {fmtOi(row.total_pain)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+
+          <p className="px-2 py-1.5 text-xxs text-text-muted border-t border-border-subtle">
+            Pain is what option writers would pay out if the underlying expired at
+            each strike. The lowest bar is where buyers collectively lose most —
+            a sharp trough pins harder than a flat basin.
+          </p>
+        </>
+      )}
+    </div>
+  );
+
   const chartBody = (
     <div className="flex-1 min-h-0 overflow-hidden">
       {isConnected && !selectedExpiry && !loading ? (
@@ -1281,6 +1429,11 @@ function OIChartWidget(props: IDockviewPanelProps) {
                 ))}
               </SelectContent>
             </Select>
+          ) : view === "pain" ? (
+            /* The ΔOI filter selects chain cells; the pain curve is computed
+               server-side over the whole chain, so the control would sit there
+               doing nothing. A dead affordance is worse than no affordance. */
+            null
           ) : (
             <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
               {OI_FILTERS.map((f) => (
@@ -1326,14 +1479,17 @@ function OIChartWidget(props: IDockviewPanelProps) {
       {/* Body */}
       {view === "signals"
         ? signalsBody
-        : view === "heat"
-          ? (rows.length > 0 ? heatBody : emptyHeat)
-          : chartBody}
+        : view === "pain"
+          ? painBody
+          : view === "heat"
+            ? (rows.length > 0 ? heatBody : emptyHeat)
+            : chartBody}
 
       {view === "heat" && rows.length > 0 && <ColourLegend />}
 
-      {/* Footer totals */}
-      {view !== "signals" && rows.length > 0 && (
+      {/* Footer totals — the pain view aggregates writer loss, not OI, so the
+          CE/PE totals would be answering a different question there. */}
+      {view !== "signals" && view !== "pain" && rows.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide">Total</span>
           <span className="text-loss font-mono tabular-nums">CE {fmtTotalOi(summary.totalCeOi)}</span>

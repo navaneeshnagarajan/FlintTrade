@@ -416,7 +416,6 @@ function applySectorView(api: DockviewApi): void {
   const sectorMapId = pid("marketoverview");
   const sectorPerfId = pid("marketoverview");
   const marketBreadthId = pid("marketoverview");
-  const heatCalendarId = pid("heatcalendar");
   const correlationMatrixId = pid("correlationmatrix");
 
   api.addPanel({
@@ -441,12 +440,6 @@ function applySectorView(api: DockviewApi): void {
     initialHeight: 220,
   });
 
-  api.addPanel({
-    id: heatCalendarId,
-    component: "heatcalendar",
-    title: "Heat Calendar",
-    position: { referencePanel: marketBreadthId, direction: "right" },
-  });
 
   api.addPanel({
     id: correlationMatrixId,
@@ -472,7 +465,6 @@ function applyOrderAutomation(api: DockviewApi): void {
   const strategyMonitorId = pid("strategymonitor");
   const flowBuilderId = pid("flowbuilder-tab");
   const strategyTemplatesId = pid("strategytemplates");
-  const sessionStatsId = pid("sessionstats");
 
   api.addPanel({
     id: strategyMonitorId,
@@ -497,12 +489,6 @@ function applyOrderAutomation(api: DockviewApi): void {
     initialHeight: 240,
   });
 
-  api.addPanel({
-    id: sessionStatsId,
-    component: "sessionstats",
-    title: "Session Stats",
-    position: { referencePanel: strategyTemplatesId, direction: "right" },
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -521,7 +507,6 @@ function applyPortfolioManager(api: DockviewApi): void {
   const netPositionId = pid("positions");
   const positionHeatmapId = pid("positions");
   const riskDashboardId = pid("riskdashboard");
-  const tradePerformanceId = pid("tradeperformance");
 
   api.addPanel({
     id: portfolioAllocId,
@@ -554,13 +539,6 @@ function applyPortfolioManager(api: DockviewApi): void {
     position: { referencePanel: positionHeatmapId, direction: "right" },
   });
 
-  api.addPanel({
-    id: tradePerformanceId,
-    component: "tradeperformance",
-    title: "Trade Performance",
-    position: { referencePanel: positionHeatmapId, direction: "below" },
-    initialHeight: 200,
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -777,7 +755,7 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs", "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints", "timesales",
+    "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs", "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "vwapbands", "pivotpoints", "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -797,7 +775,7 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation", "sessionstats", "tradeperformance", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+    "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
   ] as const) {
     api.addPanel({
       id: pid(comp),

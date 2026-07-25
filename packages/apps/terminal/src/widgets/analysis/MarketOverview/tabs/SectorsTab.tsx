@@ -11,15 +11,25 @@
  *     sample-only; here it gains a live path through the backend
  *     `sectors/rotation` endpoint, with the widget's single sample sector
  *     dataset as the disclosed fail-closed fallback.
- *   - Market Intelligence's sector heatmap/rotation tabs are dominated by
- *     the bar view over the same rotation rows (their INDIA_SECTORS table
- *     collapses into ../sampleSectors.ts).
+ *   - Market Intelligence's sector rotation tab is dominated by the bar view
+ *     over the same rotation rows (its INDIA_SECTORS table collapses into
+ *     ../sampleSectors.ts). Its sector HEATMAP is not: the market-cap-weighted
+ *     projection is the "heatmap" view below, because ranking by return alone
+ *     throws away which sectors actually move the index. `market_cap_cr` is
+ *     already on every rotation row (services/ftApi.analysis.ts) on both the
+ *     live and sample paths, so the weighting needs no new fetch and invents
+ *     no figure.
+ *
+ * The bars and heatmap views read ONE query (`marketOverview/sectorRotation`)
+ * through {@link useSectorRotationRows}; TanStack dedupes the key, so the
+ * second projection costs no extra request.
  */
 
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart, LayoutGrid, Grid3X3, BarChart3, TrendingUp, TrendingDown } from "lucide-react";
+import { BarChart, LayoutGrid, Grid3X3, BarChart3, Map as MapIcon, TrendingUp, TrendingDown } from "lucide-react";
 import { atom, useAtom } from "jotai";
+import { FlintWeightedHeatmap } from "@flinttrade/design-system";
 import {
   Select,
   SelectContent,
@@ -105,6 +115,69 @@ const TF_FIELD: Record<Timeframe, keyof Pick<
   "1Y": "change_1y",
 };
 
+/**
+ * The one sector-rotation read, shared by the bars and heatmap projections.
+ *
+ * Provenance fails closed: only an explicit `is_sample_data === false` on a
+ * connected response renders as live; anything else falls back to THE one
+ * sample sector dataset, disclosed by the caller's badge.
+ */
+function useSectorRotationRows(): {
+  rows: SectorRotationRow[];
+  isLive: boolean;
+  updatedAt: string | null;
+} {
+  const isConnected = useBrokerConnected();
+
+  const rotationQuery = useQuery({
+    queryKey: ["marketOverview", "sectorRotation"],
+    queryFn: getSectorRotation,
+    enabled: isConnected,
+    // Poll only while the backend explicitly claims live rows.
+    refetchInterval: (query) =>
+      isConnected && query.state.data?.is_sample_data === false ? 300_000 : false,
+    staleTime: 120_000,
+  });
+
+  const isLive = isConnected && rotationQuery.data?.is_sample_data === false;
+  return {
+    rows: isLive && rotationQuery.data ? rotationQuery.data.sectors : SAMPLE_SECTOR_ROTATION.sectors,
+    isLive,
+    // A timestamp is a freshness claim — sample rows never carry one.
+    updatedAt: isLive ? rotationQuery.data?.updated_at ?? null : null,
+  };
+}
+
+/** Timeframe pills shared by the two rotation projections. */
+function TimeframePills({
+  timeframe,
+  onSelect,
+}: {
+  timeframe: Timeframe;
+  onSelect: (tf: Timeframe) => void;
+}) {
+  return (
+    <>
+      {TIMEFRAMES.map((tf) => (
+        <button
+          key={tf}
+          role="tab"
+          aria-selected={tf === timeframe}
+          onClick={() => onSelect(tf)}
+          className={cn(
+            "px-2.5 py-0.5 text-xxs font-medium rounded transition-colors",
+            tf === timeframe
+              ? "bg-accent/15 text-accent border border-accent/30"
+              : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
+          )}
+        >
+          {tf}
+        </button>
+      ))}
+    </>
+  );
+}
+
 interface BarRowProps {
   name: string;
   changePct: number;
@@ -140,25 +213,8 @@ function BarRow({ name, changePct, maxAbs }: BarRowProps) {
 }
 
 function SectorBarsView() {
-  const isConnected = useBrokerConnected();
   const [timeframe, setTimeframe] = useState<Timeframe>("1D");
-
-  const rotationQuery = useQuery({
-    queryKey: ["marketOverview", "sectorRotation"],
-    queryFn: getSectorRotation,
-    enabled: isConnected,
-    // Poll only while the backend explicitly claims live rows.
-    refetchInterval: (query) =>
-      isConnected && query.state.data?.is_sample_data === false ? 300_000 : false,
-    staleTime: 120_000,
-  });
-
-  // Provenance fails closed: only an explicit is_sample_data === false on a
-  // connected response renders as live; anything else falls back to THE one
-  // sample sector dataset, disclosed.
-  const isLive = isConnected && rotationQuery.data?.is_sample_data === false;
-  const rows: SectorRotationRow[] =
-    isLive && rotationQuery.data ? rotationQuery.data.sectors : SAMPLE_SECTOR_ROTATION.sectors;
+  const { rows, isLive, updatedAt } = useSectorRotationRows();
 
   const field = TF_FIELD[timeframe];
   const ranked = useMemo(
@@ -177,22 +233,7 @@ function SectorBarsView() {
         role="tablist"
         aria-label="Timeframe"
       >
-        {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf}
-            role="tab"
-            aria-selected={tf === timeframe}
-            onClick={() => setTimeframe(tf)}
-            className={cn(
-              "px-2.5 py-0.5 text-xxs font-medium rounded transition-colors",
-              tf === timeframe
-                ? "bg-accent/15 text-accent border border-accent/30"
-                : "text-text-muted hover:text-text-primary hover:bg-surface-hover",
-            )}
-          >
-            {tf}
-          </button>
-        ))}
+        <TimeframePills timeframe={timeframe} onSelect={setTimeframe} />
         <div className="flex-1" />
         {!isLive && (
           <SampleBadge title="No live sector rotation data yet — showing the widget's sample sector table. Do not base trading decisions on these figures." />
@@ -213,11 +254,89 @@ function SectorBarsView() {
       </div>
 
       {/* A timestamp is a freshness claim — sample rows never render one. */}
-      {isLive && rotationQuery.data?.updated_at ? (
+      {updatedAt ? (
         <div className="flex-none px-2.5 py-1 text-xxs text-text-muted border-t border-border-subtle">
-          Updated: {rotationQuery.data.updated_at}
+          Updated: {updatedAt}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Heatmap view — market-cap-weighted sector projection (from the retired
+// Market Intelligence sector heatmap)
+// ---------------------------------------------------------------------------
+
+/** ₹ crore → the "L Cr" (lakh crore) scale Indian desks read index caps in. */
+function formatMarketCap(cr: number): string {
+  if (cr >= 100000) return `${(cr / 100000).toFixed(1)}L Cr`;
+  if (cr >= 1000) return `${(cr / 1000).toFixed(0)}k Cr`;
+  return `${cr.toFixed(0)} Cr`;
+}
+
+function formatReturn(v: number): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+/**
+ * The rotation rows sized by market capitalisation and coloured by return.
+ *
+ * This is the projection the ranked bars cannot make: the bars answer "which
+ * sector moved most", this answers "which sector moved the index". Both read
+ * the same rows, so they can never disagree about a figure.
+ */
+function SectorWeightedHeatmapView() {
+  const [timeframe, setTimeframe] = useState<Timeframe>("1D");
+  const { rows, isLive, updatedAt } = useSectorRotationRows();
+
+  const field = TF_FIELD[timeframe];
+  const entries = useMemo(
+    () =>
+      [...rows]
+        .sort((a, b) => b.market_cap_cr - a.market_cap_cr)
+        .map((row) => ({
+          id: row.symbol,
+          label: row.name,
+          valueLabel: formatReturn(row[field]),
+          detailLabel: formatMarketCap(row.market_cap_cr),
+          weight: row.market_cap_cr,
+          color: divergingColourScale(row[field]),
+        })),
+    [rows, field],
+  );
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden" aria-label="Sector weighted heatmap view">
+      <div
+        className="flex-none flex items-center gap-px px-2.5 py-1.5 bg-surface-elevated border-b border-border-subtle"
+        role="tablist"
+        aria-label="Timeframe"
+      >
+        <TimeframePills timeframe={timeframe} onSelect={setTimeframe} />
+        <div className="flex-1" />
+        {!isLive && (
+          <SampleBadge title="No live sector rotation data yet — showing the widget's sample sector table. Do not base trading decisions on these figures." />
+        )}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2">
+        <FlintWeightedHeatmap
+          ariaLabel={`Sector heatmap by ${timeframe} return and market capitalisation`}
+          entries={entries}
+        />
+      </div>
+
+      <div className="flex-none flex items-center gap-2 px-2.5 py-1 border-t border-border-subtle text-xxs text-text-muted">
+        <MapIcon size={9} aria-hidden="true" />
+        <span>Tile size = market cap · Colour = {timeframe} change</span>
+        <div className="flex-1" />
+        <span className="flex items-center gap-1">
+          <span className="h-1.5 w-6 rounded" style={{ background: "linear-gradient(to right,#8B3030,#3D8B80,#00C853)" }} />
+          -4% → +4%
+        </span>
+        {updatedAt ? <span className="ml-2">Updated: {updatedAt}</span> : null}
+      </div>
     </div>
   );
 }
@@ -228,10 +347,18 @@ function SectorBarsView() {
 
 const SECTOR_VIEWS: { id: SectorView; label: string; icon: typeof LayoutGrid }[] = [
   { id: "bars", label: "Bars", icon: BarChart },
+  { id: "heatmap", label: "Heatmap", icon: MapIcon },
   { id: "treemap", label: "Treemap", icon: LayoutGrid },
   { id: "grid", label: "Grid", icon: Grid3X3 },
   { id: "table", label: "Sectors", icon: BarChart3 },
 ];
+
+/**
+ * Views that render the sector-rotation plane rather than the operator's
+ * positions. They carry their own timeframe pills, counts and provenance, so
+ * the tab's position-derived stats badges and legend footer stay off.
+ */
+const ROTATION_VIEWS: readonly SectorView[] = ["bars", "heatmap"];
 
 interface SectorsTabProps {
   /** Opening view — how retired ids reproduce their presentation. */
@@ -404,7 +531,7 @@ function SectorsTab({ initialView }: SectorsTabProps) {
     setActiveView("treemap");
   };
 
-  const isMapView = activeView !== "bars";
+  const isMapView = !ROTATION_VIEWS.includes(activeView);
 
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base">
@@ -494,6 +621,8 @@ function SectorsTab({ initialView }: SectorsTabProps) {
       <div className="flex-1 overflow-hidden relative">
         {activeView === "bars"
           ? <SectorBarsView />
+          : activeView === "heatmap"
+          ? <SectorWeightedHeatmapView />
           : filteredStockData.length === 0
           ? <EmptyView />
           : activeView === "treemap"

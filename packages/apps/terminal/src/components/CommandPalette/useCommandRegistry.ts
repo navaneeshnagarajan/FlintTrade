@@ -52,7 +52,7 @@ const MAX_RECENT = 5;
  * `widgetCatalog`; exported for that guard.
  */
 export const BEGINNER_WIDGET_IDS = new Set([
-  "dashboard",
+  "indexstrip",
   "chart",
   "watchlist",
   "orderpad",
@@ -180,23 +180,12 @@ export function useCommandRegistry() {
       },
       {
         id:          "tool:trade-journal",
-        title:       "Open Trade Journal",
+        title:       "Open Trade Review",
         description: "Review and annotate your trades",
         category:    "tool",
         action:      () => {
           window.dispatchEvent(
             new CustomEvent("flinttrade:open-tool", { detail: { toolId: "trade-journal" } }),
-          );
-        },
-      },
-      {
-        id:          "tool:pnl-dashboard",
-        title:       "Open P&L Dashboard",
-        description: "Detailed profit and loss analytics",
-        category:    "tool",
-        action:      () => {
-          window.dispatchEvent(
-            new CustomEvent("flinttrade:open-tool", { detail: { toolId: "pnl-dashboard" } }),
           );
         },
       },

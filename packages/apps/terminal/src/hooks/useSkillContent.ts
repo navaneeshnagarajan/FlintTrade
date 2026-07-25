@@ -44,7 +44,7 @@ export interface SkillContent {
  * two extras (orders, holdings) to keep the picker useful.
  */
 const BEGINNER_WIDGETS: string[] = [
-  "dashboard",
+  "indexstrip",
   "chart",
   "watchlist",
   "orderpad",
@@ -103,7 +103,6 @@ const ADVANCED_WIDGETS: string[] = Array.from(
 const BEGINNER_TOOLS: string[] = ["settings"];
 const INTERMEDIATE_TOOLS: string[] = ["trade-journal", "settings"];
 const ADVANCED_TOOLS: string[] = [
-  "pnl-dashboard",
   "market-intelligence",
   "trade-journal",
   "settings",

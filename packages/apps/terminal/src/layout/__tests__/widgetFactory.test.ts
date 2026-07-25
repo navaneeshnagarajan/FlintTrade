@@ -244,10 +244,10 @@ describe("widgetFactory catalogue wiring", () => {
     // Counts drop as widgets merge. docs/ARCHITECTURE.md, docs/USER_GUIDE.md
     // and the site's capabilities test pin these same numbers — update all
     // four together.
-    expect(widgetCatalog).toHaveLength(71);
+    expect(widgetCatalog).toHaveLength(68);
     expect(counts).toEqual({
-      Analysis: 29,
-      Trading: 20,
+      Analysis: 28,
+      Trading: 18,
       Utility: 22,
     });
   });

@@ -57,7 +57,7 @@ function getTimeContext(): TimeContext | null {
     return {
       greeting: "Markets closed",
       message: "Review today's trades",
-      suggestion: "Open Trade Journal?",
+      suggestion: "Open Trade Review?",
     };
   }
 
@@ -164,7 +164,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
     navigate("/trade");
   }
 
-  /** Navigate to the trade route and open the Trade Journal tool. */
+  /** Navigate to the trade route and open the Trade Review tool. */
   function openTradeJournal() {
     onDismiss();
     navigate("/trade");
@@ -261,7 +261,7 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
             onClick={
               ctx.suggestion === "Try backtesting a strategy"
                 ? goToLab
-                : ctx.suggestion === "Open Trade Journal?"
+                : ctx.suggestion === "Open Trade Review?"
                   ? openTradeJournal
                   : undefined
             }

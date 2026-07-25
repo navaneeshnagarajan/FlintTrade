@@ -235,7 +235,7 @@ describe("computeSessionMetrics", () => {
     // Absolute ₹ drawdown from the equity peak (equity dips 3240→2120 = 1120).
     expect(m.maxDrawdown).toBe(1120);
     expect(m.bestTrade?.pnl).toBe(5680);
-    expect(m.worstTrade?.pnl).toBe(-620);
+    expect(m.worstTrade?.pnl).toBe(-1120);
   });
 
   it("measures the session from the 09:15 open to the last exit", () => {

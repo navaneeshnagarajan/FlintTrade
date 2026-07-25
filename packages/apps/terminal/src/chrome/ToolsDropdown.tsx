@@ -2,8 +2,6 @@ import { useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  PieChart,
-  BarChart3,
   BookOpen,
   Settings,
 } from "lucide-react";
@@ -18,11 +16,14 @@ interface ToolEntry {
 
 /**
  * Tools available on the /trade route — these overlay the Dockview canvas.
+ *
+ * "Market Intelligence" was removed here (ruling D4): every one of its tabs is
+ * now served by a Dockview widget — Market Overview (breadth, sectors, flows,
+ * indices), OI Analytics (OI profile, signals, max pain), Dealer Gamma (GEX),
+ * IV Smile & Skew, Correlation Matrix and Delivery Data.
  */
 const TRADE_TOOLS: ToolEntry[] = [
-  { id: "pnl-dashboard", name: "P&L Dashboard", icon: PieChart },
-  { id: "market-intelligence", name: "Market Intelligence", icon: BarChart3 },
-  { id: "trade-journal", name: "Trade Journal", icon: BookOpen },
+  { id: "trade-journal", name: "Trade Review", icon: BookOpen },
   { id: "settings", name: "Settings", icon: Settings },
 ];
 

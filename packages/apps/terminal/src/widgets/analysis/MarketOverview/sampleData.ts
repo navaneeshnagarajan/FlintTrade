@@ -108,9 +108,13 @@ function generateHistory(base: number, seed: number): number[] {
 }
 
 export const SAMPLE_GLOBAL_INDICES: GlobalIndexEntry[] = [
-  // India
+  // India — GIFT Nifty is the pre-open indicator Indian desks read before
+  // 09:15 (ported from the retired Market Intelligence global-indices table);
+  // it trades on NSE IX and is quoted in USD, which is why the table carries
+  // a currency column at all.
   { id: "NIFTY50", name: "NIFTY 50", region: "India", ltp: 22_450.30, change: 125.60, change_pct: 0.56, history: generateHistory(22_450, 1) },
   { id: "SENSEX", name: "SENSEX", region: "India", ltp: 73_961.20, change: -210.40, change_pct: -0.28, history: generateHistory(73_961, 2) },
+  { id: "GIFTNIFTY", name: "GIFT Nifty", region: "India", ltp: 22_512.00, change: 61.70, change_pct: 0.27, history: generateHistory(22_512, 11) },
   // US
   { id: "SPX", name: "S&P 500", region: "US", ltp: 5_248.80, change: 32.10, change_pct: 0.62, history: generateHistory(5_248, 3) },
   { id: "NASDAQ", name: "NASDAQ", region: "US", ltp: 16_399.50, change: -45.20, change_pct: -0.28, history: generateHistory(16_399, 4) },

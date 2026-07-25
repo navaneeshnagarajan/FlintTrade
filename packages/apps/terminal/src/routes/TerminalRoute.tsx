@@ -299,10 +299,16 @@ function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
 // are full routes now and are no longer overlaid on the /trade canvas.
 // "settings" navigates to /settings (handled in flinttrade:open-tool event listener).
-const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>, "settings"> = {
+// "market-intelligence" is unmounted (ruling D4): every tab it carried is served
+// by a Dockview widget now — Market Overview, OI Analytics, Dealer Gamma, IV
+// Smile & Skew, Correlation Matrix and Delivery Data. The id stays in ToolId
+// only so a stale saved value cannot fail to type-check; nothing resolves it,
+// so `ToolComponent` is undefined and no overlay opens.
+const tools: Omit<
+  Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>,
+  "settings" | "market-intelligence"
+> = {
   "trade-journal": lazy(() => import("../tools/TradeJournal/TradeJournalTool")),
-  "pnl-dashboard": lazy(() => import("../tools/PnLDashboard/PnLDashboardTool")),
-  "market-intelligence": lazy(() => import("../tools/MarketIntelligence/MarketIntelligenceTool")),
 };
 
 const COMPACT_TRADE_BREAKPOINT = 768;
@@ -655,7 +661,7 @@ export default function TerminalRoute() {
     };
   }, []);
 
-  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link,
+  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Review" link,
   // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).
   useEffect(() => {
     function onOpenTool(e: Event) {

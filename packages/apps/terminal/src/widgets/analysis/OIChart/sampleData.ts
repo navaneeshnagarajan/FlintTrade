@@ -69,3 +69,39 @@ export const SAMPLE_STRIKE_CELLS: StrikeCell[] = buildSampleChain(SAMPLE_ATM, 50
  * balance. Rendered only behind the sample badge.
  */
 export const SAMPLE_MAX_PAIN = SAMPLE_ATM;
+
+/** One row of the pain distribution, matching `MaxPainData["strikes"][number]`. */
+export interface SamplePainRow {
+  strike: number;
+  call_oi: number;
+  put_oi: number;
+  call_pain: number;
+  put_pain: number;
+  total_pain: number;
+}
+
+/**
+ * The sample pain curve for the Max Pain view's disconnected state.
+ *
+ * DERIVED, not invented: it is the textbook writer-loss computation
+ * (Σ call OI × max(0, expiry − strike) and Σ put OI × max(0, strike − expiry))
+ * run over {@link SAMPLE_STRIKE_CELLS}, so the sample curve is internally
+ * consistent with the sample chain the other views draw — a second hand-typed
+ * table would let the sample max-pain rule and the sample curve disagree.
+ */
+export const SAMPLE_PAIN_ROWS: SamplePainRow[] = SAMPLE_STRIKE_CELLS.map((expiryCell) => {
+  let callPain = 0;
+  let putPain = 0;
+  for (const cell of SAMPLE_STRIKE_CELLS) {
+    callPain += (cell.ceOi ?? 0) * Math.max(0, expiryCell.strike - cell.strike);
+    putPain += (cell.peOi ?? 0) * Math.max(0, cell.strike - expiryCell.strike);
+  }
+  return {
+    strike: expiryCell.strike,
+    call_oi: expiryCell.ceOi ?? 0,
+    put_oi: expiryCell.peOi ?? 0,
+    call_pain: Math.round(callPain),
+    put_pain: Math.round(putPain),
+    total_pain: Math.round(callPain + putPain),
+  };
+});

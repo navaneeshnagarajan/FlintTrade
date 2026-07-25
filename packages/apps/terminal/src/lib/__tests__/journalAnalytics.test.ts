@@ -245,6 +245,26 @@ describe("computeDayPnl", () => {
       expect(days[i].date >= days[i - 1].date).toBe(true);
     }
   });
+
+  it("REGRESSION: buckets by the IST trading day, not the UTC day", () => {
+    // 2026-03-25 19:30 UTC is 01:00 IST on 26 March. The old
+    // `toISOString().slice(0, 10)` bucketed this fill under the 25th — the
+    // previous trading day — for the whole 00:00–05:29 IST window.
+    const days = computeDayPnl([
+      makeTrade({ timestamp: "2026-03-25T19:30:00.000Z", pnl: 750 }),
+    ]);
+    expect(days).toHaveLength(1);
+    expect(days[0].date).toBe("2026-03-26");
+  });
+
+  it("agrees with the UTC day for instants inside the Indian session", () => {
+    // 09:30 UTC is 15:00 IST — same calendar day on both clocks, so normal
+    // session fills keep their dates.
+    const days = computeDayPnl([
+      makeTrade({ timestamp: "2026-03-23T09:30:00.000Z", pnl: 100 }),
+    ]);
+    expect(days[0].date).toBe("2026-03-23");
+  });
 });
 
 describe("getBestDays", () => {

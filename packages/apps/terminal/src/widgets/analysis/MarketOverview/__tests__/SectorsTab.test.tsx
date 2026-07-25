@@ -258,3 +258,85 @@ describe("SectorsTab bars view", () => {
     expect(screen.getByLabelText("Sector performance bars")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Heatmap view (rehomed from the Market Intelligence sector heatmap, D4)
+// ---------------------------------------------------------------------------
+
+describe("SectorsTab heatmap view", () => {
+  it("is offered as a view alongside the bars", () => {
+    renderTab(<SectorsTab />);
+    expect(screen.getByTitle("Heatmap")).toBeInTheDocument();
+  });
+
+  it("sizes tiles by market cap — the dimension the bars view discards", async () => {
+    renderTab(<SectorsTab initialView="heatmap" />);
+
+    // Wait for the live payload to replace the sample rows before reading the
+    // tile order — the aria-label is identical on both, so findByRole alone
+    // would resolve against the sample table.
+    await screen.findByText("+2.50%");
+    const list = screen.getByRole("list", {
+      name: "Sector heatmap by 1D return and market capitalisation",
+    });
+    const tiles = Array.from(
+      list.querySelectorAll<HTMLElement>("[data-weighted-heatmap-tile]"),
+    );
+    // Ordered by market cap, heaviest first: IT (9.8L Cr) before Auto (5.4L Cr).
+    expect(tiles.map((t) => t.dataset.weightedHeatmapTile)).toEqual(["NIFTYIT", "NIFTYAUTO"]);
+    // The market cap is on screen, in the lakh-crore scale Indian desks read.
+    expect(screen.getByText("9.8L Cr")).toBeInTheDocument();
+    expect(screen.getByText("5.4L Cr")).toBeInTheDocument();
+  });
+
+  it("colours by the selected timeframe's return and re-labels on switch", async () => {
+    renderTab(<SectorsTab initialView="heatmap" />);
+
+    expect(await screen.findByText("+2.50%")).toBeInTheDocument();
+    expect(screen.getByText("-1.50%")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "1Y" }));
+
+    // 1Y figures replace the 1D ones — one plane, one row set, two projections.
+    expect(await screen.findByText("+6.00%")).toBeInTheDocument();
+    expect(screen.getByText("+3.00%")).toBeInTheDocument();
+    expect(screen.queryByText("+2.50%")).toBeNull();
+  });
+
+  it("reads the same rows as the bars view — no second fetch", async () => {
+    renderTab(<SectorsTab initialView="heatmap" />);
+    await screen.findByText("+2.50%");
+    expect(mockGetSectorRotation).toHaveBeenCalledTimes(1);
+  });
+
+  it("badges sample rows and never claims freshness for them", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    renderTab(<SectorsTab initialView="heatmap" />);
+
+    expect(mockGetSectorRotation).not.toHaveBeenCalled();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText(/Updated:/)).toBeNull();
+  });
+
+  it("keeps the badge when a connected response omits is_sample_data (fail-closed)", async () => {
+    const { is_sample_data: _dropped, ...unflagged } = LIVE_ROTATION;
+    mockGetSectorRotation.mockResolvedValue(unflagged);
+    renderTab(<SectorsTab initialView="heatmap" />);
+    expect(await screen.findByText("Sample data")).toBeTruthy();
+  });
+
+  it("states that tile size is market cap so colour is not read as the whole story", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    renderTab(<SectorsTab initialView="heatmap" />);
+    expect(screen.getByText(/Tile size = market cap · Colour = 1D change/)).toBeInTheDocument();
+  });
+
+  it("does not render the position-map legend or stats", () => {
+    // The heatmap projects the rotation plane, not the operator's positions, so
+    // the P&L-vs-entry legend must stay off it.
+    mockUseBrokerConnected.mockReturnValue(false);
+    renderTab(<SectorsTab initialView="heatmap" />);
+    expect(screen.queryByText(/Colour = day change %/)).toBeNull();
+    expect(screen.queryByText(/Colour = unrealised P&L % vs entry/)).toBeNull();
+  });
+});

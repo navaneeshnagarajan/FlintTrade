@@ -11,6 +11,19 @@
  *     stub that self-declares is_sample_data, so the badge keys off the
  *     response flag, never off connection state, and fails closed when the
  *     flag is absent. A connected user never sees the local sample rows.
+ *
+ * Absorbed from the retired Market Intelligence tool:
+ *   - Its global-indices table's QUOTE CURRENCY column. Currency is static
+ *     metadata about an index, not a price, so it is resolved from a local
+ *     id map and rendered on the live rows too; an index the map does not
+ *     know renders no suffix rather than a guess.
+ *   - Its GIFT Nifty row — the pre-open indicator Indian desks read before
+ *     09:15, which the canonical India group did not carry.
+ *   - Its India VIX tab, reduced to the part that was not fabricated: the
+ *     regime classification of the LIVE VIX tick. The tool hardcoded the
+ *     level (14.28) and a 52-week range (10.84 / 28.42); the level is on the
+ *     WebSocket already, and no 52-week series exists anywhere in the
+ *     terminal, so the meter is deliberately not ported.
  */
 
 import { useState, memo } from "react";
@@ -22,7 +35,7 @@ import { Button } from "@/components/ui/button";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { tickAtomFamily, vixAtom } from "@/atoms/marketAtoms";
 import { tickKeyFor } from "@/lib/market";
 import { cn } from "@/lib/utils";
 import { ProvChip, SectionHeading } from "../shared";
@@ -108,6 +121,40 @@ function LiveIndexCard({ symbol, exchange }: { symbol: string; exchange: string 
 const REGIONS = ["India", "US", "Europe", "Asia"] as const;
 type Region = (typeof REGIONS)[number];
 
+/**
+ * Quote currency per index id (ported from the Market Intelligence global
+ * indices table). Static metadata, not market data — a level of 43,240 means
+ * something different in USD than in INR, and the region alone cannot say
+ * which (Asia spans JPY, HKD and CNY).
+ *
+ * Both id vocabularies are covered: the backend stub's (`NIFTY`, `NDX`,
+ * `FTSE`, `NIKKEI`) and this widget's sample constant's (`NIFTY50`,
+ * `NASDAQ`, `FTSE100`, `N225`). An unknown id renders NO suffix — never a
+ * guessed one.
+ */
+const CURRENCY_BY_INDEX_ID: Readonly<Record<string, string>> = {
+  NIFTY: "INR",
+  NIFTY50: "INR",
+  SENSEX: "INR",
+  GIFTNIFTY: "USD",
+  SPX: "USD",
+  DJI: "USD",
+  NDX: "USD",
+  NASDAQ: "USD",
+  FTSE: "GBP",
+  FTSE100: "GBP",
+  DAX: "EUR",
+  NIKKEI: "JPY",
+  N225: "JPY",
+  HSI: "HKD",
+  SHCOMP: "CNY",
+};
+
+/** Quote currency for an index id, or null when the id is not known. */
+export function currencyForIndex(id: string): string | null {
+  return CURRENCY_BY_INDEX_ID[id.toUpperCase()] ?? null;
+}
+
 function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
   if (data.length < 2) return null;
 
@@ -124,6 +171,7 @@ function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
 function IndexRow({ entry }: { entry: GlobalIndexEntry }) {
   const positive = entry.change_pct >= 0;
   const changeClass = positive ? "text-profit" : "text-loss";
+  const currency = currencyForIndex(entry.id);
 
   return (
     <tr className="border-b border-border-subtle hover:bg-surface-hover/40 transition-colors">
@@ -134,6 +182,11 @@ function IndexRow({ entry }: { entry: GlobalIndexEntry }) {
         <span className="text-xs font-mono tabular-nums text-text-primary">
           {entry.ltp.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
         </span>
+        {currency && (
+          <span className="ml-1 text-xxs text-text-muted" aria-label={`quoted in ${currency}`}>
+            {currency}
+          </span>
+        )}
       </td>
       <td className="px-2 py-1.5 text-right">
         <span className={cn("text-xs font-mono tabular-nums", changeClass)}>
@@ -149,6 +202,98 @@ function IndexRow({ entry }: { entry: GlobalIndexEntry }) {
         <Sparkline data={entry.history} positive={positive} />
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// India VIX regime (from the retired Market Intelligence India VIX tab)
+// ---------------------------------------------------------------------------
+
+interface VixBand {
+  /** Exclusive upper bound of the band; `Infinity` for the top band. */
+  below: number;
+  range: string;
+  label: string;
+  meaning: string;
+  cls: string;
+}
+
+/**
+ * The NSE volatility-index regime ladder, carried over verbatim from the
+ * Market Intelligence India VIX tab. The bands are the interpretation the
+ * tool actually added; the number itself now comes off the live tick.
+ */
+const VIX_BANDS: readonly VixBand[] = [
+  { below: 12, range: "Below 12", label: "Extreme complacency", meaning: "Markets at peak confidence — options are cheap, protection is affordable", cls: "text-blue-400" },
+  { below: 16, range: "12 – 16", label: "Low volatility", meaning: "Fear is low and markets are trending; premiums stay affordable", cls: "text-profit" },
+  { below: 20, range: "16 – 20", label: "Moderate volatility", meaning: "Normal conditions — options are fairly priced", cls: "text-warning" },
+  { below: 25, range: "20 – 25", label: "Elevated fear", meaning: "Increased uncertainty; traders are hedging more aggressively", cls: "text-orange-400" },
+  { below: 30, range: "25 – 30", label: "High fear", meaning: "Significant market stress — a sharp sell-off is usually in progress", cls: "text-loss" },
+  { below: Infinity, range: "Above 30", label: "Panic zone", meaning: "Extreme fear and stress — historically a contrarian buy signal", cls: "text-loss" },
+];
+
+/** The band a VIX level falls into. Exported for this tab's tests. */
+export function vixBandFor(value: number): VixBand {
+  return VIX_BANDS.find((band) => value < band.below) ?? VIX_BANDS[VIX_BANDS.length - 1];
+}
+
+/**
+ * Volatility regime for the live India VIX tick.
+ *
+ * Reads the same pinned tick atom the ticker and watchlist use, so there is no
+ * second source for the level. With no tick the section states that plainly —
+ * it never classifies a fabricated number, which is exactly what the retired
+ * tool did with its hardcoded 14.28.
+ */
+function VixRegimeSection() {
+  const tick = useAtomValue(vixAtom);
+  const ltp = tick?.ltp ?? 0;
+  const hasTick = Boolean(tick) && ltp > 0;
+  const prevClose = tick?.prevClose ?? tick?.close ?? 0;
+  const band = hasTick ? vixBandFor(ltp) : null;
+  const change = hasTick && prevClose > 0 ? ltp - prevClose : null;
+
+  return (
+    <section aria-labelledby="mo-vix-regime">
+      <SectionHeading id="mo-vix-regime">Volatility Regime<ProvChip live={hasTick} /></SectionHeading>
+      <div className="rounded border border-border-default bg-surface-card p-2">
+        {band ? (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-xxs text-text-muted uppercase tracking-wide">India VIX</span>
+            <span className={cn("text-lg font-mono font-semibold tabular-nums leading-none", band.cls)}>
+              {ltp.toFixed(2)}
+            </span>
+            {change !== null && (
+              <span className={cn("text-xxs font-mono tabular-nums", change >= 0 ? "text-profit" : "text-loss")}>
+                {change >= 0 ? "+" : ""}{change.toFixed(2)} ({change >= 0 ? "+" : ""}{((change / prevClose) * 100).toFixed(2)}%)
+              </span>
+            )}
+            <span className={cn("text-xs font-medium", band.cls)}>{band.label}</span>
+            <span className="text-xxs text-text-muted basis-full">{band.meaning}</span>
+          </div>
+        ) : (
+          <p className="text-xxs text-text-muted">
+            Awaiting India VIX tick — no level is classified until one arrives.
+          </p>
+        )}
+
+        <table className="mt-2 w-full" aria-label="India VIX regime bands">
+          <tbody>
+            {VIX_BANDS.map((row) => {
+              const isCurrent = band?.range === row.range;
+              return (
+                <tr key={row.range} className={cn(isCurrent && "bg-surface-hover/60")}>
+                  <td className={cn("py-0.5 pr-2 text-xxs font-mono whitespace-nowrap w-20", row.cls)}>
+                    {row.range}
+                  </td>
+                  <td className="py-0.5 text-xxs text-text-muted">{row.meaning}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -246,6 +391,9 @@ function IndicesTab() {
             ))}
           </div>
         </section>
+
+        {/* India VIX regime — live tick, classified */}
+        <VixRegimeSection />
 
         {/* Global indices table */}
         <section aria-labelledby="mo-global-indices">

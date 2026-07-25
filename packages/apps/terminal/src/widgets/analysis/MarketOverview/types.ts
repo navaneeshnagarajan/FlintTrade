@@ -14,8 +14,16 @@ export type MarketOverviewTab =
   | "indices"
   | "contribution";
 
-/** Views inside the Sectors tab. */
-export type SectorView = "treemap" | "grid" | "table" | "bars";
+/**
+ * Views inside the Sectors tab.
+ *
+ * `treemap`/`grid`/`table` map the operator's OWN POSITIONS; `bars` and
+ * `heatmap` are two projections of the SECTOR ROTATION plane — `bars` ranks
+ * the sectors by return, `heatmap` sizes them by market capitalisation so a
+ * 2 % move in a ₹14 lakh-crore index does not read like a 2 % move in a
+ * ₹90,000-crore one.
+ */
+export type SectorView = "treemap" | "grid" | "table" | "bars" | "heatmap";
 
 /** Views inside the Rotation tab. */
 export type RotationView = "sectors" | "portfolio";

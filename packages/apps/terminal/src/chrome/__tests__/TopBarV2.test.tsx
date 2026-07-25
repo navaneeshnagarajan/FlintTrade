@@ -254,7 +254,7 @@ describe("TopBarV2", () => {
     fireEvent.click(screen.getByRole("button", { name: /tools/i }));
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /trade journal/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /trade review/i })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /settings/i })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /p&l dashboard/i })).not.toBeInTheDocument();
   });
@@ -265,7 +265,7 @@ describe("TopBarV2", () => {
     window.addEventListener("flinttrade:open-tool", listener);
 
     fireEvent.click(screen.getByRole("button", { name: /tools/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /trade journal/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /trade review/i }));
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0][0]).toMatchObject({

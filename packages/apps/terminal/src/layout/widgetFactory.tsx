@@ -94,20 +94,17 @@ const lazyWidgets = {
   volatilitycone: lazy(() => import("@/widgets/analysis/VolatilityCone/VolatilityConeWidget")),
 
   // Wave 28 widgets
-  heatcalendar: lazy(() => import("@/widgets/analysis/HeatCalendar/HeatCalendarWidget")),
   vwapbands: lazy(() => import("@/widgets/analysis/VWAPBands/VWAPBandsWidget")),
   correlationpairs: lazy(() => import("@/widgets/analysis/CorrelationPairs/CorrelationPairsWidget")),
   multitimeframe: lazy(() => import("@/widgets/analysis/MultiTimeframe/MultiTimeframeWidget")),
 
   // Wave 29 widgets
   pcrtrend: lazy(() => import("@/widgets/analysis/PCRTrend/PCRTrendWidget")),
-  tradeperformance: lazy(() => import("@/widgets/trading/TradePerformance/TradePerformanceWidget")),
   instrumentcompare: lazy(() => import("@/widgets/analysis/InstrumentCompare/InstrumentCompareWidget")),
 
   // Wave 30 widgets
   greeksheatmap: lazy(() => import("@/widgets/analysis/GreeksHeatmap/GreeksHeatmapWidget")),
   gapanalysis: lazy(() => import("@/widgets/analysis/GapAnalysis/GapAnalysisWidget")),
-  sessionstats: lazy(() => import("@/widgets/trading/SessionStats/SessionStatsWidget")),
 
   // Wave 31 widgets
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
@@ -188,6 +185,32 @@ export function isMovedWidget(spec: RetiredWidget): spec is RetiredMovedWidget {
 }
 
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  sessionstats: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "Session statistics now live in the Trade Review tool's Session tab: "
+      + "same FIFO round-trip metrics via lib/pnl, same "
+      + "disclosed-sample-until-a-trip-closes provenance.",
+  },
+  tradeperformance: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "Performance metrics now live in the Trade Review tool's Performance "
+      + "tab with a Range/YTD scope toggle, routed through "
+      + "lib/journalAnalytics — which fixed an equity curve running backwards "
+      + "(the journal returns newest-first and this widget summed in array "
+      + "order), a YTD end date computed in UTC that excluded the current "
+      + "session every IST early morning, and a profit factor fabricated as "
+      + "99 when there were no losses.",
+  },
+  heatcalendar: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "The daily heat-calendar rendering (month navigation, tooltip, legend) "
+      + "survives in the Trade Review tool's Calendar tab over REAL "
+      + "journalled rupee P&L; the widget's sample-only percentage data plane "
+      + "retires as strictly dominated.",
+  },
   dashboard: {
     component: "indexstrip",
     note:
@@ -520,9 +543,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading", description: "Minimal order ticket for fast order placement without leaving the chart" },
-  { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading", description: "Today's session from the round trips closed in your tradebook — count, win rate, max drawdown, best and worst trade, hold versus idle time and order status counts" },
   { id: "riskdashboard", name: "Risk", icon: "ShieldAlert", category: "Trading", description: "Margin utilisation gauge with exposure, open positions and available cash, plus daily MTM against your local target and stop-loss references" },
-  { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading", description: "Performance analytics over recorded trades: equity curve, win rate, average R:R, profit factor, expectancy, win/loss streaks, monthly returns and trades by weekday" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
   { id: "orderladder", name: "DOM / Ladder", icon: "ArrowUpDown", category: "Trading", description: "Level-2 book and order ladder in one surface — real resting bid/ask sizes and order counts on the rows you click to place and cancel limit orders through the safety gate" },
   { id: "foreverorders", name: "Forever (GTT) Orders", icon: "Clock", category: "Trading", description: "Place and manage forever/GTT orders incl. OCO legs and validity — native brokers only" },
@@ -549,7 +570,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run the backend's prebuilt indicator condition scans (RSI extremes, volume breakout, pre-market movers, 52-week breakouts) across a symbol universe — sortable matches with their matched conditions and one-click watchlist adds, plus live NIFTY 50 sector movers" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Standard, Fibonacci, Woodie, Camarilla and DeMark pivots — the pivot with R1–R4 and S1–S4 from the previous session's OHLC, plus where the price currently sits between them" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis", description: "Volatility cone comparing current IV against historical percentiles" },
-  { id: "heatcalendar", name: "Heat Calendar", icon: "Calendar", category: "Analysis", description: "Month grid of daily percentage returns coloured by magnitude, with a monthly total — sample data only, no returns source is wired yet" },
   { id: "vwapbands", name: "VWAP Bands", icon: "Waves", category: "Analysis", description: "Standalone session VWAP panel — VWAP, the close line and ±1σ/2σ/3σ bands from intraday 5-minute bars when a broker is connected, labelled sample bars otherwise" },
   { id: "correlationpairs", name: "Correlation Pairs", icon: "Link", category: "Analysis", description: "Rolling correlation between selected instrument pairs" },
   { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis", description: "Trend, RSI, MACD sign and EMA position for one instrument across 5m/15m/1h/1D as a signal table with a confluence score — computed from live bars when a broker is connected, labelled sample signals otherwise" },

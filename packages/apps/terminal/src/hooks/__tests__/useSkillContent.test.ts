@@ -33,7 +33,7 @@ describe("useSkillContent — beginner", () => {
     expect(availableWidgets).toContain("watchlist");
     expect(availableWidgets).toContain("orderpad");
     expect(availableWidgets).toContain("positions");
-    expect(availableWidgets).toContain("dashboard");
+    expect(availableWidgets).toContain("indexstrip");
 
     // Analysis widgets must NOT be present at beginner level
     expect(availableWidgets).not.toContain("optionchain");
@@ -45,7 +45,6 @@ describe("useSkillContent — beginner", () => {
   it("returns settings-only tools", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("pnl-dashboard");
     expect(result.current.availableTools).not.toContain("market-intelligence");
     expect(result.current.availableTools).not.toContain("trade-journal");
   });
@@ -105,7 +104,6 @@ describe("useSkillContent — intermediate", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("pnl-dashboard");
     expect(result.current.availableTools).not.toContain("market-intelligence");
   });
 
@@ -165,7 +163,6 @@ describe("useSkillContent — advanced", () => {
 
   it("includes all tools", () => {
     const { result } = renderHook(() => useSkillContent());
-    expect(result.current.availableTools).toContain("pnl-dashboard");
     expect(result.current.availableTools).toContain("market-intelligence");
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");

@@ -5,8 +5,9 @@
  *
  *   Breadth       advances/declines, A/D line, 52-week highs/lows, McClellan,
  *                 breadth thrust, per-index split, top movers
- *   Sectors       sector heatmap (treemap/grid/table over positions) and the
- *                 timeframe-ranked sector bars (live sectors/rotation)
+ *   Sectors       position map (treemap/grid/table) plus two projections of
+ *                 the live sectors/rotation plane — timeframe-ranked bars and
+ *                 the market-cap-weighted heatmap
  *   Rotation      sector and portfolio Relative Rotation Graphs
  *   Flows         FII long/short positioning + FII/DII cash flows
  *   Indices       live NSE index tick cards + global indices table
@@ -79,7 +80,7 @@ const OVERVIEW_TABS: readonly MarketOverviewTab[] = [
   "contribution",
 ];
 
-const SECTOR_VIEWS: readonly SectorView[] = ["treemap", "grid", "table", "bars"];
+const SECTOR_VIEWS: readonly SectorView[] = ["treemap", "grid", "table", "bars", "heatmap"];
 const ROTATION_VIEWS: readonly RotationView[] = ["sectors", "portfolio"];
 
 /** Panel params this widget understands. */

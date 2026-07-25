@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
 
@@ -31,7 +31,8 @@ import { tickAtomFamily } from "@/atoms/marketAtoms";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getGlobalIndices } from "@/services/ftApi";
 import type { GlobalIndexEntry } from "@/services/ftApi";
-import IndicesTab from "../tabs/IndicesTab";
+import IndicesTab, { currencyForIndex, vixBandFor } from "../tabs/IndicesTab";
+import { SAMPLE_GLOBAL_INDICES } from "../sampleData";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockIndices = getGlobalIndices as ReturnType<typeof vi.fn>;
@@ -261,6 +262,34 @@ describe("IndicesTab — global indices (connected)", () => {
     expect(screen.queryByText("Indices API unavailable")).toBeNull();
   });
 
+  it("renders the quote currency for a live row, from static metadata", async () => {
+    // Ported from the Market Intelligence global-indices table (D4). Currency
+    // is metadata about the index, not a price, so it applies to live rows too.
+    mockConnected.mockReturnValue(true);
+    mockIndices.mockResolvedValue({
+      indices: [{ ...LIVE_INDICES[0], id: "NDX", name: "Nasdaq 100" }],
+      updated_at: new Date().toISOString(),
+      is_sample_data: false,
+    });
+    renderTab();
+
+    expect(await screen.findByText("Nasdaq 100")).toBeTruthy();
+    expect(screen.getByLabelText("quoted in USD")).toBeTruthy();
+  });
+
+  it("renders NO currency for an index the map does not know — never a guess", async () => {
+    mockConnected.mockReturnValue(true);
+    mockIndices.mockResolvedValue({
+      indices: [{ ...LIVE_INDICES[0], id: "KOSPI", name: "KOSPI", region: "Asia" as const }],
+      updated_at: new Date().toISOString(),
+      is_sample_data: false,
+    });
+    renderTab();
+
+    expect(await screen.findByText("KOSPI")).toBeTruthy();
+    expect(screen.queryByLabelText(/^quoted in/)).toBeNull();
+  });
+
   it("stops automatic polling after a response with missing provenance", async () => {
     vi.useFakeTimers();
     mockConnected.mockReturnValue(true);
@@ -298,5 +327,111 @@ describe("IndicesTab — global indices (connected)", () => {
       qc.clear();
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Currency + GIFT Nifty (ported from the Market Intelligence global-indices
+// table, ruling D4)
+// ---------------------------------------------------------------------------
+
+describe("IndicesTab — quote currency", () => {
+  it("covers both id vocabularies — the backend stub's and this widget's sample", () => {
+    // The two sets genuinely differ (NIFTY vs NIFTY50, NDX vs NASDAQ, FTSE vs
+    // FTSE100, NIKKEI vs N225); a map that covered only one would blank the
+    // column on live rows or on sample rows.
+    expect(currencyForIndex("NIFTY")).toBe("INR");
+    expect(currencyForIndex("NIFTY50")).toBe("INR");
+    expect(currencyForIndex("NDX")).toBe("USD");
+    expect(currencyForIndex("NASDAQ")).toBe("USD");
+    expect(currencyForIndex("FTSE")).toBe("GBP");
+    expect(currencyForIndex("FTSE100")).toBe("GBP");
+    expect(currencyForIndex("NIKKEI")).toBe("JPY");
+    expect(currencyForIndex("N225")).toBe("JPY");
+  });
+
+  it("separates the Asian currencies the region alone cannot", () => {
+    expect(currencyForIndex("N225")).toBe("JPY");
+    expect(currencyForIndex("HSI")).toBe("HKD");
+    expect(currencyForIndex("SHCOMP")).toBe("CNY");
+  });
+
+  it("returns null for an unknown id rather than guessing", () => {
+    expect(currencyForIndex("KOSPI")).toBeNull();
+    expect(currencyForIndex("")).toBeNull();
+  });
+
+  it("labels every sample row's currency", () => {
+    renderTab();
+    // Every sample row is in the map, so each renders a currency suffix.
+    expect(screen.getAllByLabelText(/^quoted in/)).toHaveLength(SAMPLE_GLOBAL_INDICES.length);
+  });
+});
+
+describe("IndicesTab — GIFT Nifty", () => {
+  it("carries GIFT Nifty in the India group, quoted in USD", () => {
+    renderTab();
+    expect(screen.getByText("GIFT Nifty")).toBeInTheDocument();
+
+    const entry = SAMPLE_GLOBAL_INDICES.find((row) => row.id === "GIFTNIFTY");
+    expect(entry?.region).toBe("India");
+    expect(currencyForIndex("GIFTNIFTY")).toBe("USD");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// India VIX regime (rehomed from the Market Intelligence India VIX tab, D4)
+// ---------------------------------------------------------------------------
+
+describe("IndicesTab — India VIX regime", () => {
+  it("classifies each band at its boundaries", () => {
+    expect(vixBandFor(9.8).label).toBe("Extreme complacency");
+    expect(vixBandFor(11.99).label).toBe("Extreme complacency");
+    expect(vixBandFor(12).label).toBe("Low volatility");
+    expect(vixBandFor(15.99).label).toBe("Low volatility");
+    expect(vixBandFor(16).label).toBe("Moderate volatility");
+    expect(vixBandFor(20).label).toBe("Elevated fear");
+    expect(vixBandFor(25).label).toBe("High fear");
+    expect(vixBandFor(30).label).toBe("Panic zone");
+    expect(vixBandFor(64.2).label).toBe("Panic zone");
+  });
+
+  it("classifies nothing until a tick arrives — the tool hardcoded 14.28", () => {
+    renderTab();
+    const heading = screen.getByText("Volatility Regime");
+    expect(heading.querySelector("span")?.textContent).toBe("Sample");
+    expect(screen.getByText(/Awaiting India VIX tick/)).toBeInTheDocument();
+    expect(screen.queryByText("14.28")).toBeNull();
+  });
+
+  it("classifies the live tick and shows the change against previous close", () => {
+    seedTick("NSE_INDEX:INDIAVIX", { ltp: 22.4, prevClose: 20.0 });
+    renderTab();
+
+    const heading = screen.getByText("Volatility Regime");
+    expect(heading.querySelector("span")?.textContent).toBe("Live");
+    // Scoped: the NSE index strip above carries its own INDIAVIX card off the
+    // SAME tick, which is the point — one source, so the two cannot disagree.
+    const section = heading.closest("section");
+    expect(section).not.toBeNull();
+    const regime = within(section as HTMLElement);
+    expect(regime.getByText("22.40")).toBeInTheDocument();
+    expect(regime.getByText("Elevated fear")).toBeInTheDocument();
+    expect(regime.getByText(/\+2\.40 \(\+12\.00%\)/)).toBeInTheDocument();
+  });
+
+  it("renders the full band ladder as the operator's reference", () => {
+    renderTab();
+    for (const range of ["Below 12", "12 – 16", "16 – 20", "20 – 25", "25 – 30", "Above 30"]) {
+      expect(screen.getByText(range)).toBeInTheDocument();
+    }
+  });
+
+  it("does NOT port the tool's hardcoded 52-week range — no such series exists", () => {
+    seedTick("NSE_INDEX:INDIAVIX", { ltp: 14.28, prevClose: 14.7 });
+    renderTab();
+    expect(screen.queryByText(/52-Week Range/i)).toBeNull();
+    expect(screen.queryByText(/10\.84/)).toBeNull();
+    expect(screen.queryByText(/28\.42/)).toBeNull();
   });
 });
