@@ -263,48 +263,48 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (71)
+### The widgets (68)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are generated
 from the widget registry
 (`packages/apps/terminal/src/layout/widgetFactory.tsx`) and are exhaustive:
 
-- **Trading** — Dashboard, Scalper, Positions, Orders, Holdings, Trade Book, Order
-  Pad, Intraday P&L, MTM Monitor, Action Center, Trade Copier, Smart
-  Order, Portfolio Allocation, Quick Trade, Session Stats, Risk,
-  Trade Log, Trade Performance, Strategy Monitor, DOM / Ladder,
-  Forever (GTT) Orders, Super Orders, and Conditional Triggers
-- **Analysis** — Chart, Option Chain, Historical Chain, OI Analytics, Straddle &
-  Implied Move, Greeks, Sector Map, FII Long/Short, Dealer Gamma,
-  Arbitrage Scanner, Index Contribution, Pattern Detection, Tape &
-  Microstructure, Vol Surface, IV Smile & Skew, Straddle P&L, Order
-  Flow, Three-Panel Chart, Portfolio Optimiser, Condition Scanner,
-  Pivot Points, Market Breadth, Volatility Cone, Heat Calendar, VWAP
-  Bands, Correlation Pairs, Multi-Timeframe, PCR Trend, Instrument
-  Compare, Greeks Matrix, Gap Analysis, Options Flow, Correlation
-  Matrix, Sector Performance, and DOM Heatmap
-- **Utility** — Watchlist, Calculator, News Feed, Ticker, AI Advisor, AI Backends,
-  AI Team, Obsidian Vault, Price Alerts, System Health,
-  Reconciliation, Funding Rates, Currency Converter, Earnings
-  Calendar, Global Indices, Strategy Templates, Audit Trail,
-  Economic Calendar, Expiry Countdown, Market Clock, Trade Ideas,
-  Tick Speed, Market Summary, and Trade Journal
+- **Trading** — Scalper, Positions, Fills, P&L Monitor, Orders, Holdings,
+  Order Pad, Action Center, Trade Copier, Smart Order, Portfolio Allocation,
+  Quick Trade, Risk, Strategy Monitor, DOM / Ladder, Forever (GTT) Orders,
+  Super Orders, and Conditional Triggers
+- **Analysis** — Chart, Market Overview, Option Chain, Historical Chain, OI
+  Analytics, Straddle & Implied Move, Greeks, Dealer Gamma, Arbitrage
+  Scanner, Pattern Detection, Tape & Microstructure, Vol Surface, IV Smile &
+  Skew, Straddle P&L, Order Flow, Portfolio Optimiser, Condition Scanner,
+  Pivot Points, Volatility Cone, VWAP Bands, Correlation Pairs, Multi-
+  Timeframe, PCR Trend, Instrument Compare, Greeks Matrix, Gap Analysis,
+  Correlation Matrix, and DOM Heatmap
+- **Utility** — Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
+  Advisor, AI Backends, AI Team, Obsidian Vault, Price Alerts,
+  Reconciliation, Funding Rates, Currency Converter, Earnings Calendar,
+  Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
+  Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
-### The 15 workspace presets
+### The 17 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
 palette (Ctrl + K → "preset"). Built-in presets include:
 
-- **Scalper Zone** — chart, level-2 depth, order pad, positions, scalper panel.
+- **Scalper Zone** — chart, order ladder, order pad, positions, scalper panel.
 - **Options Desk** — option chain, chart, Greeks, positions, straddle P&L.
-- **Market Watch** — multi-symbol watchlist, chart, price ticker, dashboard.
-- **Analysis** — chart with indicators, OI chart, depth, positions, news.
-- **Risk Monitor** — dashboard, risk panel, MTM monitor, positions, orders.
-- **Investor View** — chart, watchlist, holdings, dashboard (SIPs, net worth
+- **Market Watch** — multi-symbol watchlist, chart, price ticker, indices.
+- **Analysis** — chart with indicators, OI analytics, positions, news.
+- **Risk Monitor** — indices, risk, P&L monitor, positions, orders.
+- **Trading Desk** — indices, positions, risk and orders; the composition that
+  replaced the old Dashboard widget.
+- **Three Panel** — CE, index and PE charts with synchronised time scales on
+  the nearest-expiry ATM strikes.
+- **Investor View** — chart, watchlist, holdings, indices (SIPs, net worth
   and mutual funds live on the Invest page).
-- … plus eight more.
+- … plus nine more.
 
 Presets are serialised via the Dockview API. You can save your own custom
 preset from Settings → Workspace.
