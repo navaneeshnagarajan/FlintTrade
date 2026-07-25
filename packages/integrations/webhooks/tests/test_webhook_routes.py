@@ -28,7 +28,7 @@ def _mock_receiver(rate_ok: bool = True, sig_ok: bool = True) -> MagicMock:
     receiver.check_rate_limit.return_value = rate_ok
     receiver.verify_signature.return_value = sig_ok
     receiver._config = WebhookConfig(secret=_SECRET, require_signature=False)
-    receiver._config.allowed_sources = {"tradingview", "chartink", "custom"}
+    receiver._config.allowed_sources = {"custom"}
 
     dispatch_result = {
         "status": "executed",
@@ -39,7 +39,7 @@ def _mock_receiver(rate_ok: bool = True, sig_ok: bool = True) -> MagicMock:
 
     history_entry = MagicMock()
     history_entry.timestamp = "2026-04-19T10:00:00"
-    history_entry.source = "tradingview"
+    history_entry.source = "custom"
     history_entry.status = "executed"
     history_entry.payload = {"symbol": "NIFTY"}
     receiver.get_history.return_value = [history_entry]
@@ -47,7 +47,7 @@ def _mock_receiver(rate_ok: bool = True, sig_ok: bool = True) -> MagicMock:
     receiver.recent_log.return_value = [
         {
             "timestamp": "2026-04-19T10:00:00",
-            "source": "tradingview",
+            "source": "custom",
             "status": "executed",
         }
     ]
@@ -75,15 +75,15 @@ def client(app):
 # ---------------------------------------------------------------------------
 
 
-def test_receive_tradingview_ok(client):
-    """200 for a valid tradingview webhook."""
-    payload = {"symbol": "NIFTY", "action": "BUY", "qty": 50}
+def test_receive_custom_ok(client):
+    """200 for a valid custom webhook."""
+    payload = {"symbol": "NIFTY", "action": "signal", "qty": 50}
     with patch(
         "flinttrade_webhooks.webhook_routes._run_dispatch",
         return_value={"status": "executed", "order_id": "OID123"},
     ):
         resp = client.post(
-            "/v1/webhook/tradingview",
+            "/v1/webhook/custom",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -92,15 +92,15 @@ def test_receive_tradingview_ok(client):
     assert body["status"] in {"success", "error", "executed"}
 
 
-def test_receive_named_chartink_endpoint_ok(client):
+def test_receive_named_custom_endpoint_ok(client):
     """Named registry endpoints dispatch through the same receiver path."""
-    payload = {"symbol": "NIFTY", "action": "BUY", "qty": 50}
+    payload = {"symbol": "NIFTY", "action": "signal", "qty": 50}
     with patch(
         "flinttrade_webhooks.webhook_routes._run_dispatch",
         return_value={"status": "executed", "order_id": "OID123"},
     ):
         resp = client.post(
-            "/v1/webhook/chartink/scan1",
+            "/v1/webhook/custom/scan1",
             data=json.dumps(payload),
             content_type="application/json",
         )
@@ -108,20 +108,16 @@ def test_receive_named_chartink_endpoint_ok(client):
     assert resp.get_json()["status"] == "success"
 
 
-def test_receive_gocharting_ok(client):
-    """200 for a valid GoCharting webhook — routes through the shared gate."""
-    payload = {"symbol": "NIFTY", "exchange": "NSE", "product": "MIS", "action": "BUY", "quantity": 50}
-    with patch(
-        "flinttrade_webhooks.webhook_routes._run_dispatch",
-        return_value={"status": "executed", "order_id": "OID123"},
-    ):
-        resp = client.post(
-            "/v1/webhook/gocharting",
-            data=json.dumps(payload),
-            content_type="application/json",
-        )
-    assert resp.status_code == 200
-    assert resp.get_json()["status"] == "success"
+@pytest.mark.parametrize("retired", ["tradingview", "chartink", "gocharting"])
+def test_retired_provider_sources_are_404(client, retired):
+    """Retired provider sources (TradingView/ChartInk/GoCharting) answer 404."""
+    resp = client.post(
+        f"/v1/webhook/{retired}",
+        data=json.dumps({"symbol": "NIFTY", "action": "BUY"}),
+        content_type="application/json",
+    )
+    assert resp.status_code == 404
+    assert "Unknown source" in resp.get_json()["message"]
 
 
 def test_receive_invalid_source(client):
@@ -142,7 +138,7 @@ def test_receive_rate_limited():
     flask_app.register_blueprint(mod.webhook_bp)
     with flask_app.test_client() as c:
         resp = c.post(
-            "/v1/webhook/tradingview",
+            "/v1/webhook/custom",
             data=json.dumps({"symbol": "NIFTY"}),
             content_type="application/json",
         )
@@ -159,7 +155,7 @@ def test_bad_signature_does_not_consume_authenticated_rate_limit():
 
     with flask_app.test_client() as c:
         resp = c.post(
-            "/v1/webhook/tradingview",
+            "/v1/webhook/custom",
             data=json.dumps({"symbol": "NIFTY"}),
             content_type="application/json",
         )
@@ -262,9 +258,9 @@ def test_receive_named_endpoint_registry_failure_fails_closed():
 
 
 def test_receive_invalid_json(client):
-    """400 for a body that is neither JSON nor valid provider text."""
+    """400 for a body that is not a JSON object."""
     resp = client.post(
-        "/v1/webhook/tradingview",
+        "/v1/webhook/custom",
         data=b"\xff",
         content_type="text/plain",
     )
@@ -300,8 +296,8 @@ class TestNamedWebhookSecrets:
             _SECRET,
         )
         store.store_secret(
-            "/v1/webhook/tradingview/order-signal",
-            "tradingview",
+            "/v1/webhook/custom/order-signal",
+            "custom",
             "Order Signal",
             _SECRET,
         )
@@ -451,8 +447,8 @@ class TestNamedWebhookSecrets:
         flask_app.config["TESTING"] = True
         store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
         store.store_secret(
-            "/v1/webhook/tradingview/order-signal",
-            "tradingview",
+            "/v1/webhook/custom/order-signal",
+            "custom",
             "Order Signal",
             _SECRET,
         )
@@ -465,9 +461,11 @@ class TestNamedWebhookSecrets:
         )
         flask_app.register_blueprint(mod.webhook_bp)
 
-        body = json.dumps({"action": "BUY", "symbol": "NIFTY", "exchange": "NSE"}).encode()
+        body = json.dumps(
+            {"action": "place_order", "side": "BUY", "symbol": "NIFTY", "exchange": "NSE"}
+        ).encode()
         resp = flask_app.test_client().post(
-            "/v1/webhook/tradingview/order-signal",
+            "/v1/webhook/custom/order-signal",
             data=body,
             headers=self._headers(body, nonce="order-nonce-verified"),
         )
@@ -475,7 +473,7 @@ class TestNamedWebhookSecrets:
         assert resp.status_code == 200
         assert resp.get_json()["data"]["status"] == "placed"
         assert captured["payload"].webhook_nonce == "order-nonce-verified"
-        assert captured["payload"].webhook_path == "/v1/webhook/tradingview/order-signal"
+        assert captured["payload"].webhook_path == "/v1/webhook/custom/order-signal"
 
     def test_signed_named_webhook_rejects_bad_signature(self, signed_client):
         body = json.dumps({"action": "signal", "symbol": "TCS"}).encode()
@@ -505,9 +503,11 @@ class TestNamedWebhookSecrets:
         assert "nonce and timestamp" in resp.get_json()["message"]
 
     def test_signed_place_order_still_fails_honestly(self, signed_client):
-        body = json.dumps({"action": "BUY", "symbol": "NIFTY", "exchange": "NSE"}).encode()
+        body = json.dumps(
+            {"action": "place_order", "side": "BUY", "symbol": "NIFTY", "exchange": "NSE"}
+        ).encode()
         resp = signed_client.post(
-            "/v1/webhook/tradingview/order-signal",
+            "/v1/webhook/custom/order-signal",
             data=body,
             headers=self._headers(body, nonce="order-nonce-1"),
         )
@@ -517,10 +517,12 @@ class TestNamedWebhookSecrets:
         assert body["data"]["action"] == "place_order"
         assert "no order was placed" in body["message"]
 
-    def test_signed_text_tradingview_payload_reaches_canonical_parser(self, tmp_path):
+    def test_signed_retired_provider_named_endpoint_is_rejected(self, tmp_path):
+        """A legacy signed relay to a retired provider path answers 404, even
+        when an orphaned signing secret is still stored for that path."""
         from flinttrade_webhooks.webhook_receiver import WebhookReceiver
 
-        flask_app = Flask("signed_text_tradingview")
+        flask_app = Flask("signed_retired_provider")
         flask_app.config["TESTING"] = True
         store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
         store.store_secret("/v1/webhook/tradingview/text-order", "tradingview", "Text Order", _SECRET)
@@ -537,57 +539,5 @@ class TestNamedWebhookSecrets:
             headers=self._headers(body, nonce="text-order-1"),
         )
 
-        assert resp.status_code == 422
-        payload = resp.get_json()["data"]
-        assert payload["action"] == "place_order"
-        assert payload["symbol"] == "BANKNIFTY"
-
-    def test_signed_chartink_csv_payload_reaches_canonical_parser(self, tmp_path):
-        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
-
-        flask_app = Flask("signed_csv_chartink")
-        flask_app.config["TESTING"] = True
-        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
-        store.store_secret("/v1/webhook/chartink/csv-scan", "chartink", "CSV Scan", _SECRET)
-        mod.init_webhook_routes(
-            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
-            secret_store=store,
-        )
-        flask_app.register_blueprint(mod.webhook_bp)
-
-        body = b"NSE:RELIANCE-EQ,TCS,INFY-BE"
-        resp = flask_app.test_client().post(
-            "/v1/webhook/chartink/csv-scan",
-            data=body,
-            headers=self._headers(body, nonce="csv-scan-1"),
-        )
-
-        assert resp.status_code == 200
-        payload = resp.get_json()["data"]
-        assert payload["status"] == "received"
-        assert payload["symbol"] == "RELIANCE"
-
-    def test_signed_gocharting_text_payload_reaches_canonical_parser(self, tmp_path):
-        from flinttrade_webhooks.webhook_receiver import WebhookReceiver
-
-        flask_app = Flask("signed_text_gocharting")
-        flask_app.config["TESTING"] = True
-        store = WebhookSecretStore(tmp_path / "webhook_secrets.db", "test-master-password")
-        store.store_secret("/v1/webhook/gocharting/text-order", "gocharting", "Text Order", _SECRET)
-        mod.init_webhook_routes(
-            WebhookReceiver(WebhookConfig(secret="", rate_limit=100)),
-            secret_store=store,
-        )
-        flask_app.register_blueprint(mod.webhook_bp)
-
-        body = b"BUY BANKNIFTY NFO 30 LIMIT 51000"
-        resp = flask_app.test_client().post(
-            "/v1/webhook/gocharting/text-order",
-            data=body,
-            headers=self._headers(body, nonce="gocharting-text-order-1"),
-        )
-
-        assert resp.status_code == 422
-        payload = resp.get_json()["data"]
-        assert payload["action"] == "place_order"
-        assert payload["symbol"] == "BANKNIFTY"
+        assert resp.status_code == 404
+        assert "Unknown source" in resp.get_json()["message"]

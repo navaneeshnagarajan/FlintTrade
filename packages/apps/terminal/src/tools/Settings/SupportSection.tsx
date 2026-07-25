@@ -27,7 +27,7 @@ const SAFE_UI_ROUTES = new Set([
 ]);
 const SAFE_SETTINGS_SECTIONS: ReadonlySet<SectionId> = new Set([
   "profile", "general", "appearance", "ticker", "api", "brokers", "trading", "risk",
-  "leverage", "practice", "keyboard", "llm", "telegram", "whatsapp", "dataPaths",
+  "leverage", "practice", "keyboard", "llm", "telegram", "dataPaths",
   "security", "monitoring", "skill", "presets", "updates", "support", "about",
 ]);
 

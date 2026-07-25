@@ -48,8 +48,8 @@ def test_selector_defaults_to_none() -> None:
 def test_backwards_compatible_positional_construction() -> None:
     # The 6-positional-arg form used across existing tests MUST still work — the
     # new ``selector`` field is appended last and stays optional.
-    ctx = RequestContext("j", "human", "a", "live", "chartink", "deadbeef")
-    assert ctx.intent_source == "chartink"
+    ctx = RequestContext("j", "human", "a", "live", "custom", "deadbeef")
+    assert ctx.intent_source == "custom"
     assert ctx.external_nonce_hash == "deadbeef"
     assert ctx.selector is None
 

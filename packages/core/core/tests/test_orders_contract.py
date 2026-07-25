@@ -151,7 +151,7 @@ class TestOrderContract:
 # ---------------------------------------------------------------------------
 
 # Order endpoints that exist on the backend for internal / direct-API use
-# (curl, n8n flows, automation scripts, paper-trading harness tests) but are
+# (curl, webhook relays, automation scripts, paper-trading harness tests) but are
 # not called from the React terminal. If a leaf is here, the absence of a
 # frontend caller is by design.
 _BACKEND_ONLY_LEAVES: set[str] = {

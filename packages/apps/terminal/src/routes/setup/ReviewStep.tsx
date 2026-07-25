@@ -46,9 +46,9 @@ export function mapWizardPreset(wizardPreset: string): string {
 }
 
 const PRESET_DESCRIPTIONS: Record<string, string> = {
-  "learn-first": "Market Watch workspace — Watchlist, Chart, and Dashboard to get started",
+  "learn-first": "Market Watch workspace — Watchlist, Chart, and the live Index Strip to get started",
   "learn-then-trade": "Market Watch workspace — overview layout ideal for learning while watching markets",
-  "invest-lite": "Investor View — Chart, Watchlist, Holdings, and Dashboard for portfolio tracking",
+  "invest-lite": "Investor View — Chart, Watchlist, Holdings, and the live Index Strip for portfolio tracking",
   "invest-diversified": "Investor View — portfolio overview with holdings, watchlist, and chart",
   "scalper-zone": "Scalper Zone — Chart, Order Pad, DOM / Ladder, Positions, and Scalper for rapid execution",
   "power-user": "Scalper Zone — full-featured layout with all execution and analysis panels",

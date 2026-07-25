@@ -7,8 +7,6 @@ Coverage targets:
 - WebhookConfig validation
 - WebhookPayload validation and field normalisation
 - verify_signature: valid, invalid, no-secret, empty-signature
-- parse_tradingview: JSON with various action types
-- parse_chartink: JSON and csv-style symbol lists
 - parse_custom: generic JSON
 - _SlidingWindowLimiter: allow, reject, remaining
 - WebhookReceiver.check_rate_limit
@@ -75,7 +73,7 @@ class TestWebhookConfig:
     def test_defaults(self):
         cfg = WebhookConfig()
         assert cfg.secret == ""
-        assert "tradingview" in cfg.allowed_sources
+        assert cfg.allowed_sources == ["custom"]
         assert cfg.rate_limit == 60
         assert cfg.log_payloads is True
 
@@ -97,12 +95,12 @@ class TestWebhookConfig:
 
 class TestWebhookPayload:
     def test_action_normalised_lowercase(self):
-        p = WebhookPayload(source="tradingview", action="PLACE_ORDER")
+        p = WebhookPayload(source="custom", action="PLACE_ORDER")
         assert p.action == "place_order"
 
     def test_source_normalised_lowercase(self):
-        p = WebhookPayload(source="TradingView", action="signal")
-        assert p.source == "tradingview"
+        p = WebhookPayload(source="Custom", action="signal")
+        assert p.source == "custom"
 
     def test_defaults(self):
         p = WebhookPayload(source="custom", action="alert")
@@ -161,250 +159,6 @@ class TestVerifySignature:
         r = _make_receiver(secret=secret)
         plain_hex = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
         assert r.verify_signature(body, plain_hex) is True
-
-
-# ---------------------------------------------------------------------------
-# parse_tradingview
-# ---------------------------------------------------------------------------
-
-
-class TestParseTradingview:
-    def test_buy_action_mapped_to_place_order(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({
-            "action": "BUY", "symbol": "NIFTY", "exchange": "NFO", "quantity": "75",
-        })
-        assert payload.action == "place_order"
-        assert payload.symbol == "NIFTY"
-        assert payload.exchange == "NFO"
-        assert payload.source == "tradingview"
-
-    def test_sell_action_mapped_to_place_order(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({"action": "SELL", "symbol": "TCS"})
-        assert payload.action == "place_order"
-
-    def test_unknown_action_preserved(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({"action": "CLOSE_ALL"})
-        assert payload.action == "close_all"
-
-    def test_tv_action_in_data(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({"action": "BUY", "symbol": "RELIANCE"})
-        assert payload.data.get("tv_action") == "BUY"
-
-    def test_conflicting_side_aliases_are_replaced_by_signed_action(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({
-            "action": "BUY",
-            "side": "SELL",
-            "tv_action": "SELL",
-            "symbol": "RELIANCE",
-        })
-
-        assert payload.data["side"] == "BUY"
-        assert payload.data["tv_action"] == "BUY"
-
-    def test_extra_fields_in_data(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({
-            "action": "BUY", "symbol": "INFY", "quantity": "10",
-            "strategy": "MyStrat", "custom_field": "custom_value",
-        })
-        assert "custom_field" in payload.data or "quantity" in payload.data
-
-    def test_symbol_uppercased(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({"action": "BUY", "symbol": "reliance"})
-        assert payload.symbol == "RELIANCE"
-
-    def test_default_exchange_nse(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview({"action": "BUY", "symbol": "NIFTY"})
-        assert payload.exchange == "NSE"
-
-    def test_simple_text_payload_preserves_order_fields(self):
-        r = _make_receiver()
-        payload = r.parse_tradingview("BUY BANKNIFTY NFO 30 LIMIT 51000")
-
-        assert payload.action == "place_order"
-        assert payload.symbol == "BANKNIFTY"
-        assert payload.exchange == "NFO"
-        assert payload.data["tv_action"] == "BUY"
-        assert payload.data["quantity"] == "30"
-        assert payload.data["pricetype"] == "LIMIT"
-        assert payload.data["price"] == "51000"
-
-    def test_json_payload_rejects_invalid_price_type(self):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="invalid pricetype"):
-            r.parse_tradingview({
-                "action": "BUY",
-                "symbol": "NIFTY",
-                "pricetype": "GARBAGE",
-            })
-
-    def test_json_payload_rejects_invalid_product(self):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="invalid product"):
-            r.parse_tradingview({
-                "action": "BUY",
-                "symbol": "NIFTY",
-                "product": "JUNK",
-            })
-
-    def test_text_payload_rejects_unknown_order_token_instead_of_falling_back_to_market(self):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="invalid order token"):
-            r.parse_tradingview("BUY NIFTY NFO 1 LIMT 24000")
-
-    @pytest.mark.parametrize("price", ["-1", "nan", "inf"])
-    def test_json_limit_order_rejects_unsafe_price(self, price):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="price"):
-            r.parse_tradingview({
-                "action": "BUY",
-                "symbol": "NIFTY",
-                "pricetype": "LIMIT",
-                "price": price,
-            })
-
-    def test_text_limit_order_requires_positive_price(self):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="positive price"):
-            r.parse_tradingview("BUY NIFTY NFO 1 LIMIT")
-
-
-# ---------------------------------------------------------------------------
-# parse_chartink
-# ---------------------------------------------------------------------------
-
-
-class TestParseChartink:
-    def test_json_symbols_list(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({
-            "scan_name": "OI Spurt",
-            "stocks": "RELIANCE,TCS,INFY",
-            "triggered_at": "2026-04-09 10:00:00",
-        })
-        assert payload.source == "chartink"
-        assert payload.action == "signal"
-        assert payload.data["symbols"] == ["RELIANCE", "TCS", "INFY"]
-        assert payload.symbol == "RELIANCE"
-
-    def test_alert_list_field(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({"alert_list": "HDFC,AXIS"})
-        assert payload.data["symbols"] == ["HDFC", "AXIS"]
-
-    def test_empty_symbols(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({"scan_name": "Test"})
-        assert payload.symbol is None
-        assert payload.data["symbols"] == []
-
-    def test_scan_name_preserved(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({"scan_name": "Bullish EMA", "stocks": "WIPRO"})
-        assert payload.data["scan_name"] == "Bullish EMA"
-
-    def test_list_of_symbols(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({"symbols": ["BAJAJ", "TITAN"]})
-        assert payload.data["symbols"] == ["BAJAJ", "TITAN"]
-
-    def test_symbols_are_normalised(self):
-        r = _make_receiver()
-        payload = r.parse_chartink({"stocks": "NSE:RELIANCE-EQ,BSE:TCS-BE"})
-
-        assert payload.symbol == "RELIANCE"
-        assert payload.data["symbols"] == ["RELIANCE", "TCS"]
-
-    def test_csv_payload_is_supported(self):
-        r = _make_receiver()
-        payload = r.parse_chartink("NSE:RELIANCE-EQ,TCS,INFY-BE")
-
-        assert payload.symbol == "RELIANCE"
-        assert payload.data["symbols"] == ["RELIANCE", "TCS", "INFY"]
-
-
-# ---------------------------------------------------------------------------
-# parse_gocharting (B2)
-# ---------------------------------------------------------------------------
-
-
-class TestParseGoCharting:
-    def test_buy_maps_to_place_order(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({
-            "symbol": "reliance", "exchange": "nse", "product": "MIS",
-            "action": "BUY", "quantity": 10,
-        })
-        assert payload.source == "gocharting"
-        assert payload.action == "place_order"
-        assert payload.symbol == "RELIANCE"
-        assert payload.exchange == "NSE"
-
-    def test_sell_maps_to_place_order(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({"symbol": "TCS", "action": "SELL", "quantity": 5})
-        assert payload.action == "place_order"
-
-    def test_gc_action_and_defaults_in_data(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({"symbol": "INFY", "action": "BUY", "quantity": 1, "product": "CNC"})
-        assert payload.data["gc_action"] == "BUY"
-        assert payload.data["side"] == "BUY"
-        assert payload.data["pricetype"] == "MARKET"
-        assert payload.data["strategy"] == "GoCharting"
-        # Explicit order fields survive into data for the gated dispatcher.
-        assert payload.data["quantity"] == 1
-        assert payload.data["product"] == "CNC"
-
-    def test_conflicting_side_aliases_are_replaced_by_signed_action(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({
-            "symbol": "INFY",
-            "action": "SELL",
-            "side": "BUY",
-            "gc_action": "BUY",
-        })
-
-        assert payload.data["side"] == "SELL"
-        assert payload.data["gc_action"] == "SELL"
-
-    def test_non_actionable_downgraded_to_signal(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({"symbol": "NIFTY"})
-        assert payload.action == "signal"
-
-    def test_default_exchange_nse(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting({"symbol": "NIFTY", "action": "BUY", "quantity": 1})
-        assert payload.exchange == "NSE"
-
-    def test_plain_text_order_uses_shared_provider_shape(self):
-        r = _make_receiver()
-        payload = r.parse_gocharting("SELL BANKNIFTY NFO 30 LIMIT 51000")
-
-        assert payload.source == "gocharting"
-        assert payload.action == "place_order"
-        assert payload.symbol == "BANKNIFTY"
-        assert payload.data["gc_action"] == "SELL"
-        assert payload.data["quantity"] == "30"
-        assert payload.data["pricetype"] == "LIMIT"
-
-    def test_invalid_order_fields_are_rejected(self):
-        r = _make_receiver()
-        with pytest.raises(ValueError, match="invalid pricetype"):
-            r.parse_gocharting({
-                "symbol": "NIFTY",
-                "action": "BUY",
-                "product": "INVALID",
-                "pricetype": "INVALID",
-            })
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +265,7 @@ class TestDispatch:
         receiver must say so, never fake a "queued" success for an order that
         was not placed."""
         r = _make_receiver()
-        p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
+        p = WebhookPayload(source="custom", action="place_order", symbol="NIFTY")
         result = _run(r.dispatch(p))
         assert result["status"] == "error"
         assert result["action"] == "place_order"
@@ -526,7 +280,7 @@ class TestDispatch:
             }
 
         r = WebhookReceiver(WebhookConfig(rate_limit=100), order_dispatcher=_dispatcher)
-        p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
+        p = WebhookPayload(source="custom", action="place_order", symbol="NIFTY")
         result = _run(r.dispatch(p))
         assert result == {"status": "placed", "action": "place_order", "symbol": "NIFTY"}
 
@@ -535,7 +289,7 @@ class TestDispatch:
             raise RuntimeError("router unavailable")
 
         r = WebhookReceiver(WebhookConfig(rate_limit=100), order_dispatcher=_dispatcher)
-        p = WebhookPayload(source="tradingview", action="place_order", symbol="NIFTY")
+        p = WebhookPayload(source="custom", action="place_order", symbol="NIFTY")
         result = _run(r.dispatch(p))
         assert result["status"] == "error"
         assert result["action"] == "place_order"
@@ -570,7 +324,7 @@ class TestDispatch:
 
     def test_signal(self):
         r = _make_receiver()
-        p = WebhookPayload(source="chartink", action="signal", symbol="TCS")
+        p = WebhookPayload(source="custom", action="signal", symbol="TCS")
         result = _run(r.dispatch(p))
         assert result["status"] == "received"
 
@@ -691,11 +445,11 @@ class TestWebhookRoutes:
 
     # Happy paths
 
-    def test_tradingview_buy(self, flask_client):
+    def test_custom_place_order_fails_honestly_when_ungated(self, flask_client):
         resp = self._post(
             flask_client,
-            "tradingview",
-            {"action": "BUY", "symbol": "NIFTY", "exchange": "NFO"},
+            "custom",
+            {"action": "place_order", "side": "BUY", "symbol": "NIFTY", "exchange": "NFO"},
             secret="testsecret",
         )
         assert resp.status_code == 422
@@ -703,14 +457,17 @@ class TestWebhookRoutes:
         assert data["status"] == "error"
         assert data["data"]["action"] == "place_order"
 
-    def test_chartink_signal(self, flask_client):
+    @pytest.mark.parametrize("retired", ["tradingview", "chartink", "gocharting"])
+    def test_retired_provider_sources_answer_404(self, flask_client, retired):
+        """TradingView/ChartInk/GoCharting are no longer supported sources."""
         resp = self._post(
             flask_client,
-            "chartink",
-            {"scan_name": "Test", "stocks": "TCS,INFY"},
+            retired,
+            {"action": "BUY", "symbol": "NIFTY"},
             secret="testsecret",
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 404
+        assert "Unknown source" in resp.get_json()["message"]
 
     def test_custom_alert(self, flask_client):
         resp = self._post(
@@ -726,7 +483,7 @@ class TestWebhookRoutes:
     def test_invalid_signature_rejected(self, flask_client):
         raw = json.dumps({"action": "BUY", "symbol": "NIFTY"}).encode()
         resp = flask_client.post(
-            "/v1/webhook/tradingview",
+            "/v1/webhook/custom",
             data=raw,
             headers={"Content-Type": "application/json", "X-Signature": "sha256=wrongsig"},
         )
@@ -735,7 +492,7 @@ class TestWebhookRoutes:
     def test_no_signature_rejected_when_secret_set(self, flask_client):
         raw = json.dumps({"action": "BUY"}).encode()
         resp = flask_client.post(
-            "/v1/webhook/tradingview",
+            "/v1/webhook/custom",
             data=raw,
             headers={"Content-Type": "application/json"},
         )
@@ -817,8 +574,8 @@ class TestWebhookRoutes:
     def test_log_endpoint_after_webhook(self, flask_client):
         self._post(
             flask_client,
-            "tradingview",
-            {"action": "BUY", "symbol": "NIFTY"},
+            "custom",
+            {"action": "signal", "symbol": "NIFTY"},
             secret="testsecret",
         )
         resp = flask_client.get("/v1/webhook/log")
@@ -830,8 +587,8 @@ class TestWebhookRoutes:
         for _ in range(5):
             self._post(
                 flask_client,
-                "tradingview",
-                {"action": "BUY", "symbol": "NIFTY"},
+                "custom",
+                {"action": "signal", "symbol": "NIFTY"},
                 secret="testsecret",
             )
         resp = flask_client.get("/v1/webhook/log?limit=2")

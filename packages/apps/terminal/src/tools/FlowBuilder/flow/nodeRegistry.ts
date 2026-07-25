@@ -491,7 +491,7 @@ export const NODE_CATEGORIES: NodeCategoryDef[] = [
     nodes: [
       { type: "start", label: "Start", description: "Manual or scheduled entry point", configFields: [] },
       descriptorToNodeDef(DESCRIPTOR_PRICE_ALERT),
-      { type: "webhookTrigger", label: "Webhook Trigger", description: "TradingView / Chartink webhook", configFields: ["path"] },
+      { type: "webhookTrigger", label: "Webhook Trigger", description: "Generic inbound webhook", configFields: ["path"] },
       { type: "httpRequest", label: "HTTP Request", description: "External HTTP event trigger", configFields: ["url", "method"] },
     ],
   },

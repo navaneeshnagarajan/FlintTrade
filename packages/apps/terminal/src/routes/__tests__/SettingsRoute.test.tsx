@@ -85,9 +85,6 @@ vi.mock("@/tools/Settings/LLMSection", () => ({
 vi.mock("@/tools/Settings/TelegramSection", () => ({
   TelegramSection: () => <div data-testid="telegram-section">Telegram</div>,
 }));
-vi.mock("@/tools/Settings/WhatsAppSection", () => ({
-  WhatsAppSection: () => <div data-testid="whatsapp-section">WhatsApp</div>,
-}));
 vi.mock("@/tools/Settings/DataSection", () => ({
   DataSection: () => <div data-testid="data-section">Data</div>,
 }));
@@ -128,7 +125,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     llmCredentialConfigured: true,
     llmCredentialLast4: "live",
     telegram: {},
-    whatsapp: {},
     dataPaths: {},
     connection: {},
     restarting: false,
@@ -139,7 +135,6 @@ vi.mock("@/hooks/useSettingsState", () => ({
     updateLLMProvider: llmRouteMocks.updateLLMProvider,
     removeLLMCredential: llmRouteMocks.removeLLMCredential,
     updateTelegram: vi.fn(),
-    updateWhatsApp: vi.fn(),
     updateDataPaths: vi.fn(),
     acceptConnection: vi.fn(),
     handleRestart: vi.fn(),

@@ -177,6 +177,37 @@ vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => dataScopeState.value,
 }));
 
+// Chart sync bus — the widget must not touch it at all without a syncGroup
+// param, so the mock doubles as a tripwire for that guarantee.
+const chartSyncMocks = vi.hoisted(() => ({
+  subscribeChartSync: vi.fn<(
+    group: string,
+    id: string,
+    cb: (range: { from: number; to: number }) => void,
+  ) => () => void>(),
+  publishChartSync: vi.fn(),
+}));
+
+vi.mock("@/lib/chartSyncBus", () => ({
+  subscribeChartSync: chartSyncMocks.subscribeChartSync,
+  publishChartSync: chartSyncMocks.publishChartSync,
+}));
+
+// Option-leg resolution — mocked at the helper boundary; the helper itself is
+// unit-tested in src/lib/__tests__/optionLegSymbols.test.ts.
+const optionLegMocks = vi.hoisted(() => ({
+  resolveOptionLeg: vi.fn<(request: { underlying: string; leg: "CE" | "PE" }) => Promise<{
+    symbol: string;
+    exchange: string;
+    strike: string;
+    expiry: string;
+  }>>(),
+}));
+
+vi.mock("@/lib/optionLegSymbols", () => ({
+  resolveOptionLeg: optionLegMocks.resolveOptionLeg,
+}));
+
 vi.mock("@/hooks/useChartTheme", () => ({
   useLightweightChartTheme: () => ({
     candle: {
@@ -1168,5 +1199,201 @@ describe("ChartWidget per-panel settings scoping", () => {
       expect(JSON.parse(encoded as string)).toMatchObject({ version: 1, gridVisible: false });
     });
     expect(localStorage.getItem(DISPLAY_KEY)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Same-window time-scale sync (params.syncGroup)
+//
+// The Three Panel preset lays out three chart panels that scroll and zoom
+// together. Without a syncGroup param the chart must never touch the bus —
+// pinned below so the sync path can never leak into standalone charts.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget time-scale sync (params.syncGroup)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+    chartSyncMocks.subscribeChartSync.mockReset();
+    chartSyncMocks.subscribeChartSync.mockReturnValue(() => {});
+    chartSyncMocks.publishChartSync.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the chart off the sync bus when syncGroup is absent", () => {
+    chartInitMocks.setReady(true);
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX" }} />);
+
+    expect(chartSyncMocks.subscribeChartSync).not.toHaveBeenCalled();
+    expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
+    // Only the pre-existing persistence handler subscribes to range changes —
+    // exactly-previous behaviour with no syncGroup.
+    expect(chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("publishes visible-logical-range changes to its sync group", () => {
+    chartInitMocks.setReady(true);
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", syncGroup: "three-panel" }} />);
+
+    expect(chartSyncMocks.subscribeChartSync).toHaveBeenCalledTimes(1);
+    const [group, memberId] = chartSyncMocks.subscribeChartSync.mock.calls[0];
+    expect(group).toBe("three-panel");
+
+    // calls[0] is the persistence handler, calls[1] the sync publisher.
+    const rangeSubscriptions = chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange.mock.calls;
+    expect(rangeSubscriptions).toHaveLength(2);
+    const publishHandler = rangeSubscriptions[1][0] as (range: { from: number; to: number } | null) => void;
+
+    act(() => { publishHandler({ from: 3, to: 40 }); });
+
+    expect(chartSyncMocks.publishChartSync).toHaveBeenCalledExactlyOnceWith(
+      "three-panel",
+      memberId,
+      { from: 3, to: 40 },
+    );
+
+    // Null and degenerate ranges are never published.
+    act(() => {
+      publishHandler(null);
+      publishHandler({ from: 10, to: 10 });
+    });
+    expect(chartSyncMocks.publishChartSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a range received from the group without re-publishing it", () => {
+    chartInitMocks.setReady(true);
+    // Simulate the real chart: setting the visible logical range synchronously
+    // fires every range-change subscription with the applied range. Without
+    // the apply guard this would boomerang straight back onto the bus.
+    chartInitMocks.timeScale.setVisibleLogicalRange.mockImplementation(
+      (range: { from: number; to: number }) => {
+        chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange.mock.calls.forEach((call) => {
+          (call[0] as (r: { from: number; to: number }) => void)(range);
+        });
+      },
+    );
+
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", syncGroup: "three-panel" }} />);
+
+    const busListener = chartSyncMocks.subscribeChartSync.mock.calls[0][2];
+
+    act(() => { busListener({ from: 5, to: 55 }); });
+
+    expect(chartInitMocks.timeScale.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 5, to: 55 });
+    expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Option-leg panels (params.optionLeg)
+//
+// A preset can pin a chart to "the nearest-expiry ATM CE/PE of an underlying"
+// rather than a fixed symbol. Resolution runs at mount via resolveOptionLeg;
+// data loading is deferred until it lands, and failure is surfaced honestly.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget option-leg panels (params.optionLeg)", () => {
+  const CE_LEG = {
+    symbol: "NIFTY30DEC9924800CE",
+    exchange: "NFO",
+    strike: "24800",
+    expiry: "30-DEC-99",
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+    chartSyncMocks.subscribeChartSync.mockReset();
+    chartSyncMocks.subscribeChartSync.mockReturnValue(() => {});
+    chartSyncMocks.publishChartSync.mockReset();
+    optionLegMocks.resolveOptionLeg.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves the leg at mount and loads only the resolved contract", async () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockResolvedValue(CE_LEG);
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />);
+
+    expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledExactlyOnceWith({
+      underlying: "NIFTY",
+      leg: "CE",
+    });
+    expect(await screen.findByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
+
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalled());
+    // Every fetch is for the resolved contract — never the placeholder seed.
+    for (const call of apiMocks.getHistory.mock.calls) {
+      expect(call[0]).toBe("NIFTY30DEC9924800CE");
+      expect(call[1]).toBe("NFO");
+    }
+  });
+
+  it("shows a resolving badge and defers all data fetches while the leg resolves", () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockReturnValue(new Promise(() => {}));
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "BANKNIFTY", leg: "PE" } }} />);
+
+    expect(screen.getByText(/Resolving PE leg/)).toBeInTheDocument();
+    // The placeholder header shows the underlying, not the workspace default.
+    expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
+    expect(apiMocks.getHistory).not.toHaveBeenCalled();
+    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an honest error and fetches nothing when resolution fails", async () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockRejectedValue(
+      new Error("No option expiries available for NIFTY"),
+    );
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No option expiries available for NIFTY",
+    );
+    expect(apiMocks.getHistory).not.toHaveBeenCalled();
+    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+  });
+
+  it("keeps an option-leg chart pinned against watchlist selection", async () => {
+    optionLegMocks.resolveOptionLeg.mockResolvedValue(CE_LEG);
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />
+      </Provider>,
+    );
+    expect(await screen.findByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "TCS", exchange: "NSE" });
+    });
+    expect(screen.getByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
   });
 });

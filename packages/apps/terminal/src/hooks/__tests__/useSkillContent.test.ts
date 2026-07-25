@@ -89,7 +89,7 @@ describe("useSkillContent — intermediate", () => {
     expect(result.current.availableWidgets).toContain("orderladder");
     expect(result.current.availableWidgets).toContain("greeks");
     expect(result.current.availableWidgets).toContain("oichart");
-    expect(result.current.availableWidgets).toContain("sectormap");
+    expect(result.current.availableWidgets).toContain("marketoverview");
     // gex merged into gammadensity.
     expect(result.current.availableWidgets).toContain("gammadensity");
   });
@@ -144,7 +144,7 @@ describe("useSkillContent — advanced", () => {
 
     // Intermediate tier
     expect(availableWidgets).toContain("optionchain");
-    expect(availableWidgets).toContain("sectormap");
+    expect(availableWidgets).toContain("marketoverview");
 
     // Advanced-only
     expect(availableWidgets).toContain("volsurface");

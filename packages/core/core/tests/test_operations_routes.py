@@ -3046,31 +3046,29 @@ class TestWebhooksManagement:
     def test_create_returns_full_config(self, client):
         resp = self._create(
             client,
-            path="/webhook/chartink/scan1",
-            name="Chartink Scan",
-            webhook_type="chartink",
+            path="/webhook/custom/scan1",
+            name="Custom Scan",
+            webhook_type="custom",
         )
         assert resp.status_code == 201
         data = resp.get_json()["data"]
-        assert data["id"] == "v1/webhook/chartink/scan1"
-        assert data["path"] == "/v1/webhook/chartink/scan1"
-        assert data["type"] == "chartink"
+        assert data["id"] == "v1/webhook/custom/scan1"
+        assert data["path"] == "/v1/webhook/custom/scan1"
+        assert data["type"] == "custom"
         assert data["enabled"] is True
         assert data["secret_configured"] is True
         assert "secret" not in data
 
-    def test_create_gocharting_endpoint(self, client):
-        resp = self._create(
-            client,
-            path="/webhook/gocharting/momentum",
-            name="GoCharting Momentum",
-            webhook_type="gocharting",
-        )
-
-        assert resp.status_code == 201
-        data = resp.get_json()["data"]
-        assert data["path"] == "/v1/webhook/gocharting/momentum"
-        assert data["type"] == "gocharting"
+    def test_create_retired_provider_source_is_rejected(self, client):
+        """Retired provider sources cannot be registered any more."""
+        for retired in ("tradingview", "chartink", "gocharting"):
+            resp = self._create(
+                client,
+                path=f"/webhook/{retired}/momentum",
+                name=f"{retired} endpoint",
+                webhook_type=retired,
+            )
+            assert resp.status_code == 400, retired
 
     def test_cross_process_mutations_preserve_both_registry_rows_and_secrets(self, tmp_path, monkeypatch):
         from flinttrade_core.operations_routes import _webhook_registry_lock
@@ -3362,28 +3360,28 @@ class TestWebhooksManagement:
         resp = self._create(
             client,
             path="/webhook/nifty-breakout",
-            name="TV Breakout",
-            webhook_type="tradingview",
+            name="Nifty Breakout",
+            webhook_type="custom",
         )
         assert resp.status_code == 201
         data = resp.get_json()["data"]
-        assert data["id"] == "v1/webhook/tradingview/nifty-breakout"
-        assert data["path"] == "/v1/webhook/tradingview/nifty-breakout"
-        assert data["type"] == "tradingview"
+        assert data["id"] == "v1/webhook/custom/nifty-breakout"
+        assert data["path"] == "/v1/webhook/custom/nifty-breakout"
+        assert data["type"] == "custom"
 
     def test_create_with_secret_uses_encrypted_store_without_echoing_secret(self, flask_app, client):
         resp = self._create(
             client,
-            path="/webhook/chartink/scan1",
-            name="Chartink Scan",
-            webhook_type="chartink",
+            path="/webhook/custom/scan1",
+            name="Custom Scan",
+            webhook_type="custom",
             secret="do-not-store-in-workspace-json",
         )
         assert resp.status_code == 201
         body = resp.get_json()
         assert body["status"] == "success"
         data = body["data"]
-        assert data["path"] == "/v1/webhook/chartink/scan1"
+        assert data["path"] == "/v1/webhook/custom/scan1"
         assert "secret" not in data
 
         from flinttrade_core.workspace import Workspace
@@ -3393,7 +3391,7 @@ class TestWebhooksManagement:
         assert all("secret" not in row for row in workspace_rows)
 
         store = flask_app.config["WEBHOOK_SECRET_STORE"]
-        assert store.get_secret("/v1/webhook/chartink/scan1") == "do-not-store-in-workspace-json"
+        assert store.get_secret("/v1/webhook/custom/scan1") == "do-not-store-in-workspace-json"
 
     def test_list_id_round_trips_through_delete(self, client):
         """The id the list emits must, URL-encoded as the frontend does, delete
@@ -3499,8 +3497,8 @@ class TestWebhooksManagement:
         ("source", "body_data", "router_method"),
         [
             (
-                "tradingview",
-                {"action": "BUY", "symbol": "NIFTY", "exchange": "NFO", "quantity": 1},
+                "custom",
+                {"action": "place_order", "side": "BUY", "symbol": "NIFTY", "exchange": "NFO", "quantity": 1},
                 "place_order",
             ),
             (

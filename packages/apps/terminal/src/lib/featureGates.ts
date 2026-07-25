@@ -40,7 +40,11 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // ---------------------------------------------------------------
   // Analysis widgets — advanced-only or advanced-unlock
   // ---------------------------------------------------------------
-  "widget:sectormap":   { beginner: "locked",  intermediate: "preview", advanced: "visible" },
+  // NOTE: `widget:sectormap` removed with the Market Overview merge. The
+  // canonical (marketoverview) is deliberately UNGATED: six of the seven
+  // absorbed surfaces were always freely available, and the two
+  // preview-posture tabs (Flows, Contribution) keep their own FeatureTeaser
+  // wrappers inside the widget.
   "widget:greeks":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   // NOTE: `widget:gex` was removed when GEX merged into Dealer Gamma
   // (`gammadensity`). The canonical is deliberately left UNGATED: gammadensity

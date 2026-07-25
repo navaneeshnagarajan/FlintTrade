@@ -5,302 +5,10 @@ DO NOT RUN — written for pytest. All tests use synthetic data, no API calls.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import os
 from unittest.mock import MagicMock
 
 import pytest
-
-
-# ======================================================================
-# TradingView — payload parsing
-# ======================================================================
-
-
-class TestTradingViewPayloadParsing:
-    """Test TradingView webhook payload parsing."""
-
-    def test_parse_json_buy(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        payload = json.dumps({
-            "action": "BUY", "symbol": "RELIANCE", "exchange": "NSE",
-            "quantity": "10", "price": "0", "pricetype": "MARKET",
-            "product": "MIS", "strategy": "Flint",
-        })
-        alert = parse_tradingview_payload(payload)
-        assert alert.is_valid
-        assert alert.action == "BUY"
-        assert alert.symbol == "RELIANCE"
-        assert alert.exchange == "NSE"
-        assert alert.quantity == "10"
-        assert alert.pricetype == "MARKET"
-        assert alert.strategy == "Flint"
-
-    def test_parse_json_sell(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        payload = json.dumps({"action": "sell", "symbol": "tcs", "quantity": "5"})
-        alert = parse_tradingview_payload(payload)
-        assert alert.is_valid
-        assert alert.action == "SELL"
-        assert alert.symbol == "TCS"
-
-    def test_parse_json_defaults(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        payload = json.dumps({"action": "BUY", "symbol": "INFY"})
-        alert = parse_tradingview_payload(payload)
-        assert alert.is_valid
-        assert alert.exchange == "NSE"
-        assert alert.product == "MIS"
-        assert alert.quantity == "1"
-
-    def test_parse_text_simple(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("BUY NIFTY")
-        assert alert.is_valid
-        assert alert.action == "BUY"
-        assert alert.symbol == "NIFTY"
-        assert alert.exchange == "NSE"
-
-    def test_parse_text_with_exchange_qty(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("BUY NIFTY NFO 75")
-        assert alert.is_valid
-        assert alert.symbol == "NIFTY"
-        assert alert.exchange == "NFO"
-        assert alert.quantity == "75"
-
-    def test_parse_text_with_limit_price(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("BUY BANKNIFTY NFO 30 LIMIT 51000")
-        assert alert.is_valid
-        assert alert.pricetype == "LIMIT"
-        assert alert.price == "51000"
-
-    def test_parse_text_sell(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("SELL RELIANCE")
-        assert alert.is_valid
-        assert alert.action == "SELL"
-
-    def test_parse_empty_payload(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("")
-        assert not alert.is_valid
-        assert "Empty" in alert.error
-
-    def test_parse_invalid_json(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("{bad json")
-        assert not alert.is_valid
-        assert "Invalid JSON" in alert.error
-
-    def test_parse_missing_action(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload(json.dumps({"symbol": "RELIANCE"}))
-        assert not alert.is_valid
-        assert "action" in alert.error.lower()
-
-    def test_parse_missing_symbol(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload(json.dumps({"action": "BUY"}))
-        assert not alert.is_valid
-        assert "symbol" in alert.error.lower()
-
-    def test_parse_text_too_short(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("BUY")
-        assert not alert.is_valid
-
-    def test_parse_invalid_action(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("HOLD NIFTY")
-        assert not alert.is_valid
-
-    def test_alert_to_order(self):
-        from flinttrade_webhooks.tradingview import alert_to_order, parse_tradingview_payload
-        alert = parse_tradingview_payload(json.dumps({
-            "action": "BUY", "symbol": "RELIANCE", "exchange": "NSE",
-            "quantity": "10", "product": "CNC",
-        }))
-        order = alert_to_order(alert)
-        assert order is not None
-        assert order.symbol == "RELIANCE"
-        assert order.action == "BUY"
-        assert order.quantity == "10"
-        assert order.product == "CNC"
-
-    def test_alert_to_order_invalid(self):
-        from flinttrade_webhooks.tradingview import TradingViewAlert, alert_to_order
-        alert = TradingViewAlert(is_valid=False)
-        assert alert_to_order(alert) is None
-
-    def test_bytes_payload(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload(b"BUY NIFTY NFO 75")
-        assert alert.is_valid
-        assert alert.symbol == "NIFTY"
-
-    def test_default_strategy_override(self):
-        from flinttrade_webhooks.tradingview import parse_tradingview_payload
-        alert = parse_tradingview_payload("BUY NIFTY", default_strategy="MyStrat")
-        assert alert.strategy == "MyStrat"
-
-
-# ======================================================================
-# TradingView — webhook authentication
-# ======================================================================
-
-
-class TestTradingViewAuth:
-    """Test webhook signature verification."""
-
-    def test_verify_valid_signature(self):
-        from flinttrade_webhooks.tradingview import verify_webhook_signature
-        body = b'{"action":"BUY","symbol":"NIFTY"}'
-        secret = "my_secret_key"
-        sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        assert verify_webhook_signature(body, sig, secret)
-
-    def test_verify_invalid_signature(self):
-        from flinttrade_webhooks.tradingview import verify_webhook_signature
-        body = b'{"action":"BUY","symbol":"NIFTY"}'
-        assert not verify_webhook_signature(body, "bad_signature", "my_secret_key")
-
-    def test_verify_no_secret_rejects_by_default(self):
-        from flinttrade_webhooks.tradingview import verify_webhook_signature
-        assert not verify_webhook_signature(b"data", "any", "")
-
-    def test_verify_no_secret_skips_when_explicit(self):
-        from flinttrade_webhooks.tradingview import verify_webhook_signature
-        assert verify_webhook_signature(b"data", "any", "", skip_verification=True)
-
-    def test_handler_rejects_bad_sig(self):
-        from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook(secret="secret123")
-        alert = tv.handle('{"action":"BUY","symbol":"NIFTY"}', signature="badsig")
-        assert not alert.is_valid
-        assert "signature" in alert.error.lower()
-
-    def test_handler_accepts_good_sig(self):
-        from flinttrade_webhooks.tradingview import TradingViewWebhook
-        body = '{"action":"BUY","symbol":"NIFTY"}'
-        secret = "secret123"
-        sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
-        tv = TradingViewWebhook(secret=secret)
-        alert = tv.handle(body, signature=sig)
-        assert alert.is_valid
-
-    def test_handler_no_secret_configured(self):
-        from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook()
-        alert = tv.handle('{"action":"BUY","symbol":"NIFTY"}')
-        assert not alert.is_valid
-        assert "signature" in alert.error.lower()
-
-    def test_handler_no_secret_explicit_skip(self):
-        from flinttrade_webhooks.tradingview import TradingViewWebhook
-        tv = TradingViewWebhook(skip_verification=True)
-        alert = tv.handle('{"action":"BUY","symbol":"NIFTY"}')
-        assert alert.is_valid
-
-
-# ======================================================================
-# ChartInk — symbol mapping
-# ======================================================================
-
-
-class TestChartInkSymbolMapping:
-    """Test ChartInk payload parsing and symbol normalization."""
-
-    def test_normalize_eq_suffix(self):
-        from flinttrade_webhooks.chartink import normalize_chartink_symbol
-        assert normalize_chartink_symbol("RELIANCE-EQ") == "RELIANCE"
-
-    def test_normalize_be_suffix(self):
-        from flinttrade_webhooks.chartink import normalize_chartink_symbol
-        assert normalize_chartink_symbol("INFY-BE") == "INFY"
-
-    def test_normalize_nse_prefix(self):
-        from flinttrade_webhooks.chartink import normalize_chartink_symbol
-        assert normalize_chartink_symbol("NSE:RELIANCE") == "RELIANCE"
-
-    def test_normalize_plain(self):
-        from flinttrade_webhooks.chartink import normalize_chartink_symbol
-        assert normalize_chartink_symbol("TCS") == "TCS"
-
-    def test_normalize_lowercase(self):
-        from flinttrade_webhooks.chartink import normalize_chartink_symbol
-        assert normalize_chartink_symbol("reliance") == "RELIANCE"
-
-    def test_parse_json_payload(self):
-        from flinttrade_webhooks.chartink import parse_chartink_payload
-        payload = json.dumps({
-            "scan_name": "OI Spurt",
-            "stocks": "RELIANCE-EQ,TCS-EQ,INFY",
-            "triggered_at": "2026-03-16 10:30:00",
-        })
-        result = parse_chartink_payload(payload)
-        assert result.is_valid
-        assert result.symbol_count == 3
-        assert "RELIANCE" in result.symbols
-        assert "TCS" in result.symbols
-        assert "INFY" in result.symbols
-        assert result.scan_name == "OI Spurt"
-
-    def test_parse_csv_payload(self):
-        from flinttrade_webhooks.chartink import parse_chartink_payload
-        result = parse_chartink_payload("RELIANCE,TCS,INFY")
-        assert result.is_valid
-        assert result.symbol_count == 3
-
-    def test_parse_alert_list_field(self):
-        from flinttrade_webhooks.chartink import parse_chartink_payload
-        payload = json.dumps({"alert_list": "HDFCBANK,ICICIBANK"})
-        result = parse_chartink_payload(payload)
-        assert result.is_valid
-        assert "HDFCBANK" in result.symbols
-
-    def test_parse_empty_payload(self):
-        from flinttrade_webhooks.chartink import parse_chartink_payload
-        result = parse_chartink_payload("")
-        assert not result.is_valid
-
-    def test_parse_no_symbols(self):
-        from flinttrade_webhooks.chartink import parse_chartink_payload
-        result = parse_chartink_payload(json.dumps({"scan_name": "Empty"}))
-        assert not result.is_valid
-
-    def test_scan_to_orders(self):
-        from flinttrade_webhooks.chartink import (
-            ChartInkConfig, parse_chartink_payload, scan_result_to_orders,
-        )
-        result = parse_chartink_payload("RELIANCE,TCS,INFY")
-        config = ChartInkConfig(action="BUY", quantity_per_symbol="10", exchange="NSE")
-        orders = scan_result_to_orders(result, config)
-        assert len(orders) == 3
-        assert orders[0].symbol == "RELIANCE"
-        assert orders[0].action == "BUY"
-        assert orders[0].quantity == "10"
-
-    def test_max_symbols_limit(self):
-        from flinttrade_webhooks.chartink import (
-            ChartInkConfig, parse_chartink_payload, scan_result_to_orders,
-        )
-        symbols = ",".join(f"SYM{i}" for i in range(20))
-        result = parse_chartink_payload(symbols)
-        config = ChartInkConfig(max_symbols=5)
-        orders = scan_result_to_orders(result, config)
-        assert len(orders) == 5
-
-    def test_webhook_handler(self):
-        from flinttrade_webhooks.chartink import ChartInkConfig, ChartInkWebhook
-        ci = ChartInkWebhook(config=ChartInkConfig(action="BUY"))
-        result = ci.handle("RELIANCE,TCS")
-        assert result.is_valid
-        orders = ci.to_orders(result)
-        assert len(orders) == 2
 
 
 # ======================================================================
@@ -340,7 +48,7 @@ class TestFlowBuilder:
             ActionType, ConditionType, ExitType, FlowBuilder, SignalSource,
         )
         fb = FlowBuilder("Test Strategy")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW, label="TV Alert")
+        sig = fb.add_signal(SignalSource.WEBHOOK, label="Webhook Alert")
         cond = fb.add_condition(ConditionType.PRICE_ABOVE, config={"value": 24000})
         act = fb.add_action(ActionType.PLACE_ORDER, config={"symbol": "NIFTY"})
         exit_ = fb.add_exit(ExitType.STOP_LOSS, config={"points": 100})
@@ -382,7 +90,7 @@ class TestFlowBuilder:
         from flinttrade_webhooks.flow_builder import FlowDefinition, FlowNode, validate_flow
         flow = FlowDefinition(name="Bad", entry_node_id="n1")
         flow.add_node(FlowNode(
-            id="n1", node_type="SIGNAL", subtype="TRADINGVIEW",
+            id="n1", node_type="SIGNAL", subtype="WEBHOOK",
             next_nodes=["n999"],  # doesn't exist
         ))
         result = validate_flow(flow)
@@ -392,7 +100,7 @@ class TestFlowBuilder:
         from flinttrade_webhooks.flow_builder import FlowDefinition, FlowNode, validate_flow
         flow = FlowDefinition(name="Loop", entry_node_id="n1")
         flow.add_node(FlowNode(
-            id="n1", node_type="SIGNAL", subtype="TRADINGVIEW",
+            id="n1", node_type="SIGNAL", subtype="WEBHOOK",
             next_nodes=["n1"],
         ))
         result = validate_flow(flow)
@@ -559,13 +267,16 @@ class TestPackageExports:
     def test_all_exports(self):
         from flinttrade_webhooks import __all__
         expected = [
-            "TradingViewWebhook", "ChartInkWebhook", "WebhookReceiver",
+            "WebhookReceiver",
             "FlowBuilder", "Alerter", "FlowDefinition",
             "AlertType", "AlertChannel",
         ]
         for name in expected:
             assert name in __all__, f"Missing export: {name}"
         assert "WebhookServer" not in __all__
+        # Retired provider integrations must not be re-exported.
+        for retired in ("TradingViewWebhook", "TradingViewAlert", "ChartInkWebhook", "ChartInkConfig"):
+            assert retired not in __all__, f"Retired export resurfaced: {retired}"
 
     def test_version(self):
         from flinttrade_webhooks import __version__

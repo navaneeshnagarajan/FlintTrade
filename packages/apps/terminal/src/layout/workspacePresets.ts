@@ -153,14 +153,14 @@ function applyOptionsDesk(api: DockviewApi): void {
 // │ Watchlist│      Chart         │
 // │          │                    │
 // ├──────────┼────────────────────┤
-// │  Ticker  │    Dashboard       │
+// │  Ticker  │    Indices         │
 // └──────────┴────────────────────┘
 // ---------------------------------------------------------------------------
 function applyMarketWatch(api: DockviewApi): void {
   const watchlistId = pid("watchlist");
   const chartId = pid("chart");
   const tickerId = pid("ticker");
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
 
   api.addPanel({
     id: watchlistId,
@@ -185,9 +185,9 @@ function applyMarketWatch(api: DockviewApi): void {
   });
 
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 200,
   });
@@ -251,7 +251,7 @@ function applyAnalysis(api: DockviewApi): void {
 // Preset 5 — Risk Monitor
 //
 // ┌──────────────┬───────────────┐
-// │  Dashboard   │  Risk Panel   │
+// │  Indices     │  Risk Panel   │
 // ├──────────────┼───────────────┤
 // │  MTM Monitor │  Positions    │
 // ├──────────────┴───────────────┤
@@ -259,19 +259,19 @@ function applyAnalysis(api: DockviewApi): void {
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applyRiskMonitor(api: DockviewApi): void {
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
   const riskPanelId = pid("riskdashboard");
   const mtmMonitorId = pid("pnlmonitor");
   const positionsId = pid("positions");
   const ordersId = pid("orders");
 
-  api.addPanel({ id: dashboardId, component: "dashboard", title: "Dashboard" });
+  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices" });
 
   api.addPanel({
     id: riskPanelId,
     component: "riskdashboard",
     title: "Risk",
-    position: { referencePanel: dashboardId, direction: "right" },
+    position: { referencePanel: indexStripId, direction: "right" },
     initialWidth: 340,
   });
 
@@ -279,7 +279,7 @@ function applyRiskMonitor(api: DockviewApi): void {
     id: mtmMonitorId,
     component: "pnlmonitor",
     title: "MTM Monitor",
-    position: { referencePanel: dashboardId, direction: "below" },
+    position: { referencePanel: indexStripId, direction: "below" },
   });
 
   api.addPanel({
@@ -306,14 +306,14 @@ function applyRiskMonitor(api: DockviewApi): void {
 // │    Chart     ├───────────────┤
 // │              │   Holdings    │
 // ├──────────────┴───────────────┤
-// │          Dashboard           │
+// │          Indices             │
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applyInvestorView(api: DockviewApi): void {
   const chartId = pid("chart");
   const watchlistId = pid("watchlist");
   const holdingsId = pid("holdings");
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
 
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
@@ -333,9 +333,9 @@ function applyInvestorView(api: DockviewApi): void {
   });
 
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 220,
   });
@@ -413,21 +413,21 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applySectorView(api: DockviewApi): void {
-  const sectorMapId = pid("sectormap");
-  const sectorPerfId = pid("sectorperformance");
-  const marketBreadthId = pid("marketbreadth");
+  const sectorMapId = pid("marketoverview");
+  const sectorPerfId = pid("marketoverview");
+  const marketBreadthId = pid("marketoverview");
   const heatCalendarId = pid("heatcalendar");
   const correlationMatrixId = pid("correlationmatrix");
 
   api.addPanel({
     id: sectorMapId,
-    component: "sectormap",
+    component: "marketoverview",
     title: "Sector Map",
   });
 
   api.addPanel({
     id: sectorPerfId,
-    component: "sectorperformance",
+    component: "marketoverview",
     title: "Sector Performance",
     position: { referencePanel: sectorMapId, direction: "right" },
     initialWidth: 360,
@@ -435,7 +435,7 @@ function applySectorView(api: DockviewApi): void {
 
   api.addPanel({
     id: marketBreadthId,
-    component: "marketbreadth",
+    component: "marketoverview",
     title: "Market Breadth",
     position: { referencePanel: sectorMapId, direction: "below" },
     initialHeight: 220,
@@ -575,8 +575,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 // └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
 function applyMarketOverview(api: DockviewApi): void {
-  const marketSummaryId = pid("marketsummary");
-  const globalIndicesId = pid("globalindices");
+  const marketSummaryId = pid("marketoverview");
+  const globalIndicesId = pid("marketoverview");
   const economicCalId = pid("economiccalendar");
   const earningsCalId = pid("earningscalendar");
   const marketClockId = pid("marketclock");
@@ -584,13 +584,13 @@ function applyMarketOverview(api: DockviewApi): void {
 
   api.addPanel({
     id: marketSummaryId,
-    component: "marketsummary",
+    component: "marketoverview",
     title: "Market Summary",
   });
 
   api.addPanel({
     id: globalIndicesId,
-    component: "globalindices",
+    component: "marketoverview",
     title: "Global Indices",
     position: { referencePanel: marketSummaryId, direction: "right" },
     initialWidth: 360,
@@ -710,7 +710,7 @@ function applyEverything(api: DockviewApi): void {
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
   for (const comp of [
-    "threepanel", "multitimeframe",
+    "multitimeframe",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -777,10 +777,7 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "gammadensity", "volsurface", "orderflow", "sectormap",
-    "sectorperformance", "marketbreadth", "correlationpairs", "correlationmatrix", "instrumentcompare",
-    "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
-    "timesales",
+    "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs", "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints", "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -791,11 +788,11 @@ function applyEverything(api: DockviewApi): void {
   }
 
   // ---------- Row 2 center: Positions / Risk ----------
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: depthId, direction: "right" },
   });
 
@@ -806,7 +803,7 @@ function applyEverything(api: DockviewApi): void {
       id: pid(comp),
       component: comp,
       title: comp,
-      position: { referencePanel: dashboardId, direction: "within" },
+      position: { referencePanel: indexStripId, direction: "within" },
     });
   }
 
@@ -816,16 +813,12 @@ function applyEverything(api: DockviewApi): void {
     id: watchlistId,
     component: "watchlist",
     title: "Watchlist",
-    position: { referencePanel: dashboardId, direction: "right" },
+    position: { referencePanel: indexStripId, direction: "right" },
     initialWidth: 320,
   });
 
   for (const comp of [
-    "calculator", "news", "ticker", "aiadvisor", "conditionscanner",
-    "alerts", "fundingrate", "currencyconverter", "earningscalendar",
-    "globalindices", "strategytemplates", "audittrail", "economiccalendar",
-    "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown",
-    "marketclock", "tradeidea", "tickspeed", "marketsummary",
+    "calculator", "news", "ticker", "aiadvisor", "conditionscanner", "alerts", "fundingrate", "currencyconverter", "earningscalendar", "marketoverview", "strategytemplates", "audittrail", "economiccalendar", "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown", "marketclock", "tradeidea", "tickspeed",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -990,6 +983,95 @@ function applyMultiChart(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Preset — Trading Desk (the retired Dashboard widget as a composition)
+//
+// ┌──────────────────────────────┐
+// │        Indices strip         │
+// ├──────────────┬───────────────┤
+// │  Positions   │     Risk      │
+// ├──────────────┴───────────────┤
+// │           Orders             │
+// └──────────────────────────────┘
+// ---------------------------------------------------------------------------
+function applyTradingDesk(api: DockviewApi): void {
+  const indexStripId = pid("indexstrip");
+  const positionsId = pid("positions");
+  const riskId = pid("riskdashboard");
+  const ordersId = pid("orders");
+
+  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices", initialHeight: 150 });
+
+  api.addPanel({
+    id: positionsId,
+    component: "positions",
+    title: "Positions",
+    position: { referencePanel: indexStripId, direction: "below" },
+  });
+
+  api.addPanel({
+    id: riskId,
+    component: "riskdashboard",
+    title: "Risk",
+    position: { referencePanel: positionsId, direction: "right" },
+    initialWidth: 340,
+  });
+
+  api.addPanel({
+    id: ordersId,
+    component: "orders",
+    title: "Orders",
+    position: { referencePanel: positionsId, direction: "below" },
+    initialHeight: 200,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset — Three Panel (CE | Index | PE)
+//
+// Replaces the retired `threepanel` widget. Three full ChartWidget panels —
+// nearest-expiry ATM CE, the underlying index (wider centre), nearest-expiry
+// ATM PE — sharing one time-scale sync group, so scroll/zoom in any panel
+// moves all three. Each cell keeps the full chart surface (indicators,
+// drawings, replay, per-panel settings) and the layout survives reload.
+// ---------------------------------------------------------------------------
+function applyThreePanel(api: DockviewApi): void {
+  const legInterval = "5m"; // ThreePanel's default interval
+  const syncGroup = "three-panel";
+
+  const indexId = pid("chart-index");
+  const ceId = pid("chart-ce");
+  const peId = pid("chart-pe");
+
+  // Centre: the underlying index, wider than the option legs.
+  api.addPanel({
+    id: indexId,
+    component: "chart",
+    title: "Index",
+    params: { symbol: "NIFTY", exchange: "NSE_INDEX", interval: legInterval, syncGroup },
+  });
+
+  // Left: the ATM call.
+  api.addPanel({
+    id: ceId,
+    component: "chart",
+    title: "CE",
+    params: { optionLeg: { underlying: "NIFTY", leg: "CE" }, interval: legInterval, syncGroup },
+    position: { referencePanel: indexId, direction: "left" },
+    initialWidth: 380,
+  });
+
+  // Right: the ATM put.
+  api.addPanel({
+    id: peId,
+    component: "chart",
+    title: "PE",
+    params: { optionLeg: { underlying: "NIFTY", leg: "PE" }, interval: legInterval, syncGroup },
+    position: { referencePanel: indexId, direction: "right" },
+    initialWidth: 380,
+  });
+}
+
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "scalper-zone",
@@ -1043,9 +1125,23 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "investor-view",
     name: "Investor View",
-    description: "Chart + Watchlist + Holdings + Dashboard",
+    description: "Chart + Watchlist + Holdings + Indices",
     icon: "TrendingUp",
     apply: applyInvestorView,
+  },
+  {
+    id: "trading-desk",
+    name: "Trading Desk",
+    description: "Indices + Positions + Risk + Orders — the retired Dashboard as a composition",
+    icon: "LayoutDashboard",
+    apply: applyTradingDesk,
+  },
+  {
+    id: "three-panel",
+    name: "Three Panel",
+    description: "CE | Index | PE — three time-synchronised charts on the nearest-expiry ATM strikes",
+    icon: "Columns3",
+    apply: applyThreePanel,
   },
   {
     id: "options-analysis",
@@ -1057,7 +1153,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "sector-view",
     name: "Sector View",
-    description: "Sector Map + Sector Performance + Market Breadth + Heat Calendar + Correlation Matrix",
+    description: "Market Overview + Heat Calendar + Correlation Matrix",
     icon: "Map",
     apply: applySectorView,
   },

@@ -163,7 +163,7 @@ export const ADMIN_WIDGET_SHOWCASE: readonly {
   status: WidgetInfo["status"];
 }[] = [
   // Trading
-  { id: "dashboard", status: "live" },
+  { id: "indexstrip", status: "live" },
   { id: "scalper", status: "live" },
   { id: "positions", status: "live" },
   { id: "orders", status: "live" },
@@ -183,7 +183,7 @@ export const ADMIN_WIDGET_SHOWCASE: readonly {
   { id: "oichart", status: "live" },
   { id: "straddle", status: "live" },
   { id: "greeks", status: "live" },
-  { id: "sectormap", status: "live" },
+  { id: "marketoverview", status: "live" },
   { id: "gammadensity", status: "live" },
   { id: "volsurface", status: "live" },
   { id: "ivsmile", status: "live" },

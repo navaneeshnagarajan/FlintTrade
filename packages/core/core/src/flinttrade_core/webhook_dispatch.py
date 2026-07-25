@@ -533,7 +533,7 @@ def _payload_to_order_body(payload: WebhookPayload) -> tuple[dict[str, Any], str
 def _order_side(payload: WebhookPayload) -> str:
     values = {
         str(payload.data.get(key) or "").strip().upper()
-        for key in ("side", "tv_action", "gc_action", "order_action", "transaction_type")
+        for key in ("side", "order_action", "transaction_type")
         if str(payload.data.get(key) or "").strip()
     }
     if len(values) != 1:

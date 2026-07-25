@@ -64,6 +64,9 @@ import { useAtomValue } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
 import { isMarketHours } from "@/lib/market";
+import { publishChartSync, subscribeChartSync } from "@/lib/chartSyncBus";
+import { resolveOptionLeg } from "@/lib/optionLegSymbols";
+import type { OptionType } from "@/lib/optionSymbols";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useDataScope } from "@/hooks/useDataScope";
 import type { LogicalRange, Time } from "lightweight-charts";
@@ -424,6 +427,19 @@ interface ChartPanelParams {
   symbol?: string;
   exchange?: string;
   interval?: string;
+  /**
+   * Same-window time-scale sync group (Three Panel preset). Panels sharing a
+   * group name scroll and zoom together via the chart sync bus. Absent →
+   * exactly the previous standalone behaviour.
+   */
+  syncGroup?: string;
+  /**
+   * Resolve-and-load an option leg instead of a fixed symbol: the nearest
+   * future expiry's ATM CE/PE for `underlying` is resolved at mount via
+   * resolveOptionLeg. An optionLeg chart is pinned (never follows the global
+   * watchlist selection) and defers data loading until resolution completes.
+   */
+  optionLeg?: { underlying: string; leg: OptionType };
 }
 
 function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
@@ -438,7 +454,9 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   // chart-view key, so multiple pinned charts in one workspace never clobber each
   // other or the user's default chart. Unpinned charts behave exactly as before.
   const pinnedParams = props.params as ChartPanelParams | undefined;
-  const isPinned = Boolean(pinnedParams?.symbol);
+  // An optionLeg chart is pinned too: its instrument is the resolved contract,
+  // which a watchlist click must not clobber.
+  const isPinned = Boolean(pinnedParams?.symbol || pinnedParams?.optionLeg);
 
   // Dockview panel identity — the scope for this chart's indicator and display
   // settings. Null when the chart is rendered outside a panel (tests, embeds),
@@ -454,7 +472,11 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   );
 
   const [initialChartView] = useState(() => (isPinned ? null : loadSavedChartView()));
-  const [symbol, setSymbol] = useState(() => pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL);
+  // An optionLeg chart seeds from the underlying purely as a placeholder label;
+  // data loading is deferred until the leg resolves to a real contract.
+  const [symbol, setSymbol] = useState(
+    () => pinnedParams?.optionLeg?.underlying ?? pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL,
+  );
   const [exchange, setExchange] = useState(() => pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE);
   const [interval, setInterval] = useState(() => pinnedParams?.interval ?? initialChartView?.interval ?? "5m");
   const [intervals, setIntervals] = useState<IntervalOption[]>(STATIC_INTERVALS);
@@ -473,7 +495,8 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   // chart storage contract. The parser still accepts the old raw-array format.
   const drawingsStorageKey = createFlintChartDrawingsStorageKey({ symbol, exchange });
   const [drawings, setDrawings] = useState<Drawing[]>(() => {
-    const initialSymbol = pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL;
+    const initialSymbol =
+      pinnedParams?.optionLeg?.underlying ?? pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL;
     const initialExchange = pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE;
     const initialKey = createFlintChartDrawingsStorageKey({
       symbol: initialSymbol,
@@ -488,6 +511,45 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   const visibleLogicalRangeRef = useRef<FlintChartVisibleLogicalRange | null>(
     initialChartView?.visibleLogicalRange ?? null,
   );
+
+  // ---------------------------------------------------------------------------
+  // Option-leg resolution (preset-driven CE/PE panels)
+  //
+  // While the leg resolves, data loading is deferred (awaitingOptionLeg gates
+  // the OHLCV and quote effects) so the seed placeholder never fetches the
+  // wrong instrument's candles. On failure the chart stays empty with an
+  // honest error badge. Charts without an optionLeg param never enter this
+  // path: awaitingOptionLeg is constantly false and nothing changes.
+  // ---------------------------------------------------------------------------
+  const optionLegUnderlying = pinnedParams?.optionLeg?.underlying;
+  const optionLegType = pinnedParams?.optionLeg?.leg;
+  const [optionLegResolved, setOptionLegResolved] = useState(false);
+  const [optionLegError, setOptionLegError] = useState<string | null>(null);
+  const awaitingOptionLeg = Boolean(optionLegUnderlying && optionLegType) && !optionLegResolved;
+
+  useEffect(() => {
+    if (!optionLegUnderlying || !optionLegType) return;
+    let cancelled = false;
+    setOptionLegResolved(false);
+    setOptionLegError(null);
+    (async () => {
+      try {
+        const leg = await resolveOptionLeg({ underlying: optionLegUnderlying, leg: optionLegType });
+        if (cancelled) return;
+        setSymbol(leg.symbol);
+        setExchange(leg.exchange);
+        setOptionLegResolved(true);
+      } catch (error) {
+        if (cancelled) return;
+        setOptionLegError(
+          error instanceof Error && error.message
+            ? error.message
+            : `Could not resolve the ${optionLegUnderlying} ${optionLegType} leg`,
+        );
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [optionLegUnderlying, optionLegType]);
 
   useEffect(() => {
     const node = workspaceRef.current;
@@ -637,6 +699,49 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     timeScale.subscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
     return () => timeScale.unsubscribeVisibleLogicalRangeChange(handleVisibleLogicalRangeChange);
   }, [chartRef]);
+
+  // ---------------------------------------------------------------------------
+  // Same-window time-scale sync (params.syncGroup)
+  //
+  // Publish this chart's visible-logical-range changes to the group and apply
+  // ranges published by other members. isApplyingSyncRangeRef guards the
+  // feedback loop: applying a received range fires this chart's own
+  // range-change subscription synchronously, which must not re-publish (the
+  // bus already never echoes a publication back to its publisher). With no
+  // syncGroup the effect is a no-op and behaviour is exactly as before.
+  // ---------------------------------------------------------------------------
+  const syncGroup = pinnedParams?.syncGroup;
+  const [syncMemberId] = useState(() => `chart-${Math.random().toString(36).slice(2)}`);
+  const isApplyingSyncRangeRef = useRef(false);
+
+  useEffect(() => {
+    if (!syncGroup) return;
+    const chart = chartRef.current;
+    if (!chart) return;
+    const timeScale = chart.timeScale();
+
+    const publishRange = (range: LogicalRange | null) => {
+      if (!range || isApplyingSyncRangeRef.current) return;
+      if (!Number.isFinite(range.from) || !Number.isFinite(range.to) || range.to <= range.from) return;
+      publishChartSync(syncGroup, syncMemberId, { from: range.from, to: range.to });
+    };
+    timeScale.subscribeVisibleLogicalRangeChange(publishRange);
+
+    const unsubscribe = subscribeChartSync(syncGroup, syncMemberId, (range) => {
+      isApplyingSyncRangeRef.current = true;
+      try {
+        timeScale.setVisibleLogicalRange(range);
+      } catch { /* chart may be disposing */ }
+      finally {
+        isApplyingSyncRangeRef.current = false;
+      }
+    });
+
+    return () => {
+      timeScale.unsubscribeVisibleLogicalRangeChange(publishRange);
+      unsubscribe();
+    };
+  }, [syncGroup, syncMemberId, chartRef]);
 
   // Apply theme from CSS vars whenever the active theme changes
   const chartTheme = useLightweightChartTheme();
@@ -903,6 +1008,9 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
 
   // Fetch OHLCV data with localStorage cache
   useEffect(() => {
+    // An unresolved option leg has no real instrument yet — fetching would
+    // load the placeholder underlying's candles under the wrong identity.
+    if (awaitingOptionLeg) return;
     const candle = candleRef.current;
     const volume = volumeRef.current;
     if (!candle || !volume) return;
@@ -981,10 +1089,11 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     })();
 
     return () => { cancelled = true; };
-  }, [symbol, exchange, interval, dataScope, candleRef, volumeRef, chartRef, exitReplay]);
+  }, [symbol, exchange, interval, dataScope, awaitingOptionLeg, candleRef, volumeRef, chartRef, exitReplay]);
 
   // Fetch quote (LTP / change)
   useEffect(() => {
+    if (awaitingOptionLeg) return;
     let cancelled = false;
     setLtp(null);
     setChange(null);
@@ -1001,10 +1110,16 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
       } catch { /* quote unavailable */ }
     })();
     return () => { cancelled = true; };
-  }, [symbol, exchange, dataScope]);
+  }, [symbol, exchange, dataScope, awaitingOptionLeg]);
 
   // Event handlers
   const handleSymbolSelect = useCallback((item: SymbolSearchResult) => {
+    if (optionLegUnderlying) {
+      // The operator re-pointed an option-leg panel manually — stop treating
+      // it as awaiting resolution and drop any resolution error.
+      setOptionLegResolved(true);
+      setOptionLegError(null);
+    }
     setSymbol(item.symbol);
     setExchange(item.exchange);
     visibleLogicalRangeRef.current = null;
@@ -1018,7 +1133,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         if (ind[k]) { try { chart.removeSeries(ind[k]!); } catch { /* ignore */ } ind[k] = null; }
       });
     }
-  }, [chartRef, indRef]);
+  }, [chartRef, indRef, optionLegUnderlying]);
 
   const handleIntervalChange = useCallback((v: string) => {
     visibleLogicalRangeRef.current = null;
@@ -1177,6 +1292,16 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
             {dataScope === "explore:mock" && (
               <span className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-xxs text-warning" role="status">
                 Sample history
+              </span>
+            )}
+            {awaitingOptionLeg && !optionLegError && (
+              <span className="text-xxs text-text-muted animate-pulse whitespace-nowrap" role="status">
+                Resolving {optionLegType} leg…
+              </span>
+            )}
+            {optionLegError && (
+              <span className="rounded border border-loss/30 bg-loss/10 px-1.5 py-0.5 text-xxs text-loss" role="alert">
+                {optionLegError}
               </span>
             )}
             {ltp != null && <span className="text-lg font-mono font-bold text-text-primary leading-none whitespace-nowrap">{formatPrice(ltp)}</span>}

@@ -6,6 +6,7 @@
  */
 
 import type { JournalTrade } from "@/services/ftApi";
+import { toIstIsoDate } from "@/lib/ist";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,7 +127,12 @@ function getMonthLabel(d: Date): string {
 }
 
 function getDateLabel(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // IST trading-day key. The old `toISOString().slice(0, 10)` returned the UTC
+  // calendar day, which still reads YESTERDAY through the whole 00:00–05:29 IST
+  // window — so a fill journalled in the Indian early morning was bucketed under
+  // the previous trading day. Day buckets are compared against `istToday()` by
+  // the Trade Review calendar, so the keys must come off the same calendar.
+  return toIstIsoDate(d);
 }
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,6 @@ import { RiskSection }       from "@/tools/Settings/RiskSection";
 import { KeyboardSection }   from "@/tools/Settings/KeyboardSection";
 import { LLMSection }        from "@/tools/Settings/LLMSection";
 import { TelegramSection }   from "@/tools/Settings/TelegramSection";
-import { WhatsAppSection }   from "@/tools/Settings/WhatsAppSection";
 import { DataSection }       from "@/tools/Settings/DataSection";
 import { AboutSection }      from "@/tools/Settings/AboutSection";
 import { LeverageSection }   from "@/tools/Settings/LeverageSection";
@@ -134,7 +133,6 @@ export default function SettingsRoute() {
     llmCredentialConfigured,
     llmCredentialLast4,
     telegram,
-    whatsapp,
     dataPaths,
     connection,
     restarting,
@@ -145,7 +143,6 @@ export default function SettingsRoute() {
     updateLLMProvider,
     removeLLMCredential,
     updateTelegram,
-    updateWhatsApp,
     updateDataPaths,
     acceptConnection,
     handleRestart,
@@ -182,7 +179,6 @@ export default function SettingsRoute() {
       case "keyboard":   return <KeyboardSection />;
       case "llm":        return <></>;
       case "telegram":   return <TelegramSection   settings={telegram}   onChangeField={updateTelegram} />;
-      case "whatsapp":   return <WhatsAppSection   settings={whatsapp}   onChangeField={updateWhatsApp} />;
       case "dataPaths":  return <DataSection       settings={dataPaths}  onChange={updateDataPaths} />;
       case "security":   return <SecuritySection />;
       case "monitoring": return <MonitoringSection />;

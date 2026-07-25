@@ -1,6 +1,6 @@
 # Webhooks
 
-> TradingView webhooks, ChartInk integration, GoCharting webhooks, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge.
+> Generic (custom JSON) webhooks, flow builder, alerter, voice orders, and Excel bridge.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 
@@ -9,8 +9,8 @@
 ## Public surface
 
 - `src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake`
-- `src/flinttrade_webhooks/tradingview.py — TradingView alert ingestion`
-- `src/flinttrade_webhooks/chartink.py — ChartInk scanner integration`
+- `src/flinttrade_webhooks/webhook_routes.py — mounted signed-relay endpoints`
+- `src/flinttrade_webhooks/flow_builder.py — 54-node automation flow builder`
 
 (See the source for the full surface.)
 

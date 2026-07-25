@@ -68,7 +68,7 @@ const INTERMEDIATE_WIDGETS: string[] = [
   "orderladder",
   "greeks",
   "oichart",
-  "sectormap",
+  "marketoverview",
   "gammadensity",
   "news",
   "calculator",

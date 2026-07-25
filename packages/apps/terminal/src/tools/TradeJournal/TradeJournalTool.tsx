@@ -1,17 +1,38 @@
-// Adapted patterns from:
-//   trading-journal/frontend/app/dashboard/portfolios/[id]/page.tsx — TradesTable, win/loss stat cards
-//   trading-journal/frontend/app/dashboard/analytics/page.tsx — analytics metrics, formatINR pattern
+/**
+ * Trade Review — the terminal's consolidated trade-analysis tool (merge 2.12).
+ *
+ * Formerly "Trade Journal". Tabs:
+ *   - Log         — the canonical Fills table (merge 2.11), ranged to the
+ *                   committed header window; replaced the old TradeLogTab.
+ *   - Session     — today's session statistics (absorbed the SessionStats
+ *                   widget: FIFO round trips via lib/pnl).
+ *   - Performance — longer-horizon metrics with a Range/YTD scope toggle
+ *                   (absorbed the TradePerformance widget and the old
+ *                   Analytics tab; metrics via lib/journalAnalytics).
+ *   - Calendar    — daily P&L heat calendar over real journalled trades
+ *                   (absorbed the P&L Dashboard Calendar tab's data plane and
+ *                   the HeatCalendar widget's rendering affordances).
+ *   - Deep Analytics / Notes / Coach — unchanged.
+ *
+ * The tool id stays ``trade-journal`` (ToolsDropdown/TerminalRoute wiring is
+ * shared surface); only the display identity is renamed.
+ *
+ * Adapted patterns from:
+ *   trading-journal/frontend/app/dashboard/portfolios/[id]/page.tsx — TradesTable, win/loss stat cards
+ *   trading-journal/frontend/app/dashboard/analytics/page.tsx — analytics metrics, formatINR pattern
+ */
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { computeAnalytics } from "@/lib/journalAnalytics";
 import {
   BookOpen,
   X,
   Search,
-  BarChart2,
+  Calendar,
+  Clock,
   FileText,
   Target,
+  Trophy,
   AlertCircle,
   RefreshCw,
   Brain,
@@ -24,8 +45,10 @@ import { getTradeJournal } from "@/services/ftApi";
 import { useModeStore } from "@/stores/modeStore";
 import { type Props } from "./types";
 import { todayISO, sevenDaysAgoISO } from "./utils";
-import { TradeLogTab } from "./TradeLogTab";
-import { AnalyticsTab } from "./AnalyticsTab";
+import { LogTab } from "./LogTab";
+import { SessionTab } from "./SessionTab";
+import { PerformanceTab } from "./PerformanceTab";
+import { CalendarTab } from "./CalendarTab";
 import { DeepAnalyticsTab } from "./DeepAnalyticsTab";
 import { NotesTab } from "./NotesTab";
 import { CoachTab } from "./CoachTab";
@@ -64,7 +87,6 @@ export default function TradeJournalTool({ onClose }: Props) {
   const trades = isExploreMode ? sampleTrades : data?.trades ?? [];
   const effectiveIsLoading = isExploreMode ? false : isLoading;
   const effectiveIsError = isExploreMode ? false : isError;
-  const analytics = useMemo(() => computeAnalytics(trades), [trades]);
 
   function handleSearch() {
     setQueryStart(startDate);
@@ -83,11 +105,11 @@ export default function TradeJournalTool({ onClose }: Props) {
         <div className="flex items-center gap-2 shrink-0">
           <BookOpen size={16} className="text-primary" />
           <h1 className="font-heading font-bold text-base text-text-primary">
-            Trade Journal
+            Trade Review
           </h1>
         </div>
 
-        {/* Date range + strategy filters */}
+        {/* Date range + strategy filters (the tool's timeframe selector) */}
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           <Input
             type="text"
@@ -147,6 +169,16 @@ export default function TradeJournalTool({ onClose }: Props) {
             <span className="text-xs text-loss flex items-center gap-1">
               <AlertCircle size={11} />
               Error
+              {/* The retry affordance lived in the old TradeLogTab; the shared
+                  range query now retries from the header instead. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-xxs text-text-muted hover:text-text-primary"
+                onClick={() => refetch()}
+              >
+                Retry
+              </Button>
             </span>
           )}
           {!effectiveIsLoading && !effectiveIsError && (
@@ -157,7 +189,7 @@ export default function TradeJournalTool({ onClose }: Props) {
               {trades.length} trades
             </Badge>
           )}
-          <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6 text-text-muted hover:text-text-primary" aria-label="Close trade journal">
+          <Button variant="ghost" size="icon" onClick={onClose} className="h-6 w-6 text-text-muted hover:text-text-primary" aria-label="Close trade review">
             <X size={15} />
           </Button>
         </div>
@@ -171,14 +203,28 @@ export default function TradeJournalTool({ onClose }: Props) {
             className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted"
           >
             <BookOpen size={11} className="mr-1" />
-            Trade Log
+            Log
           </TabsTrigger>
           <TabsTrigger
-            value="analytics"
+            value="session"
             className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted"
           >
-            <BarChart2 size={11} className="mr-1" />
-            Analytics
+            <Clock size={11} className="mr-1" />
+            Session
+          </TabsTrigger>
+          <TabsTrigger
+            value="performance"
+            className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted"
+          >
+            <Trophy size={11} className="mr-1" />
+            Performance
+          </TabsTrigger>
+          <TabsTrigger
+            value="calendar"
+            className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted"
+          >
+            <Calendar size={11} className="mr-1" />
+            Calendar
           </TabsTrigger>
           <TabsTrigger
             value="deep-analytics"
@@ -207,20 +253,28 @@ export default function TradeJournalTool({ onClose }: Props) {
           value="log"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <TradeLogTab
-            trades={trades}
-            analytics={analytics}
-            isLoading={effectiveIsLoading}
-            isError={effectiveIsError}
-            onRetry={() => refetch()}
-          />
+          <LogTab startDate={queryStart} endDate={queryEnd} />
         </TabsContent>
 
         <TabsContent
-          value="analytics"
+          value="session"
           className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
         >
-          <AnalyticsTab trades={trades} />
+          <SessionTab />
+        </TabsContent>
+
+        <TabsContent
+          value="performance"
+          className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
+        >
+          <PerformanceTab trades={trades} rangeLabel={`${queryStart} → ${queryEnd}`} />
+        </TabsContent>
+
+        <TabsContent
+          value="calendar"
+          className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden"
+        >
+          <CalendarTab />
         </TabsContent>
 
         <TabsContent

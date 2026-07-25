@@ -66,19 +66,19 @@ describe("WebhooksSection", () => {
     vi.clearAllMocks();
     mockGetWebhooks.mockResolvedValue({ webhooks: [] });
     mockCreateWebhook.mockResolvedValue({
-      id: "v1/webhook/tradingview/nifty-trend-v1",
-      path: "/v1/webhook/tradingview/nifty-trend-v1",
+      id: "v1/webhook/custom/nifty-trend-v1",
+      path: "/v1/webhook/custom/nifty-trend-v1",
       name: "NIFTY Trend Signal",
-      type: "tradingview",
+      type: "custom",
       enabled: true,
       secret_configured: true,
     });
     mockDeleteWebhook.mockResolvedValue({ message: "Webhook removed" });
     mockSetWebhookEnabled.mockResolvedValue({
-      id: "v1/webhook/tradingview/nifty-trend-v1",
-      path: "/v1/webhook/tradingview/nifty-trend-v1",
+      id: "v1/webhook/custom/nifty-trend-v1",
+      path: "/v1/webhook/custom/nifty-trend-v1",
       name: "NIFTY Trend Signal",
-      type: "tradingview",
+      type: "custom",
       enabled: false,
       secret_configured: true,
     });
@@ -102,10 +102,10 @@ describe("WebhooksSection", () => {
   it("loads registered webhooks from the backend registry", async () => {
     mockGetWebhooks.mockResolvedValueOnce({
       webhooks: [{
-        id: "v1/webhook/tradingview/nifty-trend-v1",
-        path: "/v1/webhook/tradingview/nifty-trend-v1",
+        id: "v1/webhook/custom/nifty-trend-v1",
+        path: "/v1/webhook/custom/nifty-trend-v1",
         name: "NIFTY Trend Signal",
-        type: "tradingview",
+        type: "custom",
         enabled: true,
         secret_configured: true,
       }],
@@ -114,7 +114,7 @@ describe("WebhooksSection", () => {
     render(<WebhooksSection />, { wrapper: createWrapper() });
 
     expect(await screen.findByText("NIFTY Trend Signal")).toBeInTheDocument();
-    expect(screen.getByText("/v1/webhook/tradingview/nifty-trend-v1")).toBeInTheDocument();
+    expect(screen.getByText("/v1/webhook/custom/nifty-trend-v1")).toBeInTheDocument();
     expect(mockGetWebhooks).toHaveBeenCalled();
   });
 
@@ -132,8 +132,8 @@ describe("WebhooksSection", () => {
 
     await waitFor(() => expect(mockCreateWebhook).toHaveBeenCalledWith({
       name: "NIFTY Trend Signal",
-      type: "tradingview",
-      path: "/v1/webhook/tradingview/nifty-trend-v1",
+      type: "custom",
+      path: "/v1/webhook/custom/nifty-trend-v1",
       enabled: true,
       secret: "secret-1",
     }));
@@ -142,10 +142,10 @@ describe("WebhooksSection", () => {
   it("deletes registered webhooks through the backend service", async () => {
     mockGetWebhooks.mockResolvedValueOnce({
       webhooks: [{
-        id: "v1/webhook/chartink/breakout",
-        path: "/v1/webhook/chartink/breakout",
-        name: "ChartInk Breakout",
-        type: "chartink",
+        id: "v1/webhook/custom/breakout",
+        path: "/v1/webhook/custom/breakout",
+        name: "Breakout Scan",
+        type: "custom",
         enabled: true,
         secret_configured: true,
       }],
@@ -153,10 +153,10 @@ describe("WebhooksSection", () => {
 
     render(<WebhooksSection />, { wrapper: createWrapper() });
 
-    expect(await screen.findByText("ChartInk Breakout")).toBeInTheDocument();
+    expect(await screen.findByText("Breakout Scan")).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("Delete endpoint"));
 
-    await waitFor(() => expect(mockDeleteWebhook).toHaveBeenCalledWith("v1/webhook/chartink/breakout"));
+    await waitFor(() => expect(mockDeleteWebhook).toHaveBeenCalledWith("v1/webhook/custom/breakout"));
   });
 
   it("requires a signing secret before creating an endpoint", async () => {
@@ -190,10 +190,10 @@ describe("WebhooksSection", () => {
   it("toggles a registered endpoint through the backend service", async () => {
     mockGetWebhooks.mockResolvedValueOnce({
       webhooks: [{
-        id: "v1/webhook/tradingview/nifty-trend-v1",
-        path: "/v1/webhook/tradingview/nifty-trend-v1",
+        id: "v1/webhook/custom/nifty-trend-v1",
+        path: "/v1/webhook/custom/nifty-trend-v1",
         name: "NIFTY Trend Signal",
-        type: "tradingview",
+        type: "custom",
         enabled: true,
         secret_configured: true,
       }],
@@ -205,7 +205,7 @@ describe("WebhooksSection", () => {
 
     await waitFor(() => {
       expect(mockSetWebhookEnabled).toHaveBeenCalledWith(
-        "v1/webhook/tradingview/nifty-trend-v1",
+        "v1/webhook/custom/nifty-trend-v1",
         false,
       );
     });
