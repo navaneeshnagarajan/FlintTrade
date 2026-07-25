@@ -49,7 +49,7 @@ function pid(base: string): string {
 function applyScalperZone(api: DockviewApi): void {
   const chartId = pid("chart");
   const orderPadId = pid("orderpad");
-  const depthId = pid("depth");
+  const depthId = pid("orderladder");
   const positionsId = pid("positions");
   const scalperId = pid("scalper");
 
@@ -65,8 +65,11 @@ function applyScalperZone(api: DockviewApi): void {
 
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "orderladder",
+    // NSE tick puts each broker level on its own row — the retired
+    // Depth widget\'s 5-level table.
+    params: { tick: 0.05 },
+    title: "DOM / Ladder",
     position: { referencePanel: orderPadId, direction: "below" },
   });
 
@@ -204,7 +207,7 @@ function applyMarketWatch(api: DockviewApi): void {
 function applyAnalysis(api: DockviewApi): void {
   const chartId = pid("chart");
   const oiChartId = pid("oichart");
-  const depthId = pid("depth");
+  const depthId = pid("orderladder");
   const positionsId = pid("positions");
   const newsId = pid("news");
 
@@ -220,8 +223,11 @@ function applyAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "orderladder",
+    // NSE tick puts each broker level on its own row — the retired
+    // Depth widget\'s 5-level table.
+    params: { tick: 0.05 },
+    title: "DOM / Ladder",
     position: { referencePanel: oiChartId, direction: "below" },
   });
 
@@ -254,7 +260,7 @@ function applyAnalysis(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyRiskMonitor(api: DockviewApi): void {
   const dashboardId = pid("dashboard");
-  const riskPanelId = pid("riskpanel");
+  const riskPanelId = pid("riskdashboard");
   const mtmMonitorId = pid("mtmmonitor");
   const positionsId = pid("positions");
   const ordersId = pid("orders");
@@ -263,8 +269,8 @@ function applyRiskMonitor(api: DockviewApi): void {
 
   api.addPanel({
     id: riskPanelId,
-    component: "riskpanel",
-    title: "Risk Panel",
+    component: "riskdashboard",
+    title: "Risk",
     position: { referencePanel: dashboardId, direction: "right" },
     initialWidth: 340,
   });
@@ -351,7 +357,7 @@ function applyOptionsAnalysis(api: DockviewApi): void {
   const optionChainId = pid("optionchain");
   const ivSkewId = pid("ivsmile");
   const greeksHeatmapId = pid("greeksheatmap");
-  const impliedMoveId = pid("impliedmove");
+  const impliedMoveId = pid("straddle");
   const straddlePnlId = pid("straddlepnl");
 
   api.addPanel({
@@ -380,7 +386,8 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: impliedMoveId,
-    component: "impliedmove",
+    component: "straddle",
+    params: { view: "impliedmove" },
     title: "Implied Move",
     position: { referencePanel: ivSkewId, direction: "below" },
     initialHeight: 220,
@@ -700,7 +707,9 @@ function applyEverything(api: DockviewApi): void {
   const chartId = pid("chart");
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
-  for (const comp of ["chartgrid", "threepanel", "multitimeframe"] as const) {
+  for (const comp of [
+    "chartgrid", "threepanel", "multitimeframe",
+  ] as const) {
     api.addPanel({
       id: pid(comp),
       component: comp,
@@ -719,7 +728,9 @@ function applyEverything(api: DockviewApi): void {
     initialWidth: 360,
   });
 
-  for (const comp of ["orderpad", "quicktrade", "orderladder"] as const) {
+  for (const comp of [
+    "orderpad", "quicktrade", "orderladder",
+  ] as const) {
     api.addPanel({
       id: pid(comp),
       component: comp,
@@ -740,8 +751,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "greeksheatmap", "ivsmile", "oiprofile", "oiheatmap",
-    "impliedmove", "optionsflow", "volatilitycone",
+    "ivsmile", "optionsflow", "volatilitycone",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -752,21 +762,23 @@ function applyEverything(api: DockviewApi): void {
   }
 
   // ---------- Row 2 left: Analysis ----------
-  const depthId = pid("depth");
+  const depthId = pid("orderladder");
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "orderladder",
+    // NSE tick puts each broker level on its own row — the retired
+    // Depth widget\'s 5-level table.
+    params: { tick: 0.05 },
+    title: "DOM / Ladder",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 300,
   });
 
   for (const comp of [
     "domheatmap", "gammadensity", "volsurface", "orderflow", "sectormap",
-    "sectorperformance", "marketbreadth", "correlationpairs",
-    "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend",
-    "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
-    "timesales",
+    "sectorperformance", "marketbreadth", "correlationpairs", "correlationmatrix", "instrumentcompare",
+    "spreadview", "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands",
+    "pivotpoints", "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -787,9 +799,9 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "positions", "orders", "holdings", "tradebook", "intradaypnl",
-    "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition",
-    "sessionstats", "tradeperformance", "tradelog", "riskpanel",
-    "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+    "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition", "sessionstats",
+    "tradeperformance", "tradelog", "riskdashboard", "actioncenter", "strategymonitor",
+    "tradecopier",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -810,11 +822,11 @@ function applyEverything(api: DockviewApi): void {
   });
 
   for (const comp of [
-    "calculator", "news", "ticker", "aiadvisor", "scanner", "alerts",
-    "health", "fundingrate", "currencyconverter", "earningscalendar",
-    "globalindices", "strategytemplates", "audittrail", "economiccalendar",
-    "profittarget", "expirycountdown", "positionsizing", "marketclock",
-    "tradeidea", "tickspeed", "marketsummary",
+    "calculator", "news", "ticker", "aiadvisor", "scanner",
+    "alerts", "health", "fundingrate", "currencyconverter", "earningscalendar",
+    "globalindices", "strategytemplates", "audittrail", "economiccalendar", "profittarget",
+    "expirycountdown", "positionsizing", "marketclock", "tradeidea", "tickspeed",
+    "marketsummary",
   ] as const) {
     api.addPanel({
       id: pid(comp),

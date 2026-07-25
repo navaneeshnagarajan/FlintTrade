@@ -1,5 +1,26 @@
 /**
- * StraddleWidget — ATM straddle price tracker for FlintTrade terminal.
+ * StraddleWidget — ATM straddle price tracker and implied-move range.
+ *
+ * Two presentations of ONE fetch, chosen by the Dockview panel parameter
+ * `params.view`:
+ *   - `straddle`    (default) — straddle price over time on a Lightweight
+ *                    Charts line, with Spot and Synthetic Future overlays.
+ *   - `impliedmove` — the σ-band expected range absorbed from the retired
+ *                    ImpliedMove widget (merge 2.15).
+ *
+ * WHY THE MERGE (read before splitting them again): the implied-move view
+ * needs exactly four numbers — spot, ATM strike, ATM CE premium, ATM PE
+ * premium — and this widget already computes all four live from
+ * `getOptionChain` + `getQuotes`. The retired widget was static only because
+ * nobody connected the two; no backend endpoint was ever required. Both views
+ * are rendered from the same `useMemo` derivation, so switching view adds no
+ * request.
+ *
+ * The retired widget also shipped a real defect that this merge removes by
+ * deletion: it indexed a 2-entry sample array with a 5-entry symbol dropdown,
+ * so FINNIFTY silently displayed NIFTY's figures under a FINNIFTY label. Every
+ * number here is derived from the selected symbol's own live chain, so a
+ * symbol/figure mismatch is no longer representable.
  *
  * Features:
  *   - Symbol selector (NIFTY / BANKNIFTY / FINNIFTY) + Expiry selector
@@ -7,15 +28,18 @@
  *   - Three headline values: Straddle Price (CE LTP + PE LTP), CE Price, PE Price
  *   - TradingView Lightweight Charts v5 line chart of straddle price over time
  *   - Overlay toggles: Straddle / Spot / Synthetic Future
+ *   - Implied move = ATM CE + ATM PE, with ±1σ (≈68%) and ±2σ (≈95%) bands
  *   - Auto-refresh: 3s market hours, 30s off-market
  *   - P&L display when a straddle position is detected in positions data
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
 import type { ISeriesApi, LineData, Time } from "lightweight-charts";
 import { createFlintLineChart } from "@flinttrade/design-system";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import { lightweightLineRuntime } from "@/lib/lightweightChartRuntime";
+import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
   RefreshCw,
   ChevronDown,
@@ -23,6 +47,7 @@ import {
   TrendingDown,
   AlertCircle,
   Activity,
+  MoveHorizontal,
 } from "lucide-react";
 import {
   getExpiry,
@@ -86,6 +111,100 @@ interface StraddleChartFillProps {
   activeOverlays: OverlayName[];
 }
 
+/**
+ * Presentation of the ATM straddle data. `impliedmove` is the retired
+ * ImpliedMove widget's view.
+ */
+type ViewMode = "straddle" | "impliedmove";
+
+const VIEW_MODES: readonly ViewMode[] = ["straddle", "impliedmove"];
+
+const VIEW_LABELS: Record<ViewMode, string> = {
+  straddle: "Straddle",
+  impliedmove: "Implied Move",
+};
+
+function isViewMode(value: unknown): value is ViewMode {
+  return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
+}
+
+/** Resolves the Dockview `params.view` panel parameter, defaulting to straddle. */
+function resolveViewMode(value: unknown): ViewMode {
+  return isViewMode(value) ? value : "straddle";
+}
+
+interface StraddlePanelParams extends Record<string, unknown> {
+  /** Initial view — how the retired `impliedmove` id selects its old presentation. */
+  view?: string;
+}
+
+/**
+ * Expected-range figures derived from the live ATM straddle.
+ *
+ * Log-normal approximation, as carried over from the retired widget:
+ *   Implied move = ATM CE premium + ATM PE premium
+ *   ±1σ ≈ 68%  → spot ± 1× implied move
+ *   ±2σ ≈ 95%  → spot ± 2× implied move
+ */
+export interface ImpliedMoveData {
+  spot: number;
+  atmStrike: number;
+  cePremium: number;
+  pePremium: number;
+  impliedMove: number;
+  upperBound: number;
+  lowerBound: number;
+  upper2Sigma: number;
+  lower2Sigma: number;
+  impliedMovePct: number;
+}
+
+export interface ImpliedMoveInputs {
+  spot: number | null | undefined;
+  atmStrike: number | null | undefined;
+  cePremium: number | null | undefined;
+  pePremium: number | null | undefined;
+}
+
+/**
+ * Derives the implied-move bands from live ATM straddle inputs.
+ *
+ * Fails closed: any missing, non-finite or non-positive input returns `null`,
+ * and the view then discloses that no live figures are available rather than
+ * substituting a sample. There is deliberately no sample fallback — the
+ * retired widget's constant tables were the source of its mislabelling bug.
+ */
+export function computeImpliedMove({
+  spot,
+  atmStrike,
+  cePremium,
+  pePremium,
+}: ImpliedMoveInputs): ImpliedMoveData | null {
+  const spotVal = Number(spot ?? 0);
+  const atmVal = Number(atmStrike ?? 0);
+  const ceVal = Number(cePremium ?? 0);
+  const peVal = Number(pePremium ?? 0);
+
+  if (![spotVal, atmVal, ceVal, peVal].every((v) => Number.isFinite(v) && v > 0)) {
+    return null;
+  }
+
+  const impliedMove = ceVal + peVal;
+
+  return {
+    spot: spotVal,
+    atmStrike: atmVal,
+    cePremium: ceVal,
+    pePremium: peVal,
+    impliedMove,
+    upperBound: spotVal + impliedMove,
+    lowerBound: spotVal - impliedMove,
+    upper2Sigma: spotVal + impliedMove * 2,
+    lower2Sigma: spotVal - impliedMove * 2,
+    impliedMovePct: (impliedMove / spotVal) * 100,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -110,10 +229,16 @@ const CHART_COLORS = {
 
 const NUM  = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+/** Band/level formatter carried over from the retired ImpliedMove widget. */
+const NUM1 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
 
 function fmtPrice(v: number | null | undefined): string {
   if (v == null || v === 0) return "—";
   return NUM.format(v);
+}
+
+function fmtLevel(v: number): string {
+  return NUM1.format(v);
 }
 
 function fmtExpiry(raw: string): string {
@@ -379,6 +504,217 @@ function StraddleChart({
   return <div ref={containerRef} className="w-full" style={{ height }} />;
 }
 
+/** Shared in-flight body — both views wait on the same fetch. */
+function LoadingBody() {
+  return (
+    <div className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
+      <RefreshCw size={13} className="animate-spin" />
+      Loading straddle…
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Implied-move view (absorbed from the retired ImpliedMove widget)
+// ---------------------------------------------------------------------------
+
+/** Nested 1σ / 2σ zones with the live spot marker. */
+function RangeBar({ data }: { data: ImpliedMoveData }) {
+  const { spot, lowerBound, upperBound, lower2Sigma, upper2Sigma } = data;
+
+  // Positions as percentages within the 2σ range
+  const totalRange = upper2Sigma - lower2Sigma;
+  const pos = (v: number) =>
+    Math.min(100, Math.max(0, ((v - lower2Sigma) / totalRange) * 100));
+
+  const spotPct = pos(spot);
+  const lb1Pct = pos(lowerBound);
+  const ub1Pct = pos(upperBound);
+
+  return (
+    <div className="space-y-2" aria-label="Implied move range bar">
+      {/* Range bar */}
+      <div className="relative h-8 rounded bg-surface-hover overflow-visible mx-1">
+        {/* 2σ zone (full width = bg) */}
+        <div className="absolute inset-0 bg-accent/5 rounded" />
+
+        {/* 1σ zone */}
+        <div
+          className="absolute inset-y-0 bg-accent/15 rounded"
+          style={{ left: `${lb1Pct}%`, right: `${100 - ub1Pct}%` }}
+        />
+
+        {/* 1σ bound lines */}
+        <div className="absolute inset-y-0 w-px bg-accent/50" style={{ left: `${lb1Pct}%` }} />
+        <div className="absolute inset-y-0 w-px bg-accent/50" style={{ left: `${ub1Pct}%` }} />
+
+        {/* Spot marker */}
+        <div
+          className="absolute top-1 bottom-1 w-0.5 bg-text-primary rounded-full shadow"
+          style={{ left: `${spotPct}%`, transform: "translateX(-50%)" }}
+        />
+
+        {/* Spot label */}
+        <div
+          className="absolute -top-5 text-xxs font-mono text-text-primary whitespace-nowrap"
+          style={{ left: `${spotPct}%`, transform: "translateX(-50%)" }}
+        >
+          {fmtLevel(spot)}
+        </div>
+      </div>
+
+      {/* Bound labels row */}
+      <div className="flex justify-between text-xxs font-mono tabular-nums">
+        <div className="text-left">
+          <div className="text-loss font-semibold">{fmtLevel(lower2Sigma)}</div>
+          <div className="text-text-muted">−2σ (95%)</div>
+        </div>
+        <div className="text-center">
+          <div className="text-text-secondary font-semibold">{fmtLevel(lowerBound)}</div>
+          <div className="text-text-muted">−1σ (68%)</div>
+        </div>
+        <div className="text-center">
+          <div className="text-text-secondary font-semibold">{fmtLevel(upperBound)}</div>
+          <div className="text-text-muted">+1σ (68%)</div>
+        </div>
+        <div className="text-right">
+          <div className="text-profit font-semibold">{fmtLevel(upper2Sigma)}</div>
+          <div className="text-text-muted">+2σ (95%)</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PremiumRow({ label, value, colour }: { label: string; value: number; colour: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs text-text-muted">{label}</span>
+      <span className={`text-xs font-mono tabular-nums font-semibold ${colour}`}>
+        ₹{fmtLevel(value)}
+      </span>
+    </div>
+  );
+}
+
+interface ImpliedMovePanelProps {
+  data: ImpliedMoveData | null;
+  expiryLabel: string;
+}
+
+/**
+ * The σ-band expected range. Renders figures only when the live chain has
+ * produced a complete ATM straddle; otherwise it discloses the absence in the
+ * same voice as the chart view's empty states. There is no sample fallback.
+ */
+function ImpliedMovePanel({ data, expiryLabel }: ImpliedMovePanelProps) {
+  if (!data) {
+    return (
+      <div
+        className="h-full flex flex-col items-center justify-center gap-2 px-4 text-center text-xs text-text-muted"
+        aria-label="Implied move unavailable"
+      >
+        <MoveHorizontal size={20} className="text-accent/40" />
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
+          role="status"
+          aria-label="No live option chain — implied move is unavailable"
+          title="Implied move is computed from the live ATM straddle; no sample figures are ever shown."
+        >
+          No live data
+        </span>
+        <span>Implied move needs a live ATM straddle quote</span>
+        <span className="text-text-muted/60">
+          Connect a broker and select an expiry — every figure here is derived from the
+          live chain, never sampled
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto px-3 py-3 space-y-4">
+
+      {/* Key stat */}
+      <div className="flex items-center justify-between bg-surface-card rounded-lg px-3 py-2.5 border border-border-default">
+        <div>
+          <div className="text-xxs text-text-muted uppercase tracking-wide mb-0.5">
+            Implied Move{expiryLabel ? ` (${expiryLabel})` : ""}
+          </div>
+          <div className="text-lg font-bold font-mono tabular-nums text-text-primary">
+            ±₹{fmtLevel(data.impliedMove)}
+          </div>
+          <div className="text-xs text-text-muted font-mono">
+            ±{data.impliedMovePct.toFixed(2)}% of spot
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xxs text-text-muted uppercase tracking-wide mb-0.5">ATM Strike</div>
+          <div className="text-base font-bold font-mono tabular-nums text-text-secondary">
+            {fmtLevel(data.atmStrike)}
+          </div>
+          <div className="text-xxs text-text-muted">Spot {fmtLevel(data.spot)}</div>
+        </div>
+      </div>
+
+      {/* Range visualisation */}
+      <section aria-labelledby="im-range">
+        <p id="im-range" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-3">
+          Expected Range
+        </p>
+        <RangeBar data={data} />
+      </section>
+
+      {/* Premium breakdown */}
+      <section
+        aria-labelledby="im-premium"
+        className="bg-surface-card rounded-lg border border-border-default px-3 py-2.5 space-y-1.5"
+      >
+        <p id="im-premium" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-2">
+          ATM Straddle Premiums
+        </p>
+        <PremiumRow label="ATM CE Premium" value={data.cePremium} colour="text-profit" />
+        <PremiumRow label="ATM PE Premium" value={data.pePremium} colour="text-loss" />
+        <div className="border-t border-border-subtle pt-1.5">
+          <PremiumRow label="Total (Implied Move)" value={data.impliedMove} colour="text-accent" />
+        </div>
+      </section>
+
+      {/* Probability zones table */}
+      <section aria-labelledby="im-zones">
+        <p id="im-zones" className="text-xxs font-medium text-text-muted uppercase tracking-wide mb-1.5">
+          Probability Zones
+        </p>
+        <table className="w-full text-xs" aria-label="Probability zones table">
+          <thead>
+            <tr className="border-b border-border-subtle">
+              <th className="text-left py-1 text-xxs text-text-muted font-medium">Zone</th>
+              <th className="text-center py-1 text-xxs text-text-muted font-medium">Lower</th>
+              <th className="text-center py-1 text-xxs text-text-muted font-medium">Upper</th>
+              <th className="text-right py-1 text-xxs text-text-muted font-medium">Prob.</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-border-subtle">
+              <td className="py-1 text-text-secondary">1σ</td>
+              <td className="py-1 text-center font-mono tabular-nums text-loss">{fmtLevel(data.lowerBound)}</td>
+              <td className="py-1 text-center font-mono tabular-nums text-profit">{fmtLevel(data.upperBound)}</td>
+              <td className="py-1 text-right font-mono text-text-primary">68%</td>
+            </tr>
+            <tr>
+              <td className="py-1 text-text-secondary">2σ</td>
+              <td className="py-1 text-center font-mono tabular-nums text-loss">{fmtLevel(data.lower2Sigma)}</td>
+              <td className="py-1 text-center font-mono tabular-nums text-profit">{fmtLevel(data.upper2Sigma)}</td>
+              <td className="py-1 text-right font-mono text-text-primary">95%</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+    </div>
+  );
+}
+
 function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOverlays }: StraddleChartFillProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(180);
@@ -417,7 +753,12 @@ function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOve
 // Main widget
 // ---------------------------------------------------------------------------
 
-function StraddleWidget() {
+function StraddleWidget(props: IDockviewPanelProps) {
+  const panelParams = props.params as StraddlePanelParams | undefined;
+  const panelView = panelParams?.view;
+
+  const track = useTrackBehavior();
+  const [view, setView] = useState<ViewMode>(() => resolveViewMode(panelView));
   const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
   const [expiries, setExpiries]               = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry]   = useState<string | null>(null);
@@ -585,6 +926,25 @@ function StraddleWidget() {
     : null;
   const spotUp = spotChange == null ? null : spotChange >= 0;
 
+  // Implied-move bands — the same four live values the headline already uses,
+  // so the σ view costs no extra request.
+  const impliedMove = useMemo(
+    () => computeImpliedMove({ spot: spotLtp, atmStrike, cePremium: ceLtp, pePremium: peLtp }),
+    [spotLtp, atmStrike, ceLtp, peLtp],
+  );
+
+  useEffect(() => {
+    track("trade", view === "impliedmove" ? "widget_view_implied_move" : "widget_view_straddle");
+  }, [track, view]);
+
+  // Persist the chosen view into the panel params so a saved layout reopens in
+  // the same presentation (and the retired `impliedmove` id keeps its view).
+  const handleViewChange = useCallback((next: ViewMode) => {
+    if (next === view) return;
+    setView(next);
+    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+  }, [panelParams, props.api, view]);
+
   // Stable chart data arrays
   const chartStraddlePoints = useMemo(() => [...straddlePointsRef.current], [chartVersion]);
   const chartSpotPoints     = useMemo(() => [...spotPointsRef.current],     [chartVersion]);
@@ -629,6 +989,24 @@ function StraddleWidget() {
           </div>
 
           <div className="flex-1" />
+
+          {/* View toggle — chart plane vs σ-band plane, one fetch behind both */}
+          <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+            {VIEW_MODES.map((m) => (
+              <button
+                key={m}
+                onClick={() => handleViewChange(m)}
+                className={`px-2 py-0.5 text-xs font-medium transition-colors ${
+                  m === view
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                }`}
+                aria-pressed={m === view}
+              >
+                {VIEW_LABELS[m]}
+              </button>
+            ))}
+          </div>
 
           {atmStrike != null && (
             <span className="px-2 py-0.5 text-xs font-mono tabular-nums font-semibold text-accent bg-accent/10 border border-accent/30 rounded">
@@ -702,7 +1080,8 @@ function StraddleWidget() {
         />
       </div>
 
-      {/* Overlay toggles */}
+      {/* Overlay toggles — chart view only; the σ view has no series to toggle */}
+      {view === "straddle" && (
       <div className="flex-none flex items-center gap-1 px-2 py-1 bg-surface-card border-b border-border-default">
         <span className="text-xs text-text-muted mr-1">Overlay</span>
         {OVERLAYS.map((name) => {
@@ -729,18 +1108,25 @@ function StraddleWidget() {
           );
         })}
       </div>
+      )}
 
-      {/* Chart area */}
+      {/* Body — chart plane or σ-band plane */}
       <div className="flex-1 overflow-hidden relative">
-        {!selectedExpiry && !loading ? (
+        {view === "impliedmove" ? (
+          loading && !chain ? (
+            <LoadingBody />
+          ) : (
+            <ImpliedMovePanel
+              data={impliedMove}
+              expiryLabel={selectedExpiry ? fmtExpiry(selectedExpiry) : ""}
+            />
+          )
+        ) : !selectedExpiry && !loading ? (
           <div className="h-full flex items-center justify-center text-text-muted text-xs">
             Select an expiry to load straddle data
           </div>
         ) : loading && !chain ? (
-          <div className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
-            <RefreshCw size={13} className="animate-spin" />
-            Loading straddle…
-          </div>
+          <LoadingBody />
         ) : !hasChartData ? (
           <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs gap-2">
             <Activity size={20} className="text-accent/40" />

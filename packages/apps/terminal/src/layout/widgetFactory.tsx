@@ -26,7 +26,6 @@ const lazyWidgets = {
   optionchain: lazy(() => import("@/widgets/analysis/OptionChain/OptionChainWidget")),
   oichart: lazy(() => import("@/widgets/analysis/OIChart/OIChartWidget")),
   straddle: lazy(() => import("@/widgets/analysis/Straddle/StraddleWidget")),
-  depth: lazy(() => import("@/widgets/analysis/Depth/DepthWidget")),
   greeks: lazy(() => import("@/widgets/analysis/Greeks/GreeksWidget")),
 
   // Utility widgets
@@ -42,7 +41,6 @@ const lazyWidgets = {
   // New trading widgets
   intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
   mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
-  riskpanel: lazy(() => import("@/widgets/trading/RiskPanel/RiskPanelWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
   positionheatmap: lazy(() => import("@/widgets/trading/PositionHeatMap/PositionHeatMapWidget")),
 
@@ -57,7 +55,6 @@ const lazyWidgets = {
   volsurface: lazy(() => import("@/widgets/analysis/VolSurface/VolSurfaceWidget")),
   ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
   straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
-  oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
   orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
 
   // Utility widgets (new)
@@ -69,10 +66,8 @@ const lazyWidgets = {
   threepanel: lazy(() => import("@/widgets/analysis/ThreePanel/ThreePanelWidget")),
 
   // OI Heatmap
-  oiheatmap: lazy(() => import("@/widgets/analysis/OIHeatmap/OIHeatmapWidget")),
 
   // OI Signals (OI-action classification + unusual OI)
-  oisignals: lazy(() => import("@/widgets/analysis/OISignals/OISignalsWidget")),
 
   // Portfolio Optimiser (mean-variance weights)
   portfoliooptimiser: lazy(() => import("@/widgets/analysis/PortfolioOptimiser/PortfolioOptimiserWidget")),
@@ -128,7 +123,6 @@ const lazyWidgets = {
   sessionstats: lazy(() => import("@/widgets/trading/SessionStats/SessionStatsWidget")),
 
   // Wave 31 widgets
-  impliedmove: lazy(() => import("@/widgets/analysis/ImpliedMove/ImpliedMoveWidget")),
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
   optionsflow: lazy(() => import("@/widgets/analysis/OptionsFlow/OptionsFlowWidget")),
   tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
@@ -247,6 +241,50 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
       + "widget's REAL tick prints already support, so the merge makes them "
       + "real rather than preserving a fabricated surface.",
   },
+  oiprofile: {
+    component: "oichart",
+    params: { view: "butterfly" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  oiheatmap: {
+    component: "oichart",
+    params: { view: "heat" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  oisignals: {
+    component: "oichart",
+    params: { view: "signals" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  depth: {
+    component: "orderladder",
+    // At the NSE tick each broker level lands on its own row, which is what
+    // the retired 5-level depth table looked like.
+    params: { symbol: "NIFTY", exchange: "NSE", tick: 0.05 },
+    note:
+      "Merged into DOM / Ladder. These were a broken split, not duplicates: "
+      + "Depth held the real level-2 book and could not trade, while the "
+      + "ladder could trade but had no depth feed at all and rendered zero "
+      + "resting size in live mode.",
+  },
+  riskpanel: {
+    component: "riskdashboard",
+    note:
+      "Merged into Risk. The two shared exactly one metric — margin "
+      + "utilisation, computed identically but banded 80/95 here and 70/90 "
+      + "there, so an operator with both open saw one account at two risk "
+      + "levels. No params: the merged widget has no view modes.",
+  },
+  impliedmove: {
+    component: "straddle",
+    params: { view: "impliedmove" },
+    note:
+      "Merged into Straddle & Implied Move. It needed only spot, ATM strike "
+      + "and the two ATM premiums — all of which the straddle widget already "
+      + "computed live. Being static was never a data problem. The merge also "
+      + "deletes a silent mislabel where three of its five symbols showed "
+      + "another index's numbers.",
+  },
   footprint: {
     component: "orderflow",
     params: { view: "footprint+delta" },
@@ -273,7 +311,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "orderpad", name: "Order Pad", icon: "FileEdit", category: "Trading", description: "Full-featured order entry form with limit, market, and bracket orders" },
   { id: "intradaypnl", name: "Intraday P&L", icon: "TrendingUp", category: "Trading", description: "Intraday profit and loss chart updated tick by tick" },
   { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading", description: "Mark-to-market monitor with target and stop-loss level alerts" },
-  { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading", description: "Real-time risk metrics: max drawdown, margin used, and exposure limits" },
   { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "One-click emergency actions: exit all, cancel all, flatten book" },
   { id: "positionheatmap", name: "Position Heat Map", icon: "SquareStack", category: "Trading", description: "Heat map of current positions coloured by unrealised P&L" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
@@ -281,12 +318,12 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading", description: "Minimal order ticket for fast order placement without leaving the chart" },
   { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading", description: "Key statistics for the current trading session: trades, win rate, turnover" },
-  { id: "riskdashboard", name: "Risk Dashboard", icon: "ShieldAlert", category: "Trading", description: "Account risk dashboard for margin, drawdown, leverage, position count, and exposure" },
+  { id: "riskdashboard", name: "Risk", icon: "ShieldAlert", category: "Trading", description: "Margin utilisation gauge with exposure, open positions and available cash, plus daily MTM against your local target and stop-loss references" },
   { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading", description: "Annotated trade journal with entry/exit reasons and screenshots" },
   { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading", description: "Performance analytics: expectancy, Sharpe ratio, and streak analysis" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
   { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading", description: "Aggregated net position across all accounts for a given instrument" },
-  { id: "orderladder", name: "Order Ladder", icon: "ArrowUpDown", category: "Trading", description: "Ladder-style DOM view for rapid limit order placement and cancellation" },
+  { id: "orderladder", name: "DOM / Ladder", icon: "ArrowUpDown", category: "Trading", description: "Level-2 book and order ladder in one surface — real resting bid/ask sizes and order counts on the rows you click to place and cancel limit orders through the safety gate" },
   { id: "foreverorders", name: "Forever (GTT) Orders", icon: "Clock", category: "Trading", description: "Place and manage forever/GTT orders incl. OCO legs and validity — native brokers only" },
   { id: "superorders", name: "Super Orders", icon: "Target", category: "Trading", description: "Bracket-style super orders with leg-aware modify and cancel — native brokers only" },
   { id: "conditionaltriggers", name: "Conditional Triggers", icon: "Zap", category: "Trading", description: "Condition-based trigger orders: place, modify and cancel market-condition alerts that fire orders" },
@@ -296,9 +333,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "chartgrid", name: "Multi Chart", icon: "LayoutGrid", category: "Analysis", description: "1×1, 1×2, 2×1, or 2×2 grid of independent charts with per-cell symbol and interval" },
   { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis", description: "Live option chain with strike-level OI, volume, IV, and Greek data" },
   { id: "historicalchain", name: "Historical Chain", icon: "Archive", category: "Analysis", description: "Browse archived (expired) option chains — strike-level OI, volume, LTP, and IV per past expiry" },
-  { id: "oichart", name: "OI Chart", icon: "BarChart3", category: "Analysis", description: "Open interest change chart across strikes for a selected expiry" },
-  { id: "straddle", name: "Straddle", icon: "Activity", category: "Analysis", description: "Straddle and strangle builder with premium, breakeven, and IV display" },
-  { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 bid/ask depth from the active broker snapshot feed" },
+  { id: "oichart", name: "OI Analytics", icon: "BarChart3", category: "Analysis", description: "Open interest across strikes for an expiry — grouped bars, a CE/PE butterfly profile, a strike heat grid, or per-strike build-up and unwinding signals, all from one chain read" },
+  { id: "straddle", name: "Straddle & Implied Move", icon: "Activity", category: "Analysis", description: "Live ATM straddle price with spot and synthetic-future overlays, plus the implied-move range (±1σ ≈ 68%, ±2σ ≈ 95%) derived from the same chain" },
   { id: "greeks", name: "Greeks", icon: "Sigma", category: "Analysis", description: "Position-level Delta, Gamma, Theta, and Vega summary" },
   { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis", description: "Colour-coded sector tree map showing intraday performance by industry" },
   { id: "fiilongshort", name: "FII Long/Short", icon: "TrendingUp", category: "Analysis", description: "FII long/short positioning across F&O segments with an aggregate futures directional bias, derived from NSE participant OI" },
@@ -310,11 +346,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis", description: "3-D implied volatility surface across strikes and expiries" },
   { id: "ivsmile", name: "IV Smile & Skew", icon: "TrendingUp", category: "Analysis", description: "Implied volatility across strikes for the nearest expiries, as the call/put smile curves or the 25-delta put-minus-call skew" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis", description: "Payoff diagram for straddle positions with breakeven markers" },
-  { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis", description: "OI distribution profile across strikes to identify congestion zones" },
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis", description: "Real-time buy/sell order flow footprint for active F&O contracts" },
   { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis", description: "Three synchronised chart panels for multi-instrument comparison" },
-  { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis", description: "Heat map of open interest changes across strikes and expiries" },
-  { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
   { id: "portfoliooptimiser", name: "Portfolio Optimiser", icon: "PieChart", category: "Analysis", description: "Mean-variance (Markowitz) optimal weights for a basket, with expected return / volatility / Sharpe" },
   { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
@@ -329,7 +362,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis", description: "Vertical options spread calculator with illustrative expiry payoff and risk metrics" },
   { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Historical gap statistics showing fill probability and average size" },
-  { id: "impliedmove", name: "Implied Move", icon: "MoveHorizontal", category: "Analysis", description: "Expected move range derived from ATM straddle premium for current expiry" },
   { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Real-time large options trade scanner showing unusual activity" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },

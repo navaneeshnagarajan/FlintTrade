@@ -1,112 +1,187 @@
 /**
- * OIChartWidget — Open Interest Plotly grouped bar chart for FlintTrade terminal.
+ * OIChartWidget — "OI Analytics", the canonical open-interest surface.
  *
- * Features:
- *   - Symbol selector (NIFTY / BANKNIFTY / FINNIFTY / MIDCPNIFTY / SENSEX) + Exchange
- *   - Expiry selector (first 5 expiries as buttons)
- *   - Plotly grouped bar chart: Call OI bars (red), Put OI bars (green)
- *   - PCR overlay line on secondary y-axis (per-strike PCR, dotted blue line)
- *   - ATM strike vertical dashed line (yellow)
- *   - Max Pain vertical dashed line (purple)
- *   - PCR badge in header showing overall Put-Call ratio
- *   - Filter buttons: All | OI Increase | OI Decrease
- *   - Support/Resistance labels at max OI strikes
- *   - Auto-refresh: 5s market hours, 30s off-market
+ * FOUR presentations of ONE option-chain snapshot, chosen by the Dockview panel
+ * parameter `params.view`:
+ *   • "bars" (default) — Plotly grouped CE/PE OI bars by strike with the
+ *     per-strike PCR overlay, ATM and max-pain rules.
+ *   • "butterfly"      — the retired OI Profile widget's horizontal profile:
+ *     CE OI extending right, PE OI extending left, ATM line and a max-pain
+ *     arrow annotation, with the optional spot candlestick pane above it.
+ *   • "heat"           — the retired OI Heatmap widget's CE/PE strike grid with
+ *     per-cell hover readout and the colour legend.
+ *   • "signals"        — the retired OI Signals widget's per-strike
+ *     LB/SC/SB/LU table plus the z-score unusual-OI chips.
+ *
+ * WHY THEY ARE ONE WIDGET. All four answer the same question — where open
+ * interest is concentrated across strikes right now. The bar chart and the heat
+ * grid called the SAME two endpoints (`getOptionChain` + `getExpiry`) and each
+ * re-derived the ATM window, the max-OI strikes and the PCR independently, with
+ * different window sizes and — worse — different ΔOI sources. The OI Profile
+ * endpoint is itself built from the same broker chain snapshot server-side.
+ *
+ * ONE FETCH, ONE SHAPE. The chain is normalised once into `StrikeCell[]`
+ * (`oiStrikes.ts`) and every chain view renders from that array, so no two
+ * views can disagree about a strike. ΔOI comes from the backend's `oi_change`
+ * field alone; the bar chart's client-side diffing of successive poll snapshots
+ * is deleted, because it measured the gap between two arbitrary client fetches
+ * rather than the session change the broker reports — and it was the reason two
+ * panels on one screen could show opposite arrows for one strike.
+ *
+ * The signals view keeps its OWN two endpoints (`/v1/oi/analysis` and
+ * `/v1/oi/unusual`) because they are real server-side analytics, not a redraw
+ * of the chain — but it now shares this widget's symbol, exchange and expiry
+ * selection and its refresh cadence. It previously hard-coded exchange NFO and
+ * sent an EMPTY expiry, which the backend rejects as a live-chain identity, so
+ * its "Live" state was unreachable; and it had no refresh interval at all, so
+ * it was frozen from mount.
+ *
+ * DATA HONESTY.
+ *   - "Sample data" provenance badge whenever the chain plane is not live:
+ *     no broker connected, or Explore mode (where `services/api` serves a mock
+ *     chain while a broker still reads as connected).
+ *   - The signals view carries the tri-state Live / Mixed data / Sample data
+ *     badge, which requires an explicit `is_sample_data: false` from BOTH
+ *     analytics responses before it will say Live — and is forced to "sample"
+ *     whenever the chain plane is sample, so one header can never claim two
+ *     different provenances.
+ *   - Max pain is drawn only when `getMaxPain` explicitly attests
+ *     `is_sample_data: false` and the visible chain has positive OI.
+ *   - A missing figure renders as "--", never as 0.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
-import { RefreshCw, ChevronDown, AlertCircle } from "lucide-react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { AlertCircle, Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
+import type { IDockviewPanelProps } from "dockview-react";
+import { useQuery } from "@tanstack/react-query";
 import { getExpiry, getOptionChain, getQuotes, getMaxPain } from "@/services/api";
+import {
+  getOIChangeAnalysis,
+  getUnusualOI,
+  type OIChangeSignalRow,
+} from "@/services/ftApi";
 import type { Quote } from "@/types/api";
+import type { RawOptionChain } from "@/widgets/analysis/OptionChain/types";
+import { SYMBOLS } from "@/widgets/analysis/OptionChain/types";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
+import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  buildStrikeCells,
+  chainHasPositiveOi,
+  filterStrikeCells,
+  positiveFiniteNumber,
+  strikePcr,
+  summariseStrikeCells,
+  OI_FILTERS,
+  type OIFilter,
+  type StrikeCell,
+} from "./oiStrikes";
+import { SAMPLE_ATM, SAMPLE_MAX_PAIN, SAMPLE_STRIKE_CELLS } from "./sampleData";
+import { SAMPLE_ANALYSIS, SAMPLE_UNUSUAL } from "./oiSignalsSample";
+import { SPOT_INTERVALS, type SpotInterval } from "./spotIntervals";
 import type { Data, Layout } from "plotly.js";
 
 const PlotlyChart = lazy(() =>
   import("@/components/charts/PlotlyChart").then((m) => ({ default: m.PlotlyChart }))
 );
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface SymbolDef {
-  label: string;
-  exchange: string;
-  spotSymbol: string;
-  spotExchange: string;
-}
-
-type FilterType = "All" | "OI Increase" | "OI Decrease";
-
-interface RawOptionRow {
-  strike_price?: number;
-  strike?: number;
-  oi?: number;
-  open_interest?: number;
-}
-
-interface RawOptionChainEntry {
-  strike?: number;
-  ce?: RawOptionRow | null;
-  pe?: RawOptionRow | null;
-}
-
-interface RawOptionChain {
-  chain?: RawOptionChainEntry[];
-  calls?: RawOptionRow[];
-  puts?: RawOptionRow[];
-  atm_strike?: number;
-  underlying_ltp?: number;
-  pcr?: number | null;
-}
-
-interface OIRowData {
-  strike: number;
-  callOI: number | null;
-  putOI: number | null;
-  callOIChange: number | null;
-  putOIChange: number | null;
-}
+// The spot candlestick strip pulls lightweight-charts; keep it out of the
+// chunk for the panels that never open it.
+const SpotPricePane = lazy(() =>
+  import("./SpotPricePane").then((m) => ({ default: m.SpotPricePane }))
+);
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const SYMBOLS: SymbolDef[] = [
-  { label: "NIFTY",      exchange: "NFO", spotSymbol: "NIFTY",      spotExchange: "NSE_INDEX" },
-  { label: "BANKNIFTY",  exchange: "NFO", spotSymbol: "BANKNIFTY",  spotExchange: "NSE_INDEX" },
-  { label: "FINNIFTY",   exchange: "NFO", spotSymbol: "FINNIFTY",   spotExchange: "NSE_INDEX" },
-  { label: "MIDCPNIFTY", exchange: "NFO", spotSymbol: "MIDCPNIFTY", spotExchange: "NSE_INDEX" },
-  { label: "SENSEX",     exchange: "BFO", spotSymbol: "SENSEX",     spotExchange: "BSE_INDEX" },
-];
-
-const FILTERS: FilterType[] = ["All", "OI Increase", "OI Decrease"];
+/**
+ * ONE ATM window for every view. The canonical bar chart's ±15 wins over the
+ * heat grid's ±10: two views over one snapshot must aggregate the same rows, or
+ * their PCR badges and support/resistance chips silently disagree. The heat
+ * grid scrolls horizontally at this width.
+ */
 const STRIKES_AROUND_ATM = 15;
 
+/** Underlyings, and their F&O + spot exchanges, from the canonical table. */
+const SYMBOL_CHOICES = SYMBOLS;
+
+type ViewMode = "bars" | "butterfly" | "heat" | "signals";
+
+const VIEW_MODES: readonly ViewMode[] = ["bars", "butterfly", "heat", "signals"];
+
+const VIEW_LABELS: Record<ViewMode, string> = {
+  bars: "Bars",
+  butterfly: "Butterfly",
+  heat: "Heat",
+  signals: "Signals",
+};
+
+function isViewMode(value: unknown): value is ViewMode {
+  return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
+}
+
+/** Resolves the Dockview `params.view` panel parameter, defaulting to bars. */
+function resolveViewMode(value: unknown): ViewMode {
+  return isViewMode(value) ? value : "bars";
+}
+
+type PriceDir = "up" | "down" | "flat";
+
+const PRICE_DIRS: { value: PriceDir; label: string }[] = [
+  { value: "up", label: "Price ↑" },
+  { value: "flat", label: "Price → " },
+  { value: "down", label: "Price ↓" },
+];
+
+/** Signal short-code → Tailwind colour + bullish/bearish lean. */
+const SIGNAL_STYLE: Record<string, { cls: string; lean: string }> = {
+  LB: { cls: "text-profit border-profit/40 bg-profit/10", lean: "bullish" },
+  SC: { cls: "text-profit border-profit/30 bg-profit/5", lean: "bullish" },
+  SB: { cls: "text-loss border-loss/40 bg-loss/10", lean: "bearish" },
+  LU: { cls: "text-loss border-loss/30 bg-loss/5", lean: "bearish" },
+  OA: { cls: "text-warning border-warning/30 bg-warning/10", lean: "neutral" },
+  OR: { cls: "text-warning border-warning/30 bg-warning/5", lean: "neutral" },
+  N: { cls: "text-text-muted border-border-default", lean: "neutral" },
+};
+
 // ---------------------------------------------------------------------------
-// Helpers
+// Formatting
 // ---------------------------------------------------------------------------
 
 const NUM0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
-function optionOI(row: RawOptionRow | null | undefined): number | null {
-  const raw = row?.oi ?? row?.open_interest;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || !Number.isInteger(raw) || raw < 0) return null;
-  return raw;
+/** Compact Indian-notation OI for cells, tooltips and signal rows. */
+function fmtOi(v: number): string {
+  if (Math.abs(v) >= 1_00_00_000) return `${(v / 1_00_00_000).toFixed(1)}Cr`;
+  if (Math.abs(v) >= 1_00_000) return `${(v / 1_00_000).toFixed(1)}L`;
+  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
 }
 
-function positiveFiniteNumber(value: unknown): number | null {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+/** Signal-table ΔOI keeps two decimals at crore scale. */
+function fmtSignalOi(v: number): string {
+  if (Math.abs(v) >= 1_00_00_000) return `${(v / 1_00_00_000).toFixed(2)}Cr`;
+  if (Math.abs(v) >= 1_00_000) return `${(v / 1_00_000).toFixed(1)}L`;
+  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(v);
 }
 
-export function getOIChange(current: number, previous: number | undefined): number | null {
-  return Number.isFinite(current) && previous !== undefined && Number.isFinite(previous)
-    ? current - previous
-    : null;
+/** Footer totals — "--" when the side is incomplete, never a partial sum. */
+function fmtTotalOi(total: number | null): string {
+  if (total === null) return "--";
+  if (total >= 1e7) return `${(total / 1e7).toFixed(1)}Cr`;
+  if (total >= 1e5) return `${(total / 1e5).toFixed(1)}L`;
+  return NUM0.format(total);
 }
 
 function fmtExpiry(raw: string): string {
@@ -120,151 +195,204 @@ function fmtExpiry(raw: string): string {
   }
 }
 
-function optionLegWithStrike(row: RawOptionRow | null | undefined, strike: unknown): RawOptionRow | null {
-  if (!row) return null;
-  const strikeValue = positiveFiniteNumber(row.strike_price ?? row.strike ?? strike);
-  if (strikeValue === null) return null;
-  return { ...row, strike: strikeValue, strike_price: strikeValue };
+function signalStyle(short: string) {
+  return SIGNAL_STYLE[short] ?? SIGNAL_STYLE.N;
 }
 
-function chainCalls(chain: RawOptionChain): RawOptionRow[] {
-  if (chain.chain?.length) {
-    return chain.chain.flatMap((entry) => {
-      const row = optionLegWithStrike(entry.ce, entry.strike);
-      return row ? [row] : [];
-    });
-  }
-  return (chain.calls ?? []).flatMap((row) => {
-    const normalised = optionLegWithStrike(row, undefined);
-    return normalised ? [normalised] : [];
-  });
-}
-
-function chainPuts(chain: RawOptionChain): RawOptionRow[] {
-  if (chain.chain?.length) {
-    return chain.chain.flatMap((entry) => {
-      const row = optionLegWithStrike(entry.pe, entry.strike);
-      return row ? [row] : [];
-    });
-  }
-  return (chain.puts ?? []).flatMap((row) => {
-    const normalised = optionLegWithStrike(row, undefined);
-    return normalised ? [normalised] : [];
-  });
-}
-
-function chainHasPositiveOI(chain: RawOptionChain): boolean {
-  return [...chainCalls(chain), ...chainPuts(chain)].some((row) => {
-    const oi = optionOI(row);
-    return oi !== null && oi > 0;
-  });
+/** Poll cadence shared by the chain snapshot and the derived OI analytics. */
+function refreshIntervalMs(): number {
+  return isMarketHours() ? 5_000 : 30_000;
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Heat-grid colour ramps
 // ---------------------------------------------------------------------------
 
-interface SelectorProps {
-  value: string;
-  options: string[];
-  onChange: (val: string) => void;
-  className?: string;
+/** Map a 0–1 intensity to an RGBA string for CE (indigo/accent) cells. */
+function ceColour(intensity: number): string {
+  const r = Math.round(22 + (99 - 22) * intensity);
+  const g = Math.round(22 + (102 - 22) * intensity);
+  const b = Math.round(31 + (241 - 31) * intensity);
+  return `rgba(${r},${g},${b},${0.15 + 0.8 * intensity})`;
 }
 
-function Selector({ value, options, onChange, className = "" }: SelectorProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+/** Map a 0–1 intensity to an RGBA string for PE (red/loss) cells. */
+function peColour(intensity: number): string {
+  const r = Math.round(22 + (239 - 22) * intensity);
+  const g = Math.round(22 + (68 - 22) * intensity);
+  const b = Math.round(31 + (68 - 31) * intensity);
+  return `rgba(${r},${g},${b},${0.15 + 0.8 * intensity})`;
+}
 
-  useEffect(() => {
-    function onOut(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onOut);
-    return () => document.removeEventListener("mousedown", onOut);
-  }, []);
+/** Read a CSS custom property from the document root at call time. */
+function getThemeColor(varName: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+}
 
+// ---------------------------------------------------------------------------
+// Heat-grid sub-components
+// ---------------------------------------------------------------------------
+
+interface TooltipState {
+  visible: boolean;
+  x: number;
+  y: number;
+  strike: number;
+  optionType: "CE" | "PE";
+  oi: number | null;
+  oiChange: number | null;
+  volume: number | null;
+  pcr: number | null;
+}
+
+interface CellProps {
+  colour: string;
+  oi: number | null;
+  oiChange: number | null;
+  isATM: boolean;
+  isMaxOI: boolean;
+  onMouseEnter: (e: ReactMouseEvent<HTMLDivElement>) => void;
+  onMouseLeave: () => void;
+}
+
+function HeatmapCell({ colour, oi, oiChange, isATM, isMaxOI, onMouseEnter, onMouseLeave }: CellProps) {
   return (
-    <div ref={ref} className={`relative ${className}`}>
-      <button
-        onClick={() => setOpen((p) => !p)}
-        className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-text-primary bg-surface-hover border border-border-default rounded hover:border-accent/50 transition-colors"
-      >
-        {value}
-        <ChevronDown size={10} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-0.5 z-50 bg-surface-card border border-border-default rounded shadow-lg min-w-full">
-          {options.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => { onChange(opt); setOpen(false); }}
-              className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover transition-colors ${
-                opt === value ? "text-accent" : "text-text-primary"
-              }`}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
+    <div
+      className={`relative flex flex-col items-center justify-center h-full cursor-default select-none transition-opacity hover:opacity-90 ${
+        isATM ? "ring-1 ring-inset ring-accent/70" : ""
+      } ${isMaxOI ? "ring-1 ring-inset ring-warning/60" : ""}`}
+      style={{ backgroundColor: colour }}
+      data-max-oi={isMaxOI ? "true" : undefined}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      <span className="text-xxs font-mono text-text-primary/90 leading-none tabular-nums">
+        {oi === null ? "--" : fmtOi(oi)}
+      </span>
+      {oiChange !== null && oiChange !== 0 && (
+        <span className={`mt-0.5 ${oiChange > 0 ? "text-profit" : "text-loss"}`}>
+          {oiChange > 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
+        </span>
       )}
     </div>
   );
+}
+
+function ColourLegend() {
+  const stops = Array.from({ length: 5 }, (_, i) => i / 4);
+  return (
+    <div className="flex-none flex items-center gap-4 px-3 py-1.5 border-t border-border-default text-xs text-text-muted flex-wrap">
+      <div className="flex items-center gap-1.5">
+        <span className="uppercase tracking-wide text-xxs">CE</span>
+        <div className="flex h-3 rounded overflow-hidden" style={{ width: 80 }}>
+          {stops.map((v, i) => (
+            <div key={i} className="flex-1" style={{ backgroundColor: ceColour(v) }} />
+          ))}
+        </div>
+        <span className="text-xxs">Low → High</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="uppercase tracking-wide text-xxs">PE</span>
+        <div className="flex h-3 rounded overflow-hidden" style={{ width: 80 }}>
+          {stops.map((v, i) => (
+            <div key={i} className="flex-1" style={{ backgroundColor: peColour(v) }} />
+          ))}
+        </div>
+        <span className="text-xxs">Low → High</span>
+      </div>
+      <div className="flex items-center gap-2 ml-auto text-xxs">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2.5 h-2.5 ring-1 ring-accent/70 rounded-sm" />
+          ATM
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2.5 h-2.5 ring-1 ring-warning/60 rounded-sm" />
+          Max OI
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Panel params
+// ---------------------------------------------------------------------------
+
+interface OIAnalyticsPanelParams {
+  /** Initial view — how the three retired ids select their old presentation. */
+  view?: string;
+  /** Whether the spot candlestick strip opens with the panel. */
+  price?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
-function OIChartWidget() {
+function OIChartWidget(props: IDockviewPanelProps) {
+  const panelParams = props.params as OIAnalyticsPanelParams | undefined;
+  const initialView = resolveViewMode(panelParams?.view);
+
+  const isConnected = useBrokerConnected();
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const [activeSymbolIdx, setActiveSymbolIdx] = useState(0);
+
+  const [view, setView] = useState<ViewMode>(initialView);
+  // The retired OI Profile widget always showed its price strip, so a panel
+  // that opens on the butterfly view keeps it unless the params say otherwise.
+  const [showPrice, setShowPrice] = useState<boolean>(
+    typeof panelParams?.price === "boolean" ? panelParams.price : initialView === "butterfly",
+  );
+  const [spotInterval, setSpotInterval] = useState<SpotInterval>("15m");
+
+  const [symbolIdx, setSymbolIdx] = useState(0);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiryValue, setSelectedExpiry] = useState<string | null>(null);
   const [expiryIdentity, setExpiryIdentity] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterType>("All");
+  const [filter, setFilter] = useState<OIFilter>("All");
+  const [priceDir, setPriceDir] = useState<PriceDir>("flat");
 
-  const [chain, setChain]     = useState<RawOptionChain | null>(null);
-  const [spot, setSpot]       = useState<Quote | null>(null);
+  const [chain, setChain] = useState<RawOptionChain | null>(null);
+  const [spot, setSpot] = useState<Quote | null>(null);
   const [maxPainStrike, setMaxPainStrike] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [previousOI, setPreviousOI] = useState<Record<string, number>>({});
+  const [tooltip, setTooltip] = useState<TooltipState>({
+    visible: false, x: 0, y: 0, strike: 0, optionType: "CE",
+    oi: null, oiChange: null, volume: null, pcr: null,
+  });
 
-  const prevOIRef = useRef<Record<string, number>>({});
-  const prevOIKeyRef = useRef<string | null>(null);
-  const fetchRequestRef = useRef(0);
-  const inFlightRequestKeysRef = useRef(new Map<string, number>());
-  const maxPainRequestRef = useRef(0);
-  const maxPainInFlightRequestKeysRef = useRef(new Map<string, number>());
+  const gridRef = useRef<HTMLDivElement>(null);
 
-  const symDef   = SYMBOLS[activeSymbolIdx];
+  const symDef = SYMBOL_CHOICES[symbolIdx];
   const exchange = symDef.exchange;
-  const identityKey = `${symDef.label}:${exchange}`;
+  // A broker connection change swaps the data source, so it is part of the
+  // identity a response has to still match.
+  const identityKey = `${isConnected}:${symDef.label}:${exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
   const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
   const requestKey = `${identityKey}:${selectedExpiry ?? ""}`;
-  const activeRequestKeyRef = useRef(requestKey);
-  activeRequestKeyRef.current = requestKey;
 
+  // Two independent guards over one identity: max pain deliberately polls on
+  // its own 60 s clock and must not consume the chain loop's in-flight slot.
+  const chainRequests = useLatestRequest(requestKey);
+  const maxPainRequests = useLatestRequest(requestKey);
+
+  // Clear every displayed value the moment the identity changes, so nothing
+  // from the previous contract survives on screen while the next load runs.
   useEffect(() => {
-    fetchRequestRef.current += 1;
-    maxPainRequestRef.current += 1;
     setChain(null);
     setSpot(null);
     setMaxPainStrike(null);
     setLoading(false);
     setError(null);
     setLastRefresh(null);
-    setPreviousOI({});
-    prevOIRef.current = {};
-    prevOIKeyRef.current = null;
+    setTooltip((current) => ({ ...current, visible: false }));
   }, [requestKey]);
 
-  // fetch expiries
+  // ---- Expiries ------------------------------------------------------------
   useEffect(() => {
-    fetchRequestRef.current += 1;
     setExpiries([]);
     setSelectedExpiry(null);
     setExpiryIdentity(null);
@@ -274,9 +402,7 @@ function OIChartWidget() {
     setLoading(false);
     setError(null);
     setLastRefresh(null);
-    setPreviousOI({});
-    prevOIRef.current = {};
-    prevOIKeyRef.current = null;
+    if (!isConnected) return;
 
     let cancelled = false;
     (async () => {
@@ -300,16 +426,13 @@ function OIChartWidget() {
     })();
 
     return () => { cancelled = true; };
-  }, [activeSymbolIdx, identityKey, symDef.label, exchange]);
+  }, [identityKey, symDef.label, exchange, isConnected]);
 
-  // Fetch chain and spot at the market-data cadence.
+  // ---- Chain + spot --------------------------------------------------------
   const fetchData = useCallback(async () => {
-    if (!selectedExpiry) return;
-    const fetchKey = `${symDef.label}:${exchange}:${selectedExpiry}`;
-    const inFlightRequestId = inFlightRequestKeysRef.current.get(fetchKey);
-    if (inFlightRequestId === fetchRequestRef.current) return;
-    const requestId = ++fetchRequestRef.current;
-    inFlightRequestKeysRef.current.set(fetchKey, requestId);
+    if (!isConnected || !selectedExpiry) return;
+    const ticket = chainRequests.begin(requestKey);
+    if (!ticket) return;
     setLoading(true);
     setError(null);
 
@@ -319,233 +442,208 @@ function OIChartWidget() {
         getQuotes(symDef.spotSymbol, symDef.spotExchange),
       ]);
 
-      if (
-        requestId !== fetchRequestRef.current
-        || fetchKey !== activeRequestKeyRef.current
-      ) return;
+      if (!ticket.isCurrent()) return;
 
       if (chainRes.status === "fulfilled") {
-        const newChain = chainRes.value as unknown as RawOptionChain;
-        const snapshot: Record<string, number> = {};
-        chainCalls(newChain).forEach((c) => {
-          const k = `${c.strike_price ?? c.strike}_CE`;
-          const oi = optionOI(c);
-          if (oi !== null) snapshot[k] = oi;
-        });
-        chainPuts(newChain).forEach((p) => {
-          const k = `${p.strike_price ?? p.strike}_PE`;
-          const oi = optionOI(p);
-          if (oi !== null) snapshot[k] = oi;
-        });
-        const snapshotKey = `${symDef.label}:${exchange}:${selectedExpiry}`;
-        setPreviousOI(prevOIKeyRef.current === snapshotKey ? prevOIRef.current : {});
-        prevOIRef.current = snapshot;
-        prevOIKeyRef.current = snapshotKey;
-        setChain(newChain);
+        setChain(chainRes.value as unknown as RawOptionChain);
       } else {
         setChain(null);
         setError(`Chain error: ${(chainRes.reason as Error)?.message}`);
       }
 
-      if (spotRes.status === "fulfilled") {
-        setSpot(spotRes.value);
-      } else {
-        setSpot(null);
-      }
-
+      setSpot(spotRes.status === "fulfilled" ? spotRes.value : null);
     } finally {
-      if (inFlightRequestKeysRef.current.get(fetchKey) === requestId) {
-        inFlightRequestKeysRef.current.delete(fetchKey);
-      }
-      if (
-        requestId === fetchRequestRef.current
-        && fetchKey === activeRequestKeyRef.current
-      ) {
+      if (ticket.settle()) {
         setLoading(false);
         setLastRefresh(new Date());
       }
     }
-  }, [selectedExpiry, symDef.label, symDef.spotExchange, symDef.spotSymbol, exchange]);
+  }, [
+    chainRequests, requestKey, isConnected, selectedExpiry,
+    symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange,
+  ]);
 
-  // auto-refresh
   useEffect(() => {
-    if (!selectedExpiry) return;
+    if (!isConnected || !selectedExpiry) return;
     void fetchData();
-    const interval = isMarketHours() ? 5000 : 30000;
-    const id = setInterval(() => void fetchData(), interval);
+    const id = setInterval(() => void fetchData(), refreshIntervalMs());
     return () => {
       clearInterval(id);
-      fetchRequestRef.current += 1;
+      chainRequests.invalidate();
     };
-  }, [fetchData]);
+  }, [chainRequests, fetchData, isConnected, selectedExpiry]);
 
-  // Max Pain is intentionally independent of the faster chain loop.
+  // ---- Max pain (independent 60 s clock) -----------------------------------
   const fetchMaxPain = useCallback(async () => {
-    if (!selectedExpiry) return;
-    const fetchKey = `${symDef.label}:${exchange}:${selectedExpiry}`;
-    const inFlightRequestId = maxPainInFlightRequestKeysRef.current.get(fetchKey);
-    if (inFlightRequestId === maxPainRequestRef.current) return;
-
-    const requestId = ++maxPainRequestRef.current;
-    maxPainInFlightRequestKeysRef.current.set(fetchKey, requestId);
+    if (!isConnected || !selectedExpiry) return;
+    const ticket = maxPainRequests.begin(requestKey);
+    if (!ticket) return;
     setMaxPainStrike(null);
     try {
       const data = await getMaxPain(symDef.label, exchange, selectedExpiry);
-      if (requestId !== maxPainRequestRef.current || fetchKey !== activeRequestKeyRef.current) return;
-      const strike = data.is_sample_data === false
-        && typeof data.max_pain_strike === "number"
-        && Number.isFinite(data.max_pain_strike)
-        && data.max_pain_strike > 0
-        ? data.max_pain_strike
-        : null;
-      setMaxPainStrike(strike);
+      if (!ticket.isCurrent()) return;
+      // Fail closed: a max pain that is not explicitly attested live is not
+      // drawn at all, rather than drawn as if it were the real level.
+      setMaxPainStrike(
+        data.is_sample_data === false
+          && typeof data.max_pain_strike === "number"
+          && Number.isFinite(data.max_pain_strike)
+          && data.max_pain_strike > 0
+          ? data.max_pain_strike
+          : null,
+      );
     } catch {
-      if (requestId === maxPainRequestRef.current && fetchKey === activeRequestKeyRef.current) {
-        setMaxPainStrike(null);
-      }
+      if (ticket.isCurrent()) setMaxPainStrike(null);
     } finally {
-      if (maxPainInFlightRequestKeysRef.current.get(fetchKey) === requestId) {
-        maxPainInFlightRequestKeysRef.current.delete(fetchKey);
-      }
+      ticket.settle();
     }
-  }, [selectedExpiry, symDef.label, exchange]);
+  }, [maxPainRequests, requestKey, isConnected, selectedExpiry, symDef.label, exchange]);
 
   useEffect(() => {
-    if (!selectedExpiry) return;
+    if (!isConnected || !selectedExpiry) return;
     void fetchMaxPain();
     const id = setInterval(() => void fetchMaxPain(), 60_000);
     return () => {
       clearInterval(id);
-      maxPainRequestRef.current += 1;
+      maxPainRequests.invalidate();
     };
-  }, [fetchMaxPain, selectedExpiry]);
+  }, [fetchMaxPain, maxPainRequests, isConnected, selectedExpiry]);
 
-  // computed strike rows
-  const { rows, atmStrike, totalCallOI, totalPutOI, pcr, maxCallStrike, maxPutStrike } = useMemo(() => {
-    if (!chain) {
-      return {
-        rows: [] as OIRowData[],
-        atmStrike: null as number | null,
-        totalCallOI: null as number | null,
-        totalPutOI: null as number | null,
-        pcr: null as number | null,
-        maxCallStrike: null as number | null,
-        maxPutStrike: null as number | null,
-      };
+  // ---- Signals analytics (its own endpoints, this widget's selection) -------
+  // Never fire with an empty expiry: the backend cannot resolve a live chain
+  // without one, so it would answer with a sample and the view could never be
+  // Live. That is exactly the bug the retired widget shipped with.
+  const signalsExpiry = selectedExpiry ?? "";
+  const signalsEnabled = isConnected && view === "signals" && signalsExpiry !== "";
+  const analysisQuery = useQuery({
+    queryKey: ["oiAnalysis", symDef.label, exchange, signalsExpiry, priceDir],
+    queryFn: () => getOIChangeAnalysis(symDef.label, exchange, signalsExpiry, priceDir),
+    enabled: signalsEnabled,
+    refetchInterval: signalsEnabled ? refreshIntervalMs() : false,
+  });
+  const unusualQuery = useQuery({
+    queryKey: ["oiUnusual", symDef.label, exchange, signalsExpiry],
+    queryFn: () => getUnusualOI(symDef.label, exchange, signalsExpiry),
+    enabled: signalsEnabled,
+    refetchInterval: signalsEnabled ? refreshIntervalMs() : false,
+  });
+
+  // ---- Normalised strike cells --------------------------------------------
+  const spotLtp = positiveFiniteNumber(spot?.ltp);
+
+  const { cells: liveCells, atmStrike: liveAtm } = useMemo(
+    () => buildStrikeCells(
+      chain,
+      spotLtp ?? positiveFiniteNumber(chain?.underlying_ltp),
+      STRIKES_AROUND_ATM,
+    ),
+    [chain, spotLtp],
+  );
+
+  // Explore mode reports a connection while `services/api` serves a mock chain,
+  // so "connected" alone is not evidence of live data.
+  const showingSampleChain = !isConnected || isExplore;
+  const usingSampleCells = !isConnected;
+
+  const allCells = usingSampleCells ? SAMPLE_STRIKE_CELLS : liveCells;
+  const atmStrike = usingSampleCells ? SAMPLE_ATM : liveAtm;
+
+  const rows = useMemo(() => filterStrikeCells(allCells, filter), [allCells, filter]);
+  const summary = useMemo(() => summariseStrikeCells(rows), [rows]);
+
+  const visibleMaxPainStrike = usingSampleCells
+    ? SAMPLE_MAX_PAIN
+    : chain !== null && !loading && !error && chainHasPositiveOi(allCells)
+      ? maxPainStrike
+      : null;
+
+  // ---- Provenance ----------------------------------------------------------
+  const analysisIsLive = isConnected
+    && analysisQuery.isSuccess
+    && analysisQuery.data?.is_sample_data === false;
+  const unusualIsLive = isConnected
+    && unusualQuery.isSuccess
+    && unusualQuery.data?.is_sample_data === false;
+  // The chain plane's provenance caps the signals badge: one header must not
+  // claim "Live" analytics while its own spot/PCR context is a mock chain.
+  const signalsProvenance: "live" | "mixed" | "sample" = showingSampleChain
+    ? "sample"
+    : analysisIsLive && unusualIsLive
+      ? "live"
+      : analysisIsLive || unusualIsLive
+        ? "mixed"
+        : "sample";
+
+  const analysis = analysisQuery.data ?? SAMPLE_ANALYSIS;
+  const unusual = unusualQuery.data ?? SAMPLE_UNUSUAL;
+  const signalRows: OIChangeSignalRow[] = useMemo(
+    () => [...analysis.signals].sort((a, b) => a.strike - b.strike),
+    [analysis],
+  );
+  const signalsFetching = analysisQuery.isFetching || unusualQuery.isFetching;
+
+  // ---- View + params -------------------------------------------------------
+  const handleViewChange = useCallback((next: ViewMode) => {
+    if (next === view) return;
+    setView(next);
+    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+  }, [panelParams, props.api, view]);
+
+  const handlePriceToggle = useCallback(() => {
+    setShowPrice((current) => {
+      const next = !current;
+      props.api.updateParameters({ ...(panelParams ?? {}), price: next });
+      return next;
+    });
+  }, [panelParams, props.api]);
+
+  const handleRefresh = useCallback(() => {
+    void fetchData();
+    if (view === "signals") {
+      void analysisQuery.refetch();
+      void unusualQuery.refetch();
     }
+  }, [analysisQuery, fetchData, unusualQuery, view]);
 
-    const callMap: Record<number, RawOptionRow> = {};
-    const putMap:  Record<number, RawOptionRow> = {};
+  // ---- Tooltip -------------------------------------------------------------
+  const handleCellEnter = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>, cell: StrikeCell, type: "CE" | "PE") => {
+      const rect = gridRef.current?.getBoundingClientRect();
+      setTooltip({
+        visible: true,
+        x: rect ? e.clientX - rect.left : e.clientX,
+        y: rect ? e.clientY - rect.top : e.clientY,
+        strike: cell.strike,
+        optionType: type,
+        oi: type === "CE" ? cell.ceOi : cell.peOi,
+        oiChange: type === "CE" ? cell.ceOiChange : cell.peOiChange,
+        volume: type === "CE" ? cell.ceVolume : cell.peVolume,
+        pcr: strikePcr(cell),
+      });
+    },
+    [],
+  );
 
-    chainCalls(chain).forEach((call) => {
-      const strike = positiveFiniteNumber(call.strike_price ?? call.strike);
-      if (strike !== null) callMap[strike] = call;
-    });
-    chainPuts(chain).forEach((put) => {
-      const strike = positiveFiniteNumber(put.strike_price ?? put.strike);
-      if (strike !== null) putMap[strike] = put;
-    });
+  const handleCellLeave = useCallback(() => {
+    setTooltip((t) => ({ ...t, visible: false }));
+  }, []);
 
-    const allStrikes = Array.from(
-      new Set([...Object.keys(callMap).map(Number), ...Object.keys(putMap).map(Number)])
-    ).sort((a, b) => a - b);
-
-    const spotLtp = positiveFiniteNumber(spot?.ltp)
-      ?? positiveFiniteNumber(chain.underlying_ltp);
-    const atm = spotLtp !== null && allStrikes.length > 0
-      ? allStrikes.reduce((prev, cur) => (
-          Math.abs(cur - spotLtp) < Math.abs(prev - spotLtp) ? cur : prev
-        ))
-      : null;
-
-    const atmIdx = allStrikes.indexOf(atm ?? 0);
-    const lo = Math.max(0, atmIdx - STRIKES_AROUND_ATM);
-    const hi = Math.min(allStrikes.length - 1, atmIdx + STRIKES_AROUND_ATM);
-    const visible = allStrikes.slice(lo, hi + 1);
-
-    const visibleRows: OIRowData[] = visible.map((s) => {
-      const callOIValue = optionOI(callMap[s]);
-      const putOIValue = optionOI(putMap[s]);
-      return {
-        strike: s,
-        callOI: callOIValue,
-        putOI: putOIValue,
-        callOIChange: callOIValue === null ? null : getOIChange(callOIValue, previousOI[`${s}_CE`]),
-        putOIChange: putOIValue === null ? null : getOIChange(putOIValue, previousOI[`${s}_PE`]),
-      };
-    });
-    let rawRows = visibleRows;
-
-    if (filter === "OI Increase") {
-      rawRows = rawRows.filter((r) => (
-        (r.callOIChange !== null && r.callOIChange > 0)
-        || (r.putOIChange !== null && r.putOIChange > 0)
-      ));
-    } else if (filter === "OI Decrease") {
-      rawRows = rawRows.filter((r) => (
-        (r.callOIChange !== null && r.callOIChange < 0)
-        || (r.putOIChange !== null && r.putOIChange < 0)
-      ));
-    }
-
-    const hasCompleteCallOI = rawRows.length > 0 && rawRows.every((row) => row.callOI !== null);
-    const hasCompletePutOI = rawRows.length > 0 && rawRows.every((row) => row.putOI !== null);
-    const totalCallOI = hasCompleteCallOI
-      ? rawRows.reduce((sum, row) => sum + row.callOI!, 0)
-      : null;
-    const totalPutOI = hasCompletePutOI
-      ? rawRows.reduce((sum, row) => sum + row.putOI!, 0)
-      : null;
-    const pcrVal = totalCallOI !== null && totalCallOI > 0 && totalPutOI !== null
-      ? totalPutOI / totalCallOI
-      : null;
-
-    const maxCallRow = hasCompleteCallOI && rawRows.length > 0
-      ? rawRows.reduce((a, b) => b.callOI! > a.callOI! ? b : a)
-      : null;
-    const maxPutRow = hasCompletePutOI && rawRows.length > 0
-      ? rawRows.reduce((a, b) => b.putOI! > a.putOI! ? b : a)
-      : null;
-
-    return {
-      rows: rawRows,
-      atmStrike: atm,
-      totalCallOI,
-      totalPutOI,
-      pcr: pcrVal,
-      maxCallStrike: maxCallRow !== null && maxCallRow.callOI! > 0 ? maxCallRow.strike : null,
-      maxPutStrike: maxPutRow !== null && maxPutRow.putOI! > 0 ? maxPutRow.strike : null,
-    };
-  }, [chain, spot, filter, previousOI]);
-
-  const visibleMaxPainStrike = chain !== null
-    && !loading
-    && !error
-    && chainHasPositiveOI(chain)
-    ? maxPainStrike
-    : null;
-
-  // Plotly data construction
+  // ---- Bars geometry -------------------------------------------------------
   const { plotData, plotLayout } = useMemo<{ plotData: Data[]; plotLayout: Partial<Layout> }>(() => {
-    if (rows.length === 0) return { plotData: [], plotLayout: {} };
+    if (view !== "bars" || rows.length === 0) return { plotData: [], plotLayout: {} };
 
     const strikes = rows.map((r) => r.strike);
-    const ceOI    = rows.map((r) => r.callOI);
-    const peOI    = rows.map((r) => r.putOI);
-
-    // Per-strike PCR for overlay line
-    const pcrPerStrike = rows.map((r) =>
-      r.callOI !== null && r.putOI !== null && r.callOI > 0
-        ? parseFloat((r.putOI / r.callOI).toFixed(3))
-        : null
-    );
+    const pcrPerStrike = rows.map((r) => {
+      const value = strikePcr(r);
+      return value === null ? null : parseFloat(value.toFixed(3));
+    });
 
     const data: Data[] = [
       {
         name: "CE OI",
         type: "bar",
         x: strikes,
-        y: ceOI,
+        y: rows.map((r) => r.ceOi),
         marker: { color: "rgba(239, 68, 68, 0.7)" },
         hovertemplate: "Strike: %{x}<br>CE OI: %{y:,.0f}<extra></extra>",
       },
@@ -553,7 +651,7 @@ function OIChartWidget() {
         name: "PE OI",
         type: "bar",
         x: strikes,
-        y: peOI,
+        y: rows.map((r) => r.peOi),
         marker: { color: "rgba(34, 197, 94, 0.7)" },
         hovertemplate: "Strike: %{x}<br>PE OI: %{y:,.0f}<extra></extra>",
       },
@@ -569,7 +667,6 @@ function OIChartWidget() {
       },
     ];
 
-    // Build shapes and annotations for ATM and Max Pain markers
     const shapes: Partial<Layout>["shapes"] = [];
     const annotations: Partial<Layout>["annotations"] = [];
 
@@ -626,7 +723,7 @@ function OIChartWidget() {
         overlaying: "y",
         side: "right",
         tickfont: { size: 9 },
-        range: [0, Math.max(3, ...pcrPerStrike.filter((value): value is number => value !== null)) * 1.2],
+        range: [0, Math.max(3, ...pcrPerStrike.filter((v): v is number => v !== null)) * 1.2],
         showgrid: false,
       },
       legend: {
@@ -642,43 +739,402 @@ function OIChartWidget() {
     };
 
     return { plotData: data, plotLayout: layout };
-  }, [rows, atmStrike, visibleMaxPainStrike]);
+  }, [view, rows, atmStrike, visibleMaxPainStrike]);
 
-  const spotLtp = positiveFiniteNumber(spot?.ltp);
+  // ---- Butterfly geometry --------------------------------------------------
+  const { butterflyData, butterflyLayout } = useMemo<{
+    butterflyData: Data[];
+    butterflyLayout: Partial<Layout>;
+  }>(() => {
+    if (view !== "butterfly" || rows.length === 0) return { butterflyData: [], butterflyLayout: {} };
+
+    const strikes = rows.map((r) => r.strike);
+    const data: Data[] = [
+      {
+        type: "bar",
+        name: "CE OI",
+        x: rows.map((r) => r.ceOi),
+        y: strikes,
+        orientation: "h",
+        marker: { color: "rgba(239,68,68,0.65)" },
+        hovertemplate: "Strike: %{y}<br>CE OI: %{x:.3s}<extra></extra>",
+      } as Data,
+      {
+        type: "bar",
+        name: "PE OI",
+        // Negative = left of the zero line.
+        x: rows.map((r) => (r.peOi === null ? null : -r.peOi)),
+        y: strikes,
+        orientation: "h",
+        marker: { color: "rgba(34,197,94,0.65)" },
+        hovertemplate: "Strike: %{y}<br>PE OI: %{x:.3s}<extra></extra>",
+      } as Data,
+    ];
+
+    const annotations: Partial<Layout>["annotations"] = [];
+    if (visibleMaxPainStrike != null) {
+      annotations.push({
+        y: visibleMaxPainStrike,
+        x: 0,
+        xref: "x" as const,
+        text: `Max Pain ${visibleMaxPainStrike}`,
+        showarrow: true,
+        arrowhead: 2,
+        arrowcolor: "#f59e0b",
+        font: { size: 9, color: "#f59e0b" },
+        ax: 50,
+        ay: 0,
+      });
+    }
+
+    const shapes: Partial<Layout>["shapes"] = [];
+    if (atmStrike != null) {
+      shapes.push({
+        type: "line",
+        y0: atmStrike,
+        y1: atmStrike,
+        x0: 0,
+        x1: 1,
+        xref: "paper" as const,
+        line: { color: "#6366f1", width: 1, dash: "dash" },
+      });
+    }
+
+    const layout: Partial<Layout> = {
+      barmode: "overlay",
+      xaxis: {
+        title: { text: "Open Interest" },
+        tickformat: ".3s",
+        zeroline: true,
+        zerolinecolor: getThemeColor("--color-border", "#2a2a3a"),
+        zerolinewidth: 1,
+        automargin: true,
+      },
+      yaxis: {
+        title: { text: "Strike", standoff: 6 },
+        tickformat: ",.0f",
+        tickmode: "auto",
+        // Capped so a compact panel does not overlap its strike labels.
+        nticks: 8,
+        automargin: true,
+      },
+      margin: { t: 10, r: 10, b: 45, l: 68 },
+      annotations,
+      shapes,
+    };
+
+    return { butterflyData: data, butterflyLayout: layout };
+  }, [view, rows, atmStrike, visibleMaxPainStrike]);
+
   const expiryButtons = currentExpiries.slice(0, 5);
+  const pcr = summary.pcr;
+  const chartFallback = (
+    <div role="status" className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
+      <RefreshCw size={13} className="animate-spin" aria-hidden="true" />
+      <span className="sr-only">Loading chart...</span>
+      <span aria-hidden="true">Loading chart…</span>
+    </div>
+  );
 
+  // ---- Bodies --------------------------------------------------------------
+  const heatBody = (
+    <div
+      ref={gridRef}
+      data-testid="oi-heat-grid"
+      className="relative flex-1 min-h-0 flex flex-col overflow-auto px-2 py-1.5 gap-1"
+    >
+      <div className="flex gap-px" style={{ minHeight: 52 }}>
+        <div className="flex-none w-7 flex items-center justify-center">
+          <span
+            className="text-xxs text-text-muted rotate-180 font-mono uppercase tracking-wider"
+            style={{ writingMode: "vertical-rl" }}
+          >
+            CE
+          </span>
+        </div>
+        {rows.map((cell) => (
+          <div key={`ce-${cell.strike}`} className="flex-1 min-w-0" style={{ minWidth: 32, height: 52 }}>
+            <HeatmapCell
+              colour={ceColour(cell.ceOi !== null && summary.maxCeOi > 0 ? cell.ceOi / summary.maxCeOi : 0)}
+              oi={cell.ceOi}
+              oiChange={cell.ceOiChange}
+              isATM={cell.strike === atmStrike}
+              isMaxOI={summary.maxCeStrike !== null && cell.strike === summary.maxCeStrike}
+              onMouseEnter={(e) => handleCellEnter(e, cell, "CE")}
+              onMouseLeave={handleCellLeave}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-px">
+        <div className="flex-none w-7" />
+        {rows.map((cell) => (
+          <div key={`lbl-${cell.strike}`} className="flex-1 min-w-0 flex items-center justify-center" style={{ minWidth: 32 }}>
+            <span className={`text-xxs font-mono tabular-nums leading-none ${
+              cell.strike === atmStrike ? "text-accent font-semibold" : "text-text-muted"
+            }`}>
+              {cell.strike}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-px" style={{ minHeight: 52 }}>
+        <div className="flex-none w-7 flex items-center justify-center">
+          <span
+            className="text-xxs text-text-muted rotate-180 font-mono uppercase tracking-wider"
+            style={{ writingMode: "vertical-rl" }}
+          >
+            PE
+          </span>
+        </div>
+        {rows.map((cell) => (
+          <div key={`pe-${cell.strike}`} className="flex-1 min-w-0" style={{ minWidth: 32, height: 52 }}>
+            <HeatmapCell
+              colour={peColour(cell.peOi !== null && summary.maxPeOi > 0 ? cell.peOi / summary.maxPeOi : 0)}
+              oi={cell.peOi}
+              oiChange={cell.peOiChange}
+              isATM={cell.strike === atmStrike}
+              isMaxOI={summary.maxPeStrike !== null && cell.strike === summary.maxPeStrike}
+              onMouseEnter={(e) => handleCellEnter(e, cell, "PE")}
+              onMouseLeave={handleCellLeave}
+            />
+          </div>
+        ))}
+      </div>
+
+      {tooltip.visible && (
+        <div
+          className="absolute z-50 pointer-events-none bg-surface-card border border-border-default rounded-md shadow-lg p-2 text-xs min-w-[120px]"
+          style={{ left: tooltip.x + 12, top: tooltip.y - 8 }}
+          data-testid="oi-tooltip"
+        >
+          <div className="font-semibold text-text-primary mb-1">
+            {tooltip.strike} {tooltip.optionType}
+          </div>
+          <div className="flex flex-col gap-0.5 text-xxs">
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">OI</span>
+              <span className="font-mono tabular-nums text-text-primary">
+                {tooltip.oi === null ? "--" : fmtOi(tooltip.oi)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">OI Chg</span>
+              <span className={`font-mono tabular-nums ${
+                tooltip.oiChange === null
+                  ? "text-text-muted"
+                  : tooltip.oiChange >= 0 ? "text-profit" : "text-loss"
+              }`}>
+                {tooltip.oiChange === null
+                  ? "--"
+                  : `${tooltip.oiChange >= 0 ? "+" : ""}${fmtOi(Math.abs(tooltip.oiChange))}`}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-text-muted">Volume</span>
+              <span className="font-mono tabular-nums text-text-primary">
+                {tooltip.volume === null ? "--" : fmtOi(tooltip.volume)}
+              </span>
+            </div>
+            {tooltip.pcr !== null && (
+              <div className="flex justify-between gap-3">
+                <span className="text-text-muted">PCR</span>
+                <span className="font-mono tabular-nums text-text-primary">{tooltip.pcr.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const signalsBody = (
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* Summary chips */}
+      <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-elevated border-b border-border-subtle flex-wrap text-xxs">
+        {(["Long Build-up", "Short Covering", "Short Build-up", "Long Unwinding"] as const).map((label) => {
+          const short = label === "Long Build-up" ? "LB"
+            : label === "Short Covering" ? "SC"
+              : label === "Short Build-up" ? "SB" : "LU";
+          const style = signalStyle(short);
+          return (
+            <span key={label} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 ${style.cls}`} title={label}>
+              <span className="font-semibold">{short}</span>
+              <span className="tabular-nums">{analysis.summary[label] ?? 0}</span>
+            </span>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-auto">
+        {signalRows.length === 0 ? (
+          <p className="text-xs text-text-muted text-center py-8">No OI signals for {symDef.label}.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border-default hover:bg-transparent">
+                <TableHead className="text-xxs text-text-muted font-medium">Strike</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium">Type</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">OI</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium text-right">ΔOI</TableHead>
+                <TableHead className="text-xxs text-text-muted font-medium">Signal</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {signalRows.map((s, i) => {
+                const style = signalStyle(s.signal_short);
+                return (
+                  <TableRow key={`${s.strike}-${s.option_type}-${i}`} className="border-border-subtle hover:bg-surface-hover">
+                    <TableCell className="text-xs font-mono text-text-primary py-1">{s.strike}</TableCell>
+                    <TableCell className="text-xs text-text-secondary py-1">{s.option_type}</TableCell>
+                    <TableCell className="text-xs font-mono text-text-secondary py-1 text-right tabular-nums">{fmtSignalOi(s.oi)}</TableCell>
+                    <TableCell className={`text-xs font-mono py-1 text-right tabular-nums ${s.oi_change >= 0 ? "text-profit" : "text-loss"}`}>
+                      {s.oi_change >= 0 ? "+" : ""}{fmtSignalOi(s.oi_change)}
+                    </TableCell>
+                    <TableCell className="py-1">
+                      <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xxs font-medium ${style.cls}`} title={`${s.signal} (${style.lean})`}>
+                        {s.signal_short}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      {/* Unusual OI footer */}
+      <div className="flex-none bg-surface-card border-t border-border-default px-2 py-1.5">
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-xxs uppercase tracking-wide text-text-muted">Unusual OI</span>
+          <span className="text-xxs text-text-muted">· |z| ≥ {unusual.threshold.toFixed(1)}</span>
+          {signalsFetching && <span className="text-xxs text-text-muted">· updating…</span>}
+        </div>
+        {unusual.unusual.length === 0 ? (
+          <p className="text-xxs text-text-muted">No unusual OI activity.</p>
+        ) : (
+          <div className="flex items-center gap-2 flex-wrap">
+            {unusual.unusual.slice(0, 6).map((u, i) => (
+              <span
+                key={`${u.strike}-${u.option_type}-${i}`}
+                className="inline-flex items-center gap-1 rounded border border-border-default px-1.5 py-0.5 text-xxs"
+                title={`${u.option_type} ${u.strike}: ΔOI ${u.change_pct.toFixed(1)}% (z ${u.z_score.toFixed(1)}, ${u.direction})`}
+              >
+                {u.direction === "addition"
+                  ? <TrendingUp size={10} className="text-profit" aria-hidden="true" />
+                  : <TrendingDown size={10} className="text-loss" aria-hidden="true" />}
+                <span className="font-mono text-text-primary">{u.strike}{u.option_type}</span>
+                <span className="text-text-muted tabular-nums">z{u.z_score.toFixed(1)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const chartBody = (
+    <div className="flex-1 min-h-0 overflow-hidden">
+      {isConnected && !selectedExpiry && !loading ? (
+        <div className="h-full flex items-center justify-center text-text-muted text-xs">
+          Select an expiry to load OI data
+        </div>
+      ) : loading && !chain ? (
+        <div className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
+          <Loader2 size={13} className="animate-spin" />
+          Loading open interest…
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="h-full flex items-center justify-center text-text-muted text-xs">
+          {filter !== "All" ? "No strikes match the filter" : "No OI data"}
+        </div>
+      ) : (
+        <Suspense fallback={chartFallback}>
+          <PlotlyChart
+            data={view === "butterfly" ? butterflyData : plotData}
+            layout={view === "butterfly" ? butterflyLayout : plotLayout}
+            config={{ displayModeBar: false, responsive: true }}
+            style={{ width: "100%", height: "100%" }}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+
+  const emptyHeat = (
+    <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
+      {loading && !chain
+        ? <span className="flex items-center gap-2"><Loader2 size={16} className="animate-spin" />Loading OI data...</span>
+        : filter !== "All" ? "No strikes match the filter" : "Select symbol and expiry to view the OI heat grid"}
+    </div>
+  );
+
+  // ---- Render --------------------------------------------------------------
   return (
-    <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none">
+    <div className="h-full flex flex-col bg-surface-base overflow-hidden select-none" data-testid="oianalytics-widget">
 
-      {/* Header */}
+      {/* Header row 1 */}
       <div className="flex-none bg-surface-card border-b border-border-default px-2 py-1.5 space-y-1.5">
-
-        {/* Row 1 */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {isExplore && (
+          {view === "signals" ? (
+            signalsProvenance === "live" ? (
+              <span
+                className="inline-flex items-center rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+                role="status"
+                aria-label="Live: OI signals from the connected broker's option chain"
+                title="Live — OI-action classification + unusual-OI from the connected broker's chain."
+              >
+                Live
+              </span>
+            ) : signalsProvenance === "mixed" ? (
+              <span
+                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+                role="status"
+                aria-label="Showing mixed live and sample OI data"
+                title="Only one OI response is explicitly live; the other section is sample or unavailable."
+              >
+                Mixed data
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+                role="status"
+                aria-label="Showing sample data, not live open interest"
+                title="Sample OI signals so the widget is usable in explore mode — connect a broker for live data."
+              >
+                Sample data
+              </span>
+            )
+          ) : showingSampleChain ? (
             <span
               className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
               role="status"
-              aria-label="Showing demo data, not live open interest"
-              title="Demo data — fabricated sample values, not a live option chain."
+              aria-label="Showing sample data, not live open interest"
+              title="Sample data — illustrative values, not a live option chain."
             >
-              Demo data
+              Sample data
             </span>
-          )}
-          <Selector
-            value={symDef.label}
-            options={SYMBOLS.map((s) => s.label)}
-            onChange={(val) => {
-              const idx = SYMBOLS.findIndex((s) => s.label === val);
-              setActiveSymbolIdx(idx);
-            }}
-          />
+          ) : null}
+
+          <Select value={String(symbolIdx)} onValueChange={(v) => setSymbolIdx(Number(v))}>
+            <SelectTrigger className="h-7 px-2 text-xs w-36" data-testid="symbol-select" aria-label="Underlying symbol">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SYMBOL_CHOICES.map((s, i) => (
+                <SelectItem key={s.label} value={String(i)} className="text-xs">{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           <span className="px-2 py-1 text-xs font-medium text-text-muted bg-surface-base border border-border-default rounded">
             {exchange}
           </span>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" data-testid="expiry-strip">
             {expiryButtons.length === 0 && !loading && (
               <span className="text-xs text-text-muted px-1">No expiries</span>
             )}
@@ -699,17 +1155,49 @@ function OIChartWidget() {
 
           <div className="flex-1" />
 
+          {/* View switcher */}
+          <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+            {VIEW_MODES.map((mode) => (
+              <button
+                key={mode}
+                onClick={() => handleViewChange(mode)}
+                aria-pressed={mode === view}
+                className={`px-2 py-0.5 text-xs font-medium transition-colors ${
+                  mode === view
+                    ? "bg-accent/15 text-accent"
+                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                }`}
+              >
+                {VIEW_LABELS[mode]}
+              </button>
+            ))}
+          </div>
+
           <button
-            onClick={fetchData}
-            disabled={loading || !selectedExpiry}
+            onClick={handlePriceToggle}
+            aria-pressed={showPrice}
+            className={`px-2 py-0.5 text-xs font-medium rounded border transition-colors ${
+              showPrice
+                ? "bg-accent/15 border-accent/60 text-accent"
+                : "bg-surface-hover border-border-default text-text-muted hover:text-text-primary"
+            }`}
+            title="Show the underlying spot candlestick strip"
+          >
+            Spot chart
+          </button>
+
+          <button
+            onClick={handleRefresh}
+            disabled={!isConnected || loading || !selectedExpiry}
             className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors disabled:opacity-40"
             title="Refresh"
+            data-testid="refresh-btn"
           >
             <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
 
-        {/* Row 2: spot, PCR badge, max pain, support/resistance, filter */}
+        {/* Header row 2 — shared context, then the per-view control */}
         <div className="flex items-center gap-2 flex-wrap">
           {spotLtp != null ? (
             <div className="flex items-center gap-1">
@@ -724,15 +1212,15 @@ function OIChartWidget() {
 
           {pcr != null && (
             <span className={`px-2 py-0.5 rounded text-xxs font-medium border font-mono ${
-              Number(pcr) >= 1.2
+              pcr >= 1.2
                 ? "text-profit bg-profit/10 border-profit/30"
-                : Number(pcr) <= 0.8
+                : pcr <= 0.8
                   ? "text-loss bg-loss/10 border-loss/30"
                   : "text-warning bg-warning/10 border-warning/30"
             }`}>
-              PCR: {Number(pcr).toFixed(2)}
+              PCR: {pcr.toFixed(2)}
               <span className="ml-1 font-normal opacity-70 text-xxs">
-                {Number(pcr) >= 1.2 ? "Bullish" : Number(pcr) <= 0.8 ? "Bearish" : "Neutral"}
+                {pcr >= 1.2 ? "Bullish" : pcr <= 0.8 ? "Bearish" : "Neutral"}
               </span>
             </span>
           )}
@@ -743,34 +1231,69 @@ function OIChartWidget() {
             </span>
           )}
 
-          {maxPutStrike != null && (
+          {summary.maxPeStrike != null && (
             <span className="text-xxs text-profit/80 bg-profit/10 border border-profit/20 rounded px-1 py-0.5 font-mono">
-              S {NUM0.format(maxPutStrike)}
+              S {NUM0.format(summary.maxPeStrike)}
             </span>
           )}
-          {maxCallStrike != null && (
+          {summary.maxCeStrike != null && (
             <span className="text-xxs text-loss/80 bg-loss/10 border border-loss/20 rounded px-1 py-0.5 font-mono">
-              R {NUM0.format(maxCallStrike)}
+              R {NUM0.format(summary.maxCeStrike)}
             </span>
           )}
 
           <div className="flex-1" />
 
-          <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
-            {FILTERS.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-2 py-0.5 text-xs font-medium transition-colors ${
-                  f === filter
-                    ? "bg-accent/15 text-accent"
-                    : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
-                }`}
+          {showPrice && (
+            <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+              {SPOT_INTERVALS.map((iv) => (
+                <button
+                  key={iv}
+                  onClick={() => setSpotInterval(iv)}
+                  className={`px-1.5 py-0.5 text-xxs font-medium transition-colors ${
+                    iv === spotInterval
+                      ? "bg-accent/15 text-accent"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                  }`}
+                >
+                  {iv}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {view === "signals" ? (
+            <Select value={priceDir} onValueChange={(v) => setPriceDir(v as PriceDir)}>
+              <SelectTrigger
+                className="h-7 w-24 text-xs bg-surface-hover border-border-default text-text-primary"
+                aria-label="Underlying price direction"
               >
-                {f}
-              </button>
-            ))}
-          </div>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRICE_DIRS.map((d) => (
+                  <SelectItem key={d.value} value={d.value} className="text-xs">{d.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex items-center bg-surface-base rounded border border-border-default overflow-hidden">
+              {OI_FILTERS.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  aria-pressed={f === filter}
+                  className={`px-2 py-0.5 text-xs font-medium transition-colors ${
+                    f === filter
+                      ? "bg-accent/15 text-accent"
+                      : "text-text-muted hover:text-text-primary hover:bg-surface-hover"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -782,45 +1305,34 @@ function OIChartWidget() {
         </div>
       )}
 
-      {/* Chart body */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {!selectedExpiry && !loading ? (
-          <div className="h-full flex items-center justify-center text-text-muted text-xs">
-            Select an expiry to load OI data
-          </div>
-        ) : loading && !chain ? (
-          <div className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
-            <RefreshCw size={13} className="animate-spin" />
-            Loading open interest…
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-text-muted text-xs">
-            {filter !== "All" ? "No strikes match the filter" : "No OI data"}
-          </div>
-        ) : (
-          <Suspense fallback={
-            <div role="status" className="h-full flex items-center justify-center text-text-muted text-xs gap-2">
-              <RefreshCw size={13} className="animate-spin" aria-hidden="true" />
-              <span className="sr-only">Loading chart...</span>
-              <span aria-hidden="true">Loading chart…</span>
-            </div>
-          }>
-            <PlotlyChart
-              data={plotData}
-              layout={plotLayout}
-              config={{ displayModeBar: false, responsive: true }}
-              style={{ width: "100%", height: "100%" }}
+      {/* Optional spot candlestick strip */}
+      {showPrice && (
+        <div className="flex-none h-[32%] border-b border-border-default">
+          <Suspense fallback={<div className="h-full" />}>
+            <SpotPricePane
+              symbol={symDef.spotSymbol}
+              spotExchange={symDef.spotExchange}
+              interval={spotInterval}
             />
           </Suspense>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Footer */}
-      {chain && rows.length > 0 && (
+      {/* Body */}
+      {view === "signals"
+        ? signalsBody
+        : view === "heat"
+          ? (rows.length > 0 ? heatBody : emptyHeat)
+          : chartBody}
+
+      {view === "heat" && rows.length > 0 && <ColourLegend />}
+
+      {/* Footer totals */}
+      {view !== "signals" && rows.length > 0 && (
         <div className="flex-none bg-surface-card border-t border-border-default px-3 py-1 flex items-center gap-4 text-xs">
           <span className="text-text-muted uppercase tracking-wide">Total</span>
-          <span className="text-loss font-mono tabular-nums">CE {totalCallOI === null ? "--" : totalCallOI >= 1e7 ? `${(totalCallOI / 1e7).toFixed(1)}Cr` : totalCallOI >= 1e5 ? `${(totalCallOI / 1e5).toFixed(1)}L` : NUM0.format(totalCallOI)}</span>
-          <span className="text-profit font-mono tabular-nums">PE {totalPutOI === null ? "--" : totalPutOI >= 1e7 ? `${(totalPutOI / 1e7).toFixed(1)}Cr` : totalPutOI >= 1e5 ? `${(totalPutOI / 1e5).toFixed(1)}L` : NUM0.format(totalPutOI)}</span>
+          <span className="text-loss font-mono tabular-nums">CE {fmtTotalOi(summary.totalCeOi)}</span>
+          <span className="text-profit font-mono tabular-nums">PE {fmtTotalOi(summary.totalPeOi)}</span>
           {atmStrike != null && (
             <span className="text-text-muted ml-1">
               ATM: <span className="font-mono text-warning">{NUM0.format(atmStrike)}</span>

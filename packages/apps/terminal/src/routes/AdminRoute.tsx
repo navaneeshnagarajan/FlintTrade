@@ -154,14 +154,16 @@ const WIDGETS: WidgetInfo[] = [
   { id: "tradebook", name: "Trade Book", category: "Trading", status: "live" },
   { id: "orderpad", name: "Order Pad", category: "Trading", status: "live" },
   { id: "mtmmonitor", name: "MTM Monitor", category: "Trading", status: "live" },
-  { id: "riskpanel", name: "Risk Panel", category: "Trading", status: "live" },
+  { id: "riskdashboard", name: "Risk", category: "Trading", status: "live" },
   { id: "actioncenter", name: "Action Center", category: "Trading", status: "live" },
+  // Trading, not Analysis: the merged DOM / Ladder carries a live order-entry
+  // surface, so it sits with the widgets that can write to the broker.
+  { id: "orderladder", name: "DOM / Ladder", category: "Trading", status: "live" },
   // Analysis
   { id: "chart", name: "Chart", category: "Analysis", status: "live" },
   { id: "optionchain", name: "Option Chain", category: "Analysis", status: "live" },
   { id: "oichart", name: "OI Chart", category: "Analysis", status: "live" },
   { id: "straddle", name: "Straddle", category: "Analysis", status: "live" },
-  { id: "depth", name: "Depth", category: "Analysis", status: "live" },
   { id: "greeks", name: "Greeks", category: "Analysis", status: "live" },
   { id: "sectormap", name: "Sector Map", category: "Analysis", status: "live" },
   { id: "gammadensity", name: "Dealer Gamma", category: "Analysis", status: "live" },

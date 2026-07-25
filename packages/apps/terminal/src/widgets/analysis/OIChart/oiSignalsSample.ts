@@ -1,5 +1,5 @@
 /**
- * Sample OI-signal data for the OISignals widget in explore / disconnected mode.
+ * Sample OI-signal data for the OI Analytics signals view in explore mode.
  *
  * Mirrors the shape of /ft-api/v1/oi/analysis and /ft-api/v1/oi/unusual so the
  * widget renders identically whether it is showing this sample or live data.

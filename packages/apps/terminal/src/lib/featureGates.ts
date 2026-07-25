@@ -28,7 +28,9 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   "widget:calculator":  { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:aiadvisor":   { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:mtmmonitor":  { beginner: "locked",  intermediate: "visible", advanced: "visible" },
-  "widget:riskpanel":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
+  // NOTE: `widget:riskpanel` removed with the Risk merge. The canonical
+  // (riskdashboard) is deliberately left UNGATED — a margin and daily-stop
+  // readout is the last thing to hide from a beginner.
   "widget:actioncenter":{ beginner: "locked",  intermediate: "preview", advanced: "visible" },
 
   // ---------------------------------------------------------------
@@ -52,9 +54,21 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // same row or a saved panel bypasses it.
   "widget:greeksheatmap": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   "widget:greekssurface": { beginner: "locked", intermediate: "locked", advanced: "visible" },
+  // The ladder absorbed Depth's real level-2 book and is rapid click-to-trade
+  // order entry; its nearest sibling widget:scalper is already beginner-locked.
+  // The two inputs were locked (depth) and ungated-by-omission (ladder), and
+  // the omission reads as accidental rather than decided.
+  "widget:orderladder": { beginner: "locked", intermediate: "visible", advanced: "visible" },
+  // Retired id resolving to the gated straddle canonical.
+  "widget:impliedmove": { beginner: "locked", intermediate: "visible", advanced: "visible" },
   "widget:ivskew":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Retired ids folded into `oichart`; each keeps a row so a saved panel
+  // cannot bypass the canonical's gate. oiprofile was the strictest of the
+  // four and keeps its own setting.
+  "widget:oiheatmap":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
+  "widget:oisignals":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   // Merged canonical. Order Flow absorbed Footprint, which was locked to
   // advanced; an absent widget: id resolves to visible at every level, so

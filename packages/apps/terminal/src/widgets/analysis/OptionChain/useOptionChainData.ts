@@ -8,10 +8,11 @@
  *   - Return all processed data needed by the widget
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Quote } from "@/types/api";
 import { getExpiry, getOptionChain, getQuotes } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import { useLatestRequest } from "@/hooks/useLatestRequest";
 import type {
   SymbolDef,
   RawOptionChain,
@@ -87,18 +88,16 @@ export function useOptionChainData(
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [lastRefresh, setLastRefresh]     = useState<Date | null>(null);
-  const requestGenerationRef = useRef(0);
-  const inFlightRequestKeysRef = useRef(new Map<string, number>());
   const identityKey = `${symDef.label}:${exchange}`;
   const currentExpiries = expiryIdentity === identityKey ? expiries : [];
   const expiryCandidate = typeof selectedExpiryValue === "string" ? selectedExpiryValue.trim() : "";
   const selectedExpiry = currentExpiries.includes(expiryCandidate) ? expiryCandidate : null;
   const requestKey = `${symDef.label}:${exchange}:${selectedExpiry ?? ""}`;
-  const activeRequestKeyRef = useRef(requestKey);
-  activeRequestKeyRef.current = requestKey;
+  // Shared guard: identity changes invalidate every in-flight response and a
+  // pending request for the same key makes the next poll tick a no-op.
+  const requests = useLatestRequest(requestKey);
 
   useEffect(() => {
-    requestGenerationRef.current += 1;
     setChain(null);
     setSpot(null);
     setLoading(false);
@@ -141,11 +140,8 @@ export function useOptionChainData(
   const fetchData = useCallback(async () => {
     if (!selectedExpiry) return;
 
-    const fetchKey = `${symDef.label}:${exchange}:${selectedExpiry}`;
-    const inFlightGeneration = inFlightRequestKeysRef.current.get(fetchKey);
-    if (inFlightGeneration === requestGenerationRef.current) return;
-    const requestGeneration = ++requestGenerationRef.current;
-    inFlightRequestKeysRef.current.set(fetchKey, requestGeneration);
+    const ticket = requests.begin(requestKey);
+    if (!ticket) return;
     setLoading(true);
     setError(null);
 
@@ -155,10 +151,7 @@ export function useOptionChainData(
         getQuotes(symDef.spotSymbol, symDef.spotExchange),
       ]);
 
-      if (
-        requestGeneration !== requestGenerationRef.current
-        || fetchKey !== activeRequestKeyRef.current
-      ) return;
+      if (!ticket.isCurrent()) return;
 
       if (chainResult.status === "fulfilled") {
         setChain(chainResult.value as unknown as RawOptionChain);
@@ -174,19 +167,13 @@ export function useOptionChainData(
         setSpot(null);
       }
     } finally {
-      if (inFlightRequestKeysRef.current.get(fetchKey) === requestGeneration) {
-        inFlightRequestKeysRef.current.delete(fetchKey);
-      }
-      if (
-        requestGeneration === requestGenerationRef.current
-        && fetchKey === activeRequestKeyRef.current
-      ) {
+      if (ticket.settle()) {
         setLoading(false);
         setLastRefresh(new Date());
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedExpiry, symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange]);
+  }, [requests, requestKey, selectedExpiry, symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange]);
 
   // Auto-refresh at market-aware intervals
   useEffect(() => {
