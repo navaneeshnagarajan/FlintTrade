@@ -12,7 +12,7 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "7.29.6",
-      "brace-expansion": "2.1.2",
+      "brace-expansion@>=2.0.0 <2.1.2": "2.1.2",
       "esbuild": "0.28.1",
       "fast-uri": "4.1.1",
       "hono": "4.12.25",
