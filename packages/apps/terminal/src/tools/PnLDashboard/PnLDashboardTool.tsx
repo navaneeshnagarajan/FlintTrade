@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
 import { useModeData } from "@/hooks/useModeData";
+import { istParts, istToday } from "@/lib/ist";
 import { lightweightAreaRuntime } from "@/lib/lightweightChartRuntime";
 import { useModeStore } from "@/stores/modeStore";
 import type { Funds, Position, Trade } from "@/types/api";
@@ -367,11 +368,17 @@ function SummaryTab({ positions, funds }: { positions: Position[]; funds: { avai
 function CalendarTab({ trades }: { trades: Trade[] }) {
   const daily = useMemo(() => computeDailyPnl(trades), [trades]);
 
-  // Build a calendar view for the last 3 months
-  const today = new Date();
+  // Build a calendar view for the last 3 months. "Today" is the IST trading
+  // day: the cells are keyed by the trade dates the backend reports, which are
+  // Indian market days, so the highlight and the future greying must be read
+  // off the same calendar. `new Date().toISOString()` would still be on
+  // yesterday for the whole IST early morning (UTC turns over at 05:30 IST),
+  // which un-highlighted today and greyed it out as "future".
+  const todayKey = istToday();
+  const { year: istYear, month: istMonth } = istParts();
   const months: { year: number; month: number; label: string }[] = [];
   for (let i = 2; i >= 0; i--) {
-    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const d = new Date(istYear, istMonth - i, 1);
     months.push({ year: d.getFullYear(), month: d.getMonth(), label: d.toLocaleString("en-IN", { month: "short", year: "2-digit" }) });
   }
 
@@ -442,8 +449,10 @@ function CalendarTab({ trades }: { trades: Trade[] }) {
                     if (!day) return <div key={di} className="h-7" />;
                     const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                     const pnl = pnlByDate[dateStr];
-                    const isToday = dateStr === today.toISOString().slice(0, 10);
-                    const isFuture = new Date(dateStr) > today;
+                    // Both keys are ISO ``YYYY-MM-DD``, so a string compare is
+                    // the calendar compare — no re-parsing into a zone.
+                    const isToday = dateStr === todayKey;
+                    const isFuture = dateStr > todayKey;
                     return (
                       <div
                         key={di}

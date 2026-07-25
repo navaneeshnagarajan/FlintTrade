@@ -11,6 +11,8 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 }));
 
 import ExpiryCountdownWidget, {
+  EXPIRY_ASSUMPTION_NOTE,
+  EXPIRY_WEEKDAY_NAME,
   NSE_EXPIRY_WEEKDAY,
   computeExpiries,
 } from "../ExpiryCountdownWidget";
@@ -83,6 +85,71 @@ describe("ExpiryCountdownWidget", () => {
     render(<ExpiryCountdownWidget />);
     const labels = screen.getAllByText(/NSE F&O Expiry/);
     expect(labels.length).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expiry-weekday disclosure
+//
+// The countdown arithmetic is exact, but it counts down to a weekday nothing in
+// this repository has verified against an NSE circular. The widget must say so
+// on screen: printing "Thu 30 Jul" and a live seconds countdown as plain fact
+// is the failure mode these cases pin against.
+// ---------------------------------------------------------------------------
+
+describe("ExpiryCountdownWidget — expiry-weekday caveat", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("badges the assumed weekday in the header", () => {
+    render(<ExpiryCountdownWidget />);
+    const badge = screen.getByRole("status", { name: EXPIRY_ASSUMPTION_NOTE });
+    expect(badge).toHaveTextContent(`Assumed ${EXPIRY_WEEKDAY_NAME}`);
+  });
+
+  it("uses the same amber affordance sibling widgets use for unverified figures", () => {
+    render(<ExpiryCountdownWidget />);
+    const badge = screen.getByRole("status", { name: EXPIRY_ASSUMPTION_NOTE });
+    expect(badge.className).toContain("text-warning");
+    expect(badge.className).toContain("bg-warning/10");
+    expect(badge).toHaveAttribute("title", EXPIRY_ASSUMPTION_NOTE);
+  });
+
+  it("spells the caveat out in full, naming what to check it against", () => {
+    render(<ExpiryCountdownWidget />);
+    expect(screen.getByText(EXPIRY_ASSUMPTION_NOTE)).toBeInTheDocument();
+    expect(EXPIRY_ASSUMPTION_NOTE).toContain("assumption, not a verified exchange rule");
+    expect(EXPIRY_ASSUMPTION_NOTE).toContain("contract master");
+    expect(EXPIRY_ASSUMPTION_NOTE).toContain("NSE circular");
+  });
+
+  it("shows the caveat unconditionally — no connected state makes it a fact", () => {
+    const { rerender } = render(<ExpiryCountdownWidget />);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    rerender(<ExpiryCountdownWidget />);
+    expect(screen.getAllByText(EXPIRY_ASSUMPTION_NOTE).length).toBeGreaterThan(0);
+  });
+
+  it("carries the caveat into each row's accessible name, beside the date", () => {
+    render(<ExpiryCountdownWidget />);
+    for (const item of screen.getAllByRole("listitem")) {
+      expect(item.getAttribute("aria-label")).toContain(
+        `(assumed ${EXPIRY_WEEKDAY_NAME} expiry, not verified against the NSE calendar)`,
+      );
+    }
+  });
+
+  it("derives the caveat wording from the one constant, so moving it moves the copy", () => {
+    // The disclosure must never drift from the rule it discloses.
+    expect(EXPIRY_WEEKDAY_NAME).toBe(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][NSE_EXPIRY_WEEKDAY]);
+    expect(EXPIRY_ASSUMPTION_NOTE).toContain(EXPIRY_WEEKDAY_NAME);
   });
 });
 

@@ -12,13 +12,20 @@
  *
  *   - browser-local maths — ``new Date(y, m, d)``, ``setHours(15, 30)`` — which
  *     pins 15:30 to the operator's own zone rather than the NSE close;
- *   - ``toISOString().slice(0, 10)`` — which yields the **UTC** calendar day, so
- *     "is today" flips a day early for every IST evening after 17:30 hrs.
+ *   - ``toISOString().slice(0, 10)`` — which yields the **UTC** calendar day.
+ *     IST is never behind UTC, so the two calendars agree for most of the day
+ *     and diverge in one window: UTC midnight falls at 05:30 IST, so from
+ *     00:00 to 05:29 IST the UTC day is still YESTERDAY's date. A "today"
+ *     derived that way therefore turns over 5½ hrs LATE — through the whole IST
+ *     early morning it reports the previous day, and nothing it produces is
+ *     ever a day ahead.
  *
  * Exchange-calendar policy (which weekday contracts expire on, which days are
  * holidays) deliberately does NOT live here — that is exchange rule-making, not
- * timezone arithmetic. See ``NSE_EXPIRY_WEEKDAY`` in ExpiryCountdownWidget, which
- * still needs maintainer confirmation against current NSE circulars.
+ * timezone arithmetic. Calendar primitives that take the weekday as an argument
+ * (see {@link lastIstWeekdayOfMonth}) are fair game; the choice of weekday is
+ * the caller's. See ``NSE_EXPIRY_WEEKDAY`` in ExpiryCountdownWidget, which still
+ * needs maintainer confirmation against current NSE circulars.
  */
 
 /** Minutes that IST runs ahead of UTC. Fixed: India observes no daylight saving. */
@@ -109,8 +116,10 @@ export function istMinutes(date: Date = new Date()): number {
 /**
  * The IST calendar day of an instant as ``YYYY-MM-DD``.
  *
- * Replaces ``toISOString().slice(0, 10)``, which returns the UTC calendar day
- * and therefore reports yesterday for any IST evening after 17:30 hrs.
+ * Replaces ``toISOString().slice(0, 10)``, which returns the UTC calendar day.
+ * UTC midnight is 05:30 IST, so that idiom reports YESTERDAY for every instant
+ * between 00:00 and 05:29 IST — it turns over to the new day 5½ hrs late. It is
+ * never a day ahead: IST leads UTC, so the error only ever runs backwards.
  *
  * @param date - Instant to convert.
  * @returns The ISO date of the IST trading day containing that instant.
@@ -152,6 +161,41 @@ export function fromIstParts(
   second = 0,
 ): Date {
   return new Date(Date.UTC(year, month, day, hour, minute, second) - IST_OFFSET_MS);
+}
+
+/**
+ * The last occurrence of a given weekday in an IST calendar month.
+ *
+ * Pure calendar arithmetic — the caller says which weekday it wants, so no
+ * exchange rule is encoded here. Contract calendars ("the monthly F&O expiry is
+ * the last Thursday") are built on top of this by passing their own weekday
+ * constant; that keeps the rule in one reviewable place and the date maths in
+ * one tested place.
+ *
+ * Month indices outside 0–11 roll over exactly as ``Date.UTC`` does, so
+ * ``month + 1`` is a safe way to step into January of the next year.
+ *
+ * @param year - Full year in IST.
+ * @param month - Month index in IST, 0 = January … 11 = December.
+ * @param weekday - Day of the week, 0 = Sunday … 6 = Saturday.
+ * @param hour - Hour of the day in IST; defaults to midnight.
+ * @param minute - Minute of the hour in IST; defaults to zero.
+ * @returns The real instant of that IST wall-clock reading.
+ */
+export function lastIstWeekdayOfMonth(
+  year: number,
+  month: number,
+  weekday: number,
+  hour = 0,
+  minute = 0,
+): Date {
+  // Day 0 of the following month is the last day of this one. Date.UTC is used
+  // purely as zone-free calendar arithmetic on the day numbers — the result is
+  // anchored back into IST by fromIstParts, so nothing here reads the host zone.
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const lastWeekday = new Date(Date.UTC(year, month, lastDay)).getUTCDay();
+  const offset = (lastWeekday - weekday + 7) % 7;
+  return fromIstParts(year, month, lastDay - offset, hour, minute);
 }
 
 /**

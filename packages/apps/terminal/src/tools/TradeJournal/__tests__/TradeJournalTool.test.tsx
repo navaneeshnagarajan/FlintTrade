@@ -5,7 +5,7 @@
  * Verifies rendering, heading, and key UI elements.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -14,7 +14,7 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 
 const tradeJournalMocks = vi.hoisted(() => ({
-  queryOptions: undefined as { enabled?: boolean } | undefined,
+  queryOptions: undefined as { enabled?: boolean; queryKey?: unknown[] } | undefined,
   refetch: vi.fn(),
 }));
 
@@ -93,6 +93,7 @@ vi.mock("@/lib/formatters", () => ({
 // ---------------------------------------------------------------------------
 
 import TradeJournalTool from "../TradeJournalTool";
+import { istDayKey, sevenDaysAgoISO, todayISO } from "../utils";
 import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
@@ -151,5 +152,74 @@ describe("TradeJournalTool", () => {
     expect(screen.getByText("Sample Data")).toBeInTheDocument();
     expect(screen.getAllByText("VWAP Reclaim").length).toBeGreaterThan(0);
     expect(screen.queryByText("Gap Fade")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trade Review date range
+//
+// The range defaults must be Indian trading days: the journal rows the backend
+// returns are keyed by IST session dates, so a UTC "today" silently drops the
+// current session from the default window.
+//
+// Every case pins a FIXED instant. 2026-07-24 19:30 UTC is 01:00 IST on
+// Saturday 25 July 2026 — inside the 00:00–05:29 IST window where the UTC date
+// is still yesterday's, which is exactly what the old
+// `new Date().toISOString().slice(0, 10)` returned.
+// ---------------------------------------------------------------------------
+
+const IST_EARLY_MORNING = new Date("2026-07-24T19:30:00Z");
+
+describe("TradeJournalTool — IST date range defaults", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tradeJournalMocks.queryOptions = undefined;
+    useModeStore.setState({ mode: "live" });
+    vi.useFakeTimers();
+    vi.setSystemTime(IST_EARLY_MORNING);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("REGRESSION: defaults the range to IST days, not the UTC day", () => {
+    // The UTC calendar still reads 24 July at this instant; India is on the
+    // 25th. The old default end date was "2026-07-24", so a trade taken in the
+    // small hours of the 25th fell outside the range the tool opened with.
+    expect(IST_EARLY_MORNING.toISOString().slice(0, 10)).toBe("2026-07-24");
+
+    render(<TradeJournalTool />);
+
+    expect(screen.getByLabelText("End date")).toHaveValue("2026-07-25");
+    expect(screen.getByLabelText("Start date")).toHaveValue("2026-07-19");
+  });
+
+  it("sends those same IST days to the backend query", () => {
+    render(<TradeJournalTool />);
+
+    expect(tradeJournalMocks.queryOptions?.queryKey).toEqual([
+      "tradeJournal",
+      "2026-07-19",
+      "2026-07-25",
+      "",
+    ]);
+  });
+
+  it("spans seven IST calendar days inclusive of today", () => {
+    expect(todayISO()).toBe("2026-07-25");
+    expect(sevenDaysAgoISO()).toBe("2026-07-19");
+  });
+
+  it("keeps the range on the Indian calendar across a month boundary", () => {
+    // 02:00 IST on 3 August 2026; UTC still reads 2 August.
+    vi.setSystemTime(new Date("2026-08-02T20:30:00Z"));
+    expect(todayISO()).toBe("2026-08-03");
+    expect(sevenDaysAgoISO()).toBe("2026-07-28");
+  });
+
+  it("agrees with the notes-tab day key — one IST implementation, not two", () => {
+    expect(todayISO()).toBe(istDayKey());
+    expect(istDayKey(IST_EARLY_MORNING)).toBe("2026-07-25");
   });
 });

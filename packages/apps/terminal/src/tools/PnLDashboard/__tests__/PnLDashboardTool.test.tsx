@@ -5,7 +5,7 @@
  * Verifies rendering, heading, tabs, and key UI elements.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -240,5 +240,68 @@ describe("PnLDashboardTool", () => {
       { time: "2026-05-29", value: 0 },
       { time: "2026-05-30", value: -50 },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar heatmap — "today" is the IST trading day
+//
+// The cells are keyed by the trade dates the backend reports, which are Indian
+// session dates, so the highlight and the future-greying must be read off the
+// same calendar. Fixed instants throughout: 2026-07-24 19:30 UTC is 01:00 IST
+// on Saturday 25 July 2026, inside the 00:00–05:29 IST window where the UTC
+// date is still yesterday's.
+// ---------------------------------------------------------------------------
+
+describe("PnLDashboardTool — IST calendar heatmap", () => {
+  beforeEach(() => {
+    setupMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function openCalendar(now: string) {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(now));
+    render(<PnLDashboardTool />);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(screen.getByRole("tab", { name: /Calendar/i }));
+  }
+
+  it("REGRESSION: rings the IST day, not the lagging UTC day", async () => {
+    // The old `today.toISOString().slice(0, 10)` read "2026-07-24" here, so the
+    // ring sat on yesterday's cell for the whole IST early morning.
+    await openCalendar("2026-07-24T19:30:00Z");
+
+    const today = await screen.findByTitle("2026-07-25");
+    expect(today.className).toContain("ring-1");
+    expect(screen.getByTitle("2026-07-24").className).not.toContain("ring-1");
+  });
+
+  it("REGRESSION: does not grey out today as a future day", async () => {
+    // `new Date("2026-07-25") > today` compared UTC midnight of the cell with
+    // the current instant, so today's own cell rendered as an unreachable
+    // future day — disabled text, no heat colour — until 05:30 IST.
+    await openCalendar("2026-07-24T19:30:00Z");
+
+    const today = await screen.findByTitle("2026-07-25");
+    expect(today.className).not.toContain("text-text-disabled");
+    // Tomorrow is still future, and yesterday is still past.
+    expect(screen.getByTitle("2026-07-26").className).toContain("text-text-disabled");
+    expect(screen.getByTitle("2026-07-24").className).not.toContain("text-text-disabled");
+  });
+
+  it("picks the three months from the IST calendar", async () => {
+    // 02:00 IST on Saturday 1 August 2026 — UTC still reads 31 July, so a
+    // UTC/local month read shows May–July and never opens the August grid the
+    // operator is actually trading.
+    await openCalendar("2026-07-31T20:30:00Z");
+
+    expect(await screen.findByText("Aug 26")).toBeInTheDocument();
+    expect(screen.getByText("Jun 26")).toBeInTheDocument();
+    expect(screen.queryByText("May 26")).not.toBeInTheDocument();
+    expect(screen.getByTitle("2026-08-01").className).toContain("ring-1");
   });
 });

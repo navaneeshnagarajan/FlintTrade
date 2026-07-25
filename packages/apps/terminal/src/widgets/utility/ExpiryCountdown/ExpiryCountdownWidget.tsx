@@ -19,12 +19,28 @@
  * verified fact: confirm it against the latest NSE circular and, when it
  * moves, change that one constant — the weekly, monthly and quarterly
  * calculations all derive from it.
+ *
+ * Until then the uncertainty is rendered, not just commented: the header
+ * carries an amber "Assumed <day>" badge — the same affordance sibling widgets
+ * use for unverified figures — and {@link EXPIRY_ASSUMPTION_NOTE} is printed
+ * in full above the legend. Both are unconditional; a live broker connection
+ * does not make the assumption true. The authoritative alternative is the
+ * broker/symbol-master expiry list behind ``getExpiry`` in ``@/services/api``
+ * (already used by the option-chain surfaces); wiring it here would need a
+ * symbol/exchange input this widget does not currently take.
  */
 
 import { useState, useEffect, useMemo, memo } from "react";
 import { Timer } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { fmtDuration, fmtIstClock, fromIstParts, istParts, splitDuration } from "@/lib/ist";
+import {
+  fmtDuration,
+  fmtIstClock,
+  fromIstParts,
+  istParts,
+  lastIstWeekdayOfMonth,
+  splitDuration,
+} from "@/lib/ist";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,12 +110,15 @@ function expiryInstant(year: number, month: number, day: number): Date {
  * @returns The month's final expiry instant.
  */
 function lastExpiryDayOf(year: number, month: number): Date {
-  // Day 0 of the following month is the last day of this one. UTC maths keeps
-  // this independent of the host's zone; only the day numbers matter.
-  const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const lastWeekday = new Date(Date.UTC(year, month, lastDayOfMonth)).getUTCDay();
-  const offset = (lastWeekday - NSE_EXPIRY_WEEKDAY + 7) % 7;
-  return expiryInstant(year, month, lastDayOfMonth - offset);
+  // The calendar arithmetic lives in @/lib/ist; this function only supplies the
+  // exchange rule (which weekday, which close) on top of it.
+  return lastIstWeekdayOfMonth(
+    year,
+    month,
+    NSE_EXPIRY_WEEKDAY,
+    NSE_CLOSE_HOUR,
+    NSE_CLOSE_MINUTE,
+  );
 }
 
 /**
@@ -188,6 +207,21 @@ function urgencyClass(days: number, blinkEnabled: boolean): string {
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/** The assumed expiry weekday's short name, derived from the one constant. */
+export const EXPIRY_WEEKDAY_NAME = DAY_NAMES[NSE_EXPIRY_WEEKDAY];
+
+/**
+ * The caveat shown to the operator, in the widget and as the badge tooltip.
+ *
+ * The countdown arithmetic is exact, but it counts down to a weekday this
+ * repository has NOT verified, so the widget must not present the date as
+ * fact.
+ */
+export const EXPIRY_ASSUMPTION_NOTE =
+  `Dates assume NSE F&O contracts expire on ${EXPIRY_WEEKDAY_NAME} — a configured `
+  + "assumption, not a verified exchange rule. Confirm the expiry against your broker's "
+  + "contract master or the current NSE circular before trading it.";
+
 /**
  * Render an expiry instant as its IST calendar date, e.g. "Thu 31 Jul".
  *
@@ -226,7 +260,10 @@ function ExpiryRowItem({ row, now, blink }: ExpiryRowItemProps) {
     <div
       className="flex items-center gap-2 py-2.5 border-b border-border-default last:border-0"
       role="listitem"
-      aria-label={`${row.kind} expiry on ${formatDate(row.date)}`}
+      aria-label={
+        `${row.kind} expiry on ${formatDate(row.date)} `
+        + `(assumed ${EXPIRY_WEEKDAY_NAME} expiry, not verified against the NSE calendar)`
+      }
     >
       {/* Kind badge */}
       <div className="w-20 shrink-0">
@@ -283,6 +320,19 @@ function ExpiryCountdownWidget() {
       <div className="flex-none flex items-center gap-2 px-2 py-1.5 bg-surface-card border-b border-border-default">
         <Timer size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Expiry Countdown</span>
+        {/* Honest disclosure — the dates below are computed from
+            NSE_EXPIRY_WEEKDAY, an assumption this repository has never checked
+            against a circular. Same amber affordance sibling widgets use for
+            unverified figures, and deliberately unconditional: there is no
+            connected state in which the assumption becomes a fact. */}
+        <span
+          className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded shrink-0"
+          role="status"
+          aria-label={EXPIRY_ASSUMPTION_NOTE}
+          title={EXPIRY_ASSUMPTION_NOTE}
+        >
+          Assumed {EXPIRY_WEEKDAY_NAME}
+        </span>
         <div className="flex-1" />
         <span className="text-xxs text-text-muted tabular-nums">
           {fmtIstClock(now)} IST
@@ -298,6 +348,12 @@ function ExpiryCountdownWidget() {
         {expiries.map((row) => (
           <ExpiryRowItem key={row.kind} row={row} now={now} blink={blink} />
         ))}
+      </div>
+
+      {/* Expiry-weekday caveat — spelled out in full, because the badge alone
+          cannot say which weekday is assumed or what to check it against. */}
+      <div className="flex-none px-3 py-1.5 border-t border-border-default">
+        <p className="text-xxs text-warning leading-snug">{EXPIRY_ASSUMPTION_NOTE}</p>
       </div>
 
       {/* Legend */}
