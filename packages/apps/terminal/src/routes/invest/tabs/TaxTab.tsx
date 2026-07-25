@@ -278,7 +278,8 @@ export function TaxTab() {
   const summary = (
     shouldUseDemoFallback ? getDemoTaxSummary(selectedFy) : liveSummary
   ) as TaxSummaryWithMethodology | undefined;
-  const isDemo = shouldUseDemoFallback || Boolean(summary?.is_sample_data);
+  // Provenance fails closed: only an explicit `is_sample_data: false` clears the demo banner.
+  const isDemo = shouldUseDemoFallback || summary?.is_sample_data !== false;
   const auditAssessment: AuditAssessment = !isDemo && summary?.audit_assessment === "required"
     ? "required"
     : "incomplete";

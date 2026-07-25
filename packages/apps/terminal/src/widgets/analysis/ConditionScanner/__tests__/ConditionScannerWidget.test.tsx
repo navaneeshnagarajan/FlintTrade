@@ -186,6 +186,21 @@ describe("ConditionScannerWidget", () => {
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
+  it("badges a run with no provenance flag as sample, never Live", async () => {
+    // Fail-closed: the affirmative "Live scan" claim needs an explicit false.
+    const { is_sample_data: _omitted, ...noProvenance } = RUN_SAMPLE;
+    mockRun.mockResolvedValue(noProvenance);
+    renderWidget();
+
+    await chooseScanAndRun();
+
+    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText(/Sample scan — connect a broker read account/i)).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Live scan/i)).not.toBeInTheDocument();
+  });
+
   it("shows the empty-match state honestly", async () => {
     mockRun.mockResolvedValue({ ...RUN_SAMPLE, matched_count: 0, results: [] });
     renderWidget();

@@ -156,7 +156,7 @@ export function SectorRotationTab() {
   const [sortField, setSortField] = useState<SortField>("change_1d");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const isDemo = isError || (!isLoading && (!data || data.is_sample_data));
+  const isDemo = isError || (!isLoading && (!data || data.is_sample_data !== false));
   const sectors = data?.sectors ?? DEMO_SECTORS;
 
   const maxCap = useMemo(() => Math.max(...sectors.map((s) => s.market_cap_cr)), [sectors]);

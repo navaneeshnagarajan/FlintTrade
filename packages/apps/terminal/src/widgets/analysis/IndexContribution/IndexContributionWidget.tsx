@@ -86,7 +86,7 @@ function IndexContributionWidget() {
 
   const response = isConnected && live ? live : { is_sample_data: true, contribution: SAMPLE_INDEX_CONTRIBUTION };
   const contribution = response.contribution;
-  const isSample = response.is_sample_data;
+  const isSample = response.is_sample_data !== false;
 
   const maxAbs = useMemo(
     () => contribution.constituents.reduce((m, c) => Math.max(m, Math.abs(c.contribution_pct)), 0),

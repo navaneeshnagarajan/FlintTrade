@@ -187,7 +187,7 @@ export function RiskReturnTab() {
     retry: 1,
   });
 
-  const isDemo = isError || (!isLoading && (!data || data.is_sample_data));
+  const isDemo = isError || (!isLoading && (!data || data.is_sample_data !== false));
   const points = data?.points ?? DEMO_POINTS;
 
   // Category legend — unique categories

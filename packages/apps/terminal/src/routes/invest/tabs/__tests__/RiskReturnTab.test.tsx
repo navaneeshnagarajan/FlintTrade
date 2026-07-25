@@ -2,7 +2,7 @@
  * RiskReturnTab.test.tsx — render tests for the risk-return scatter tab.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -60,12 +60,43 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { RiskReturnTab } from "../RiskReturnTab";
+import { useQuery } from "@tanstack/react-query";
+
+const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
+
+const NO_DATA = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() };
+
+const LIVE_POINT = {
+  symbol: "NIFTYBEES",
+  name: "Nifty 50 ETF",
+  category: "Equity",
+  annualised_return: 14.2,
+  annualised_volatility: 15.8,
+  sharpe_ratio: 0.89,
+};
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("RiskReturnTab", () => {
+  beforeEach(() => {
+    mockUseQuery.mockReturnValue(NO_DATA);
+  });
+
+  it("keeps the demo banner when the response omits is_sample_data", () => {
+    // Provenance fails closed — an absent flag is sample, never live.
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { points: [LIVE_POINT] } });
+    render(<RiskReturnTab />);
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
+  it("drops the demo banner only on an explicit is_sample_data: false", () => {
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, points: [LIVE_POINT] } });
+    render(<RiskReturnTab />);
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+  });
+
   it("renders the section heading", () => {
     render(<RiskReturnTab />);
     expect(screen.getByText("Risk-Return Analysis")).toBeInTheDocument();

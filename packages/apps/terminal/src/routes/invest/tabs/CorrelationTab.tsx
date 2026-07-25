@@ -278,7 +278,7 @@ export function CorrelationTab() {
     retry: 1,
   });
 
-  const isDemo = isError || (!isLoading && (!data || data.is_sample_data));
+  const isDemo = isError || (!isLoading && (!data || data.is_sample_data !== false));
   const symbols = data?.symbols ?? DEMO_SYMBOLS;
   const matrix = data?.matrix ?? DEMO_MATRIX;
   const regime = data?.regime ?? "Risk-On";

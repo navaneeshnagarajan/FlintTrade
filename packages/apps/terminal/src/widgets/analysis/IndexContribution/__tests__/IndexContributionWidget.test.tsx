@@ -45,6 +45,35 @@ describe("IndexContributionWidget", () => {
     expect(screen.getByText(/advancing/i)).toBeInTheDocument();
   });
 
+  it("keeps the demo affordance when a connected response omits is_sample_data", () => {
+    // Fail-closed: absent provenance is sample, never live.
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({
+      data: {
+        contribution: {
+          index_name: "BANKNIFTY",
+          index_level: 52000,
+          index_change_pct: -0.35,
+          index_change_points: -182,
+          weights_as_of: "2026-06-30",
+          advancers: 4,
+          decliners: 8,
+          constituents: [
+            { symbol: "HDFCBANK", weight: 28, ltp: 990, prev_close: 1000, change_pct: -1, contribution_pct: -0.28, contribution_points: -145 },
+          ],
+        },
+      },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(<IndexContributionWidget />, { wrapper });
+
+    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
+  });
+
   it("renders live decomposition without demo affordance when connected", () => {
     mockConnected.mockReturnValue(true);
     mockHook.mockReturnValue({

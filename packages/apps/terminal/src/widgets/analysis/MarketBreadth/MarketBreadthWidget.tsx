@@ -210,7 +210,10 @@ function MarketBreadthWidget() {
         } else {
           // Map snake_case backend fields → camelCase widget fields
           const d = parsed.data.data;
-          setIsSample(parsed.data.is_sample_data ?? false);
+          // Provenance fails closed, matching the history fetch above: the field is
+          // optional in the schema, so an absent flag is treated as sample data
+          // rather than silently claiming the numbers are live.
+          setIsSample(parsed.data.is_sample_data !== false);
           setData((prev) => ({
             series: prev.series,
             newHighs: d.new_highs ?? 0,

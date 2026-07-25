@@ -263,7 +263,8 @@ export function ShareholdingTab() {
     retry: 1,
   });
 
-  const isDemo = !symbol || isError || (!isLoading && data?.is_sample_data);
+  // Fails closed: absent data, or a response with no provenance flag, counts as demo.
+  const isDemo = !symbol || isError || (!isLoading && (!data || data.is_sample_data !== false));
   const displayData: ShareholdingResponse = data ?? DEMO_RESPONSE;
 
   // Build chart series from history (align on quarters from promoter_history)

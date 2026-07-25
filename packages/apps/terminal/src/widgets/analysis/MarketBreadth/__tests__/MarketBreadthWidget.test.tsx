@@ -87,6 +87,38 @@ describe("MarketBreadthWidget", () => {
     expect(screen.getByText(/live history accumulates while connected/)).toBeTruthy();
   });
 
+  it("keeps the sample badge when the payload omits is_sample_data entirely", async () => {
+    // Provenance fails closed. The flag is optional in the schema, so a payload
+    // without it parses cleanly and the numbers land — but an absent flag is
+    // never evidence of live data, so the badge must stay.
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            String(url).includes("/history")
+              ? { status: "success", count: 0, data: [] }
+              : {
+                  status: "success",
+                  data: {
+                    date: "2026-06-05",
+                    advances: 47, declines: 11, unchanged: 2,
+                    ad_ratio: 4.2727,
+                    new_highs: null, new_lows: null,
+                    ad_line: null, mcclellan_oscillator: null, breadth_thrust: null,
+                  },
+                },
+          ),
+      }),
+    );
+    mockUseBrokerConnected.mockReturnValue(true);
+    render(<MarketBreadthWidget />);
+    // The payload really was adopted…
+    expect(await screen.findByText("47")).toBeTruthy();
+    // …and it is still badged Sample, because the backend never claimed otherwise.
+    expect(screen.getByText("Sample")).toBeTruthy();
+  });
+
   it("charts REAL accumulated history when /breadth/history reports live points", async () => {
     const livePoint = (d: string, adv: number) => ({
       date: d, advances: adv, declines: 50 - adv - 2, unchanged: 2,

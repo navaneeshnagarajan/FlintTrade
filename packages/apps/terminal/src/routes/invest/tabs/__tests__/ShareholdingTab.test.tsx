@@ -2,8 +2,8 @@
  * ShareholdingTab.test.tsx — render tests for the shareholding tab.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -60,12 +60,84 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { ShareholdingTab } from "../ShareholdingTab";
+import { useQuery } from "@tanstack/react-query";
+
+const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
+
+const NO_DATA = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() };
+
+/** A complete server payload minus its provenance flag. */
+const LIVE_PAYLOAD = {
+  shareholding: {
+    symbol: "TCS",
+    as_of_quarter: "Jun 2025",
+    promoter_pct: 71.77,
+    fii_pct: 12.40,
+    dii_pct: 10.80,
+    public_pct: 5.03,
+    government_pct: 0.00,
+    promoter_history: [{ quarter: "Jun 2025", percentage: 71.77 }],
+    fii_history: [{ quarter: "Jun 2025", percentage: 12.40 }],
+    dii_history: [{ quarter: "Jun 2025", percentage: 10.80 }],
+    public_history: [{ quarter: "Jun 2025", percentage: 5.03 }],
+  },
+  financials: {
+    symbol: "TCS",
+    revenue: 240893,
+    net_profit: 48797,
+    operating_cash_flow: 44338,
+    debt_to_equity: 0.09,
+    roe: 51.2,
+    roce: 64.3,
+    pe_ratio: 27.1,
+    market_cap: 1265000,
+    book_value: 260,
+    annual_history: [
+      { year: "Mar 2025", revenue: 240893, net_profit: 48797, operating_cash_flow: 44338 },
+    ],
+  },
+  announcements: [],
+};
+
+/** The tab only leaves its "no symbol yet" demo state once a symbol is fetched. */
+function fetchSymbol(symbol = "TCS") {
+  fireEvent.change(screen.getByRole("textbox", { name: /enter nse\/bse symbol/i }), {
+    target: { value: symbol },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /fetch/i }));
+}
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("ShareholdingTab", () => {
+  beforeEach(() => {
+    mockUseQuery.mockReturnValue(NO_DATA);
+  });
+
+  it("keeps the demo banner when the response omits is_sample_data", () => {
+    // Provenance fails closed — an absent flag is sample, never live.
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: LIVE_PAYLOAD });
+    render(<ShareholdingTab />);
+    fetchSymbol();
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
+  it("drops the demo banner only on an explicit is_sample_data: false", () => {
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { ...LIVE_PAYLOAD, is_sample_data: false } });
+    render(<ShareholdingTab />);
+    fetchSymbol();
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+  });
+
+  it("treats an absent response as demo once a symbol has been fetched", () => {
+    // The tab renders DEMO_RESPONSE in this state, so it must say so.
+    render(<ShareholdingTab />);
+    fetchSymbol();
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
   it("renders the section heading", () => {
     render(<ShareholdingTab />);
     expect(screen.getByText("Shareholding Pattern")).toBeInTheDocument();

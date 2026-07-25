@@ -66,6 +66,8 @@ vi.mock("@/components/ui/badge", () => ({
 // ---------------------------------------------------------------------------
 
 import SectorMapWidget from "../SectorMapWidget";
+import { RRGCanvas } from "../RRGCanvas";
+import type { RRGResponse } from "@/services/ftApi";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -128,5 +130,54 @@ describe("SectorMapWidget", () => {
   it("shows legend footer with colour gradient", () => {
     render(<SectorMapWidget {...defaultProps} />);
     expect(screen.getByText(/-4% → \+4%/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RRGCanvas provenance — the sample indicator must fail closed, exactly as
+// PortfolioRRGTab's badge already does.
+// ---------------------------------------------------------------------------
+
+describe("RRGCanvas provenance", () => {
+  beforeEach(() => {
+    // JSDOM has no Canvas 2D implementation; the draw loop bails on a null
+    // context, so the surrounding markup is what these tests exercise.
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(null);
+  });
+
+  /** `is_sample_data` is a required field in the TS type but optional on the
+   *  wire, so the absent case needs an assertion to be expressible. */
+  function rrgResponse(provenance: { is_sample_data?: boolean }): RRGResponse {
+    return {
+      benchmark: "NIFTY 50",
+      tail_length: 2,
+      sectors: [
+        {
+          symbol: "NIFTYIT",
+          name: "Nifty IT",
+          current_quadrant: "leading",
+          tail: [
+            { date: "2026-07-17", rs_ratio: 100.4, rs_momentum: 100.2 },
+            { date: "2026-07-18", rs_ratio: 100.9, rs_momentum: 100.6 },
+          ],
+        },
+      ],
+      ...provenance,
+    } as RRGResponse;
+  }
+
+  it("badges the plot as sample when the response omits is_sample_data", () => {
+    render(<RRGCanvas data={rrgResponse({})} tailLength={2} />);
+    expect(screen.getByText("sample data")).toBeInTheDocument();
+  });
+
+  it("drops the badge only on an explicit is_sample_data: false", () => {
+    render(<RRGCanvas data={rrgResponse({ is_sample_data: false })} tailLength={2} />);
+    expect(screen.queryByText("sample data")).not.toBeInTheDocument();
+  });
+
+  it("badges the plot as sample on an explicit is_sample_data: true", () => {
+    render(<RRGCanvas data={rrgResponse({ is_sample_data: true })} tailLength={2} />);
+    expect(screen.getByText("sample data")).toBeInTheDocument();
   });
 });

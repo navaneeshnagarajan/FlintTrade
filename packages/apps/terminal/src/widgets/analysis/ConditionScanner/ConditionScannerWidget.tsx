@@ -497,7 +497,8 @@ function ConditionScannerWidget(props: IDockviewPanelProps) {
         <Radar size={13} className="text-accent shrink-0" aria-hidden="true" />
         <span className="text-xs font-semibold text-text-primary">Condition Scanner</span>
         {view === "scans" && run && (
-          run.is_sample_data ? (
+          // Fails closed: only an explicit `false` earns the affirmative "Live" claim.
+          run.is_sample_data !== false ? (
             <span
               className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
               role="status"
@@ -616,7 +617,7 @@ function ConditionScannerWidget(props: IDockviewPanelProps) {
       {/* Provenance banner — per view, and only for data actually on screen. */}
       {view === "scans" ? (
         run && (
-          run.is_sample_data ? (
+          run.is_sample_data !== false ? (
             <div className="flex-none px-2 py-1 bg-warning/5 border-b border-warning/20">
               <span className="text-xxs text-warning" role="status">
                 Sample scan — connect a broker read account to scan live prices

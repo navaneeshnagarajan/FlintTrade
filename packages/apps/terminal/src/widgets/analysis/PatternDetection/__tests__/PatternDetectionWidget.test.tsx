@@ -43,6 +43,29 @@ describe("PatternDetectionWidget", () => {
     expect(screen.getByText("Three White Soldiers")).toBeInTheDocument();
   });
 
+  it("keeps the demo affordance when a connected response omits is_sample_data", () => {
+    // Fail-closed: absent provenance is sample, never live.
+    mockConnected.mockReturnValue(true);
+    mockHook.mockReturnValue({
+      data: {
+        scan: {
+          bar_count: 40,
+          matches: [
+            { index: 39, time: "2026-07-03", pattern: "shooting_star", label: "Shooting Star", direction: "bearish", strength: 0.7 },
+          ],
+        },
+      },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+
+    render(<PatternDetectionWidget />, { wrapper });
+
+    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText("Shooting Star")).toBeInTheDocument();
+  });
+
   it("renders live patterns without demo affordance when connected", () => {
     mockConnected.mockReturnValue(true);
     mockHook.mockReturnValue({
