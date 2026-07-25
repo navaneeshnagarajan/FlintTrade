@@ -12,8 +12,8 @@
  * DATA HONESTY: greeks are NOT in the OpenAlgo option-chain feed, so when a
  * broker is connected the widget fetches the live IV smile (`getFtIVSmile` —
  * the same screener source GreeksSurface uses) and derives the aligned greek
- * grid client-side via the shared Black–Scholes approximation
- * (`greeksHeatmapTransform`), showing a "Live" badge. Deterministic sample data
+ * grid client-side via the shared Black–Scholes module (`@/lib/optionsMath`,
+ * through `greeksHeatmapTransform`), showing a "Live" badge. Deterministic sample data
  * is restricted to disconnected Explore state; connected empty/error reads are
  * surfaced as unavailable and never replaced with sample figures.
  */
@@ -35,7 +35,7 @@ import { getExpiry } from "@/services/api";
 import { getFtIVSmile } from "@/services/ftApi.analysis";
 import type { IVSmileData } from "@/types/api";
 import { SYMBOLS as OPTION_SYMBOLS } from "@/widgets/analysis/OptionChain/types";
-import { buildGreeksHeatmap } from "./greeksHeatmapTransform";
+import { approxGreeks, buildGreeksHeatmap, classifyMoneyness } from "./greeksHeatmapTransform";
 import type { ExpiryRow, HeatCell } from "./greeksHeatmapTransform";
 
 // ---------------------------------------------------------------------------
@@ -46,32 +46,38 @@ type GreekKey = "delta" | "gamma" | "theta" | "vega";
 
 // ---------------------------------------------------------------------------
 // Sample data — 3 expiries × 9 strikes
+//
+// The IV surface is fabricated (a deterministic smile + put skew per expiry),
+// but the greeks come from `approxGreeks` — the SAME shared Black–Scholes path
+// (`@/lib/optionsMath`) the live grid uses. Sample and live rows are therefore
+// two readings of one implementation, not two unrelated formulas.
 // ---------------------------------------------------------------------------
 
 const SAMPLE_STRIKES = [21500, 21600, 21700, 21800, 21900, 22000, 22100, 22200, 22300];
 const ATM_STRIKE = 22000;
+/** Smile curvature: extra IV per unit squared moneyness. */
+const SAMPLE_SMILE_CURVE = 12;
+/** Put skew: extra IV on the downside wing, per unit moneyness. */
+const SAMPLE_PUT_SKEW = 0.6;
 
-function makeSampleRow(expiry: string, label: string, dte: number, baseIV: number): ExpiryRow {
-  // Deterministic offsets per strike index (no Math.random) for testability
-  const deltaJitter = [0.02, 0.01, 0.01, 0.00, 0.00, 0.00, -0.01, -0.01, -0.02];
-  const gammaJitter = [0.9, 1.0, 1.05, 1.1, 1.1, 1.05, 1.0, 0.95, 0.9];
-  const cells: HeatCell[] = SAMPLE_STRIKES.map((strike, i) => {
-    const d = (strike - ATM_STRIKE) / ATM_STRIKE;
-    const moneyness: "OTM" | "ATM" | "ITM" =
-      Math.abs(d) < 0.001 ? "ATM" : d < 0 ? "OTM" : "ITM";
-    const delta = parseFloat(Math.max(0.01, Math.min(0.99, 0.5 - d * 4 + deltaJitter[i])).toFixed(3));
-    const gamma = parseFloat((0.003 * Math.exp(-Math.pow(d * 12, 2)) * gammaJitter[i] * (30 / Math.max(dte, 1))).toFixed(6));
-    const theta = parseFloat((-0.4 * baseIV * Math.exp(-Math.pow(d * 8, 2)) - 0.05).toFixed(2));
-    const vega  = parseFloat((0.12 * Math.exp(-Math.pow(d * 6, 2)) * Math.sqrt(dte / 30)).toFixed(3));
-    return { strike, moneyness, delta, gamma, theta, vega };
+function makeSampleRow(expiry: string, label: string, dte: number, atmIv: number): ExpiryRow {
+  const cells: HeatCell[] = SAMPLE_STRIKES.map((strike) => {
+    const mv = (strike - ATM_STRIKE) / ATM_STRIKE;
+    // Deterministic smile (no Math.random) so the grid is testable.
+    const iv = atmIv + SAMPLE_SMILE_CURVE * mv * mv + (mv < 0 ? SAMPLE_PUT_SKEW * -mv : 0);
+    return {
+      strike,
+      moneyness: classifyMoneyness(strike, ATM_STRIKE),
+      ...approxGreeks(strike, ATM_STRIKE, iv, dte),
+    };
   });
   return { expiry, label, dte, cells };
 }
 
 export const SAMPLE_GREEKS_HEATMAP_DATA: ExpiryRow[] = [
-  makeSampleRow("2026-04-17", "17 Apr", 8,  1.0),
-  makeSampleRow("2026-04-24", "24 Apr", 15, 0.85),
-  makeSampleRow("2026-05-29", "29 May", 50, 0.65),
+  makeSampleRow("2026-04-17", "17 Apr", 8,  0.16),
+  makeSampleRow("2026-04-24", "24 Apr", 15, 0.145),
+  makeSampleRow("2026-05-29", "29 May", 50, 0.13),
 ];
 
 // ---------------------------------------------------------------------------

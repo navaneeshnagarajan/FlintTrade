@@ -20,7 +20,7 @@ import { useMemo, useState, useCallback, memo } from "react";
 import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Calculator, TrendingUp, Layers } from "lucide-react";
+import { Calculator, TrendingUp, Layers, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -34,11 +34,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { WidgetProps } from "@/types/widgets";
 import { getMargin, getFunds } from "@/services/api";
 import type { MarginData, Funds } from "@/types/api";
+import {
+  deriveTarget,
+  formatRR,
+  riskBudget,
+  rrRatio as computeRR,
+  sizeFixedFractional,
+  type TradeSide,
+} from "@/lib/sizing";
 
 // ---------------------------------------------------------------------------
-// Risk calculation engine (adapted from riskCalculator.ts)
+// Risk calculation engine — sizing and risk/reward come from the shared kernel
+// in lib/sizing.ts. This tab sizes in shares, i.e. a lot size of 1.
 // ---------------------------------------------------------------------------
-type TradeSide = "BUY" | "SELL";
 
 interface RiskCalcParams {
   capital: number;
@@ -59,24 +67,33 @@ interface RiskCalcResult {
   rewardPoints: number;
   rewardAmount: number;
   rrRatio: number;
+  /** True when a single share already risks more than `riskAmount`. */
+  exceedsRisk: boolean;
+  /** Rupees actually at risk at `quantity` — differs from the budget when clamped. */
+  actualRisk: number;
 }
 
 function calculateRiskPosition(params: RiskCalcParams): RiskCalcResult | null {
   const { capital, riskPercent, entryPrice, stopLossPrice, targetPrice, riskRewardRatio, side } =
     params;
 
-  if (capital <= 0 || riskPercent <= 0 || entryPrice <= 0 || stopLossPrice <= 0) return null;
+  if (entryPrice <= 0 || stopLossPrice <= 0) return null;
 
-  const riskAmount = capital * (riskPercent / 100);
   const slPoints = Math.abs(entryPrice - stopLossPrice);
-  if (slPoints <= 0) return null;
 
   if (side === "BUY" && entryPrice <= stopLossPrice) return null;
   if (side === "SELL" && entryPrice >= stopLossPrice) return null;
 
-  const quantity = Math.floor(riskAmount / slPoints);
-  if (quantity <= 0) return null;
+  // Lot size 1 — this tab quotes shares, not lots.
+  const sized = sizeFixedFractional({
+    capital,
+    riskPct: riskPercent,
+    stopDistance: slPoints,
+    lotSize: 1,
+  });
+  if (!sized) return null;
 
+  const quantity = sized.units;
   const positionValue = quantity * entryPrice;
   let finalTarget: number;
   let finalRR: number;
@@ -84,20 +101,30 @@ function calculateRiskPosition(params: RiskCalcParams): RiskCalcResult | null {
   if (targetPrice && targetPrice > 0) {
     if (side === "BUY" && targetPrice <= entryPrice) return null;
     if (side === "SELL" && targetPrice >= entryPrice) return null;
+    const implied = computeRR(entryPrice, stopLossPrice, targetPrice);
+    if (implied === null) return null;
     finalTarget = targetPrice;
-    finalRR = Math.abs(targetPrice - entryPrice) / slPoints;
+    finalRR = implied;
   } else {
     finalRR = riskRewardRatio;
-    finalTarget =
-      side === "BUY"
-        ? entryPrice + slPoints * finalRR
-        : entryPrice - slPoints * finalRR;
+    finalTarget = deriveTarget(entryPrice, slPoints, finalRR, side);
   }
 
   const rewardPoints = Math.abs(finalTarget - entryPrice);
   const rewardAmount = rewardPoints * quantity;
 
-  return { riskAmount, slPoints, quantity, positionValue, targetPrice: finalTarget, rewardPoints, rewardAmount, rrRatio: finalRR };
+  return {
+    riskAmount: riskBudget(capital, riskPercent),
+    slPoints,
+    quantity,
+    positionValue,
+    targetPrice: finalTarget,
+    rewardPoints,
+    rewardAmount,
+    rrRatio: finalRR,
+    exceedsRisk: sized.exceedsRisk,
+    actualRisk: sized.rupeeRisk,
+  };
 }
 
 // Auto-detect side from entry vs SL (adapted from riskCalculator.ts)
@@ -334,7 +361,7 @@ function RiskCalcTab() {
         </div>
 
         <div>
-          <Label className="text-xxs uppercase tracking-wider text-text-muted">R:R Ratio</Label>
+          <Label className="text-xxs uppercase tracking-wider text-text-muted">Target R:R</Label>
           <Controller
             name="riskRewardRatio"
             control={control}
@@ -345,7 +372,7 @@ function RiskCalcTab() {
                 </SelectTrigger>
                 <SelectContent className="bg-surface-card border-border-default text-xs">
                   {[1, 1.5, 2, 2.5, 3, 4, 5].map((v) => (
-                    <SelectItem key={v} value={String(v)}>1:{v}</SelectItem>
+                    <SelectItem key={v} value={String(v)}>{formatRR(v)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -373,9 +400,37 @@ function RiskCalcTab() {
       {result ? (
         <div className="border border-border-default rounded p-2 bg-surface-card space-y-0.5">
           <p className="text-xxs text-text-muted uppercase tracking-wider mb-1">Results</p>
-          <ResultRow label="Quantity" value={`${result.quantity.toLocaleString("en-IN")} shares`} highlight="neutral" />
+
+          {/* Over-budget warning — one share already breaches the stated risk */}
+          {result.exceedsRisk && (
+            <div
+              role="status"
+              className="flex items-start gap-1.5 text-xxs text-warning bg-warning/10 border border-warning/30 rounded px-1.5 py-1 mb-1 leading-snug"
+            >
+              <AlertTriangle size={11} className="mt-px shrink-0" aria-hidden="true" />
+              <span>
+                A single share risks {formatINR(result.actualRisk)}, which exceeds your{" "}
+                {formatINR(result.riskAmount)} risk budget. One share is shown because it is
+                the smallest tradeable size; tighten the stop or raise your capital to stay
+                within budget.
+              </span>
+            </div>
+          )}
+
+          <ResultRow
+            label="Quantity"
+            value={`${result.quantity.toLocaleString("en-IN")} ${result.quantity === 1 ? "share" : "shares"}`}
+            highlight="neutral"
+          />
           <ResultRow label="Position Value" value={formatINR(result.positionValue)} />
-          <ResultRow label="Risk Amount" value={formatINR(result.riskAmount)} highlight="loss" />
+          <ResultRow
+            label="Risk Amount"
+            value={formatINR(result.riskAmount)}
+            highlight={result.exceedsRisk ? "neutral" : "loss"}
+          />
+          {result.exceedsRisk && (
+            <ResultRow label="Actual Risk" value={formatINR(result.actualRisk)} highlight="loss" />
+          )}
           <ResultRow label="SL Points" value={result.slPoints.toFixed(2)} />
           <div className="border-t border-border-default my-1" />
           <ResultRow label="Target" value={formatINR(result.targetPrice)} highlight="profit" />
@@ -383,8 +438,8 @@ function RiskCalcTab() {
           <ResultRow label="Reward Amount" value={formatINR(result.rewardAmount)} highlight="profit" />
           <div className="border-t border-border-default my-1" />
           <ResultRow
-            label="Risk : Reward"
-            value={`1 : ${Number.isInteger(result.rrRatio) ? result.rrRatio : result.rrRatio.toFixed(2)}`}
+            label="R:R Ratio"
+            value={formatRR(result.rrRatio)}
             highlight={result.rrRatio >= 2 ? "profit" : result.rrRatio >= 1 ? "neutral" : "loss"}
           />
         </div>

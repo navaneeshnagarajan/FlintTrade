@@ -41,6 +41,12 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Merged canonical. Order Flow absorbed Footprint, which was locked to
+  // advanced; an absent widget: id resolves to visible at every level, so
+  // leaving this out would hand beginners a microstructure surface that was
+  // advanced-only before the merge. The footprint entry stays because its
+  // own gate test pins it and the retired id still resolves.
+  "widget:orderflow": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   "widget:footprint":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:domheatmap":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
 

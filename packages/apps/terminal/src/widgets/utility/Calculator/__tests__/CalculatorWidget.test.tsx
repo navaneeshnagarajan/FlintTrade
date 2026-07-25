@@ -40,6 +40,18 @@ import CalculatorWidget from "../CalculatorWidget";
 
 const defaultProps = makeDockviewPanelProps();
 
+/** Read the value cell of a `ResultRow` by its label. */
+function resultValue(label: string): string {
+  const row = screen.getByText(label).closest("div");
+  return row?.querySelector("span:last-child")?.textContent?.trim() ?? "";
+}
+
+/** Type into the input that sits alongside a form label. */
+function setField(label: string, value: string): void {
+  const field = screen.getByText(label).closest("div")?.querySelector("input");
+  fireEvent.change(field as HTMLInputElement, { target: { value } });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -179,5 +191,75 @@ describe("CalculatorWidget", () => {
     // Results should appear
     expect(screen.getByText("Risk Amount")).toBeInTheDocument();
     expect(screen.getByText("Reward Amount")).toBeInTheDocument();
+  });
+
+  // ── Numeric characterisation (pins the sizing kernel) ────────────────────
+  //
+  // These pin the exact arithmetic of the fixed-fractional sizing kernel so
+  // that extracting it into `lib/sizing.ts` cannot silently change a number.
+
+  describe("risk sizing arithmetic", () => {
+    it("pins quantity and the auto-derived target for a known BUY trade", () => {
+      render(<CalculatorWidget {...defaultProps} />);
+
+      // Defaults: capital ₹2,00,000 · risk 2% · R:R 2 → risk budget ₹4,000.
+      setField("Entry Price", "500");
+      setField("Stop Loss", "490");
+
+      // SL points 10 → quantity = floor(4000 / 10) = 400 shares (lot size 1).
+      expect(resultValue("Quantity")).toBe("400 shares");
+      expect(resultValue("Position Value")).toBe("₹2,00,000");
+      expect(resultValue("Risk Amount")).toBe("₹4,000");
+      expect(resultValue("SL Points")).toBe("10.00");
+      // Auto-derived target = 500 + 10 × 2 = 520.
+      expect(resultValue("Target")).toBe("₹520");
+      expect(resultValue("Reward Points")).toBe("20.00");
+      expect(resultValue("Reward Amount")).toBe("₹8,000");
+      expect(resultValue("R:R Ratio")).toBe("2.00 : 1");
+    });
+
+    it("pins the R:R implied by an explicit target price", () => {
+      render(<CalculatorWidget {...defaultProps} />);
+
+      setField("Entry Price", "500");
+      setField("Stop Loss", "490");
+      setField("Target Price (optional)", "530");
+
+      // Reward 30 / risk 10 → 3R, quantity unchanged at 400.
+      expect(resultValue("Quantity")).toBe("400 shares");
+      expect(resultValue("Reward Points")).toBe("30.00");
+      expect(resultValue("Reward Amount")).toBe("₹12,000");
+      expect(resultValue("R:R Ratio")).toBe("3.00 : 1");
+    });
+
+    it("pins a SELL trade (stop above entry) auto-detecting the side", () => {
+      render(<CalculatorWidget {...defaultProps} />);
+
+      setField("Entry Price", "490");
+      setField("Stop Loss", "500");
+
+      // SL points 10 → 400 shares; target = 490 − 10 × 2 = 470.
+      expect(resultValue("Quantity")).toBe("400 shares");
+      expect(resultValue("Target")).toBe("₹470");
+      expect(resultValue("R:R Ratio")).toBe("2.00 : 1");
+    });
+
+    it("warns rather than hiding results when one share breaches the risk budget", () => {
+      render(<CalculatorWidget {...defaultProps} />);
+
+      // Budget ₹4,000 but a single share risks ₹10,000 → floor() lands on 0.
+      // Previously this rendered the empty-form placeholder, which was
+      // indistinguishable from "you have not typed anything yet".
+      setField("Entry Price", "100000");
+      setField("Stop Loss", "90000");
+
+      expect(resultValue("Quantity")).toBe("1 share");
+      expect(resultValue("Risk Amount")).toBe("₹4,000");
+      expect(resultValue("Actual Risk")).toBe("₹10,000");
+      expect(screen.getByText(/exceeds your ₹4,000 risk budget/i)).toBeInTheDocument();
+      expect(
+        screen.queryByText("Enter entry and stop loss prices to calculate"),
+      ).not.toBeInTheDocument();
+    });
   });
 });

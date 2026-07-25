@@ -10,10 +10,17 @@
  *   - No external dependencies — pure maths + Tailwind
  */
 
-import { useState, useMemo, memo } from "react";
-import { Target } from "lucide-react";
+import { useState, useMemo, useEffect, memo } from "react";
+import { Target, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import {
+  breakevenWinRate,
+  formatRR,
+  riskBudget,
+  rrRatio as computeRR,
+  sizeFixedFractional,
+} from "@/lib/sizing";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,10 +32,16 @@ interface CalcResult {
   rrRatio: number;
   breakEvenWinRate: number;    // percentage
   suggestedQty: number;
+  /** True when the suggested single lot already breaches the risk budget. */
+  suggestionExceedsRisk: boolean;
+  /** Rupee risk of the suggested quantity — only meaningful when sized. */
+  suggestedRisk: number;
+  /** Rupee budget the suggestion was measured against. */
+  riskBudgetAmount: number;
 }
 
 // ---------------------------------------------------------------------------
-// Maths
+// Maths — sizing and risk/reward come from the shared kernel in lib/sizing.ts
 // ---------------------------------------------------------------------------
 
 function calculate(
@@ -44,20 +57,32 @@ function calculate(
   const units = qty * lotSize;
   const risk = Math.abs(entry - stopLoss);
   const reward = Math.abs(target - entry);
-  if (risk === 0) return null;
+
+  const rr = computeRR(entry, stopLoss, target);
+  if (rr === null) return null;
 
   const riskPerTrade = risk * units;
   const potentialProfit = reward * units;
-  const rrRatio = reward / risk;
-  const breakEvenWinRate = (1 / (1 + rrRatio)) * 100;
 
-  let suggestedQty = qty;
-  if (capital > 0 && maxRiskPct > 0) {
-    const maxRiskAmount = (capital * maxRiskPct) / 100;
-    suggestedQty = Math.max(1, Math.floor(maxRiskAmount / (risk * lotSize)));
-  }
+  const sized = sizeFixedFractional({
+    capital,
+    riskPct: maxRiskPct,
+    stopDistance: risk,
+    lotSize,
+  });
 
-  return { riskPerTrade, potentialProfit, rrRatio, breakEvenWinRate, suggestedQty };
+  return {
+    riskPerTrade,
+    potentialProfit,
+    rrRatio: rr,
+    breakEvenWinRate: breakevenWinRate(rr),
+    // Without usable capital/risk inputs there is no budget to size against,
+    // so the operator's own quantity stands.
+    suggestedQty: sized?.lots ?? qty,
+    suggestionExceedsRisk: sized?.exceedsRisk ?? false,
+    suggestedRisk: sized?.rupeeRisk ?? 0,
+    riskBudgetAmount: riskBudget(capital, maxRiskPct),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -177,19 +202,28 @@ function ProfitTargetWidget() {
   const [capital, setCapital] = useState("500000");
   const [maxRiskPct, setMaxRiskPct] = useState("1");
 
-  const result = useMemo(() => {
-    const r = calculate(
-      parseFloat(entry),
-      parseFloat(stopLoss),
-      parseFloat(target),
-      parseFloat(qty),
-      parseFloat(lotSize),
-      parseFloat(capital),
-      parseFloat(maxRiskPct),
-    );
-    if (r) track("trade", "profit_target_calc");
-    return r;
-  }, [entry, stopLoss, target, qty, lotSize, capital, maxRiskPct, track]);
+  const result = useMemo(
+    () =>
+      calculate(
+        parseFloat(entry),
+        parseFloat(stopLoss),
+        parseFloat(target),
+        parseFloat(qty),
+        parseFloat(lotSize),
+        parseFloat(capital),
+        parseFloat(maxRiskPct),
+      ),
+    [entry, stopLoss, target, qty, lotSize, capital, maxRiskPct],
+  );
+
+  // Behaviour tracking is a side effect, so it belongs in an effect rather than
+  // in the memo — inside useMemo it fired on every keystroke and ran twice
+  // under StrictMode. Keyed on "has a result" so it reports once per session.
+  const hasResult = result !== null;
+  useEffect(() => {
+    if (!hasResult) return;
+    track("trade", "profit_target_calc");
+  }, [hasResult, track]);
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">
@@ -238,7 +272,7 @@ function ProfitTargetWidget() {
               <ResultRow label="Potential Profit" value={fmtINR(result.potentialProfit)} highlight="profit" />
               <ResultRow
                 label="R:R Ratio"
-                value={`${result.rrRatio.toFixed(2)} : 1`}
+                value={formatRR(result.rrRatio)}
                 highlight={result.rrRatio >= 2 ? "profit" : result.rrRatio >= 1 ? "neutral" : "loss"}
               />
               <ResultRow
@@ -248,9 +282,25 @@ function ProfitTargetWidget() {
               <ResultRow
                 label="Suggested Qty (lots)"
                 value={String(result.suggestedQty)}
-                highlight="neutral"
+                highlight={result.suggestionExceedsRisk ? "loss" : "neutral"}
               />
             </div>
+
+            {/* Over-budget warning — one lot already breaches the stated risk */}
+            {result.suggestionExceedsRisk && (
+              <div
+                role="status"
+                className="flex items-start gap-1.5 text-xxs text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5 leading-snug"
+              >
+                <AlertTriangle size={11} className="mt-px shrink-0" aria-hidden="true" />
+                <span>
+                  A single lot risks {fmtINR(result.suggestedRisk)} — more than the{" "}
+                  {fmtINR(result.riskBudgetAmount)} you allowed. One lot is shown because it
+                  is the smallest tradeable size; widen your capital, raise the max risk, or
+                  tighten the stop to stay within budget.
+                </span>
+              </div>
+            )}
 
             {/* Breakeven insight */}
             <div className="bg-surface-card border border-border-default rounded px-2 py-1.5 text-xs text-text-secondary">

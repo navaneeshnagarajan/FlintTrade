@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getFtIVSmile } from "@/services/ftApi";
 import { getOptionChain } from "@/services/api";
 import { isMarketHours } from "@/lib/market";
+import { bsGreeks, yearsFromDays } from "@/lib/optionsMath";
 import type { GreeksSurfaceExpiry, GreeksSurfacePoint } from "./sampleData";
 
 const MONEYNESS_RANGE = 0.05; // ±5% from ATM
@@ -66,17 +67,17 @@ export function buildSurfaceFromIVSmile(
       const ivDec = (nearest.call_iv + nearest.put_iv) / 2;
       if (!(ivDec > 0) || !Number.isFinite(ivDec)) continue;
       const iv = ivDec * 100;
-      // Approximate greeks from IV and moneyness
-      const T = days_to_expiry / 365;
-      const d1 = T > 0
-        ? (-mv + 0.5 * ivDec * ivDec * T) / (ivDec * Math.sqrt(T))
-        : (mv >= 0 ? 3 : -3);
-      const delta = 1 / (1 + Math.exp(-1.7 * d1));
-      const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
-      const gamma = T > 0 ? (pdf / (targetStrike * ivDec * Math.sqrt(T))) * 1000 : 0;
-      const theta = T > 0
-        ? -(ivDec * atm_strike * Math.exp(-0.5 * mv * mv * 100)) / Math.sqrt(365 * days_to_expiry * 2 * Math.PI)
-        : 0;
+      // Call-side greeks from the shared Black–Scholes module. The ATM strike
+      // stands in for spot (the IV-smile payload carries no spot per curve),
+      // so `ln(spot/strike)` is the exact moneyness of the bucket's rounded
+      // strike rather than the linear `-mv` approximation used before.
+      const { delta, gamma, theta } = bsGreeks({
+        spot: atm_strike,
+        strike: targetStrike,
+        timeToExpiryYears: yearsFromDays(days_to_expiry),
+        volatility: ivDec,
+        optionType: "call",
+      });
 
       surfacePoints.push({
         moneyness: moneynessLabel,

@@ -12,19 +12,17 @@
  * without a broker connection.
  */
 
+import { normaliseIv } from "@/lib/optionsMath";
 import type { IVSmileData } from "@/types/api";
 import type { IVSkewCurve, IVSkewData, IVSkewPoint } from "./IVSkewWidget";
 
 /**
  * Normalise a single implied-volatility figure to a 0–1 decimal.
  *
- * The current endpoint reports decimal IV. Percentage-point normalisation is
- * retained only for one-way compatibility with older saved/mock payloads.
+ * Re-exported from the shared options-maths module (`@/lib/optionsMath`), which
+ * owns the one percent-vs-fraction heuristic; the widget-local copy is gone.
  */
-export function normaliseIv(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value > 1.5 ? value / 100 : value;
-}
+export { normaliseIv };
 
 /**
  * Map one IV-smile curve to a skew curve, or null when it has no points.

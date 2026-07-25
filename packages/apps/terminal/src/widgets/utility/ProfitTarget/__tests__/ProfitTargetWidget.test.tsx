@@ -12,6 +12,12 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 
 import ProfitTargetWidget from "../ProfitTargetWidget";
 
+/** Read the value cell of a `ResultRow` by its label. */
+function resultValue(label: string): string {
+  const row = screen.getByText(label).closest("div");
+  return row?.querySelector("span:last-child")?.textContent?.trim() ?? "";
+}
+
 describe("ProfitTargetWidget", () => {
   it("renders widget header with title", () => {
     render(<ProfitTargetWidget />);
@@ -66,5 +72,47 @@ describe("ProfitTargetWidget", () => {
     expect(rrRow).toBeTruthy();
     const rrValue = screen.getByText(/2.50 : 1/);
     expect(rrValue).toBeTruthy();
+  });
+
+  // ── Numeric characterisation (pins the sizing kernel) ──────────────────────
+  //
+  // These pin the exact arithmetic so that extracting the shared sizing kernel
+  // into `lib/sizing.ts` cannot silently change a number.
+
+  describe("risk/reward arithmetic", () => {
+    it("pins every result row for the default trade", () => {
+      render(<ProfitTargetWidget />);
+
+      // entry 22000 · SL 21800 · target 22500 · 1 lot × 50 → risk 200, reward 500.
+      expect(resultValue("Risk per Trade")).toBe("₹10,000");
+      expect(resultValue("Potential Profit")).toBe("₹25,000");
+      expect(resultValue("R:R Ratio")).toBe("2.50 : 1");
+      // Breakeven win rate = 1 / (1 + 2.5) = 28.571…%
+      expect(resultValue("Breakeven Win Rate")).toBe("28.6%");
+      // Capital ₹5,00,000 · max risk 1% → budget ₹5,000, but one lot risks
+      // ₹10,000; the max(1, …) clamp still recommends 1 lot.
+      expect(resultValue("Suggested Qty (lots)")).toBe("1");
+      // …and the clamp is now stated out loud instead of passing silently.
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /single lot risks ₹10,000 — more than the ₹5,000 you allowed/i,
+      );
+    });
+
+    it("pins suggested qty when the budget covers several lots", () => {
+      render(<ProfitTargetWidget />);
+      fireEvent.change(screen.getByLabelText("Max Risk %"), { target: { value: "4" } });
+
+      // Budget ₹20,000 / (200 × 50 = ₹10,000 per lot) → 2 lots exactly.
+      expect(resultValue("Suggested Qty (lots)")).toBe("2");
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("pins the breakeven win rate at 1:1", () => {
+      render(<ProfitTargetWidget />);
+      fireEvent.change(screen.getByLabelText("Target Price"), { target: { value: "22200" } });
+
+      expect(resultValue("R:R Ratio")).toBe("1.00 : 1");
+      expect(resultValue("Breakeven Win Rate")).toBe("50.0%");
+    });
   });
 });

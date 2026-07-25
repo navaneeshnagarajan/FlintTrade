@@ -103,12 +103,22 @@ describe("LegBuilder — render", () => {
     expect(screen.getByText("Strategy Builder")).toBeInTheDocument();
   });
 
-  it("renders all 7 template pills", () => {
+  // Pills now come from the shared catalogue (lib/strategyTemplates). The two
+  // credit pills were labelled "STR"/"STRG" while the same ids meant the LONG
+  // (debit) strategies in the other two catalogues — this panel places real
+  // gated basket orders, so they are now the explicit short variants. The leg
+  // shapes are unchanged; only the labels name what was always being sold.
+  it("renders all 7 template pills, with the credit strategies named short", () => {
     renderLegBuilder();
-    const pills = ["STR", "STRG", "BCS", "BPS", "IC", "BF", "CUST"];
+    const pills = ["SSTR", "SSTG", "BCS", "BPS", "IC", "BF", "CUST"];
     for (const pill of pills) {
       expect(screen.getByText(pill)).toBeInTheDocument();
     }
+    expect(screen.getByRole("button", { name: "Short Straddle" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Short Strangle" })).toBeInTheDocument();
+    // No ambiguous bare label may survive anywhere on the panel.
+    expect(screen.queryByRole("button", { name: "Straddle" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Strangle" })).toBeNull();
   });
 
   it("shows empty-state prompt when no legs are present", () => {
@@ -132,9 +142,9 @@ describe("LegBuilder — render", () => {
 describe("LegBuilder — template selection", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("STR template populates 2 legs (Sell CE + Sell PE at ATM)", async () => {
+  it("SSTR template populates 2 legs (Sell CE + Sell PE at ATM)", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
 
     // 2 leg rows should appear (column header + 2 data rows)
     const sideLabels = screen.getAllByLabelText("Strike price");
@@ -159,8 +169,8 @@ describe("LegBuilder — template selection", () => {
 
   it("CUST template clears legs and shows empty prompt", async () => {
     renderLegBuilder();
-    // First load STR
-    await userEvent.click(screen.getByText("STR"));
+    // First load SSTR
+    await userEvent.click(screen.getByText("SSTR"));
     expect(screen.getAllByLabelText("Strike price")).toHaveLength(2);
 
     // Switch to custom
@@ -171,14 +181,14 @@ describe("LegBuilder — template selection", () => {
 
   it("active template pill has aria-pressed=true", async () => {
     renderLegBuilder();
-    const strBtn = screen.getByText("STR").closest("button")!;
+    const strBtn = screen.getByText("SSTR").closest("button")!;
     await userEvent.click(strBtn);
     expect(strBtn).toHaveAttribute("aria-pressed", "true");
   });
 
   it("inactive pills have aria-pressed=false", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const icBtn = screen.getByText("IC").closest("button")!;
     expect(icBtn).toHaveAttribute("aria-pressed", "false");
   });
@@ -210,7 +220,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("Remove leg button removes a specific leg", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // 2 legs
+    await userEvent.click(screen.getByText("SSTR")); // 2 legs
     const removeButtons = screen.getAllByLabelText("Remove leg");
     expect(removeButtons).toHaveLength(2);
     await userEvent.click(removeButtons[0]);
@@ -219,7 +229,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("toggling BUY/SELL changes the leg side", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // 2 SELL legs
+    await userEvent.click(screen.getByText("SSTR")); // 2 SELL legs
 
     // Click the B (BUY) button on the first leg
     const buyButtons = screen.getAllByText("B");
@@ -242,7 +252,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("changing lots input updates the leg", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const lotsInputs = screen.getAllByLabelText("Number of lots");
     fireEvent.change(lotsInputs[0], { target: { value: "3" } });
     expect((lotsInputs[0] as HTMLInputElement).value).toBe("3");
@@ -296,7 +306,7 @@ describe("LegBuilder — metrics", () => {
 
   it("shows metrics footer when legs are present", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     expect(screen.getByText(/Net/)).toBeInTheDocument();
     // The footer's place action is present and live.
     expect(
@@ -304,10 +314,10 @@ describe("LegBuilder — metrics", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows credit net premium for sell-only strategy (straddle)", async () => {
+  it("shows credit net premium for sell-only strategy (short straddle)", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
-    // Straddle = 2× SELL; net premium < 0 → Credit label
+    await userEvent.click(screen.getByText("SSTR"));
+    // Short straddle = 2× SELL; net premium < 0 → Credit label
     expect(screen.getByText(/Credit/)).toBeInTheDocument();
   });
 
@@ -344,16 +354,16 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("shows an enabled 'Place Strategy' action when legs are present", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const btn = screen.getByRole("button", { name: "Place strategy" });
     expect(btn).toBeEnabled();
     expect(btn).toHaveTextContent(/place strategy/i);
     expect(btn).not.toHaveTextContent(/coming soon/i);
   });
 
-  it("dispatches basketOrder with the exact per-leg contract for a straddle", async () => {
+  it("dispatches basketOrder with the exact per-leg contract for a short straddle", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // SELL ATM CE + SELL ATM PE
+    await userEvent.click(screen.getByText("SSTR")); // SELL ATM CE + SELL ATM PE
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(basketOrderMock).toHaveBeenCalledTimes(1);
@@ -385,7 +395,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("shows a placed-count toast when the basket succeeds", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("2 legs placed");
@@ -396,7 +406,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
     // server's message and the widget must show it verbatim.
     basketOrderMock.mockRejectedValueOnce(new Error("Daily loss limit breached"));
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Daily loss limit breached");
@@ -437,7 +447,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       }),
     );
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     // Confirmed rollback (rollback_order_id present) — honest counts, but no
@@ -469,7 +479,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       }),
     );
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     const alert = await screen.findByRole("alert");
@@ -495,7 +505,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       renderLegBuilder();
       // fireEvent (not userEvent) — userEvent's internal delays hang under
       // fake timers; the clicks here need no pointer-event realism.
-      fireEvent.click(screen.getByText("STR"));
+      fireEvent.click(screen.getByText("SSTR"));
       fireEvent.click(screen.getByRole("button", { name: "Place strategy" }));
       await act(async () => {}); // flush the rejected basket promise
 
@@ -512,7 +522,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("refuses to dispatch without an expiry", async () => {
     renderLegBuilder({ expiry: null });
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(basketOrderMock).not.toHaveBeenCalled();

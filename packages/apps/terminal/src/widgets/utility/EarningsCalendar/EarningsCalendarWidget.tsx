@@ -6,6 +6,10 @@
  *   - Past dates: beat (green dot) / missed (red dot) / inline (grey dot)
  *   - Future dates: highlighted with accent colour
  *   - Filter by sector
+ *   - The grid is a calendar of IST trading days: every cell is identified by
+ *     its IST ISO date (see ``@/lib/ist``) rather than a browser-local Date, so
+ *     entries land on the right square and "today" highlights the right square
+ *     wherever the operator is.
  *   - Local sample data (with a visible "Sample data" badge) in explore
  *     mode; ft-api data in connected mode. The backend earnings source is
  *     currently synthetic-only and flags itself via is_sample_data, so the
@@ -23,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { fromIstParts, istParts, istToday, toIstIsoDate } from "@/lib/ist";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { SAMPLE_EARNINGS, SAMPLE_SECTORS } from "./sampleData";
@@ -36,22 +41,36 @@ import { getEarningsCalendar } from "@/services/ftApi";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function getMonthMatrix(year: number, month: number): (Date | null)[][] {
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (Date | null)[] = [
-    ...Array(firstDay).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => new Date(year, month, i + 1)),
+/** The IST ISO date (``YYYY-MM-DD``) of a calendar day. */
+function isoDayOf(year: number, month: number, day: number): string {
+  return toIstIsoDate(fromIstParts(year, month, day));
+}
+
+/**
+ * Lay a month out as calendar rows of IST ISO dates, Sunday-first.
+ *
+ * Cells carry ISO date strings rather than Date objects on purpose. The
+ * previous version built browser-local ``new Date(year, month, day)`` cells and
+ * keyed them with ``toISOString()``, which is UTC — so on an IST machine every
+ * cell's key came out a day early and the whole grid was shifted by one square.
+ *
+ * @param year - Full year to lay out.
+ * @param month - Month index, 0 = January.
+ * @returns Week rows of ISO date strings, with nulls padding the first and last.
+ */
+function getMonthMatrix(year: number, month: number): (string | null)[][] {
+  // Pure calendar arithmetic in UTC — independent of the host's own zone.
+  const firstDay = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells: (string | null)[] = [
+    ...Array<null>(firstDay).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => isoDayOf(year, month, i + 1)),
   ];
   // Pad to complete last row
   while (cells.length % 7 !== 0) cells.push(null);
-  const rows: (Date | null)[][] = [];
+  const rows: (string | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
   return rows;
-}
-
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }
 
 type ResultDot = "beat" | "missed" | "inline";
@@ -73,18 +92,23 @@ const DOT_LABEL: Record<ResultDot, string> = {
 // ---------------------------------------------------------------------------
 
 interface DayCellProps {
-  date: Date | null;
+  /** IST ISO date (``YYYY-MM-DD``) this cell stands for, or null for padding. */
+  date: string | null;
   entries: EarningsEntry[];
-  isToday: boolean;
+  /** IST ISO date of today, for the past/present/future comparison. */
+  todayIso: string;
 }
 
-function DayCell({ date, entries, isToday }: DayCellProps) {
+function DayCell({ date, entries, todayIso }: DayCellProps) {
   if (!date) return <td className="border border-border-subtle bg-surface-base" />;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const isPast = date < today;
-  const isFuture = date > today;
+  // ISO dates sort lexicographically, so string comparison IS date comparison —
+  // and unlike the local-midnight Date it replaces, it agrees with the IST
+  // trading day the entries are keyed by.
+  const isToday = date === todayIso;
+  const isPast = date < todayIso;
+  const isFuture = date > todayIso;
+  const dayOfMonth = Number(date.slice(8, 10));
 
   return (
     <td
@@ -101,7 +125,7 @@ function DayCell({ date, entries, isToday }: DayCellProps) {
           isToday ? "text-accent font-bold" : "text-text-muted",
         )}
       >
-        {date.getDate()}
+        {dayOfMonth}
       </div>
       <div className="flex flex-wrap gap-0.5">
         {entries.map((e) => (
@@ -141,9 +165,11 @@ function EarningsCalendarWidget() {
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
 
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
+  // Open on the IST month, not the browser-local one: an operator west of IST
+  // would otherwise land on the previous month for the first hours of every
+  // Indian trading month.
+  const [year, setYear] = useState(() => istParts().year);
+  const [month, setMonth] = useState(() => istParts().month);
   const [sectorFilter, setSectorFilter] = useState<string>("all");
 
   useEffect(() => {
@@ -195,7 +221,7 @@ function EarningsCalendarWidget() {
 
   const matrix = useMemo(() => getMonthMatrix(year, month), [year, month]);
 
-  const todayIso = toIsoDate(now);
+  const todayIso = istToday();
   const monthLabel = new Date(year, month, 1).toLocaleString("en-IN", {
     month: "long",
     year: "numeric",
@@ -299,8 +325,8 @@ function EarningsCalendarWidget() {
                   <DayCell
                     key={ci}
                     date={date}
-                    entries={date ? (byDate[toIsoDate(date)] ?? []) : []}
-                    isToday={date ? toIsoDate(date) === todayIso : false}
+                    entries={date ? (byDate[date] ?? []) : []}
+                    todayIso={todayIso}
                   />
                 ))}
               </tr>

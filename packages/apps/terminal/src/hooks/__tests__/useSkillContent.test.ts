@@ -150,9 +150,12 @@ describe("useSkillContent — advanced", () => {
     expect(availableWidgets).toContain("orderflow");
     expect(availableWidgets).toContain("depthheatmap");
     expect(availableWidgets).toContain("scanner");
-    // Wave-35 order-flow widgets — promoted so the Add Widget picker can reach
+    // Order-flow widgets. `footprint` merged into `orderflow` (its
+    // "footprint+delta" view mode), so the canonical id is what the picker can reach
     // them (they were registered + functional but in no skill tier).
-    expect(availableWidgets).toContain("footprint");
+    expect(availableWidgets).toContain("orderflow");
+    // The retired id must NOT come back into the picker.
+    expect(availableWidgets).not.toContain("footprint");
     expect(availableWidgets).toContain("domheatmap");
   });
 

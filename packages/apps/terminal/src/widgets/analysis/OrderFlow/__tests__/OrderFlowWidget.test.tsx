@@ -1,8 +1,13 @@
 /**
  * OrderFlowWidget.test.tsx
  *
- * Tests for the Order Flow footprint chart widget.
- * Verifies rendering, toolbar elements, and empty/loading states.
+ * Tests for the canonical Order Flow chart widget.
+ * Verifies rendering, toolbar elements, empty/loading states, and the three
+ * view modes (footprint / footprint+delta / heatmap).
+ *
+ * The `footprint+delta` cases were ported here from the retired standalone
+ * FootprintWidget suite during merge 2.4 — they pin the per-cell delta text,
+ * the responsive cumulative-delta strip, and the bucket-grouping semantic.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -109,6 +114,10 @@ function hookResult(overrides = {}) {
 
 const defaultProps = makeDockviewPanelProps();
 
+const deltaViewProps = makeDockviewPanelProps({
+  params: { view: "footprint+delta" },
+});
+
 function resizeObservedElement(target: Element, width: number, height: number): void {
   const observation = resizeObservations.find((entry) => entry.target === target);
   expect(observation).toBeDefined();
@@ -124,16 +133,20 @@ function installCanvasPaintHarness() {
   const frameCallbacks: FrameRequestCallback[] = [];
   const fillText = vi.fn();
   const measureText = vi.fn((text: string) => ({ width: text.length * 6 }) as TextMetrics);
+  const moveTo = vi.fn();
+  const setLineDash = vi.fn();
   const context = {
     beginPath: vi.fn(),
+    closePath: vi.fn(),
+    fill: vi.fn(),
     fillRect: vi.fn(),
     fillText,
     lineTo: vi.fn(),
     measureText,
-    moveTo: vi.fn(),
+    moveTo,
     restore: vi.fn(),
     save: vi.fn(),
-    setLineDash: vi.fn(),
+    setLineDash,
     stroke: vi.fn(),
     strokeRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D;
@@ -148,6 +161,9 @@ function installCanvasPaintHarness() {
   return {
     fillText,
     measureText,
+    moveTo,
+    setLineDash,
+    paintedLabels: () => fillText.mock.calls.map(([label]) => String(label)),
     runLatestFrame: () => {
       const callback = frameCallbacks.at(-1);
       expect(callback).toBeDefined();
@@ -155,6 +171,41 @@ function installCanvasPaintHarness() {
     },
   };
 }
+
+/** Y coordinate of the dashed Latest-POC line — the first moveTo after setLineDash. */
+function getDashedLineY(
+  moveTo: ReturnType<typeof vi.fn>,
+  setLineDash: ReturnType<typeof vi.fn>,
+): number {
+  const dashOrder = setLineDash.mock.invocationCallOrder.at(-1);
+  expect(dashOrder).toBeDefined();
+  const moveIndex = moveTo.mock.invocationCallOrder.findIndex(
+    (order) => dashOrder !== undefined && order > dashOrder,
+  );
+  expect(moveIndex).toBeGreaterThanOrEqual(0);
+  return Number(moveTo.mock.calls[moveIndex]?.[1]);
+}
+
+const singleBucket = {
+  time_label: "09:15",
+  cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
+  poc_price: 22500,
+  total_volume: 180,
+  delta: 20,
+};
+
+const twoLevelBuckets = [
+  {
+    time_label: "09:15",
+    cells: {
+      "22500": { buy_volume: 1000, sell_volume: 800 },
+      "22550": { buy_volume: 500, sell_volume: 1200 },
+    },
+    poc_price: 22500,
+    total_volume: 3500,
+    delta: -500,
+  },
+];
 
 const twentySecondPrecisionBuckets = Array.from({ length: 20 }, (_, index) => ({
   time_label: `09:${String(15 + index).padStart(2, "0")}:00`,
@@ -165,6 +216,17 @@ const twentySecondPrecisionBuckets = Array.from({ length: 20 }, (_, index) => ({
   total_volume: 180 + index,
   delta: 20 + index,
 }));
+
+function orderFlowResponse(buckets: unknown[], overrides: Record<string, unknown> = {}) {
+  return {
+    buckets,
+    symbol: "NIFTY",
+    exchange: "NSE_INDEX",
+    interval: 300,
+    is_live: false,
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -236,17 +298,74 @@ describe("OrderFlowWidget", () => {
     expect(screen.getByText("5m")).toBeInTheDocument();
   });
 
-  it("shows labelled icon controls for Footprint and Heatmap modes", () => {
+  it("shows labelled icon controls for all three view modes", () => {
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByRole("button", { name: "Footprint view" })).toHaveAttribute(
       "title",
       "Footprint view",
     );
+    expect(
+      screen.getByRole("button", { name: "Footprint with delta view" }),
+    ).toHaveAttribute("title", "Footprint with delta view");
     expect(screen.getByRole("button", { name: "Heatmap view" })).toHaveAttribute(
       "title",
       "Heatmap view",
     );
   });
+
+  // ─── View-mode parameter (retired `footprint` id resolution) ───────────────
+
+  it("defaults to the footprint view when no view parameter is supplied", () => {
+    render(<OrderFlowWidget {...defaultProps} />);
+    expect(screen.getByTestId("order-flow-chart")).toHaveAttribute("data-view", "footprint");
+    expect(screen.getByRole("button", { name: "Footprint view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByText("Cum. Δ")).not.toBeInTheDocument();
+  });
+
+  it("opens in the delta view when the panel parameter requests it", () => {
+    render(<OrderFlowWidget {...deltaViewProps} />);
+    const chart = screen.getByTestId("order-flow-chart");
+    expect(chart).toHaveAttribute("data-view", "footprint+delta");
+    expect(chart).toHaveAttribute("data-cumulative-delta", "visible");
+    expect(
+      screen.getByRole("button", { name: "Footprint with delta view" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Cum. Δ")).toBeInTheDocument();
+    expect(chart).toHaveAccessibleName(/Delta value shown in each cell/);
+    expect(chart).toHaveAccessibleName(/Cumulative delta line shown at bottom/);
+  });
+
+  it("ignores an unrecognised view parameter", () => {
+    const props = makeDockviewPanelProps({ params: { view: "candlestick" } });
+    render(<OrderFlowWidget {...props} />);
+    expect(screen.getByTestId("order-flow-chart")).toHaveAttribute("data-view", "footprint");
+  });
+
+  it("persists the chosen view into the panel parameters", () => {
+    const updateParameters = vi.fn();
+    const props = makeDockviewPanelProps({
+      params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
+      api: { ...defaultProps.api, updateParameters },
+    });
+    render(<OrderFlowWidget {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Footprint with delta view" }));
+
+    expect(updateParameters).toHaveBeenCalledWith({
+      symbol: "NIFTY",
+      exchange: "NSE_INDEX",
+      view: "footprint+delta",
+    });
+    expect(screen.getByTestId("order-flow-chart")).toHaveAttribute(
+      "data-view",
+      "footprint+delta",
+    );
+  });
+
+  // ─── Canvas sizing ────────────────────────────────────────────────────────
 
   it("replaces a pending paint after resizing clears the canvas backing store", () => {
     let nextAnimationFrameId = 1;
@@ -257,23 +376,7 @@ describe("OrderFlowWidget", () => {
       .spyOn(window, "cancelAnimationFrame")
       .mockImplementation(() => undefined);
     mockUseOrderFlow.mockReturnValue(
-      hookResult({
-        data: {
-          buckets: [
-            {
-              time_label: "09:15",
-              cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-              poc_price: 22500,
-              total_volume: 180,
-              delta: 20,
-            },
-          ],
-          symbol: "NIFTY",
-          exchange: "NSE_INDEX",
-          interval: 300,
-          is_live: false,
-        },
-      }),
+      hookResult({ data: orderFlowResponse([singleBucket]) }),
     );
     render(<OrderFlowWidget {...defaultProps} />);
     const pendingFrameId = requestAnimationFrameMock.mock.results.at(-1)?.value as number;
@@ -283,10 +386,130 @@ describe("OrderFlowWidget", () => {
 
     expect(cancelAnimationFrameMock).toHaveBeenCalledWith(pendingFrameId);
     expect(requestAnimationFrameMock).toHaveBeenCalledTimes(requestCount + 1);
-    const canvas = screen.getByTestId("order-flow-chart").querySelector("canvas");
+    const canvas = screen.getByTestId("order-flow-canvas");
     expect(canvas).toHaveAttribute("width", "220");
     expect(canvas).toHaveAttribute("height", "64");
   });
+
+  it("updates the canvas backing store when only device pixel ratio changes", () => {
+    vi.useFakeTimers();
+    let devicePixelRatio = 1;
+    vi.spyOn(window, "devicePixelRatio", "get").mockImplementation(() => devicePixelRatio);
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse(twentySecondPrecisionBuckets) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+    const chart = screen.getByTestId("order-flow-chart");
+    const canvas = screen.getByTestId("order-flow-canvas");
+
+    resizeObservedElement(chart, 220, 64);
+    expect(canvas).toHaveAttribute("width", "220");
+    expect(canvas).toHaveAttribute("height", "64");
+
+    devicePixelRatio = 2;
+    act(() => vi.advanceTimersByTime(250));
+
+    expect(canvas).toHaveAttribute("width", "440");
+    expect(canvas).toHaveAttribute("height", "128");
+    expect(canvas).toHaveStyle({ width: "220px", height: "64px" });
+  });
+
+  it("keeps footprint geometry stable across 139px and 140px canvas heights", () => {
+    const harness = installCanvasPaintHarness();
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse(twoLevelBuckets) }),
+    );
+    render(<OrderFlowWidget {...deltaViewProps} />);
+    const chart = screen.getByTestId("order-flow-chart");
+
+    resizeObservedElement(chart, 520, 139);
+    harness.runLatestFrame();
+    const lineAt139 = getDashedLineY(harness.moveTo, harness.setLineDash);
+
+    harness.moveTo.mockClear();
+    harness.setLineDash.mockClear();
+    resizeObservedElement(chart, 520, 140);
+    harness.runLatestFrame();
+    const lineAt140 = getDashedLineY(harness.moveTo, harness.setLineDash);
+
+    expect(Math.abs(lineAt140 - lineAt139)).toBeLessThan(2);
+    expect(screen.getByText("Cum. Δ")).toBeInTheDocument();
+  });
+
+  // ─── Delta presentation absorbed from the retired Footprint widget ─────────
+
+  it("draws the per-cell delta number only in the delta view", () => {
+    const harness = installCanvasPaintHarness();
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket]) }),
+    );
+    render(<OrderFlowWidget {...defaultProps} />);
+
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 520, 240);
+    harness.runLatestFrame();
+    expect(harness.paintedLabels()).not.toContain("+20");
+
+    harness.fillText.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Footprint with delta view" }));
+    harness.runLatestFrame();
+
+    expect(harness.paintedLabels()).toContain("+20");
+    expect(harness.paintedLabels()).toContain("Cumulative Δ");
+  });
+
+  it("draws the cumulative-delta strip from the backend bucket delta, not a client sum", () => {
+    const harness = installCanvasPaintHarness();
+    // Cells sum to +20 while the backend reports −5000. The strip must follow
+    // the backend value: the aggregator applies session/out-of-order guards
+    // the client cannot reproduce.
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: orderFlowResponse([{ ...singleBucket, delta: -5000 }]),
+      }),
+    );
+    render(<OrderFlowWidget {...deltaViewProps} />);
+
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 520, 240);
+    harness.runLatestFrame();
+
+    const labels = harness.paintedLabels();
+    expect(labels).toContain("-5,000");
+    // The per-cell figure is still derived from that cell's own volumes.
+    expect(labels).toContain("+20");
+  });
+
+  it("merges backend buckets that share a time label into one column", () => {
+    const harness = installCanvasPaintHarness();
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({
+        data: orderFlowResponse([
+          singleBucket,
+          {
+            time_label: "09:15",
+            cells: { "22500": { buy_volume: 40, sell_volume: 30 } },
+            poc_price: 22500,
+            total_volume: 70,
+            delta: 10,
+          },
+        ]),
+      }),
+    );
+    render(<OrderFlowWidget {...deltaViewProps} />);
+
+    // A 1:1 bucket→column map would report two bars for one instant.
+    expect(screen.getByText(/1 bars/)).toBeInTheDocument();
+
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 520, 240);
+    harness.runLatestFrame();
+
+    // Volumes merge (140 buy / 110 sell) and the backend deltas add up (+30).
+    expect(harness.paintedLabels()).toContain("+30");
+    expect(harness.paintedLabels().filter((label) => label === "09:15")).toHaveLength(1);
+  });
+
+  // ─── Compact layout ───────────────────────────────────────────────────────
 
   it("uses stable compact controls and preserves chart space at 220x96", () => {
     render(
@@ -297,6 +520,7 @@ describe("OrderFlowWidget", () => {
 
     const panel = screen.getByTestId("order-flow-panel");
     resizeObservedElement(panel, 220, 96);
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 220, 64);
 
     expect(panel).toHaveAttribute("data-layout", "compact");
     const toolbar = screen.getByRole("toolbar", { name: "Order flow controls" });
@@ -307,7 +531,7 @@ describe("OrderFlowWidget", () => {
     expect(moreControls).toBeInTheDocument();
     expect(within(toolbar).queryByRole("button", { name: "1m interval" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("order-flow-legend")).not.toBeInTheDocument();
-    expect(screen.getByTestId("order-flow-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("order-flow-chart")).toHaveAttribute("data-density", "compact");
     expect(screen.getByTestId("order-flow-compact-state")).toHaveTextContent("No data");
 
     fireEvent.pointerDown(moreControls, { button: 0, ctrlKey: false });
@@ -316,7 +540,30 @@ describe("OrderFlowWidget", () => {
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("NIFTY", "NSE_INDEX", 60, 20);
   });
 
-  it("restores full controls and legend at a normal panel size", () => {
+  it("drops the cumulative-delta affordance when the canvas is too short for the strip", () => {
+    render(
+      <div style={{ width: "220px", height: "96px" }}>
+        <OrderFlowWidget {...deltaViewProps} />
+      </div>,
+    );
+
+    const panel = screen.getByTestId("order-flow-panel");
+    resizeObservedElement(panel, 220, 96);
+    resizeObservedElement(screen.getByTestId("order-flow-chart"), 220, 64);
+
+    const chart = screen.getByTestId("order-flow-chart");
+    expect(chart).toHaveAttribute("data-cumulative-delta", "hidden");
+    expect(chart).toHaveAccessibleName(/Cumulative delta is hidden at this height/);
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "More order flow controls" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(screen.getByTestId("order-flow-compact-legend")).toBeInTheDocument();
+    expect(screen.queryByText("Cum. Δ")).not.toBeInTheDocument();
+  });
+
+  it("restores full controls, legend, and canvas density at a normal panel size", () => {
     render(<OrderFlowWidget {...defaultProps} />);
 
     const panel = screen.getByTestId("order-flow-panel");
@@ -331,8 +578,10 @@ describe("OrderFlowWidget", () => {
     expect(panel).toHaveAttribute("data-layout", "full");
     expect(screen.queryByRole("button", { name: "More order flow controls" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "1m interval" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Footprint with delta view" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Heatmap view" })).toBeInTheDocument();
     expect(screen.getByTestId("order-flow-legend")).toBeInTheDocument();
+    expect(screen.getByTestId("order-flow-chart")).toHaveAttribute("data-density", "full");
   });
 
   it("uses a bounded error status instead of overflowing a compact chart", () => {
@@ -394,79 +643,45 @@ describe("OrderFlowWidget", () => {
     expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
   });
 
-  it("updates the canvas backing store when only device pixel ratio changes", () => {
-    vi.useFakeTimers();
-    let devicePixelRatio = 1;
-    vi.spyOn(window, "devicePixelRatio", "get").mockImplementation(() => devicePixelRatio);
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
-    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
-    mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: twentySecondPrecisionBuckets,
-        symbol: "NIFTY",
-        exchange: "NSE_INDEX",
-        interval: 300,
-        is_live: false,
-      },
-    }));
-    render(<OrderFlowWidget {...defaultProps} />);
-    const chart = screen.getByTestId("order-flow-chart");
-    const canvas = chart.querySelector("canvas");
+  // ─── Time-scale subsampling ───────────────────────────────────────────────
 
-    resizeObservedElement(chart, 220, 64);
-    expect(canvas).toHaveAttribute("width", "220");
-    expect(canvas).toHaveAttribute("height", "64");
-
-    devicePixelRatio = 2;
-    act(() => vi.advanceTimersByTime(250));
-
-    expect(canvas).toHaveAttribute("width", "440");
-    expect(canvas).toHaveAttribute("height", "128");
-    expect(canvas).toHaveStyle({ width: "220px", height: "64px" });
-  });
-
-  it("measures and subsamples twenty HH:MM:SS labels in both view modes", () => {
+  it("measures and subsamples twenty HH:MM:SS labels in every view mode", () => {
     const harness = installCanvasPaintHarness();
     mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: twentySecondPrecisionBuckets,
-        symbol: "NIFTY",
-        exchange: "NSE_INDEX",
-        interval: 60,
-        is_live: false,
-      },
+      data: orderFlowResponse(twentySecondPrecisionBuckets, { interval: 60 }),
     }));
     render(<OrderFlowWidget {...defaultProps} />);
     const chart = screen.getByTestId("order-flow-chart");
+
+    const expectSubsampledTimeLabels = () => {
+      const isTimeLabel = (label: string) => /^\d{2}:\d{2}:\d{2}$/.test(label);
+      const measuredTimes = harness.measureText.mock.calls
+        .map(([label]) => String(label))
+        .filter(isTimeLabel);
+      const paintedTimes = harness.paintedLabels().filter(isTimeLabel);
+      expect(measuredTimes).toHaveLength(20);
+      expect(paintedTimes.length).toBeGreaterThan(1);
+      expect(paintedTimes.length).toBeLessThan(20);
+    };
 
     resizeObservedElement(chart, 520, 240);
     harness.runLatestFrame();
+    expectSubsampledTimeLabels();
 
-    let measuredTimes = harness.measureText.mock.calls
-      .map(([label]) => String(label))
-      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
-    let paintedTimes = harness.fillText.mock.calls
-      .map(([label]) => String(label))
-      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
-    expect(measuredTimes).toHaveLength(20);
-    expect(paintedTimes.length).toBeGreaterThan(1);
-    expect(paintedTimes.length).toBeLessThan(20);
+    harness.measureText.mockClear();
+    harness.fillText.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Footprint with delta view" }));
+    harness.runLatestFrame();
+    expectSubsampledTimeLabels();
 
     harness.measureText.mockClear();
     harness.fillText.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Heatmap view" }));
     harness.runLatestFrame();
-
-    measuredTimes = harness.measureText.mock.calls
-      .map(([label]) => String(label))
-      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
-    paintedTimes = harness.fillText.mock.calls
-      .map(([label]) => String(label))
-      .filter((label) => /^\d{2}:\d{2}:\d{2}$/.test(label));
-    expect(measuredTimes).toHaveLength(20);
-    expect(paintedTimes.length).toBeGreaterThan(1);
-    expect(paintedTimes.length).toBeLessThan(20);
+    expectSubsampledTimeLabels();
   });
+
+  // ─── Honesty affordances ──────────────────────────────────────────────────
 
   it("labels the bucket-derived value and line as Latest POC, never LTP", () => {
     render(<OrderFlowWidget {...defaultProps} />);
@@ -477,6 +692,16 @@ describe("OrderFlowWidget", () => {
     expect(screen.queryByText("LTP")).not.toBeInTheDocument();
   });
 
+  it("labels the delta view's legend without introducing an LTP claim", () => {
+    render(<OrderFlowWidget {...deltaViewProps} />);
+    expect(screen.getByText("Buy")).toBeInTheDocument();
+    expect(screen.getByText("Sell")).toBeInTheDocument();
+    expect(screen.getByText("POC")).toBeInTheDocument();
+    expect(screen.getByText("Latest POC")).toBeInTheDocument();
+    expect(screen.getByText("Cum. Δ")).toBeInTheDocument();
+    expect(screen.queryByText("LTP")).not.toBeInTheDocument();
+  });
+
   it("shows 'No data' when no buckets and not loading", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({ data: undefined }));
     render(<OrderFlowWidget {...defaultProps} />);
@@ -484,45 +709,19 @@ describe("OrderFlowWidget", () => {
   });
 
   it("shows 'Live' badge when is_live is true", () => {
-    const sampleData = {
-      buckets: [
-        {
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-        },
-      ],
-      symbol: "NIFTY",
-      exchange: "NFO",
-      interval: 300,
-      is_live: true,
-    };
-    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO", is_live: true }) }),
+    );
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Live")).toBeInTheDocument();
   });
 
   it("renders exact trade-tick quality and provenance", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: [{
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-          quality: "exact",
-          provenance: "trade_tick",
-        }],
-        symbol: "NIFTY",
-        exchange: "NFO",
-        interval: 300,
-        is_live: true,
-        quality: "exact",
-        provenance: "trade_tick",
-      },
+      data: orderFlowResponse(
+        [{ ...singleBucket, quality: "exact", provenance: "trade_tick" }],
+        { exchange: "NFO", is_live: true, quality: "exact", provenance: "trade_tick" },
+      ),
     }));
 
     render(<OrderFlowWidget {...defaultProps} />);
@@ -533,23 +732,15 @@ describe("OrderFlowWidget", () => {
 
   it("renders cumulative-quote order flow as estimated", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: [{
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
+      data: orderFlowResponse(
+        [{ ...singleBucket, quality: "estimated", provenance: "cumulative_quote_delta" }],
+        {
+          exchange: "NFO",
+          is_live: true,
           quality: "estimated",
           provenance: "cumulative_quote_delta",
-        }],
-        symbol: "NIFTY",
-        exchange: "NFO",
-        interval: 300,
-        is_live: true,
-        quality: "estimated",
-        provenance: "cumulative_quote_delta",
-      },
+        },
+      ),
     }));
 
     render(<OrderFlowWidget {...defaultProps} />);
@@ -559,22 +750,9 @@ describe("OrderFlowWidget", () => {
   });
 
   it("uses the backend interval in chart and legend labels", () => {
-    const sampleData = {
-      buckets: [
-        {
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-        },
-      ],
-      symbol: "NIFTY",
-      exchange: "NSE_INDEX",
-      interval: 60,
-      is_live: true,
-    };
-    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { interval: 60, is_live: true }) }),
+    );
 
     render(<OrderFlowWidget {...defaultProps} />);
 
@@ -585,44 +763,20 @@ describe("OrderFlowWidget", () => {
   });
 
   it("shows 'Sample data' badge when is_live is false", () => {
-    const sampleData = {
-      buckets: [
-        {
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-        },
-      ],
-      symbol: "NIFTY",
-      exchange: "NFO",
-      interval: 300,
-      is_live: false,
-    };
-    mockUseOrderFlow.mockReturnValue(hookResult({ data: sampleData }));
+    mockUseOrderFlow.mockReturnValue(
+      hookResult({ data: orderFlowResponse([singleBucket], { exchange: "NFO" }) }),
+    );
     render(<OrderFlowWidget {...defaultProps} />);
     expect(screen.getByText("Sample data")).toBeInTheDocument();
   });
 
   it("keeps explicit sample provenance visible even if is_live is contradictory", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: [
-          {
-            time_label: "09:15",
-            cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-            poc_price: 22500,
-            total_volume: 180,
-            delta: 20,
-          },
-        ],
-        symbol: "NIFTY",
+      data: orderFlowResponse([singleBucket], {
         exchange: "NFO",
-        interval: 300,
         is_live: true,
         is_sample_data: true,
-      },
+      }),
     }));
 
     render(<OrderFlowWidget {...defaultProps} />);
@@ -632,23 +786,9 @@ describe("OrderFlowWidget", () => {
   });
 
   it("shows 'Delayed' for retained backend data that is no longer live", () => {
-    const delayedData = {
-      buckets: [
-        {
-          time_label: "09:15",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-        },
-      ],
-      symbol: "NIFTY",
-      exchange: "NFO",
-      interval: 300,
-      is_live: false,
-      live_state: "delayed",
-    };
-    mockUseOrderFlow.mockReturnValue(hookResult({ data: delayedData }));
+    mockUseOrderFlow.mockReturnValue(hookResult({
+      data: orderFlowResponse([singleBucket], { exchange: "NFO", live_state: "delayed" }),
+    }));
 
     render(<OrderFlowWidget {...defaultProps} />);
 
@@ -659,20 +799,10 @@ describe("OrderFlowWidget", () => {
 
   it("shows 'Stale' for retained order flow from an older session", () => {
     mockUseOrderFlow.mockReturnValue(hookResult({
-      data: {
-        buckets: [{
-          time_label: "15:25",
-          cells: { "22500": { buy_volume: 100, sell_volume: 80 } },
-          poc_price: 22500,
-          total_volume: 180,
-          delta: 20,
-        }],
-        symbol: "NIFTY",
-        exchange: "NFO",
-        interval: 300,
-        is_live: false,
-        live_state: "stale",
-      },
+      data: orderFlowResponse(
+        [{ ...singleBucket, time_label: "15:25" }],
+        { exchange: "NFO", live_state: "stale" },
+      ),
     }));
 
     render(<OrderFlowWidget {...defaultProps} />);

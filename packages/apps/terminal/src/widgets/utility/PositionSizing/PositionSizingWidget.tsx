@@ -8,11 +8,17 @@
  *   - Visual: core donut chart showing capital at risk vs available
  */
 
-import { useState, useMemo, memo } from "react";
-import { Ruler } from "lucide-react";
+import { useState, useMemo, useEffect, memo } from "react";
+import { Ruler, AlertTriangle } from "lucide-react";
 import { FlintDonutBreakdown } from "@flinttrade/design-system";
 import { Input } from "@/components/ui/input";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import {
+  kellyFraction,
+  riskBudget,
+  sizeFixedFractional,
+  type FixedFractionalResult,
+} from "@/lib/sizing";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,79 +26,51 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 type Method = "fixedFractional" | "kelly" | "atr";
 
-interface SizingResult {
-  lots: number;
-  units: number;
-  rupeeRisk: number;
-  maxLoss: number;
-  capitalAtRisk: number;  // fraction 0-1
+/** A sizing result plus the budget it was measured against. */
+interface SizingView {
+  sized: FixedFractionalResult;
+  /** Rupee budget the operator asked for — the yardstick for `exceedsRisk`. */
+  budget: number;
 }
 
 // ---------------------------------------------------------------------------
-// Calculations
+// Calculations — all three methods reduce to the shared fixed-fractional
+// kernel in lib/sizing.ts; only the risk percentage differs between them.
 // ---------------------------------------------------------------------------
 
-function calcFixedFractional(
+/** Size a position at a given risk percentage, pairing it with its budget. */
+function size(
   capital: number,
   riskPct: number,
   slDistance: number,
   lotSize: number,
-): SizingResult | null {
-  if (!capital || !riskPct || !slDistance || !lotSize) return null;
-  const maxRisk = (capital * riskPct) / 100;
-  const riskPerLot = slDistance * lotSize;
-  if (riskPerLot <= 0) return null;
-  const lots = Math.max(1, Math.floor(maxRisk / riskPerLot));
-  const units = lots * lotSize;
-  const rupeeRisk = riskPerLot * lots;
-  return {
-    lots,
-    units,
-    rupeeRisk,
-    maxLoss: rupeeRisk,
-    capitalAtRisk: rupeeRisk / capital,
-  };
+): SizingView | null {
+  const sized = sizeFixedFractional({ capital, riskPct, stopDistance: slDistance, lotSize });
+  if (!sized) return null;
+  return { sized, budget: riskBudget(capital, riskPct) };
 }
 
-function calcKelly(
+/** Kelly sizing: the stake percentage comes from the edge, not from the operator. */
+function sizeKelly(
   capital: number,
-  winRate: number,   // 0-100
-  rrRatio: number,   // reward:risk
+  winRate: number,
+  rewardRisk: number,
   slDistance: number,
   lotSize: number,
-): SizingResult | null {
-  if (!capital || !winRate || !rrRatio || !slDistance || !lotSize) return null;
-  const p = winRate / 100;
-  const q = 1 - p;
-  // Kelly fraction: (p * rrRatio - q) / rrRatio
-  const kellyFraction = Math.max(0, (p * rrRatio - q) / rrRatio);
-  // Use half-Kelly for safety
-  const halfKelly = kellyFraction / 2;
-  const maxRisk = capital * halfKelly;
-  const riskPerLot = slDistance * lotSize;
-  if (riskPerLot <= 0) return null;
-  const lots = Math.max(1, Math.floor(maxRisk / riskPerLot));
-  const units = lots * lotSize;
-  const rupeeRisk = riskPerLot * lots;
-  return {
-    lots,
-    units,
-    rupeeRisk,
-    maxLoss: rupeeRisk,
-    capitalAtRisk: rupeeRisk / capital,
-  };
+): SizingView | null {
+  const stakePct = kellyFraction({ winRate, rewardRisk }) * 100;
+  return size(capital, stakePct, slDistance, lotSize);
 }
 
-function calcATR(
+/** ATR sizing: the stop distance comes from volatility, the budget from risk %. */
+function sizeATR(
   capital: number,
   riskPct: number,
   atr: number,
   atrMultiplier: number,
   lotSize: number,
-): SizingResult | null {
-  if (!capital || !riskPct || !atr || !atrMultiplier || !lotSize) return null;
-  const slDistance = atr * atrMultiplier;
-  return calcFixedFractional(capital, riskPct, slDistance, lotSize);
+): SizingView | null {
+  return size(capital, riskPct, atr * atrMultiplier, lotSize);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,24 +190,27 @@ function PositionSizingWidget() {
   const [atr, setAtr] = useState("180");
   const [atrMult, setAtrMult] = useState("1.5");
 
-  const result = useMemo<SizingResult | null>(() => {
+  const result = useMemo<SizingView | null>(() => {
     const cap = parseFloat(capital);
     const rp = parseFloat(riskPct);
     const sl = parseFloat(slDistance);
     const ls = parseFloat(lotSize);
 
-    let r: SizingResult | null = null;
-    if (method === "fixedFractional") {
-      r = calcFixedFractional(cap, rp, sl, ls);
-    } else if (method === "kelly") {
-      r = calcKelly(cap, parseFloat(winRate), parseFloat(rrRatio), sl, ls);
-    } else {
-      r = calcATR(cap, rp, parseFloat(atr), parseFloat(atrMult), ls);
+    if (method === "fixedFractional") return size(cap, rp, sl, ls);
+    if (method === "kelly") {
+      return sizeKelly(cap, parseFloat(winRate), parseFloat(rrRatio), sl, ls);
     }
+    return sizeATR(cap, rp, parseFloat(atr), parseFloat(atrMult), ls);
+  }, [method, capital, riskPct, slDistance, lotSize, winRate, rrRatio, atr, atrMult]);
 
-    if (r) track("trade", `position_sizing_calc_${method}`);
-    return r;
-  }, [method, capital, riskPct, slDistance, lotSize, winRate, rrRatio, atr, atrMult, track]);
+  // Behaviour tracking is a side effect, so it belongs in an effect rather than
+  // in the memo — inside useMemo it fired on every keystroke and ran twice
+  // under StrictMode. Keyed on "has a result" so it reports once per method.
+  const hasResult = result !== null;
+  useEffect(() => {
+    if (!hasResult) return;
+    track("trade", `position_sizing_calc_${method}`);
+  }, [hasResult, method, track]);
 
   const handleMethodChange = (m: Method) => {
     setMethod(m);
@@ -316,22 +297,38 @@ function PositionSizingWidget() {
         {/* Results */}
         {result ? (
           <div className="space-y-3">
+            {/* Over-budget warning — one lot already breaches the stated risk */}
+            {result.sized.exceedsRisk && (
+              <div
+                role="status"
+                className="flex items-start gap-1.5 text-xxs text-warning bg-warning/10 border border-warning/30 rounded px-2 py-1.5 leading-snug"
+              >
+                <AlertTriangle size={11} className="mt-px shrink-0" aria-hidden="true" />
+                <span>
+                  A single lot risks {fmtINR(result.sized.rupeeRisk)} — more than the{" "}
+                  {fmtINR(result.budget)} you allowed. One lot is shown because it is the
+                  smallest tradeable size; reduce the stop distance or the lot size to stay
+                  within budget.
+                </span>
+              </div>
+            )}
+
             {/* Pie chart */}
             <div className="flex items-center gap-4 bg-surface-card border border-border-default rounded p-3">
-              <PieChart atRiskFraction={result.capitalAtRisk} />
+              <PieChart atRiskFraction={result.sized.capitalAtRiskPct / 100} />
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-1.5 text-xxs">
                   <span className="w-2.5 h-2.5 rounded-sm bg-loss/60 inline-block shrink-0" />
                   <span className="text-text-muted">At Risk</span>
                   <span className="ml-auto font-mono font-semibold text-loss">
-                    {(result.capitalAtRisk * 100).toFixed(2)}%
+                    {result.sized.capitalAtRiskPct.toFixed(2)}%
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 text-xxs">
                   <span className="w-2.5 h-2.5 rounded-sm bg-profit/50 inline-block shrink-0" />
                   <span className="text-text-muted">Available</span>
                   <span className="ml-auto font-mono font-semibold text-profit">
-                    {((1 - result.capitalAtRisk) * 100).toFixed(2)}%
+                    {(100 - result.sized.capitalAtRiskPct).toFixed(2)}%
                   </span>
                 </div>
               </div>
@@ -339,10 +336,18 @@ function PositionSizingWidget() {
 
             {/* Result rows */}
             <div className="bg-surface-card border border-border-default rounded p-2">
-              <ResultRow label="Position Size (lots)" value={String(result.lots)} />
-              <ResultRow label="Units (shares)" value={String(result.units)} />
-              <ResultRow label="Rupee Risk" value={fmtINR(result.rupeeRisk)} accent="text-loss" />
-              <ResultRow label="Max Loss" value={fmtINR(result.maxLoss)} accent="text-loss" />
+              <ResultRow label="Position Size (lots)" value={String(result.sized.lots)} />
+              <ResultRow label="Units (shares)" value={String(result.sized.units)} />
+              <ResultRow
+                label="Rupee Risk"
+                value={fmtINR(result.sized.rupeeRisk)}
+                accent={result.sized.exceedsRisk ? "text-warning" : "text-loss"}
+              />
+              <ResultRow
+                label="Max Loss"
+                value={fmtINR(result.sized.rupeeRisk)}
+                accent={result.sized.exceedsRisk ? "text-warning" : "text-loss"}
+              />
             </div>
           </div>
         ) : (

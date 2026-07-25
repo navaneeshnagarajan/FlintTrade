@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { UNDERLYINGS, STRATEGY_TEMPLATES } from "./types";
+import { UNDERLYINGS } from "./types";
+import { LOADABLE_STRATEGY_TEMPLATES } from "@/lib/strategyTemplates";
 import { validateLegs, calculateNetPremium, formatINR } from "./utils";
 import type { Leg, Direction, OptionType, Underlying } from "./types";
 
@@ -92,15 +93,17 @@ export function LegsTab({
         )}
       </div>
 
-      {/* Template quick-apply bar — adapted from OptionChainPicker strategy template buttons */}
+      {/* Template quick-apply bar — the shared catalogue, filtered to the
+          entries an options builder can actually represent (stock-leg and
+          multi-expiry strategies stay reference-only in the widget). */}
       <div className="flex items-center gap-1 px-3 flex-wrap">
-        {Object.entries(STRATEGY_TEMPLATES).map(([key, tmpl]) => (
+        {LOADABLE_STRATEGY_TEMPLATES.map((tmpl) => (
           <Button
-            key={key}
+            key={tmpl.id}
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs text-text-muted hover:text-text-primary hover:bg-surface-elevated border border-border-default"
-            onClick={() => onTemplate(key)}
+            onClick={() => onTemplate(tmpl.id)}
             title={tmpl.description}
           >
             {tmpl.name}

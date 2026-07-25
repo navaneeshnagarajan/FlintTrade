@@ -6,7 +6,7 @@
  * fallback; the honest sample badge stays either way).
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -29,6 +29,7 @@ vi.mock("@/services/ftApi", () => ({
 }));
 
 import EconomicCalendarWidget from "../EconomicCalendarWidget";
+import { toIstIsoDate } from "@/lib/ist";
 
 function renderWidget() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,9 +41,7 @@ function renderWidget() {
 }
 
 function isoDaysAhead(offset: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return toIstIsoDate(new Date(Date.now() + offset * 86_400_000));
 }
 
 beforeEach(() => {
@@ -153,5 +152,67 @@ describe("EconomicCalendarWidget", () => {
     await waitFor(() => expect(mockCalendar).toHaveBeenCalled());
     expect(screen.queryByText("Unknown-land PMI")).not.toBeInTheDocument();
     expect(screen.getAllByText(/RBI/i).length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// "Today" is the IST trading day
+//
+// Event dates arrive as IST calendar days. The widget used to compare them
+// against `new Date().toISOString().slice(0, 10)` — the UTC day — so for the
+// whole 00:00–05:30 IST window today's events lost their "Today" heading and
+// were greyed out as past.
+//
+// Fixed instant, no reliance on the machine's timezone.
+// ---------------------------------------------------------------------------
+
+describe("EconomicCalendarWidget — IST trading day", () => {
+  // 20:30 UTC on Saturday 25 July 2026 — late evening in Europe, and already
+  // 02:00 IST on Sunday the 26th.
+  const IST_EVENING_ROLLOVER = new Date("2026-07-25T20:30:00Z");
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("REGRESSION: heads the IST day 'Today' while the UTC day is still yesterday", async () => {
+    vi.setSystemTime(IST_EVENING_ROLLOVER);
+    // Sanity: the UTC-based helper this replaced would have said the 25th.
+    expect(IST_EVENING_ROLLOVER.toISOString().slice(0, 10)).toBe("2026-07-25");
+
+    mockCalendar.mockResolvedValue({
+      days: 30,
+      events: [
+        {
+          date: "2026-07-26", time: "10:00", event: "IST Day CPI",
+          country: "IN", impact: "high", previous: null, forecast: null,
+          actual: null, category: "cpi",
+        },
+      ],
+    });
+
+    renderWidget();
+
+    expect(await screen.findByText("IST Day CPI")).toBeInTheDocument();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+  });
+
+  it("still marks the previous IST day as past, not today", async () => {
+    vi.setSystemTime(IST_EVENING_ROLLOVER);
+    mockCalendar.mockResolvedValue({
+      days: 30,
+      events: [
+        {
+          date: "2026-07-25", time: "10:00", event: "Yesterday CPI",
+          country: "IN", impact: "high", previous: null, forecast: null,
+          actual: null, category: "cpi",
+        },
+      ],
+    });
+
+    renderWidget();
+
+    expect(await screen.findByText("Yesterday CPI")).toBeInTheDocument();
+    expect(screen.queryByText("Today")).not.toBeInTheDocument();
   });
 });

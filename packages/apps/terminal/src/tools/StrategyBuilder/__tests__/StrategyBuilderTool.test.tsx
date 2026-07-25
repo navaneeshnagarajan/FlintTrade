@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ describe("StrategyBuilderTool", () => {
     // underlying is NIFTY (ATM 22500, gap 50) → -2/-1/+1/+2 offsets become
     // 22400 / 22450 / 22550 / 22600.
     const tmpl: BuilderTemplate = {
-      id: "iron_condor",
+      id: "iron-condor",
       name: "Iron Condor",
       legs: [
         { action: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 },
@@ -92,11 +93,28 @@ describe("StrategyBuilderTool", () => {
     expect(sessionStorage.getItem(PENDING_TEMPLATE_KEY)).toBeNull();
   });
 
+  it("offers long and short volatility templates as separate pills", async () => {
+    // The pill bar reads the shared catalogue (lib/strategyTemplates). Before
+    // the merge this builder had a single "Straddle" pill meaning BUY-both,
+    // while the OptionChain LegBuilder's identically-keyed pill sold both.
+    render(<StrategyBuilderTool />);
+
+    const longBtn = screen.getByRole("button", { name: "Long Straddle" });
+    const shortBtn = screen.getByRole("button", { name: "Short Straddle" });
+    expect(screen.queryByRole("button", { name: "Straddle" })).not.toBeInTheDocument();
+
+    await userEvent.click(longBtn);
+    expect(screen.getAllByText("BUY")).toHaveLength(2);
+
+    await userEvent.click(shortBtn);
+    expect(screen.getAllByText("SELL")).toHaveLength(2);
+  });
+
   it("applies a live load-template event while mounted", () => {
     render(<StrategyBuilderTool />);
 
     const tmpl: BuilderTemplate = {
-      id: "bull_call_spread",
+      id: "bull-call-spread",
       name: "Bull Call Spread",
       legs: [
         { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
