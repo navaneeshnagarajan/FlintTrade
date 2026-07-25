@@ -718,8 +718,68 @@ containment_marker=FLINTTRADE_PROCESS_ANCHOR=$containment_token
 target=
 watchdog=
 enumerator=
+containment_cgroup=
 ${probes}
 fi
+# Linux cgroup v2 containment (best effort).
+#
+# The marker sweep below can only kill what a ps snapshot shows it. cgroup
+# membership is inherited and an unprivileged process cannot leave it, so a
+# scope contains a setsid() descendant by construction rather than by winning
+# a race against it.
+#
+# Strictly additive: if the scope cannot be created -- no delegation, a
+# container, cgroup v1, or a non-Linux host -- containment_cgroup stays empty
+# and every path below behaves exactly as it did before.
+if [ -r /proc/self/cgroup ] && [ -d /sys/fs/cgroup ]; then
+  cgroup_self=$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null)
+  for cgroup_base in "/sys/fs/cgroup$cgroup_self" /sys/fs/cgroup; do
+    [ -d "$cgroup_base" ] || continue
+    [ -w "$cgroup_base" ] || continue
+    candidate_cgroup=$cgroup_base/flinttrade-$containment_token
+    if mkdir "$candidate_cgroup" 2>/dev/null; then
+      # The scope holds ONLY the target tree. The supervisor and its watchdog
+      # stay outside, or cgroup.kill would take down the very thing doing the
+      # containing.
+      if [ -w "$candidate_cgroup/cgroup.procs" ]; then
+        containment_cgroup=$candidate_cgroup
+      else
+        rmdir "$candidate_cgroup" 2>/dev/null || :
+      fi
+      break
+    fi
+  done
+fi
+cgroup_contain() {
+  [ -n "$containment_cgroup" ] || return 1
+  # cgroup.kill (Linux 5.14+) terminates every member atomically: no scan
+  # window, nothing can be spawned into a gap.
+  if [ -w "$containment_cgroup/cgroup.kill" ]; then
+    printf '1\n' > "$containment_cgroup/cgroup.kill" 2>/dev/null || :
+    return 0
+  fi
+  # Older kernels: signal the exact membership list. Still authoritative in a
+  # way a ps snapshot is not.
+  cgroup_rounds=0
+  while [ "$cgroup_rounds" -lt 60 ]; do
+    cgroup_members=$(cat "$containment_cgroup/cgroup.procs" 2>/dev/null) || return 0
+    [ -n "$cgroup_members" ] || return 0
+    for cgroup_member in $cgroup_members; do
+      if [ "$cgroup_rounds" -gt 10 ]; then
+        /bin/kill -KILL "$cgroup_member" 2>/dev/null || :
+      else
+        /bin/kill -TERM "$cgroup_member" 2>/dev/null || :
+      fi
+    done
+    cgroup_rounds=$((cgroup_rounds + 1))
+    /bin/sleep 0.02
+  done
+  return 0
+}
+cgroup_release() {
+  [ -n "$containment_cgroup" ] || return 0
+  rmdir "$containment_cgroup" 2>/dev/null || :
+}
 proc_tr=
 proc_grep=
 for candidate_tr in /usr/bin/tr /bin/tr; do
@@ -781,6 +841,7 @@ trap on_term TERM
   trap '' TERM HUP INT
   if IFS= read -r _ <&4; then exit 0; fi
   /bin/kill -TERM -$$ 2>/dev/null || :
+  cgroup_contain || :
   watchdog_attempts=0
   watchdog_empty_scans=0
   while [ "$watchdog_attempts" -lt 150 ]; do
@@ -801,6 +862,8 @@ trap on_term TERM
     fi
     /bin/sleep 0.02
   done
+  cgroup_contain || :
+  cgroup_release
   /bin/kill -KILL -$$ 2>/dev/null || :
 ) &
 watchdog=$!
@@ -829,6 +892,15 @@ fi
   trap - TERM HUP INT
   FLINTTRADE_PROCESS_ANCHOR=$containment_token
   export FLINTTRADE_PROCESS_ANCHOR
+  # NOTE: "$$" inside this subshell is the PARENT shell's pid, not ours, so it
+  # cannot be used to join the scope -- doing that puts the SUPERVISOR in the
+  # cgroup and cgroup.kill then kills the watchdog. A nested "sh -c" has its
+  # own $$, and that pid survives the exec, so the target and everything it
+  # spawns land in the scope.
+  if [ -n "$containment_cgroup" ]; then
+    exec /bin/sh -c 'printf "%s\n" "$$" > "$1/cgroup.procs" 2>/dev/null || :; shift; exec "$@"' \
+      sh "$containment_cgroup" "$@" </dev/null 3>&- 4<&-
+  fi
   exec "$@" </dev/null 3>&- 4<&-
 ) &
 target=$!
