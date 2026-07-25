@@ -109,7 +109,6 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "aiteam", "name": "AI Team", "category": "Utility", "status": "live"},
     {"id": "obsidian", "name": "Obsidian Vault", "category": "Utility", "status": "live"},
     {"id": "alerts", "name": "Price Alerts", "category": "Utility", "status": "live"},
-    {"id": "health", "name": "System Health", "category": "Utility", "status": "live"},
     {"id": "reconciliation", "name": "Reconciliation", "category": "Utility", "status": "live"},
     {"id": "fundingrate", "name": "Funding Rates", "category": "Utility", "status": "live"},
     {"id": "currencyconverter", "name": "Currency Converter", "category": "Utility", "status": "live"},

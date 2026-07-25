@@ -824,7 +824,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "calculator", "news", "ticker", "aiadvisor", "conditionscanner",
-    "alerts", "health", "fundingrate", "currencyconverter", "earningscalendar",
+    "alerts", "fundingrate", "currencyconverter", "earningscalendar",
     "globalindices", "strategytemplates", "audittrail", "economiccalendar",
     "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown",
     "marketclock", "tradeidea", "tickspeed", "marketsummary",

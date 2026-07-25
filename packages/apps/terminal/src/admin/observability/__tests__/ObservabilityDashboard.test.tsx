@@ -133,9 +133,12 @@ describe("ObservabilityDashboard", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Observability" })).toBeInTheDocument();
   });
 
-  it("renders all five composed observability section headings", () => {
+  // The System Health card retired with the widget (ruling D6): its unique
+  // connection roll-up moved into MonitoringSection, which this dashboard
+  // already embeds as Traffic & Latency — the card had become a duplicate.
+  it("renders the four composed observability section headings", () => {
     render(<ObservabilityDashboard />);
-    expect(screen.getByRole("heading", { name: "System Health" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "System Health" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "System Metrics" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Traffic & Latency" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Security & Rate Limiting" })).toBeInTheDocument();
@@ -145,7 +148,6 @@ describe("ObservabilityDashboard", () => {
   it("mounts each section landmark without throwing", () => {
     render(<ObservabilityDashboard />);
     for (const title of [
-      "System Health",
       "System Metrics",
       "Traffic & Latency",
       "Security & Rate Limiting",
@@ -155,9 +157,9 @@ describe("ObservabilityDashboard", () => {
     }
   });
 
-  it("mounts the HealthWidget child surface", () => {
+  it("surfaces the connection roll-up through the embedded Monitoring section", () => {
     render(<ObservabilityDashboard />);
-    expect(screen.getByTestId("health-widget")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-status-panel")).toBeInTheDocument();
   });
 
   it("uses British-English copy in the page description", () => {

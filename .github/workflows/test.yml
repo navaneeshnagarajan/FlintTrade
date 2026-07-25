@@ -213,7 +213,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Run trading + utility A-H widget tests
-        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/trading/ src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/ src/widgets/utility/Health/
+        run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/widgets/trading/ src/widgets/utility/AIAdvisor/ src/widgets/utility/Alerts/ src/widgets/utility/AuditTrail/ src/widgets/utility/Calculator/ src/widgets/utility/CurrencyConverter/ src/widgets/utility/EarningsCalendar/ src/widgets/utility/EconomicCalendar/ src/widgets/utility/ExpiryCountdown/ src/widgets/utility/FundingRate/ src/widgets/utility/GlobalIndices/
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
 

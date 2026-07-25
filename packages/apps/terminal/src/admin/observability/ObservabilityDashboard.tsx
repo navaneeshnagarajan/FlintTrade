@@ -5,9 +5,10 @@
  * observability surfaces into one responsive grid so an operator can survey the
  * whole platform at a glance:
  *
- *   - System Health        → HealthWidget        (connections, traffic, latency, security roll-up)
  *   - System Metrics       → SystemMetricsPanel   (CPU / memory / disk / network / uptime)
- *   - Traffic & Latency    → MonitoringSection    (requests/sec, error rate, per-broker latency)
+ *   - Traffic & Latency    → MonitoringSection    (connection roll-up, requests/sec, error rate,
+ *                                                   per-broker latency — the System Health widget
+ *                                                   retired into this section, ruling D6)
  *   - Security & Rate Limit→ SecuritySection      (threat counters, banned-IP management)
  *   - Audit Trail          → AuditTrailWidget     (append-only activity log)
  *
@@ -31,7 +32,6 @@ import { Activity } from "lucide-react";
 
 // Existing observability surfaces — imported directly from their real paths
 // (no barrel imports, per the repo's bundle conventions).
-import HealthWidget from "@/widgets/utility/Health/HealthWidget";
 import AuditTrailWidget from "@/widgets/utility/AuditTrail/AuditTrailWidget";
 import { SystemMetricsPanel } from "@/routes/admin/SystemMetricsPanel";
 import { MonitoringSection } from "@/tools/Settings/MonitoringSection";
@@ -92,17 +92,6 @@ export function ObservabilityDashboard(): JSX.Element {
       {/* Composed grid */}
       <main aria-label="Observability dashboard" className="max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* System health roll-up — connections, traffic, latency, security summary */}
-          <ObservabilitySection
-            title="System Health"
-            description="Connection status, request throughput, and latency overview"
-          >
-            {/* HealthWidget fills its parent height; give it a fixed visualisation area. */}
-            <div className="h-[28rem] overflow-hidden rounded-glass-inner border border-glass-l1">
-              <HealthWidget />
-            </div>
-          </ObservabilitySection>
-
           {/* Server resource metrics — CPU / memory / disk / network / uptime */}
           <ObservabilitySection
             title="System Metrics"

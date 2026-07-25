@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { ICON_MAP } from "@/chrome/WidgetPicker";
-import { widgetCatalog, widgetComponents, RETIRED_WIDGET_IDS } from "../widgetFactory";
+import { widgetCatalog, widgetComponents, RETIRED_WIDGET_IDS, isMovedWidget } from "../widgetFactory";
 
 // ---------------------------------------------------------------------------
 // Catalogue-truth guard — helpers
@@ -182,9 +182,15 @@ describe("widgetFactory catalogue wiring", () => {
     // would wipe the whole workspace tab (TerminalRoute's fromJSON catch).
     for (const [retiredId, spec] of Object.entries(RETIRED_WIDGET_IDS)) {
       expect(widgetComponents[retiredId], `${retiredId} must stay resolvable`).toBeTruthy();
-      // Its canonical target must itself be a live widget.
-      expect(widgetComponents[spec.component], `${retiredId} → ${spec.component}`).toBeTruthy();
-      expect(widgetCatalog.map((w) => w.id)).toContain(spec.component);
+      if (isMovedWidget(spec)) {
+        // Tool/route-absorbed retirement: it renders a pointer panel, so the
+        // requirement is a named destination, not a canonical widget.
+        expect(spec.movedTo.destination.length).toBeGreaterThan(0);
+      } else {
+        // Its canonical target must itself be a live widget.
+        expect(widgetComponents[spec.component], `${retiredId} → ${spec.component}`).toBeTruthy();
+        expect(widgetCatalog.map((w) => w.id)).toContain(spec.component);
+      }
       expect(spec.note.length).toBeGreaterThan(0);
     }
   });
@@ -213,6 +219,7 @@ describe("widgetFactory catalogue wiring", () => {
     };
 
     for (const [retiredId, spec] of Object.entries(RETIRED_WIDGET_IDS)) {
+      if (isMovedWidget(spec)) continue; // pointer panels take no params
       const accepted = ACCEPTED[spec.component];
       if (!accepted || !spec.params) continue;
       for (const [key, value] of Object.entries(spec.params)) {
@@ -237,11 +244,11 @@ describe("widgetFactory catalogue wiring", () => {
     // Counts drop as widgets merge. docs/ARCHITECTURE.md, docs/USER_GUIDE.md
     // and the site's capabilities test pin these same numbers — update all
     // four together.
-    expect(widgetCatalog).toHaveLength(82);
+    expect(widgetCatalog).toHaveLength(81);
     expect(counts).toEqual({
       Analysis: 35,
       Trading: 23,
-      Utility: 24,
+      Utility: 23,
     });
   });
 

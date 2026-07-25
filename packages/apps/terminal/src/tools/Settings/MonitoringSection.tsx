@@ -10,6 +10,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { SectionTitle } from "./shared";
+import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import {
   getHealth,
   getTrafficStats,
@@ -313,6 +314,12 @@ export function MonitoringSection() {
   return (
     <div className="space-y-6">
       <SectionTitle>Monitoring</SectionTitle>
+
+      {/* Connection layer roll-up — moved here from the retired System
+          Health widget (ruling D6); it existed nowhere else in Settings. */}
+      <section className="space-y-2">
+        <ConnectionStatusPanel />
+      </section>
 
       {/* Health panel */}
       <section className="space-y-2">

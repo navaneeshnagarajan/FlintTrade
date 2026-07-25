@@ -57,7 +57,6 @@ const lazyWidgets = {
 
   // Utility widgets (new)
   alerts: lazy(() => import("@/widgets/utility/Alerts/AlertsWidget")),
-  health: lazy(() => import("@/widgets/utility/Health/HealthWidget")),
 
   // Analysis widgets (new)
   threepanel: lazy(() => import("@/widgets/analysis/ThreePanel/ThreePanelWidget")),
@@ -164,7 +163,7 @@ const lazyWidgets = {
  * the retired widget's presentation, so an operator who saved a layout
  * containing the old panel gets the same view back under the new widget.
  */
-export interface RetiredWidget {
+export interface RetiredMergedWidget {
   /** The canonical widget's component id. */
   readonly component: string;
   /** Params that reproduce the retired widget's view on the canonical one. */
@@ -173,7 +172,41 @@ export interface RetiredWidget {
   readonly note: string;
 }
 
+/**
+ * A widget whose capability dissolved into a tool or route rather than
+ * another widget. A saved panel cannot render the destination (tools are
+ * overlays, Settings is a route), so it renders a small pointer instead —
+ * still a resolvable component, so the saved tab survives (Dockview wipes the
+ * whole tab when any one panel fails to resolve).
+ */
+export interface RetiredMovedWidget {
+  readonly movedTo: {
+    /** Human-readable destination, e.g. "Settings → Monitoring". */
+    readonly destination: string;
+    /** Router path when the destination is routable (Settings sections). */
+    readonly route?: string;
+  };
+  /** Why it was retired — shown to nobody, read by the next maintainer. */
+  readonly note: string;
+}
+
+export type RetiredWidget = RetiredMergedWidget | RetiredMovedWidget;
+
+/** Narrowing helper shared with the guard tests. */
+export function isMovedWidget(spec: RetiredWidget): spec is RetiredMovedWidget {
+  return "movedTo" in spec;
+}
+
 export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  health: {
+    movedTo: { destination: "Settings → Monitoring", route: "/settings#monitoring" },
+    note:
+      "Retired into Settings (ruling D6, 2026-07-26). Every one of its data "
+      + "sources — backend health, traffic, latency, security stats, "
+      + "connection state — was already rendered by Settings' Monitoring and "
+      + "Security sections and the status bar; the widget was a duplicate "
+      + "readout. Saved panels show a pointer rather than a fourth copy.",
+  },
   gex: {
     component: "gammadensity",
     params: { view: "exposure" },
@@ -428,7 +461,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
   { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Last-traded-price alerts — above, below, crosses above, crosses below — armed in this browser and polled while the panel is open, with a log of the ones that fired" },
-  { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
   { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates — needs a connected crypto broker; sample preview in Explore" },
   { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Convert between INR, USD, EUR, GBP, JPY, SGD and AED — static reference rates only, no FX feed is wired yet" },
@@ -552,11 +584,48 @@ function createWidgetPanel(
  * Params already present on the saved panel win: an operator who changed the
  * view before saving keeps their choice.
  */
+/** Pointer panel for widgets whose capability moved into a tool or route. */
+function MovedWidgetNotice({ retiredId, movedTo }: {
+  retiredId: string;
+  movedTo: RetiredMovedWidget["movedTo"];
+}) {
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center gap-2 px-4 text-center bg-surface-base"
+      data-testid={`moved-widget-${retiredId}`}
+    >
+      <span className="text-sm font-medium text-text-primary">
+        This widget moved to {movedTo.destination}
+      </span>
+      <span className="text-xs text-text-muted max-w-72">
+        Its readouts live there now, so this panel can be closed — nothing else
+        is lost from this layout.
+      </span>
+      {movedTo.route && (
+        <a
+          href={movedTo.route}
+          className="mt-1 px-2.5 py-1 text-xs rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        >
+          Open {movedTo.destination.split("→")[0]?.trim() ?? "destination"}
+        </a>
+      )}
+    </div>
+  );
+}
+
 function createRetiredWidgetPanel(
   retiredId: string,
-  { component, params }: RetiredWidget,
+  spec: RetiredWidget,
   resolved: Record<string, React.FC<IDockviewPanelProps>>,
 ): React.FC<IDockviewPanelProps> {
+  if (isMovedWidget(spec)) {
+    const PanelComponent: React.FC<IDockviewPanelProps> = () => (
+      <MovedWidgetNotice retiredId={retiredId} movedTo={spec.movedTo} />
+    );
+    PanelComponent.displayName = `Retired(${retiredId}→${spec.movedTo.destination})`;
+    return PanelComponent;
+  }
+  const { component, params } = spec;
   const Canonical = resolved[component];
   const PanelComponent: React.FC<IDockviewPanelProps> = (props) => {
     if (!Canonical) return <WidgetError name={retiredId} message="Canonical widget missing" onRetry={() => {}} />;
