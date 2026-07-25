@@ -1,15 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import { ICON_MAP } from "@/chrome/WidgetPicker";
-import { widgetCatalog, widgetComponents } from "../widgetFactory";
+import { widgetCatalog, widgetComponents, RETIRED_WIDGET_IDS } from "../widgetFactory";
 
 describe("widgetFactory catalogue wiring", () => {
-  it("keeps the public widget catalogue and Dockview component map in sync", () => {
+  it("resolves every catalogue widget, and every extra component is a documented retirement", () => {
+    // This used to assert a strict bijection. Merged widgets break that by
+    // design: a retired id leaves the picker but MUST keep resolving, because
+    // Dockview looks a saved panel's component up in this map alone and
+    // TerminalRoute discards the operator's entire saved tab when one fails.
     const catalogIds = widgetCatalog.map((widget) => widget.id);
-    const componentIds = Object.keys(widgetComponents).sort();
+    const componentIds = Object.keys(widgetComponents);
 
     expect(new Set(catalogIds).size).toBe(catalogIds.length);
-    expect([...catalogIds].sort()).toEqual(componentIds);
+    // Every catalogue widget resolves.
+    for (const id of catalogIds) {
+      expect(componentIds).toContain(id);
+    }
+    // Every extra resolvable id is an intentional, documented retirement.
+    const extras = componentIds.filter((id) => !catalogIds.includes(id)).sort();
+    expect(extras).toEqual(Object.keys(RETIRED_WIDGET_IDS).sort());
+  });
+
+  it("keeps every retired widget id loadable so saved layouts survive", () => {
+    // A retired id that stopped resolving would not degrade one panel — it
+    // would wipe the whole workspace tab (TerminalRoute's fromJSON catch).
+    for (const [retiredId, spec] of Object.entries(RETIRED_WIDGET_IDS)) {
+      expect(widgetComponents[retiredId], `${retiredId} must stay resolvable`).toBeTruthy();
+      // Its canonical target must itself be a live widget.
+      expect(widgetComponents[spec.component], `${retiredId} → ${spec.component}`).toBeTruthy();
+      expect(widgetCatalog.map((w) => w.id)).toContain(spec.component);
+      expect(spec.note.length).toBeGreaterThan(0);
+    }
   });
 
   it("documents the current terminal widget category split", () => {
@@ -18,6 +40,9 @@ describe("widgetFactory catalogue wiring", () => {
       return acc;
     }, {});
 
+    // Counts drop as widgets merge. docs/ARCHITECTURE.md, docs/USER_GUIDE.md
+    // and the site's capabilities test pin these same numbers — update all
+    // four together.
     expect(widgetCatalog).toHaveLength(102);
     expect(counts).toEqual({
       Analysis: 49,

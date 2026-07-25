@@ -167,6 +167,37 @@ const lazyWidgets = {
 };
 
 // ---------------------------------------------------------------------------
+// Retired widget ids
+// ---------------------------------------------------------------------------
+
+/**
+ * Widgets that have been merged into a canonical surface.
+ *
+ * A retired id is REMOVED from {@link widgetCatalog} — it no longer appears in
+ * the picker — but MUST stay resolvable in {@link widgetComponents}, because
+ * Dockview looks a saved panel's `component` string up in that map alone, and
+ * `routes/TerminalRoute.tsx` discards the operator's ENTIRE saved layout tab
+ * when any component fails to resolve. A retired id that stopped resolving
+ * would not degrade one panel; it would wipe the workspace.
+ *
+ * Each entry names the canonical widget and the panel params that reproduce
+ * the retired widget's presentation, so an operator who saved a layout
+ * containing the old panel gets the same view back under the new widget.
+ */
+export interface RetiredWidget {
+  /** The canonical widget's component id. */
+  readonly component: string;
+  /** Params that reproduce the retired widget's view on the canonical one. */
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** Why it was retired — shown to nobody, read by the next maintainer. */
+  readonly note: string;
+}
+
+export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  // (populated as merges land)
+};
+
+// ---------------------------------------------------------------------------
 // Widget metadata for the picker popup
 // ---------------------------------------------------------------------------
 export const widgetCatalog: WidgetMeta[] = [
@@ -379,10 +410,42 @@ function createWidgetPanel(
 // ---------------------------------------------------------------------------
 // Export: widgetComponents record for DockviewReact `components` prop
 // ---------------------------------------------------------------------------
-export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> =
+/**
+ * Wrap a canonical widget so a retired id keeps resolving, with the params
+ * that reproduce the retired widget's presentation merged in.
+ *
+ * Params already present on the saved panel win: an operator who changed the
+ * view before saving keeps their choice.
+ */
+function createRetiredWidgetPanel(
+  retiredId: string,
+  { component, params }: RetiredWidget,
+  resolved: Record<string, React.FC<IDockviewPanelProps>>,
+): React.FC<IDockviewPanelProps> {
+  const Canonical = resolved[component];
+  const PanelComponent: React.FC<IDockviewPanelProps> = (props) => {
+    if (!Canonical) return <WidgetError name={retiredId} message="Canonical widget missing" onRetry={() => {}} />;
+    const merged = { ...props, params: { ...params, ...(props.params ?? {}) } };
+    return <Canonical {...merged} />;
+  };
+  PanelComponent.displayName = `Retired(${retiredId}→${component})`;
+  return PanelComponent;
+}
+
+const liveWidgetComponents: Record<string, React.FC<IDockviewPanelProps>> =
   Object.fromEntries(
     Object.entries(lazyWidgets).map(([id, LazyWidget]) => [
       id,
       createWidgetPanel(id, LazyWidget as React.LazyExoticComponent<React.ComponentType<IDockviewPanelProps>>),
     ])
   );
+
+export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> = {
+  ...liveWidgetComponents,
+  ...Object.fromEntries(
+    Object.entries(RETIRED_WIDGET_IDS).map(([retiredId, spec]) => [
+      retiredId,
+      createRetiredWidgetPanel(retiredId, spec, liveWidgetComponents),
+    ]),
+  ),
+};
