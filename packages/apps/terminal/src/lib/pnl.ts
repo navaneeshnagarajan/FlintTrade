@@ -171,7 +171,11 @@ export function roundTripsFromTrades(trades: Trade[]): RoundTrip[] {
  * Positionbook rows arrive unnormalised from the wire: real adapters send
  * numerics as strings and some use snake_case field names.
  */
-type WirePosition = Position & { average_price?: string | number };
+type WirePosition = Position & {
+  average_price?: string | number;
+  avgPrice?: string | number;
+  qty?: string | number;
+};
 
 /** Coerce a possibly string-typed broker numeric to a finite number, else null. */
 function toFiniteNumber(value: unknown): number | null {
@@ -211,11 +215,15 @@ function toFiniteNumber(value: unknown): number | null {
  * @returns The position's effective P&L in rupees.
  */
 export function positionMtm(position: Position): number {
-  const qty = toFiniteNumber(position.quantity) ?? 0;
+  // Every spelling adapters actually send. This accepted only `quantity` and
+  // `averagePrice`/`average_price`, so a row shaped `qty`/`avgPrice` silently
+  // fell through to the broker `pnl` field — reintroducing the very
+  // disagreement this helper exists to end, but only for some adapters and
+  // only in the widgets that pass raw rows.
+  const wire = position as WirePosition;
+  const qty = toFiniteNumber(wire.quantity ?? wire.qty) ?? 0;
   const ltp = toFiniteNumber(position.ltp);
-  const avg = toFiniteNumber(
-    (position as WirePosition).averagePrice ?? (position as WirePosition).average_price,
-  );
+  const avg = toFiniteNumber(wire.averagePrice ?? wire.average_price ?? wire.avgPrice);
   if (qty !== 0 && ltp !== null && ltp > 0 && avg !== null && avg > 0) {
     return (ltp - avg) * qty;
   }

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSkillStore } from "@/stores/skillStore";
 import { useSkillContent } from "../useSkillContent";
-import { widgetCatalog } from "@/layout/widgetFactory";
+import { widgetCatalog, RETIRED_WIDGET_IDS } from "@/layout/widgetFactory";
 
 // ---------------------------------------------------------------------------
 // Reset store between tests
@@ -85,11 +85,13 @@ describe("useSkillContent — intermediate", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableWidgets).toContain("optionchain");
     expect(result.current.availableWidgets).toContain("straddle");
-    expect(result.current.availableWidgets).toContain("depth");
+    // depth merged into orderladder.
+    expect(result.current.availableWidgets).toContain("orderladder");
     expect(result.current.availableWidgets).toContain("greeks");
     expect(result.current.availableWidgets).toContain("oichart");
     expect(result.current.availableWidgets).toContain("sectormap");
-    expect(result.current.availableWidgets).toContain("gex");
+    // gex merged into gammadensity.
+    expect(result.current.availableWidgets).toContain("gammadensity");
   });
 
   it("does not include advanced-only widgets", () => {
@@ -296,6 +298,36 @@ describe("useSkillContent — additive invariant", () => {
     const advancedTools = result.current.availableTools;
     for (const id of intermediateTools) {
       expect(advancedTools).toContain(id);
+    }
+  });
+});
+
+describe("useSkillContent — merged canonicals stay reachable per tier", () => {
+  // The tier lists are by widget id, and a retired id leaves widgetCatalog —
+  // which the picker intersects against. So a merge silently removes a surface
+  // from a tier unless the canonical is added in the same change.
+  it("keeps the intermediate tier's analysis surfaces after the merges", () => {
+    useSkillStore.getState().setGlobalLevel("intermediate");
+    const { result } = renderHook(() => useSkillContent());
+    const widgets = result.current.availableWidgets;
+
+    // depth -> orderladder, gex -> gammadensity.
+    expect(widgets).toContain("orderladder");
+    expect(widgets).toContain("gammadensity");
+    expect(widgets).not.toContain("depth");
+    expect(widgets).not.toContain("gex");
+  });
+
+  it("lists no retired id in any tier", () => {
+    for (const level of ["beginner", "intermediate", "advanced"] as const) {
+      useSkillStore.getState().setGlobalLevel(level);
+      const { result } = renderHook(() => useSkillContent());
+      for (const id of Object.keys(RETIRED_WIDGET_IDS)) {
+        expect(
+          result.current.availableWidgets,
+          `${level} tier lists retired id ${id}`,
+        ).not.toContain(id);
+      }
     }
   });
 });

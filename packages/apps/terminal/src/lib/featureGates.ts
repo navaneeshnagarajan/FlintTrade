@@ -45,13 +45,12 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // direction from the Order Flow merge, where the canonical was already the
   // stricter of the two.
   "widget:volsurface":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
-  // Retired id — resolves to `ivsmile`, which is advanced-only. Without its
-  // own row an absent widget: id defaults to visible, so a saved `ivskew`
-  // panel would bypass the gate its canonical carries.
+  // Retired id — resolves to `ivsmile`, which is advanced-only.
   // The Greeks Matrix derives greeks client-side and labels them Live, while
   // its own IV source (widget:ivsmile) and sibling widget:volsurface are
-  // advanced-only. Gating it closes that asymmetry; the retired id needs the
-  // same row or a saved panel bypasses it.
+  // advanced-only. Gating the CANONICAL closes that asymmetry — that row is
+  // live. The retired id's row beside it is a forward-compatible declaration
+  // only (see the note above).
   "widget:greeksheatmap": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   "widget:greekssurface": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   // The ladder absorbed Depth's real level-2 book and is rapid click-to-trade
@@ -59,14 +58,21 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // The two inputs were locked (depth) and ungated-by-omission (ladder), and
   // the omission reads as accidental rather than decided.
   "widget:orderladder": { beginner: "locked", intermediate: "visible", advanced: "visible" },
-  // Retired id resolving to the gated straddle canonical.
+  // Retired ids below. NOTE ON WHAT THESE DO: `useFeatureGate` has exactly one
+  // `widget:` caller — chrome/WidgetPicker.tsx — and it iterates
+  // `widgetCatalog`, which by definition excludes retired ids. So these rows
+  // are NOT reached today, and a saved panel is never gate-checked in either
+  // direction. They are kept as forward-compatible declarations so that if
+  // gating ever extends beyond the picker, a retired id already carries its
+  // canonical's posture rather than defaulting to visible. An earlier comment
+  // here claimed they prevent a saved panel bypassing its gate; that was wrong.
   "widget:impliedmove": { beginner: "locked", intermediate: "visible", advanced: "visible" },
   "widget:ivskew":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
-  // Retired ids folded into `oichart`; each keeps a row so a saved panel
-  // cannot bypass the canonical's gate. oiprofile was the strictest of the
-  // four and keeps its own setting.
+  // Retired ids folded into `oichart`. Unreachable today (see the note above);
+  // declared so a future gate check finds the canonical's posture. oiprofile
+  // keeps its own stricter setting, which is what it carried before the merge.
   "widget:oiheatmap":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oisignals":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },

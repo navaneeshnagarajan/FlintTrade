@@ -147,6 +147,45 @@ describe("widgetFactory catalogue wiring", () => {
     }
   });
 
+
+  it("uses params a canonical actually understands", () => {
+    // Every canonical resolves its view/tab param with a silent fallback to a
+    // default, so a typo (`view: "skewe"`) reopens the WRONG view with a green
+    // suite. This pins the accepted vocabulary per canonical: adding a
+    // retirement with an unknown value now fails here instead of shipping.
+    const ACCEPTED: Record<string, Record<string, readonly string[]>> = {
+      orderflow: { view: ["footprint", "footprint+delta", "heatmap"] },
+      ivsmile: { view: ["smile", "skew"] },
+      gammadensity: { view: ["density", "exposure"] },
+      domheatmap: { view: ["live", "replay"], scale: ["log", "gamma"] },
+      greeksheatmap: {
+        projection: ["grid", "surface"],
+        metric: ["iv", "delta", "gamma", "theta", "vega"],
+      },
+      timesales: { view: ["tape", "stats"] },
+      straddle: { view: ["straddle", "impliedmove"] },
+      oichart: { view: ["bars", "butterfly", "heat", "signals"] },
+      positions: { view: ["table", "net", "heat"], group: ["sector", "exchange", "flat"] },
+      calculator: { tab: ["sizing", "target", "brokerage", "margin"] },
+      conditionscanner: { view: ["scans", "sectors"] },
+    };
+
+    for (const [retiredId, spec] of Object.entries(RETIRED_WIDGET_IDS)) {
+      const accepted = ACCEPTED[spec.component];
+      if (!accepted || !spec.params) continue;
+      for (const [key, value] of Object.entries(spec.params)) {
+        const vocabulary = accepted[key];
+        if (!vocabulary) continue; // free-form param (symbol, tick, scan key)
+        expect(
+          vocabulary,
+          `${retiredId} → ${spec.component} passes ${key}="${String(value)}", `
+          + `which is not one of ${vocabulary.join(" | ")} — it would silently `
+          + "fall back to the canonical's default view",
+        ).toContain(value);
+      }
+    }
+  });
+
   it("documents the current terminal widget category split", () => {
     const counts = widgetCatalog.reduce<Record<string, number>>((acc, widget) => {
       acc[widget.category] = (acc[widget.category] ?? 0) + 1;

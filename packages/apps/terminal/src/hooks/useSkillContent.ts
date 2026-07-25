@@ -60,11 +60,16 @@ const INTERMEDIATE_WIDGETS: string[] = [
   ...BEGINNER_WIDGETS,
   "optionchain",
   "straddle",
-  "depth",
+  // Merged canonicals. `depth` folded into `orderladder` and `gex` into
+  // `gammadensity`; because this list is by id and the retired ids leave the
+  // catalogue, leaving them here silently removed BOTH surfaces from the
+  // intermediate picker — the retired ids no longer resolve into it and the
+  // survivors were never added.
+  "orderladder",
   "greeks",
   "oichart",
   "sectormap",
-  "gex",
+  "gammadensity",
   "news",
   "calculator",
   "ticker",

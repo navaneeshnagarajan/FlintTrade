@@ -21,6 +21,7 @@ import {
 import useWebSocket from "@/hooks/useWebSocket";
 import { useVoiceAlert } from "@/hooks/useVoiceAlert";
 import { useModeStore } from "@/stores/modeStore";
+import { checkOrderEntryMode, checkPriceForOrderType } from "@/lib/orderGuards";
 import type { PlaceOrderParams, WsInstrument } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { ScalperControls } from "./ScalperControls";
@@ -88,7 +89,8 @@ function snapToTick(price: number): number {
 }
 
 function ScalperWidget(_props: WidgetProps) {
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const mode = useModeStore((s) => s.mode);
+  const isExplore = mode === "explore";
   const [symbol, setSymbol] = useState(DEFAULT_SYMBOL);
   const [lots, setLots] = useState(1);
   const [product, setProduct] = useState<ProductType>("MIS");
@@ -298,8 +300,9 @@ function ScalperWidget(_props: WidgetProps) {
         showStatus("Strike not resolved", "error");
         return;
       }
-      if (isExplore) {
-        showStatus("Connect a broker to place orders", "error");
+      const modeRefusal = checkOrderEntryMode(mode);
+      if (modeRefusal) {
+        showStatus(modeRefusal, "error");
         return;
       }
       // Fail closed: never size a real order from the hardcoded fallback lot
@@ -320,8 +323,12 @@ function ScalperWidget(_props: WidgetProps) {
       // A LIMIT order must carry a real price — ₹0 is a guaranteed rejection
       // (or worse, a lenient bridge could treat it as marketable).
       const price = orderType === "LIMIT" ? parseFloat(limitPrice) : 0;
-      if (orderType === "LIMIT" && (!Number.isFinite(price) || price <= 0)) {
-        showStatus("Enter a limit price before placing a LIMIT order", "error");
+      const priceRefusal = checkPriceForOrderType(
+        orderType === "LIMIT" ? "LIMIT" : "MARKET",
+        orderType === "LIMIT" ? price : 1,
+      );
+      if (priceRefusal) {
+        showStatus(priceRefusal, "error");
         return;
       }
       const qty = lots * lotSize;

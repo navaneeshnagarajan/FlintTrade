@@ -124,3 +124,26 @@ describe("totalPositionMtm", () => {
     expect(totalPositionMtm(book)).toBe(250);
   });
 });
+
+describe("positionMtm accepts every wire spelling", () => {
+  // Positions normalises its rows before calling this; MTM Monitor and Risk
+  // pass raw positionbook rows straight from the broker. An adapter that
+  // sends qty/avgPrice therefore marked to market in one widget and fell back
+  // to the broker pnl in the others — the exact side-by-side disagreement
+  // this helper was extracted to end.
+  it("reads qty and avgPrice as well as quantity and averagePrice", () => {
+    const canonical = { quantity: 75, averagePrice: 100, ltp: 110, pnl: 9999 } as never;
+    const aliased = { qty: 75, avgPrice: 100, ltp: 110, pnl: 9999 } as never;
+    const snake = { quantity: 75, average_price: 100, ltp: 110, pnl: 9999 } as never;
+
+    expect(positionMtm(canonical)).toBe(750);
+    expect(positionMtm(aliased)).toBe(750);
+    expect(positionMtm(snake)).toBe(750);
+  });
+
+  it("totals agree whether rows are normalised or raw", () => {
+    const raw = [{ qty: 75, avgPrice: 100, ltp: 110, pnl: 1 }] as never[];
+    const normalised = [{ quantity: 75, averagePrice: 100, ltp: 110, pnl: 1 }] as never[];
+    expect(totalPositionMtm(raw)).toBe(totalPositionMtm(normalised));
+  });
+});

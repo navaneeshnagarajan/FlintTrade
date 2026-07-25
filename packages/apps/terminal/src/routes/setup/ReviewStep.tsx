@@ -50,9 +50,9 @@ const PRESET_DESCRIPTIONS: Record<string, string> = {
   "learn-then-trade": "Market Watch workspace — overview layout ideal for learning while watching markets",
   "invest-lite": "Investor View — Chart, Watchlist, Holdings, and Dashboard for portfolio tracking",
   "invest-diversified": "Investor View — portfolio overview with holdings, watchlist, and chart",
-  "scalper-zone": "Scalper Zone — Chart, Order Pad, Depth, Positions, and Scalper for rapid execution",
+  "scalper-zone": "Scalper Zone — Chart, Order Pad, DOM / Ladder, Positions, and Scalper for rapid execution",
   "power-user": "Scalper Zone — full-featured layout with all execution and analysis panels",
-  "full": "Analysis workspace — Chart, OI Chart, Depth, Positions, and News feed",
+  "full": "Analysis workspace — Chart, OI Analytics, DOM / Ladder, Positions, and News feed",
   "minimal": "Market Watch workspace — clean layout with essential widgets to get started",
   "options-desk": "Options Desk — Option Chain, Chart, Greeks, Positions, and Straddle",
 };

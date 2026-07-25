@@ -36,10 +36,21 @@
  * detection is what stops a legacy percentage-points response rendering at 100×.
  *
  * EXPIRY: the widget resolves the nearest FUTURE expiry itself (shared
- * `selectFutureExpiry`) and lets the operator override it by typing up to three
- * comma-separated expiries. It never sends an empty expiry list, because the
- * backend fills that in with a hard-coded label (`analysis_routes.py`), which
- * would render a stale contract's curve as if it were the current one.
+ * `selectFutureExpiry`) and lets the operator override it by typing one. It
+ * never sends an empty expiry list, because the backend fills that in with a
+ * hard-coded label (`analysis_routes.py`), which would render a stale
+ * contract's curve as if it were the current one.
+ *
+ * ONE CURVE, NOT THREE. The input used to accept three comma-separated
+ * expiries and the renderer allocates a three-colour palette, but
+ * `/api/v1/ivsmile` is single-expiry by construction: `_option_request` reads
+ * one expiry via `_body_expiry` and the response is shaped `"curves": [curve]`
+ * — always exactly one element. Everything past the first entry was dropped
+ * server-side with nothing to tell the operator. Rather than advertise a term
+ * structure the endpoint cannot serve, the input takes one expiry. The palette
+ * and the multi-curve rendering stay because the disclosed SAMPLE payload does
+ * carry several curves, and because a future multi-expiry endpoint should not
+ * need the renderer rewritten.
  */
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
@@ -297,7 +308,8 @@ function IVSmileWidget(props: IDockviewPanelProps) {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
-        .slice(0, 3),
+        // One only — see the ONE CURVE note in the file docstring.
+        .slice(0, 1),
     [expiriesInput],
   );
 
@@ -532,8 +544,8 @@ function IVSmileWidget(props: IDockviewPanelProps) {
         <Input
           value={expiriesInput}
           onChange={(e) => setExpiriesInput(e.target.value)}
-          placeholder={autoExpiry ? `${autoExpiry} (auto)` : "Expiries (comma-sep)"}
-          aria-label="Expiries (comma-separated, overrides the auto-selected expiry)"
+          placeholder={autoExpiry ? `${autoExpiry} (auto)` : "Expiry"}
+          aria-label="Expiry (overrides the auto-selected expiry)"
           className="flex-1 min-w-36 h-7 text-xs"
         />
 

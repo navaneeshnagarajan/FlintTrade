@@ -764,20 +764,20 @@ function applyEverything(api: DockviewApi): void {
   }
 
   // ---------- Row 2 left: Analysis ----------
-  const depthId = pid("orderladder");
+  // Anchored on the depth heatmap. This slot held `depth` before that widget
+  // merged into the ladder; keeping it as a ladder panel would have opened the
+  // same widget twice, since the Trading group above already adds one.
+  const depthId = pid("domheatmap");
   api.addPanel({
     id: depthId,
-    component: "orderladder",
-    // NSE tick puts each broker level on its own row — the retired
-    // Depth widget\'s 5-level table.
-    params: { tick: 0.05 },
-    title: "DOM / Ladder",
+    component: "domheatmap",
+    title: "DOM Heatmap",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 300,
   });
 
   for (const comp of [
-    "domheatmap", "gammadensity", "volsurface", "orderflow", "sectormap",
+    "gammadensity", "volsurface", "orderflow", "sectormap",
     "sectorperformance", "marketbreadth", "correlationpairs", "correlationmatrix", "instrumentcompare",
     "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
     "timesales",
@@ -825,7 +825,8 @@ function applyEverything(api: DockviewApi): void {
   for (const comp of [
     "calculator", "news", "ticker", "aiadvisor", "conditionscanner",
     "alerts", "health", "fundingrate", "currencyconverter", "earningscalendar",
-    "globalindices", "strategytemplates", "audittrail", "economiccalendar", "expirycountdown",
+    "globalindices", "strategytemplates", "audittrail", "economiccalendar",
+    "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown",
     "marketclock", "tradeidea", "tickspeed", "marketsummary",
   ] as const) {
     api.addPanel({
@@ -995,7 +996,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "scalper-zone",
     name: "Scalper Zone",
-    description: "Chart + Order Pad + Depth + Positions + Scalper",
+    description: "Chart + Order Pad + DOM / Ladder + Positions + Scalper",
     icon: "Zap",
     apply: applyScalperZone,
   },
@@ -1030,14 +1031,14 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "analysis",
     name: "Analysis",
-    description: "Chart + OI Chart + Depth + Positions + News",
+    description: "Chart + OI Analytics + DOM / Ladder + Positions + News",
     icon: "BarChart3",
     apply: applyAnalysis,
   },
   {
     id: "risk-monitor",
     name: "Risk Monitor",
-    description: "Dashboard + Risk Panel + MTM Monitor + Positions + Orders",
+    description: "Dashboard + Risk + MTM Monitor + Positions + Orders",
     icon: "ShieldAlert",
     apply: applyRiskMonitor,
   },
@@ -1051,7 +1052,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "options-analysis",
     name: "Options Analysis",
-    description: "Option Chain + IV Skew + Greeks Heatmap + Implied Move + Straddle P&L",
+    description: "Option Chain + IV Smile & Skew + Greeks Matrix + Straddle & Implied Move + Straddle P&L",
     icon: "Sigma",
     apply: applyOptionsAnalysis,
   },
@@ -1072,7 +1073,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "portfolio-manager",
     name: "Portfolio Manager",
-    description: "Portfolio Allocation + Net Positions + Position Heatmap + Risk Dashboard + Trade Performance",
+    description: "Portfolio Allocation + Positions (net and heat-map views) + Risk + Trade Performance",
     icon: "PieChart",
     apply: applyPortfolioManager,
   },
@@ -1086,14 +1087,14 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "quick-scalper",
     name: "Quick Scalper",
-    description: "Quick Trade + Order Ladder + Depth Heatmap + Tape & Microstructure + Tick Speed + Intraday P&L",
+    description: "Quick Trade + Order Ladder + DOM Heatmap + Tape & Microstructure + Tick Speed + Intraday P&L",
     icon: "Gauge",
     apply: applyQuickScalper,
   },
   {
     id: "everything",
     name: "Everything",
-    description: "All widgets in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
+    description: "A broad sweep of the widget catalogue in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
     icon: "LayoutDashboard",
     apply: applyEverything,
   },

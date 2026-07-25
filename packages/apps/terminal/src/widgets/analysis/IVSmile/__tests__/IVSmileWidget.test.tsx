@@ -367,14 +367,18 @@ describe("IVSmileWidget — expiry selection", () => {
     );
 
     fireEvent.change(
-      screen.getByLabelText(/expiries \(comma-separated/i),
+      screen.getByLabelText(/^expiry \(overrides/i),
       { target: { value: "2050-03-27, 2050-04-24" } },
     );
 
+    // ONE expiry reaches the hook even when several are typed. The endpoint is
+    // single-expiry by construction (`_body_expiry` reads one, the response is
+    // shaped `curves: [curve]`), so sending three meant two were dropped
+    // server-side with nothing shown to the operator.
     expect(mockUseIVSmile).toHaveBeenLastCalledWith(
       "NIFTY",
       "NFO",
-      ["2050-03-27", "2050-04-24"],
+      ["2050-03-27"],
       true,
     );
   });
