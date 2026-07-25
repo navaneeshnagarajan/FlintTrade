@@ -1,15 +1,23 @@
 /**
  * greeksHeatmapTransform — pure helper that turns the screener IV-smile response
- * (`IVSmileData`) into the `ExpiryRow[]` grid the GreeksHeatmap widget renders.
+ * (`IVSmileData`) into the `ExpiryRow[]` matrix the Greeks Matrix widget renders
+ * under BOTH of its projections (the 2-D heat grid and the CSS-3D surface).
  *
  * IMPORTANT: greeks are NOT carried in the OpenAlgo `optionchain` feed (that
  * payload has only ltp/bid/ask/oi). The live IV smile is the dedicated source;
  * the per-strike greeks are derived from it through the shared Black–Scholes
- * module (`@/lib/optionsMath`) — the same one GreeksSurface's live and sample
- * paths call — so every greek the terminal renders comes from one implementation.
+ * module (`@/lib/optionsMath`), so every greek the terminal renders comes from
+ * one implementation.
  *
- * Kept separate from the widget so the chain→grid maths (strike alignment, ATM
- * classification, greek derivation) is unit-tested without a broker connection.
+ * Strike alignment is an INTERSECTION across expiries, not a synthetic
+ * moneyness bucket: the retired GreeksSurface widget snapped every row to
+ * ±5% buckets and rendered a rounded strike that no contract need trade at.
+ * The intersection keeps real, tradeable strikes in every cell, at the cost of
+ * dropping strikes that are not quoted across all the expiries on screen.
+ *
+ * Kept separate from the widget so the chain→matrix maths (strike alignment,
+ * ATM classification, greek derivation) is unit-tested without a broker
+ * connection.
  */
 
 import { bsGreeks, normaliseIv, yearsFromDays } from "@/lib/optionsMath";
@@ -20,6 +28,12 @@ export type Moneyness = "OTM" | "ATM" | "ITM";
 export interface HeatCell {
   strike: number;
   moneyness: Moneyness;
+  /**
+   * Mid implied volatility in PERCENTAGE POINTS (15.2 for 15.2%), the scale the
+   * widget's "IV %" metric renders. The greeks below are derived from the same
+   * figure as a decimal fraction.
+   */
+  iv: number;
   delta: number;
   gamma: number;
   theta: number;
@@ -97,10 +111,22 @@ function labelFor(expiry: string): string {
 }
 
 /**
- * Build the aligned greeks grid from a live IV smile. Every expiry row is
+ * Convert a decimal IV fraction to the percentage-point scale `HeatCell.iv`
+ * carries, at the 2-decimal display precision both projections render.
+ *
+ * @param ivDecimal Implied volatility as a decimal fraction.
+ * @returns Percentage points, e.g. 0.152 → 15.2.
+ */
+export function ivPercent(ivDecimal: number): number {
+  return Number((ivDecimal * 100).toFixed(2));
+}
+
+/**
+ * Build the aligned greeks matrix from a live IV smile. Every expiry row is
  * rendered against the SAME strike set (the intersection of strikes present
- * across all curves) so the grid columns stay aligned. Returns null when no
- * usable strike is shared, so the caller can fall back to sample data.
+ * across all curves) so the grid columns — and the surface's depth rows — stay
+ * aligned. Returns null when no usable strike is shared, so the caller can fall
+ * back to sample data.
  */
 export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRow[] | null {
   // Drop degenerate expiries upfront: a non-positive days-to-expiry produces
@@ -135,8 +161,14 @@ export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRo
         ? curve.atm_strike
         : common[Math.floor(common.length / 2)];
     const cells: HeatCell[] = common.map((strike) => {
-      const g = approxGreeks(strike, atm, ivByStrike.get(strike) ?? 0, curve.days_to_expiry);
-      return { strike, moneyness: classifyMoneyness(strike, atm), ...g };
+      const ivDecimal = ivByStrike.get(strike) ?? 0;
+      const g = approxGreeks(strike, atm, ivDecimal, curve.days_to_expiry);
+      return {
+        strike,
+        moneyness: classifyMoneyness(strike, atm),
+        iv: ivPercent(ivDecimal),
+        ...g,
+      };
     });
     return {
       expiry: curve.expiry,

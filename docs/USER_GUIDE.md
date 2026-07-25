@@ -263,7 +263,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (97)
+### The widgets (95)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are

@@ -624,7 +624,7 @@ function applyMarketOverview(api: DockviewApi): void {
 // ┌────────────┬──────────────┬──────────┐
 // │ Quick Trade│DOM Heatmap   │TickSpeed │
 // ├────────────┼──────────────┴──────────┤
-// │ Order Lad. │   Microstructure        │
+// │ Order Lad. │   Tape & Microstructure │
 // ├────────────┴─────────────────────────┤
 // │          Intraday P&L                │
 // └──────────────────────────────────────┘
@@ -634,7 +634,7 @@ function applyQuickScalper(api: DockviewApi): void {
   const depthHeatmapId = pid("domheatmap");
   const tickSpeedId = pid("tickspeed");
   const orderLadderId = pid("orderladder");
-  const microstructureId = pid("microstructure");
+  const microstructureId = pid("timesales");
   const intradayPnlId = pid("intradaypnl");
 
   api.addPanel({
@@ -671,8 +671,10 @@ function applyQuickScalper(api: DockviewApi): void {
 
   api.addPanel({
     id: microstructureId,
-    component: "microstructure",
-    title: "Market Microstructure",
+    component: "timesales",
+    // The statistics-only view is what this slot has always shown.
+    params: { view: "stats" },
+    title: "Tape & Microstructure",
     position: { referencePanel: orderLadderId, direction: "right" },
   });
 
@@ -738,7 +740,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "greekssurface", "ivsmile", "oiprofile", "oiheatmap",
+    "greeksheatmap", "ivsmile", "oiprofile", "oiheatmap",
     "impliedmove", "optionsflow", "volatilitycone",
   ] as const) {
     api.addPanel({
@@ -764,7 +766,7 @@ function applyEverything(api: DockviewApi): void {
     "sectorperformance", "marketbreadth", "correlationpairs",
     "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend",
     "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
-    "microstructure",
+    "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -994,7 +996,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "quick-scalper",
     name: "Quick Scalper",
-    description: "Quick Trade + Order Ladder + Depth Heatmap + Microstructure + Tick Speed + Intraday P&L",
+    description: "Quick Trade + Order Ladder + Depth Heatmap + Tape & Microstructure + Tick Speed + Intraday P&L",
     icon: "Gauge",
     apply: applyQuickScalper,
   },

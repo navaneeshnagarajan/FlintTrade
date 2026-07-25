@@ -87,7 +87,6 @@ const lazyWidgets = {
   smartorder: lazy(() => import("@/widgets/trading/SmartOrder/SmartOrderWidget")),
 
   // Analysis widgets (Wave 24)
-  greekssurface: lazy(() => import("@/widgets/analysis/GreeksSurface/GreeksSurfaceWidget")),
 
   // Utility widgets (Wave 24)
   fundingrate: lazy(() => import("@/widgets/utility/FundingRate/FundingRateWidget")),
@@ -135,7 +134,6 @@ const lazyWidgets = {
   tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
 
   // Wave 32 widgets
-  microstructure: lazy(() => import("@/widgets/analysis/Microstructure/MicrostructureWidget")),
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
   positionsizing: lazy(() => import("@/widgets/utility/PositionSizing/PositionSizingWidget")),
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
@@ -229,6 +227,26 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
       + "provenance badge and its percent-vs-decimal normalisation became the "
       + "canonical behaviour, because they were the stricter of the two.",
   },
+  greekssurface: {
+    component: "greeksheatmap",
+    // The retired widget opened on IV; the merged default is delta, so a
+    // saved panel needs the metric too or it reopens showing something else.
+    params: { projection: "surface", metric: "iv" },
+    note:
+      "Merged into Greeks Matrix. One dataset under two projections — both "
+      + "derived greeks from the same getFtIVSmile payload with what were "
+      + "character-identical formulas. The 3-D bar projection is now a "
+      + "projection setting rather than a separate widget.",
+  },
+  microstructure: {
+    component: "timesales",
+    params: { view: "stats" },
+    note:
+      "Merged into Tape and Microstructure. Every number it displayed came "
+      + "from Math.random(); its statistics are exactly what the neighbouring "
+      + "widget's REAL tick prints already support, so the merge makes them "
+      + "real rather than preserving a fabricated surface.",
+  },
   footprint: {
     component: "orderflow",
     params: { view: "footprint+delta" },
@@ -288,7 +306,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "arbitragescanner", name: "Arbitrage Scanner", icon: "ArrowLeftRight", category: "Analysis", description: "Cash-future basis dislocations vs cost-of-carry plus cross-exchange (NSE/BSE) price gaps, ranked by annualised edge" },
   { id: "indexcontribution", name: "Index Contribution", icon: "BarChart3", category: "Analysis", description: "Index movers ranked by constituent point contribution (free-float weight × return), with advancers/decliners and per-name push" },
   { id: "patterndetection", name: "Pattern Detection", icon: "CandlestickChart", category: "Analysis", description: "Detects the six candlestick patterns FlintTrade backtests (doji, hammer, engulfing, morning/evening star, three soldiers) on a symbol's recent bars" },
-  { id: "timesales", name: "Time & Sales", icon: "ClipboardList", category: "Analysis", description: "Streaming tape of trade prints inferred from live quote ticks (tick-rule side, volume-delta size) with a buy/sell pressure bar" },
+  { id: "timesales", name: "Tape & Microstructure", icon: "ClipboardList", category: "Analysis", description: "Streaming tape of trade prints inferred from live quote ticks (tick-rule side, volume-delta size), with tick velocity, aggressor ratio and large-order statistics computed from those prints" },
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis", description: "3-D implied volatility surface across strikes and expiries" },
   { id: "ivsmile", name: "IV Smile & Skew", icon: "TrendingUp", category: "Analysis", description: "Implied volatility across strikes for the nearest expiries, as the call/put smile curves or the 25-delta put-minus-call skew" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis", description: "Payoff diagram for straddle positions with breakeven markers" },
@@ -299,7 +317,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
   { id: "portfoliooptimiser", name: "Portfolio Optimiser", icon: "PieChart", category: "Analysis", description: "Mean-variance (Markowitz) optimal weights for a basket, with expected return / volatility / Sharpe" },
   { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
-  { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis", description: "3-D surface plot of option Greeks across strikes and days to expiry" },
   { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
   { id: "marketbreadth", name: "Market Breadth", icon: "BarChart4", category: "Analysis", description: "Advance/decline ratio, new highs/lows, and breadth oscillators for NSE" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis", description: "Volatility cone comparing current IV against historical percentiles" },
@@ -310,11 +327,10 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "pcrtrend", name: "PCR Trend", icon: "TrendingDown", category: "Analysis", description: "Put-Call Ratio trend line to gauge market sentiment over time" },
   { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis", description: "Percentage-based comparison chart for up to five instruments" },
   { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis", description: "Vertical options spread calculator with illustrative expiry payoff and risk metrics" },
-  { id: "greeksheatmap", name: "Greeks Heatmap", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks heat map derived from the current IV smile" },
+  { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Historical gap statistics showing fill probability and average size" },
   { id: "impliedmove", name: "Implied Move", icon: "MoveHorizontal", category: "Analysis", description: "Expected move range derived from ATM straddle premium for current expiry" },
   { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Real-time large options trade scanner showing unusual activity" },
-  { id: "microstructure", name: "Market Microstructure", icon: "Microscope", category: "Analysis", description: "Tick-level microstructure analysis: trade clustering, aggressor ratio, VPIN" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },

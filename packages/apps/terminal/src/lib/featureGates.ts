@@ -46,6 +46,12 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // Retired id — resolves to `ivsmile`, which is advanced-only. Without its
   // own row an absent widget: id defaults to visible, so a saved `ivskew`
   // panel would bypass the gate its canonical carries.
+  // The Greeks Matrix derives greeks client-side and labels them Live, while
+  // its own IV source (widget:ivsmile) and sibling widget:volsurface are
+  // advanced-only. Gating it closes that asymmetry; the retired id needs the
+  // same row or a saved panel bypasses it.
+  "widget:greeksheatmap": { beginner: "locked", intermediate: "locked", advanced: "visible" },
+  "widget:greekssurface": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   "widget:ivskew":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },

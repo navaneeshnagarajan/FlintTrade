@@ -163,9 +163,9 @@ def _days_to_expiry(expiry: str) -> int:
     terminal's expiry API actually returns), the strict ``DDMMMYY`` form, and
     the dashed ``DD-MMM-YY`` form. Returns 0 when the expiry cannot be parsed,
     so callers degrade gracefully rather than raising. Consumers that derive
-    time-decay greeks (the terminal's GreeksSurface and Greeks-heatmap widgets)
-    need a real time-to-expiry — a hardcoded 0 collapses gamma/theta/vega to
-    zero.
+    time-decay greeks (the terminal's Greeks Matrix widget, under both its grid
+    and surface projections) need a real time-to-expiry — a hardcoded 0
+    collapses gamma/theta/vega to zero.
     """
     dte = _authoritative_days_to_expiry(expiry)
     return dte if dte is not None else 0
