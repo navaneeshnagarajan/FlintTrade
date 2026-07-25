@@ -183,7 +183,7 @@ export default function HomePage() {
             <span>Package surfaces across Python, React, shared UI, Rust/PyO3, and the Electron desktop shell.</span>
           </div>
           <div>
-            <strong>84</strong>
+            <strong>82</strong>
             <span>Terminal widgets described by the public contributor documentation.</span>
           </div>
           <div>

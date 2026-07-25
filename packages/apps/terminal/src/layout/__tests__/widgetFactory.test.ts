@@ -43,9 +43,9 @@ describe("widgetFactory catalogue wiring", () => {
     // Counts drop as widgets merge. docs/ARCHITECTURE.md, docs/USER_GUIDE.md
     // and the site's capabilities test pin these same numbers — update all
     // four together.
-    expect(widgetCatalog).toHaveLength(84);
+    expect(widgetCatalog).toHaveLength(82);
     expect(counts).toEqual({
-      Analysis: 37,
+      Analysis: 35,
       Trading: 23,
       Utility: 24,
     });
@@ -60,11 +60,12 @@ describe("widgetFactory catalogue wiring", () => {
     expect(missing).toEqual([]);
   });
 
-  it("describes Spread View as a vertical options spread calculator", () => {
-    const spreadView = widgetCatalog.find((widget) => widget.id === "spreadview");
-
-    expect(spreadView?.description).toBe(
-      "Vertical options spread calculator with illustrative expiry payoff and risk metrics",
-    );
+  it("keeps Spread View out of the catalogue after its demotion to template data", () => {
+    // It was four hardcoded two-leg spreads with no data source and a
+    // permanently disabled execute button. The spreads are now entries in
+    // lib/strategyTemplates.ts and its economic validator — the one thing it
+    // uniquely owned — moved into the options builder.
+    expect(widgetCatalog.find((widget) => widget.id === "spreadview")).toBeUndefined();
+    expect(Object.keys(RETIRED_WIDGET_IDS)).toContain("spreadview");
   });
 });

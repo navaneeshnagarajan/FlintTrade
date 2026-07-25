@@ -16,6 +16,14 @@
  * `long-strangle` / `short-strangle`). `lib/__tests__/strategyTemplates.test.ts`
  * is the regression guard.
  *
+ * The four vertical spreads (`bull-call-spread`, `bear-put-spread`,
+ * `bull-put-spread`, `bear-call-spread`) also absorb the retired `SpreadView`
+ * widget, which was nothing but those four shapes over hand-typed premiums with
+ * no data source and no execution path. Its one irreplaceable part — the
+ * economic validator — moved to `lib/spreadAnalysis` and now runs inside the
+ * Lab builder. The two credit spreads were genuinely missing here until then:
+ * every builder in the terminal offered the debit pair and neither credit one.
+ *
  * Other conflicts resolved here:
  *   - Butterfly is the 3-leg / lots:2 form (payoff-identical to the old 4-leg
  *     lots:1 shape, but it occupies 3 rather than 4 of the builder's 6 slots).
@@ -123,7 +131,7 @@ export function isLoadable(template: StrategyTemplate): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The catalogue — 14 strategy concepts
+// The catalogue — 16 strategy concepts
 // ---------------------------------------------------------------------------
 
 export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
@@ -175,6 +183,37 @@ export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
     legs: [
       { action: "BUY",  optionType: "PE", strikeOffset:  0, lots: 1, strikeLabel: "ATM" },
       { action: "SELL", optionType: "PE", strikeOffset: -1, lots: 1, strikeLabel: "OTM" },
+    ],
+  },
+  {
+    id: "bull-put-spread",
+    name: "Bull Put Spread",
+    shortName: "BUPS",
+    outlook: "bullish",
+    description: "Sells the higher put, buys the lower one. Credit spread — keeps the premium while price holds up. Defined risk.",
+    maxProfit: "Net credit",
+    maxLoss: "Width − Net credit",
+    breakeven: "Short strike − Net credit",
+    // The exact action-mirror of the bear put spread: same two contracts,
+    // opposite side. Sold-side entries always name their direction here.
+    legs: [
+      { action: "SELL", optionType: "PE", strikeOffset:  0, lots: 1, strikeLabel: "ATM" },
+      { action: "BUY",  optionType: "PE", strikeOffset: -1, lots: 1, strikeLabel: "OTM" },
+    ],
+  },
+  {
+    id: "bear-call-spread",
+    name: "Bear Call Spread",
+    shortName: "BECS",
+    outlook: "bearish",
+    description: "Sells the lower call, buys the higher one. Credit spread — keeps the premium while price stays capped. Defined risk.",
+    maxProfit: "Net credit",
+    maxLoss: "Width − Net credit",
+    breakeven: "Short strike + Net credit",
+    // The exact action-mirror of the bull call spread.
+    legs: [
+      { action: "SELL", optionType: "CE", strikeOffset: 0, lots: 1, strikeLabel: "ATM" },
+      { action: "BUY",  optionType: "CE", strikeOffset: 1, lots: 1, strikeLabel: "OTM" },
     ],
   },
   {
@@ -353,7 +392,7 @@ export const CUSTOM_TEMPLATE: StrategyTemplate = {
 // Lookups
 // ---------------------------------------------------------------------------
 
-/** The 10 entries an options builder can represent, in catalogue order. */
+/** The 12 entries an options builder can represent, in catalogue order. */
 export const LOADABLE_STRATEGY_TEMPLATES: readonly StrategyTemplate[] =
   STRATEGY_TEMPLATES.filter(isLoadable);
 

@@ -110,6 +110,12 @@ const TEMPLATE_ORDER = [
   "short-strangle",
   "bull-call-spread",
   "bear-put-spread",
+  // The credit verticals. Added when Spread View was demoted to template
+  // data: a retired Spread View panel rehydrates onto the option chain, and
+  // two of its four spread types were unreachable from this builder — the
+  // only surface that can price them against a live chain and place them.
+  "bull-put-spread",
+  "bear-call-spread",
   "iron-condor",
   "butterfly",
   CUSTOM_TEMPLATE_ID,

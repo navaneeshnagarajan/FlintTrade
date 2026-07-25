@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UNDERLYINGS } from "./types";
 import { LOADABLE_STRATEGY_TEMPLATES } from "@/lib/strategyTemplates";
+import { analyseVerticalSpread } from "@/lib/spreadAnalysis";
 import { validateLegs, calculateNetPremium, formatINR } from "./utils";
 import type { Leg, Direction, OptionType, Underlying } from "./types";
 
@@ -43,6 +44,14 @@ export function LegsTab({
   const { valid, error } = validateLegs(legs);
   const netPremium = calculateNetPremium(legs);
   const isDebit = netPremium > 0;
+
+  // Vertical-spread economics — carried over from the retired SpreadView
+  // widget, which was the only surface in the terminal that checked them.
+  // `validateLegs` above cannot tell a coherent vertical from an impossible
+  // one (a debit larger than the strike width, a credit structure priced as a
+  // debit); this can. Every other shape reports `not-a-vertical` and is left
+  // alone.
+  const spreadCheck = analyseVerticalSpread(legs, underlying.lotSize);
 
   return (
     <div className="flex flex-col h-full gap-2">
@@ -215,6 +224,47 @@ export function LegsTab({
           </Table>
         )}
       </div>
+
+      {/* Vertical-spread economics */}
+      {spreadCheck.kind === "invalid" && (
+        <div
+          role="alert"
+          className="mx-3 flex items-start gap-1.5 rounded border border-red-500/30 bg-red-900/20 px-2 py-1.5 text-xs text-red-400"
+        >
+          <AlertCircle size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>{spreadCheck.spread.label} spread: {spreadCheck.error}</span>
+        </div>
+      )}
+      {spreadCheck.kind === "unpriced" && (
+        <p className="px-3 text-xxs text-text-muted">
+          {spreadCheck.spread.label} spread — enter the leg premiums to check its economics.
+        </p>
+      )}
+      {spreadCheck.kind === "valid" && (
+        <div className="mx-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xxs text-text-muted">
+          <Badge variant="outline" className="text-xxs px-1.5 border-border-default text-text-secondary font-normal">
+            {spreadCheck.spread.label} spread
+          </Badge>
+          <span>
+            Max profit{" "}
+            <span className="font-mono tabular-nums text-emerald-400">
+              {formatINR(spreadCheck.metrics.maxProfit)}
+            </span>
+          </span>
+          <span>
+            Max loss{" "}
+            <span className="font-mono tabular-nums text-red-400">
+              {formatINR(spreadCheck.metrics.maxLoss)}
+            </span>
+          </span>
+          <span>
+            Breakeven{" "}
+            <span className="font-mono tabular-nums text-text-primary">
+              {spreadCheck.metrics.breakeven.toLocaleString("en-IN")}
+            </span>
+          </span>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="flex items-center gap-2 px-3 pb-2">

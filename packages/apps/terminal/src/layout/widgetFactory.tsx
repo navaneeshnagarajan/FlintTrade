@@ -22,7 +22,6 @@ const lazyWidgets = {
 
   // Analysis widgets
   chart: lazy(() => import("@/widgets/analysis/Chart/ChartWidget")),
-  chartgrid: lazy(() => import("@/widgets/analysis/Chart/ChartGrid")),
   optionchain: lazy(() => import("@/widgets/analysis/OptionChain/OptionChainWidget")),
   oichart: lazy(() => import("@/widgets/analysis/OIChart/OIChartWidget")),
   straddle: lazy(() => import("@/widgets/analysis/Straddle/StraddleWidget")),
@@ -111,7 +110,6 @@ const lazyWidgets = {
   pcrtrend: lazy(() => import("@/widgets/analysis/PCRTrend/PCRTrendWidget")),
   tradeperformance: lazy(() => import("@/widgets/trading/TradePerformance/TradePerformanceWidget")),
   instrumentcompare: lazy(() => import("@/widgets/analysis/InstrumentCompare/InstrumentCompareWidget")),
-  spreadview: lazy(() => import("@/widgets/analysis/SpreadView/SpreadViewWidget")),
 
   // Wave 30 widgets
   greeksheatmap: lazy(() => import("@/widgets/analysis/GreeksHeatmap/GreeksHeatmapWidget")),
@@ -235,6 +233,27 @@ export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
       + "from Math.random(); its statistics are exactly what the neighbouring "
       + "widget's REAL tick prints already support, so the merge makes them "
       + "real rather than preserving a fabricated surface.",
+  },
+  chartgrid: {
+    component: "chart",
+    note:
+      "Demoted to the Multi Chart workspace preset. A grid of N charts is a "
+      + "LAYOUT, not a widget: its cell was a stripped clone of the chart "
+      + "widget that dropped indicators, drawings, the OI overlay and — "
+      + "critically — persistence, while a preset-composed layout survives "
+      + "reload. A saved grid panel reopens as one full chart; the preset "
+      + "gives back the grid.",
+  },
+  spreadview: {
+    component: "optionchain",
+    note:
+      "Demoted to template data. It was four hardcoded two-leg spreads with "
+      + "hand-typed premiums, no data source and a permanently disabled "
+      + "execute button — every one expressible as a two-row entry in the "
+      + "options builder, which now also carries the economic validator that "
+      + "was the only thing this surface uniquely owned. A saved panel "
+      + "reopens on the option chain, where those spreads can be built for "
+      + "real.",
   },
   scanner: {
     component: "conditionscanner",
@@ -364,7 +383,6 @@ export const widgetCatalog: WidgetMeta[] = [
 
   // Analysis
   { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis", description: "Interactive candlestick chart with indicators, drawing tools, and replay" },
-  { id: "chartgrid", name: "Multi Chart", icon: "LayoutGrid", category: "Analysis", description: "1×1, 1×2, 2×1, or 2×2 grid of independent charts with per-cell symbol and interval" },
   { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis", description: "Live option chain with strike-level OI, volume, IV, and Greek data" },
   { id: "historicalchain", name: "Historical Chain", icon: "Archive", category: "Analysis", description: "Browse archived (expired) option chains — strike-level OI, volume, LTP, and IV per past expiry" },
   { id: "oichart", name: "OI Analytics", icon: "BarChart3", category: "Analysis", description: "Open interest across strikes for an expiry — grouped bars, a CE/PE butterfly profile, a strike heat grid, or per-strike build-up and unwinding signals, all from one chain read" },
@@ -393,7 +411,6 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis", description: "Four charts of the same instrument at different timeframes in one view" },
   { id: "pcrtrend", name: "PCR Trend", icon: "TrendingDown", category: "Analysis", description: "Put-Call Ratio trend line to gauge market sentiment over time" },
   { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis", description: "Percentage-based comparison chart for up to five instruments" },
-  { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis", description: "Vertical options spread calculator with illustrative expiry payoff and risk metrics" },
   { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
   { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Historical gap statistics showing fill probability and average size" },
   { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Real-time large options trade scanner showing unusual activity" },

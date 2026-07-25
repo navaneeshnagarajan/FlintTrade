@@ -11,6 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import type { Dispatch, SetStateAction } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
 import { ohlcvCacheKey } from "@/lib/chartCache";
 
 // ---------------------------------------------------------------------------
@@ -1046,5 +1047,126 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
     });
     expect(screen.getByText("INFY")).toBeInTheDocument();
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-panel settings scoping
+//
+// A workspace can hold several chart panels (the Multi Chart preset lays out
+// four). Indicator and display settings are therefore keyed by Dockview panel
+// id, so one chart's configuration can never overwrite another's.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget per-panel settings scoping", () => {
+  const INDICATOR_KEY = "flinttrade:chart:indicator-settings:v1";
+  const DISPLAY_KEY = "flinttrade:chart:display-settings:v1";
+
+  function panelProps(id: string): Partial<IDockviewPanelProps> {
+    return { api: { id } as unknown as IDockviewPanelProps["api"] };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    indicatorHookMocks.refresh.mockClear();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hydrates a panel's own indicator settings in preference to the workspace-wide key", () => {
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showRSI: true }, periods: { rsi: 21 } }),
+    );
+    localStorage.setItem(
+      `${INDICATOR_KEY}:panel:chart-b`,
+      JSON.stringify({ version: 1, indicators: { showMACD: true }, periods: { rsi: 9 } }),
+    );
+
+    render(<ChartWidget {...panelProps("chart-b")} />);
+
+    expect(vi.mocked(useIndicators)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicators: expect.objectContaining({ showMACD: true, showRSI: false }),
+        periods: expect.objectContaining({ rsi: 9 }),
+      }),
+    );
+  });
+
+  it("inherits the workspace-wide settings the first time a panel is opened", () => {
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showRSI: true }, periods: { rsi: 21 } }),
+    );
+
+    render(<ChartWidget {...panelProps("chart-new")} />);
+
+    expect(vi.mocked(useIndicators)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicators: expect.objectContaining({ showRSI: true }),
+        periods: expect.objectContaining({ rsi: 21 }),
+      }),
+    );
+    // The inherited settings become the panel's own from that point on.
+    expect(localStorage.getItem(`${INDICATOR_KEY}:panel:chart-new`)).not.toBeNull();
+  });
+
+  it("writes indicator settings to the panel key, leaving the sibling panel and workspace default alone", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showMACD: true }, paneSizes: { macd: "balanced" } }),
+    );
+    const siblingKey = `${INDICATOR_KEY}:panel:chart-b`;
+    const siblingPayload = JSON.stringify({
+      version: 1,
+      indicators: { showRSI: true },
+      paneSizes: { rsi: "compact" },
+    });
+    localStorage.setItem(siblingKey, siblingPayload);
+
+    render(<ChartWidget {...panelProps("chart-a")} />);
+
+    await user.click(screen.getByRole("button", { name: /Indicators/i }));
+    await user.click(screen.getByRole("button", { name: "Set MACD pane to Expanded" }));
+
+    await waitFor(() => {
+      const encoded = localStorage.getItem(`${INDICATOR_KEY}:panel:chart-a`);
+      expect(encoded).not.toBeNull();
+      expect(JSON.parse(encoded as string)).toMatchObject({
+        version: 1,
+        indicators: expect.objectContaining({ showMACD: true }),
+        paneSizes: expect.objectContaining({ macd: "expanded" }),
+      });
+    });
+
+    expect(JSON.parse(localStorage.getItem(INDICATOR_KEY) as string)).toMatchObject({
+      paneSizes: expect.objectContaining({ macd: "balanced" }),
+    });
+    expect(localStorage.getItem(siblingKey)).toBe(siblingPayload);
+  });
+
+  it("writes display settings to the panel key and never to the workspace-wide key", async () => {
+    const user = userEvent.setup();
+    render(<ChartWidget {...panelProps("chart-a")} />);
+
+    await user.click(screen.getByRole("button", { name: "Open chart display settings" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Grid" }));
+
+    await waitFor(() => {
+      const encoded = localStorage.getItem(`${DISPLAY_KEY}:panel:chart-a`);
+      expect(encoded).not.toBeNull();
+      expect(JSON.parse(encoded as string)).toMatchObject({ version: 1, gridVisible: false });
+    });
+    expect(localStorage.getItem(DISPLAY_KEY)).toBeNull();
   });
 });

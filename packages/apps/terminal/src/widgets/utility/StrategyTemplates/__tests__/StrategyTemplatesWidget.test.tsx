@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 beforeAll(() => {
@@ -39,13 +39,15 @@ describe("StrategyTemplatesWidget", () => {
   });
 
   // Was 8 loadable / 12 total. The unified catalogue (lib/strategyTemplates)
-  // adds the two explicitly-short volatility entries — the widget's old
+  // added the two explicitly-short volatility entries — the widget's old
   // `straddle`/`strangle` ids meant LONG here but SHORT in the OptionChain
-  // LegBuilder, so both directions now exist under their own names.
-  it("renders 10 loadable cards and 4 reference-only cards (14 total)", () => {
+  // LegBuilder, so both directions now exist under their own names — and then
+  // the two credit verticals (bull put / bear call) that arrived with the
+  // SpreadView widget's retirement into template data.
+  it("renders 12 loadable cards and 4 reference-only cards (16 total)", () => {
     render(<StrategyTemplatesWidget />);
     const loadable = screen.getAllByRole("button", { name: /Load .* strategy template/i });
-    expect(loadable).toHaveLength(10);
+    expect(loadable).toHaveLength(12);
     // Stock-leg and multi-expiry templates must NOT offer a load affordance —
     // the options builder cannot represent them faithfully.
     for (const name of ["Covered Call", "Protective Put", "Collar", "Calendar Spread"]) {
@@ -152,6 +154,10 @@ describe("StrategyTemplatesWidget", () => {
   it("shows correct card details for Iron Condor", () => {
     render(<StrategyTemplatesWidget />);
     expect(screen.getByText("Iron Condor")).toBeTruthy();
-    expect(screen.getByText("Net credit")).toBeTruthy();
+    // "Net credit" is no longer unique — the two credit verticals carry it too
+    // — so assert it on the Iron Condor card itself.
+    const card = screen.getByLabelText("Load Iron Condor strategy template");
+    expect(within(card).getByText("Net credit")).toBeTruthy();
+    expect(within(card).getByText("Width − Net credit")).toBeTruthy();
   });
 });

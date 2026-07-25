@@ -95,8 +95,8 @@ describe("strategyTemplates — direction inversion guard", () => {
 });
 
 describe("strategyTemplates — catalogue shape", () => {
-  it("holds 14 strategy concepts plus custom", () => {
-    expect(STRATEGY_TEMPLATES).toHaveLength(14);
+  it("holds 16 strategy concepts plus custom", () => {
+    expect(STRATEGY_TEMPLATES).toHaveLength(16);
     expect(CUSTOM_TEMPLATE.id).toBe(CUSTOM_TEMPLATE_ID);
     expect(STRATEGY_TEMPLATES.map((t) => t.id)).not.toContain(CUSTOM_TEMPLATE_ID);
   });
@@ -135,7 +135,7 @@ describe("strategyTemplates — loadability gate", () => {
   it("marks exactly the stock-leg and multi-expiry entries as reference-only", () => {
     const referenceOnly = STRATEGY_TEMPLATES.filter((t) => !isLoadable(t)).map((t) => t.id);
     expect(referenceOnly.sort()).toEqual([...REFERENCE_ONLY_IDS].sort());
-    expect(LOADABLE_STRATEGY_TEMPLATES).toHaveLength(10);
+    expect(LOADABLE_STRATEGY_TEMPLATES).toHaveLength(12);
   });
 
   it("returns null builder legs for every reference-only entry", () => {
@@ -179,6 +179,37 @@ describe("strategyTemplates — resolved leg-shape conflicts", () => {
     const bought = legs.filter((l) => l.action === "BUY").reduce((s, l) => s + l.lots, 0);
     const sold = legs.filter((l) => l.action === "SELL").reduce((s, l) => s + l.lots, 0);
     expect(bought).toBe(sold);
+  });
+
+  it.each([
+    ["bull-call-spread", "bear-call-spread"],
+    ["bear-put-spread", "bull-put-spread"],
+  ])("%s and %s are exact action-mirrors", (debitId, creditId) => {
+    // The two credit verticals arrived with the SpreadView widget's retirement;
+    // before that every builder offered the debit pair and neither credit one,
+    // so a bull put spread could not be expressed at all.
+    const debit = builderLegsFor(byId(debitId))!;
+    const credit = builderLegsFor(byId(creditId))!;
+
+    expect(debit).toHaveLength(2);
+    expect(credit).toHaveLength(2);
+    for (const leg of debit) {
+      const mirror = credit.find((c) => c.strikeOffset === leg.strikeOffset)!;
+      expect(mirror).toBeDefined();
+      expect(mirror.optionType).toBe(leg.optionType);
+      expect(mirror.lots).toBe(leg.lots);
+      expect(mirror.action).not.toBe(leg.action);
+    }
+  });
+
+  it("keeps all four vertical spreads loadable and two legs wide", () => {
+    for (const id of ["bull-call-spread", "bear-put-spread", "bull-put-spread", "bear-call-spread"]) {
+      const legs = builderLegsFor(byId(id))!;
+      expect(legs).toHaveLength(2);
+      expect(new Set(legs.map((l) => l.optionType)).size).toBe(1);
+      expect(legs.filter((l) => l.action === "BUY")).toHaveLength(1);
+      expect(legs.filter((l) => l.action === "SELL")).toHaveLength(1);
+    }
   });
 
   it("orders the iron condor by ascending strike offset with four distinct wings", () => {

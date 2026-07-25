@@ -108,9 +108,12 @@ describe("LegBuilder — render", () => {
   // (debit) strategies in the other two catalogues — this panel places real
   // gated basket orders, so they are now the explicit short variants. The leg
   // shapes are unchanged; only the labels name what was always being sold.
-  it("renders all 7 template pills, with the credit strategies named short", () => {
+  it("renders every template pill, with the credit strategies named short", () => {
     renderLegBuilder();
-    const pills = ["SSTR", "SSTG", "BCS", "BPS", "IC", "BF", "CUST"];
+    // BUPS/BECS joined when Spread View was demoted to template data — two of
+    // its four spread types had been unreachable from the only builder that
+    // can price them live and place them.
+    const pills = ["SSTR", "SSTG", "BCS", "BPS", "BUPS", "BECS", "IC", "BF", "CUST"];
     for (const pill of pills) {
       expect(screen.getByText(pill)).toBeInTheDocument();
     }

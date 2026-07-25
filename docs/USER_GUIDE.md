@@ -263,40 +263,36 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (84)
+### The widgets (82)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
-under `packages/apps/terminal/src/widgets/`. The lists below are
-representative, not exhaustive; run the widget registry
-(`packages/apps/terminal/src/layout/widgetFactory.tsx`) for the exact current
-count:
+under `packages/apps/terminal/src/widgets/`. The lists below are generated
+from the widget registry
+(`packages/apps/terminal/src/layout/widgetFactory.tsx`) and are exhaustive:
 
-- **Trading** — Dashboard, Scalper, Positions, Orders, Holdings,
-  Trade Book, Order Pad, Intraday P&L, MTM Monitor, Risk Panel, Action
-  Center, Position Heat Map, Trade Copier, Portfolio Allocation, Quick
-  Trade, Session Stats, Risk Dashboard, Trade Log, Trade Performance,
-  Strategy Monitor, Net Positions, and Order Ladder.
-- **Analysis** — Chart, Multi Chart, Option Chain, OI Chart,
-  Straddle, Depth, Greeks, Sector Map, GEX Dashboard, Vol Surface, IV
-  Smile, Straddle P&L, OI Profile, Order Flow, Depth Heatmap,
-  Three-Panel Chart, OI Heatmap, Greeks Surface, Pivot Points, Order
-  Book Replay, Market Breadth, Volatility Cone, Heat Calendar, VWAP
+- **Trading** — Dashboard, Scalper, Positions, Orders, Holdings, Trade Book, Order
+  Pad, Intraday P&L, MTM Monitor, Action Center, Trade Copier, Smart
+  Order, Portfolio Allocation, Quick Trade, Session Stats, Risk,
+  Trade Log, Trade Performance, Strategy Monitor, DOM / Ladder,
+  Forever (GTT) Orders, Super Orders, and Conditional Triggers
+- **Analysis** — Chart, Option Chain, Historical Chain, OI Analytics, Straddle &
+  Implied Move, Greeks, Sector Map, FII Long/Short, Dealer Gamma,
+  Arbitrage Scanner, Index Contribution, Pattern Detection, Tape &
+  Microstructure, Vol Surface, IV Smile & Skew, Straddle P&L, Order
+  Flow, Three-Panel Chart, Portfolio Optimiser, Condition Scanner,
+  Pivot Points, Market Breadth, Volatility Cone, Heat Calendar, VWAP
   Bands, Correlation Pairs, Multi-Timeframe, PCR Trend, Instrument
-  Compare, Spread View, Greeks Heatmap, Gap Analysis, Implied Move,
-  Options Flow, Market Microstructure, Correlation Matrix, IV Skew,
-  Sector Performance, Footprint Chart, DOM Heatmap, FII Long/Short,
-  Gamma Density, Arbitrage Scanner, Index Contribution, Pattern
-  Detection, and Time & Sales.
-- **Utility** — Watchlist, Calculator, News Feed, Ticker, AI
-  Advisor, Pre-Market Scanner, Price Alerts, System Health, Funding
-  Rates, Currency Converter, Earnings Calendar, Global Indices,
-  Strategy Templates, Audit Trail, Economic Calendar, Profit Target
-  Calc, Expiry Countdown, Position Sizing, Market Clock, Trade Ideas,
-  Tick Speed, and Market Summary.
-
+  Compare, Greeks Matrix, Gap Analysis, Options Flow, Correlation
+  Matrix, Sector Performance, and DOM Heatmap
+- **Utility** — Watchlist, Calculator, News Feed, Ticker, AI Advisor, AI Backends,
+  AI Team, Obsidian Vault, Price Alerts, System Health,
+  Reconciliation, Funding Rates, Currency Converter, Earnings
+  Calendar, Global Indices, Strategy Templates, Audit Trail,
+  Economic Calendar, Expiry Countdown, Market Clock, Trade Ideas,
+  Tick Speed, Market Summary, and Trade Journal
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
-### The 14 workspace presets
+### The 15 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
 palette (Ctrl + K → "preset"). Built-in presets include:

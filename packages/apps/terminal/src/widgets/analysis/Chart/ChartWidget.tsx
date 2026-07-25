@@ -138,12 +138,56 @@ function loadSavedChartView() {
   return parseFlintChartViewState(localStorage.getItem(FLINT_CHART_VIEW_STATE_STORAGE_KEY));
 }
 
-function loadSavedIndicatorSettings() {
-  return parseFlintChartIndicatorSettings(localStorage.getItem(FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY));
+/**
+ * Scope a chart storage key to a single Dockview panel.
+ *
+ * Indicator and display settings are per chart panel, not per workspace: a
+ * layout can hold several charts (the Multi Chart preset lays out four) and
+ * each must keep its own indicator set, periods, colours, pane sizing and
+ * display toggles. Keying by panel id rather than symbol+exchange (the scheme
+ * drawings correctly use) is deliberate — a drawing is anchored to one
+ * instrument's price series, whereas an indicator set belongs to the chart:
+ *   - a 1m/5m/15m/1D stack of the SAME instrument still gets four independent
+ *     configurations, which symbol keying could not express;
+ *   - changing a chart's symbol no longer swaps the indicator setup underneath
+ *     the trader.
+ * Dockview serialises panel ids into the persisted layout, so a panel-scoped
+ * key survives a reload exactly as the layout itself does.
+ *
+ * Charts rendered outside a Dockview panel (no panel id) keep writing the
+ * legacy workspace-wide key.
+ */
+function createFlintChartPanelStorageKey(baseKey: string, panelId: string | null): string {
+  if (!panelId) return baseKey;
+  return `${baseKey}:panel:${encodeURIComponent(panelId)}`;
 }
 
-function loadSavedDisplaySettings() {
-  return parseFlintChartDisplaySettings(localStorage.getItem(FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY));
+/**
+ * Read a panel-scoped settings payload, falling back to the workspace-wide key.
+ *
+ * The fallback is the migration path: a panel that has never been configured
+ * inherits whatever the pre-panel-scoping (or standalone) chart saved, so
+ * existing setups survive and a freshly added chart opens with familiar
+ * settings instead of bare defaults.
+ */
+function readPanelScopedSetting(baseKey: string, panelId: string | null): string | null {
+  if (!panelId) return localStorage.getItem(baseKey);
+  return (
+    localStorage.getItem(createFlintChartPanelStorageKey(baseKey, panelId)) ??
+    localStorage.getItem(baseKey)
+  );
+}
+
+function loadSavedIndicatorSettings(panelId: string | null) {
+  return parseFlintChartIndicatorSettings(
+    readPanelScopedSetting(FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY, panelId),
+  );
+}
+
+function loadSavedDisplaySettings(panelId: string | null) {
+  return parseFlintChartDisplaySettings(
+    readPanelScopedSetting(FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY, panelId),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +440,19 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   const pinnedParams = props.params as ChartPanelParams | undefined;
   const isPinned = Boolean(pinnedParams?.symbol);
 
+  // Dockview panel identity — the scope for this chart's indicator and display
+  // settings. Null when the chart is rendered outside a panel (tests, embeds),
+  // in which case the legacy workspace-wide keys are used unchanged.
+  const panelId = props.api?.id ?? null;
+  const indicatorSettingsStorageKey = createFlintChartPanelStorageKey(
+    FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY,
+    panelId,
+  );
+  const displaySettingsStorageKey = createFlintChartPanelStorageKey(
+    FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
+    panelId,
+  );
+
   const [initialChartView] = useState(() => (isPinned ? null : loadSavedChartView()));
   const [symbol, setSymbol] = useState(() => pinnedParams?.symbol ?? initialChartView?.symbol ?? DEFAULT_SYMBOL);
   const [exchange, setExchange] = useState(() => pinnedParams?.exchange ?? initialChartView?.exchange ?? DEFAULT_EXCHANGE);
@@ -460,8 +517,8 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     return () => observer.disconnect();
   }, []);
 
-  const [initialIndicatorSettings] = useState(() => loadSavedIndicatorSettings());
-  const [chartDisplaySettings, setChartDisplaySettings] = useState(() => loadSavedDisplaySettings());
+  const [initialIndicatorSettings] = useState(() => loadSavedIndicatorSettings(panelId));
+  const [chartDisplaySettings, setChartDisplaySettings] = useState(() => loadSavedDisplaySettings(panelId));
   const [indicators, setIndicators] = useState<IndicatorState>(() => ({ ...initialIndicatorSettings.indicators }));
   const [periods, setPeriods] = useState<IndicatorPeriods>(() => ({ ...initialIndicatorSettings.periods }));
   const [indicatorColors, setIndicatorColors] = useState<Record<FlintChartIndicatorKey, FlintChartIndicatorColor>>(
@@ -522,7 +579,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   useEffect(() => {
     try {
       localStorage.setItem(
-        FLINT_CHART_INDICATOR_SETTINGS_STORAGE_KEY,
+        indicatorSettingsStorageKey,
         encodeFlintChartIndicatorSettings({
           indicators,
           periods,
@@ -533,16 +590,16 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         }),
       );
     } catch { /* localStorage quota exceeded — ignore */ }
-  }, [indicatorColors, indicatorLineStyles, indicatorPaneSizes, indicatorPaneStretchFactors, indicators, periods]);
+  }, [indicatorColors, indicatorLineStyles, indicatorPaneSizes, indicatorPaneStretchFactors, indicators, indicatorSettingsStorageKey, periods]);
 
   useEffect(() => {
     try {
       localStorage.setItem(
-        FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
+        displaySettingsStorageKey,
         encodeFlintChartDisplaySettings(chartDisplaySettings),
       );
     } catch { /* localStorage quota exceeded — ignore */ }
-  }, [chartDisplaySettings]);
+  }, [chartDisplaySettings, displaySettingsStorageKey]);
 
   const barsRef = useRef<OhlcvBar[]>([]);
   const timesRef = useRef<Time[]>([]);

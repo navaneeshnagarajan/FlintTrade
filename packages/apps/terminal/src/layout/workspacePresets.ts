@@ -710,7 +710,7 @@ function applyEverything(api: DockviewApi): void {
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
   for (const comp of [
-    "chartgrid", "threepanel", "multitimeframe",
+    "threepanel", "multitimeframe",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -779,8 +779,8 @@ function applyEverything(api: DockviewApi): void {
   for (const comp of [
     "domheatmap", "gammadensity", "volsurface", "orderflow", "sectormap",
     "sectorperformance", "marketbreadth", "correlationpairs", "correlationmatrix", "instrumentcompare",
-    "spreadview", "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands",
-    "pivotpoints", "timesales",
+    "pcrtrend", "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
+    "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -918,6 +918,77 @@ function applyOptionsScalper(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preset 15 — Multi Chart
+//
+// The 2×2 chart grid, expressed as a layout template instead of a widget (it
+// replaces the retired `chartgrid` widget). Every cell is a full ChartWidget
+// panel — indicators, drawings, OI overlay, quotes, replay and display
+// settings all come along, each panel keeps its own indicator/display
+// configuration (ChartWidget keys those by panel id), and the whole grid is
+// persisted with the workspace layout instead of being lost on reload.
+//
+// ┌──────────────┬──────────────┐
+// │    NIFTY     │  BANKNIFTY   │
+// ├──────────────┼──────────────┤
+// │   FINNIFTY   │  MIDCPNIFTY  │
+// └──────────────┴──────────────┘
+//
+// The four NSE index defaults mirror the retired widget's default cells. Each
+// chart is pinned via panel params so it holds its instrument instead of
+// following the global watchlist selection; any cell can be re-pointed from its
+// own symbol search, and panels can be closed or dragged for a 1, 2H or 2V
+// arrangement through Dockview itself.
+// ---------------------------------------------------------------------------
+function applyMultiChart(api: DockviewApi): void {
+  const gridInterval = "5m";
+  const cell = (symbol: string) => ({
+    symbol,
+    exchange: "NSE_INDEX",
+    interval: gridInterval,
+  });
+
+  const topLeftId = pid("chart-nifty");
+  const topRightId = pid("chart-banknifty");
+  const bottomLeftId = pid("chart-finnifty");
+  const bottomRightId = pid("chart-midcpnifty");
+
+  // Top-left: the benchmark index.
+  api.addPanel({
+    id: topLeftId,
+    component: "chart",
+    title: "NIFTY",
+    params: cell("NIFTY"),
+  });
+
+  // Top-right.
+  api.addPanel({
+    id: topRightId,
+    component: "chart",
+    title: "BANKNIFTY",
+    params: cell("BANKNIFTY"),
+    position: { referencePanel: topLeftId, direction: "right" },
+  });
+
+  // Bottom-left, beneath the benchmark.
+  api.addPanel({
+    id: bottomLeftId,
+    component: "chart",
+    title: "FINNIFTY",
+    params: cell("FINNIFTY"),
+    position: { referencePanel: topLeftId, direction: "below" },
+  });
+
+  // Bottom-right completes the 2×2.
+  api.addPanel({
+    id: bottomRightId,
+    component: "chart",
+    title: "MIDCPNIFTY",
+    params: cell("MIDCPNIFTY"),
+    position: { referencePanel: topRightId, direction: "below" },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
@@ -934,6 +1005,13 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "Four-chart desk — Index + Futures + CE/PE strike charts + Option Chain",
     icon: "Crosshair",
     apply: applyOptionsScalper,
+  },
+  {
+    id: "multi-chart",
+    name: "Multi Chart",
+    description: "Four independent charts in a 2×2 grid — NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY",
+    icon: "LayoutGrid",
+    apply: applyMultiChart,
   },
   {
     id: "options-desk",
