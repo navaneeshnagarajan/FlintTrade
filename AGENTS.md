@@ -42,7 +42,7 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 
 State at handoff: Phase 3 and the deferred-ledger clearance remain landed. The
 Tauri-to-Electron migration is active on `codex/desktop-electron-migration`:
-the Electron 40 security waist, checksum-bound first-run source bootstrap,
+the Electron 43 security waist, checksum-bound first-run source bootstrap,
 journalled source updates, source guardian lifecycle, renderer update UX and
 four-installer release pipeline are implemented in reviewed commits. Task 7 is
 implemented in the settled tree: the retained Tauri/frozen-payload production

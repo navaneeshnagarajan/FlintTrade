@@ -5,7 +5,7 @@ description = "OHLCV downloader, free data sources (OpenChart/yfinance/jugaad), 
 requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
-    "duckdb~=1.4",
+    "duckdb~=1.5",
     "flask>=3.0",
     "yfinance>=0.2",
     "jugaad-data>=0.31.0",

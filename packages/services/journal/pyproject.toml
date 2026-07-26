@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "flinttrade-core",
     "flinttrade-data",
-    "duckdb~=1.4",
+    "duckdb~=1.5",
     "flask>=3.0",
     "pydantic>=2.0",
 ]

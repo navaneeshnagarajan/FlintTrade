@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         # NOTE: `submodules: recursive` was removed 2026-05-19. OpenAlgo +
         # OpenClaw + AlgoMirror are no longer git submodules — they were
         # detached in commit 3da42e4 and live under `.local/external/`
@@ -22,7 +22,7 @@ jobs:
         # Trying to recursively check them out triggered noisy warnings
         # on every weekly run.
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v7
@@ -39,7 +39,7 @@ jobs:
           fi
           uv run python scripts/audit_repos.py --format markdown > .local/STATUS.md
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: status-report
           path: .local/STATUS.md
