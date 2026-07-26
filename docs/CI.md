@@ -311,15 +311,39 @@ If you add a new GitHub Actions workflow:
 
 ---
 
-## Known-red: `electron-desktop-tests` (since 2026-07-23)
+## Resolved: `electron-desktop-tests` Linux containment failures (2026-07-23 → 2026-07-26)
 
 Red on `main` since a6f92464, the Electron source-bootstrap migration; green
-through 07a0f434 on 2026-07-20. Roughly 19 failing locations in
-`electron/bootstrap-io.test.ts` and `electron/bootstrap.test.ts` — the
-process-containment cases. They pass on macOS (953 tests) and fail on the
+through 07a0f434 on 2026-07-20; fixed on this branch on 2026-07-26. Roughly 19
+failing locations in `electron/bootstrap-io.test.ts` and `electron/bootstrap.test.ts`
+— the process-containment cases — passed on macOS (953 tests) and failed on the
 Ubuntu runner.
 
-**Two traps, both measured, both of which have already cost a lot of time.**
+**Root causes (three, all downstream of detection, as the measurements said):**
+
+1. **Drain iterations were quadratically expensive on Linux.** Each sweep
+   re-parsed the full env-laden `ps` snapshot (~189 KB on the runner) with
+   multiple byte-at-a-time `while read` here-doc passes in dash, so the
+   TERM→KILL escalation ladder (SIGKILL from the 11th sighting) took several
+   seconds — long after an escapee's marker timers fired. The snapshot is now
+   prefiltered with `grep` (C speed) so each pass reads only candidate lines,
+   and escaped-session processes that retain the containment marker are
+   SIGKILLed on first sighting: they never receive the process-group TERM and
+   are precisely the violation the guardian exists for, so there is no graceful
+   window to honour. In-group members keep the TERM grace ladder.
+2. **A drained-descendant report rewrote timeout/cancel exit codes.** The
+   settled proof's `descendants=1` flag set `descendantLeak` unconditionally,
+   which outranks `timeout` in the exit-code mapping — so a timed-out command
+   whose dying child was merely *sighted* by the first sweep reported exit 1
+   instead of 124. On macOS the child was always reaped before the first
+   snapshot; on Linux it was often still visible. The leak flag now only
+   applies when the run has no terminal reason of its own.
+3. **Zombies counted as live descendants.** The sweep now requests `-o state=`
+   and skips `Z*` entries — a zombie cannot be signalled and only added a
+   phantom drain iteration.
+
+**Two measurement traps, both measured, both of which cost a lot of time —
+they remain the durable lesson:**
 
 **1. A plausible hypothesis about `ps` formatting is FALSE.** The containment
 sweep tags processes with a `FLINTTRADE_PROCESS_ANCHOR` environment marker and
@@ -345,12 +369,14 @@ believing any delta between two numbers.
 
 Reproduce on ubuntu-22.04 + Node 22 (Docker is sufficient). This is fail-closed
 containment — the guardian that stops orphaned bootstrap processes surviving —
-so do not relax an assertion or extend a timeout to get green.
+so do not relax an assertion or extend a timeout to get green; the 2026-07-26
+fix strengthened enforcement (faster sweeps, immediate SIGKILL for
+session-escapees) rather than weakening any assertion.
 
-Fuller history, including five approaches tried and reverted, lives in
-`.local/specs/desktop-linux-ci/DIAGNOSIS.md` on the maintainer's machine
-(`.local/` is gitignored, so it does not travel to a fresh worktree — which is
-why the essentials are recorded here instead).
+Fuller history, including the approaches tried and reverted along the way,
+lives in `.local/specs/desktop-linux-ci/DIAGNOSIS.md` on the maintainer's
+machine (`.local/` is gitignored, so it does not travel to a fresh worktree —
+which is why the essentials are recorded here instead).
 
 ---
 
