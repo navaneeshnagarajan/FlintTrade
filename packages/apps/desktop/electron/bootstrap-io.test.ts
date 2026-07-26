@@ -145,6 +145,10 @@ function fakeUnsettledHttpsResponse(statusCode: number, headers: Record<string, 
 }
 
 afterEach(async () => {
+  // A test that times out under fake timers is abandoned mid-await, so its own
+  // restore never runs; restoring here keeps one failure from freezing every
+  // later timer-dependent test in the file.
+  vi.useRealTimers();
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { force: true, maxRetries: 8, recursive: true, retryDelay: 25 })),
   );
@@ -1322,31 +1326,38 @@ describe("bootstrap system boundaries", () => {
     15_000,
   );
 
-  it.runIf(process.platform !== "win32")("clears the force-kill timer after a cancelled process exits", async () => {
-    vi.useFakeTimers();
-    const originalKill = process.kill.bind(process);
-    const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => originalKill(pid, signal));
-    try {
-      const dependencies = createNodeBootstrapDependencies(process.platform);
-      const abort = new AbortController();
-      const running = dependencies.command.run({
-        args: ["-e", "setInterval(() => {}, 1000)"],
-        command: process.execPath,
-        signal: abort.signal,
-        timeoutMs: 30_000,
-      });
-      abort.abort();
-      await expect(running).resolves.toMatchObject({ exitCode: 130 });
-      const terminationSignals = kill.mock.calls.filter((call) => call[1] === "SIGTERM" || call[1] === "SIGKILL");
-      expect(terminationSignals).toHaveLength(1);
+  it.runIf(process.platform !== "win32")(
+    "clears the force-kill timer after a cancelled process exits",
+    async () => {
+      // Real timers throughout: faking the clock also froze every delay()/retry
+      // inside the cancel path, so any transient write retry left this test — and,
+      // via the leaked fake clock, every later timer-dependent test — hung on the
+      // Linux runner. Waiting out the real 5s deadline verifies the same
+      // behaviour: a cleared force-kill timer stays silent.
+      const originalKill = process.kill.bind(process);
+      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => originalKill(pid, signal));
+      try {
+        const dependencies = createNodeBootstrapDependencies(process.platform);
+        const abort = new AbortController();
+        const running = dependencies.command.run({
+          args: ["-e", "setInterval(() => {}, 1000)"],
+          command: process.execPath,
+          signal: abort.signal,
+          timeoutMs: 30_000,
+        });
+        abort.abort();
+        await expect(running).resolves.toMatchObject({ exitCode: 130 });
+        const terminationSignals = kill.mock.calls.filter((call) => call[1] === "SIGTERM" || call[1] === "SIGKILL");
+        expect(terminationSignals).toHaveLength(1);
 
-      await vi.advanceTimersByTimeAsync(5_001);
-      expect(kill.mock.calls.filter((call) => call[1] === "SIGTERM" || call[1] === "SIGKILL")).toHaveLength(1);
-    } finally {
-      kill.mockRestore();
-      vi.useRealTimers();
-    }
-  });
+        await new Promise((resolve) => setTimeout(resolve, 5_100));
+        expect(kill.mock.calls.filter((call) => call[1] === "SIGTERM" || call[1] === "SIGKILL")).toHaveLength(1);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+    15_000,
+  );
 
   it.runIf(process.platform !== "win32")("times out descendant processes in the command process group", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-timeout-tree-"));

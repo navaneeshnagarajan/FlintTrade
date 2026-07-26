@@ -341,6 +341,15 @@ Ubuntu runner.
 3. **Zombies counted as live descendants.** The sweep now requests `-o state=`
    and skips `Z*` entries — a zombie cannot be signalled and only added a
    phantom drain iteration.
+4. **A fake-clock leak turned one flake into a file-wide cascade.** The
+   force-kill-timer test ran its whole cancel flow under `vi.useFakeTimers()`,
+   which also froze every `delay()`/retry inside the product cancel path; after
+   any heavy containment test it hung, vitest abandoned it mid-await (so its
+   own `finally` restore never ran), and every later timer-dependent test in
+   the file inherited the frozen clock — the contiguous 5 s/15 s timeout block
+   that ends exactly where the timer-free filesystem tests begin. The test now
+   verifies the same cleared-timer behaviour on the real clock, and the file's
+   `afterEach` restores real timers defensively.
 
 **Two measurement traps, both measured, both of which cost a lot of time —
 they remain the durable lesson:**
