@@ -6,8 +6,12 @@
  *
  * Features:
  *   - Up to 4 legs, each with BUY/SELL + CE/PE + strike select + lots
- *   - Strategy template pills: Straddle, Strangle, Bull Call Spread,
- *     Bear Put Spread, Iron Condor, Butterfly, Custom
+ *   - Strategy template pills drawn from the shared `lib/strategyTemplates`
+ *     catalogue: Short Straddle, Short Strangle, Bull Call Spread, Bear Put
+ *     Spread, Iron Condor, Butterfly, Custom. The two credit strategies were
+ *     previously labelled just "Straddle"/"Strangle" here while the very same
+ *     ids meant the LONG (debit) versions in the other two catalogues — this
+ *     panel places REAL gated basket orders, so the direction is now named.
  *   - ATM-relative template auto-population with nearest-strike snapping
  *   - Net premium, max profit, max loss, breakeven(s) via payoff scan
  *   - Place Strategy button dispatches basketOrder through the gated backend
@@ -22,6 +26,15 @@ import { Plus, Trash2, TrendingUp, Zap } from "lucide-react";
 import { basketOrder, OrderApiError } from "@/services/api";
 import type { BasketOrderResult } from "@/types/api";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
+import { checkLotSizeVerified, checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
+import { cn } from "@/lib/utils";
+import { useModeStore } from "@/stores/modeStore";
+import {
+  builderLegsFor,
+  getStrategyTemplate,
+  CUSTOM_TEMPLATE_ID,
+  type StrategyTemplate,
+} from "@/lib/strategyTemplates";
 import { NUM, NUM0, fmtLtp } from "./formatters";
 import type { StrikeRow } from "./types";
 import PayoffChart from "./PayoffChart";
@@ -61,21 +74,6 @@ export interface OptionLeg {
   premium: number | null;
 }
 
-interface LegTemplateDef {
-  side: "BUY" | "SELL";
-  optionType: "CE" | "PE";
-  /** Multiples of strikeGap from ATM (negative = ITM/lower, positive = OTM/higher) */
-  strikeOffset: number;
-  lots: number;
-}
-
-interface StrategyTemplate {
-  name: string;
-  shortName: string;
-  description: string;
-  legs: LegTemplateDef[];
-}
-
 export interface LegBuilderHandle {
   /** Called by OptionChainWidget when user clicks a chain row while builder is open */
   addLegFromStrike: (strike: number, optionType: "CE" | "PE") => void;
@@ -101,84 +99,38 @@ export interface LegBuilderProps {
 }
 
 // ---------------------------------------------------------------------------
-// Strategy templates (adapted from openalgo-chart strategyTemplates.js)
+// Strategy template pills
 // ---------------------------------------------------------------------------
 
-const STRATEGY_TEMPLATES: Record<string, StrategyTemplate> = {
-  straddle: {
-    name: "Straddle",
-    shortName: "STR",
-    description: "Sell ATM CE + Sell ATM PE",
-    legs: [
-      { side: "SELL", optionType: "CE", strikeOffset: 0, lots: 1 },
-      { side: "SELL", optionType: "PE", strikeOffset: 0, lots: 1 },
-    ],
-  },
-  strangle: {
-    name: "Strangle",
-    shortName: "STRG",
-    description: "Sell 1-step OTM CE + Sell 1-step OTM PE",
-    legs: [
-      { side: "SELL", optionType: "CE", strikeOffset:  1, lots: 1 },
-      { side: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
-    ],
-  },
-  "bull-call-spread": {
-    name: "Bull Call Spread",
-    shortName: "BCS",
-    description: "Buy ATM CE + Sell 1-step OTM CE",
-    legs: [
-      { side: "BUY",  optionType: "CE", strikeOffset: 0, lots: 1 },
-      { side: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 },
-    ],
-  },
-  "bear-put-spread": {
-    name: "Bear Put Spread",
-    shortName: "BPS",
-    description: "Buy ATM PE + Sell 1-step OTM PE",
-    legs: [
-      { side: "BUY",  optionType: "PE", strikeOffset:  0, lots: 1 },
-      { side: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
-    ],
-  },
-  "iron-condor": {
-    name: "Iron Condor",
-    shortName: "IC",
-    description: "Sell OTM strangle, buy wing protection",
-    legs: [
-      { side: "BUY",  optionType: "PE", strikeOffset: -2, lots: 1 },
-      { side: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
-      { side: "SELL", optionType: "CE", strikeOffset:  1, lots: 1 },
-      { side: "BUY",  optionType: "CE", strikeOffset:  2, lots: 1 },
-    ],
-  },
-  butterfly: {
-    name: "Butterfly",
-    shortName: "BF",
-    description: "Buy ITM CE, Sell 2× ATM CE, Buy OTM CE",
-    legs: [
-      { side: "BUY",  optionType: "CE", strikeOffset: -1, lots: 1 },
-      { side: "SELL", optionType: "CE", strikeOffset:  0, lots: 2 },
-      { side: "BUY",  optionType: "CE", strikeOffset:  1, lots: 1 },
-    ],
-  },
-  custom: {
-    name: "Custom",
-    shortName: "CUST",
-    description: "Build your own (up to 4 legs)",
-    legs: [],
-  },
-};
-
+/**
+ * The catalogue entries this panel offers, in pill order. Every leg shape and
+ * label comes from `lib/strategyTemplates`; only the selection and ordering are
+ * local. The credit strategies are the explicitly-short ids — this panel has
+ * always sold both legs, it just used to call that "Straddle".
+ */
 const TEMPLATE_ORDER = [
-  "straddle",
-  "strangle",
+  "short-straddle",
+  "short-strangle",
   "bull-call-spread",
   "bear-put-spread",
+  // The credit verticals. Added when Spread View was demoted to template
+  // data: a retired Spread View panel rehydrates onto the option chain, and
+  // two of its four spread types were unreachable from this builder — the
+  // only surface that can price them against a live chain and place them.
+  "bull-put-spread",
+  "bear-call-spread",
   "iron-condor",
   "butterfly",
-  "custom",
+  CUSTOM_TEMPLATE_ID,
 ] as const;
+
+/** Resolved pill definitions — a missing id would be a catalogue regression. */
+const TEMPLATE_PILLS: StrategyTemplate[] = TEMPLATE_ORDER.flatMap((id) => {
+  const tmpl = getStrategyTemplate(id);
+  return tmpl ? [tmpl] : [];
+});
+
+const DEFAULT_TEMPLATE_ID: string = TEMPLATE_ORDER[0];
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -451,8 +403,12 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   { strikes, atmStrike, lotSize, symLabel, exchange, expiry, onClose, spotPrice },
   ref,
 ) {
+  // A lot size of 0 means the symbol master has not resolved yet. It is NOT a
+  // tradable multiplier, so placement is refused rather than defaulted to 1.
+  const lotSizeVerified = lotSize > 0;
+  const mode = useModeStore((s) => s.mode);
   const [legs, setLegs]           = useState<OptionLeg[]>([]);
-  const [activeTemplate, setActiveTemplate] = useState<string>("straddle");
+  const [activeTemplate, setActiveTemplate] = useState<string>(DEFAULT_TEMPLATE_ID);
   const [placing, setPlacing]     = useState(false);
   const [orderMsg, setOrderMsg]   = useState<OrderMsg | null>(null);
   const orderMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -512,19 +468,24 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   const applyTemplate = useCallback(
     (templateKey: string) => {
       setActiveTemplate(templateKey);
-      if (templateKey === "custom") {
+      if (templateKey === CUSTOM_TEMPLATE_ID) {
         // Custom: clear legs so user builds from scratch
         setLegs([]);
         return;
       }
 
-      const tmpl = STRATEGY_TEMPLATES[templateKey];
+      const tmpl = getStrategyTemplate(templateKey);
       if (!tmpl || !atmStrike || strikes.length === 0) return;
+      // Same gate the other consumers use: reference-only entries (stock or
+      // multi-expiry legs) never yield builder legs, so they can never be
+      // half-loaded into a panel that places live orders.
+      const templateLegs = builderLegsFor(tmpl);
+      if (!templateLegs) return;
 
       const sortedStrikeValues = strikes.map((r) => r.strike).sort((a, b) => a - b);
       const newLegs: OptionLeg[] = [];
 
-      for (const tl of tmpl.legs) {
+      for (const tl of templateLegs) {
         const target = atmStrike + tl.strikeOffset * strikeGap;
         // Snap to the nearest available strike in the chain
         const nearest = sortedStrikeValues.reduce((prev, curr) =>
@@ -534,7 +495,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
 
         newLegs.push({
           id: generateId(),
-          side: tl.side,
+          side: tl.action,
           optionType: tl.optionType,
           strike: nearest,
           lots: tl.lots,
@@ -568,7 +529,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
         premium: premiumFor(defaultStrike, "CE"),
       },
     ]);
-    setActiveTemplate("custom");
+    setActiveTemplate(CUSTOM_TEMPLATE_ID);
   }, [legs.length, atmStrike, strikes, premiumFor]);
 
   const removeLeg = useCallback((id: string) => {
@@ -620,7 +581,7 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
           },
         ];
       });
-      setActiveTemplate("custom");
+      setActiveTemplate(CUSTOM_TEMPLATE_ID);
     },
     [premiumFor],
   );
@@ -651,17 +612,54 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
       return;
     }
 
+    // The same three gates the single-leg path in OptionChainWidget applies.
+    // This button sends SEVERAL orders per click, so an unverified lot size is
+    // multiplied across every leg — it needs the guards more, not less.
+    const modeBlock = checkOrderEntryMode(mode);
+    if (modeBlock) {
+      showOrderMsg({ text: modeBlock, ok: false });
+      return;
+    }
+    const lotBlock = checkLotSizeVerified(
+      exchange,
+      { lotSize, verified: lotSizeVerified },
+      symLabel,
+    );
+    if (lotBlock) {
+      showOrderMsg({ text: lotBlock, ok: false });
+      return;
+    }
+
+    // Resolve every leg before sending any of them: a basket is placed
+    // leg-by-leg server-side, so a quantity that fails halfway leaves a
+    // partially-filled strategy.
+    const quantities: number[] = [];
+    for (const leg of legs) {
+      const quantity = resolveLotQuantity(exchange, leg.lots, {
+        lotSize,
+        verified: lotSizeVerified,
+      });
+      if (quantity == null) {
+        showOrderMsg({
+          text: `Lot size for ${symLabel} is unverified — no legs sent`,
+          ok: false,
+        });
+        return;
+      }
+      quantities.push(quantity);
+    }
+
     setPlacing(true);
 
     try {
       // All legs are MARKET/MIS — price and trigger price are intentionally
       // omitted so the backend BasketLeg parses them as None.
-      const orders = legs.map((leg) => ({
+      const orders = legs.map((leg, i) => ({
         symbol:    buildCompactOptionSymbol(symLabel, expiry, leg.strike, leg.optionType)
           ?? `${symLabel}${expiry}${leg.strike}${leg.optionType}`,
         exchange,
         action:    leg.side,
-        quantity:  leg.lots * lotSize,
+        quantity:  quantities[i],
         orderType: "MARKET" as const,
         product:   "MIS" as const,
       }));
@@ -688,7 +686,11 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
   // ---------------------------------------------------------------------------
 
   const canAddLeg = legs.length < 4;
-  const canPlace  = STRATEGY_PLACEMENT_AVAILABLE && legs.length >= 1 && !placing;
+  const canPlace  = STRATEGY_PLACEMENT_AVAILABLE
+    && legs.length >= 1
+    && !placing
+    && lotSizeVerified
+    && checkOrderEntryMode(mode) == null;
 
   const isDebit       = metrics.netPremiumRupees >= 0;
   const netPremLabel  = isDebit ? "Debit" : "Credit";
@@ -717,14 +719,14 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
           role="group"
           aria-label="Strategy templates"
         >
-          {TEMPLATE_ORDER.map((key) => {
-            const tmpl  = STRATEGY_TEMPLATES[key];
-            const active = activeTemplate === key;
+          {TEMPLATE_PILLS.map((tmpl) => {
+            const active = activeTemplate === tmpl.id;
             return (
               <button
-                key={key}
-                onClick={() => applyTemplate(key)}
-                title={tmpl.description}
+                key={tmpl.id}
+                onClick={() => applyTemplate(tmpl.id)}
+                title={`${tmpl.name} — ${tmpl.description}`}
+                aria-label={tmpl.name}
                 aria-pressed={active}
                 className={`shrink-0 px-2 py-0.5 text-xxs font-semibold rounded-full border transition-colors ${
                   active
@@ -848,9 +850,15 @@ const LegBuilder = forwardRef<LegBuilderHandle, LegBuilderProps>(function LegBui
             </div>
           )}
 
-          {/* Lot size note */}
-          <span className="text-xxs text-text-muted font-mono ml-auto">
-            Lot {lotSize}
+          {/* Lot size note — an unresolved symbol master says so rather than
+              printing "Lot 0", which reads like a real contract size. */}
+          <span
+            className={cn(
+              "text-xxs font-mono ml-auto",
+              lotSizeVerified ? "text-text-muted" : "text-warning",
+            )}
+          >
+            {lotSizeVerified ? `Lot ${lotSize}` : "Lot size unverified"}
           </span>
 
           {/* Place Strategy — dispatches the gated basket route; the "Coming

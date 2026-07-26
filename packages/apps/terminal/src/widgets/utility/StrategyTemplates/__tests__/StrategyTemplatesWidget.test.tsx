@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 beforeAll(() => {
@@ -38,10 +38,16 @@ describe("StrategyTemplatesWidget", () => {
     expect(screen.getByText("Strategy Templates")).toBeTruthy();
   });
 
-  it("renders 8 loadable cards and 4 reference-only cards (12 total)", () => {
+  // Was 8 loadable / 12 total. The unified catalogue (lib/strategyTemplates)
+  // added the two explicitly-short volatility entries — the widget's old
+  // `straddle`/`strangle` ids meant LONG here but SHORT in the OptionChain
+  // LegBuilder, so both directions now exist under their own names — and then
+  // the two credit verticals (bull put / bear call) that arrived with the
+  // SpreadView widget's retirement into template data.
+  it("renders 12 loadable cards and 4 reference-only cards (16 total)", () => {
     render(<StrategyTemplatesWidget />);
     const loadable = screen.getAllByRole("button", { name: /Load .* strategy template/i });
-    expect(loadable).toHaveLength(8);
+    expect(loadable).toHaveLength(12);
     // Stock-leg and multi-expiry templates must NOT offer a load affordance —
     // the options builder cannot represent them faithfully.
     for (const name of ["Covered Call", "Protective Put", "Collar", "Calendar Spread"]) {
@@ -84,7 +90,9 @@ describe("StrategyTemplatesWidget", () => {
 
     expect(loadListener).toHaveBeenCalledOnce();
     const event = loadListener.mock.calls[0][0] as CustomEvent;
-    expect(event.detail.id).toBe("long_call");
+    // Ids are kebab-case now (the shared catalogue's convention, already used
+    // by both builders); the widget's old snake_case ids are gone.
+    expect(event.detail.id).toBe("long-call");
     expect(event.detail.legs).toEqual([
       { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
     ]);
@@ -93,7 +101,7 @@ describe("StrategyTemplatesWidget", () => {
     const stashed = JSON.parse(
       sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
     ) as BuilderTemplate;
-    expect(stashed.id).toBe("long_call");
+    expect(stashed.id).toBe("long-call");
 
     // Navigates to the Lab where the Options Builder lives.
     expect(navListener).toHaveBeenCalledOnce();
@@ -111,7 +119,7 @@ describe("StrategyTemplatesWidget", () => {
     const stashed = JSON.parse(
       sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
     ) as BuilderTemplate;
-    expect(stashed.id).toBe("iron_condor");
+    expect(stashed.id).toBe("iron-condor");
     // The old coarse ATM/OTM labels could not distinguish the short strikes
     // from the protective wings — explicit offsets can.
     expect(stashed.legs.map((l) => l.strikeOffset).sort((a, b) => a - b)).toEqual([-2, -1, 1, 2]);
@@ -121,9 +129,35 @@ describe("StrategyTemplatesWidget", () => {
     expect(stashed.legs).toContainEqual({ action: "BUY", optionType: "PE", strikeOffset: -2, lots: 1 });
   });
 
+  it("hands off long and short straddles as separate, opposite-direction cards", () => {
+    // Regression guard for the catalogue merge: a single "Straddle" card used
+    // to mean BUY-both here and SELL-both in the OptionChain LegBuilder.
+    render(<StrategyTemplatesWidget />);
+
+    fireEvent.click(screen.getByLabelText("Load Long Straddle strategy template"));
+    const long = JSON.parse(
+      sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
+    ) as BuilderTemplate;
+    expect(long.id).toBe("long-straddle");
+    expect(long.legs.every((l) => l.action === "BUY")).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("Load Short Straddle strategy template"));
+    const short = JSON.parse(
+      sessionStorage.getItem(PENDING_TEMPLATE_KEY) ?? "null",
+    ) as BuilderTemplate;
+    expect(short.id).toBe("short-straddle");
+    expect(short.legs.every((l) => l.action === "SELL")).toBe(true);
+
+    expect(screen.queryByLabelText("Load Straddle strategy template")).not.toBeInTheDocument();
+  });
+
   it("shows correct card details for Iron Condor", () => {
     render(<StrategyTemplatesWidget />);
     expect(screen.getByText("Iron Condor")).toBeTruthy();
-    expect(screen.getByText("Net credit")).toBeTruthy();
+    // "Net credit" is no longer unique — the two credit verticals carry it too
+    // — so assert it on the Iron Condor card itself.
+    const card = screen.getByLabelText("Load Iron Condor strategy template");
+    expect(within(card).getByText("Net credit")).toBeTruthy();
+    expect(within(card).getByText("Width − Net credit")).toBeTruthy();
   });
 });

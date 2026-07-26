@@ -3583,9 +3583,6 @@ _WRITE_METHODS = (
 )
 
 _CANONICAL_GATED_WRITE_CONTEXTS: dict[str, dict[str, frozenset[str]]] = {
-    "packages/integrations/webhooks/src/flinttrade_webhooks/chartink.py": {
-        "_place_via_router": frozenset({"place_order"}),
-    },
     "packages/services/ditto/src/flinttrade_ditto/mirror.py": {
         "_place_via_router": frozenset({"place_order"}),
     },
@@ -4651,34 +4648,6 @@ def test_ditto_mirror_admits_complete_target_state_before_gate_and_router():
         and injected.value.id == "owner"
         and injected.attr == "admit_order"
     ), "DittoRuntime must inject DittoRouterOwner.admit_order into PositionMirror"
-
-
-def test_chartink_requires_admission_before_gate_and_router() -> None:
-    """ChartInk's optional placement helper cannot mint from parser output alone."""
-    path = _REPO_ROOT / "packages/integrations/webhooks/src/flinttrade_webhooks/chartink.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "ChartInkWebhook")
-    dispatch = next(
-        node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name == "_place_via_router"
-    )
-    call_lines: dict[str, list[int]] = {"admit": [], "gate": [], "router": []}
-    for node in ast.walk(dispatch):
-        if not isinstance(node, ast.Call):
-            continue
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "_admit_order":
-            call_lines["admit"].append(node.lineno)
-        elif isinstance(node.func, ast.Name) and node.func.id == "gate_order":
-            call_lines["gate"].append(node.lineno)
-        elif isinstance(node.func, ast.Attribute) and node.func.attr == "place_order":
-            call_lines["router"].append(node.lineno)
-
-    assert all(len(lines) == 1 for lines in call_lines.values()), (
-        f"ChartInk must have exactly one admission, gate mint, and router dispatch per order: {call_lines}"
-    )
-    assert call_lines["admit"][0] < call_lines["gate"][0] < call_lines["router"][0], (
-        "ChartInk order sequence regressed: complete admission must precede gate_order, "
-        f"which must precede BrokerRouter.place_order ({call_lines})"
-    )
 
 
 def test_raw_openalgo_modify_cancel_allowlist_has_no_stale_entries():

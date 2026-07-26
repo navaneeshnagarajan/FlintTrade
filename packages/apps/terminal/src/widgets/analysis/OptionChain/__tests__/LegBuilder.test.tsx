@@ -6,7 +6,7 @@
  * and strategy placement through the gated basket API (mocked).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
@@ -59,6 +59,7 @@ vi.mock("@/services/api", () => ({
 
 import LegBuilder, { type LegBuilderHandle } from "../LegBuilder";
 import type { StrikeRow } from "../types";
+import { useModeStore } from "@/stores/modeStore";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -90,6 +91,22 @@ function renderLegBuilder(props = {}) {
   return { ...utils, ref };
 }
 
+/**
+ * Put the store in a mode that permits order entry.
+ *
+ * The store defaults to `explore`, and every placement test below used to run
+ * in it — which is exactly how the missing mode gate went unnoticed: the suite
+ * was dispatching basket orders from the one mode that must never place them.
+ */
+function useTradingMode(): void {
+  beforeEach(() => {
+    useModeStore.setState({ mode: "practice" });
+  });
+  afterEach(() => {
+    useModeStore.setState({ mode: "explore" });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -103,12 +120,25 @@ describe("LegBuilder — render", () => {
     expect(screen.getByText("Strategy Builder")).toBeInTheDocument();
   });
 
-  it("renders all 7 template pills", () => {
+  // Pills now come from the shared catalogue (lib/strategyTemplates). The two
+  // credit pills were labelled "STR"/"STRG" while the same ids meant the LONG
+  // (debit) strategies in the other two catalogues — this panel places real
+  // gated basket orders, so they are now the explicit short variants. The leg
+  // shapes are unchanged; only the labels name what was always being sold.
+  it("renders every template pill, with the credit strategies named short", () => {
     renderLegBuilder();
-    const pills = ["STR", "STRG", "BCS", "BPS", "IC", "BF", "CUST"];
+    // BUPS/BECS joined when Spread View was demoted to template data — two of
+    // its four spread types had been unreachable from the only builder that
+    // can price them live and place them.
+    const pills = ["SSTR", "SSTG", "BCS", "BPS", "BUPS", "BECS", "IC", "BF", "CUST"];
     for (const pill of pills) {
       expect(screen.getByText(pill)).toBeInTheDocument();
     }
+    expect(screen.getByRole("button", { name: "Short Straddle" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Short Strangle" })).toBeInTheDocument();
+    // No ambiguous bare label may survive anywhere on the panel.
+    expect(screen.queryByRole("button", { name: "Straddle" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Strangle" })).toBeNull();
   });
 
   it("shows empty-state prompt when no legs are present", () => {
@@ -132,9 +162,9 @@ describe("LegBuilder — render", () => {
 describe("LegBuilder — template selection", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("STR template populates 2 legs (Sell CE + Sell PE at ATM)", async () => {
+  it("SSTR template populates 2 legs (Sell CE + Sell PE at ATM)", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
 
     // 2 leg rows should appear (column header + 2 data rows)
     const sideLabels = screen.getAllByLabelText("Strike price");
@@ -159,8 +189,8 @@ describe("LegBuilder — template selection", () => {
 
   it("CUST template clears legs and shows empty prompt", async () => {
     renderLegBuilder();
-    // First load STR
-    await userEvent.click(screen.getByText("STR"));
+    // First load SSTR
+    await userEvent.click(screen.getByText("SSTR"));
     expect(screen.getAllByLabelText("Strike price")).toHaveLength(2);
 
     // Switch to custom
@@ -171,14 +201,14 @@ describe("LegBuilder — template selection", () => {
 
   it("active template pill has aria-pressed=true", async () => {
     renderLegBuilder();
-    const strBtn = screen.getByText("STR").closest("button")!;
+    const strBtn = screen.getByText("SSTR").closest("button")!;
     await userEvent.click(strBtn);
     expect(strBtn).toHaveAttribute("aria-pressed", "true");
   });
 
   it("inactive pills have aria-pressed=false", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const icBtn = screen.getByText("IC").closest("button")!;
     expect(icBtn).toHaveAttribute("aria-pressed", "false");
   });
@@ -210,7 +240,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("Remove leg button removes a specific leg", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // 2 legs
+    await userEvent.click(screen.getByText("SSTR")); // 2 legs
     const removeButtons = screen.getAllByLabelText("Remove leg");
     expect(removeButtons).toHaveLength(2);
     await userEvent.click(removeButtons[0]);
@@ -219,7 +249,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("toggling BUY/SELL changes the leg side", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // 2 SELL legs
+    await userEvent.click(screen.getByText("SSTR")); // 2 SELL legs
 
     // Click the B (BUY) button on the first leg
     const buyButtons = screen.getAllByText("B");
@@ -242,7 +272,7 @@ describe("LegBuilder — leg CRUD", () => {
 
   it("changing lots input updates the leg", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const lotsInputs = screen.getAllByLabelText("Number of lots");
     fireEvent.change(lotsInputs[0], { target: { value: "3" } });
     expect((lotsInputs[0] as HTMLInputElement).value).toBe("3");
@@ -296,7 +326,7 @@ describe("LegBuilder — metrics", () => {
 
   it("shows metrics footer when legs are present", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     expect(screen.getByText(/Net/)).toBeInTheDocument();
     // The footer's place action is present and live.
     expect(
@@ -304,10 +334,10 @@ describe("LegBuilder — metrics", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows credit net premium for sell-only strategy (straddle)", async () => {
+  it("shows credit net premium for sell-only strategy (short straddle)", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
-    // Straddle = 2× SELL; net premium < 0 → Credit label
+    await userEvent.click(screen.getByText("SSTR"));
+    // Short straddle = 2× SELL; net premium < 0 → Credit label
     expect(screen.getByText(/Credit/)).toBeInTheDocument();
   });
 
@@ -330,6 +360,8 @@ describe("LegBuilder — metrics", () => {
 });
 
 describe("LegBuilder — order placement (gated basket path)", () => {
+  useTradingMode();
+
   // Strategy placement dispatches basketOrder → POST /api/v1/orders/basket,
   // which is live-gated server-side (require_live_unlocked → SafetySystem
   // L1–L5 → gate_order → BrokerRouter per leg, atomic with rollback). The
@@ -344,16 +376,16 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("shows an enabled 'Place Strategy' action when legs are present", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     const btn = screen.getByRole("button", { name: "Place strategy" });
     expect(btn).toBeEnabled();
     expect(btn).toHaveTextContent(/place strategy/i);
     expect(btn).not.toHaveTextContent(/coming soon/i);
   });
 
-  it("dispatches basketOrder with the exact per-leg contract for a straddle", async () => {
+  it("dispatches basketOrder with the exact per-leg contract for a short straddle", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR")); // SELL ATM CE + SELL ATM PE
+    await userEvent.click(screen.getByText("SSTR")); // SELL ATM CE + SELL ATM PE
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(basketOrderMock).toHaveBeenCalledTimes(1);
@@ -385,7 +417,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("shows a placed-count toast when the basket succeeds", async () => {
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("2 legs placed");
@@ -396,7 +428,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
     // server's message and the widget must show it verbatim.
     basketOrderMock.mockRejectedValueOnce(new Error("Daily loss limit breached"));
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("Daily loss limit breached");
@@ -437,7 +469,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       }),
     );
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     // Confirmed rollback (rollback_order_id present) — honest counts, but no
@@ -469,7 +501,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       }),
     );
     renderLegBuilder();
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     const alert = await screen.findByRole("alert");
@@ -495,7 +527,7 @@ describe("LegBuilder — order placement (gated basket path)", () => {
       renderLegBuilder();
       // fireEvent (not userEvent) — userEvent's internal delays hang under
       // fake timers; the clicks here need no pointer-event realism.
-      fireEvent.click(screen.getByText("STR"));
+      fireEvent.click(screen.getByText("SSTR"));
       fireEvent.click(screen.getByRole("button", { name: "Place strategy" }));
       await act(async () => {}); // flush the rejected basket promise
 
@@ -512,10 +544,69 @@ describe("LegBuilder — order placement (gated basket path)", () => {
 
   it("refuses to dispatch without an expiry", async () => {
     renderLegBuilder({ expiry: null });
-    await userEvent.click(screen.getByText("STR"));
+    await userEvent.click(screen.getByText("SSTR"));
     await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
 
     expect(basketOrderMock).not.toHaveBeenCalled();
     expect(await screen.findByRole("status")).toHaveTextContent("Select an expiry first");
+  });
+});
+
+describe("LegBuilder — pre-trade guards", () => {
+  // The basket path sends SEVERAL orders per click off one lot size, so a
+  // missing guard is multiplied across every leg. These pin the two gates the
+  // single-leg path in OptionChainWidget has always applied.
+  beforeEach(() => vi.clearAllMocks());
+
+  it("refuses every leg when the lot size is unverified", async () => {
+    useModeStore.setState({ mode: "practice" });
+    try {
+      // 0 is what OptionChainWidget passes while the symbol master is still
+      // resolving. It used to arrive as 1, which silently sent one-unit MARKET
+      // orders against NFO option contracts.
+      renderLegBuilder({ lotSize: 0 });
+      await userEvent.click(screen.getByText("SSTR"));
+
+      expect(screen.getByText("Lot size unverified")).toBeInTheDocument();
+      const place = screen.getByRole("button", { name: "Place strategy" });
+      expect(place).toBeDisabled();
+
+      await userEvent.click(place);
+      expect(basketOrderMock).not.toHaveBeenCalled();
+    } finally {
+      useModeStore.setState({ mode: "explore" });
+    }
+  });
+
+  it("refuses to place in Explore mode", async () => {
+    // The store's default. Every placement test in the suite above ran in this
+    // mode before the gate existed.
+    useModeStore.setState({ mode: "explore" });
+    renderLegBuilder();
+    await userEvent.click(screen.getByText("SSTR"));
+
+    const place = screen.getByRole("button", { name: "Place strategy" });
+    expect(place).toBeDisabled();
+    await userEvent.click(place);
+    expect(basketOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("multiplies lots by the verified lot size on every leg", async () => {
+    useModeStore.setState({ mode: "practice" });
+    try {
+      renderLegBuilder({ lotSize: 75 });
+      await userEvent.click(screen.getByText("SSTR"));
+      await userEvent.click(screen.getByRole("button", { name: "Place strategy" }));
+
+      const payload = basketOrderMock.mock.calls[0][0] as {
+        orders: { quantity: number }[];
+      };
+      expect(payload.orders).toHaveLength(2);
+      for (const order of payload.orders) {
+        expect(order.quantity).toBe(75);
+      }
+    } finally {
+      useModeStore.setState({ mode: "explore" });
+    }
   });
 });

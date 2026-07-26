@@ -288,7 +288,7 @@ class BaseStrategy(ABC):
 
     @abstractmethod
     def on_signal(self, signal: dict[str, Any]) -> None:
-        """Called when an external signal arrives (webhook, TradingView alert, etc.)."""
+        """Called when an external signal arrives (webhook, scheduled scan, etc.)."""
 
     @abstractmethod
     def generate_orders(self) -> list[Order]:

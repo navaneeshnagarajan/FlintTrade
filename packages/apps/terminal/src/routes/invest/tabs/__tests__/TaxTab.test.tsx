@@ -226,6 +226,27 @@ describe("TaxTab", () => {
     expect(exportToCSVMock).not.toHaveBeenCalled();
   });
 
+  it("treats a summary with no is_sample_data flag as demo", () => {
+    // Provenance fails closed: an absent flag must not unlock the live-data
+    // affordances (the illustrative banner stays, CSV export stays disabled).
+    const { is_sample_data: _omitted, ...noProvenance } = mockSummary;
+    useTaxSummaryMock.mockReturnValue({
+      data: { ...noProvenance, data_source: "tax_history" },
+      isLoading: false,
+      isError: false,
+    });
+
+    renderWithProviders();
+
+    expect(
+      screen.getByText(/the built-in tax ledger is illustrative; live tax-history ingestion is not wired/i),
+    ).toBeInTheDocument();
+    const exportButton = screen.getByRole("button", { name: /export csv/i });
+    expect(exportButton).toBeDisabled();
+    fireEvent.click(exportButton);
+    expect(exportToCSVMock).not.toHaveBeenCalled();
+  });
+
   it("exports backend P&L and only the backend overall estimate and provenance", () => {
     useTaxSummaryMock.mockReturnValue({
       data: { ...mockSummary, is_sample_data: false, data_source: "tax_history" },

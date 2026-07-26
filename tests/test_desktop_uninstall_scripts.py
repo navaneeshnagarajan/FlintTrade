@@ -18,6 +18,12 @@ SH = ROOT / "scripts" / "install" / "flinttrade-uninstall.sh"
 PS1 = ROOT / "scripts" / "install" / "flinttrade-uninstall.ps1"
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
+# The macOS uninstaller reads the bundle identifier with plutil/defaults and
+# signals processes inside a .app bundle. Neither exists on Linux, where the
+# script correctly refuses to remove an unverified bundle — so these tests
+# must skip off Darwin, exactly as their Linux (/proc) and Windows
+# (PowerShell) siblings already do.
+NO_MACOS_REASON = "requires macOS bundle tooling (plutil/defaults)"
 LEGACY_BUNDLE_ID = "com.flinttrade.app"
 
 
@@ -591,6 +597,7 @@ def test_purge_refuses_managed_data_below_symlinked_parent(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason=NO_MACOS_REASON)
 def test_macos_ordinary_uninstall_preserves_electron_and_legacy_profiles(tmp_path: Path) -> None:
     paths = _macos_footprint(tmp_path)
     result = _run(tmp_path, os_name="Darwin")
@@ -605,6 +612,7 @@ def test_macos_ordinary_uninstall_preserves_electron_and_legacy_profiles(tmp_pat
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason=NO_MACOS_REASON)
 def test_macos_uninstall_stops_only_executables_inside_the_receipted_bundle(tmp_path: Path) -> None:
     paths = _macos_footprint(tmp_path)
     bundle_executable = paths["app"]
@@ -645,6 +653,7 @@ def test_macos_uninstall_stops_only_executables_inside_the_receipted_bundle(tmp_
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason=NO_MACOS_REASON)
 def test_macos_confirmed_purge_removes_all_current_and_legacy_data(tmp_path: Path) -> None:
     paths = _macos_footprint(tmp_path)
     result = _run(tmp_path, "--purge", "--yes", os_name="Darwin")
@@ -655,6 +664,7 @@ def test_macos_confirmed_purge_removes_all_current_and_legacy_data(tmp_path: Pat
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason=NO_MACOS_REASON)
 def test_macos_dry_run_lists_shell_without_deleting_data(tmp_path: Path) -> None:
     paths = _macos_footprint(tmp_path)
     result = _run(tmp_path, "--dry-run", os_name="Darwin")

@@ -107,7 +107,6 @@ vi.mock("@/services/api", () => ({
   sendTelegram: vi.fn(),
   getLeverageSettings: vi.fn(),
 }));
-vi.mock("@/services/ftApi.automation", () => ({ testWhatsAppAlert: vi.fn() }));
 vi.mock("@/services/ftApi.telegram", () => ({
   readTelegramConfig: vi.fn(),
   persistTelegramConfig: vi.fn(),
@@ -117,10 +116,6 @@ vi.mock("@/services/ftApi.skillDrafts", () => ({
   readSkillDraft: vi.fn(),
   approveSkillDraft: vi.fn(),
   rejectSkillDraft: vi.fn(),
-}));
-vi.mock("@/services/ftApi.whatsapp", () => ({
-  readWhatsAppConfig: vi.fn(),
-  persistWhatsAppConfig: vi.fn(),
 }));
 
 // Store/hook deps for the heavier sections.
@@ -197,7 +192,6 @@ import { GeneralSection } from "../GeneralSection";
 import { TradingSection } from "../TradingSection";
 import { LLMSection } from "../LLMSection";
 import { TelegramSection } from "../TelegramSection";
-import { WhatsAppSection } from "../WhatsAppSection";
 import { DataSection } from "../DataSection";
 import { KeyboardSection } from "../KeyboardSection";
 import { LeverageSection } from "../LeverageSection";
@@ -459,16 +453,6 @@ describe("Section smoke renders (crash guard)", () => {
     const { container } = render(
       <TelegramSection
         settings={{ enabled: false, botToken: "", chatId: "" } as unknown as React.ComponentProps<typeof TelegramSection>["settings"]}
-        onChangeField={vi.fn()}
-      />,
-    );
-    expect(container.firstChild).toBeTruthy();
-  });
-
-  it("WhatsAppSection renders", () => {
-    const { container } = render(
-      <WhatsAppSection
-        settings={{ enabled: false, phoneE164: "", adminUrl: "" } as unknown as React.ComponentProps<typeof WhatsAppSection>["settings"]}
         onChangeField={vi.fn()}
       />,
     );

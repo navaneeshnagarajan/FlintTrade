@@ -398,7 +398,7 @@ describe("useWsBridge — INDEX_INSTRUMENTS subscription on connect", () => {
     );
   });
 
-  it("subscribes to exactly the four canonical INDEX_INSTRUMENTS (no extras)", () => {
+  it("subscribes to exactly the canonical INDEX_INSTRUMENTS (no extras)", () => {
     // Arrange
     renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
 
@@ -412,9 +412,15 @@ describe("useWsBridge — INDEX_INSTRUMENTS subscription on connect", () => {
       )
     );
 
-    // Assert — exactly 4 instruments in the index subscription
+    // Assert — the index subscription is exactly the canonical set. FINNIFTY
+    // and NIFTYIT joined it because the Index Strip and the Market Overview
+    // indices tab RENDER cards for them; unsubscribed, those cards sat on
+    // "Awaiting tick" forever.
     expect(indexCall).toBeDefined();
-    expect((indexCall![0] as WsInstrument[]).length).toBe(4);
+    const subscribed = (indexCall![0] as WsInstrument[]).map((i) => i.symbol).sort();
+    expect(subscribed).toEqual(
+      ["BANKNIFTY", "FINNIFTY", "INDIAVIX", "NIFTY", "NIFTYIT", "SENSEX"],
+    );
   });
 
   it("does not subscribe when status fires as false (disconnection)", async () => {

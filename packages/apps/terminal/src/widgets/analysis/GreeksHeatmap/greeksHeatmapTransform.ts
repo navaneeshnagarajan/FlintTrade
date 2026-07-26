@@ -1,17 +1,26 @@
 /**
  * greeksHeatmapTransform — pure helper that turns the screener IV-smile response
- * (`IVSmileData`) into the `ExpiryRow[]` grid the GreeksHeatmap widget renders.
+ * (`IVSmileData`) into the `ExpiryRow[]` matrix the Greeks Matrix widget renders
+ * under BOTH of its projections (the 2-D heat grid and the CSS-3D surface).
  *
  * IMPORTANT: greeks are NOT carried in the OpenAlgo `optionchain` feed (that
  * payload has only ltp/bid/ask/oi). The live IV smile is the dedicated source;
- * the per-strike greeks are derived from it with the SAME Black–Scholes
- * approximation the GreeksSurface widget uses (`buildSurfaceFromIVSmile`), so
- * the two widgets stay consistent.
+ * the per-strike greeks are derived from it through the shared Black–Scholes
+ * module (`@/lib/optionsMath`), so every greek the terminal renders comes from
+ * one implementation.
  *
- * Kept separate from the widget so the chain→grid maths (strike alignment, ATM
- * classification, greek derivation) is unit-tested without a broker connection.
+ * Strike alignment is an INTERSECTION across expiries, not a synthetic
+ * moneyness bucket: the retired GreeksSurface widget snapped every row to
+ * ±5% buckets and rendered a rounded strike that no contract need trade at.
+ * The intersection keeps real, tradeable strikes in every cell, at the cost of
+ * dropping strikes that are not quoted across all the expiries on screen.
+ *
+ * Kept separate from the widget so the chain→matrix maths (strike alignment,
+ * ATM classification, greek derivation) is unit-tested without a broker
+ * connection.
  */
 
+import { bsGreeks, normaliseIv, yearsFromDays } from "@/lib/optionsMath";
 import type { IVSmileData } from "@/types/api";
 
 export type Moneyness = "OTM" | "ATM" | "ITM";
@@ -19,6 +28,12 @@ export type Moneyness = "OTM" | "ATM" | "ITM";
 export interface HeatCell {
   strike: number;
   moneyness: Moneyness;
+  /**
+   * Mid implied volatility in PERCENTAGE POINTS (15.2 for 15.2%), the scale the
+   * widget's "IV %" metric renders. The greeks below are derived from the same
+   * figure as a decimal fraction.
+   */
+  iv: number;
   delta: number;
   gamma: number;
   theta: number;
@@ -40,9 +55,21 @@ interface Greeks {
 }
 
 /**
- * Approximate option greeks from an IV figure (decimal) and time to expiry,
- * mirroring GreeksSurface's `buildSurfaceFromIVSmile`. Call-side greeks; vega is
- * the standard BS sensitivity `φ(d1)·√T`. Returns zeros for non-positive IV.
+ * Call-side option greeks for one strike, from an IV figure (decimal) and a
+ * days-to-expiry count. A thin adapter over the shared `bsGreeks` — the ATM
+ * strike stands in for spot, since the IV-smile curve carries no per-curve spot.
+ *
+ * Scale conventions come from `@/lib/optionsMath`: gamma ×1000, theta per day,
+ * vega per 1 percentage-point IV move. Degenerate input (non-positive IV, ATM,
+ * strike or dte) returns all zeros — with no time value the whole cell is
+ * reported inert (delta 0 too) rather than a lone delta that would look
+ * meaningful inside a "Live" grid.
+ *
+ * @param strike Contract strike.
+ * @param atmStrike The curve's ATM strike, used as the spot proxy.
+ * @param ivDecimal Implied volatility as a decimal fraction.
+ * @param dte Days to expiry.
+ * @returns Display-rounded delta, gamma, theta and vega.
  */
 export function approxGreeks(
   strike: number,
@@ -50,23 +77,13 @@ export function approxGreeks(
   ivDecimal: number,
   dte: number,
 ): Greeks {
-  // Guard strike > 0 (gamma divides by `strike` → Infinity otherwise) and
-  // dte > 0: with no time value the time-decay greeks collapse to 0, so the
-  // whole cell is reported inert (delta 0 too) rather than a lone delta that
-  // would look meaningful inside a "Live" grid.
-  if (!(ivDecimal > 0) || !(atmStrike > 0) || !(strike > 0) || !(dte > 0)) {
-    return { delta: 0, gamma: 0, theta: 0, vega: 0 };
-  }
-  const mv = (strike - atmStrike) / atmStrike; // log-moneyness proxy
-  const T = dte / 365;
-  // d1: ITM call (strike below ATM, mv<0) → positive d1 → high delta.
-  const d1 = (-mv + 0.5 * ivDecimal * ivDecimal * T) / (ivDecimal * Math.sqrt(T));
-  const delta = 1 / (1 + Math.exp(-1.7 * d1)); // logistic approximation
-  const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
-  const gamma = (pdf / (strike * ivDecimal * Math.sqrt(T))) * 1000;
-  const theta =
-    -(ivDecimal * atmStrike * Math.exp(-0.5 * mv * mv * 100)) / Math.sqrt(365 * dte * 2 * Math.PI);
-  const vega = pdf * Math.sqrt(T);
+  const { delta, gamma, theta, vega } = bsGreeks({
+    spot: atmStrike,
+    strike,
+    timeToExpiryYears: yearsFromDays(dte),
+    volatility: ivDecimal,
+    optionType: "call",
+  });
   return {
     delta: Number(delta.toFixed(4)),
     gamma: Number(gamma.toFixed(6)),
@@ -75,13 +92,14 @@ export function approxGreeks(
   };
 }
 
-/** Normalise a percent IV (≈14.8) or decimal IV (≤1.5) to a 0–1 decimal. */
-function normaliseIv(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value > 1.5 ? value / 100 : value;
-}
-
-function classifyMoneyness(strike: number, atm: number): Moneyness {
+/**
+ * Classify a strike against the ATM strike on the call convention.
+ *
+ * @param strike Contract strike.
+ * @param atm The curve's ATM strike.
+ * @returns "ATM" on an exact match, otherwise "ITM" below ATM and "OTM" above.
+ */
+export function classifyMoneyness(strike: number, atm: number): Moneyness {
   if (strike === atm) return "ATM";
   // Call convention: a strike below ATM is in-the-money for a call.
   return strike < atm ? "ITM" : "OTM";
@@ -93,10 +111,22 @@ function labelFor(expiry: string): string {
 }
 
 /**
- * Build the aligned greeks grid from a live IV smile. Every expiry row is
+ * Convert a decimal IV fraction to the percentage-point scale `HeatCell.iv`
+ * carries, at the 2-decimal display precision both projections render.
+ *
+ * @param ivDecimal Implied volatility as a decimal fraction.
+ * @returns Percentage points, e.g. 0.152 → 15.2.
+ */
+export function ivPercent(ivDecimal: number): number {
+  return Number((ivDecimal * 100).toFixed(2));
+}
+
+/**
+ * Build the aligned greeks matrix from a live IV smile. Every expiry row is
  * rendered against the SAME strike set (the intersection of strikes present
- * across all curves) so the grid columns stay aligned. Returns null when no
- * usable strike is shared, so the caller can fall back to sample data.
+ * across all curves) so the grid columns — and the surface's depth rows — stay
+ * aligned. Returns null when no usable strike is shared, so the caller can fall
+ * back to sample data.
  */
 export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRow[] | null {
   // Drop degenerate expiries upfront: a non-positive days-to-expiry produces
@@ -131,8 +161,14 @@ export function buildGreeksHeatmap(iv: IVSmileData | null | undefined): ExpiryRo
         ? curve.atm_strike
         : common[Math.floor(common.length / 2)];
     const cells: HeatCell[] = common.map((strike) => {
-      const g = approxGreeks(strike, atm, ivByStrike.get(strike) ?? 0, curve.days_to_expiry);
-      return { strike, moneyness: classifyMoneyness(strike, atm), ...g };
+      const ivDecimal = ivByStrike.get(strike) ?? 0;
+      const g = approxGreeks(strike, atm, ivDecimal, curve.days_to_expiry);
+      return {
+        strike,
+        moneyness: classifyMoneyness(strike, atm),
+        iv: ivPercent(ivDecimal),
+        ...g,
+      };
     });
     return {
       expiry: curve.expiry,

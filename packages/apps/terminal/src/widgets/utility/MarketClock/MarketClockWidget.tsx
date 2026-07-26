@@ -4,7 +4,7 @@
  * Markets tracked:
  *   - NSE (Equities)        09:15–15:30 IST
  *   - MCX (Commodities)     09:00–23:55 IST
- *   - SGX Nifty             06:30–23:30 IST
+ *   - GIFT Nifty            06:30–23:30 IST
  *   - US (NYSE/NASDAQ)      19:00–01:30 IST (next day)
  *   - Europe (LSE/Xetra)    12:30–21:00 IST
  *
@@ -12,12 +12,15 @@
  *   - Status: Open (green) / Pre-market (amber) / Closed (grey)
  *   - Progress bar: how far through the session
  *   - Time remaining or time until open
- *   - Ticks every second; uses IST (Asia/Kolkata)
+ *   - Ticks every second; all clock maths goes through ``@/lib/ist`` so the
+ *     widget reads the same IST wall clock on an operator's machine anywhere
+ *     in the world.
  */
 
 import { useState, useEffect, useMemo, memo } from "react";
 import { Clock } from "lucide-react";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { fmtDuration, fmtIstClock, istMinutes } from "@/lib/ist";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +29,7 @@ import { cn } from "@/lib/utils";
 
 type MarketStatus = "open" | "pre" | "closed";
 
-interface MarketDef {
+export interface MarketDef {
   name: string;
   description: string;
   /** Open time in IST minutes from midnight */
@@ -37,7 +40,7 @@ interface MarketDef {
   preMin: number;
 }
 
-interface MarketState {
+export interface MarketState {
   def: MarketDef;
   status: MarketStatus;
   progress: number;       // 0–1, fraction through session
@@ -68,8 +71,15 @@ export const MARKET_DEFS: MarketDef[] = [
     preMin: 10,
   },
   {
-    name: "SGX Nifty",
-    description: "Singapore Exchange",
+    // SGX Nifty ceased to exist in July 2023: open interest migrated to NSE
+    // International Exchange in GIFT City (Gandhinagar) and the contract now
+    // trades as GIFT Nifty. Only the label moved — the session window below is
+    // the one this widget has always shipped, carried over unchanged because no
+    // NSE IX session timing is documented anywhere in this repository. A
+    // maintainer should confirm it against the current NSE IX contract
+    // specification before anyone treats these hours as authoritative.
+    name: "GIFT Nifty",
+    description: "NSE IX — GIFT City",
     openMin: hm(6, 30),
     closeMin: hm(23, 30),
     preMin: 0,
@@ -94,20 +104,32 @@ export const MARKET_DEFS: MarketDef[] = [
 // Compute market state from current IST time
 // ---------------------------------------------------------------------------
 
-function istMinutes(now: Date): number {
-  // Convert to IST (UTC+5:30)
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60_000;
-  const istMs = utcMs + 5.5 * 3_600_000;
-  const istDate = new Date(istMs);
-  return istDate.getHours() * 60 + istDate.getMinutes() + istDate.getSeconds() / 60;
-}
+/** Minutes in a day — the wrap point for sessions that run past IST midnight. */
+const MINUTES_PER_DAY = 1440;
 
-function computeMarketState(def: MarketDef, nowMin: number, nowMs: number): MarketState {
+/**
+ * Derive a market's live session state from the current IST clock.
+ *
+ * @param def - Session window, in IST minutes since midnight.
+ * @param nowMin - Current IST minutes since midnight, in [0, 1440).
+ * @param nowMs - Current epoch milliseconds, used only for sub-second smoothing.
+ * @returns The market's status, session progress and time to the next boundary.
+ */
+export function computeMarketState(def: MarketDef, nowMin: number, nowMs: number): MarketState {
   const { openMin, closeMin, preMin } = def;
 
-  // Normalise: wrap close past midnight
-  const isOpen = nowMin >= openMin && nowMin < closeMin;
-  const isPre = !isOpen && nowMin >= openMin - preMin && nowMin < openMin;
+  // Normalise: wrap close past midnight. A session whose close exceeds 1440 (US
+  // Markets closes at 25:30, i.e. 01:30 the following IST morning) is still
+  // running in the small hours, when nowMin has already wrapped back towards
+  // zero. Comparing the raw nowMin against the window would report Closed
+  // between 00:00 and 01:30 IST while the NYSE is very much open, so shift the
+  // reading into the previous day's frame whenever that lands inside the
+  // window.
+  const wrapsMidnight = closeMin > MINUTES_PER_DAY && nowMin + MINUTES_PER_DAY < closeMin;
+  const effectiveMin = wrapsMidnight ? nowMin + MINUTES_PER_DAY : nowMin;
+
+  const isOpen = effectiveMin >= openMin && effectiveMin < closeMin;
+  const isPre = !isOpen && effectiveMin >= openMin - preMin && effectiveMin < openMin;
   const status: MarketStatus = isOpen ? "open" : isPre ? "pre" : "closed";
 
   let progress = 0;
@@ -115,16 +137,16 @@ function computeMarketState(def: MarketDef, nowMin: number, nowMs: number): Mark
 
   if (isOpen) {
     const sessionLen = closeMin - openMin;
-    progress = (nowMin - openMin) / sessionLen;
-    remainingMs = (closeMin - nowMin) * 60_000 - (nowMs % 1000);
+    progress = (effectiveMin - openMin) / sessionLen;
+    remainingMs = (closeMin - effectiveMin) * 60_000 - (nowMs % 1000);
   } else if (isPre) {
     progress = 0;
-    remainingMs = (openMin - nowMin) * 60_000 - (nowMs % 1000);
+    remainingMs = (openMin - effectiveMin) * 60_000 - (nowMs % 1000);
   } else {
     progress = 0;
     // Time until next open (could be tomorrow)
-    let minsUntil = openMin - nowMin;
-    if (minsUntil < 0) minsUntil += 1440;
+    let minsUntil = openMin - effectiveMin;
+    if (minsUntil < 0) minsUntil += MINUTES_PER_DAY;
     remainingMs = minsUntil * 60_000;
   }
 
@@ -134,16 +156,6 @@ function computeMarketState(def: MarketDef, nowMin: number, nowMs: number): Mark
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
-
-function fmtDuration(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${String(s).padStart(2, "0")}s`;
-  return `${s}s`;
-}
 
 function fmtTime(min: number): string {
   const h = Math.floor(min % 1440 / 60);
@@ -284,7 +296,7 @@ function MarketClockWidget() {
         <span className="text-xs font-semibold text-text-primary">Market Clock</span>
         <div className="flex-1" />
         <span className="text-xxs text-text-muted tabular-nums">
-          {now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour12: false })} IST
+          {fmtIstClock(now)} IST
         </span>
         {openCount > 0 && (
           <span className="px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded">

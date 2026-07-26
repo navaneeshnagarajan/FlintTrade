@@ -11,6 +11,10 @@ const INDEX_INSTRUMENTS: WsInstrument[] = [
   { symbol: "BANKNIFTY", exchange: "NSE_INDEX" },
   { symbol: "SENSEX", exchange: "BSE_INDEX" },
   { symbol: "INDIAVIX", exchange: "NSE_INDEX" },
+  // Rendered by the Index Strip and the Market Overview indices tab. Both
+  // showed a permanently "Awaiting tick" card until they were subscribed here.
+  { symbol: "FINNIFTY", exchange: "NSE_INDEX" },
+  { symbol: "NIFTYIT", exchange: "NSE_INDEX" },
 ];
 
 /** MCX commodities that need nearest-futures resolution */

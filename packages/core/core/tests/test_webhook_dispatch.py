@@ -71,13 +71,13 @@ def test_place_order_fails_closed_without_live_endpoint_authority() -> None:
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     dispatcher = WebhookOrderDispatcher(_app(router))
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1"},
+        data={"side": "BUY", "quantity": "1"},
         webhook_nonce="verified-nonce-unarmed",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -92,13 +92,13 @@ def test_place_order_rejects_action_not_granted_by_endpoint_authority() -> None:
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     dispatcher = _dispatcher(_app(router), "cancel_order")
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1"},
+        data={"side": "BUY", "quantity": "1"},
         webhook_nonce="verified-nonce-wrong-action",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -113,13 +113,13 @@ def test_place_order_rejects_invalid_authority_selector() -> None:
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     dispatcher = _dispatcher(_app(router), "place_order", selector="attacker-controlled")
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1"},
+        data={"side": "BUY", "quantity": "1"},
         webhook_nonce="verified-nonce-invalid-selector",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -129,18 +129,18 @@ def test_place_order_rejects_invalid_authority_selector() -> None:
     router.place_order.assert_not_called()
 
 
-def test_tradingview_place_order_runs_through_gate_and_router() -> None:
+def test_custom_place_order_runs_through_gate_and_router() -> None:
     router = MagicMock()
     router.place_order = AsyncMock(return_value="ORDER-1")
     dispatcher = _dispatcher(_app(router), "place_order")
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1", "account_id": "default"},
+        data={"side": "BUY", "quantity": "1", "account_id": "default"},
         webhook_nonce="verified-nonce-1",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -153,7 +153,7 @@ def test_tradingview_place_order_runs_through_gate_and_router() -> None:
     expected_hash = hashlib.sha256(b"verified-nonce-1").hexdigest()
     assert request_ctx.actor_type == "external_intent"
     assert request_ctx.actor_id == "external_intent:webhook:test-endpoint"
-    assert request_ctx.intent_source == "tradingview"
+    assert request_ctx.intent_source == "custom"
     assert request_ctx.selector == "openalgo:default"
     assert request_ctx.external_nonce_hash == expected_hash
     assert kwargs["hint"].adapter_id == "openalgo"
@@ -161,24 +161,25 @@ def test_tradingview_place_order_runs_through_gate_and_router() -> None:
     assert kwargs["safety_ctx"].verify(kwargs["order"], request_ctx, "openalgo", "default")
 
 
-def test_gocharting_place_order_threads_side_through_gate_and_router() -> None:
+def test_parsed_custom_place_order_threads_side_through_gate_and_router() -> None:
     router = MagicMock()
-    router.place_order = AsyncMock(return_value="ORDER-GC-1")
+    router.place_order = AsyncMock(return_value="ORDER-CUSTOM-1")
     app = _app(router)
     dispatcher = _dispatcher(app, "place_order")
-    payload = WebhookReceiver(WebhookConfig(skip_verification=True)).parse_gocharting({
-        "action": "BUY",
+    payload = WebhookReceiver(WebhookConfig(skip_verification=True)).parse_custom({
+        "action": "place_order",
+        "side": "BUY",
         "symbol": "NIFTY",
         "exchange": "NSE",
         "quantity": "1",
     })
-    payload.webhook_nonce = "verified-gocharting-nonce"
-    payload.webhook_path = "/v1/webhook/gocharting/test-endpoint"
+    payload.webhook_nonce = "verified-custom-nonce"
+    payload.webhook_path = "/v1/webhook/custom/test-endpoint"
 
     result = asyncio.run(dispatcher.place_order(payload))
 
     assert result["status"] == "placed"
-    assert result["orderid"] == "ORDER-GC-1"
+    assert result["orderid"] == "ORDER-CUSTOM-1"
     router.place_order.assert_awaited_once()
     assert router.place_order.await_args.kwargs["order"].action.value == "BUY"
 
@@ -188,13 +189,13 @@ def test_place_order_rejects_conflicting_side_aliases_before_router() -> None:
     router.place_order = AsyncMock(return_value="SHOULD-NOT-REACH")
     dispatcher = _dispatcher(_app(router), "place_order")
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"side": "SELL", "tv_action": "BUY", "quantity": "1"},
+        data={"side": "SELL", "order_action": "BUY", "quantity": "1"},
         webhook_nonce="verified-conflicting-side",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -324,13 +325,13 @@ def test_post_submit_reservation_failure_reports_placed_with_warning(
     journal = MagicMock()
     monkeypatch.setattr(dispatcher, "_journal", journal)
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1"},
+        data={"side": "BUY", "quantity": "1"},
         webhook_nonce="verified-post-submit-nonce",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -351,13 +352,13 @@ def test_place_order_refuses_unvalidated_safety_runtime() -> None:
     app.config["SAFETY_CONFIG_READY"] = False
     dispatcher = _dispatcher(app, "place_order")
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1", "account_id": "default"},
+        data={"side": "BUY", "quantity": "1", "account_id": "default"},
         webhook_nonce="verified-nonce-2",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))
@@ -410,13 +411,13 @@ def test_place_order_checks_prospective_greeks_before_router(monkeypatch: pytest
         AsyncMock(return_value=state),
     )
     payload = WebhookPayload(
-        source="tradingview",
+        source="custom",
         action="place_order",
         symbol="NIFTY",
         exchange="NSE",
-        data={"tv_action": "BUY", "quantity": "1", "account_id": "default"},
+        data={"side": "BUY", "quantity": "1", "account_id": "default"},
         webhook_nonce="verified-nonce-greeks",
-        webhook_path="/v1/webhook/tradingview/test-endpoint",
+        webhook_path="/v1/webhook/custom/test-endpoint",
     )
 
     result = asyncio.run(dispatcher.place_order(payload))

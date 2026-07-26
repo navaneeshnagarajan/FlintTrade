@@ -7,8 +7,9 @@ import { Brain, TrendingUp, Zap, Code2, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { UNDERLYINGS, STRATEGY_TEMPLATES } from "./types";
+import { UNDERLYINGS } from "./types";
 import type { Leg, Underlying } from "./types";
+import { builderLegsFor, getStrategyTemplate } from "@/lib/strategyTemplates";
 import { calculateNetPremium, formatINR, genId } from "./utils";
 import {
   LOAD_TEMPLATE_EVENT,
@@ -65,24 +66,9 @@ export default function StrategyBuilderTool({ onClose }: Props) {
     setLegs((prev) => prev.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
   };
 
-  // Apply template — adapted from OptionChainPicker's applyTemplate logic
-  const handleTemplate = (key: string) => {
-    const tmpl = STRATEGY_TEMPLATES[key];
-    if (!tmpl) return;
-    const newLegs: Leg[] = tmpl.legs.map((lt) => ({
-      id: genId(),
-      action: lt.action,
-      optionType: lt.optionType,
-      strike: atm + lt.strikeOffset * strikeGap,
-      lots: lt.lots,
-      premium: 0,
-    }));
-    setLegs(newLegs);
-  };
-
-  // Apply a hand-off template from the StrategyTemplates widget — same
-  // strike maths as handleTemplate, but the legs arrive via templateBridge.
-  // validateLegs caps at 6 legs, so trim anything longer.
+  // Apply a hand-off template from the StrategyTemplates widget — the legs
+  // arrive via templateBridge. validateLegs caps at 6 legs, so trim anything
+  // longer.
   const applyBridgeTemplate = (tmpl: BuilderTemplate) => {
     const newLegs: Leg[] = tmpl.legs.slice(0, 6).map((lt) => ({
       id: genId(),
@@ -93,6 +79,17 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       premium: 0,
     }));
     setLegs(newLegs);
+  };
+
+  // Apply a catalogue template picked from the in-builder pill bar. Routed
+  // through the same `builderLegsFor` gate the widget uses, so a reference-only
+  // entry (stock or multi-expiry legs) can never load a degenerate approximation.
+  const handleTemplate = (key: string) => {
+    const tmpl = getStrategyTemplate(key);
+    if (!tmpl) return;
+    const legs = builderLegsFor(tmpl);
+    if (!legs) return;
+    applyBridgeTemplate({ id: tmpl.id, name: tmpl.name, legs });
   };
 
   // Latest-ref so the mount-time stash read and the live event listener both

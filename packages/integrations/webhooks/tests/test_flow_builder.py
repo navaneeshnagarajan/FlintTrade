@@ -19,8 +19,7 @@ import pytest
 class TestLegacyEnums:
     def test_signal_source_values(self):
         from flinttrade_webhooks.flow_builder import SignalSource
-        assert SignalSource.TRADINGVIEW == "TRADINGVIEW"
-        assert SignalSource.CHARTINK == "CHARTINK"
+        assert SignalSource.WEBHOOK == "WEBHOOK"
         assert SignalSource.PYTHON_SCRIPT == "PYTHON_SCRIPT"
         assert SignalSource.CRON == "CRON"
         assert SignalSource.MANUAL == "MANUAL"
@@ -301,7 +300,7 @@ class TestFlowNode:
     def test_to_dict_roundtrip(self):
         from flinttrade_webhooks.flow_builder import FlowNode
         n = FlowNode(
-            id="n1", node_type="SIGNAL", subtype="TRADINGVIEW",
+            id="n1", node_type="SIGNAL", subtype="WEBHOOK",
             label="TV Alert", config={"strategy": "Flint"},
             next_nodes=["n2"],
         )
@@ -309,7 +308,7 @@ class TestFlowNode:
         restored = FlowNode.from_dict(d)
         assert restored.id == "n1"
         assert restored.node_type == "SIGNAL"
-        assert restored.subtype == "TRADINGVIEW"
+        assert restored.subtype == "WEBHOOK"
         assert restored.label == "TV Alert"
         assert restored.config == {"strategy": "Flint"}
         assert restored.next_nodes == ["n2"]
@@ -427,7 +426,7 @@ class TestValidationResult:
         )
         flow = FlowDefinition(name="Valid", entry_node_id="n1")
         flow.add_node(FlowNode(id="n1", node_type="SIGNAL",
-                               subtype=SignalSource.TRADINGVIEW.value, next_nodes=["n2"]))
+                               subtype=SignalSource.WEBHOOK.value, next_nodes=["n2"]))
         flow.add_node(FlowNode(id="n2", node_type="CONDITION",
                                subtype=ConditionType.PRICE_ABOVE.value, next_nodes=["n3"]))
         flow.add_node(FlowNode(id="n3", node_type="ACTION",
@@ -538,7 +537,7 @@ class TestFlowBuilderLegacyAPI:
     def test_add_signal_returns_id(self):
         from flinttrade_webhooks.flow_builder import FlowBuilder, SignalSource
         fb = FlowBuilder("Test")
-        sid = fb.add_signal(SignalSource.TRADINGVIEW)
+        sid = fb.add_signal(SignalSource.WEBHOOK)
         assert sid.startswith("sig_")
 
     def test_add_condition_returns_id(self):
@@ -570,8 +569,8 @@ class TestFlowBuilderLegacyAPI:
     def test_second_signal_does_not_override_entry(self):
         from flinttrade_webhooks.flow_builder import FlowBuilder, SignalSource
         fb = FlowBuilder("Test")
-        first = fb.add_signal(SignalSource.TRADINGVIEW)
-        fb.add_signal(SignalSource.CHARTINK)
+        first = fb.add_signal(SignalSource.WEBHOOK)
+        fb.add_signal(SignalSource.MANUAL)
         flow = fb.build()
         assert flow.entry_node_id == first
 
@@ -594,7 +593,7 @@ class TestFlowBuilderLegacyAPI:
     def test_validate_valid_flow(self):
         from flinttrade_webhooks.flow_builder import ActionType, FlowBuilder, SignalSource
         fb = FlowBuilder("Valid")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW)
+        sig = fb.add_signal(SignalSource.WEBHOOK)
         act = fb.add_action(ActionType.PLACE_ORDER)
         fb.connect(sig, act)
         result = fb.validate()
@@ -617,7 +616,7 @@ class TestFlowBuilderLegacyAPI:
     def test_to_json_is_parseable(self):
         from flinttrade_webhooks.flow_builder import ActionType, FlowBuilder, SignalSource
         fb = FlowBuilder("JSONTest")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW)
+        sig = fb.add_signal(SignalSource.WEBHOOK)
         act = fb.add_action(ActionType.PLACE_ORDER, config={"symbol": "NIFTY"})
         fb.connect(sig, act)
         raw = fb.to_json()
@@ -631,7 +630,7 @@ class TestFlowBuilderLegacyAPI:
         )
         fb = FlowBuilder("Unique")
         ids = [
-            fb.add_signal(SignalSource.TRADINGVIEW),
+            fb.add_signal(SignalSource.WEBHOOK),
             fb.add_condition(ConditionType.PRICE_ABOVE),
             fb.add_condition(ConditionType.TIME_WINDOW),
             fb.add_action(ActionType.PLACE_ORDER),
@@ -673,7 +672,7 @@ class TestEndToEndFlowLegacy:
             ActionType, ConditionType, ExitType, FlowBuilder, SignalSource,
         )
         fb = FlowBuilder("NIFTY Scalper", description="Buy NIFTY on TV signal, SL at 100 pts")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW, label="TV BUY Signal",
+        sig = fb.add_signal(SignalSource.WEBHOOK, label="TV BUY Signal",
                             config={"strategy_id": "nifty_scalper"})
         cond = fb.add_condition(ConditionType.TIME_WINDOW, label="Market hours",
                                 config={"start": "09:15", "end": "15:20"})
@@ -708,7 +707,7 @@ class TestEndToEndFlowLegacy:
     def test_multiple_actions_one_signal(self):
         from flinttrade_webhooks.flow_builder import ActionType, FlowBuilder, SignalSource
         fb = FlowBuilder("FanOut")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW)
+        sig = fb.add_signal(SignalSource.WEBHOOK)
         act1 = fb.add_action(ActionType.PLACE_ORDER, config={"symbol": "NIFTY"})
         act2 = fb.add_action(ActionType.SEND_ALERT, config={"channel": "telegram"})
         fb.connect(sig, act1)
@@ -806,7 +805,7 @@ class TestEndToEndFlowNewAPI:
         """Legacy add_signal + new add_node should coexist."""
         from flinttrade_webhooks.flow_builder import FlowBuilder, NodeType, SignalSource
         fb = FlowBuilder("Mixed")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW)
+        sig = fb.add_signal(SignalSource.WEBHOOK)
         order = fb.add_node(NodeType.PLACE_ORDER, config={"symbol": "NIFTY"})
         fb.connect(sig, order)
         result = fb.validate()

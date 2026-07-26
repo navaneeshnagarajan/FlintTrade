@@ -28,9 +28,11 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
   useBrokerCapabilities: () => ({ data: null }),
 }));
 
+const mockMode = vi.hoisted(() => ({ current: "practice" }));
+
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (s: { mode: string }) => unknown) =>
-    selector({ mode: "practice" }),
+    selector({ mode: mockMode.current }),
 }));
 
 vi.mock("@/lib/market", async (importOriginal) => ({
@@ -429,5 +431,71 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ exchange: "NSE", quantity: 1 }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared pre-trade guards (lib/orderGuards). The pad previously had no
+// explore-mode block of its own, sent LIMIT orders with a ₹0 price, and
+// discarded the disclosed quantity the operator typed.
+// ---------------------------------------------------------------------------
+
+describe("OrderPadWidget shared pre-trade guards", () => {
+  beforeEach(() => {
+    mockPlaceOrder.mockReset();
+    mockPlaceOrder.mockResolvedValue({ orderId: "OP001" });
+    mockGetSymbol.mockReset();
+    mockGetSymbol.mockResolvedValue({
+      symbol: "RELIANCE", name: "Reliance", exchange: "NSE",
+      instrumenttype: "EQ", lotsize: 1, tick_size: 0.05,
+    });
+    mockMode.current = "practice";
+  });
+
+  it("refuses order entry in explore mode instead of relying on the backend 403", async () => {
+    mockMode.current = "explore";
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    expect(await screen.findByText(/connect a broker to place orders/i)).toBeTruthy();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("refuses a LIMIT order with no price instead of sending it at zero", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "LIMIT" }));
+    const priceInput = document.getElementById("orderpad-price") as HTMLInputElement;
+    fireEvent.change(priceInput, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const messages = await screen.findAllByText(/price above zero/i);
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("sends the disclosed quantity the operator typed", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "100" } });
+    const discInput = document.getElementById("orderpad-disc-qty") as HTMLInputElement;
+    fireEvent.change(discInput, { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ quantity: 100, disclosedQuantity: 25 }),
+    );
+  });
+
+  it("omits the disclosed quantity when the operator leaves it blank", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
   });
 });

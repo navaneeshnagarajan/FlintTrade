@@ -1,42 +1,30 @@
-"""S8/T8 — ChartInk webhook order path routed through the safety-gated BrokerRouter.
+"""Webhook order intents rely on gate_order's external-intent contract.
 
-These tests prove that when a :class:`ChartInkWebhook` is given a (fake) safety-gated
-``broker_router``, an ingested ChartInk scan is *placed* through
-``gate_order`` -> ``router.place_order`` with the EXTERNAL-intent identity ChartInk
-requires:
+These tests pin the ``gate_order`` contract the webhook dispatch path
+(``flinttrade_core.webhook_dispatch.WebhookOrderDispatcher``) relies on:
 
-  - the minted :class:`RequestContext` carries ``actor_type='external_intent'`` and
-    ``intent_source='chartink'``;
-  - ``gate_order`` is genuinely invoked (a real one-shot SafetyContext is minted) and
-    the resulting context carries the same external-intent metadata bound to the
-    ``openalgo:<account_id>`` selector and the sha256 of the webhook nonce;
-  - a mismatch — a RequestContext whose ``external_nonce_hash`` does not match the
-    raw nonce handed to ``gate_order`` — is rejected (``SafetyBypassError``), so a
-    gated context cannot be replayed against a different webhook payload.
+  - a RequestContext carrying ``actor_type='external_intent'`` with a matching
+    ``intent_source`` and ``external_nonce_hash`` mints a real one-shot
+    SafetyContext stamped with the same external-intent metadata;
+  - a mismatch — a RequestContext whose ``external_nonce_hash`` does not match
+    the raw nonce handed to ``gate_order`` — is rejected
+    (``SafetyBypassError``), so a gated context cannot be replayed against a
+    different webhook payload.
 
-No live network is required: a fake router records calls, and ``gate_order`` needs
-only the process-wide safety-gate secret (set in a fixture).
+No live network is required: ``gate_order`` needs only the process-wide
+safety-gate secret (set in a fixture).
 """
 
 from __future__ import annotations
 
 import hashlib
-from contextlib import contextmanager
-from types import SimpleNamespace
 
 import pytest
 
 from flinttrade_core.exceptions import SafetyBypassError
 from flinttrade_engine.safety import gate_order, set_safety_gate_secret
 from flinttrade_engine.request_context import RequestContext
-from flinttrade_webhooks.chartink import ChartInkConfig, ChartInkWebhook
 
-
-# A valid, signed ChartInk scan body (JSON form ChartInk actually sends).
-_CHARTINK_BODY = (
-    '{"scan_name": "OI Spurt Bullish", "stocks": "RELIANCE,TCS", '
-    '"triggered_at": "2026-05-30 10:30:00"}'
-)
 _WEBHOOK_NONCE = "replay-nonce-abc123"
 
 
@@ -44,99 +32,6 @@ _WEBHOOK_NONCE = "replay-nonce-abc123"
 def _safety_secret() -> None:
     """Bind a dedicated safety-gate HMAC secret so ``gate_order`` can mint."""
     set_safety_gate_secret(b"x" * 32)
-
-
-class FakeRouter:
-    """Records ``place_order`` calls instead of touching a broker.
-
-    The router never verifies the SafetyContext here (that is the gateway's own
-    contract, tested elsewhere); it only proves the gated dispatch path *reaches*
-    ``place_order`` with the right request context and a real SafetyContext.
-    """
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    async def place_order(self, request_ctx, *, order, safety_ctx, hint=None, **kwargs):
-        self.calls.append(
-            {
-                "request_ctx": request_ctx,
-                "order": order,
-                "safety_ctx": safety_ctx,
-                "hint": hint,
-            }
-        )
-        return "BROKER-ORDER-1"
-
-
-class FakeAdmission:
-    """Records the complete portfolio admission that must precede every gate."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[object, str, str]] = []
-
-    @contextmanager
-    def __call__(self, order: object, adapter_id: str, account_id: str):
-        self.calls.append((order, adapter_id, account_id))
-        lease = SimpleNamespace(
-            reserve=lambda _candidate, _positions: object(),
-            acknowledge=lambda _reservation, _result: None,
-        )
-        yield lease, []
-
-
-def test_chartink_gated_dispatch_routes_through_router_as_external_intent() -> None:
-    """A valid ChartInk ingest with a fake router places each order, gated as external_intent."""
-    router = FakeRouter()
-    admission = FakeAdmission()
-    handler = ChartInkWebhook(
-        config=ChartInkConfig(action="BUY", quantity_per_symbol="5", account_id="acc1"),
-        broker_router=router,
-        admit_order=admission,
-    )
-
-    result = handler.handle(_CHARTINK_BODY)
-    assert result.is_valid
-    assert result.symbols == ["RELIANCE", "TCS"]
-
-    placements = handler.place_orders(result, nonce=_WEBHOOK_NONCE)
-
-    # One placement per symbol, all routed successfully.
-    assert len(placements) == 2
-    assert all(p.success for p in placements)
-    assert {p.symbol for p in placements} == {"RELIANCE", "TCS"}
-    assert all(p.broker_order_id == "BROKER-ORDER-1" for p in placements)
-
-    # The router was actually called once per order.
-    assert len(router.calls) == 2
-    assert [(order.symbol, adapter_id, account_id) for order, adapter_id, account_id in admission.calls] == [
-        ("RELIANCE", "openalgo", "acc1"),
-        ("TCS", "openalgo", "acc1"),
-    ]
-
-    expected_hash = hashlib.sha256(_WEBHOOK_NONCE.encode("utf-8")).hexdigest()
-    for call in router.calls:
-        ctx: RequestContext = call["request_ctx"]
-        # EXTERNAL-intent identity is stamped on the request context.
-        assert ctx.actor_type == "external_intent"
-        assert ctx.intent_source == "chartink"
-        assert ctx.actor_id == "external_intent:chartink"
-        assert ctx.mode == "live"
-        assert ctx.selector == "openalgo:acc1"
-        assert ctx.external_nonce_hash == expected_hash
-
-        # A real one-shot SafetyContext reached the router, carrying the same
-        # external-intent metadata bound to the resolved openalgo account.
-        sctx = call["safety_ctx"]
-        assert sctx.actor_type == "external_intent"
-        assert sctx.intent_source == "chartink"
-        assert sctx.external_nonce_hash == expected_hash
-        assert sctx.adapter_id == "openalgo"
-        assert sctx.account_id == "acc1"
-
-        # The routing hint binds the OpenAlgo selector.
-        assert call["hint"].adapter_id == "openalgo"
-        assert call["hint"].account_id == "acc1"
 
 
 def test_gate_order_invoked_with_matching_external_intent_metadata() -> None:
@@ -149,11 +44,11 @@ def test_gate_order_invoked_with_matching_external_intent_metadata() -> None:
     nonce = _WEBHOOK_NONCE
     nonce_hash = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
     request_ctx = RequestContext(
-        jti="chartink-test",
+        jti="webhook-test",
         actor_type="external_intent",
-        actor_id="external_intent:chartink:OI Spurt Bullish",
+        actor_id="external_intent:webhook:my-signal",
         mode="live",
-        intent_source="chartink",
+        intent_source="custom",
         external_nonce_hash=nonce_hash,
         selector="openalgo:default",
     )
@@ -164,12 +59,12 @@ def test_gate_order_invoked_with_matching_external_intent_metadata() -> None:
         adapter_id="openalgo",
         account_id="default",
         actor_type="external_intent",
-        intent_source="chartink",
+        intent_source="custom",
         external_nonce=nonce,
     )
 
     assert safety_ctx.actor_type == "external_intent"
-    assert safety_ctx.intent_source == "chartink"
+    assert safety_ctx.intent_source == "custom"
     assert safety_ctx.external_nonce_hash == nonce_hash
 
 
@@ -181,11 +76,11 @@ def test_gate_order_rejects_mismatched_external_nonce() -> None:
     """
     real_hash = hashlib.sha256(_WEBHOOK_NONCE.encode("utf-8")).hexdigest()
     request_ctx = RequestContext(
-        jti="chartink-test",
+        jti="webhook-test",
         actor_type="external_intent",
-        actor_id="external_intent:chartink:scan",
+        actor_id="external_intent:webhook:my-signal",
         mode="live",
-        intent_source="chartink",
+        intent_source="custom",
         external_nonce_hash=real_hash,
         selector="openalgo:default",
     )
@@ -197,60 +92,6 @@ def test_gate_order_rejects_mismatched_external_nonce() -> None:
             adapter_id="openalgo",
             account_id="default",
             actor_type="external_intent",
-            intent_source="chartink",
+            intent_source="custom",
             external_nonce="a-different-nonce",  # does not match real_hash
         )
-
-
-def test_place_orders_requires_router() -> None:
-    """Without an injected router, place_orders raises — the caller-places path is unchanged."""
-    handler = ChartInkWebhook(config=ChartInkConfig())
-    result = handler.handle(_CHARTINK_BODY)
-    assert result.is_valid
-
-    assert not handler.has_router
-    with pytest.raises(RuntimeError, match="requires a broker_router"):
-        handler.place_orders(result, nonce=_WEBHOOK_NONCE)
-
-    # The legacy parse -> to_orders path still works without a router.
-    orders = handler.to_orders(result)
-    assert [o.symbol for o in orders] == ["RELIANCE", "TCS"]
-
-
-def test_place_orders_requires_complete_admission_callback() -> None:
-    """A router alone cannot turn ChartInk parsing into a safety-admitted write."""
-    handler = ChartInkWebhook(
-        config=ChartInkConfig(),
-        broker_router=FakeRouter(),
-    )
-    result = handler.handle(_CHARTINK_BODY)
-
-    with pytest.raises(RuntimeError, match="admit_order"):
-        handler.place_orders(result, nonce=_WEBHOOK_NONCE)
-
-
-def test_synthetic_nonce_is_generated_when_absent() -> None:
-    """When no webhook nonce is threaded through, a synthetic uuid nonce binds the gate.
-
-    The router still receives a populated external_nonce_hash (sha256 of the
-    generated nonce), proving the dispatch is never left unbound.
-    """
-    router = FakeRouter()
-    admission = FakeAdmission()
-    handler = ChartInkWebhook(
-        config=ChartInkConfig(account_id="default"),
-        broker_router=router,
-        admit_order=admission,
-    )
-    result = handler.handle(_CHARTINK_BODY)
-
-    placements = handler.place_orders(result)  # no nonce supplied
-
-    assert all(p.success for p in placements)
-    assert len(router.calls) == 2
-    for call in router.calls:
-        ctx: RequestContext = call["request_ctx"]
-        assert ctx.actor_type == "external_intent"
-        assert ctx.external_nonce_hash  # non-empty synthetic hash
-        # 64 hex chars == sha256 digest
-        assert len(ctx.external_nonce_hash) == 64

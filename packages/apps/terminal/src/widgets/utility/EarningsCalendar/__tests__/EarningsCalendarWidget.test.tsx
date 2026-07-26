@@ -6,7 +6,7 @@
  * for connected users).
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -35,6 +35,7 @@ vi.mock("@/services/ftApi", async (importOriginal) => {
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getEarningsCalendar } from "@/services/ftApi";
 import EarningsCalendarWidget from "../EarningsCalendarWidget";
+import { istParts } from "@/lib/ist";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockEarnings = getEarningsCalendar as ReturnType<typeof vi.fn>;
@@ -84,9 +85,12 @@ describe("EarningsCalendarWidget", () => {
 
   it("navigates to next month on next button click", () => {
     render(<EarningsCalendarWidget />, { wrapper });
-    const now = new Date();
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const expectedLabel = nextMonth.toLocaleString("en-IN", { month: "long", year: "numeric" });
+    // The widget opens on the IST month, so the expectation must too.
+    const { year, month } = istParts();
+    const expectedLabel = new Date(year, month + 1, 1).toLocaleString("en-IN", {
+      month: "long",
+      year: "numeric",
+    });
 
     fireEvent.click(screen.getByLabelText("Next month"));
     expect(screen.getByText(expectedLabel)).toBeTruthy();
@@ -94,8 +98,8 @@ describe("EarningsCalendarWidget", () => {
 
   it("navigates back to current month on prev button click after next", () => {
     render(<EarningsCalendarWidget />, { wrapper });
-    const now = new Date();
-    const currentLabel = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleString("en-IN", {
+    const { year, month } = istParts();
+    const currentLabel = new Date(year, month, 1).toLocaleString("en-IN", {
       month: "long",
       year: "numeric",
     });
@@ -138,8 +142,9 @@ describe("EarningsCalendarWidget — honest data", () => {
     // The earnings backend is currently synthetic-only and says so via
     // is_sample_data. Fabricated result dates must NEVER render unbadged
     // just because a broker is connected.
-    const now = new Date();
-    const liveDate = new Date(now.getFullYear(), now.getMonth(), 15).toISOString().slice(0, 10);
+    // The 15th of the IST month the widget opens on.
+    const { year, month } = istParts();
+    const liveDate = `${year}-${String(month + 1).padStart(2, "0")}-15`;
     mockConnected.mockReturnValue(true);
     mockEarnings.mockResolvedValue({
       entries: [
@@ -177,10 +182,15 @@ describe("EarningsCalendarWidget — honest data", () => {
   });
 
   it("renders the live entries (not sample data) when connected with a populated response", async () => {
-    const now = new Date();
-    const liveDate = new Date(now.getFullYear(), now.getMonth(), 15).toISOString().slice(0, 10);
+    // The 15th of the IST month the widget opens on.
+    const { year, month } = istParts();
+    const liveDate = `${year}-${String(month + 1).padStart(2, "0")}-15`;
     mockConnected.mockReturnValue(true);
     mockEarnings.mockResolvedValue({
+      // The explicit live flag the real route sends. Provenance now fails
+      // closed, so a payload that omits it reads as sample — which is the
+      // point: a backend that stops flagging must not silently read as live.
+      is_sample_data: false,
       entries: [
         { symbol: "ZOMATO", company: "Zomato", date: liveDate, result: "beat", sector: "Consumer" },
       ],
@@ -192,5 +202,74 @@ describe("EarningsCalendarWidget — honest data", () => {
     expect(await screen.findByText("ZOMATO")).toBeTruthy();
     expect(screen.queryByText("INFY")).toBeNull();
     expect(screen.queryByText("Sample data")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The grid is a calendar of IST trading days
+//
+// Cells used to be browser-local Date objects keyed with `toISOString()` — the
+// UTC day. On an IST machine every key came out a day early, so entries landed
+// one square to the left and the "today" highlight sat on the wrong date.
+//
+// Fixed instant, no reliance on the machine's timezone.
+// ---------------------------------------------------------------------------
+
+/** The single cell carrying the "today" highlight, or null. */
+function todayCell(): HTMLTableCellElement | null {
+  const cells = Array.from(document.querySelectorAll("td")).filter((td) =>
+    td.className.includes("bg-accent/10"),
+  );
+  return cells.length === 1 ? cells[0] : null;
+}
+
+/** The day-of-month number rendered in a cell. */
+function cellDay(cell: HTMLTableCellElement): string {
+  return cell.firstElementChild?.textContent ?? "";
+}
+
+describe("EarningsCalendarWidget — IST trading day", () => {
+  // 20:30 UTC on Saturday 25 July 2026 — late evening in Europe, and already
+  // 02:00 IST on Sunday the 26th.
+  const IST_EVENING_ROLLOVER = new Date("2026-07-25T20:30:00Z");
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("REGRESSION: highlights the IST day while the UTC day is still yesterday", () => {
+    vi.setSystemTime(IST_EVENING_ROLLOVER);
+    // Sanity: the UTC-based helper this replaced would have said the 25th.
+    expect(IST_EVENING_ROLLOVER.toISOString().slice(0, 10)).toBe("2026-07-25");
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    const expectedLabel = new Date(2026, 6, 1).toLocaleString("en-IN", {
+      month: "long",
+      year: "numeric",
+    });
+    expect(screen.getByText(expectedLabel)).toBeTruthy();
+
+    const cell = todayCell();
+    expect(cell).not.toBeNull();
+    expect(cellDay(cell!)).toBe("26");
+  });
+
+  it("REGRESSION: places an entry on the cell matching its IST date", async () => {
+    vi.setSystemTime(IST_EVENING_ROLLOVER);
+    mockConnected.mockReturnValue(true);
+    mockEarnings.mockResolvedValue({
+      entries: [
+        { symbol: "PAYTM", company: "One97 Communications", date: "2026-07-15", sector: "Fintech" },
+      ],
+      is_sample_data: true,
+    });
+
+    render(<EarningsCalendarWidget />, { wrapper });
+
+    const chip = await screen.findByText("PAYTM");
+    const cell = chip.closest("td");
+    expect(cell).not.toBeNull();
+    expect(cellDay(cell as HTMLTableCellElement)).toBe("15");
   });
 });

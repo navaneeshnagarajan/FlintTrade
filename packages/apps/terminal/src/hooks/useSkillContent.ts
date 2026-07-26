@@ -44,7 +44,7 @@ export interface SkillContent {
  * two extras (orders, holdings) to keep the picker useful.
  */
 const BEGINNER_WIDGETS: string[] = [
-  "dashboard",
+  "indexstrip",
   "chart",
   "watchlist",
   "orderpad",
@@ -60,15 +60,20 @@ const INTERMEDIATE_WIDGETS: string[] = [
   ...BEGINNER_WIDGETS,
   "optionchain",
   "straddle",
-  "depth",
+  // Merged canonicals. `depth` folded into `orderladder` and `gex` into
+  // `gammadensity`; because this list is by id and the retired ids leave the
+  // catalogue, leaving them here silently removed BOTH surfaces from the
+  // intermediate picker — the retired ids no longer resolve into it and the
+  // survivors were never added.
+  "orderladder",
   "greeks",
   "oichart",
-  "sectormap",
-  "gex",
+  "marketoverview",
+  "gammadensity",
   "news",
   "calculator",
   "ticker",
-  "mtmmonitor",
+  "pnlmonitor",
 ];
 
 /**
@@ -98,8 +103,6 @@ const ADVANCED_WIDGETS: string[] = Array.from(
 const BEGINNER_TOOLS: string[] = ["settings"];
 const INTERMEDIATE_TOOLS: string[] = ["trade-journal", "settings"];
 const ADVANCED_TOOLS: string[] = [
-  "pnl-dashboard",
-  "market-intelligence",
   "trade-journal",
   "settings",
 ];

@@ -515,6 +515,42 @@ class TestIVSmileEndpoint:
         })
         assert resp.status_code == 200
 
+    def test_ivsmile_returns_one_curve_per_requested_expiry(self, client):
+        """Several expiries in, several curves out.
+
+        This route read a single expiry via ``_body_expiry`` and always
+        answered with exactly one curve, so a caller asking for a term
+        structure had every expiry past the first dropped in silence — the
+        terminal even allocated a three-colour palette for curves that could
+        never arrive.
+        """
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiry_dates": ["26MAR26", "30APR26", "28MAY26"],
+        })
+        curves = body["data"]["curves"]
+        assert len(curves) == 3
+        assert [c["expiry"] for c in curves] == ["26MAR26", "30APR26", "28MAY26"]
+
+    def test_ivsmile_deduplicates_and_caps_expiries(self, client):
+        """Each expiry is its own chain read, so the fan-out is bounded."""
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY",
+            "exchange": "NFO",
+            "expiry_dates": ["26MAR26", "26MAR26", "30APR26", "28MAY26", "25JUN26"],
+        })
+        curves = body["data"]["curves"]
+        assert len(curves) == 3, "duplicates collapse and the list is capped"
+        assert [c["expiry"] for c in curves] == ["26MAR26", "30APR26", "28MAY26"]
+
+    def test_ivsmile_single_expiry_still_returns_one_curve(self, client):
+        """The single-expiry contract every existing caller relies on."""
+        _, body = _post(client, "/api/v1/ivsmile", {
+            "symbol": "NIFTY", "exchange": "NFO", "expiry": "26MAR26",
+        })
+        assert len(body["data"]["curves"]) == 1
+
     def test_ivsmile_status_ok(self, client):
         _, body = _post(client, "/api/v1/ivsmile", {"symbol": "NIFTY", "exchange": "NFO"})
         assert body["status"] == "success"
@@ -587,6 +623,26 @@ class TestIVSmileEndpoint:
         curve = body["data"]["curves"][0]
         assert curve["points"]
         assert curve["atm_iv"] > 0.0
+
+    def test_ivsmile_mixed_expiries_keep_live_curves_and_omit_fallback(self, app, client):
+        """One live expiry beside one unusable expiry must not poison the response.
+
+        The connected widget accepts data only when is_sample_data is exactly
+        False, so collapsing mixed results into a response-wide sample flag
+        would discard every valid live curve; sample-backed fallback curves
+        are omitted instead.
+        """
+        app.config["REGISTRY"] = _ConnectedRegistry()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [_future_expiry(), "not-an-expiry"]},
+        )
+
+        assert body["is_sample_data"] is False
+        assert len(body["data"]["curves"]) == 1
+        assert body["data"]["curves"][0]["atm_iv"] > 0.0
 
     @pytest.mark.parametrize("expiry", ["not-an-expiry", "2020-01-01", pytest.param("today", id="same-day")])
     def test_live_ivsmile_requires_strictly_future_expiry(self, app, client, expiry):

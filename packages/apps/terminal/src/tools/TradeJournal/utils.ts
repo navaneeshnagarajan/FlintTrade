@@ -1,4 +1,5 @@
 import { formatNumber } from "@/lib/formatters";
+import { fromIstParts, istParts, istToday, toIstIsoDate } from "@/lib/ist";
 import { type JournalTrade } from "@/services/ftApi";
 import { type TiltStatus } from "./types";
 
@@ -42,30 +43,43 @@ export function pnlColor(value: number): string {
 }
 
 /**
- * The IST trading day (Asia/Kolkata) as ``YYYY-MM-DD``.
+ * The IST trading day (Asia/Kolkata) of an instant, as ``YYYY-MM-DD``.
  *
  * Daily notes must key on the Indian trading day, not the machine's UTC date:
- * ``toISOString()`` flips to the next day at 05:30 IST-behind (i.e. an evening
- * session in the US, or any machine west of UTC, files notes under the wrong
- * day). ``en-CA`` formats as ISO ``YYYY-MM-DD`` directly.
+ * ``toISOString()`` only turns over at 05:30 IST, so through the whole IST
+ * early morning it still reports yesterday and notes are filed under the wrong
+ * day. Delegates to ``@/lib/ist`` so the terminal has one IST implementation
+ * rather than one per tool.
+ *
+ * @param now - Instant to convert; defaults to now.
+ * @returns The ISO date of the IST trading day containing that instant.
  */
 export function istDayKey(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
+  return toIstIsoDate(now);
 }
 
+/**
+ * Today's IST trading day as ``YYYY-MM-DD`` — the default end of the journal range.
+ *
+ * @returns The current IST trading day.
+ */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  return istToday();
 }
 
+/**
+ * The IST day seven trading-window days back — the default start of the range.
+ *
+ * Inclusive of today, so the default window spans seven IST calendar days.
+ * Stepping the IST day number (rather than subtracting 6 × 24 hrs from the
+ * host clock) keeps the boundary on the Indian calendar wherever the operator
+ * is.
+ *
+ * @returns The ISO date six IST days before today.
+ */
 export function sevenDaysAgoISO(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 6);
-  return d.toISOString().slice(0, 10);
+  const { year, month, day } = istParts();
+  return toIstIsoDate(fromIstParts(year, month, day - 6));
 }
 
 export function formatMinutes(mins: number): string {

@@ -96,12 +96,6 @@ export interface TelegramData {
   chatId: string;
 }
 
-export interface WhatsAppData {
-  enabled: boolean;
-  phoneE164: string;
-  adminUrl: string;
-}
-
 export interface DataPathsData {
   fastStoragePath: string;
   archiveStoragePath: string;
@@ -134,7 +128,6 @@ export interface SettingsState {
   llmCredentialConfigured: boolean;
   llmCredentialLast4: string;
   telegram: TelegramData;
-  whatsapp: WhatsAppData;
   dataPaths: DataPathsData;
   connection: ConnectionData;
   restarting: boolean;
@@ -153,7 +146,6 @@ export interface SettingsState {
   ) => Promise<void>;
   removeLLMCredential: () => Promise<void>;
   updateTelegram: (field: keyof TelegramData, value: string | boolean) => void;
-  updateWhatsApp: (field: keyof WhatsAppData, value: string | boolean) => void;
   updateDataPaths: (field: keyof DataPathsData, value: string) => void;
   acceptConnection: (connection: SavedConnectionData) => void;
   handleRestart: (onDone?: (msg: string) => void) => void;
@@ -176,7 +168,6 @@ export function useSettingsState(): SettingsState {
   const llm         = useSettingsStore((s) => s.llm);
   const llmSetupPending = useSettingsStore((s) => s.llmSetupPending);
   const telegram    = useSettingsStore((s) => s.telegram);
-  const whatsapp    = useSettingsStore((s) => s.whatsapp);
   const dataPaths   = useSettingsStore((s) => s.dataPaths);
 
   // ---- connectionStore selectors ----
@@ -662,10 +653,6 @@ export function useSettingsState(): SettingsState {
     useSettingsStore.getState().setTelegram({ [field]: value });
   }, []);
 
-  const updateWhatsApp = useCallback((field: keyof WhatsAppData, value: string | boolean) => {
-    useSettingsStore.getState().setWhatsApp({ [field]: value });
-  }, []);
-
   const updateDataPaths = useCallback((field: keyof DataPathsData, value: string) => {
     useSettingsStore.getState().setDataPaths({ [field]: value });
   }, []);
@@ -748,15 +735,6 @@ export function useSettingsState(): SettingsState {
     [telegram],
   );
 
-  const whatsappData = useMemo<WhatsAppData>(
-    () => ({
-      enabled: whatsapp?.enabled ?? false,
-      phoneE164: whatsapp?.phoneE164 ?? "",
-      adminUrl: whatsapp?.adminUrl ?? "",
-    }),
-    [whatsapp],
-  );
-
   const dataPathsData = useMemo<DataPathsData>(
     () => ({
       fastStoragePath: dataPaths.fastStoragePath,
@@ -790,7 +768,6 @@ export function useSettingsState(): SettingsState {
       ? llmCredentialMetadata.last4
       : "",
     telegram: telegramData,
-    whatsapp: whatsappData,
     dataPaths: dataPathsData,
     connection,
     restarting,
@@ -801,7 +778,6 @@ export function useSettingsState(): SettingsState {
     updateLLMProvider,
     removeLLMCredential,
     updateTelegram,
-    updateWhatsApp,
     updateDataPaths,
     acceptConnection,
     handleRestart,

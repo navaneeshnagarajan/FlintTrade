@@ -46,6 +46,8 @@ const TICKER_INSTRUMENTS: WsInstrument[] = [
   { symbol: "BANKNIFTY",  exchange: "NSE_INDEX" },
   { symbol: "SENSEX",     exchange: "BSE_INDEX" },
   { symbol: "INDIAVIX",   exchange: "NSE_INDEX" },
+  { symbol: "FINNIFTY",   exchange: "NSE_INDEX" },
+  { symbol: "NIFTYIT",    exchange: "NSE_INDEX" },
   // MCX commodities — OpenAlgo resolves nearest contract on its side when
   // queried by display name (GOLD, SILVER, etc.) via multiquotes.
   { symbol: "GOLD",       exchange: "MCX" },

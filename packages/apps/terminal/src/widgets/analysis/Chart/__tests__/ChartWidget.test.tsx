@@ -11,6 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import type { Dispatch, SetStateAction } from "react";
+import type { IDockviewPanelProps } from "dockview-react";
 import { ohlcvCacheKey } from "@/lib/chartCache";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,9 @@ const chartInitMocks = vi.hoisted(() => {
     setVisibleLogicalRange: vi.fn(),
     subscribeVisibleLogicalRangeChange: vi.fn(),
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
+    setVisibleRange: vi.fn(),
+    subscribeVisibleTimeRangeChange: vi.fn(),
+    unsubscribeVisibleTimeRangeChange: vi.fn(),
   };
   const chart = {
     applyOptions: vi.fn(),
@@ -174,6 +178,37 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 const dataScopeState = vi.hoisted(() => ({ value: "explore:mock" }));
 vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => dataScopeState.value,
+}));
+
+// Chart sync bus — the widget must not touch it at all without a syncGroup
+// param, so the mock doubles as a tripwire for that guarantee.
+const chartSyncMocks = vi.hoisted(() => ({
+  subscribeChartSync: vi.fn<(
+    group: string,
+    id: string,
+    cb: (range: { from: number; to: number }) => void,
+  ) => () => void>(),
+  publishChartSync: vi.fn(),
+}));
+
+vi.mock("@/lib/chartSyncBus", () => ({
+  subscribeChartSync: chartSyncMocks.subscribeChartSync,
+  publishChartSync: chartSyncMocks.publishChartSync,
+}));
+
+// Option-leg resolution — mocked at the helper boundary; the helper itself is
+// unit-tested in src/lib/__tests__/optionLegSymbols.test.ts.
+const optionLegMocks = vi.hoisted(() => ({
+  resolveOptionLeg: vi.fn<(request: { underlying: string; leg: "CE" | "PE" }) => Promise<{
+    symbol: string;
+    exchange: string;
+    strike: string;
+    expiry: string;
+  }>>(),
+}));
+
+vi.mock("@/lib/optionLegSymbols", () => ({
+  resolveOptionLeg: optionLegMocks.resolveOptionLeg,
 }));
 
 vi.mock("@/hooks/useChartTheme", () => ({
@@ -1045,6 +1080,328 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
       expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "TCS", exchange: "NSE" });
     });
     expect(screen.getByText("INFY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-panel settings scoping
+//
+// A workspace can hold several chart panels (the Multi Chart preset lays out
+// four). Indicator and display settings are therefore keyed by Dockview panel
+// id, so one chart's configuration can never overwrite another's.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget per-panel settings scoping", () => {
+  const INDICATOR_KEY = "flinttrade:chart:indicator-settings:v1";
+  const DISPLAY_KEY = "flinttrade:chart:display-settings:v1";
+
+  function panelProps(id: string): Partial<IDockviewPanelProps> {
+    return { api: { id } as unknown as IDockviewPanelProps["api"] };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    indicatorHookMocks.refresh.mockClear();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hydrates a panel's own indicator settings in preference to the workspace-wide key", () => {
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showRSI: true }, periods: { rsi: 21 } }),
+    );
+    localStorage.setItem(
+      `${INDICATOR_KEY}:panel:chart-b`,
+      JSON.stringify({ version: 1, indicators: { showMACD: true }, periods: { rsi: 9 } }),
+    );
+
+    render(<ChartWidget {...panelProps("chart-b")} />);
+
+    expect(vi.mocked(useIndicators)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicators: expect.objectContaining({ showMACD: true, showRSI: false }),
+        periods: expect.objectContaining({ rsi: 9 }),
+      }),
+    );
+  });
+
+  it("inherits the workspace-wide settings the first time a panel is opened", () => {
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showRSI: true }, periods: { rsi: 21 } }),
+    );
+
+    render(<ChartWidget {...panelProps("chart-new")} />);
+
+    expect(vi.mocked(useIndicators)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicators: expect.objectContaining({ showRSI: true }),
+        periods: expect.objectContaining({ rsi: 21 }),
+      }),
+    );
+    // The inherited settings become the panel's own from that point on.
+    expect(localStorage.getItem(`${INDICATOR_KEY}:panel:chart-new`)).not.toBeNull();
+  });
+
+  it("writes indicator settings to the panel key, leaving the sibling panel and workspace default alone", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      INDICATOR_KEY,
+      JSON.stringify({ version: 1, indicators: { showMACD: true }, paneSizes: { macd: "balanced" } }),
+    );
+    const siblingKey = `${INDICATOR_KEY}:panel:chart-b`;
+    const siblingPayload = JSON.stringify({
+      version: 1,
+      indicators: { showRSI: true },
+      paneSizes: { rsi: "compact" },
+    });
+    localStorage.setItem(siblingKey, siblingPayload);
+
+    render(<ChartWidget {...panelProps("chart-a")} />);
+
+    await user.click(screen.getByRole("button", { name: /Indicators/i }));
+    await user.click(screen.getByRole("button", { name: "Set MACD pane to Expanded" }));
+
+    await waitFor(() => {
+      const encoded = localStorage.getItem(`${INDICATOR_KEY}:panel:chart-a`);
+      expect(encoded).not.toBeNull();
+      expect(JSON.parse(encoded as string)).toMatchObject({
+        version: 1,
+        indicators: expect.objectContaining({ showMACD: true }),
+        paneSizes: expect.objectContaining({ macd: "expanded" }),
+      });
+    });
+
+    expect(JSON.parse(localStorage.getItem(INDICATOR_KEY) as string)).toMatchObject({
+      paneSizes: expect.objectContaining({ macd: "balanced" }),
+    });
+    expect(localStorage.getItem(siblingKey)).toBe(siblingPayload);
+  });
+
+  it("writes display settings to the panel key and never to the workspace-wide key", async () => {
+    const user = userEvent.setup();
+    render(<ChartWidget {...panelProps("chart-a")} />);
+
+    await user.click(screen.getByRole("button", { name: "Open chart display settings" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Grid" }));
+
+    await waitFor(() => {
+      const encoded = localStorage.getItem(`${DISPLAY_KEY}:panel:chart-a`);
+      expect(encoded).not.toBeNull();
+      expect(JSON.parse(encoded as string)).toMatchObject({ version: 1, gridVisible: false });
+    });
+    expect(localStorage.getItem(DISPLAY_KEY)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Same-window time-scale sync (params.syncGroup)
+//
+// The Three Panel preset lays out three chart panels that scroll and zoom
+// together. Without a syncGroup param the chart must never touch the bus —
+// pinned below so the sync path can never leak into standalone charts.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget time-scale sync (params.syncGroup)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+    chartSyncMocks.subscribeChartSync.mockReset();
+    chartSyncMocks.subscribeChartSync.mockReturnValue(() => {});
+    chartSyncMocks.publishChartSync.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the chart off the sync bus when syncGroup is absent", () => {
+    chartInitMocks.setReady(true);
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX" }} />);
+
+    expect(chartSyncMocks.subscribeChartSync).not.toHaveBeenCalled();
+    expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
+    // Only the pre-existing persistence handler subscribes to range changes —
+    // exactly-previous behaviour with no syncGroup, and no time-range
+    // subscription at all.
+    expect(chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+    expect(chartInitMocks.timeScale.subscribeVisibleTimeRangeChange).not.toHaveBeenCalled();
+  });
+
+  it("publishes visible-time-range changes to its sync group", () => {
+    chartInitMocks.setReady(true);
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", syncGroup: "three-panel" }} />);
+
+    expect(chartSyncMocks.subscribeChartSync).toHaveBeenCalledTimes(1);
+    const [group, memberId] = chartSyncMocks.subscribeChartSync.mock.calls[0];
+    expect(group).toBe("three-panel");
+
+    // The persistence handler stays on the logical-range subscription; the
+    // sync publisher rides the time-range subscription so option panels with
+    // missing bars stay aligned to the same market interval.
+    expect(chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+    const rangeSubscriptions = chartInitMocks.timeScale.subscribeVisibleTimeRangeChange.mock.calls;
+    expect(rangeSubscriptions).toHaveLength(1);
+    const publishHandler = rangeSubscriptions[0][0] as (range: { from: number; to: number } | null) => void;
+
+    act(() => { publishHandler({ from: 3, to: 40 }); });
+
+    expect(chartSyncMocks.publishChartSync).toHaveBeenCalledExactlyOnceWith(
+      "three-panel",
+      memberId,
+      { from: 3, to: 40 },
+    );
+
+    // Null and degenerate ranges are never published.
+    act(() => {
+      publishHandler(null);
+      publishHandler({ from: 10, to: 10 });
+    });
+    expect(chartSyncMocks.publishChartSync).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a range received from the group without re-publishing it", () => {
+    chartInitMocks.setReady(true);
+    // Simulate the real chart: setting the visible time range synchronously
+    // fires every time-range subscription with the applied range. Without
+    // the apply guard this would boomerang straight back onto the bus.
+    chartInitMocks.timeScale.setVisibleRange.mockImplementation(
+      (range: { from: number; to: number }) => {
+        chartInitMocks.timeScale.subscribeVisibleTimeRangeChange.mock.calls.forEach((call) => {
+          (call[0] as (r: { from: number; to: number }) => void)(range);
+        });
+      },
+    );
+
+    render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", syncGroup: "three-panel" }} />);
+
+    const busListener = chartSyncMocks.subscribeChartSync.mock.calls[0][2];
+
+    act(() => { busListener({ from: 5, to: 55 }); });
+
+    expect(chartInitMocks.timeScale.setVisibleRange).toHaveBeenCalledWith({ from: 5, to: 55 });
+    expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Option-leg panels (params.optionLeg)
+//
+// A preset can pin a chart to "the nearest-expiry ATM CE/PE of an underlying"
+// rather than a fixed symbol. Resolution runs at mount via resolveOptionLeg;
+// data loading is deferred until it lands, and failure is surfaced honestly.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget option-leg panels (params.optionLeg)", () => {
+  const CE_LEG = {
+    symbol: "NIFTY30DEC9924800CE",
+    exchange: "NFO",
+    strike: "24800",
+    expiry: "30-DEC-99",
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+    dataScopeState.value = "explore:mock";
+    apiMocks.getHistory.mockReset();
+    apiMocks.getHistory.mockResolvedValue([]);
+    apiMocks.getQuotes.mockReset();
+    apiMocks.getQuotes.mockResolvedValue({});
+    chartSyncMocks.subscribeChartSync.mockReset();
+    chartSyncMocks.subscribeChartSync.mockReturnValue(() => {});
+    chartSyncMocks.publishChartSync.mockReset();
+    optionLegMocks.resolveOptionLeg.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves the leg at mount and loads only the resolved contract", async () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockResolvedValue(CE_LEG);
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />);
+
+    expect(optionLegMocks.resolveOptionLeg).toHaveBeenCalledExactlyOnceWith({
+      underlying: "NIFTY",
+      leg: "CE",
+    });
+    expect(await screen.findByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
+
+    await waitFor(() => expect(apiMocks.getHistory).toHaveBeenCalled());
+    // Every fetch is for the resolved contract — never the placeholder seed.
+    for (const call of apiMocks.getHistory.mock.calls) {
+      expect(call[0]).toBe("NIFTY30DEC9924800CE");
+      expect(call[1]).toBe("NFO");
+    }
+  });
+
+  it("shows a resolving badge and defers all data fetches while the leg resolves", () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockReturnValue(new Promise(() => {}));
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "BANKNIFTY", leg: "PE" } }} />);
+
+    expect(screen.getByText(/Resolving PE leg/)).toBeInTheDocument();
+    // The placeholder header shows the underlying, not the workspace default.
+    expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
+    expect(apiMocks.getHistory).not.toHaveBeenCalled();
+    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an honest error and fetches nothing when resolution fails", async () => {
+    chartInitMocks.setReady(true);
+    optionLegMocks.resolveOptionLeg.mockRejectedValue(
+      new Error("No option expiries available for NIFTY"),
+    );
+
+    render(<ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No option expiries available for NIFTY",
+    );
+    expect(apiMocks.getHistory).not.toHaveBeenCalled();
+    expect(apiMocks.getQuotes).not.toHaveBeenCalled();
+  });
+
+  it("keeps an option-leg chart pinned against watchlist selection", async () => {
+    optionLegMocks.resolveOptionLeg.mockResolvedValue(CE_LEG);
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget params={{ optionLeg: { underlying: "NIFTY", leg: "CE" } }} />
+      </Provider>,
+    );
+    expect(await screen.findByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
+
+    act(() => {
+      store.set(selectedSymbolAtom, { symbol: "TCS", exchange: "NSE" });
+    });
+
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "TCS", exchange: "NSE" });
+    });
+    expect(screen.getByText("NIFTY30DEC9924800CE")).toBeInTheDocument();
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
   });
 });

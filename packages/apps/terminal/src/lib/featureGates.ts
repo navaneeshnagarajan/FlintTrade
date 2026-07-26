@@ -17,7 +17,7 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   // ---------------------------------------------------------------
   "widget:orders":      { beginner: "preview", intermediate: "visible", advanced: "visible" },
   "widget:holdings":    { beginner: "preview", intermediate: "visible", advanced: "visible" },
-  "widget:tradebook":   { beginner: "preview", intermediate: "visible", advanced: "visible" },
+  "widget:fills":       { beginner: "preview", intermediate: "visible", advanced: "visible" },
   "widget:scalper":     { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:optionchain": { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oichart":     { beginner: "locked",  intermediate: "visible", advanced: "visible" },
@@ -27,20 +27,69 @@ export const FEATURE_GATES: Record<string, Record<SkillLevel, GateStatus>> = {
   "widget:ticker":      { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:calculator":  { beginner: "visible", intermediate: "visible", advanced: "visible" },
   "widget:aiadvisor":   { beginner: "visible", intermediate: "visible", advanced: "visible" },
-  "widget:mtmmonitor":  { beginner: "locked",  intermediate: "visible", advanced: "visible" },
-  "widget:riskpanel":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
+  // NOTE: `widget:mtmmonitor` removed with the P&L merge. The canonical
+  // (pnlmonitor) is deliberately UNGATED: IntradayPnL was the beginner-facing
+  // P&L surface and the merged default view opens on that headline; the MTM
+  // chart content that motivated the old lock is a read-only projection of
+  // settingsStore.riskLimits, not an order surface.
+  // NOTE: `widget:riskpanel` removed with the Risk merge. The canonical
+  // (riskdashboard) is deliberately left UNGATED — a margin and daily-stop
+  // readout is the last thing to hide from a beginner.
   "widget:actioncenter":{ beginner: "locked",  intermediate: "preview", advanced: "visible" },
 
   // ---------------------------------------------------------------
   // Analysis widgets — advanced-only or advanced-unlock
   // ---------------------------------------------------------------
-  "widget:sectormap":   { beginner: "locked",  intermediate: "preview", advanced: "visible" },
+  // NOTE: `widget:sectormap` removed with the Market Overview merge. The
+  // canonical (marketoverview) is deliberately UNGATED: six of the seven
+  // absorbed surfaces were always freely available, and the two
+  // preview-posture tabs (Flows, Contribution) keep their own FeatureTeaser
+  // wrappers inside the widget.
   "widget:greeks":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
-  "widget:gex":         { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // NOTE: `widget:gex` was removed when GEX merged into Dealer Gamma
+  // (`gammadensity`). The canonical is deliberately left UNGATED: gammadensity
+  // was already visible at every level, so adopting GEX's advanced-only gate
+  // would have TAKEN a surface away from beginners. That is the opposite
+  // direction from the Order Flow merge, where the canonical was already the
+  // stricter of the two.
   "widget:volsurface":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Retired id — resolves to `ivsmile`, which is advanced-only.
+  // The Greeks Matrix derives greeks client-side and labels them Live, while
+  // its own IV source (widget:ivsmile) and sibling widget:volsurface are
+  // advanced-only. Gating the CANONICAL closes that asymmetry — that row is
+  // live. The retired id's row beside it is a forward-compatible declaration
+  // only (see the note above).
+  "widget:greeksheatmap": { beginner: "locked", intermediate: "locked", advanced: "visible" },
+  "widget:greekssurface": { beginner: "locked", intermediate: "locked", advanced: "visible" },
+  // The ladder absorbed Depth's real level-2 book and is rapid click-to-trade
+  // order entry; its nearest sibling widget:scalper is already beginner-locked.
+  // The two inputs were locked (depth) and ungated-by-omission (ladder), and
+  // the omission reads as accidental rather than decided.
+  "widget:orderladder": { beginner: "locked", intermediate: "visible", advanced: "visible" },
+  // Retired ids below. NOTE ON WHAT THESE DO: `useFeatureGate` has exactly one
+  // `widget:` caller — chrome/WidgetPicker.tsx — and it iterates
+  // `widgetCatalog`, which by definition excludes retired ids. So these rows
+  // are NOT reached today, and a saved panel is never gate-checked in either
+  // direction. They are kept as forward-compatible declarations so that if
+  // gating ever extends beyond the picker, a retired id already carries its
+  // canonical's posture rather than defaulting to visible. An earlier comment
+  // here claimed they prevent a saved panel bypassing its gate; that was wrong.
+  "widget:impliedmove": { beginner: "locked", intermediate: "visible", advanced: "visible" },
+  "widget:ivskew":      { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:ivsmile":     { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:straddlepnl": { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Retired ids folded into `oichart`. Unreachable today (see the note above);
+  // declared so a future gate check finds the canonical's posture. oiprofile
+  // keeps its own stricter setting, which is what it carried before the merge.
+  "widget:oiheatmap":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
+  "widget:oisignals":   { beginner: "locked",  intermediate: "visible", advanced: "visible" },
   "widget:oiprofile":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
+  // Merged canonical. Order Flow absorbed Footprint, which was locked to
+  // advanced; an absent widget: id resolves to visible at every level, so
+  // leaving this out would hand beginners a microstructure surface that was
+  // advanced-only before the merge. The footprint entry stays because its
+  // own gate test pins it and the retired id still resolves.
+  "widget:orderflow": { beginner: "locked", intermediate: "locked", advanced: "visible" },
   "widget:footprint":   { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
   "widget:domheatmap":  { beginner: "locked",  intermediate: "locked",  advanced: "visible" },
 

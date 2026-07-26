@@ -14,7 +14,7 @@ export interface WebhookConfig {
   id: string;
   path: string;
   name: string;
-  type: "tradingview" | "chartink" | "gocharting" | "custom";
+  type: "custom";
   enabled: boolean;
   secret_configured: boolean;
 }
@@ -22,18 +22,6 @@ export interface WebhookConfig {
 export interface WebhookCreateConfig extends Omit<WebhookConfig, "id" | "secret_configured"> {
   /** Required at creation and never echoed by list/get responses. */
   secret: string;
-}
-
-export interface N8nWorkflow {
-  id: string;
-  name: string;
-  active: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface N8nWebhookTriggerResult {
-  [key: string]: unknown;
 }
 
 export const getCronJobs = () =>
@@ -70,37 +58,3 @@ export const deleteWebhook = (id: string) =>
   isDemoUserSession()
     ? Promise.reject(new Error("Webhook configuration is unavailable in Demo mode."))
     : del<{ message: string }>("webhooks/" + encodeURIComponent(id));
-
-export const checkN8nHealth = () =>
-  isDemoAuthSession()
-    ? Promise.resolve({ running: false })
-    : get<{ running: boolean }>("automation/n8n/health");
-
-export const listN8nWorkflows = () =>
-  isDemoAuthSession()
-    ? Promise.resolve({ workflows: [], count: 0 })
-    : get<{ workflows: N8nWorkflow[]; count: number }>("automation/n8n/workflows");
-
-export const triggerN8nWebhook = (
-  webhookId: string,
-  data: Record<string, unknown> = {},
-) =>
-  post<N8nWebhookTriggerResult>("automation/n8n/webhook/trigger", {
-    webhook_id: webhookId,
-    data,
-  });
-
-export const activateN8nWorkflow = (workflowId: string) =>
-  post<{ workflow_id: string; active: true }>(
-    `automation/n8n/workflows/${encodeURIComponent(workflowId)}/activate`,
-  );
-
-export const deactivateN8nWorkflow = (workflowId: string) =>
-  post<{ workflow_id: string; active: false }>(
-    `automation/n8n/workflows/${encodeURIComponent(workflowId)}/deactivate`,
-  );
-
-export const testWhatsAppAlert = (message?: string) =>
-  post<{ status: string; message: string }>("alerts/whatsapp/test", {
-    ...(message ? { message } : {}),
-  });

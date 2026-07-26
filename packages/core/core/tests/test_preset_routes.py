@@ -134,7 +134,7 @@ class TestListPresets:
 
     def test_builtin_presets_included(self, client):
         data = client.get("/api/v1/presets/", headers=_auth()).get_json()
-        assert data["data"]["builtin_count"] == 6
+        assert data["data"]["builtin_count"] == 17
 
     def test_custom_count_zero_initially(self, client):
         data = client.get("/api/v1/presets/", headers=_auth()).get_json()
@@ -159,7 +159,7 @@ class TestListPresets:
     def test_builtin_flags_are_true(self, client):
         data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         builtins = [p for p in data["presets"] if p["is_builtin"]]
-        assert len(builtins) == 6
+        assert len(builtins) == 17
 
     def test_custom_preset_appears_in_list(self, client):
         _create_preset(client, name="My Custom Layout")

@@ -356,7 +356,7 @@ describe("ScalperWidget", () => {
 
     await buyCeWithConfirm();
 
-    await screen.findByText(/Enter a limit price before placing a LIMIT order/);
+    await screen.findByText(/price above zero before placing a LIMIT order/);
     expect(mockPlaceOrder).not.toHaveBeenCalled();
   });
 

@@ -708,7 +708,10 @@ export const getEarningsCalendar = async (
     entries: rows.map(normaliseEarningsEntry),
     // Propagated so the widget badges fabricated rows even when a broker is
     // connected — the "live" backend source is currently a sample generator.
-    is_sample_data: raw.is_sample_data === true,
+    // Absent means sample: every route path emits the flag today, so requiring
+    // an explicit `false` costs nothing and stops a future live source that
+    // forgets it from being rendered as verified.
+    is_sample_data: raw.is_sample_data !== false,
   };
 };
 

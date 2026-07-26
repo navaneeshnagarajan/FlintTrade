@@ -78,9 +78,9 @@ Closed-market/no-funds verification does not prove funded live order execution.
 |---|---|---|
 | Preset layouts (14) | ✅ | Dockview workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
-| Trading + dashboard widgets (101 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
+| Trading + dashboard widgets (69 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
 | Screens: welcome / dashboard / explore / demo | ✅ | Demo mode feeds widgets + dashboard cards from `MockDataEngine` |
-| TradingView professional charts + indicators | ✅ | `components/tradingview/` + lightweight-charts |
+| Professional charts + indicators | ✅ | `widgets/analysis/Chart/` on the lightweight-charts library |
 | Native sandbox + virtual capital + paper orders | ✅ | `SandboxControls` (capital + place paper order) |
 | Trade journal | ✅ | `TradeJournalTool` + write path on executed orders |
 | Multiple built-in strategies | ✅ | 132 runnable by name (`ALL_STRATEGIES` + `STRATEGY_REGISTRY` + `BUILTIN`); 41 selectable in the Lab picker |
@@ -115,7 +115,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 
 | Item | Status | Notes |
 |---|---|---|
-| Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (TradingView/ChartInk webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
+| Automate pillar (webhooks / flow builder / schedules / monitors / Telegram) | ✅ | `/automate` route → `AutomateRoute` (generic HMAC-signed custom webhooks, flow builder, scheduler, kill-switch indicator), backed by the webhooks + automation packages |
 | Ditto multi-account mirror (account mirroring / margin / trailing SL / risk manager) | ✅ | `/ditto` route + backend `/ditto/*` (`operations_routes.py`); natively reimplemented AlgoMirror patterns |
 | Invest & Learn routes | ✅ | `/invest` (mutual funds / SIP / net worth) and `/learn` (guided learning) protected routes |
 
@@ -134,7 +134,6 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Stock / fundamentals screener | ✅ | `StocksTab` (Invest route) → `useStockScan` → `/v1/stocks/scan`; curated large-cap fundamentals (disclosed as a fixed point-in-time snapshot). The separate `/screener/fundamental/*` clients are a dead duplicate (no consumers) |
 | Credential rotation (`rotation/status|schedule|rotate-now`) | ✅ | **Mounted (Phase 1 G5)** behind the G9 operator-session write guard. `CredentialsRotator` runs over `flinttrade_core.native_rotation.NativeSessionRefresher` — a real per-selector `refresh_token` hook (Dhan renew-in-place via `RenewToken`, vault-credential replay for the rest, raises on failure so `rotate-now` reports honestly). Active registered native adapters get the daily 08:05 IST refresh job (armed on the serve path); stale coming-soon selectors such as Kotak Neo do not schedule false refresh work. |
 | Native-SDK **order execution** (R13/R14) | 🟡 | Dhan and Upstox SDK-backed native paths plus INDmoney, Kotak Neo, and Groww REST/native writes are mapped and gated; INDmoney, Kotak Neo, and Groww remain not connectable. INDmoney's fail-closed emergency planner is locally verified, but restart-time regular/smart-parent discrimination, a broker-atomic reduce-only close primitive, and funded/live-market order-safety proof remain. Kotak Neo's fail-closed planner is locally verified, but live login/read and order-safety proof remain. Groww now has approved-key login/account-read proof but still needs market-data/API permission, static-IP, and order-safety proof before promotion. Funded live order placement remains unproven until market/funds conditions allow a live broker write probe. |
-| n8n bridge (health / workflows / webhook trigger) | ✅ | Automate → "n8n Bridge" section (advanced skill tier) wires all five clients (health badge, activate/deactivate with surfaced failures, manual webhook trigger); honest offline + missing-API-key states; `N8N_HOST` is read by the bridge and documented with `N8N_API_KEY` in `.env.example` |
 | Overscoped / dead frontend clients | — | Admin user-CRUD (single-principal app → out of scope), QuestDB browser-REST, OTP pair — removal candidates |
 
 ---

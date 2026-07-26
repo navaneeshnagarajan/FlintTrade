@@ -162,7 +162,9 @@ function ArbitrageScannerWidget() {
   const response: ArbitrageScanResponse | undefined = isConnected
     ? live
     : { is_sample_data: true, scan: SAMPLE_ARBITRAGE_SCAN };
-  const isSample = response?.is_sample_data === true;
+  // Fail closed: a present payload must say `is_sample_data: false` to be
+  // labelled live. A missing flag reads as sample, not as real.
+  const isSample = response != null && response.is_sample_data !== false;
   const isRealEmptyScan =
     response !== undefined &&
     !response.is_sample_data &&

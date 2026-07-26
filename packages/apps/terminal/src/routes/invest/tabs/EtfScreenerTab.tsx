@@ -481,7 +481,7 @@ export function EtfScreenerTab() {
 
   const columns = useMemo(() => buildColumns(), []);
 
-  const isDemo = isError || (!isLoading && (!data || data.is_sample_data));
+  const isDemo = isError || (!isLoading && (!data || data.is_sample_data !== false));
   const rawRows = data?.etfs ?? DEMO_ROWS;
 
   const filteredRows = useMemo(() => {

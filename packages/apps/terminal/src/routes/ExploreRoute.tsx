@@ -309,7 +309,7 @@ function AutomatePreview() {
       </div>
       <div className="flex items-center justify-between rounded-md bg-surface-base px-2.5 py-2.5 text-xs">
         <div>
-          <div className="text-text-primary font-medium">TradingView Webhook</div>
+          <div className="text-text-primary font-medium">Webhook Flows</div>
           <div className="text-xxs text-text-muted">54-node flow builder</div>
         </div>
         <Badge className="bg-neutral-bg text-neutral-text text-xxs border-0">

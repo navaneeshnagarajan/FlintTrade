@@ -1032,7 +1032,7 @@ def kill_switch_reset() -> tuple[Any, int]:
 # Webhooks
 # ------------------------------------------------------------------
 
-_WEBHOOK_SOURCES = ("tradingview", "chartink", "gocharting", "custom")
+_WEBHOOK_SOURCES = ("custom",)
 _WEBHOOK_REGISTRY_KEY = "automation.webhooks"
 
 

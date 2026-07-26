@@ -2,7 +2,7 @@
  * SectorRotationTab.test.tsx — render tests for the sector rotation tab.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -60,12 +60,48 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { SectorRotationTab } from "../SectorRotationTab";
+import { useQuery } from "@tanstack/react-query";
+
+const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
+
+const NO_DATA = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() };
+
+const LIVE_SECTOR = {
+  symbol: "NIFTYIT",
+  name: "Nifty IT",
+  change_1d: 1.24,
+  change_1w: 3.10,
+  change_1m: 6.80,
+  change_3m: 12.40,
+  change_6m: 18.20,
+  change_1y: 32.10,
+  market_cap_cr: 980000,
+  momentum_score: 82,
+  quadrant: "leading",
+};
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("SectorRotationTab", () => {
+  beforeEach(() => {
+    mockUseQuery.mockReturnValue(NO_DATA);
+  });
+
+  it("keeps the demo banner when the response omits is_sample_data", () => {
+    // Provenance fails closed — an absent flag is sample, never live.
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { sectors: [LIVE_SECTOR] } });
+    render(<SectorRotationTab />);
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
+  it("drops the demo banner only on an explicit is_sample_data: false", () => {
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, sectors: [LIVE_SECTOR] } });
+    render(<SectorRotationTab />);
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+  });
+
   it("renders the section heading", () => {
     render(<SectorRotationTab />);
     expect(screen.getByText("Sector Rotation")).toBeInTheDocument();

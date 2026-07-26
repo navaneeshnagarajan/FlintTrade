@@ -9,12 +9,12 @@ import "dockview-react/dist/styles/dockview.css";
 import {
   CandlestickChart,
   FileEdit,
-  LayoutDashboard,
   LayoutGrid,
   Layers,
   ShieldOff,
   Star,
   Table2,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLayoutStore } from "@/stores/layoutStore";
@@ -247,7 +247,11 @@ function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): st
 
 /**
  * Apply the beginner-friendly 5-widget layout:
- * Dashboard, Chart, Watchlist, OrderPad, Positions — simple top/bottom split.
+ * Index Strip, Chart, Watchlist, OrderPad, Positions — an always-visible
+ * index strip on top, then a simple left/right split. The strip replaces the
+ * retired Dashboard widget (its positions/orders tables and funds cards were
+ * duplicates of the Positions, Orders and Risk widgets; the index cards were
+ * the part a beginner layout actually needs at a glance).
  */
 function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
   const ts = Date.now();
@@ -255,9 +259,17 @@ function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
   const watchlistId = `watchlist-${ts}-b`;
   const orderpadId = `orderpad-${ts}-c`;
   const positionsId = `positions-${ts}-d`;
-  const dashboardId = `dashboard-${ts}-e`;
+  const indexStripId = `indexstrip-${ts}-e`;
 
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
+
+  api.addPanel({
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
+    position: { referencePanel: chartId, direction: "above" },
+    initialHeight: 150,
+  });
 
   api.addPanel({
     id: watchlistId,
@@ -281,23 +293,22 @@ function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 200,
   });
-
-  api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
-    position: { referencePanel: positionsId, direction: "within" },
-  });
 }
 
 // Full-page tools available from the TOOLS dropdown on /trade.
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
 // are full routes now and are no longer overlaid on the /trade canvas.
 // "settings" navigates to /settings (handled in flinttrade:open-tool event listener).
-const tools: Omit<Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>, "settings"> = {
+// "market-intelligence" is unmounted (ruling D4): every tab it carried is served
+// by a Dockview widget now — Market Overview, OI Analytics, Dealer Gamma, IV
+// Smile & Skew, Correlation Matrix and Delivery Data. The id stays in ToolId
+// only so a stale saved value cannot fail to type-check; nothing resolves it,
+// so `ToolComponent` is undefined and no overlay opens.
+const tools: Omit<
+  Record<ToolId, React.LazyExoticComponent<React.ComponentType<{ onClose: () => void }>>>,
+  "settings" | "market-intelligence"
+> = {
   "trade-journal": lazy(() => import("../tools/TradeJournal/TradeJournalTool")),
-  "pnl-dashboard": lazy(() => import("../tools/PnLDashboard/PnLDashboardTool")),
-  "market-intelligence": lazy(() => import("../tools/MarketIntelligence/MarketIntelligenceTool")),
 };
 
 const COMPACT_TRADE_BREAKPOINT = 768;
@@ -322,7 +333,7 @@ function useCompactTradeWorkspace(): boolean {
   return isCompact;
 }
 
-type CompactTradeWidgetId = "chart" | "watchlist" | "orderpad" | "positions" | "dashboard";
+type CompactTradeWidgetId = "chart" | "watchlist" | "orderpad" | "positions" | "indexstrip";
 
 const COMPACT_TRADE_WIDGETS: Array<{
   id: CompactTradeWidgetId;
@@ -333,7 +344,7 @@ const COMPACT_TRADE_WIDGETS: Array<{
   { id: "watchlist", label: "Watchlist", Icon: Star },
   { id: "orderpad", label: "Order Pad", Icon: FileEdit },
   { id: "positions", label: "Positions", Icon: Table2 },
-  { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+  { id: "indexstrip", label: "Indices", Icon: TrendingUp },
 ];
 
 function TradeCompactWorkspace({
@@ -597,7 +608,7 @@ export default function TerminalRoute() {
         }
       } else {
         // No layout saved yet — apply the skill-appropriate default preset.
-        // Beginner: 5 core widgets (dashboard, chart, watchlist, orderpad, positions)
+        // Beginner: 5 core widgets (indexstrip, chart, watchlist, orderpad, positions)
         // Intermediate: Market Watch preset
         // Advanced: Scalper Zone preset
         const skillPreset = getDefaultPresetId(level);
@@ -650,7 +661,7 @@ export default function TerminalRoute() {
     };
   }, []);
 
-  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Journal" link,
+  // Listen for the custom event dispatched by DailyWelcome's "Open Trade Review" link,
   // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).
   useEffect(() => {
     function onOpenTool(e: Event) {

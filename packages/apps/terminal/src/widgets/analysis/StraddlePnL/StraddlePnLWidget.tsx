@@ -55,7 +55,9 @@ function carriesSampleFlag(payload: unknown): boolean {
   return (
     typeof payload === "object" &&
     payload !== null &&
-    (payload as { is_sample_data?: unknown }).is_sample_data === true
+    // Fail closed: only an explicit `false` counts as live, so a payload
+    // that omits the flag entirely is treated as sample rather than real.
+    (payload as { is_sample_data?: unknown }).is_sample_data !== false
   );
 }
 

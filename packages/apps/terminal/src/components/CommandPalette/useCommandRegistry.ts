@@ -45,23 +45,35 @@ export interface GroupedCommands {
 
 const RECENT_KEY = "flinttrade:recentCommands";
 const MAX_RECENT = 5;
-const BEGINNER_WIDGET_IDS = new Set([
-  "dashboard",
+/**
+ * Skill-tier gates for the widget commands. Both are keyed by catalogue id, so
+ * a retired or invented id does not degrade gracefully — it silently removes a
+ * widget from that tier. `useCommandRegistry.test.ts` pins every id against
+ * `widgetCatalog`; exported for that guard.
+ */
+export const BEGINNER_WIDGET_IDS = new Set([
+  "indexstrip",
   "chart",
   "watchlist",
   "orderpad",
   "positions",
 ]);
-const INTERMEDIATE_WIDGET_IDS = new Set([
+export const INTERMEDIATE_WIDGET_IDS = new Set([
   ...BEGINNER_WIDGET_IDS,
   "orders",
   "ticker",
-  "depth",
+  // `depth` was retired into `orderladder` by the widget merge. Because this
+  // gate is by id, leaving the retired id here removed the DOM / Ladder from
+  // the intermediate tier entirely — the retired id matches no catalogue entry
+  // and the canonical was never added. Same failure `useSkillContent.ts` fixed
+  // for its own list.
+  "orderladder",
   "optionchain",
   "greeks",
-  "pnl",
+  // `pnl` was never a catalogue id — the P&L surface is `pnlmonitor`,
+  // so this tier silently shipped one widget short of its intent.
+  "pnlmonitor",
   "riskdashboard",
-  "mtmmonitor",
   "alerts",
 ]);
 
@@ -168,36 +180,12 @@ export function useCommandRegistry() {
       },
       {
         id:          "tool:trade-journal",
-        title:       "Open Trade Journal",
+        title:       "Open Trade Review",
         description: "Review and annotate your trades",
         category:    "tool",
         action:      () => {
           window.dispatchEvent(
             new CustomEvent("flinttrade:open-tool", { detail: { toolId: "trade-journal" } }),
-          );
-        },
-      },
-      {
-        id:          "tool:pnl-dashboard",
-        title:       "Open P&L Dashboard",
-        description: "Detailed profit and loss analytics",
-        category:    "tool",
-        action:      () => {
-          window.dispatchEvent(
-            new CustomEvent("flinttrade:open-tool", { detail: { toolId: "pnl-dashboard" } }),
-          );
-        },
-      },
-      {
-        id:          "tool:market-intelligence",
-        title:       "Open Market Intelligence",
-        description: "AI-powered market insights",
-        category:    "tool",
-        action:      () => {
-          window.dispatchEvent(
-            new CustomEvent("flinttrade:open-tool", {
-              detail: { toolId: "market-intelligence" },
-            }),
           );
         },
       },

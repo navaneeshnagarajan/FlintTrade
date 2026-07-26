@@ -4,9 +4,10 @@ Signed relays call these via ``/ft-api/v1/webhook/*``; the WSGI prefix stripper
 in app.py rewrites to ``/v1/webhook/*`` before Flask dispatch. Direct provider
 delivery does not produce the required HMAC/nonce/timestamp envelope.
 
-- ``POST /ft-api/v1/webhook/<source>`` — receive, verify, parse, and
-  dispatch a webhook from ``tradingview``, ``chartink``, ``gocharting``, or ``custom``.
-- ``POST /ft-api/v1/webhook/<source>/<id>`` — named endpoint form used by the
+- ``POST /ft-api/v1/webhook/custom`` — receive, verify, parse, and
+  dispatch a generic JSON webhook. Retired provider sources (``tradingview``,
+  ``chartink``, ``gocharting``) now answer 404.
+- ``POST /ft-api/v1/webhook/custom/<id>`` — named endpoint form used by the
   Flows panel registry; handled by the same receiver path.
 - ``GET  /ft-api/v1/webhook/log`` — return recent webhook history.
 
@@ -115,8 +116,14 @@ def _get_receiver() -> WebhookReceiver:
 # ---------------------------------------------------------------------------
 
 
-def _parse_request_body() -> tuple[bytes, dict[str, Any] | str | None]:
+def _parse_request_body() -> tuple[bytes, dict[str, Any] | None]:
     """Read the raw request body and attempt JSON decoding.
+
+    Only a JSON OBJECT is accepted. The plain-text branch existed for the
+    ChartInk CSV and TradingView text payloads; with those providers removed
+    (ruling D3) a non-JSON body has no parser, and returning the raw string
+    let it travel as far as the dispatcher before failing with an unrelated
+    422. It now fails at the door with an accurate message.
 
     Returns:
         Tuple of (raw_bytes, parsed_dict_or_None).
@@ -131,7 +138,7 @@ def _parse_request_body() -> tuple[bytes, dict[str, Any] | str | None]:
     try:
         decoded = json.loads(text)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return raw, text
+        return raw, None
     return raw, decoded if isinstance(decoded, dict) else None
 
 
@@ -236,7 +243,7 @@ def _run_dispatch(receiver: WebhookReceiver, payload: WebhookPayload) -> dict[st
 # ---------------------------------------------------------------------------
 
 
-_VALID_SOURCES = frozenset({"tradingview", "chartink", "gocharting", "custom"})
+_VALID_SOURCES = frozenset({"custom"})
 
 
 @webhook_bp.route("/<source>", methods=["POST"])
@@ -245,7 +252,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
     """Receive a webhook from an external source, verify, parse, and dispatch.
 
     Path parameters:
-        source: One of ``tradingview``, ``chartink``, ``gocharting``, ``custom``.
+        source: ``custom`` (retired provider sources answer 404).
         webhook_id: Optional named endpoint slug from the UI registry.
 
     Headers (optional):
@@ -285,7 +292,7 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
     if body_dict is None:
         return jsonify({
             "status": "error",
-            "message": "Request body must be a JSON object or supported text payload",
+            "message": "Request body must be a JSON object",
         }), 400
 
     # Signature verification
@@ -315,16 +322,9 @@ def receive_webhook(source: str, webhook_id: str | None = None) -> tuple[Respons
 
     # Parse
     try:
-        if source == "tradingview":
-            payload = receiver.parse_tradingview(body_dict)
-        elif source == "chartink":
-            payload = receiver.parse_chartink(body_dict)
-        elif source == "gocharting":
-            payload = receiver.parse_gocharting(body_dict)
-        else:
-            if not isinstance(body_dict, dict):
-                raise ValueError("Custom webhooks require a JSON object")
-            payload = receiver.parse_custom(body_dict)
+        if not isinstance(body_dict, dict):
+            raise ValueError("Custom webhooks require a JSON object")
+        payload = receiver.parse_custom(body_dict)
     except Exception as exc:
         logger.warning("Webhook parse error for source=%s: %s", source, exc)
         return jsonify({"status": "error", "message": "Webhook parse failed"}), 422

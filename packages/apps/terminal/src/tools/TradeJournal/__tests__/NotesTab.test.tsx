@@ -23,12 +23,10 @@ vi.mock("@/stores/modeStore", () => ({
 
 const mockGetDailyNote = vi.fn();
 const mockPutDailyNote = vi.fn();
-const mockListDailyNotes = vi.fn();
 vi.mock("@/services/ftApi.journal", () => ({
   getDailyNote: (date: string) => mockGetDailyNote(date) as Promise<unknown>,
   putDailyNote: (date: string, content: string) =>
     mockPutDailyNote(date, content) as Promise<unknown>,
-  listDailyNotes: () => mockListDailyNotes() as Promise<unknown>,
 }));
 
 vi.mock("@/components/ui/textarea", () => ({
@@ -122,7 +120,6 @@ describe("NotesTab", () => {
     mockGetDailyNote.mockImplementation((date: string) =>
       Promise.resolve({ date, content: "", updated_at: null }),
     );
-    mockListDailyNotes.mockResolvedValue([]);
     mockPutDailyNote.mockImplementation((date: string, content: string) =>
       Promise.resolve({ date, content, updated_at: "2026-07-20T10:00:00" }),
     );
@@ -318,7 +315,6 @@ describe("NotesTab", () => {
     // Allow any (incorrect) query or import kick-off to surface.
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(mockGetDailyNote).not.toHaveBeenCalled();
-    expect(mockListDailyNotes).not.toHaveBeenCalled();
     expect(mockPutDailyNote).not.toHaveBeenCalled();
     expect(localStorageMock.getItem("flinttrade_journal_notes_2026-07-01")).toBe(
       "legacy note",

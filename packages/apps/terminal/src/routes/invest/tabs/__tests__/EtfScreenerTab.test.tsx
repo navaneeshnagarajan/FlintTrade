@@ -2,7 +2,7 @@
  * EtfScreenerTab.test.tsx — render tests for the ETF screener tab.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -60,12 +60,34 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
 // ---------------------------------------------------------------------------
 
 import { EtfScreenerTab } from "../EtfScreenerTab";
+import { useQuery } from "@tanstack/react-query";
+
+const mockUseQuery = useQuery as unknown as ReturnType<typeof vi.fn>;
+
+const NO_DATA = { data: undefined, isLoading: false, isError: false, refetch: vi.fn() };
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("EtfScreenerTab", () => {
+  beforeEach(() => {
+    mockUseQuery.mockReturnValue(NO_DATA);
+  });
+
+  it("keeps the demo banner when the response omits is_sample_data", () => {
+    // Provenance fails closed — an absent flag is sample, never live.
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { etfs: [] } });
+    render(<EtfScreenerTab />);
+    expect(screen.getByTestId("demo-banner")).toBeInTheDocument();
+  });
+
+  it("drops the demo banner only on an explicit is_sample_data: false", () => {
+    mockUseQuery.mockReturnValue({ ...NO_DATA, data: { is_sample_data: false, etfs: [] } });
+    render(<EtfScreenerTab />);
+    expect(screen.queryByTestId("demo-banner")).not.toBeInTheDocument();
+  });
+
   it("renders the section heading", () => {
     render(<EtfScreenerTab />);
     expect(screen.getByText("ETF Screener")).toBeInTheDocument();

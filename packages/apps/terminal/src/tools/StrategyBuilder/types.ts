@@ -50,71 +50,21 @@ export type Underlying = {
   strikeGap: number;
 };
 
-// STRATEGY_TEMPLATES adapted from openalgo-chart/src/services/strategyTemplates.js
-export const STRATEGY_TEMPLATES: Record<
-  string,
-  { name: string; description: string; legs: { action: Direction; optionType: OptionType; strikeOffset: number; lots: number }[] }
-> = {
-  straddle: {
-    name: "Straddle",
-    description: "Buy ATM CE + Buy ATM PE (same strike)",
-    legs: [
-      { action: "BUY", optionType: "CE", strikeOffset: 0, lots: 1 },
-      { action: "BUY", optionType: "PE", strikeOffset: 0, lots: 1 },
-    ],
-  },
-  strangle: {
-    name: "Strangle",
-    description: "Buy OTM CE + Buy OTM PE (different strikes)",
-    legs: [
-      { action: "BUY", optionType: "CE", strikeOffset:  1, lots: 1 },
-      { action: "BUY", optionType: "PE", strikeOffset: -1, lots: 1 },
-    ],
-  },
-  "short-straddle": {
-    name: "Short Straddle",
-    description: "Sell ATM CE + Sell ATM PE (theta decay)",
-    legs: [
-      { action: "SELL", optionType: "CE", strikeOffset: 0, lots: 1 },
-      { action: "SELL", optionType: "PE", strikeOffset: 0, lots: 1 },
-    ],
-  },
-  "iron-condor": {
-    name: "Iron Condor",
-    description: "Sell OTM strangle, buy protection",
-    legs: [
-      { action: "BUY",  optionType: "PE", strikeOffset: -2, lots: 1 },
-      { action: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
-      { action: "SELL", optionType: "CE", strikeOffset:  1, lots: 1 },
-      { action: "BUY",  optionType: "CE", strikeOffset:  2, lots: 1 },
-    ],
-  },
-  butterfly: {
-    name: "Butterfly",
-    description: "Buy ITM, Sell 2 ATM, Buy OTM CE",
-    legs: [
-      { action: "BUY",  optionType: "CE", strikeOffset: -1, lots: 1 },
-      { action: "SELL", optionType: "CE", strikeOffset:  0, lots: 2 },
-      { action: "BUY",  optionType: "CE", strikeOffset:  1, lots: 1 },
-    ],
-  },
-  "bull-call-spread": {
-    name: "Bull Call Spread",
-    description: "Buy lower strike CE, Sell higher strike CE",
-    legs: [
-      { action: "BUY",  optionType: "CE", strikeOffset: 0, lots: 1 },
-      { action: "SELL", optionType: "CE", strikeOffset: 1, lots: 1 },
-    ],
-  },
-  "bear-put-spread": {
-    name: "Bear Put Spread",
-    description: "Buy higher strike PE, Sell lower strike PE",
-    legs: [
-      { action: "BUY",  optionType: "PE", strikeOffset:  0, lots: 1 },
-      { action: "SELL", optionType: "PE", strikeOffset: -1, lots: 1 },
-    ],
-  },
-};
+// The option-strategy template catalogue lives in `lib/strategyTemplates` — one
+// definition shared by this builder, the StrategyTemplates widget, and the
+// OptionChain LegBuilder. It is re-exported here only so existing importers of
+// `./types` keep working; do not add strategy rows to this file.
+//
+// The former local copy keyed a LONG straddle/strangle as `straddle`/`strangle`
+// while the LegBuilder keyed a SHORT one under the same ids. Both directions now
+// carry explicit ids (`long-straddle` / `short-straddle`, …).
+export {
+  LOADABLE_STRATEGY_TEMPLATES,
+  STRATEGY_TEMPLATES,
+  builderLegsFor,
+  getStrategyTemplate,
+} from "@/lib/strategyTemplates";
+export type { StrategyTemplate, StrategyTemplateLeg } from "@/lib/strategyTemplates";
 
 // Exchange codes aligned with FlintTrade multi-exchange support.
 // Mirrors lib/tradingConstants.EXCHANGES — including the new NCO,

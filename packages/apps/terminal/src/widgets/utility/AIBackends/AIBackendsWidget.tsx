@@ -35,6 +35,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   getAgentBackends,
   runAgent,
   type AgentEvent,
@@ -157,6 +167,14 @@ export default function AIBackendsWidget() {
     abortRef.current = null;
     setRunning(false);
   }, []);
+
+  /**
+   * Backend awaiting confirmation. Running an agent launches a real local CLI
+   * process (codex, hermes, antigravity) with operator-supplied text, from
+   * inside a trading terminal. That is a host-level side effect, so it asks
+   * first — the same courtesy the order tickets extend before they place.
+   */
+  const [pendingRun, setPendingRun] = useState<BackendItem | null>(null);
 
   const start = useCallback(
     async (id: string) => {
@@ -349,7 +367,7 @@ export default function AIBackendsWidget() {
                           <Button
                             size="sm"
                             className="h-7 px-3 text-xs"
-                            onClick={() => void start(backend.id)}
+                            onClick={() => setPendingRun(backend)}
                             disabled={running || !prompt.trim()}
                           >
                             {running ? (
@@ -402,6 +420,38 @@ export default function AIBackendsWidget() {
           )}
         </>
       )}
+
+      {/* Running an agent starts a real local process with operator-supplied
+          text. Ask before doing it. */}
+      <AlertDialog open={pendingRun !== null} onOpenChange={(open) => { if (!open) setPendingRun(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Run {pendingRun?.display_name} on this machine?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This starts {pendingRun?.display_name} as a local process with the
+              instruction you typed, and it runs with your own permissions — it
+              can read and change files on this machine. Nothing is sent to a
+              broker and no order can be placed from here, but review the
+              instruction before continuing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded border border-border-subtle bg-surface-card px-2.5 py-2 text-xs text-text-secondary whitespace-pre-wrap break-words max-h-40 overflow-auto">
+            {prompt.trim()}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const backend = pendingRun;
+                setPendingRun(null);
+                if (backend) void start(backend.id);
+              }}
+            >
+              Run agent
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

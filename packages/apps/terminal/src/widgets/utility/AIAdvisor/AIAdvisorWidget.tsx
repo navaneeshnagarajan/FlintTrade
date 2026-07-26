@@ -32,6 +32,8 @@ import { useAIConversationStore } from "@/stores/aiConversationStore";
 import { useAuthStore } from "@/stores/authStore";
 import { getAdvisorBase } from "@/services/advisorApi";
 import { placeOrder } from "@/services/api";
+import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
+import { useModeStore } from "@/stores/modeStore";
 import type { PlaceOrderParams } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -160,8 +162,12 @@ export function normaliseToolEndpoint(endpoint: string): string {
  *
  * Every core field must be explicit — an AI-proposed order gets no silent
  * defaults. Returns null (→ honest refusal) when anything is missing or
- * malformed; deep validation (price bands, lot size) stays with the backend
- * safety layers.
+ * malformed, including a LIMIT or SL that carries no usable price.
+ *
+ * Band and lot-size validation stays with the backend safety layers, which own
+ * the authoritative contract data. What is checked HERE is what the operator
+ * is being asked to approve: the approval card must not show a plausible order
+ * that no client guard has inspected.
  */
 export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrderParams | null {
   const symbol = typeof payload["symbol"] === "string" ? payload["symbol"].trim() : "";
@@ -201,6 +207,15 @@ export function toPlaceOrderParams(payload: Record<string, unknown>): PlaceOrder
     if (!Number.isFinite(triggerPrice) || triggerPrice < 0) return null;
     params.triggerPrice = triggerPrice;
   }
+
+  // A LIMIT or SL priced at zero passed every check above, because the price
+  // branch only rejects negatives and an absent price is treated as optional.
+  // The operator would have seen "LIMIT" on the approval card with no price
+  // they could sanity-check. This is the one guard the manual tickets apply
+  // that a model-composed order most needs.
+  if (checkPriceForOrderType(orderType as GuardedOrderType, params.price, params.triggerPrice)) {
+    return null;
+  }
   return params;
 }
 
@@ -231,6 +246,14 @@ export async function executeApprovedToolCall(toolCall: ToolCall): Promise<Appro
         `Action not executed: "${toolCall.endpoint}" is not an approvable action. ` +
         "Only order placement through the gated order path can be approved here.",
     };
+  }
+
+  // Read imperatively: this runs from an approval handler, not a render. The
+  // manual tickets all gate on mode, and an approval card is not a substitute
+  // — approving an order in Explore approved something that cannot be placed.
+  const modeBlock = checkOrderEntryMode(useModeStore.getState().mode);
+  if (modeBlock) {
+    return { executed: false, message: `Action not executed: ${modeBlock}.` };
   }
 
   const params = toPlaceOrderParams(toolCall.payload);

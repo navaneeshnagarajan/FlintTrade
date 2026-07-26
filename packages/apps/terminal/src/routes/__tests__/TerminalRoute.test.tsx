@@ -192,7 +192,7 @@ vi.mock("@/layout/widgetFactory", () => ({
     watchlist: () => <div data-testid="compact-widget-watchlist">Watchlist widget</div>,
     orderpad: () => <div data-testid="compact-widget-orderpad">Order Pad widget</div>,
     positions: () => <div data-testid="compact-widget-positions">Positions widget</div>,
-    dashboard: () => <div data-testid="compact-widget-dashboard">Dashboard widget</div>,
+    indexstrip: () => <div data-testid="compact-widget-indexstrip">Index Strip widget</div>,
   },
   widgetCatalog: [
     {
@@ -538,6 +538,18 @@ describe("TerminalRoute", () => {
 
     expect(screen.getByRole("tab", { name: "Order Pad" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("compact-widget-orderpad")).toBeInTheDocument();
+  });
+
+  it("offers the Index Strip (not the retired Dashboard) as the fifth compact tab", () => {
+    setViewportWidth(390);
+    renderTerminalRoute();
+
+    expect(screen.queryByRole("tab", { name: "Dashboard" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Indices" }));
+
+    expect(screen.getByRole("tab", { name: "Indices" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("compact-widget-indexstrip")).toBeInTheDocument();
   });
 
   it("supports arrow-key navigation across compact workspace tabs", () => {

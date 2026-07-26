@@ -199,11 +199,26 @@ export const getPendingOrders = () =>
     (r) => r.orders,
   );
 
-export const approveOrder = (id: string) =>
-  post<{ status: string }>(
+/**
+ * Approve a queued order — this releases it to the broker, so it is a live
+ * order dispatch and fails closed on an unready native write target exactly
+ * as `postOrder` does. Approving while the target is still hydrating could
+ * send the order to `brokers.execution.default` instead of the account the
+ * operator is looking at.
+ */
+export const approveOrder = async (id: string) => {
+  const mode = useModeStore.getState().mode;
+  const apiKey = useConnectionStore.getState().apiKey;
+  assertNativeWriteTargetReadyOrThrow(mode, apiKey);
+  return post<{ status: string }>(
     "action-center/approve/" + encodeURIComponent(id),
   );
+};
 
+/**
+ * Reject a queued order. Not gated: refusing to send an order is
+ * risk-reducing and must always be available.
+ */
 export const rejectOrder = (id: string) =>
   post<{ status: string }>(
     "action-center/reject/" + encodeURIComponent(id),
@@ -306,7 +321,16 @@ export const getSmartRouteJob = (jobId: string) =>
 
 export const listSmartRouteJobs = () => get<SmartRouteJob[]>("orders/smart-route");
 
-/** Request cancellation of a running smart-route job (honoured before the next child). */
+/**
+ * Request cancellation of a running smart-route job (honoured before the next
+ * child order).
+ *
+ * Deliberately NOT write-target gated, for the same reason as `cancelBracket`:
+ * stopping a job that is still slicing real orders into the market is
+ * risk-reducing, and must never be blocked by native write-target hydration.
+ * The job already carries the selector its children are placed on, so there is
+ * no target to resolve here.
+ */
 export const cancelSmartRoute = (jobId: string) =>
   post<SmartRouteJob>("orders/smart-route/" + encodeURIComponent(jobId) + "/cancel");
 

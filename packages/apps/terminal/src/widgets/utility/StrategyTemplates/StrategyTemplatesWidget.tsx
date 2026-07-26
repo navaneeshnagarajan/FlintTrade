@@ -2,7 +2,9 @@
  * StrategyTemplatesWidget — Option strategy template library for FlintTrade.
  *
  * Features:
- *   - Grid of 12 option strategy template cards
+ *   - Grid of strategy template cards, read from the single shared catalogue
+ *     `lib/strategyTemplates` (the Lab builder and the OptionChain LegBuilder
+ *     read the same rows — there is exactly one definition of "Iron Condor")
  *   - Each card: name, legs summary, max profit, max loss, breakeven, market outlook
  *   - Loadable cards stash the template via templateBridge, dispatch the
  *     load event, and navigate to the Lab's Options Builder
@@ -18,216 +20,23 @@ import { BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
+  builderLegsFor,
+  STRATEGY_TEMPLATES,
+  type StrategyOutlook,
+  type StrategyTemplate,
+  type StrategyTemplateLeg,
+} from "@/lib/strategyTemplates";
+import {
   LOAD_TEMPLATE_EVENT,
   stashPendingTemplate,
   type BuilderTemplate,
-  type BuilderTemplateLeg,
 } from "@/tools/StrategyBuilder/templateBridge";
 
 // ---------------------------------------------------------------------------
-// Types & data
+// Types
 // ---------------------------------------------------------------------------
 
-type Outlook = "bullish" | "bearish" | "neutral" | "volatile";
-
-interface StrategyLeg {
-  action: "buy" | "sell";
-  type: "call" | "put" | "stock";
-  strike?: "ATM" | "OTM" | "ITM" | string;
-  expiry?: "near" | "far";
-  /** Strike offset from ATM in strike-gap units — required for builder loading. */
-  strikeOffset?: number;
-}
-
-interface StrategyTemplate {
-  id: string;
-  name: string;
-  legs: StrategyLeg[];
-  maxProfit: string;
-  maxLoss: string;
-  breakeven: string;
-  outlook: Outlook;
-  description: string;
-}
-
-/**
- * A template is loadable into the Options Builder only when every leg is a
- * single-expiry option with an explicit strike offset. Stock legs and
- * calendar (multi-expiry) legs have no representation in the builder.
- */
-function builderLegsFor(template: StrategyTemplate): BuilderTemplateLeg[] | null {
-  const legs: BuilderTemplateLeg[] = [];
-  for (const leg of template.legs) {
-    if (leg.type === "stock" || leg.expiry !== undefined || leg.strikeOffset === undefined) {
-      return null;
-    }
-    legs.push({
-      action: leg.action === "buy" ? "BUY" : "SELL",
-      optionType: leg.type === "call" ? "CE" : "PE",
-      strikeOffset: leg.strikeOffset,
-      lots: 1,
-    });
-  }
-  return legs.length > 0 ? legs : null;
-}
-
-const TEMPLATES: StrategyTemplate[] = [
-  {
-    id: "long_call",
-    name: "Long Call",
-    legs: [{ action: "buy", type: "call", strike: "ATM", strikeOffset: 0 }],
-    maxProfit: "Unlimited",
-    maxLoss: "Premium paid",
-    breakeven: "Strike + Premium",
-    outlook: "bullish",
-    description: "Right to buy. Profits when price rises above breakeven.",
-  },
-  {
-    id: "long_put",
-    name: "Long Put",
-    legs: [{ action: "buy", type: "put", strike: "ATM", strikeOffset: 0 }],
-    maxProfit: "Strike − Premium",
-    maxLoss: "Premium paid",
-    breakeven: "Strike − Premium",
-    outlook: "bearish",
-    description: "Right to sell. Profits when price falls below breakeven.",
-  },
-  {
-    id: "bull_call_spread",
-    name: "Bull Call Spread",
-    legs: [
-      { action: "buy", type: "call", strike: "ATM", strikeOffset: 0 },
-      { action: "sell", type: "call", strike: "OTM", strikeOffset: 1 },
-    ],
-    maxProfit: "Width − Net debit",
-    maxLoss: "Net debit",
-    breakeven: "Long strike + Net debit",
-    outlook: "bullish",
-    description: "Capped profit, reduced cost vs long call. Moderately bullish.",
-  },
-  {
-    id: "bear_put_spread",
-    name: "Bear Put Spread",
-    legs: [
-      { action: "buy", type: "put", strike: "ATM", strikeOffset: 0 },
-      { action: "sell", type: "put", strike: "OTM", strikeOffset: -1 },
-    ],
-    maxProfit: "Width − Net debit",
-    maxLoss: "Net debit",
-    breakeven: "Long strike − Net debit",
-    outlook: "bearish",
-    description: "Capped profit, reduced cost vs long put. Moderately bearish.",
-  },
-  {
-    id: "straddle",
-    name: "Straddle",
-    legs: [
-      { action: "buy", type: "call", strike: "ATM", strikeOffset: 0 },
-      { action: "buy", type: "put", strike: "ATM", strikeOffset: 0 },
-    ],
-    maxProfit: "Unlimited",
-    maxLoss: "Total premium",
-    breakeven: "ATM ± Total premium",
-    outlook: "volatile",
-    description: "Profits from large moves in either direction. High cost.",
-  },
-  {
-    id: "strangle",
-    name: "Strangle",
-    legs: [
-      { action: "buy", type: "call", strike: "OTM", strikeOffset: 1 },
-      { action: "buy", type: "put", strike: "OTM", strikeOffset: -1 },
-    ],
-    maxProfit: "Unlimited",
-    maxLoss: "Total premium",
-    breakeven: "Strikes ± Total premium",
-    outlook: "volatile",
-    description: "Cheaper than straddle. Needs larger move to profit.",
-  },
-  {
-    id: "iron_condor",
-    name: "Iron Condor",
-    legs: [
-      { action: "sell", type: "call", strike: "OTM", strikeOffset: 1 },
-      { action: "buy", type: "call", strike: "OTM", strikeOffset: 2 },
-      { action: "sell", type: "put", strike: "OTM", strikeOffset: -1 },
-      { action: "buy", type: "put", strike: "OTM", strikeOffset: -2 },
-    ],
-    maxProfit: "Net credit",
-    maxLoss: "Width − Net credit",
-    breakeven: "Short strikes ± Net credit",
-    outlook: "neutral",
-    description: "Profits when price stays within a range. Classic range trade.",
-  },
-  {
-    id: "butterfly",
-    name: "Butterfly",
-    legs: [
-      { action: "buy", type: "call", strike: "ITM", strikeOffset: -1 },
-      { action: "sell", type: "call", strike: "ATM", strikeOffset: 0 },
-      { action: "sell", type: "call", strike: "ATM", strikeOffset: 0 },
-      { action: "buy", type: "call", strike: "OTM", strikeOffset: 1 },
-    ],
-    maxProfit: "Width − Net debit",
-    maxLoss: "Net debit",
-    breakeven: "Wings ± Net debit",
-    outlook: "neutral",
-    description: "Max profit at ATM strike at expiry. Tight range strategy.",
-  },
-  {
-    id: "covered_call",
-    name: "Covered Call",
-    legs: [
-      { action: "buy", type: "stock" },
-      { action: "sell", type: "call", strike: "OTM" },
-    ],
-    maxProfit: "Strike − Entry + Premium",
-    maxLoss: "Entry − Premium",
-    breakeven: "Entry − Premium",
-    outlook: "neutral",
-    description: "Generates income on held stock. Caps upside above strike.",
-  },
-  {
-    id: "protective_put",
-    name: "Protective Put",
-    legs: [
-      { action: "buy", type: "stock" },
-      { action: "buy", type: "put", strike: "ATM" },
-    ],
-    maxProfit: "Unlimited",
-    maxLoss: "Entry − Strike + Premium",
-    breakeven: "Entry + Premium",
-    outlook: "bullish",
-    description: "Insurance for long stock position. Limits downside loss.",
-  },
-  {
-    id: "collar",
-    name: "Collar",
-    legs: [
-      { action: "buy", type: "stock" },
-      { action: "buy", type: "put", strike: "OTM" },
-      { action: "sell", type: "call", strike: "OTM" },
-    ],
-    maxProfit: "Call strike − Entry + Net credit",
-    maxLoss: "Entry − Put strike − Net credit",
-    breakeven: "Entry + Net debit",
-    outlook: "neutral",
-    description: "Protects gains on stock. Sacrifices upside for downside protection.",
-  },
-  {
-    id: "calendar_spread",
-    name: "Calendar Spread",
-    legs: [
-      { action: "sell", type: "call", strike: "ATM", expiry: "near" },
-      { action: "buy", type: "call", strike: "ATM", expiry: "far" },
-    ],
-    maxProfit: "Time decay differential",
-    maxLoss: "Net debit",
-    breakeven: "Near strike ± Range",
-    outlook: "neutral",
-    description: "Exploits time decay difference between expiries. Low-directional.",
-  },
-];
+type Outlook = StrategyOutlook;
 
 // ---------------------------------------------------------------------------
 // Outlook config
@@ -245,7 +54,21 @@ const OUTLOOK_CONFIG: Record<Outlook, { label: string; className: string }> = {
 // ---------------------------------------------------------------------------
 
 interface LegsProps {
-  legs: StrategyLeg[];
+  legs: readonly StrategyTemplateLeg[];
+}
+
+/**
+ * Render one leg chip. The lot multiplier is shown whenever it exceeds 1 — the
+ * butterfly's body is a single double-lot leg, and a chip that omitted the ×2
+ * would understate the position by half.
+ */
+function legChipLabel(leg: StrategyTemplateLeg): string {
+  const sign = leg.action === "BUY" ? "+" : "−";
+  const body = leg.optionType === "STOCK"
+    ? "STOCK"
+    : `${leg.strikeLabel ?? ""} ${leg.optionType}`.trim();
+  const mult = leg.lots > 1 ? ` ×${leg.lots}` : "";
+  return `${sign}${body}${mult}`;
 }
 
 function LegsDisplay({ legs }: LegsProps) {
@@ -256,12 +79,12 @@ function LegsDisplay({ legs }: LegsProps) {
           key={i}
           className={cn(
             "text-xxs px-1 py-px rounded border font-mono",
-            leg.action === "buy"
+            leg.action === "BUY"
               ? "bg-profit/10 text-profit border-profit/20"
               : "bg-loss/10 text-loss border-loss/20",
           )}
         >
-          {leg.action === "buy" ? "+" : "−"}{leg.type === "stock" ? "STOCK" : `${leg.strike ?? ""} ${leg.type.toUpperCase()}`}
+          {legChipLabel(leg)}
         </span>
       ))}
     </div>
@@ -369,13 +192,13 @@ function StrategyTemplatesWidget() {
   const filtered = useMemo(
     () =>
       outlookFilter === "all"
-        ? TEMPLATES
-        : TEMPLATES.filter((t) => t.outlook === outlookFilter),
+        ? STRATEGY_TEMPLATES
+        : STRATEGY_TEMPLATES.filter((t) => t.outlook === outlookFilter),
     [outlookFilter],
   );
 
   function handleSelect(id: string) {
-    const tmpl = TEMPLATES.find((t) => t.id === id);
+    const tmpl = STRATEGY_TEMPLATES.find((t) => t.id === id);
     if (!tmpl) return;
     const legs = builderLegsFor(tmpl);
     if (!legs) return;

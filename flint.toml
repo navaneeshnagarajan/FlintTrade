@@ -26,7 +26,7 @@ ditto = { path = "packages/services/ditto", lang = "python", description = "Mult
 automation = { path = "packages/services/automation", lang = "python", description = "ML pipeline, cron, Telegram, OpenClaw bridge, post-market analysis" }
 journal = { path = "packages/services/journal", lang = "python", description = "Trade journal, trade logging, execution analytics, and P&L tracking" }
 gateway = { path = "packages/integrations/gateway", lang = "python", description = "Direct broker connections, adapter pattern, encrypted credentials, WebSocket bridge" }
-webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "TradingView, ChartInk, custom webhooks, and flow builder" }
+webhooks = { path = "packages/integrations/webhooks", lang = "python", description = "Generic HMAC-signed custom webhooks and flow builder" }
 terminal = { path = "packages/apps/terminal", lang = "react", description = "Trading UI — manual orders, automation, option-chain views, OI analysis, DOM, charts" }
 site = { path = "packages/apps/site", lang = "nextjs", description = "Documentation and MCP reference site" }
 desktop = { path = "packages/apps/desktop", lang = "typescript", description = "Electron 40 shell — verified local-source bootstrap, guardian supervision, close-to-tray runtime and four-installer delivery" }

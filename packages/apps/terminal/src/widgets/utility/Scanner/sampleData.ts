@@ -1,9 +1,16 @@
 /**
- * sampleData.ts — sample sector-mover rows for the Pre-Market Scanner's
- * Explore-mode Sectors tab (the only remaining sample surface).
+ * sampleData.ts — Explore-mode sample sector-mover rows.
  *
- * Gap/Volume run real backend prebuilt scans and OI Change consumes the
- * live /v1/oi/unusual surface — their sample fallbacks live server-side.
+ * The Pre-Market Scanner widget that owned this folder was merged into the
+ * Condition Scanner (merge 2.17); its scans were two of the backend's eight
+ * prebuilt keys and its OI tab a third rendering of /v1/oi/unusual. Only this
+ * module survives, because `hooks/useSectorMovers.ts` serves these rows
+ * whenever the live NIFTY 50 quote sweep is unavailable.
+ *
+ * It stays at THIS path deliberately: `hooks/__tests__/useSectorMovers.test.ts`
+ * mocks the specifier `@/widgets/utility/Scanner/sampleData`, so the module
+ * moves with the hook — folded into the market/sector family by the Market
+ * Overview merge — and not before.
  */
 
 // ─── Types ──────────────────────────────────────────────────────────────────────

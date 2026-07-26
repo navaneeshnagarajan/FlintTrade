@@ -43,16 +43,6 @@ export interface TelegramSettings {
   chatId: string;
 }
 
-export interface WhatsAppSettings {
-  enabled: boolean;
-  /** Operator phone in E.164 format (e.g. ``+919876543210``). Display only —
-   * the actual Signal pairing lives in OpenAlgo's admin UI. */
-  phoneE164: string;
-  /** Optional override for OpenAlgo's WhatsApp admin URL.
-   * Defaults to ``/whatsapp`` (resolved against the configured OpenAlgo host). */
-  adminUrl: string;
-}
-
 export interface DataPaths {
   fastStoragePath: string;
   archiveStoragePath: string;
@@ -87,7 +77,6 @@ interface SettingsStore {
   llm: LLMSettings;
   llmSetupPending: boolean;
   telegram: TelegramSettings;
-  whatsapp: WhatsAppSettings;
   dataPaths: DataPaths;
   name: string;
   interests: string[];
@@ -111,7 +100,6 @@ interface SettingsStore {
   ) => void;
   clearLLMSetupDraft: () => void;
   setTelegram: (telegram: Partial<TelegramSettings>) => void;
-  setWhatsApp: (whatsapp: Partial<WhatsAppSettings>) => void;
   setDataPaths: (dataPaths: Partial<DataPaths>) => void;
   setName: (name: string) => void;
   setInterests: (interests: string[]) => void;
@@ -153,11 +141,6 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
     botToken: "",
     chatId: "",
   },
-  whatsapp: {
-    enabled: false,
-    phoneE164: "",
-    adminUrl: "",
-  },
   dataPaths: {
     fastStoragePath: "",
     archiveStoragePath: "",
@@ -187,8 +170,6 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
   clearLLMSetupDraft: () => set({ llmSetupPending: false }),
   setTelegram: (telegram) =>
     set((state) => ({ telegram: { ...state.telegram, ...telegram } })),
-  setWhatsApp: (whatsapp) =>
-    set((state) => ({ whatsapp: { ...state.whatsapp, ...whatsapp } })),
   setDataPaths: (dataPaths) =>
     set((state) => ({ dataPaths: { ...state.dataPaths, ...dataPaths } })),
   setName: (name) => set({ name }),
@@ -206,18 +187,13 @@ const storeImpl: StateCreator<SettingsStore, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:settings",
-  version: 10,
+  version: 11,
   partialize: (state) => {
-    const { llm, telegram, whatsapp, ...rest } = state;
+    const { llm, telegram, ...rest } = state;
     return {
       ...rest,
       llm: { ...llm, apiKey: "" },         // never persist LLM API key to localStorage
       telegram: { ...telegram, botToken: "" }, // never persist bot token to localStorage
-      // Phone number is PII (regulated under India's DPDP Act 2023);
-      // localStorage is readable by any script on the same origin and by
-      // browser-extension snooping / shared-machine forensics. The user
-      // re-enters their phone on first WhatsApp section visit.
-      whatsapp: { ...whatsapp, phoneE164: "" },
     };
   },
   migrate: (persistedState: unknown, version: number) => {
@@ -316,19 +292,9 @@ const persistedStore = persist(storeImpl, {
       };
     }
 
-    // v6 → v7: add WhatsApp settings section (mirrors upstream OpenAlgo
-    // v2.0.1.1 WhatsApp bot integration).
-    if (version < 7) {
-      state = {
-        ...state,
-        whatsapp: {
-          enabled: false,
-          phoneE164: "",
-          adminUrl: "",
-          ...((state.whatsapp as Record<string, unknown>) ?? {}),
-        } as WhatsAppSettings,
-      };
-    }
+    // v6 → v7: previously added the WhatsApp settings section. WhatsApp
+    // alerting was retired in the dedup wave, so this step is now a no-op —
+    // any persisted whatsapp key is stripped by the v10 → v11 step below.
 
     // v7 -> v8: retire the named LM Studio integration in favour of the
     // application-managed Ollama runtime, regardless of the legacy endpoint.
@@ -386,6 +352,12 @@ const persistedStore = persist(storeImpl, {
           apiKey: "",
         } as LLMSettings,
       };
+    }
+
+    // v10 -> v11: WhatsApp alerting was retired — drop its persisted settings.
+    if (version < 11) {
+      const { whatsapp: _whatsapp, ...rest } = state as Record<string, unknown> & { whatsapp?: unknown };
+      state = rest;
     }
 
     return state;

@@ -215,7 +215,14 @@ describe("desktop path resolution", () => {
     },
   );
 
-  it.runIf(process.platform !== "win32")("resolves a filesystem symlink loop exactly like Python without unbounded traversal", () => {
+  it.runIf(process.platform !== "win32")("terminates on a filesystem symlink loop without unbounded traversal", () => {
+    // The property that matters is TERMINATION: a loop must not spin or
+    // recurse without bound. Parity with Python is only a secondary check,
+    // because Python itself is platform-dependent here — macOS returns the
+    // unresolved path while Linux raises OSError ELOOP ("Too many levels of
+    // symbolic links"). Asserting equality with Python's stdout unconditionally
+    // made this test pass on macOS and fail on every Linux runner, which is why
+    // it is scoped to the platforms where Python actually produces an answer.
     const root = mkdtempSync(join(tmpdir(), "flinttrade-path-loop-parity-"));
     try {
       const first = join(root, "first");
@@ -223,12 +230,28 @@ describe("desktop path resolution", () => {
       symlinkSync("second", first);
       symlinkSync("first", second);
       const candidate = join(first, "workspace");
-      const pythonResolved = execFileSync(
-        "python3",
-        ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))", candidate],
-        { encoding: "utf8", stdio: "pipe" },
-      ).trim();
-      expect(canonicalisePathComponents(candidate, path.posix)).toBe(pythonResolved);
+
+      const resolved = canonicalisePathComponents(candidate, path.posix);
+      // Terminated, produced an absolute path, and is a fixed point — feeding
+      // the result back in cannot start the traversal again.
+      expect(path.posix.isAbsolute(resolved)).toBe(true);
+      expect(canonicalisePathComponents(resolved, path.posix)).toBe(resolved);
+
+      let pythonResolved: string | null = null;
+      try {
+        pythonResolved = execFileSync(
+          "python3",
+          ["-c", "from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=False))", candidate],
+          { encoding: "utf8", stdio: "pipe" },
+        ).trim();
+      } catch {
+        // Python refused to resolve the loop (Linux ELOOP). There is no
+        // reference string to compare against; termination above is the pin.
+        pythonResolved = null;
+      }
+      if (pythonResolved !== null) {
+        expect(resolved).toBe(pythonResolved);
+      }
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

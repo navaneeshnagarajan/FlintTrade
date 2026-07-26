@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { realisedFromTrades, realisedBySymbol } from "./pnl";
+import { realisedFromTrades, realisedBySymbol, positionMtm, totalPositionMtm } from "./pnl";
 import type { Trade } from "@/types/api";
 
 function trade(symbol: string, action: "BUY" | "SELL", quantity: number, price: number): Trade {
@@ -61,5 +61,89 @@ describe("realisedFromTrades", () => {
     ]);
     expect(bySymbol.get("SBIN")).toBe(100);
     expect(bySymbol.get("TCS")).toBe(-50);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// positionMtm / totalPositionMtm — the single "what is my P&L right now"
+// definition. MTM Monitor and the P&L dashboard used to sum the raw broker
+// `pnl` field while the Intraday P&L widget corrected it, so two widgets
+// docked side by side reported different totals for the same book.
+// ---------------------------------------------------------------------------
+
+describe("positionMtm", () => {
+  const open = (over: Record<string, unknown> = {}) => ({
+    symbol: "NIFTY24JUL24000CE",
+    exchange: "NFO",
+    product: "MIS",
+    quantity: 75,
+    averagePrice: 100,
+    ltp: 110,
+    pnl: 9999, // deliberately wrong broker figure
+    ...over,
+  }) as never;
+
+  it("computes the local mark-to-market instead of trusting a wrong broker pnl", () => {
+    expect(positionMtm(open())).toBe(750); // (110 − 100) × 75
+  });
+
+  it("coerces string-typed wire numerics", () => {
+    expect(positionMtm(open({ quantity: "75", averagePrice: "100", ltp: "110" }))).toBe(750);
+  });
+
+  it("reads the snake_case average price some adapters send", () => {
+    expect(positionMtm(open({ averagePrice: undefined, average_price: 100 }))).toBe(750);
+  });
+
+  it("falls back to the broker figure for a closed position", () => {
+    expect(positionMtm(open({ quantity: 0, pnl: 1234 }))).toBe(1234);
+  });
+
+  it("treats a zero LTP as missing rather than fabricating a total loss", () => {
+    // Several brokers report ltp: 0 for an open position (illiquid option,
+    // pre-market). (0 − 100) × 75 would invent a ₹7,500 loss.
+    expect(positionMtm(open({ ltp: 0, pnl: 250 }))).toBe(250);
+  });
+
+  it("treats a zero average price as missing", () => {
+    expect(positionMtm(open({ averagePrice: 0, pnl: 250 }))).toBe(250);
+  });
+
+  it("returns zero rather than NaN when everything is missing", () => {
+    expect(positionMtm({ quantity: 0 } as never)).toBe(0);
+  });
+});
+
+describe("totalPositionMtm", () => {
+  it("sums the corrected per-position figures, not the broker ones", () => {
+    const book = [
+      { quantity: 75, averagePrice: 100, ltp: 110, pnl: 1 },
+      { quantity: 50, averagePrice: 200, ltp: 190, pnl: 2 },
+    ] as never[];
+    // (110−100)×75 = 750, (190−200)×50 = −500 → 250. Broker sum would be 3.
+    expect(totalPositionMtm(book)).toBe(250);
+  });
+});
+
+describe("positionMtm accepts every wire spelling", () => {
+  // Positions normalises its rows before calling this; MTM Monitor and Risk
+  // pass raw positionbook rows straight from the broker. An adapter that
+  // sends qty/avgPrice therefore marked to market in one widget and fell back
+  // to the broker pnl in the others — the exact side-by-side disagreement
+  // this helper was extracted to end.
+  it("reads qty and avgPrice as well as quantity and averagePrice", () => {
+    const canonical = { quantity: 75, averagePrice: 100, ltp: 110, pnl: 9999 } as never;
+    const aliased = { qty: 75, avgPrice: 100, ltp: 110, pnl: 9999 } as never;
+    const snake = { quantity: 75, average_price: 100, ltp: 110, pnl: 9999 } as never;
+
+    expect(positionMtm(canonical)).toBe(750);
+    expect(positionMtm(aliased)).toBe(750);
+    expect(positionMtm(snake)).toBe(750);
+  });
+
+  it("totals agree whether rows are normalised or raw", () => {
+    const raw = [{ qty: 75, avgPrice: 100, ltp: 110, pnl: 1 }] as never[];
+    const normalised = [{ quantity: 75, averagePrice: 100, ltp: 110, pnl: 1 }] as never[];
+    expect(totalPositionMtm(raw)).toBe(totalPositionMtm(normalised));
   });
 });

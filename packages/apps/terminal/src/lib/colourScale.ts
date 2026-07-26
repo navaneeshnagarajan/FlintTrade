@@ -7,7 +7,7 @@
  *
  * Primary consumer: SectorMap treemap widget (stock colouring by % change).
  * Secondary consumers: any heatmap widget that needs a diverging scale
- * (DepthHeatmap overlay, P&L heat, GEX chart, etc.).
+ * (depth-heatmap overlay, P&L heat, dealer-gamma chart, etc.).
  *
  * Design decisions:
  *   - The breakpoints are fixed at ±4 % (beyond that, colour is clamped to

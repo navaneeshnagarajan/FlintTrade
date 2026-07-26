@@ -131,8 +131,7 @@ class NodeType(StrEnum):
 
 # Legacy aliases for backward compatibility
 class SignalSource(StrEnum):
-    TRADINGVIEW = "TRADINGVIEW"
-    CHARTINK = "CHARTINK"
+    WEBHOOK = "WEBHOOK"
     PYTHON_SCRIPT = "PYTHON_SCRIPT"
     CRON = "CRON"
     MANUAL = "MANUAL"
@@ -254,7 +253,7 @@ def _build_registry() -> dict[NodeType, NodeSpec]:
     _reg(NodeSpec(
         node_type=NodeType.WEBHOOK_TRIGGER, label="Webhook Trigger",
         category=NodeCategory.TRIGGER,
-        description="Trigger flow from an inbound webhook (TradingView, ChartInk, custom)",
+        description="Trigger flow from an inbound generic webhook",
         outputs=(_out("trigger", "Trigger"),),
         config_fields=(
             _cfg("webhookId", "Webhook ID", "string", True),
@@ -1380,7 +1379,7 @@ class FlowBuilder:
     Usage::
 
         fb = FlowBuilder("My Strategy")
-        sig = fb.add_signal(SignalSource.TRADINGVIEW, label="TV Alert")
+        sig = fb.add_signal(SignalSource.WEBHOOK, label="Webhook Alert")
         cond = fb.add_condition(ConditionType.PRICE_ABOVE, config={"value": 24000})
         act = fb.add_action(ActionType.PLACE_ORDER, config={"symbol": "NIFTY", "action": "BUY"})
         exit_ = fb.add_exit(ExitType.STOP_LOSS, config={"points": 100})

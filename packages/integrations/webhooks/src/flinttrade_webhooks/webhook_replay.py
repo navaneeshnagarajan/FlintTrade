@@ -22,7 +22,7 @@ import math
 import time
 
 # Database H8 + Identity M5 (data-layer §7.4):
-REPLAY_WINDOW_SECONDS = 600        # 10 min — TradingView/ChartInk freshness norm
+REPLAY_WINDOW_SECONDS = 600        # 10 min — signed-relay freshness norm
 GC_GRACE_SECONDS = 3600            # 60 min forensic-evidence grace
 GC_RETAIN_SECONDS = REPLAY_WINDOW_SECONDS + GC_GRACE_SECONDS
 

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSkillStore } from "@/stores/skillStore";
 import { useSkillContent } from "../useSkillContent";
-import { widgetCatalog } from "@/layout/widgetFactory";
+import { widgetCatalog, RETIRED_WIDGET_IDS } from "@/layout/widgetFactory";
 
 // ---------------------------------------------------------------------------
 // Reset store between tests
@@ -33,7 +33,7 @@ describe("useSkillContent — beginner", () => {
     expect(availableWidgets).toContain("watchlist");
     expect(availableWidgets).toContain("orderpad");
     expect(availableWidgets).toContain("positions");
-    expect(availableWidgets).toContain("dashboard");
+    expect(availableWidgets).toContain("indexstrip");
 
     // Analysis widgets must NOT be present at beginner level
     expect(availableWidgets).not.toContain("optionchain");
@@ -45,8 +45,6 @@ describe("useSkillContent — beginner", () => {
   it("returns settings-only tools", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("pnl-dashboard");
-    expect(result.current.availableTools).not.toContain("market-intelligence");
     expect(result.current.availableTools).not.toContain("trade-journal");
   });
 
@@ -85,11 +83,13 @@ describe("useSkillContent — intermediate", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableWidgets).toContain("optionchain");
     expect(result.current.availableWidgets).toContain("straddle");
-    expect(result.current.availableWidgets).toContain("depth");
+    // depth merged into orderladder.
+    expect(result.current.availableWidgets).toContain("orderladder");
     expect(result.current.availableWidgets).toContain("greeks");
     expect(result.current.availableWidgets).toContain("oichart");
-    expect(result.current.availableWidgets).toContain("sectormap");
-    expect(result.current.availableWidgets).toContain("gex");
+    expect(result.current.availableWidgets).toContain("marketoverview");
+    // gex merged into gammadensity.
+    expect(result.current.availableWidgets).toContain("gammadensity");
   });
 
   it("does not include advanced-only widgets", () => {
@@ -103,8 +103,6 @@ describe("useSkillContent — intermediate", () => {
     const { result } = renderHook(() => useSkillContent());
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");
-    expect(result.current.availableTools).not.toContain("pnl-dashboard");
-    expect(result.current.availableTools).not.toContain("market-intelligence");
   });
 
   it("returns detailed tooltip level", () => {
@@ -142,24 +140,27 @@ describe("useSkillContent — advanced", () => {
 
     // Intermediate tier
     expect(availableWidgets).toContain("optionchain");
-    expect(availableWidgets).toContain("sectormap");
+    expect(availableWidgets).toContain("marketoverview");
 
     // Advanced-only
     expect(availableWidgets).toContain("volsurface");
     expect(availableWidgets).toContain("scalper");
     expect(availableWidgets).toContain("orderflow");
-    expect(availableWidgets).toContain("depthheatmap");
-    expect(availableWidgets).toContain("scanner");
-    // Wave-35 order-flow widgets — promoted so the Add Widget picker can reach
+    // depthheatmap merged into domheatmap (its gamma-scale look).
+    expect(availableWidgets).toContain("domheatmap");
+    expect(availableWidgets).not.toContain("depthheatmap");
+    expect(availableWidgets).toContain("conditionscanner");
+    // Order-flow widgets. `footprint` merged into `orderflow` (its
+    // "footprint+delta" view mode), so the canonical id is what the picker can reach
     // them (they were registered + functional but in no skill tier).
-    expect(availableWidgets).toContain("footprint");
+    expect(availableWidgets).toContain("orderflow");
+    // The retired id must NOT come back into the picker.
+    expect(availableWidgets).not.toContain("footprint");
     expect(availableWidgets).toContain("domheatmap");
   });
 
   it("includes all tools", () => {
     const { result } = renderHook(() => useSkillContent());
-    expect(result.current.availableTools).toContain("pnl-dashboard");
-    expect(result.current.availableTools).toContain("market-intelligence");
     expect(result.current.availableTools).toContain("trade-journal");
     expect(result.current.availableTools).toContain("settings");
   });
@@ -291,6 +292,36 @@ describe("useSkillContent — additive invariant", () => {
     const advancedTools = result.current.availableTools;
     for (const id of intermediateTools) {
       expect(advancedTools).toContain(id);
+    }
+  });
+});
+
+describe("useSkillContent — merged canonicals stay reachable per tier", () => {
+  // The tier lists are by widget id, and a retired id leaves widgetCatalog —
+  // which the picker intersects against. So a merge silently removes a surface
+  // from a tier unless the canonical is added in the same change.
+  it("keeps the intermediate tier's analysis surfaces after the merges", () => {
+    useSkillStore.getState().setGlobalLevel("intermediate");
+    const { result } = renderHook(() => useSkillContent());
+    const widgets = result.current.availableWidgets;
+
+    // depth -> orderladder, gex -> gammadensity.
+    expect(widgets).toContain("orderladder");
+    expect(widgets).toContain("gammadensity");
+    expect(widgets).not.toContain("depth");
+    expect(widgets).not.toContain("gex");
+  });
+
+  it("lists no retired id in any tier", () => {
+    for (const level of ["beginner", "intermediate", "advanced"] as const) {
+      useSkillStore.getState().setGlobalLevel(level);
+      const { result } = renderHook(() => useSkillContent());
+      for (const id of Object.keys(RETIRED_WIDGET_IDS)) {
+        expect(
+          result.current.availableWidgets,
+          `${level} tier lists retired id ${id}`,
+        ).not.toContain(id);
+      }
     }
   });
 });

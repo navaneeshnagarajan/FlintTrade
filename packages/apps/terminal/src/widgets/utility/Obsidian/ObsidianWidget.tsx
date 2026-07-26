@@ -1,11 +1,18 @@
 /**
  * ObsidianWidget — browse the operator's Obsidian vault from the terminal.
  *
- * Read-only surface over /api/v1/ai/obsidian/* (status, notes, note, search).
- * The same vault the AI agent reads for context and journals decisions into.
- * When FLINTTRADE_OBSIDIAN_VAULT is unset the status reports not-configured and
- * the widget shows a clear setup hint — it never fabricates notes. Nothing here
- * writes to the vault or touches the order path.
+ * Read-only over VAULT CONTENT — /api/v1/ai/obsidian/* (status, notes, note,
+ * search). The same vault the AI agent reads for context and journals
+ * decisions into. Nothing here writes a note, and nothing touches the order
+ * path.
+ *
+ * It is NOT read-only over CONFIGURATION: when the vault path is unset the
+ * widget offers a path field and calls saveObsidianVaultPath, which writes
+ * host-level config. The docstring used to claim "nothing here writes",
+ * full stop, which was wrong about that one mutation.
+ *
+ * When the path is unset the status reports not-configured and the widget
+ * shows a setup hint — it never fabricates notes.
  */
 
 import { useState } from "react";

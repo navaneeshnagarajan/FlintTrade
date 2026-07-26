@@ -106,7 +106,7 @@ identically to regular orders.
 | `holidays` | Exchange holiday list. |
 | `timings` | Exchange-timing windows for a date. |
 | `telegram` | Send a Telegram message via the OpenAlgo bot. |
-| `whatsapp/notify` | Send a WhatsApp message via the OpenAlgo bot (added in 2.0.1.1). Public surface deliberately narrowed — pairing / start / stop are admin-only on OpenAlgo's `/whatsapp` web UI. |
+| `whatsapp/notify` | Upstream OpenAlgo endpoint. **Not wrapped by FlintTrade** — WhatsApp support was removed on 2026-07-26 (ruling D3); listed only so the OpenAlgo surface stays fully documented. |
 
 ### Broker management (session-authenticated, NOT under `/api/v1/`)
 

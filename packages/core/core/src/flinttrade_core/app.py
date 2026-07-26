@@ -3980,11 +3980,6 @@ def create_flask_app(
 
     app.register_blueprint(analytics_bp)
 
-    # Register WhatsApp Alerts blueprint (/api/v1/alerts/whatsapp/*)
-    from flinttrade_automation.whatsapp_routes import whatsapp_bp  # noqa: PLC0415
-
-    app.register_blueprint(whatsapp_bp)
-
     # Register Telegram Alerts blueprint (/api/v1/telegram)
     from .telegram_routes import telegram_bp  # noqa: PLC0415
 
@@ -4079,11 +4074,6 @@ def create_flask_app(
     from flinttrade_webhooks.voice_orders import voice_bp  # noqa: PLC0415
 
     app.register_blueprint(voice_bp)
-
-    # Register n8n bridge blueprint (/api/v1/automation/n8n/*)
-    from flinttrade_automation.n8n_routes import n8n_bp  # noqa: PLC0415
-
-    app.register_blueprint(n8n_bp)
 
     # Register QuestDB bridge blueprint (/api/v1/data/questdb/*)
     from flinttrade_data.questdb_routes import questdb_bp  # noqa: PLC0415
@@ -4950,117 +4940,6 @@ def create_flask_app(
             {
                 "status": "ok",
                 "message": "Telegram settings saved" + (" — applying to the running bot" if applying else ""),
-                "data": data,
-            }
-        ), 200
-
-    @app.route("/v1/config/whatsapp", methods=["GET", "POST"])
-    @limiter.limit("10 per minute")
-    def _whatsapp_config() -> Any:
-        """Read or persist redacted WhatsApp alert settings from the UI.
-
-        Mirrors ``/v1/config/telegram``: localhost-only, authenticated
-        session, the webhook URL stored in a hardened owner-only secret file
-        (URLs routinely embed tokens). A save drops the cached alerter so the
-        next send uses the new settings.
-        """
-        remote = request.remote_addr or ""
-        if remote not in ("127.0.0.1", "::1", "localhost"):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "This endpoint is only reachable from localhost",
-                }
-            ), 403
-
-        from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
-
-        denied = require_local_control_auth(
-            message="WhatsApp configuration requires an authenticated session"
-        )
-        if denied is not None:
-            return denied
-
-        from .whatsapp_config import persist_whatsapp_config, read_whatsapp_config  # noqa: PLC0415
-
-        if request.method == "GET":
-            return jsonify({"status": "success", "data": read_whatsapp_config()}), 200
-
-        payload = request.get_json(silent=True) or {}
-        try:
-            data = persist_whatsapp_config(payload)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
-        except Exception as exc:  # noqa: BLE001 - never surface secret material
-            logger.error("Failed to persist WhatsApp config (%s)", type(exc).__name__)
-            return jsonify({"status": "error", "message": "Could not persist WhatsApp config"}), 500
-
-        try:
-            from flinttrade_automation.whatsapp_routes import reset_whatsapp_alerter  # noqa: PLC0415
-
-            reset_whatsapp_alerter()
-        except Exception:  # noqa: BLE001 - config is durable either way
-            logger.warning("Could not reset the WhatsApp alerter after config save", exc_info=True)
-
-        return jsonify(
-            {
-                "status": "ok",
-                "message": "WhatsApp settings saved",
-                "data": data,
-            }
-        ), 200
-
-    @app.route("/v1/config/n8n", methods=["GET", "POST"])
-    @limiter.limit("10 per minute")
-    def _n8n_config() -> Any:
-        """Read or persist redacted n8n bridge settings from the UI.
-
-        Mirrors the telegram/whatsapp config routes: localhost-only,
-        authenticated session, API key in the hardened secret store. A save
-        drops the cached bridge so the next request uses the new settings.
-        """
-        remote = request.remote_addr or ""
-        if remote not in ("127.0.0.1", "::1", "localhost"):
-            return jsonify(
-                {
-                    "status": "error",
-                    "message": "This endpoint is only reachable from localhost",
-                }
-            ), 403
-
-        from .local_ai_routes import require_local_control_auth  # noqa: PLC0415
-
-        denied = require_local_control_auth(
-            message="n8n configuration requires an authenticated session"
-        )
-        if denied is not None:
-            return denied
-
-        from .n8n_config import persist_n8n_config, read_n8n_config  # noqa: PLC0415
-
-        if request.method == "GET":
-            return jsonify({"status": "success", "data": read_n8n_config()}), 200
-
-        payload = request.get_json(silent=True) or {}
-        try:
-            data = persist_n8n_config(payload)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
-        except Exception as exc:  # noqa: BLE001 - never surface secret material
-            logger.error("Failed to persist n8n config (%s)", type(exc).__name__)
-            return jsonify({"status": "error", "message": "Could not persist n8n config"}), 500
-
-        try:
-            from flinttrade_automation.n8n_routes import reset_n8n_bridge  # noqa: PLC0415
-
-            reset_n8n_bridge()
-        except Exception:  # noqa: BLE001 - config is durable either way
-            logger.warning("Could not reset the n8n bridge after config save", exc_info=True)
-
-        return jsonify(
-            {
-                "status": "ok",
-                "message": "n8n settings saved",
                 "data": data,
             }
         ), 200

@@ -6,12 +6,11 @@
  *   - Amount input with converted amount display
  *   - Hardcoded rate table (refreshed manually per session)
  *   - Swap button to reverse from/to
- *   - Historical rate sparkline (last 30 days — sample data)
+ *   - No rate history: the table is a fixed reference, not a feed
  */
 
 import { useState, useMemo, useEffect, memo } from "react";
 import { ArrowLeftRight, RefreshCw, AlertTriangle } from "lucide-react";
-import { FlintMiniSparkline } from "@flinttrade/design-system";
 import {
   Select,
   SelectContent,
@@ -21,7 +20,6 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 
 // ---------------------------------------------------------------------------
@@ -79,40 +77,6 @@ function formatConverted(value: number, currency: Currency): string {
 }
 
 // ---------------------------------------------------------------------------
-// Sparkline — deterministic 30-day sample rate history rendered through core.
-// ---------------------------------------------------------------------------
-
-/** Generate deterministic 30-day rate history from base rate. */
-function generateHistory(from: Currency, to: Currency): number[] {
-  const baseRate = convert(1, from, to);
-  const seed = from.charCodeAt(0) + to.charCodeAt(0);
-  return Array.from({ length: 30 }, (_, i) => {
-    const noise = Math.sin((i + seed) * 0.7) * 0.012 + Math.cos((i * seed) * 0.3) * 0.008;
-    return baseRate * (1 + noise);
-  });
-}
-
-interface SparklineProps {
-  data: number[];
-}
-
-function Sparkline({ data }: SparklineProps) {
-  if (data.length < 2) return null;
-
-  const first = data[0];
-  const last = data[data.length - 1];
-
-  return (
-    <FlintMiniSparkline
-      points={data}
-      positive={last >= first}
-      ariaLabel="30-day rate history sparkline"
-      className="h-8 w-40"
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
@@ -136,14 +100,6 @@ function CurrencyConverterWidget() {
 
   const rate = useMemo(() => convert(1, from, to), [from, to]);
   const inverseRate = useMemo(() => convert(1, to, from), [from, to]);
-
-  const sparkData = useMemo(() => generateHistory(from, to), [from, to]);
-
-  const pctChange = useMemo(() => {
-    const first = sparkData[0];
-    const last = sparkData[sparkData.length - 1];
-    return ((last - first) / first) * 100;
-  }, [sparkData]);
 
   function handleSwap() {
     setFrom(to);
@@ -270,24 +226,16 @@ function CurrencyConverterWidget() {
           </div>
         </div>
 
-        {/* Sparkline */}
+        {/* Rate history. There is none: the conversion table is a hardcoded
+            constant, so no 30-day series exists to plot. This slot used to
+            render a sin/cos curve labelled "30-day trend" with a signed
+            percentage change — a fabricated market history presented as fact,
+            and outside the scope of the static-rates notice below. */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xxs text-text-muted uppercase tracking-wide">30-day trend</span>
-            <span
-              className={cn(
-                "text-xxs font-mono tabular-nums",
-                pctChange >= 0 ? "text-profit" : "text-loss",
-              )}
-            >
-              {pctChange >= 0 ? "+" : ""}{pctChange.toFixed(2)}%
-            </span>
-          </div>
-          <div className="flex justify-center">
-            <Sparkline data={sparkData} />
-          </div>
-          <p className="text-center text-xxs text-text-muted">
-            {from}/{to} · last 30 days
+          <span className="text-xxs text-text-muted uppercase tracking-wide">Rate history</span>
+          <p className="text-xxs text-text-muted">
+            No historical series — the conversion table is a fixed reference,
+            not a rate feed, so there is no {from}/{to} trend to show.
           </p>
         </div>
 

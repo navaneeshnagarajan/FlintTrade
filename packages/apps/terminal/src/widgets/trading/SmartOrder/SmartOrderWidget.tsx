@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { parseWholeNumber } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
 import {
   cancelSmartRoute,
@@ -43,12 +44,7 @@ import { pickNativeWriteTarget } from "@/services/brokerTargets";
  * silently become the default), and a "1,000" quantity must mean 1000 — or
  * be rejected — never parseInt-truncated to 1.
  */
-export function parseQuantity(raw: string): number | null {
-  const digits = raw.trim().replace(/,/g, "");
-  if (!/^\d+$/.test(digits)) return null;
-  const value = Number.parseInt(digits, 10);
-  return value > 0 ? value : null;
-}
+export const parseQuantity = parseWholeNumber;
 
 export function parseSlippageBps(raw: string): number | null {
   const trimmed = raw.trim();

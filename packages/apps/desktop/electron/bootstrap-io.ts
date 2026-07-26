@@ -720,22 +720,35 @@ watchdog=
 enumerator=
 ${probes}
 fi
+filter=
+if [ -x /usr/bin/grep ]; then filter=/usr/bin/grep
+elif [ -x /bin/grep ]; then filter=/bin/grep
+fi
 snapshot_tagged_descendants() {
-  [ -n "$enumerator" ] || return 1
-  tagged_snapshot=$("$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o command= 2>/dev/null) || return 1
-  while read -r tagged_member tagged_parent tagged_group tagged_rest; do
+  [ -n "$enumerator" ] && [ -n "$filter" ] || return 1
+  tagged_snapshot=$("$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null) || return 1
+  tagged_candidates=$(printf '%s\n' "$tagged_snapshot" | "$filter" -F "$containment_marker" 2>/dev/null || :)
+  while read -r tagged_member tagged_parent tagged_group tagged_state tagged_rest; do
     case "$tagged_member" in
       ''|*[!0-9]*) continue ;;
     esac
+    case "$tagged_state" in
+      Z*) continue ;;
+    esac
     case " $tagged_rest " in
-      *" $containment_marker "*) printf '%s\n' "$tagged_member" ;;
+      *" $containment_marker "*) printf '%s %s\n' "$tagged_member" "$tagged_group" ;;
     esac
   done <<FLINT_TAGGED_SNAPSHOT
-$tagged_snapshot
+$tagged_candidates
 FLINT_TAGGED_SNAPSHOT
 }
+cancel_pending=
 on_term() {
-  if [ -n "$target" ]; then /bin/kill -TERM "$target" 2>/dev/null || :; fi
+  if [ -n "$target" ]; then
+    /bin/kill -TERM "$target" 2>/dev/null || :
+  else
+    cancel_pending=1
+  fi
 }
 trap on_term TERM
 (
@@ -752,13 +765,16 @@ trap on_term TERM
     else
       watchdog_empty_scans=0
       watchdog_attempts=$((watchdog_attempts + 1))
-      for tagged_member in $watchdog_tagged; do
-        if [ "$watchdog_attempts" -gt 10 ]; then
+      while read -r tagged_member tagged_group; do
+        [ -n "$tagged_member" ] || continue
+        if [ "$tagged_group" != "$$" ] || [ "$watchdog_attempts" -gt 10 ]; then
           /bin/kill -KILL "$tagged_member" 2>/dev/null || :
         else
           /bin/kill -TERM "$tagged_member" 2>/dev/null || :
         fi
-      done
+      done <<FLINT_WATCHDOG_TAGGED
+$watchdog_tagged
+FLINT_WATCHDOG_TAGGED
     fi
     /bin/sleep 0.02
   done
@@ -793,10 +809,11 @@ fi
   exec "$@" </dev/null 3>&- 4<&-
 ) &
 target=$!
+if [ -n "$cancel_pending" ]; then /bin/kill -TERM "$target" 2>/dev/null || :; fi
 wait "$target"
 status=$?
 target=
-[ -n "$enumerator" ] || {
+[ -n "$enumerator" ] && [ -n "$filter" ] || {
   printf '%s\n' containment-failed >&3
   while :; do /bin/sleep 3600; done
 }
@@ -805,7 +822,7 @@ drain_attempts=0
 empty_scans=0
 while :; do
   snapshot=$(
-    "$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o command= 2>/dev/null &
+    "$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null &
     probe=$!
     printf 'FLINTTRADE_PROBE %s\n' "$probe"
     wait "$probe"
@@ -815,43 +832,66 @@ while :; do
   }
   probe=
   probe_parent=
-  while read -r first second third rest; do
+  probe_line=$(printf '%s\n' "$snapshot" | "$filter" '^FLINTTRADE_PROBE ' 2>/dev/null || :)
+  while read -r first second rest; do
     if [ "$first" = FLINTTRADE_PROBE ]; then probe=$second; fi
   done <<FLINT_SNAPSHOT_PROBE
-$snapshot
+$probe_line
 FLINT_SNAPSHOT_PROBE
-  while read -r member parent member_group rest; do
-    if [ "$member" = "$probe" ]; then probe_parent=$parent; fi
-  done <<FLINT_SNAPSHOT_PARENT
-$snapshot
+  case "$probe" in
+    ''|*[!0-9]*) probe= ;;
+  esac
+  if [ -n "$probe" ]; then
+    parent_line=$(printf '%s\n' "$snapshot" | "$filter" -E "^ *$probe " 2>/dev/null || :)
+    while read -r member parent rest; do
+      if [ "$member" = "$probe" ]; then probe_parent=$parent; fi
+    done <<FLINT_SNAPSHOT_PARENT
+$parent_line
 FLINT_SNAPSHOT_PARENT
+  fi
   [ -n "$probe" ] && [ -n "$probe_parent" ] || {
     printf '%s\n' containment-failed >&3
     while :; do /bin/sleep 3600; done
   }
   external=
   escaped=
-  while read -r member parent member_group rest; do
+  group_lines=$(printf '%s\n' "$snapshot" | "$filter" -E "^ *[0-9]+ +[0-9]+ +$$ " 2>/dev/null || :)
+  while read -r member parent member_group member_state rest; do
     case "$member" in
-      FLINTTRADE_PROBE|'') continue ;;
+      ''|*[!0-9]*) continue ;;
     esac
-    if [ "$member_group" = "$$" ] &&
-       [ "$member" != "$$" ] &&
+    case "$member_state" in
+      Z*) continue ;;
+    esac
+    if [ "$member" != "$$" ] &&
        [ "$member" != "$watchdog" ] &&
        [ "$member" != "$probe" ] &&
        [ "$member" != "$probe_parent" ]; then
       external="$external $member"
-    elif [ "$member" != "$$" ] &&
-         [ "$member" != "$watchdog" ] &&
-         [ "$member" != "$probe" ] &&
-         [ "$member" != "$probe_parent" ]; then
+    fi
+  done <<FLINT_SNAPSHOT_GROUP
+$group_lines
+FLINT_SNAPSHOT_GROUP
+  marker_lines=$(printf '%s\n' "$snapshot" | "$filter" -F "$containment_marker" 2>/dev/null || :)
+  while read -r member parent member_group member_state rest; do
+    case "$member" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    case "$member_state" in
+      Z*) continue ;;
+    esac
+    if [ "$member_group" != "$$" ] &&
+       [ "$member" != "$$" ] &&
+       [ "$member" != "$watchdog" ] &&
+       [ "$member" != "$probe" ] &&
+       [ "$member" != "$probe_parent" ]; then
       case " $rest " in
         *" $containment_marker "*) escaped="$escaped $member" ;;
       esac
     fi
-  done <<FLINT_SNAPSHOT_MEMBERS
-$snapshot
-FLINT_SNAPSHOT_MEMBERS
+  done <<FLINT_SNAPSHOT_MARKED
+$marker_lines
+FLINT_SNAPSHOT_MARKED
   if [ -z "$external$escaped" ]; then
     empty_scans=$((empty_scans + 1))
     if [ "$empty_scans" -ge 2 ]; then break; fi
@@ -867,11 +907,7 @@ FLINT_SNAPSHOT_MEMBERS
   fi
   if [ -n "$external" ]; then /bin/kill -TERM -$$ 2>/dev/null || :; fi
   for escaped_member in $escaped; do
-    if [ "$drain_attempts" -gt 10 ]; then
-      /bin/kill -KILL "$escaped_member" 2>/dev/null || :
-    else
-      /bin/kill -TERM "$escaped_member" 2>/dev/null || :
-    fi
+    /bin/kill -KILL "$escaped_member" 2>/dev/null || :
   done
   /bin/sleep 0.02
 done
@@ -1436,9 +1472,12 @@ function createCommandRunner(platform: NodeJS.Platform, options: BootstrapIoOpti
                   const targetExit = Number(proof[1]);
                   if (!Number.isSafeInteger(targetExit) || targetExit > 255) terminate("containment");
                   else {
-                    if (proof[2] === "1") {
+                    if (proof[2] === "1" && !terminalReason) {
+                      // A drained-descendant report only downgrades a run that had no
+                      // terminal reason of its own; a timeout or cancel already carries
+                      // its exit code and the drain result must not rewrite it.
                       descendantLeak = true;
-                      terminalReason ??= "descendant";
+                      terminalReason = "descendant";
                     }
                     void releaseProtocolAnchor("FLINTTRADE_RELEASE\n");
                   }

@@ -8,12 +8,12 @@ import type { WidgetMeta } from "@/types/widgets";
 // ---------------------------------------------------------------------------
 const lazyWidgets = {
   // Trading widgets
-  dashboard: lazy(() => import("@/widgets/trading/Dashboard/DashboardWidget")),
   scalper: lazy(() => import("@/widgets/trading/Scalper/ScalperWidget")),
   positions: lazy(() => import("@/widgets/trading/Positions/PositionsWidget")),
+  fills: lazy(() => import("@/widgets/trading/Fills/FillsWidget")),
+  pnlmonitor: lazy(() => import("@/widgets/trading/PnLMonitor/PnLMonitorWidget")),
   orders: lazy(() => import("@/widgets/trading/Orders/OrdersWidget")),
   holdings: lazy(() => import("@/widgets/trading/Holdings/HoldingsWidget")),
-  tradebook: lazy(() => import("@/widgets/trading/TradeBook/TradeBookWidget")),
   orderpad: lazy(() => import("@/widgets/trading/OrderPad/OrderPadWidget")),
   foreverorders: lazy(() => import("@/widgets/orders/ForeverOrdersWidget")),
   superorders: lazy(() => import("@/widgets/orders/SuperOrdersWidget")),
@@ -22,15 +22,15 @@ const lazyWidgets = {
 
   // Analysis widgets
   chart: lazy(() => import("@/widgets/analysis/Chart/ChartWidget")),
-  chartgrid: lazy(() => import("@/widgets/analysis/Chart/ChartGrid")),
+  marketoverview: lazy(() => import("@/widgets/analysis/MarketOverview/MarketOverviewWidget")),
   optionchain: lazy(() => import("@/widgets/analysis/OptionChain/OptionChainWidget")),
   oichart: lazy(() => import("@/widgets/analysis/OIChart/OIChartWidget")),
   straddle: lazy(() => import("@/widgets/analysis/Straddle/StraddleWidget")),
-  depth: lazy(() => import("@/widgets/analysis/Depth/DepthWidget")),
   greeks: lazy(() => import("@/widgets/analysis/Greeks/GreeksWidget")),
 
   // Utility widgets
   watchlist: lazy(() => import("@/widgets/utility/Watchlist/WatchlistWidget")),
+  indexstrip: lazy(() => import("@/widgets/utility/IndexStrip/IndexStripWidget")),
   calculator: lazy(() => import("@/widgets/utility/Calculator/CalculatorWidget")),
   news: lazy(() => import("@/widgets/utility/News/NewsWidget")),
   ticker: lazy(() => import("@/widgets/utility/Ticker/TickerWidget")),
@@ -40,41 +40,26 @@ const lazyWidgets = {
   obsidian: lazy(() => import("@/widgets/utility/Obsidian/ObsidianWidget")),
 
   // New trading widgets
-  intradaypnl: lazy(() => import("@/widgets/trading/IntradayPnL/IntradayPnLWidget")),
-  mtmmonitor: lazy(() => import("@/widgets/trading/MTMMonitor/MTMMonitorWidget")),
-  riskpanel: lazy(() => import("@/widgets/trading/RiskPanel/RiskPanelWidget")),
   actioncenter: lazy(() => import("@/widgets/trading/ActionCenter/ActionCenterWidget")),
-  positionheatmap: lazy(() => import("@/widgets/trading/PositionHeatMap/PositionHeatMapWidget")),
 
   // New analysis widgets
-  sectormap: lazy(() => import("@/widgets/analysis/SectorMap/SectorMapWidget")),
-  fiilongshort: lazy(() => import("@/widgets/analysis/FiiLongShort/FiiLongShortWidget")),
   gammadensity: lazy(() => import("@/widgets/analysis/GammaDensity/GammaDensityWidget")),
   arbitragescanner: lazy(() => import("@/widgets/analysis/ArbitrageScanner/ArbitrageScannerWidget")),
-  indexcontribution: lazy(() => import("@/widgets/analysis/IndexContribution/IndexContributionWidget")),
   patterndetection: lazy(() => import("@/widgets/analysis/PatternDetection/PatternDetectionWidget")),
   timesales: lazy(() => import("@/widgets/analysis/TimeSales/TimeSalesWidget")),
-  gex: lazy(() => import("@/widgets/analysis/GEX/GEXWidget")),
   volsurface: lazy(() => import("@/widgets/analysis/VolSurface/VolSurfaceWidget")),
   ivsmile: lazy(() => import("@/widgets/analysis/IVSmile/IVSmileWidget")),
   straddlepnl: lazy(() => import("@/widgets/analysis/StraddlePnL/StraddlePnLWidget")),
-  oiprofile: lazy(() => import("@/widgets/analysis/OIProfile/OIProfileWidget")),
   orderflow: lazy(() => import("@/widgets/analysis/OrderFlow/OrderFlowWidget")),
-  depthheatmap: lazy(() => import("@/widgets/analysis/DepthHeatmap/DepthHeatmapWidget")),
 
   // Utility widgets (new)
-  scanner: lazy(() => import("@/widgets/utility/Scanner/ScannerWidget")),
   alerts: lazy(() => import("@/widgets/utility/Alerts/AlertsWidget")),
-  health: lazy(() => import("@/widgets/utility/Health/HealthWidget")),
 
   // Analysis widgets (new)
-  threepanel: lazy(() => import("@/widgets/analysis/ThreePanel/ThreePanelWidget")),
 
   // OI Heatmap
-  oiheatmap: lazy(() => import("@/widgets/analysis/OIHeatmap/OIHeatmapWidget")),
 
   // OI Signals (OI-action classification + unusual OI)
-  oisignals: lazy(() => import("@/widgets/analysis/OISignals/OISignalsWidget")),
 
   // Portfolio Optimiser (mean-variance weights)
   portfoliooptimiser: lazy(() => import("@/widgets/analysis/PortfolioOptimiser/PortfolioOptimiserWidget")),
@@ -89,7 +74,6 @@ const lazyWidgets = {
   smartorder: lazy(() => import("@/widgets/trading/SmartOrder/SmartOrderWidget")),
 
   // Analysis widgets (Wave 24)
-  greekssurface: lazy(() => import("@/widgets/analysis/GreeksSurface/GreeksSurfaceWidget")),
 
   // Utility widgets (Wave 24)
   fundingrate: lazy(() => import("@/widgets/utility/FundingRate/FundingRateWidget")),
@@ -97,7 +81,6 @@ const lazyWidgets = {
   // Utility widgets (Wave 25)
   currencyconverter: lazy(() => import("@/widgets/utility/CurrencyConverter/CurrencyConverterWidget")),
   earningscalendar: lazy(() => import("@/widgets/utility/EarningsCalendar/EarningsCalendarWidget")),
-  globalindices: lazy(() => import("@/widgets/utility/GlobalIndices/GlobalIndicesWidget")),
   strategytemplates: lazy(() => import("@/widgets/utility/StrategyTemplates/StrategyTemplatesWidget")),
   audittrail: lazy(() => import("@/widgets/utility/AuditTrail/AuditTrailWidget")),
 
@@ -105,58 +88,42 @@ const lazyWidgets = {
   pivotpoints: lazy(() => import("@/widgets/analysis/PivotPoints/PivotPointsWidget")),
   economiccalendar: lazy(() => import("@/widgets/utility/EconomicCalendar/EconomicCalendarWidget")),
   portfolioallocation: lazy(() => import("@/widgets/trading/PortfolioAllocation/PortfolioAllocationWidget")),
-  orderbookreplay: lazy(() => import("@/widgets/analysis/OrderBookReplay/OrderBookReplayWidget")),
 
   // Wave 27 widgets
-  marketbreadth: lazy(() => import("@/widgets/analysis/MarketBreadth/MarketBreadthWidget")),
   quicktrade: lazy(() => import("@/widgets/trading/QuickTrade/QuickTradeWidget")),
   volatilitycone: lazy(() => import("@/widgets/analysis/VolatilityCone/VolatilityConeWidget")),
-  profittarget: lazy(() => import("@/widgets/utility/ProfitTarget/ProfitTargetWidget")),
 
   // Wave 28 widgets
-  heatcalendar: lazy(() => import("@/widgets/analysis/HeatCalendar/HeatCalendarWidget")),
   vwapbands: lazy(() => import("@/widgets/analysis/VWAPBands/VWAPBandsWidget")),
   correlationpairs: lazy(() => import("@/widgets/analysis/CorrelationPairs/CorrelationPairsWidget")),
   multitimeframe: lazy(() => import("@/widgets/analysis/MultiTimeframe/MultiTimeframeWidget")),
 
   // Wave 29 widgets
   pcrtrend: lazy(() => import("@/widgets/analysis/PCRTrend/PCRTrendWidget")),
-  tradeperformance: lazy(() => import("@/widgets/trading/TradePerformance/TradePerformanceWidget")),
   instrumentcompare: lazy(() => import("@/widgets/analysis/InstrumentCompare/InstrumentCompareWidget")),
-  spreadview: lazy(() => import("@/widgets/analysis/SpreadView/SpreadViewWidget")),
 
   // Wave 30 widgets
   greeksheatmap: lazy(() => import("@/widgets/analysis/GreeksHeatmap/GreeksHeatmapWidget")),
-  marketsummary: lazy(() => import("@/widgets/utility/MarketSummary/MarketSummaryWidget")),
   gapanalysis: lazy(() => import("@/widgets/analysis/GapAnalysis/GapAnalysisWidget")),
-  sessionstats: lazy(() => import("@/widgets/trading/SessionStats/SessionStatsWidget")),
 
   // Wave 31 widgets
-  impliedmove: lazy(() => import("@/widgets/analysis/ImpliedMove/ImpliedMoveWidget")),
   riskdashboard: lazy(() => import("@/widgets/trading/RiskDashboard/RiskDashboardWidget")),
-  optionsflow: lazy(() => import("@/widgets/analysis/OptionsFlow/OptionsFlowWidget")),
-  tradelog: lazy(() => import("@/widgets/trading/TradeLog/TradeLogWidget")),
 
   // Wave 32 widgets
-  microstructure: lazy(() => import("@/widgets/analysis/Microstructure/MicrostructureWidget")),
   expirycountdown: lazy(() => import("@/widgets/utility/ExpiryCountdown/ExpiryCountdownWidget")),
-  positionsizing: lazy(() => import("@/widgets/utility/PositionSizing/PositionSizingWidget")),
   correlationmatrix: lazy(() => import("@/widgets/analysis/CorrelationMatrix/CorrelationMatrixWidget")),
+  deliverydata: lazy(() => import("@/widgets/analysis/DeliveryData/DeliveryDataWidget")),
 
   // Wave 33 widgets
-  ivskew: lazy(() => import("@/widgets/analysis/IVSkew/IVSkewWidget")),
   marketclock: lazy(() => import("@/widgets/utility/MarketClock/MarketClockWidget")),
   strategymonitor: lazy(() => import("@/widgets/trading/StrategyMonitor/StrategyMonitorWidget")),
-  netposition: lazy(() => import("@/widgets/trading/NetPosition/NetPositionWidget")),
 
   // Wave 34 widgets
   tradeidea: lazy(() => import("@/widgets/utility/TradeIdea/TradeIdeaWidget")),
-  sectorperformance: lazy(() => import("@/widgets/analysis/SectorPerformance/SectorPerformanceWidget")),
   tickspeed: lazy(() => import("@/widgets/utility/TickSpeed/TickSpeedWidget")),
   orderladder: lazy(() => import("@/widgets/trading/OrderLadder/OrderLadderWidget")),
 
   // Wave 35 — order flow visualisation
-  footprint: lazy(() => import("@/widgets/analysis/Footprint/FootprintWidget")),
   domheatmap: lazy(() => import("@/widgets/analysis/DOMHeatmap/DOMHeatmapWidget")),
 
   // Wave 36 — historical option-chain archive
@@ -167,116 +134,478 @@ const lazyWidgets = {
 };
 
 // ---------------------------------------------------------------------------
+// Retired widget ids
+// ---------------------------------------------------------------------------
+
+/**
+ * Widgets that have been merged into a canonical surface.
+ *
+ * A retired id is REMOVED from {@link widgetCatalog} — it no longer appears in
+ * the picker — but MUST stay resolvable in {@link widgetComponents}, because
+ * Dockview looks a saved panel's `component` string up in that map alone, and
+ * `routes/TerminalRoute.tsx` discards the operator's ENTIRE saved layout tab
+ * when any component fails to resolve. A retired id that stopped resolving
+ * would not degrade one panel; it would wipe the workspace.
+ *
+ * Each entry names the canonical widget and the panel params that reproduce
+ * the retired widget's presentation, so an operator who saved a layout
+ * containing the old panel gets the same view back under the new widget.
+ */
+export interface RetiredMergedWidget {
+  /** The canonical widget's component id. */
+  readonly component: string;
+  /** Params that reproduce the retired widget's view on the canonical one. */
+  readonly params?: Readonly<Record<string, unknown>>;
+  /** Why it was retired — shown to nobody, read by the next maintainer. */
+  readonly note: string;
+}
+
+/**
+ * A widget whose capability dissolved into a tool or route rather than
+ * another widget. A saved panel cannot render the destination (tools are
+ * overlays, Settings is a route), so it renders a small pointer instead —
+ * still a resolvable component, so the saved tab survives (Dockview wipes the
+ * whole tab when any one panel fails to resolve).
+ */
+export interface RetiredMovedWidget {
+  readonly movedTo: {
+    /** Human-readable destination, e.g. "Settings → Monitoring". */
+    readonly destination: string;
+    /** Router path when the destination is routable (Settings sections). */
+    readonly route?: string;
+  };
+  /** Why it was retired — shown to nobody, read by the next maintainer. */
+  readonly note: string;
+}
+
+export type RetiredWidget = RetiredMergedWidget | RetiredMovedWidget;
+
+/** Narrowing helper shared with the guard tests. */
+export function isMovedWidget(spec: RetiredWidget): spec is RetiredMovedWidget {
+  return "movedTo" in spec;
+}
+
+export const RETIRED_WIDGET_IDS: Readonly<Record<string, RetiredWidget>> = {
+  sessionstats: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "Session statistics now live in the Trade Review tool's Session tab: "
+      + "same FIFO round-trip metrics via lib/pnl, same "
+      + "disclosed-sample-until-a-trip-closes provenance.",
+  },
+  tradeperformance: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "Performance metrics now live in the Trade Review tool's Performance "
+      + "tab with a Range/YTD scope toggle, routed through "
+      + "lib/journalAnalytics — which fixed an equity curve running backwards "
+      + "(the journal returns newest-first and this widget summed in array "
+      + "order), a YTD end date computed in UTC that excluded the current "
+      + "session every IST early morning, and a profit factor fabricated as "
+      + "99 when there were no losses.",
+  },
+  heatcalendar: {
+    movedTo: { destination: "Trade Review (Tools menu)" },
+    note:
+      "The daily heat-calendar rendering (month navigation, tooltip, legend) "
+      + "survives in the Trade Review tool's Calendar tab over REAL "
+      + "journalled rupee P&L; the widget's sample-only percentage data plane "
+      + "retires as strictly dominated.",
+  },
+  dashboard: {
+    component: "indexstrip",
+    note:
+      "Dissolved into composition (ruling D5, 2026-07-26). It imported zero "
+      + "widgets and reimplemented four surfaces the terminal already had: "
+      + "the live index cards (now the Index Strip widget), a positions "
+      + "table (its P&L% column and FlintSegmentTracker status strip moved "
+      + "into Positions, recomputed from the kernel's mtm/pnlPercent rather "
+      + "than the raw broker fields), an orders table (Orders) and "
+      + "funds/margin cards (Risk). A saved panel reopens as the Index Strip "
+      + "— the only part of it nothing else carried; the Trading Desk preset "
+      + "gives back the full at-a-glance composition.",
+  },
+  threepanel: {
+    movedTo: { destination: "Workspace presets → Three Panel" },
+    note:
+      "Demoted to the Three Panel workspace preset (dedup 3.3). Its cells "
+      + "were stripped chart clones (no indicators, drawings, replay or "
+      + "persistence); the preset composes three full ChartWidget panels "
+      + "whose time scales sync via lib/chartSyncBus and whose CE/PE cells "
+      + "resolve nearest-expiry ATM legs via lib/optionLegSymbols — the "
+      + "resolution logic extracted from this widget. A single saved panel "
+      + "cannot render a three-panel layout, so it points at the preset.",
+  },
+  marketbreadth: {
+    component: "marketoverview",
+    params: { tab: "breadth" },
+    note:
+      "Merged into Market Overview. Its zod-validated /breadth fetches and "
+      + "fail-closed provenance became the Breadth tab verbatim.",
+  },
+  sectormap: {
+    component: "marketoverview",
+    params: { tab: "sectors" },
+    note:
+      "Merged into Market Overview. Treemap/grid/table over positions became "
+      + "the Sectors tab (default treemap), keeping the metric-labelling fix "
+      + "— live colours are unrealised P&L% vs entry, not day change. Its RRG "
+      + "and Portfolio modes moved to the Rotation tab (same localStorage "
+      + "key, saved symbol lists survive).",
+  },
+  sectorperformance: {
+    component: "marketoverview",
+    params: { tab: "sectors", view: "bars" },
+    note:
+      "Merged into Market Overview as the Sectors bars view. It is wired to "
+      + "the sectors/rotation endpoint, but that route is still a backend "
+      + "stub, so the bars remain honestly badged sample; its own sample "
+      + "table collapsed into the widget's single sample sector dataset.",
+  },
+  globalindices: {
+    component: "marketoverview",
+    params: { tab: "indices" },
+    note:
+      "Merged into Market Overview. The table, its honest empty/error/retry "
+      + "states and the response-flag-keyed badge carried over unchanged into "
+      + "the Indices tab.",
+  },
+  fiilongshort: {
+    component: "marketoverview",
+    params: { tab: "flows" },
+    note:
+      "Merged into Market Overview. Futures-bias gauge + FII segment table "
+      + "became the Flows tab, joined by the 10-day FII/DII cash table and "
+      + "DII derivative rows via the same getFiiDiiData call.",
+  },
+  marketsummary: {
+    component: "marketoverview",
+    params: { tab: "breadth" },
+    note:
+      "Split by section into Market Overview: breadth + Top Movers → Breadth; "
+      + "live index tick cards → Indices (awaiting-tick honesty preserved); "
+      + "sector bars → Sectors bars view; FII/DII net → Flows. Opens on "
+      + "Breadth, the closest match to its at-a-glance identity.",
+  },
+  indexcontribution: {
+    component: "marketoverview",
+    params: { tab: "contribution" },
+    note:
+      "Merged into Market Overview per ruling D9 as the Contribution tab — "
+      + "selector, diverging contribution bars, weights-as-of disclosure and "
+      + "fail-closed demo affordance unchanged.",
+  },
+  tradebook: {
+    component: "fills",
+    note:
+      "Merged into Fills. Its TanStack table engine, permissive raw-tradebook "
+      + "parsing, value column, side pills, refresh/clock and honest "
+      + "error/empty states survive unchanged; Fills adds the journal "
+      + "enrichment it never had.",
+  },
+  tradelog: {
+    component: "fills",
+    note:
+      "Merged into Fills. CSV export, symbol search and the stats footer "
+      + "carry over. Dropped: the Type/Status/fill-time columns (never "
+      + "populated by real data — the journal records fills, not orders) and "
+      + "the computeStats /2 halving (the sample fixture now puts P&L on the "
+      + "closing leg only, so totals are a direct sum).",
+  },
+  intradaypnl: {
+    component: "pnlmonitor",
+    params: { view: "live" },
+    note:
+      "Merged into P&L Monitor. Its realised/unrealised split, tradebook "
+      + "partial-close booking and peak/drawdown maths are the canonical "
+      + "figures (every semantic pin survives); its baseline sparkline gave "
+      + "way to the MTM chart, which now plots the same corrected series.",
+  },
+  mtmmonitor: {
+    component: "pnlmonitor",
+    params: { view: "live" },
+    note:
+      "Merged into P&L Monitor. Contributed the Lightweight Charts curve, "
+      + "target/SL price lines, staleness chip and error banner + retry; its "
+      + "raw totalPositionMtm plot (blind to booked partial-close realised) "
+      + "and its peak>0 drawdown guard (zero drawdown for a book that fell "
+      + "straight underwater) were both corrected to the IntradayPnL maths.",
+  },
+  optionsflow: {
+    component: "oichart",
+    params: { view: "signals" },
+    note:
+      "Folded into OI Analytics' Signals view (ruling D1, 2026-07-26). It had "
+      + "no data source at all — an unconditional hardcoded sample — and its "
+      + "unusual-OI third was already dominated by the signals view's real "
+      + "/v1/oi/unusual feed. The sweep/block tape presentation survives as "
+      + "the collapsed, sample-labelled FlowTape section there.",
+  },
+  health: {
+    movedTo: { destination: "Settings → Monitoring", route: "/settings#monitoring" },
+    note:
+      "Retired into Settings (ruling D6, 2026-07-26). Every one of its data "
+      + "sources — backend health, traffic, latency, security stats, "
+      + "connection state — was already rendered by Settings' Monitoring and "
+      + "Security sections and the status bar; the widget was a duplicate "
+      + "readout. Saved panels show a pointer rather than a fourth copy.",
+  },
+  gex: {
+    component: "gammadensity",
+    params: { view: "exposure" },
+    note:
+      "Merged into Dealer Gamma. The gammadensity backend endpoint reuses the "
+      + "very option-chain snapshot the GEX endpoint builds, so the two were "
+      + "one data plane behind two widgets. GEX's call/put decomposition and "
+      + "signed Net GEX area are now the 'exposure' view; its gamma-flip "
+      + "annotation is dropped because the server returns that field as null "
+      + "unconditionally.",
+  },
+  depthheatmap: {
+    component: "domheatmap",
+    // Its identity was the gamma power-scale look, not a distinct view.
+    params: { scale: "gamma" },
+    note:
+      "Merged into DOM Heatmap. Same visual, byte-identical colour ramps, same "
+      + "layered-canvas architecture and the same Flame icon — the only real "
+      + "difference was that this one was entirely synthetic. Its deterministic "
+      + "generator survives as the labelled demo provider.",
+  },
+  orderbookreplay: {
+    component: "domheatmap",
+    params: { view: "replay" },
+    note:
+      "Merged into DOM Heatmap as its 'replay' view. It owned a good transport "
+      + "and scrubber but played over a Math.random() sample; DOM Heatmap "
+      + "already kept a real 60-snapshot ring buffer, which is what a scrubber "
+      + "wants.",
+  },
+  ivskew: {
+    component: "ivsmile",
+    params: { view: "skew" },
+    note:
+      "Merged into IV Smile & Skew. Both read the same getFtIVSmile payload "
+      + "with the same palette, symbols, axis toggle and ATM/25-delta metrics; "
+      + "only the projection differed. IV Skew's four-state fail-closed "
+      + "provenance badge and its percent-vs-decimal normalisation became the "
+      + "canonical behaviour, because they were the stricter of the two.",
+  },
+  greekssurface: {
+    component: "greeksheatmap",
+    // The retired widget opened on IV; the merged default is delta, so a
+    // saved panel needs the metric too or it reopens showing something else.
+    params: { projection: "surface", metric: "iv" },
+    note:
+      "Merged into Greeks Matrix. One dataset under two projections — both "
+      + "derived greeks from the same getFtIVSmile payload with what were "
+      + "character-identical formulas. The 3-D bar projection is now a "
+      + "projection setting rather than a separate widget.",
+  },
+  microstructure: {
+    component: "timesales",
+    params: { view: "stats" },
+    note:
+      "Merged into Tape and Microstructure. Every number it displayed came "
+      + "from Math.random(); its statistics are exactly what the neighbouring "
+      + "widget's REAL tick prints already support, so the merge makes them "
+      + "real rather than preserving a fabricated surface.",
+  },
+  chartgrid: {
+    component: "chart",
+    note:
+      "Demoted to the Multi Chart workspace preset. A grid of N charts is a "
+      + "LAYOUT, not a widget: its cell was a stripped clone of the chart "
+      + "widget that dropped indicators, drawings, the OI overlay and — "
+      + "critically — persistence, while a preset-composed layout survives "
+      + "reload. A saved grid panel reopens as one full chart; the preset "
+      + "gives back the grid.",
+  },
+  spreadview: {
+    component: "optionchain",
+    note:
+      "Demoted to template data. It was four hardcoded two-leg spreads with "
+      + "hand-typed premiums, no data source and a permanently disabled "
+      + "execute button — every one expressible as a two-row entry in the "
+      + "options builder, which now also carries the economic validator that "
+      + "was the only thing this surface uniquely owned. A saved panel "
+      + "reopens on the option chain, where those spreads can be built for "
+      + "real.",
+  },
+  scanner: {
+    component: "conditionscanner",
+    params: { view: "scans", scan: "pre_market_movers" },
+    note:
+      "Merged into Condition Scanner. Same client function, same endpoint, "
+      + "same row type — it simply hardcoded two of the backend's eight "
+      + "prebuilt scan keys into a tab enum while the canonical fetches the "
+      + "whole catalogue. Its unusual-OI tab did not come across: that "
+      + "endpoint already lives in OI Analytics, which this widget links to.",
+  },
+  positionsizing: {
+    component: "calculator",
+    params: { tab: "sizing" },
+    note:
+      "Merged into Calculator. Its fixed-fractional sizing was algebraically "
+      + "identical to Profit Target's and to the Calculator's own risk tab.",
+  },
+  profittarget: {
+    component: "calculator",
+    params: { tab: "target" },
+    note:
+      "Merged into Calculator. Same shared sizing kernel; its reward-side "
+      + "analysis becomes the Target tab.",
+  },
+  netposition: {
+    component: "positions",
+    params: { view: "net" },
+    note:
+      "Merged into Positions. All three position renderings read the same "
+      + "cache, so they were one book behind three widgets. Its grouping "
+      + "function also split on whitespace, making it a no-op on every real "
+      + "broker symbol.",
+  },
+  positionheatmap: {
+    component: "positions",
+    params: { view: "heat" },
+    note:
+      "Merged into Positions as the heat-map view. Its P&L percentage "
+      + "recompute guarded only the entry price, so any row with a zero LTP "
+      + "was painted a fabricated -100%.",
+  },
+  oiprofile: {
+    component: "oichart",
+    params: { view: "butterfly" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  oiheatmap: {
+    component: "oichart",
+    params: { view: "heat" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  oisignals: {
+    component: "oichart",
+    params: { view: "signals" },
+    note: "Merged into OI Analytics. All four answered the same question — where open interest sits across strikes. OI Chart and OI Heatmap hit the identical endpoints while independently duplicating the ATM-window, max-OI and PCR maths with different window sizes AND different change sources, so two widgets on one screen could disagree about the same strike.",
+  },
+  depth: {
+    component: "orderladder",
+    // At the NSE tick each broker level lands on its own row, which is what
+    // the retired 5-level depth table looked like.
+    params: { symbol: "NIFTY", exchange: "NSE", tick: 0.05 },
+    note:
+      "Merged into DOM / Ladder. These were a broken split, not duplicates: "
+      + "Depth held the real level-2 book and could not trade, while the "
+      + "ladder could trade but had no depth feed at all and rendered zero "
+      + "resting size in live mode.",
+  },
+  riskpanel: {
+    component: "riskdashboard",
+    note:
+      "Merged into Risk. The two shared exactly one metric — margin "
+      + "utilisation, computed identically but banded 80/95 here and 70/90 "
+      + "there, so an operator with both open saw one account at two risk "
+      + "levels. No params: the merged widget has no view modes.",
+  },
+  impliedmove: {
+    component: "straddle",
+    params: { view: "impliedmove" },
+    note:
+      "Merged into Straddle & Implied Move. It needed only spot, ATM strike "
+      + "and the two ATM premiums — all of which the straddle widget already "
+      + "computed live. Being static was never a data problem. The merge also "
+      + "deletes a silent mislabel where three of its five symbols showed "
+      + "another index's numbers.",
+  },
+  footprint: {
+    component: "orderflow",
+    params: { view: "footprint+delta" },
+    note:
+      "Merged into Order Flow. The two widgets were ~90% identical — same "
+      + "useOrderFlow call, same symbols and intervals, a copy-pasted "
+      + "formatIntervalLabel and a near byte-identical DPR effect. Footprint's "
+      + "per-cell delta text and cumulative-delta strip are now the "
+      + "'footprint+delta' view mode.",
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Widget metadata for the picker popup
 // ---------------------------------------------------------------------------
 export const widgetCatalog: WidgetMeta[] = [
   // Trading
-  { id: "dashboard", name: "Dashboard", icon: "LayoutDashboard", category: "Trading", description: "Overview of open positions, real-time P&L, and market status" },
   { id: "scalper", name: "Scalper", icon: "Zap", category: "Trading", description: "One-click order entry panel optimised for intraday F&O scalping" },
-  { id: "positions", name: "Positions", icon: "Table2", category: "Trading", description: "Live position book with MTM P&L, quantity, and average price" },
+  { id: "positions", name: "Positions", icon: "Table2", category: "Trading", description: "The open position book of the selected account in three views — a sortable table with square-off, convert and exit-all, a net view that groups legs by underlying, and a P&L heat map — all from one broker read, so the three cannot disagree" },
+  { id: "fills", name: "Fills", icon: "ArrowRightLeft", category: "Trading", description: "Executed fills for the session — broker tradebook joined with journal entry/exit, realised P&L, fees and screenshots; filter, sort and CSV export" },
+  { id: "pnlmonitor", name: "P&L Monitor", icon: "TrendingUp", category: "Trading", description: "Day P&L with realised/unrealised split, MTM chart with target and stop-loss lines, and summary and drawdown views from positions, tradebook and funds" },
   { id: "orders", name: "Orders", icon: "ClipboardList", category: "Trading", description: "Order book showing pending, executed, and rejected orders" },
   { id: "holdings", name: "Holdings", icon: "Wallet", category: "Trading", description: "Long-term equity and mutual fund holdings with current value" },
-  { id: "tradebook", name: "Trade Book", icon: "BookOpen", category: "Trading", description: "Executed trade history for the current session" },
   { id: "orderpad", name: "Order Pad", icon: "FileEdit", category: "Trading", description: "Full-featured order entry form with limit, market, and bracket orders" },
-  { id: "intradaypnl", name: "Intraday P&L", icon: "TrendingUp", category: "Trading", description: "Intraday profit and loss chart updated tick by tick" },
-  { id: "mtmmonitor", name: "MTM Monitor", icon: "Target", category: "Trading", description: "Mark-to-market monitor with target and stop-loss level alerts" },
-  { id: "riskpanel", name: "Risk Panel", icon: "ShieldAlert", category: "Trading", description: "Real-time risk metrics: max drawdown, margin used, and exposure limits" },
-  { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "One-click emergency actions: exit all, cancel all, flatten book" },
-  { id: "positionheatmap", name: "Position Heat Map", icon: "SquareStack", category: "Trading", description: "Heat map of current positions coloured by unrealised P&L" },
+  { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "Approval queue for orders the safety system has held back — review each pending intent and approve or reject it before it reaches a broker" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
   { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
   { id: "quicktrade", name: "Quick Trade", icon: "Zap", category: "Trading", description: "Minimal order ticket for fast order placement without leaving the chart" },
-  { id: "sessionstats", name: "Session Stats", icon: "Clock", category: "Trading", description: "Key statistics for the current trading session: trades, win rate, turnover" },
-  { id: "riskdashboard", name: "Risk Dashboard", icon: "ShieldAlert", category: "Trading", description: "Account risk dashboard for margin, drawdown, leverage, position count, and exposure" },
-  { id: "tradelog", name: "Trade Log", icon: "FileText", category: "Trading", description: "Annotated trade journal with entry/exit reasons and screenshots" },
-  { id: "tradeperformance", name: "Trade Performance", icon: "Trophy", category: "Trading", description: "Performance analytics: expectancy, Sharpe ratio, and streak analysis" },
+  { id: "riskdashboard", name: "Risk", icon: "ShieldAlert", category: "Trading", description: "Margin utilisation gauge with exposure, open positions and available cash, plus daily MTM against your local target and stop-loss references" },
   { id: "strategymonitor", name: "Strategy Monitor", icon: "Activity", category: "Trading", description: "Live status of all running automated strategies with PnL per strategy" },
-  { id: "netposition", name: "Net Positions", icon: "Layers", category: "Trading", description: "Aggregated net position across all accounts for a given instrument" },
-  { id: "orderladder", name: "Order Ladder", icon: "ArrowUpDown", category: "Trading", description: "Ladder-style DOM view for rapid limit order placement and cancellation" },
+  { id: "orderladder", name: "DOM / Ladder", icon: "ArrowUpDown", category: "Trading", description: "Level-2 book and order ladder in one surface — real resting bid/ask sizes and order counts on the rows you click to place and cancel limit orders through the safety gate" },
   { id: "foreverorders", name: "Forever (GTT) Orders", icon: "Clock", category: "Trading", description: "Place and manage forever/GTT orders incl. OCO legs and validity — native brokers only" },
   { id: "superorders", name: "Super Orders", icon: "Target", category: "Trading", description: "Bracket-style super orders with leg-aware modify and cancel — native brokers only" },
   { id: "conditionaltriggers", name: "Conditional Triggers", icon: "Zap", category: "Trading", description: "Condition-based trigger orders: place, modify and cancel market-condition alerts that fire orders" },
 
   // Analysis
   { id: "chart", name: "Chart", icon: "CandlestickChart", category: "Analysis", description: "Interactive candlestick chart with indicators, drawing tools, and replay" },
-  { id: "chartgrid", name: "Multi Chart", icon: "LayoutGrid", category: "Analysis", description: "1×1, 1×2, 2×1, or 2×2 grid of independent charts with per-cell symbol and interval" },
+  { id: "marketoverview", name: "Market Overview", icon: "LayoutGrid", category: "Analysis", description: "Market breadth, sector performance and rotation (RRG), FII/DII flows, live NSE and global indices, and index contribution by constituent weight — one tabbed surface with per-section Live/Sample provenance" },
   { id: "optionchain", name: "Option Chain", icon: "Grid3x3", category: "Analysis", description: "Live option chain with strike-level OI, volume, IV, and Greek data" },
   { id: "historicalchain", name: "Historical Chain", icon: "Archive", category: "Analysis", description: "Browse archived (expired) option chains — strike-level OI, volume, LTP, and IV per past expiry" },
-  { id: "oichart", name: "OI Chart", icon: "BarChart3", category: "Analysis", description: "Open interest change chart across strikes for a selected expiry" },
-  { id: "straddle", name: "Straddle", icon: "Activity", category: "Analysis", description: "Straddle and strangle builder with premium, breakeven, and IV display" },
-  { id: "depth", name: "Depth", icon: "Layers", category: "Analysis", description: "Level-2 bid/ask depth from the active broker snapshot feed" },
+  { id: "oichart", name: "OI Analytics", icon: "BarChart3", category: "Analysis", description: "Open interest across strikes for an expiry — grouped bars, a CE/PE butterfly profile, a strike heat grid, or per-strike build-up and unwinding signals, all from one chain read" },
+  { id: "straddle", name: "Straddle & Implied Move", icon: "Activity", category: "Analysis", description: "Live ATM straddle price with spot and synthetic-future overlays, plus the implied-move range (±1σ ≈ 68%, ±2σ ≈ 95%) derived from the same chain" },
   { id: "greeks", name: "Greeks", icon: "Sigma", category: "Analysis", description: "Position-level Delta, Gamma, Theta, and Vega summary" },
-  { id: "sectormap", name: "Sector Map", icon: "Map", category: "Analysis", description: "Colour-coded sector tree map showing intraday performance by industry" },
-  { id: "gex", name: "GEX Dashboard", icon: "BarChart2", category: "Analysis", description: "Gamma Exposure (GEX) by strike to identify key support and resistance levels" },
-  { id: "fiilongshort", name: "FII Long/Short", icon: "TrendingUp", category: "Analysis", description: "FII long/short positioning across F&O segments with an aggregate futures directional bias, derived from NSE participant OI" },
-  { id: "gammadensity", name: "Gamma Density", icon: "BarChart2", category: "Analysis", description: "Dealer gamma density (Γ×OI) by strike at intraday and to-expiry horizons, with the ±1σ/±2σ convexity-zone expected-move band" },
+  { id: "gammadensity", name: "Dealer Gamma", icon: "BarChart2", category: "Analysis", description: "Dealer gamma from one option-chain snapshot, in two views: gamma-weighted open interest by strike at intraday and to-expiry horizons with the ±1σ convexity zone, or call/put gamma-exposure bars with signed net exposure and the dealer long/short-gamma zone" },
   { id: "arbitragescanner", name: "Arbitrage Scanner", icon: "ArrowLeftRight", category: "Analysis", description: "Cash-future basis dislocations vs cost-of-carry plus cross-exchange (NSE/BSE) price gaps, ranked by annualised edge" },
-  { id: "indexcontribution", name: "Index Contribution", icon: "BarChart3", category: "Analysis", description: "Index movers ranked by constituent point contribution (free-float weight × return), with advancers/decliners and per-name push" },
   { id: "patterndetection", name: "Pattern Detection", icon: "CandlestickChart", category: "Analysis", description: "Detects the six candlestick patterns FlintTrade backtests (doji, hammer, engulfing, morning/evening star, three soldiers) on a symbol's recent bars" },
-  { id: "timesales", name: "Time & Sales", icon: "ClipboardList", category: "Analysis", description: "Streaming tape of trade prints inferred from live quote ticks (tick-rule side, volume-delta size) with a buy/sell pressure bar" },
+  { id: "timesales", name: "Tape & Microstructure", icon: "ClipboardList", category: "Analysis", description: "Streaming tape of trade prints inferred from live quote ticks (tick-rule side, volume-delta size), with tick velocity, aggressor ratio and large-order statistics computed from those prints" },
   { id: "volsurface", name: "Vol Surface", icon: "Box", category: "Analysis", description: "3-D implied volatility surface across strikes and expiries" },
-  { id: "ivsmile", name: "IV Smile", icon: "TrendingUp", category: "Analysis", description: "Implied volatility smile curve for a selected expiry date" },
+  { id: "ivsmile", name: "IV Smile & Skew", icon: "TrendingUp", category: "Analysis", description: "Implied volatility across strikes for the nearest expiries, as the call/put smile curves or the 25-delta put-minus-call skew" },
   { id: "straddlepnl", name: "Straddle P&L", icon: "ArrowLeftRight", category: "Analysis", description: "Payoff diagram for straddle positions with breakeven markers" },
-  { id: "oiprofile", name: "OI Profile", icon: "BarChart", category: "Analysis", description: "OI distribution profile across strikes to identify congestion zones" },
   { id: "orderflow", name: "Order Flow", icon: "BarChart2", category: "Analysis", description: "Real-time buy/sell order flow footprint for active F&O contracts" },
-  { id: "depthheatmap", name: "Depth Heatmap", icon: "Flame", category: "Analysis", description: "Heatmap of order book depth changes over time" },
-  { id: "threepanel", name: "Three-Panel Chart", icon: "Columns3", category: "Analysis", description: "Three synchronised chart panels for multi-instrument comparison" },
-  { id: "oiheatmap", name: "OI Heatmap", icon: "Grid2x2", category: "Analysis", description: "Heat map of open interest changes across strikes and expiries" },
-  { id: "oisignals", name: "OI Signals", icon: "Activity", category: "Analysis", description: "Per-strike OI-action signals (long build-up / short covering / unwinding) plus unusual-OI outliers" },
   { id: "portfoliooptimiser", name: "Portfolio Optimiser", icon: "PieChart", category: "Analysis", description: "Mean-variance (Markowitz) optimal weights for a basket, with expected return / volatility / Sharpe" },
-  { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run prebuilt indicator condition scans (RSI, volume spikes, EMA crosses) across a symbol universe" },
-  { id: "greekssurface", name: "Greeks Surface", icon: "Box", category: "Analysis", description: "3-D surface plot of option Greeks across strikes and days to expiry" },
-  { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Classic, Camarilla, and Woodie pivot levels for the current session" },
-  { id: "orderbookreplay", name: "Order Book Replay", icon: "BarChart3", category: "Analysis", description: "Historical replay of the order book for post-session microstructure analysis" },
-  { id: "marketbreadth", name: "Market Breadth", icon: "BarChart4", category: "Analysis", description: "Advance/decline ratio, new highs/lows, and breadth oscillators for NSE" },
+  { id: "conditionscanner", name: "Condition Scanner", icon: "Radar", category: "Analysis", description: "Run the backend's prebuilt indicator condition scans (RSI extremes, volume breakout, pre-market movers, 52-week breakouts) across a symbol universe — sortable matches with their matched conditions and one-click watchlist adds, plus live NIFTY 50 sector movers" },
+  { id: "pivotpoints", name: "Pivot Points", icon: "GitFork", category: "Analysis", description: "Standard, Fibonacci, Woodie, Camarilla and DeMark pivots — the pivot with R1–R4 and S1–S4 from the previous session's OHLC, plus where the price currently sits between them" },
   { id: "volatilitycone", name: "Volatility Cone", icon: "Triangle", category: "Analysis", description: "Volatility cone comparing current IV against historical percentiles" },
-  { id: "heatcalendar", name: "Heat Calendar", icon: "Calendar", category: "Analysis", description: "Calendar heat map of daily P&L or returns for pattern spotting" },
-  { id: "vwapbands", name: "VWAP Bands", icon: "Waves", category: "Analysis", description: "VWAP with standard deviation bands overlaid on the price chart" },
+  { id: "vwapbands", name: "VWAP Bands", icon: "Waves", category: "Analysis", description: "Standalone session VWAP panel — VWAP, the close line and ±1σ/2σ/3σ bands from intraday 5-minute bars when a broker is connected, labelled sample bars otherwise" },
   { id: "correlationpairs", name: "Correlation Pairs", icon: "Link", category: "Analysis", description: "Rolling correlation between selected instrument pairs" },
-  { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis", description: "Four charts of the same instrument at different timeframes in one view" },
-  { id: "pcrtrend", name: "PCR Trend", icon: "TrendingDown", category: "Analysis", description: "Put-Call Ratio trend line to gauge market sentiment over time" },
-  { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis", description: "Percentage-based comparison chart for up to five instruments" },
-  { id: "spreadview", name: "Spread View", icon: "ArrowUpDown", category: "Analysis", description: "Vertical options spread calculator with illustrative expiry payoff and risk metrics" },
-  { id: "greeksheatmap", name: "Greeks Heatmap", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks heat map derived from the current IV smile" },
-  { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Historical gap statistics showing fill probability and average size" },
-  { id: "impliedmove", name: "Implied Move", icon: "MoveHorizontal", category: "Analysis", description: "Expected move range derived from ATM straddle premium for current expiry" },
-  { id: "optionsflow", name: "Options Flow", icon: "Workflow", category: "Analysis", description: "Real-time large options trade scanner showing unusual activity" },
-  { id: "microstructure", name: "Market Microstructure", icon: "Microscope", category: "Analysis", description: "Tick-level microstructure analysis: trade clustering, aggressor ratio, VPIN" },
+  { id: "multitimeframe", name: "Multi-Timeframe", icon: "Layers", category: "Analysis", description: "Trend, RSI, MACD sign and EMA position for one instrument across 5m/15m/1h/1D as a signal table with a confluence score — computed from live bars when a broker is connected, labelled sample signals otherwise" },
+  { id: "pcrtrend", name: "PCR Trend", icon: "TrendingDown", category: "Analysis", description: "Put-Call Ratio trend line to gauge market sentiment over time — sample sessions only, no chain PCR source is wired yet" },
+  { id: "instrumentcompare", name: "Instrument Compare", icon: "GitCompare", category: "Analysis", description: "Percentage-change overlay of up to four instruments rebased to a common start — sample series only, no live price feed is wired yet" },
+  { id: "greeksheatmap", name: "Greeks Matrix", icon: "Grid3x3", category: "Analysis", description: "Per-strike theoretical Greeks across expiries — delta, gamma, theta, vega or IV — as a heat grid or a rotatable 3-D surface" },
+  { id: "gapanalysis", name: "Gap Analysis", icon: "ArrowUpFromLine", category: "Analysis", description: "Gap-up/gap-down events with fill rate and average gap size — sample events only, no gap-history source is wired yet" },
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
-  { id: "ivskew", name: "IV Skew", icon: "Activity", category: "Analysis", description: "Skew chart showing the difference in IV between OTM puts and calls" },
-  { id: "sectorperformance", name: "Sector Performance", icon: "BarChart", category: "Analysis", description: "Bar chart of intraday performance ranked by sector" },
-  { id: "footprint", name: "Footprint Chart", icon: "BarChart2", category: "Analysis", description: "Footprint chart with per-cell buy/sell volume, delta, POC, and cumulative delta strip" },
-  { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Historical depth-of-market heatmap showing where large orders sit and are pulled over time" },
+  { id: "deliverydata", name: "Delivery Data", icon: "Package", category: "Analysis", description: "Delivery percentage per scrip with open/high/low/close and traded volume, sorted into conviction bands — sample data only, no delivery source is wired yet" },
+  { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },
-  { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility", description: "Options payoff and break-even calculator with strategy builder" },
+  { id: "indexstrip", name: "Index Strip", icon: "TrendingUp", category: "Utility", description: "Compact strip of live index cards — NIFTY 50, BANK NIFTY, SENSEX, FIN NIFTY and India VIX with change, sparkline and a VIX>20 alert border, straight from the WebSocket tick stream" },
+  { id: "calculator", name: "Calculator", icon: "Calculator", category: "Utility", description: "Position sizing (fixed %, Kelly, ATR), risk/reward targets, brokerage charges and live margin" },
   { id: "news", name: "News Feed", icon: "Newspaper", category: "Utility", description: "Curated market news and announcements relevant to your watchlist" },
   { id: "ticker", name: "Ticker", icon: "TrendingUp", category: "Utility", description: "Horizontal scrolling ticker bar showing live prices for key indices" },
   { id: "aiadvisor", name: "AI Advisor", icon: "Bot", category: "Utility", description: "AI-powered trade assistant for strategy ideas, analysis, and Q&A" },
   { id: "aibackends", name: "AI Backends", icon: "Layers", category: "Utility", description: "Detect and run supported AI backends — Claude Code, Cerebras, Codex, and other CLI/ACP agents" },
   { id: "aiteam", name: "AI Team", icon: "Users", category: "Utility", description: "Multi-agent consensus analysis — technical, fundamental, sentiment, and risk specialists vote on a symbol" },
   { id: "obsidian", name: "Obsidian Vault", icon: "BookText", category: "Utility", description: "Browse and search the Obsidian vault the AI agent reads for context and journals decisions into" },
-  { id: "scanner", name: "Pre-Market Scanner", icon: "ScanLine", category: "Utility", description: "Gap and volume-breakout scans over the NIFTY 50 plus live sector movers; OI change stays sample-labelled" },
-  { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Price and indicator alerts with Telegram and in-app notifications" },
-  { id: "health", name: "System Health", icon: "Activity", category: "Utility", description: "Broker gateway/OpenAlgo bridge status, WebSocket latency, and API health metrics" },
+  { id: "alerts", name: "Price Alerts", icon: "Bell", category: "Utility", description: "Last-traded-price alerts — above, below, crosses above, crosses below — armed in this browser and polled while the panel is open, with a log of the ones that fired" },
   { id: "reconciliation", name: "Reconciliation", icon: "ShieldCheck", category: "Utility", description: "Broker-vs-FlintTrade reconciliation status per native account with expandable mismatch reports" },
-  { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates across exchanges for arbitrage tracking" },
-  { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Live currency converter for INR, USD, and major pairs" },
+  { id: "fundingrate", name: "Funding Rates", icon: "Percent", category: "Utility", description: "Perpetual futures funding rates — needs a connected crypto broker; sample preview in Explore" },
+  { id: "currencyconverter", name: "Currency Converter", icon: "ArrowLeftRight", category: "Utility", description: "Convert between INR, USD, EUR, GBP, JPY, SGD and AED — static reference rates only, no FX feed is wired yet" },
   { id: "earningscalendar", name: "Earnings Calendar", icon: "CalendarDays", category: "Utility", description: "Upcoming earnings announcements and results calendar for NSE stocks" },
-  { id: "globalindices", name: "Global Indices", icon: "Globe", category: "Utility", description: "Live prices for major global indices: SGX Nifty, Dow, S&P, Nasdaq, etc." },
   { id: "strategytemplates", name: "Strategy Templates", icon: "BookOpen", category: "Utility", description: "Library of pre-built option strategy templates to launch from one click" },
   { id: "audittrail", name: "Audit Trail", icon: "ScrollText", category: "Utility", description: "Append-only audit log of all orders and account events" },
   { id: "economiccalendar", name: "Economic Calendar", icon: "CalendarClock", category: "Utility", description: "Macro economic event calendar with market impact ratings" },
-  { id: "profittarget", name: "Profit Target Calc", icon: "Target", category: "Utility", description: "Position-aware profit target and stop-loss calculator with R:R ratio" },
   { id: "expirycountdown", name: "Expiry Countdown", icon: "Timer", category: "Utility", description: "Countdown timers to weekly and monthly expiry across all segments" },
-  { id: "positionsizing", name: "Position Sizing", icon: "Ruler", category: "Utility", description: "Kelly criterion and fixed-risk position sizing calculator" },
   { id: "marketclock", name: "Market Clock", icon: "Clock", category: "Utility", description: "Multi-timezone market clock showing session open/close for NSE, NYSE, etc." },
-  { id: "tradeidea", name: "Trade Ideas", icon: "Lightbulb", category: "Utility", description: "AI-generated trade ideas based on screener signals and market regime" },
+  { id: "tradeidea", name: "Trade Ideas", icon: "Lightbulb", category: "Utility", description: "Your own trade setups, typed by hand and kept in this browser: symbol, direction, entry zone, stop-loss, target, timeframe, notes and tags, tracked from planned through to completed" },
   { id: "tickspeed", name: "Tick Speed", icon: "Gauge", category: "Utility", description: "Tick arrival rate gauge for detecting unusual activity in F&O instruments" },
-  { id: "marketsummary", name: "Market Summary", icon: "LayoutDashboard", category: "Utility", description: "Snapshot of market breadth, FII/DII data, and sector rotation for the day" },
-  { id: "tradejournal", name: "Trade Journal", icon: "NotebookPen", category: "Utility", description: "Annotated trade journal with full-text search: log entries with notes, tags, setup/execution quality, and see win-rate and P&L stats" },
+  { id: "tradejournal", name: "Journal Entries", icon: "NotebookPen", category: "Utility", description: "Your annotated trade journal on the backend store — write, edit and delete entries with notes, tags, side, prices and strategy, find them by full-text search, and see win rate and P&L across them" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -379,10 +708,79 @@ function createWidgetPanel(
 // ---------------------------------------------------------------------------
 // Export: widgetComponents record for DockviewReact `components` prop
 // ---------------------------------------------------------------------------
-export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> =
+/**
+ * Wrap a canonical widget so a retired id keeps resolving, with the params
+ * that reproduce the retired widget's presentation merged in.
+ *
+ * Params already present on the saved panel win: an operator who changed the
+ * view before saving keeps their choice.
+ */
+/** Pointer panel for widgets whose capability moved into a tool or route. */
+function MovedWidgetNotice({ retiredId, movedTo }: {
+  retiredId: string;
+  movedTo: RetiredMovedWidget["movedTo"];
+}) {
+  return (
+    <div
+      className="h-full flex flex-col items-center justify-center gap-2 px-4 text-center bg-surface-base"
+      data-testid={`moved-widget-${retiredId}`}
+    >
+      <span className="text-sm font-medium text-text-primary">
+        This widget moved to {movedTo.destination}
+      </span>
+      <span className="text-xs text-text-muted max-w-72">
+        Its readouts live there now, so this panel can be closed — nothing else
+        is lost from this layout.
+      </span>
+      {movedTo.route && (
+        <a
+          href={movedTo.route}
+          className="mt-1 px-2.5 py-1 text-xs rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        >
+          Open {movedTo.destination.split("→")[0]?.trim() ?? "destination"}
+        </a>
+      )}
+    </div>
+  );
+}
+
+function createRetiredWidgetPanel(
+  retiredId: string,
+  spec: RetiredWidget,
+  resolved: Record<string, React.FC<IDockviewPanelProps>>,
+): React.FC<IDockviewPanelProps> {
+  if (isMovedWidget(spec)) {
+    const PanelComponent: React.FC<IDockviewPanelProps> = () => (
+      <MovedWidgetNotice retiredId={retiredId} movedTo={spec.movedTo} />
+    );
+    PanelComponent.displayName = `Retired(${retiredId}→${spec.movedTo.destination})`;
+    return PanelComponent;
+  }
+  const { component, params } = spec;
+  const Canonical = resolved[component];
+  const PanelComponent: React.FC<IDockviewPanelProps> = (props) => {
+    if (!Canonical) return <WidgetError name={retiredId} message="Canonical widget missing" onRetry={() => {}} />;
+    const merged = { ...props, params: { ...params, ...(props.params ?? {}) } };
+    return <Canonical {...merged} />;
+  };
+  PanelComponent.displayName = `Retired(${retiredId}→${component})`;
+  return PanelComponent;
+}
+
+const liveWidgetComponents: Record<string, React.FC<IDockviewPanelProps>> =
   Object.fromEntries(
     Object.entries(lazyWidgets).map(([id, LazyWidget]) => [
       id,
       createWidgetPanel(id, LazyWidget as React.LazyExoticComponent<React.ComponentType<IDockviewPanelProps>>),
     ])
   );
+
+export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> = {
+  ...liveWidgetComponents,
+  ...Object.fromEntries(
+    Object.entries(RETIRED_WIDGET_IDS).map(([retiredId, spec]) => [
+      retiredId,
+      createRetiredWidgetPanel(retiredId, spec, liveWidgetComponents),
+    ]),
+  ),
+};

@@ -10,4 +10,37 @@
 #       reason: "dev-only tooling; not shipped to the browser bundle"
 #       accepted_by: "navaneesh"
 #       expires: "2026-08-23"
-allowlist: []
+allowlist:
+  # ---------------------------------------------------------------------------
+  # Both entries below are UNFIXABLE BY UPGRADE as of 2026-07-26, not deferred
+  # convenience. Everything that had a real patched version was fixed instead,
+  # via the pnpm overrides block in the root package.json (js-yaml 4.3.0,
+  # postcss 8.5.23, fast-uri 4.1.1, sharp 0.35.3, brace-expansion 2.1.2) and
+  # direct bumps of next (16.2.12) and react-router-dom (7.18.1).
+  # ---------------------------------------------------------------------------
+
+  - advisory: "GHSA-mh99-v99m-4gvg"
+    package: "brace-expansion"
+    reason: >-
+      The advisory declares patched >=5.0.8, but brace-expansion has never
+      published a 5.x — its latest release is 2.1.2, which the root overrides
+      already pin repo-wide. The range is unsatisfiable, so no upgrade can
+      clear it. Reachability is also low: the remaining paths are
+      build/publish tooling (sigstore, tuf-js, cacache under @flinttrade/desktop),
+      not runtime, and the DoS needs attacker-controlled brace patterns which
+      that tooling never takes from user input.
+    accepted_by: "navaneesh"
+    expires: "2026-10-26"
+
+  - advisory: "GHSA-qwww-vcr4-c8h2"
+    package: "react-router"
+    reason: >-
+      Patched only in react-router >=8.3.0, which does not exist on npm yet
+      (latest is 7.18.1, already pinned). It arrives transitively through
+      fumadocs-core, the static docs framework used by the marketing site, so
+      it cannot be upgraded ahead of fumadocs. The advisory explicitly affects
+      only applications using the unstable RSC APIs; the site does not use
+      them, and the terminal does not depend on fumadocs at all. Revisit when
+      fumadocs ships a react-router 8 compatible release.
+    accepted_by: "navaneesh"
+    expires: "2026-10-26"

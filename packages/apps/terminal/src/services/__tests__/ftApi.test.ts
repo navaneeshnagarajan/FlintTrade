@@ -237,6 +237,22 @@ describe("FlintTrade API client (ftApi.ts)", () => {
         sector: "IT",
       },
     ]);
+    // The response above carries no provenance flag. Absent must resolve to
+    // sample so the widget badges it, never to live.
+    expect(result.is_sample_data).toBe(true);
+  });
+
+  it("getEarningsCalendar() only reports live provenance when the backend says so", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        status: "success",
+        data: { events: [], is_sample_data: false },
+      }),
+    );
+
+    await expect(getEarningsCalendar(2026, 7)).resolves.toMatchObject({
+      is_sample_data: false,
+    });
   });
 
   it("getPortfolioRRGData() calls the backend portfolio RRG route through ftApi", async () => {

@@ -110,11 +110,6 @@ export interface JournalSearchParams {
   offset?: number;
 }
 
-export interface JournalImportResult {
-  created: string[];
-  count: number;
-}
-
 /**
  * A single day's free-form trading notes, keyed by the IST trading day
  * (``YYYY-MM-DD``). A missing note is served as ``content: ""`` with a null
@@ -124,14 +119,6 @@ export interface DailyNote {
   date: string;
   content: string;
   updated_at: string | null;
-}
-
-/** List row for daily notes — newest first, with a short content preview. */
-export interface DailyNoteSummary {
-  date: string;
-  updated_at: string;
-  word_count: number;
-  preview: string;
 }
 
 /**
@@ -178,10 +165,6 @@ export const listJournalEntries = (
   return get<JournalListResponse>("journal/entries" + (q ? "?" + q : ""));
 };
 
-/** Fetch a single entry by id. */
-export const getJournalEntry = (id: string): Promise<JournalEntry> =>
-  get<JournalEntry>("journal/entries/" + encodeURIComponent(id));
-
 /** Create a new entry. */
 export const createJournalEntry = (body: JournalEntryInput): Promise<JournalEntry> =>
   post<JournalEntry>("journal/entries", body);
@@ -219,19 +202,9 @@ export const getJournalStats = (
   return get<JournalStats>("journal/stats" + (q ? "?" + q : ""));
 };
 
-/** Bulk-import entries; resolves with the created ids and count. */
-export const importJournalEntries = (
-  trades: JournalEntryInput[],
-): Promise<JournalImportResult> =>
-  post<JournalImportResult>("journal/import", { trades });
-
 // ---------------------------------------------------------------------------
 // Daily notes (backend-persisted; replaces the localStorage-only NotesTab)
 // ---------------------------------------------------------------------------
-
-/** List all daily notes (date desc) with word counts and content previews. */
-export const listDailyNotes = (): Promise<DailyNoteSummary[]> =>
-  get<DailyNoteSummary[]>("journal/notes");
 
 /**
  * Fetch the note for one IST trading day (``YYYY-MM-DD``). A day without a
@@ -291,11 +264,11 @@ export const deleteJournalScreenshot = (id: string): Promise<{ deleted: string }
  * Absolute URL of the CSV export endpoint (``text/csv`` attachment).
  *
  * Resolves correctly in dev (``/ft-api/api/v1/journal/export``) and prod
- * (``/api/v1/journal/export``). Note that a plain anchor cannot attach the
- * FT-API auth headers, so prefer {@link fetchJournalCsv} for the actual
- * download in an authenticated session.
+ * (``/api/v1/journal/export``). Deliberately module-private: a plain anchor
+ * cannot attach the FT-API auth headers, so every caller must go through
+ * {@link fetchJournalCsv} rather than linking the bare URL.
  */
-export const journalExportUrl = (): string => `${getBase()}/api/v1/journal/export`;
+const journalExportUrl = (): string => `${getBase()}/api/v1/journal/export`;
 
 /**
  * Fetch the CSV export with the FT-API auth headers attached and resolve the

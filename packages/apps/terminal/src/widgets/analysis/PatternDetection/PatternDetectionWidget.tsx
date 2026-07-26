@@ -83,7 +83,7 @@ function PatternDetectionWidget() {
 
   const response = isConnected && live ? live : { is_sample_data: true, scan: SAMPLE_PATTERN_SCAN };
   const scan = response.scan;
-  const isSample = response.is_sample_data;
+  const isSample = response.is_sample_data !== false;
 
   const bullish = scan.matches.filter((m) => m.direction === "bullish").length;
   const bearish = scan.matches.filter((m) => m.direction === "bearish").length;

@@ -3,7 +3,14 @@
  *
  * Simple sector classification for NSE stocks.
  * Maps a stock symbol to its broad sector name.
- * Used by SectorTab, DashboardTab, and NetWorthTab to group holdings.
+ * Used by SectorTab, DashboardTab, NetWorthTab to group holdings, and by the
+ * Positions heat map to group the position book.
+ *
+ * This is the SINGLE classification source. Two widget-local copies of a
+ * hardcoded sector map used to exist alongside it and disagreed with it
+ * (NTPC/POWERGRID as Infra vs Energy, ADANIPORTS as Logistics vs Infra,
+ * BAJFINANCE as NBFC vs Finance); a symbol must not land in two sectors
+ * depending on which panel is open. Add missing symbols HERE.
  */
 
 /** Direct symbol → sector lookup (uppercase symbols). */
@@ -99,17 +106,40 @@ const SECTOR_MAP: Record<string, string> = {
   // Consumer Discretionary
   TITAN: "Consumer",
   TATACONSUM: "Consumer",
+  ASIANPAINT: "Consumer",
   HAVELLS: "Consumer",
   VOLTAS: "Consumer",
   WHIRLPOOL: "Consumer",
 };
 
 /**
+ * The tradable root of a symbol — the underlying, with any derivative
+ * expiry/strike suffix removed and any leading token taken from a
+ * whitespace-delimited option description.
+ *
+ * ```
+ * "NIFTY24APR22500CE"      → "NIFTY"
+ * "NIFTY 22200 CE 10APR"   → "NIFTY"
+ * "RELIANCE"               → "RELIANCE"
+ * "M&M"                    → "M&M"     (punctuation is preserved — the
+ *                                       sector map keys on the real symbol)
+ * ```
+ */
+export function symbolRoot(symbol: string): string {
+  const head = symbol.trim().split(/\s+/)[0] || symbol.trim();
+  const root = head.replace(/\d{2}[A-Z]{3}\d{2}.*$/i, "");
+  return (root || head).toUpperCase();
+}
+
+/**
  * Returns the broad sector name for a given NSE symbol.
+ *
+ * Derivative symbols are classified by their underlying (a NIFTY option is
+ * not its own sector), so the caller never has to pre-strip an expiry.
  * Falls back to "Other" for unrecognised symbols.
  */
 export function classifySector(symbol: string): string {
-  return SECTOR_MAP[symbol.toUpperCase()] ?? "Other";
+  return SECTOR_MAP[symbolRoot(symbol)] ?? "Other";
 }
 
 export interface SectorBreakdownEntry {

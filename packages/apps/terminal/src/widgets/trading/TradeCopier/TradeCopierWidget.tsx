@@ -4,6 +4,16 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -179,6 +189,13 @@ function TradeCopierWidget() {
         ? mutationError(accountMutation.error)
         : "";
   const isMutating = startMutation.isPending || stopMutation.isPending || accountMutation.isPending;
+
+  /**
+   * Arming the mirror is confirmed first. Once live, every fill on the source
+   * account becomes real orders on the target accounts — the widest-blast-radius
+   * action in the terminal, and it was a single unguarded click.
+   */
+  const [confirmingStart, setConfirmingStart] = useState(false);
   const canStart = Boolean(
     !status.active
     && !statusQuery.isError
@@ -388,7 +405,7 @@ function TradeCopierWidget() {
             type="button"
             size="sm"
             className="w-full"
-            onClick={() => startMutation.mutate()}
+            onClick={() => setConfirmingStart(true)}
             disabled={!canStart}
             data-testid="start-mirror"
           >
@@ -396,6 +413,38 @@ function TradeCopierWidget() {
             Start Mirror
           </Button>
         )}
+
+      {/* Arming a live multi-account mirror deserves the same confirmation an
+          exit-all gets. */}
+      <AlertDialog open={confirmingStart} onOpenChange={setConfirmingStart}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start mirroring to {targetAccounts.size} account{targetAccounts.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Every fill on <strong>{sourceAccount || "the source account"}</strong> will
+              be placed as a real order on {targetAccounts.size === 1 ? "the target account" : "each target account"} until you
+              stop the mirror. Each child order still passes the full safety
+              gate, but they are live orders on other accounts.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {targetAccounts.size > 0 && (
+            <ul className="text-xs text-text-secondary list-disc pl-5 space-y-0.5">
+              {[...targetAccounts].map((id) => <li key={id}>{id}</li>)}
+            </ul>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmingStart(false);
+                startMutation.mutate();
+              }}
+            >
+              Start mirror
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </div>
     </div>
   );

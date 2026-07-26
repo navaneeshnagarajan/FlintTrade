@@ -84,7 +84,15 @@ export function TemplatesTab({ onUse }: TemplatesTabProps) {
                       {tag}
                     </Badge>
                   ))}
-                  <span className="text-xs text-text-muted">{tmpl.nodeCount} nodes</span>
+                  {/* Built templates report their real node count so the label
+                      cannot drift from the workflow. Drafts have no workflow
+                      yet, so their count is a plan and says so — it used to
+                      render as fact beside an empty node list. */}
+                  <span className="text-xs text-text-muted">
+                    {tmpl.workflow.nodes.length > 0
+                      ? `${tmpl.workflow.nodes.length} nodes`
+                      : `${tmpl.nodeCount} nodes planned`}
+                  </span>
                 </div>
                 <Button
                   size="sm"

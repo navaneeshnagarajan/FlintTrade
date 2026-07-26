@@ -163,9 +163,9 @@ def _days_to_expiry(expiry: str) -> int:
     terminal's expiry API actually returns), the strict ``DDMMMYY`` form, and
     the dashed ``DD-MMM-YY`` form. Returns 0 when the expiry cannot be parsed,
     so callers degrade gracefully rather than raising. Consumers that derive
-    time-decay greeks (the terminal's GreeksSurface and Greeks-heatmap widgets)
-    need a real time-to-expiry — a hardcoded 0 collapses gamma/theta/vega to
-    zero.
+    time-decay greeks (the terminal's Greeks Matrix widget, under both its grid
+    and surface projections) need a real time-to-expiry — a hardcoded 0
+    collapses gamma/theta/vega to zero.
     """
     dte = _authoritative_days_to_expiry(expiry)
     return dte if dte is not None else 0
@@ -1292,22 +1292,33 @@ def vol_surface_endpoint() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@analysis_bp.route("/ivsmile", methods=["POST"])
-def iv_smile_endpoint() -> Any:
-    """IV Smile curve extraction.
+# Cap on curves per IV-smile request. Each expiry is its own broker chain read,
+# so an unbounded list would let one request fan out arbitrarily. Mirrors
+# _MAX_VOL_SURFACE_EXPIRIES.
+_MAX_IV_SMILE_EXPIRIES = 3
 
-    Request JSON:
-        symbol (str): Underlying symbol.
-        exchange (str): Exchange code.
-        expiry (str): Expiry label.
+
+def _iv_smile_curve(
+    symbol: str,
+    exchange: str,
+    expiry: str,
+) -> tuple[dict[str, Any], bool, float]:
+    """Build one IV-smile curve for a single expiry.
+
+    Extracted from `iv_smile_endpoint` so the route can serve several expiries
+    in one response. Each call performs its own live chain read and falls back
+    to the sample snapshot independently, so one unavailable expiry cannot
+    blank the others.
+
+    Args:
+        symbol: Underlying symbol.
+        exchange: Exchange code.
+        expiry: The expiry label to build the curve for.
 
     Returns:
-        JSON with IV smile data or error.
+        A ``(curve, used_sample, spot)`` triple. ``used_sample`` is True when
+        the curve came from the sample snapshot rather than a live chain.
     """
-    try:
-        _body, symbol, exchange, expiry = _option_request("26MAR26")
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
     sample_spot = 24000.0
     spot = 0.0
     snapshot: OptionChainSnapshot | None = None
@@ -1341,13 +1352,12 @@ def iv_smile_endpoint() -> Any:
     if snapshot is None:
         spot = sample_spot
         snapshot = _make_sample_snapshot(symbol=symbol, exchange=exchange, spot=spot)
-        logger.info("IVSmile: using sample data for %s %s", symbol, exchange)
+        logger.info("IVSmile: using sample data for %s %s %s", symbol, exchange, expiry)
 
     result = calculate_iv_smile(snapshot, spot=spot, expiry_date=expiry)
 
-    # Shape ``data`` to the terminal's IVSmileData contract: a single expiry's
-    # flat dataclass becomes one entry in a ``curves`` array of per-strike points.
-    # (The widget read `curves`/`points` and got undefined from the raw dataclass.)
+    # Shape to the terminal's IVSmileData contract: a single expiry's flat
+    # dataclass becomes one entry in a ``curves`` array of per-strike points.
     curve = {
         "expiry": result.expiry_date or expiry,
         "days_to_expiry": (
@@ -1371,10 +1381,69 @@ def iv_smile_endpoint() -> Any:
             for p in result.points
         ],
     }
+    return curve, used_sample, spot
+
+
+
+@analysis_bp.route("/ivsmile", methods=["POST"])
+def iv_smile_endpoint() -> Any:
+    """IV Smile curve extraction.
+
+    Request JSON:
+        symbol (str): Underlying symbol.
+        exchange (str): Exchange code.
+        expiry (str): Expiry label.
+
+    Returns:
+        JSON with IV smile data or error.
+    """
+    try:
+        body = _request_json_object()
+        symbol = _request_identity_string(body, "symbol", "NIFTY")
+        exchange = _request_identity_string(body, "exchange", "NFO")
+        _option_chain_underlying_exchange(symbol, exchange)
+        # MULTI-EXPIRY. This read a single expiry via `_body_expiry` and always
+        # answered with exactly one curve, so a caller asking for a term
+        # structure had every expiry past the first dropped in silence — the
+        # terminal's own widget allocated a three-colour palette for curves
+        # that could never arrive. `_body_expiries` already existed and is what
+        # /volsurface uses; the per-expiry work below is now a loop.
+        expiries = _body_expiries(body, ["26MAR26"])
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    # Deduplicate and cap. An all-empty request is NOT rejected here: this
+    # route deliberately answers an unusable expiry with sample data and echoes
+    # the label back (unlike /volsurface and /gammadensity, which 400) — pinned
+    # by test_unusable_expiry_never_publishes_connected_chain_as_live.
+    unique = list(dict.fromkeys(expiries))
+    non_empty = [e for e in unique if e]
+    expiries = (non_empty or unique[:1])[:_MAX_IV_SMILE_EXPIRIES]
+
+    live_curves: list[dict[str, Any]] = []
+    sample_curves: list[dict[str, Any]] = []
+    spot = 0.0
+    for expiry in expiries:
+        curve, curve_used_sample, curve_spot = _iv_smile_curve(symbol, exchange, expiry)
+        (sample_curves if curve_used_sample else live_curves).append(curve)
+        # The spot is a property of the underlying, not the expiry; take the
+        # first live one so a sample-backed tail expiry cannot overwrite it.
+        if spot <= 0.0 or (not curve_used_sample and curve_spot > 0.0):
+            spot = curve_spot
+
+    # Partial fallback, mirroring _iv_smile_curve's contract: when at least one
+    # expiry produced a live curve, omit the sample-backed curves rather than
+    # collapsing the whole response into is_sample_data=True — sample points
+    # must never ship under a live flag, and a response-wide sample flag makes
+    # the connected widget discard every valid live curve.
+    curves = live_curves if live_curves else sample_curves
+    used_sample = not live_curves
+
+    expiry = expiries[0]
     iv_smile_data = {
         "underlying": symbol,
         "spot_price": spot,
-        "curves": [curve],
+        "curves": curves,
         "is_sample_data": used_sample,
     }
 

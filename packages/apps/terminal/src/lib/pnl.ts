@@ -6,7 +6,7 @@
  * carried their own copy of this loop; extracting it keeps them consistent.
  */
 
-import type { Trade } from "@/types/api";
+import type { Position, Trade } from "@/types/api";
 
 /**
  * Booked realised P&L from a set of trades, pairing BUY↔SELL legs per symbol in
@@ -161,4 +161,79 @@ export function roundTripsFromTrades(trades: Trade[]): RoundTrip[] {
 
   roundTrips.sort((a, b) => a.exitTime.localeCompare(b.exitTime));
   return roundTrips;
+}
+
+// ---------------------------------------------------------------------------
+// Open-position mark-to-market
+// ---------------------------------------------------------------------------
+
+/**
+ * Positionbook rows arrive unnormalised from the wire: real adapters send
+ * numerics as strings and some use snake_case field names.
+ */
+type WirePosition = Position & {
+  average_price?: string | number;
+  avgPrice?: string | number;
+  qty?: string | number;
+};
+
+/** Coerce a possibly string-typed broker numeric to a finite number, else null. */
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Effective P&L for a single position.
+ *
+ * OpenAlgo's `pnl` field is wrong for some brokers (CLAUDE.md quirk 4), so for
+ * an open position this computes the mark-to-market locally as
+ * `(ltp − averagePrice) × quantity` whenever those inputs are genuinely
+ * available, and falls back to the broker-supplied `pnl` when the local
+ * computation is impossible or untrustworthy.
+ *
+ * Fall-back cases (all defer to the broker figure, never fabricate one):
+ *   - closed position (quantity === 0);
+ *   - LTP or average price missing;
+ *   - LTP ≤ 0 or average price ≤ 0 — several brokers report `ltp: 0` for an
+ *     open position (an illiquid option with no trade yet, pre-market, or a
+ *     positionbook that simply does not populate LTP). Treating that literal
+ *     zero as valid produced a fabricated `(0 − avg) × qty` loss that overrode
+ *     the correct broker figure, so non-positive inputs count as missing.
+ *
+ * Scope: this is the *unrealised* P&L on the currently open quantity only. A
+ * position partially closed earlier in the session has booked realised P&L
+ * that the positionbook cannot separate from unrealised; restore that from the
+ * tradebook via {@link realisedBySymbol}.
+ *
+ * Extracted from the Intraday P&L widget because MTM Monitor and the P&L
+ * dashboard summed the raw broker `pnl` instead, so two widgets open side by
+ * side reported different totals for the same book.
+ *
+ * @param position - One positionbook row, possibly string-typed off the wire.
+ * @returns The position's effective P&L in rupees.
+ */
+export function positionMtm(position: Position): number {
+  // Every spelling adapters actually send. This accepted only `quantity` and
+  // `averagePrice`/`average_price`, so a row shaped `qty`/`avgPrice` silently
+  // fell through to the broker `pnl` field — reintroducing the very
+  // disagreement this helper exists to end, but only for some adapters and
+  // only in the widgets that pass raw rows.
+  const wire = position as WirePosition;
+  const qty = toFiniteNumber(wire.quantity ?? wire.qty) ?? 0;
+  const ltp = toFiniteNumber(position.ltp);
+  const avg = toFiniteNumber(wire.averagePrice ?? wire.average_price ?? wire.avgPrice);
+  if (qty !== 0 && ltp !== null && ltp > 0 && avg !== null && avg > 0) {
+    return (ltp - avg) * qty;
+  }
+  return toFiniteNumber(position.pnl) ?? 0;
+}
+
+/**
+ * Total mark-to-market across a position book, using {@link positionMtm} per
+ * row. The single definition of "what is my P&L right now".
+ */
+export function totalPositionMtm(positions: Position[]): number {
+  return positions.reduce((sum, p) => sum + positionMtm(p), 0);
 }

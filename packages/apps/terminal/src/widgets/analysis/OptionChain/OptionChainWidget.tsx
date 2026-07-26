@@ -38,6 +38,7 @@ import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } fr
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
+import { checkOrderEntryMode, resolveLotQuantity } from "@/lib/orderGuards";
 import { useOptionChainData } from "./useOptionChainData";
 import SymbolSearch from "./SymbolSearch";
 import BasketPanel from "./BasketPanel";
@@ -64,7 +65,8 @@ import type { IDockviewPanelProps } from "dockview-react";
 
 function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
   const glideTheme = useGlideTheme();
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const mode = useModeStore((s) => s.mode);
+  const isExplore = mode === "explore";
   // Honour a pinned symbol from the Dockview panel params (e.g. the options-
   // scalper preset pins `{ symbol: "NIFTY" }`). Falls back to the first known
   // underlying. Previously the widget ignored params and only worked for the
@@ -318,13 +320,38 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
     } catch {
       // Fall back to manually constructed symbol
     }
+    // Shared pre-trade guards. This path used to send `quantity: 1` against an
+    // NFO/BFO option symbol — a single unit of a contract that trades in lots,
+    // which is exactly the non-lot-multiple order every other ticket in the
+    // terminal refuses. It also never checked the app mode.
+    const modeRefusal = checkOrderEntryMode(mode);
+    if (modeRefusal) {
+      setOrderMsg({ text: modeRefusal, ok: false });
+      clearTimeout(orderMsgTimerRef.current);
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 3000);
+      return;
+    }
+    const lotSize = symbolDetails?.lotsize ?? 0;
+    const quantity = resolveLotQuantity(orderExchange, 1, {
+      lotSize,
+      verified: lotSize > 0,
+    });
+    if (quantity == null) {
+      setOrderMsg({
+        text: `Lot size for ${orderSymbol} is unverified — order not sent`,
+        ok: false,
+      });
+      clearTimeout(orderMsgTimerRef.current);
+      orderMsgTimerRef.current = setTimeout(() => setOrderMsg(null), 4000);
+      return;
+    }
     try {
       await placeOrder({
         strategy: "FlintChain",
         symbol: orderSymbol,
         exchange: orderExchange,
         action: action === "B" ? "BUY" : "SELL",
-        quantity: 1,
+        quantity,
         orderType: "MARKET",
         product: "MIS",
       });
@@ -630,7 +657,10 @@ function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
           ref={legBuilderRef}
           strikes={strikes}
           atmStrike={atmStrike}
-          lotSize={symbolDetails?.lotsize ?? 1}
+          // 0, not 1, when the symbol master has not resolved: the single-leg
+          // path above already refuses on this condition, and the basket path
+          // multiplies the value across every leg.
+          lotSize={symbolDetails?.lotsize ?? 0}
           symLabel={symDef.label}
           exchange={exchange}
           expiry={selectedExpiry}

@@ -1,5 +1,5 @@
 /**
- * WebhooksSection — Manage TradingView webhook endpoints.
+ * WebhooksSection — Manage generic (custom JSON) webhook endpoints.
  *
  * Two sub-areas surfaced via tabs:
  *  1. Active     — registered endpoints with test/delete actions
@@ -17,15 +17,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -47,20 +39,6 @@ import { InlineToast, useInlineToast } from "./shared";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function typeBadgeClass(type: WebhookConfig["type"]): string {
-  if (type === "tradingview") return "bg-blue-500/10 text-blue-400 border-0";
-  if (type === "chartink") return "bg-purple-500/10 text-purple-400 border-0";
-  if (type === "gocharting") return "bg-teal-500/10 text-teal-400 border-0";
-  return "bg-surface-base text-text-muted border-0";
-}
-
-function typeLabel(type: WebhookConfig["type"]): string {
-  if (type === "tradingview") return "TradingView";
-  if (type === "chartink") return "ChartInk";
-  if (type === "gocharting") return "GoCharting";
-  return "Custom";
-}
 
 function slugFromPath(path: string): string {
   return path.split("/").filter(Boolean).slice(2).join("/") || path;
@@ -155,7 +133,6 @@ function ActiveWebhooksTab({
             <TableHead>Name</TableHead>
             <TableHead>Relay path</TableHead>
             <TableHead>Slug</TableHead>
-            <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -171,11 +148,6 @@ function ActiveWebhooksTab({
               </TableCell>
               <TableCell className="font-mono text-xs text-text-secondary">
                 {slugFromPath(ep.path)}
-              </TableCell>
-              <TableCell>
-                <Badge className={`text-xs ${typeBadgeClass(ep.type)}`}>
-                  {typeLabel(ep.type)}
-                </Badge>
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
@@ -227,14 +199,6 @@ function ActiveWebhooksTab({
 // CreateWebhookTab — form schema
 // ---------------------------------------------------------------------------
 
-const WEBHOOK_TYPES = [
-  "tradingview",
-  "chartink",
-  "gocharting",
-  "custom",
-] as const;
-type WebhookType = (typeof WEBHOOK_TYPES)[number];
-
 const createSchema = z.object({
   name: z.string().min(1, "Name is required").max(64, "Name too long"),
   strategyId: z
@@ -245,7 +209,6 @@ const createSchema = z.object({
       /^[a-z0-9-_]+$/,
       "Use lowercase letters, numbers, hyphens, or underscores",
     ),
-  type: z.enum(WEBHOOK_TYPES),
   secret: z
     .string()
     .trim()
@@ -268,20 +231,17 @@ function CreateWebhookTab({
     register,
     handleSubmit,
     watch,
-    setValue,
     formState: { errors, isSubmitting },
     reset,
   } = useForm<CreateFormValues>({
     resolver: zodResolver(createSchema),
-    defaultValues: { type: "tradingview" },
   });
 
-  const watchedType = watch("type");
   const watchedStrategyId = watch("strategyId") ?? "";
 
   const previewUrl = watchedStrategyId.trim()
-    ? `/v1/webhook/${watchedType}/${watchedStrategyId.trim()}`
-    : `/v1/webhook/${watchedType}/<strategy-id>`;
+    ? `/v1/webhook/custom/${watchedStrategyId.trim()}`
+    : "/v1/webhook/custom/<strategy-id>";
 
   const onSubmit = async (values: CreateFormValues) => {
     try {
@@ -311,38 +271,6 @@ function CreateWebhookTab({
         {errors.name && (
           <p className="text-xs text-loss">{errors.name.message}</p>
         )}
-      </div>
-
-      {/* Type */}
-      <div className="space-y-1.5">
-        <Label
-          htmlFor="wh-type"
-          className="text-xs font-medium text-text-primary"
-        >
-          Type
-        </Label>
-        <Select
-          value={watchedType}
-          onValueChange={(v) => setValue("type", v as WebhookType)}
-        >
-          <SelectTrigger id="wh-type" className="h-8 text-xs">
-            <SelectValue placeholder="Select type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="tradingview" className="text-xs">
-              TradingView
-            </SelectItem>
-            <SelectItem value="chartink" className="text-xs">
-              ChartInk
-            </SelectItem>
-            <SelectItem value="gocharting" className="text-xs">
-              GoCharting
-            </SelectItem>
-            <SelectItem value="custom" className="text-xs">
-              Custom
-            </SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       {/* Strategy ID */}
@@ -436,8 +364,8 @@ export default function WebhooksSection() {
     mutationFn: (values: CreateFormValues) =>
       createWebhook({
         name: values.name.trim(),
-        type: values.type,
-        path: `/v1/webhook/${values.type}/${values.strategyId.trim()}`,
+        type: "custom",
+        path: `/v1/webhook/custom/${values.strategyId.trim()}`,
         enabled: true,
         secret: values.secret.trim(),
       }),
@@ -500,8 +428,8 @@ export default function WebhooksSection() {
             Webhooks
           </h3>
           <p className="text-sm text-text-secondary mt-0.5">
-            Register signed relay endpoints for TradingView, ChartInk,
-            GoCharting, and custom payload formats.
+            Register signed relay endpoints for your own scripts and custom
+            JSON payloads.
           </p>
         </div>
 

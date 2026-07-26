@@ -13,8 +13,26 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
+const mockListStrategies = vi.hoisted(() =>
+  vi.fn((): Promise<unknown[]> => Promise.resolve([])),
+);
+vi.mock("@/services/ftApi.backtest", () => ({
+  listUploadedStrategies: mockListStrategies,
+}));
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import StrategyMonitorWidget, { SAMPLE_STRATEGIES } from "../StrategyMonitorWidget";
+
+/** The widget now reads real uploaded strategies, so it needs a query client. */
+function renderMonitor() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <StrategyMonitorWidget />
+    </QueryClientProvider>,
+  );
+}
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 
@@ -33,19 +51,19 @@ beforeAll(() => {
 describe("StrategyMonitorWidget", () => {
   it("renders widget title", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.getByText("Strategy Monitor")).toBeTruthy();
   });
 
   it("labels the surface as a local preview even when connected", () => {
     mockConnected.mockReturnValue(true);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.getByText("Local preview")).toBeTruthy();
   });
 
   it("shows the 'Sample data' badge when disconnected", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     const badge = screen.getByText("Sample data");
     expect(badge).toBeTruthy();
     expect(badge.getAttribute("role")).toBe("status");
@@ -53,7 +71,7 @@ describe("StrategyMonitorWidget", () => {
 
   it("does not show the sample badge when connected (shows empty state instead)", () => {
     mockConnected.mockReturnValue(true);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.queryByText("Sample data")).toBeNull();
   });
 
@@ -61,7 +79,7 @@ describe("StrategyMonitorWidget", () => {
     // House rule: no mock/live-looking P&L when connected. Must show the honest
     // empty state instead of SAMPLE_STRATEGIES.
     mockConnected.mockReturnValue(true);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     for (const s of SAMPLE_STRATEGIES) {
       expect(screen.queryByText(s.name)).toBeNull();
     }
@@ -70,7 +88,7 @@ describe("StrategyMonitorWidget", () => {
 
   it("offers a Strategy Lab action from the empty state", () => {
     mockConnected.mockReturnValue(true);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     const listener = vi.fn();
     window.addEventListener("flinttrade:navigate", listener);
     fireEvent.click(screen.getByRole("button", { name: /open strategy lab/i }));
@@ -81,7 +99,7 @@ describe("StrategyMonitorWidget", () => {
 
   it("renders all strategy names", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     for (const s of SAMPLE_STRATEGIES) {
       expect(screen.getByText(s.name)).toBeTruthy();
     }
@@ -89,33 +107,33 @@ describe("StrategyMonitorWidget", () => {
 
   it("renders strategy list with correct aria-label", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.getByRole("list", { name: /strategy list/i })).toBeTruthy();
   });
 
   it("renders running count in header", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.getByText(/running/)).toBeTruthy();
   });
 
   it("renders health badge (All OK, Degraded, or Critical)", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     const health = screen.queryByText("All OK") ?? screen.queryByText("Degraded") ?? screen.queryByText("Critical");
     expect(health).toBeTruthy();
   });
 
   it("error strategy shows Critical health", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     // SAMPLE_STRATEGIES has one error strategy → Critical
     expect(screen.getByText("Critical")).toBeTruthy();
   });
 
   it("clicking expand shows strategy logs", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     // click expand on first strategy row
     const expandButtons = screen.getAllByRole("button", { name: /expand logs/i });
     expect(expandButtons.length).toBeGreaterThan(0);
@@ -127,7 +145,7 @@ describe("StrategyMonitorWidget", () => {
 
   it("does not expose lifecycle controls without a backend mutation", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.queryAllByRole("button", { name: /^Start / })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: /^Pause / })).toHaveLength(0);
     expect(screen.queryAllByRole("button", { name: /^Stop / })).toHaveLength(0);
@@ -136,7 +154,7 @@ describe("StrategyMonitorWidget", () => {
 
   it("renders footer with total P&L, trades, signals", () => {
     mockConnected.mockReturnValue(false);
-    render(<StrategyMonitorWidget />);
+    renderMonitor();
     expect(screen.getByText(/Total P&L/i)).toBeTruthy();
     expect(screen.getByText(/Trades/i)).toBeTruthy();
     expect(screen.getByText(/Signals/i)).toBeTruthy();
@@ -172,5 +190,34 @@ describe("SAMPLE_STRATEGIES", () => {
     for (const s of SAMPLE_STRATEGIES.filter((s) => s.status === "running")) {
       expect(s.tradesToday).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("StrategyMonitorWidget — real uploaded strategies", () => {
+  it("renders the strategies the engine reports instead of a permanently empty list", async () => {
+    // Connected used to mean `[]` unconditionally, because nothing called
+    // GET /api/v1/strategies. An operator with a strategy running saw nothing,
+    // indistinguishable from having uploaded none.
+    mockConnected.mockReturnValue(true);
+    mockListStrategies.mockResolvedValue([
+      { strategy_id: "ema_cross", name: "EMA Crossover", state: "running",
+        pid: 4242, memory_mb: 38.5, uptime_seconds: 900 },
+      { strategy_id: "broken", name: "Broken Strategy", state: "crashed",
+        pid: null, memory_mb: null, uptime_seconds: null },
+    ]);
+
+    renderMonitor();
+
+    expect(await screen.findByText("EMA Crossover")).toBeTruthy();
+    expect(screen.getByText("Broken Strategy")).toBeTruthy();
+    // A crashed process reads as an error row, not as merely stopped.
+    expect(screen.getAllByText(/error/i).length).toBeGreaterThan(0);
+  });
+
+  it("does not call the engine while disconnected", () => {
+    mockConnected.mockReturnValue(false);
+    mockListStrategies.mockClear();
+    renderMonitor();
+    expect(mockListStrategies).not.toHaveBeenCalled();
   });
 });

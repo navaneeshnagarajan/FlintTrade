@@ -1,9 +1,16 @@
 /**
  * PositionsWidget.test.tsx
  *
- * Tests for the Positions trading widget.
- * Verifies rendering, empty state, position row display, and the two
- * gated safety actions (per-row Convert and the typed exit-all flow).
+ * Tests for the merged Positions widget — the position book's THREE views.
+ * Covers the gated write path (per-row Convert, per-row square-off, the typed
+ * exit-all flow, the broker-target threading and the fail-closed product
+ * check), the Excel export, and the two absorbed views: netting/grouping/totals
+ * (from the retired Net Position widget) and the treemap/grouping/chart-open
+ * contract (from the retired Position Heat Map widget).
+ *
+ * The pure kernel (`positionBook.ts`) is exercised directly at the bottom —
+ * exposure, mark-to-market and netting have ONE definition each now, so those
+ * assertions are the reconciliation's pins.
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
@@ -15,7 +22,8 @@ import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
 // and exit-all actions go through the real helpers with a stubbed fetch.
 vi.stubEnv("DEV", true);
 
-// Radix Select (the broker-target picker) references ResizeObserver internally.
+// Radix Select (the broker-target picker, the heat-map group picker) and the
+// heat map's container measurement both need ResizeObserver.
 beforeAll(() => {
   global.ResizeObserver = class {
     observe() {}
@@ -56,6 +64,17 @@ vi.mock("@/hooks/usePositions", () => ({
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
+}));
+
+vi.mock("@/hooks/useTrackBehavior", () => ({
+  useTrackBehavior: () => vi.fn(),
+}));
+
+// Deterministic colour string so the heat-map assertions do not depend on
+// exact RGB maths.
+vi.mock("@/lib/colourScale", () => ({
+  divergingColourScaleRange: () => "rgb(80,160,100)",
+  divergingColourScale: () => "rgb(80,160,100)",
 }));
 
 // Mock tradingStore to avoid side-effects in usePositions
@@ -119,6 +138,13 @@ vi.mock("@/stores/brokerStore", () => ({
 // ---------------------------------------------------------------------------
 
 import PositionsWidget from "../PositionsWidget";
+import {
+  netPositions,
+  normalisePositions,
+  positionExposure,
+  underlyingOf,
+} from "../positionBook";
+import { SAMPLE_POSITION_BOOK } from "../sampleBook";
 
 function mockBrokerAccountMatch(
   account: { account_id: string; broker: string; source?: string },
@@ -139,6 +165,11 @@ function mockBrokerAccountMatch(
 
 const defaultProps = makeDockviewPanelProps();
 
+/** Panel props that open the widget on one of the two absorbed views. */
+function viewProps(view: "table" | "net" | "heat") {
+  return makeDockviewPanelProps<Record<string, unknown>>({ params: { view } });
+}
+
 function queryResult(overrides = {}) {
   return {
     data: undefined,
@@ -151,6 +182,22 @@ function queryResult(overrides = {}) {
     dataUpdatedAt: 0,
     ...overrides,
   };
+}
+
+/** JSDOM reports 0×0 for every rect, which culls every treemap cell. */
+function withMeasuredContainer(run: () => void) {
+  const original = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function () {
+    return {
+      width: 800, height: 400, top: 0, left: 0, right: 800, bottom: 400, x: 0, y: 0,
+      toJSON() {},
+    } as DOMRect;
+  };
+  try {
+    run();
+  } finally {
+    Element.prototype.getBoundingClientRect = original;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +228,13 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 
+  it("shows the empty state when data is undefined", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: undefined }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
+  });
+
   it("does not fetch or expose position actions without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
@@ -191,6 +245,16 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /exit all positions/i })).not.toBeInTheDocument();
+  });
+
+  it("does not fetch for the heat view either when the broker is disconnected", () => {
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    render(<PositionsWidget {...viewProps("heat")} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.getByText("Broker required")).toBeInTheDocument();
+    expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
   });
 
   it("displays position rows with symbol, qty, and P&L", () => {
@@ -208,10 +272,12 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("NIFTY24APR24000CE")).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY24APR51000PE")).toBeInTheDocument();
 
-    // P&L values rendered via formatPnl: positive gets "+", negative gets just sign prefix
+    // P&L is the shared mark-to-market, not the broker's `pnl` field:
+    // (150 − 134) × 75 = +1,200 and (220 − 193) × −30 = −810 (the broker said
+    // −800). A loss now carries its minus sign; the table used to print the
+    // absolute value, so a ₹810 loss read as "₹810".
     expect(screen.getByText("+₹1,200")).toBeInTheDocument();
-    // formatPnl(-800) produces "₹800" (Math.abs, no sign prefix for negative)
-    expect(screen.getByText("₹800")).toBeInTheDocument();
+    expect(screen.getByText("-₹810")).toBeInTheDocument();
   });
 
   it("shows connected practice positions read-only without broker write controls", () => {
@@ -227,6 +293,8 @@ describe("PositionsWidget", () => {
 
     expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
     expect(screen.getByText("Read-only")).toBeInTheDocument();
+    // Provenance is labelled separately from capability: sandbox book, no writes.
+    expect(screen.getByText("Practice")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Convert NIFTY24APR24000CE" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Exit all positions" })).not.toBeInTheDocument();
@@ -247,7 +315,7 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("Positions (1)")).toBeInTheDocument();
   });
 
-  it("displays total P&L in the header", () => {
+  it("displays total P&L in the header from the shared mark-to-market", () => {
     mockUsePositions.mockReturnValue(
       queryResult({
         data: [
@@ -258,8 +326,104 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    // Total = 1000 + (-300) = 700 => P&L: +₹700
-    expect(screen.getByText("P&L: +₹700")).toBeInTheDocument();
+    // (100 − 90) × 10 = +100, (50 − 65) × 20 = −300 → −200. The broker's own
+    // `pnl` fields would have summed to +700; totalPositionMtm is the single
+    // definition, so the header, the net total and the heat cells agree.
+    expect(screen.getByText("P&L: -₹200")).toBeInTheDocument();
+  });
+
+  it("falls back to the broker P&L when the row cannot be marked to market", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        // ltp 0 — an illiquid option the broker never priced. Recomputing would
+        // fabricate a (0 − 134) × 75 loss.
+        data: [{ symbol: "NIFTY24APR24000CE", pnl: 640, quantity: 75, ltp: 0, average_price: 134 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("P&L: +₹640")).toBeInTheDocument();
+  });
+
+  // ── Absorbed from the retired Dashboard widget (ruling D5) ───────────────
+
+  it("shows the P&L% column with the kernel's derived percentage", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        // No broker pnlPercent → the kernel derives (150 − 134) / 134 × 100
+        // × sign(qty) = +11.94%. The retired Dashboard recomputed this
+        // per-row; the column now renders the ONE normalised figure.
+        data: [{ symbol: "NIFTY24APR24000CE", pnl: 1200, quantity: 75, ltp: 150, average_price: 134 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByRole("columnheader", { name: /P&L%/ })).toBeInTheDocument();
+    expect(screen.getByText("+11.94%")).toBeInTheDocument();
+  });
+
+  it("prefers a broker-supplied P&L% over the derivation, like every other view", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          { symbol: "INFY", pnl: 3000, quantity: 100, ltp: 1510, average_price: 1480, pnlPercent: 5.5 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("+5.50%")).toBeInTheDocument();
+    // The derivation would have said +2.03% — the broker figure wins.
+    expect(screen.queryByText("+2.03%")).not.toBeInTheDocument();
+  });
+
+  it("signs a losing row's P&L% as a loss", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "TCS", pnl: -4000, quantity: 50, ltp: 3820, average_price: 3900 }],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const pct = screen.getByText("-2.05%");
+    expect(pct).toBeInTheDocument();
+    expect(pct).toHaveClass("text-loss");
+  });
+
+  it("renders the position-status tracker with counts from the shared mark-to-market", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [
+          // (100 − 90) × 10 = +100 → profit.
+          { symbol: "A", pnl: 100, quantity: 10, ltp: 100, average_price: 90 },
+          // (50 − 65) × 20 = −300 → loss, even though the broker's own `pnl`
+          // says +1000: the tracker tones by the kernel mtm, not the raw field.
+          { symbol: "B", pnl: 1000, quantity: 20, ltp: 50, average_price: 65 },
+          // (2500 − 2500) × 10 = 0 → flat.
+          { symbol: "C", pnl: 0, quantity: 10, ltp: 2500, average_price: 2500 },
+        ],
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByRole("img", { name: "Position status tracker" })).toBeInTheDocument();
+    expect(screen.getByText("1 profit")).toBeInTheDocument();
+    expect(screen.getByText("1 loss")).toBeInTheDocument();
+    expect(screen.getByText("1 flat")).toBeInTheDocument();
+  });
+
+  it("keeps the tracker off the net and heat views and off the empty book", () => {
+    mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+    expect(screen.queryByRole("img", { name: "Position status tracker" })).not.toBeInTheDocument();
+
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "A", pnl: 100, quantity: 10, ltp: 100, average_price: 90, exchange: "NSE", product: "MIS" }],
+      }),
+    );
+    render(<PositionsWidget {...viewProps("net")} />);
+    expect(screen.queryByRole("img", { name: "Position status tracker" })).not.toBeInTheDocument();
   });
 
   // ── Interaction tests ────────────────────────────────────────────────────
@@ -274,7 +438,12 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(screen.getByText(/failed to load positions/i)).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/failed to load positions/i);
+    // The banner says the figures are frozen — a silently stale P&L is worse
+    // than a loud error.
+    expect(alert.textContent).toMatch(/frozen/i);
+    expect(alert.textContent).toContain("Network timeout");
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
@@ -330,6 +499,51 @@ describe("PositionsWidget", () => {
 
     const retryBtn = screen.getByRole("button", { name: /retrying/i });
     expect(retryBtn).toBeDisabled();
+  });
+
+  // ── Freshness (absorbed from the retired Net Position widget) ────────────
+
+  it("shows a last-updated indicator once data arrives", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "TATAMOTORS", pnl: 250, quantity: 5, ltp: 950, average_price: 900 }],
+        dataUpdatedAt: Date.now(),
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const chip = screen.getByRole("status", { name: /positions last updated/i });
+    expect(chip.textContent).toMatch(/updated \d{2}:\d{2}:\d{2}/i);
+    expect(chip.textContent).not.toMatch(/stale/i);
+  });
+
+  it("flags the P&L as stale when the feed stops refreshing", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({
+        data: [{ symbol: "TATAMOTORS", pnl: 250, quantity: 5, ltp: 950, average_price: 900 }],
+        // Beyond both the market (30s) and off-hours (150s) thresholds.
+        dataUpdatedAt: Date.now() - 200_000,
+      }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const chip = screen.getByRole("status", { name: /positions last updated .* stale/i });
+    expect(chip.textContent).toMatch(/stale since \d{2}:\d{2}:\d{2}/i);
+  });
+
+  it("shows no error banner, staleness chip or broker warning for the Explore sample", () => {
+    mockModeState.mode = "explore";
+    mockUseBrokerConnected.mockReturnValue(false);
+    mockUsePositions.mockReturnValue(
+      queryResult({ data: undefined, isError: true, error: new Error("unreachable") }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
+    expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
   });
 
   // ── Excel export ─────────────────────────────────────────────────────────
@@ -524,6 +738,16 @@ describe("PositionsWidget", () => {
       expect(mockEmitNotification).toHaveBeenCalledWith(
         expect.objectContaining({ category: "system", title: "Exit-all submitted" }),
       );
+    });
+
+    it("keeps exit-all reachable from the absorbed views (it is book-level)", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: positions }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByRole("button", { name: "Exit all positions" })).toBeInTheDocument();
+      // Per-row writes stay on the table view: a net row is an aggregate of
+      // broker rows, and squaring one off would mean inventing a multi-leg plan.
+      expect(screen.queryByRole("button", { name: "Square off NIFTY24APR24000CE" })).not.toBeInTheDocument();
     });
 
     it("surfaces the mode-guard 403 honestly inside the exit-all dialog", async () => {
@@ -730,5 +954,263 @@ describe("PositionsWidget", () => {
         account_id: "UP-9",
       });
     });
+  });
+
+  // ── Net view (absorbed from the retired Net Position widget) ─────────────
+
+  describe("net view", () => {
+    const LIVE = [
+      { symbol: "TATAMOTORS", exchange: "NSE", product: "MIS", quantity: 5, averagePrice: 900, ltp: 950, pnl: 250 },
+      { symbol: "TATAMOTORS", exchange: "NSE", product: "CNC", quantity: -2, averagePrice: 900, ltp: 950, pnl: -100 },
+      { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
+    ];
+
+    it("renders the netted table with its headers and totals footer", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: LIVE }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByLabelText("Net positions table")).toBeInTheDocument();
+      expect(screen.getByText("Symbol")).toBeInTheDocument();
+      expect(screen.getByText("Net Qty")).toBeInTheDocument();
+      expect(screen.getByText("Avg")).toBeInTheDocument();
+      expect(screen.getByText("LTP")).toBeInTheDocument();
+      expect(screen.getByText(/Net P&L/i)).toBeInTheDocument();
+      expect(screen.getByText("Exposure")).toBeInTheDocument();
+      expect(screen.getByText("Total")).toBeInTheDocument();
+    });
+
+    it("nets the broker's split rows for one symbol into a single net row", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: LIVE }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      // 5 long MIS + 2 short CNC = net +3, one row, under the TATAMOTORS group.
+      expect(screen.getByLabelText("TATAMOTORS: net qty 3")).toBeInTheDocument();
+      expect(screen.getByLabelText("TATAMOTORS group — 1 positions")).toBeInTheDocument();
+      expect(screen.getByText("Positions (2)")).toBeInTheDocument();
+    });
+
+    it("clicking a group header collapses its rows", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: LIVE }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      const group = screen.getByLabelText("TATAMOTORS group — 1 positions");
+      expect(group.getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByLabelText("TATAMOTORS: net qty 3")).toBeInTheDocument();
+
+      fireEvent.click(group);
+      expect(group.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByLabelText("TATAMOTORS: net qty 3")).not.toBeInTheDocument();
+    });
+
+    it("drops symbols that net flat and says so in the total", () => {
+      mockUsePositions.mockReturnValue(
+        queryResult({
+          data: [
+            { symbol: "RELIANCE", exchange: "NSE", product: "CNC", quantity: 80, averagePrice: 2950, ltp: 2870, pnl: -6400 },
+            { symbol: "RELIANCE", exchange: "NSE", product: "MIS", quantity: -80, averagePrice: 2960, ltp: 2870, pnl: 7200 },
+            { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
+          ],
+        }),
+      );
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.queryByText("RELIANCE")).not.toBeInTheDocument();
+      // The whole book's P&L still counts the flat legs — the label says so
+      // rather than letting the footer disagree with the header.
+      expect(screen.getByText(/incl. 2 flat legs/i)).toBeInTheDocument();
+    });
+
+    it("renders live positions, never the Explore sample, when a broker is connected", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: LIVE }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getAllByText("TATAMOTORS").length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText("NIFTY24APR22500CE")).toBeNull();
+      expect(screen.queryByText("Sample")).toBeNull();
+    });
+
+    it("shows the empty state when connected with no positions", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      render(<PositionsWidget {...viewProps("net")} />);
+
+      expect(screen.getByText("No open positions")).toBeInTheDocument();
+    });
+  });
+
+  // ── Heat view (absorbed from the retired Position Heat Map widget) ───────
+
+  describe("heat view", () => {
+    const MOCK_POSITIONS = [
+      { symbol: "INFY", exchange: "NSE", product: "CNC", quantity: 100, averagePrice: 1480, ltp: 1510, pnl: 3000, pnlPercent: 2.0 },
+      { symbol: "TCS", exchange: "NSE", product: "CNC", quantity: 50, averagePrice: 3900, ltp: 3820, pnl: -4000, pnlPercent: -2.1 },
+    ];
+
+    it("renders cells rather than the empty state, and counts them in the header", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: MOCK_POSITIONS }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat")} />);
+        expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+        expect(screen.getByText("Positions (2)")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^INFY:/ })).toBeInTheDocument();
+      });
+    });
+
+    it("renders the group-mode selector", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: MOCK_POSITIONS }));
+      render(<PositionsWidget {...viewProps("heat")} />);
+
+      expect(screen.getByRole("combobox", { name: /group heat map by/i })).toBeInTheDocument();
+    });
+
+    it("clicking a position cell opens a chart via flinttrade:addWidget (not a dead no-op)", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: MOCK_POSITIONS }));
+      const events: CustomEvent[] = [];
+      const handler = (e: Event) => events.push(e as CustomEvent);
+      window.addEventListener("flinttrade:addWidget", handler);
+      try {
+        withMeasuredContainer(() => {
+          render(<PositionsWidget {...viewProps("heat")} />);
+          // Cells are role="button" with the symbol in the aria-label.
+          fireEvent.click(screen.getByRole("button", { name: /^INFY:/ }));
+        });
+        expect(events).toHaveLength(1);
+        expect(events[0].detail).toMatchObject({
+          widgetId: "chart",
+          props: { symbol: "INFY", exchange: "NSE" },
+        });
+      } finally {
+        window.removeEventListener("flinttrade:addWidget", handler);
+      }
+    });
+
+    it("labels a cell with the shared mark-to-market, not the broker P&L field", () => {
+      mockUsePositions.mockReturnValue(queryResult({ data: MOCK_POSITIONS }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat")} />);
+        // (1510 − 1480) × 100 = +3,000 and (3820 − 3900) × 50 = −4,000.
+        expect(screen.getByRole("button", { name: "INFY: +₹3,000 (+2.00%)" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "TCS: -₹4,000 (-2.10%)" })).toBeInTheDocument();
+      });
+      // Header total agrees with the cells: 3,000 − 4,000 = −1,000.
+      expect(screen.getByText("P&L: -₹1,000")).toBeInTheDocument();
+    });
+
+    it("shows the Explore sample and its watermark without a broker", () => {
+      mockModeState.mode = "explore";
+      mockUseBrokerConnected.mockReturnValue(false);
+      mockUsePositions.mockReturnValue(queryResult({ data: [] }));
+      withMeasuredContainer(() => {
+        render(<PositionsWidget {...viewProps("heat")} />);
+        expect(screen.getByText(/Sample data — connect a broker/i)).toBeInTheDocument();
+        expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+      });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// positionBook kernel — the reconciled definitions
+// ---------------------------------------------------------------------------
+
+describe("positionBook", () => {
+  it("derives the underlying from the symbol root, spaced or not", () => {
+    expect(underlyingOf("NIFTY 22200 CE 10APR")).toBe("NIFTY");
+    expect(underlyingOf("BANKNIFTY FUT 24APR")).toBe("BANKNIFTY");
+    // A real broker symbol has no spaces — the retired widget's whitespace
+    // split made live grouping a no-op.
+    expect(underlyingOf("NIFTY24APR22500CE")).toBe("NIFTY");
+    expect(underlyingOf("RELIANCE")).toBe("RELIANCE");
+  });
+
+  it("classifies a position's sector from lib/sectors.ts, derivatives included", () => {
+    const [option, stock] = normalisePositions([
+      { symbol: "NIFTY24APR22500CE", quantity: 75, ltp: 235, average_price: 180 },
+      { symbol: "SBIN", quantity: 10, ltp: 832, average_price: 810 },
+    ]);
+    expect(option.sector).toBe("Other"); // index options are not a stock sector
+    expect(stock.sector).toBe("Banking");
+  });
+
+  it("computes exposure at the mark, falling back to entry when LTP is unusable", () => {
+    // |qty| × ltp — what the position is worth now, not what it cost.
+    expect(positionExposure(2, 22450, 22400)).toBe(2 * 22450);
+    // Short positions carry exposure too.
+    expect(positionExposure(-2, 22450, 22400)).toBe(2 * 22450);
+    // A broker that reports ltp 0 on an open position must not report zero risk.
+    expect(positionExposure(2, 0, 22400)).toBe(2 * 22400);
+  });
+
+  it("marks each row to market once, with the broker figure as the fallback", () => {
+    const [marked, unpriced] = normalisePositions([
+      { symbol: "TCS", quantity: 10, ltp: 3050, average_price: 3000, pnl: 400 },
+      { symbol: "NIFTY24APR22500CE", quantity: 75, ltp: 0, average_price: 180, pnl: 640 },
+    ]);
+    // The recomputation Net Position performed — minus its always-1 lot factor.
+    expect(marked.mtm).toBe((3050 - 3000) * 10);
+    expect(unpriced.mtm).toBe(640);
+  });
+
+  it("nets long and short of the same symbol across products", () => {
+    const rows = netPositions(
+      normalisePositions([
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "NRML", quantity: 2, average_price: 22400, ltp: 22450 },
+        { symbol: "NIFTY FUT", exchange: "NFO", product: "MIS", quantity: -1, average_price: 22400, ltp: 22450 },
+      ]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].netQty).toBe(1);
+    expect(rows[0].legs).toBe(2);
+  });
+
+  it("excludes flat positions (net qty = 0)", () => {
+    const rows = netPositions(
+      normalisePositions([
+        { symbol: "NIFTY FUT", quantity: 1, average_price: 22400, ltp: 22400 },
+        { symbol: "NIFTY FUT", quantity: -1, average_price: 22400, ltp: 22400 },
+      ]),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("nets P&L as the sum of the rows' mark-to-market, so views cannot disagree", () => {
+    const normalised = normalisePositions([
+      { symbol: "NIFTY FUT", quantity: 2, average_price: 22400, ltp: 22500, pnl: 1 },
+      { symbol: "NIFTY FUT", quantity: -1, average_price: 22400, ltp: 22500, pnl: 2 },
+    ]);
+    const [net] = netPositions(normalised);
+    expect(net.mtm).toBe(normalised.reduce((sum, row) => sum + row.mtm, 0));
+    expect(net.mtm).toBeGreaterThan(0); // net long into a rising market
+  });
+
+  it("net-row P&L turns negative when the mark falls below a long's average", () => {
+    const [net] = netPositions(
+      normalisePositions([
+        { symbol: "NIFTY FUT", quantity: 1, average_price: 22400, ltp: 22300 },
+      ]),
+    );
+    expect(net.mtm).toBeLessThan(0);
+  });
+
+  it("prices a net row's exposure off the net quantity", () => {
+    const [net] = netPositions(
+      normalisePositions([
+        { symbol: "NIFTY FUT", quantity: 3, average_price: 22400, ltp: 22450 },
+        { symbol: "NIFTY FUT", quantity: -1, average_price: 22400, ltp: 22450 },
+      ]),
+    );
+    // Net 2 lots at the mark — NOT the gross 4, and not the entry price.
+    expect(net.exposure).toBe(2 * 22450);
+  });
+
+  it("nets the sample book into fewer rows than it has legs", () => {
+    const rows = netPositions(normalisePositions(SAMPLE_POSITION_BOOK));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.length).toBeLessThan(SAMPLE_POSITION_BOOK.length);
+    // The two RELIANCE legs cancel exactly.
+    expect(rows.find((row) => row.symbol === "RELIANCE")).toBeUndefined();
+    // The two NIFTY option legs net to +45 under the NIFTY underlying.
+    const nifty = rows.find((row) => row.symbol === "NIFTY24APR22500CE");
+    expect(nifty?.netQty).toBe(45);
+    expect(nifty?.underlying).toBe("NIFTY");
   });
 });

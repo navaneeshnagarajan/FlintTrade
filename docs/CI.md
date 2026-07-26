@@ -311,6 +311,84 @@ If you add a new GitHub Actions workflow:
 
 ---
 
+## Resolved: `electron-desktop-tests` Linux containment failures (2026-07-23 → 2026-07-26)
+
+Red on `main` since a6f92464, the Electron source-bootstrap migration; green
+through 07a0f434 on 2026-07-20; fixed on this branch on 2026-07-26. Roughly 19
+failing locations in `electron/bootstrap-io.test.ts` and `electron/bootstrap.test.ts`
+— the process-containment cases — passed on macOS (953 tests) and failed on the
+Ubuntu runner.
+
+**Root causes (three, all downstream of detection, as the measurements said):**
+
+1. **Drain iterations were quadratically expensive on Linux.** Each sweep
+   re-parsed the full env-laden `ps` snapshot (~189 KB on the runner) with
+   multiple byte-at-a-time `while read` here-doc passes in dash, so the
+   TERM→KILL escalation ladder (SIGKILL from the 11th sighting) took several
+   seconds — long after an escapee's marker timers fired. The snapshot is now
+   prefiltered with `grep` (C speed) so each pass reads only candidate lines,
+   and escaped-session processes that retain the containment marker are
+   SIGKILLed on first sighting: they never receive the process-group TERM and
+   are precisely the violation the guardian exists for, so there is no graceful
+   window to honour. In-group members keep the TERM grace ladder.
+2. **A drained-descendant report rewrote timeout/cancel exit codes.** The
+   settled proof's `descendants=1` flag set `descendantLeak` unconditionally,
+   which outranks `timeout` in the exit-code mapping — so a timed-out command
+   whose dying child was merely *sighted* by the first sweep reported exit 1
+   instead of 124. On macOS the child was always reaped before the first
+   snapshot; on Linux it was often still visible. The leak flag now only
+   applies when the run has no terminal reason of its own.
+3. **Zombies counted as live descendants.** The sweep now requests `-o state=`
+   and skips `Z*` entries — a zombie cannot be signalled and only added a
+   phantom drain iteration.
+4. **A fake-clock leak turned one flake into a file-wide cascade.** The
+   force-kill-timer test ran its whole cancel flow under `vi.useFakeTimers()`,
+   which also froze every `delay()`/retry inside the product cancel path; after
+   any heavy containment test it hung, vitest abandoned it mid-await (so its
+   own `finally` restore never ran), and every later timer-dependent test in
+   the file inherited the frozen clock — the contiguous 5 s/15 s timeout block
+   that ends exactly where the timer-free filesystem tests begin. The test now
+   verifies the same cleared-timer behaviour on the real clock, and the file's
+   `afterEach` restores real timers defensively.
+
+**Two measurement traps, both measured, both of which cost a lot of time —
+they remain the durable lesson:**
+
+**1. A plausible hypothesis about `ps` formatting is FALSE.** The containment
+sweep tags processes with a `FLINTTRADE_PROCESS_ANCHOR` environment marker and
+finds them in `ps` output. It is tempting to conclude that procps does not
+append the environment when an explicit `-o command=` format is given. Measured
+on the runner:
+
+```
+ps axeww -o …command= : status=0 markerFound=TRUE  bytes=189656
+/proc/<pid>/environ   : exact-match count=1
+drain-loop replay     : escaped_matched=[4732]
+```
+
+Enumeration, parsing and detection all work correctly on Linux. **The bug is
+downstream of detection.** Chasing this cost two reverted cgroup
+implementations and a `/proc` code path that fixed nothing.
+
+**2. `gh run view --log-failed` on an IN-PROGRESS run returns a PARTIAL log.**
+Failure counts read from it are far below reality — readings of "3 failing
+locations" came from partial logs, while a control run of the identical commit
+returned 19. Wait for the run to complete, and re-run the same commit before
+believing any delta between two numbers.
+
+Reproduce on ubuntu-22.04 + Node 22 (Docker is sufficient). This is fail-closed
+containment — the guardian that stops orphaned bootstrap processes surviving —
+so do not relax an assertion or extend a timeout to get green; the 2026-07-26
+fix strengthened enforcement (faster sweeps, immediate SIGKILL for
+session-escapees) rather than weakening any assertion.
+
+Fuller history, including the approaches tried and reverted along the way,
+lives in `.local/specs/desktop-linux-ci/DIAGNOSIS.md` on the maintainer's
+machine (`.local/` is gitignored, so it does not travel to a fresh worktree —
+which is why the essentials are recorded here instead).
+
+---
+
 *Owners: any contributor who touches a file under `.github/workflows/`
 should update this document in the same commit so the contract stays
 current.*

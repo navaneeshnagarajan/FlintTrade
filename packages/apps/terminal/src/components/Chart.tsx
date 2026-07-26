@@ -17,7 +17,7 @@ interface ChartProps {
 }
 
 /**
- * TradingView Lightweight Charts v5 wrapper.
+ * Native chart component — wraps the lightweight-charts v5 library.
  * Fetches historical OHLCV via API. Live ticks are routed through Jotai
  * atoms (useWsBridge) — no direct window event listeners needed here.
  */

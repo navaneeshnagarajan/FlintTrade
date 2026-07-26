@@ -93,15 +93,20 @@ function fmtIv(v: number | undefined): string {
 }
 
 /**
- * True when the payload carries the backend's `is_sample_data: true` honesty
- * flag (propagated onto object payloads by the ftApi response unwrapper).
+ * True when a present payload is NOT explicitly flagged live.
+ *
+ * Fail-closed: a payload must carry `is_sample_data: false` to be treated as
+ * real. Matches GammaDensity's `carriesExplicitLiveFlag`, the reference
+ * implementation in this family.
  */
 function carriesSampleFlag(payload: unknown): boolean {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    (payload as { is_sample_data?: unknown }).is_sample_data === true
-  );
+  // Nothing has arrived yet — the loading state covers this, not the badge.
+  if (typeof payload !== "object" || payload === null) return false;
+  // Fail CLOSED once a payload is present: only an explicit
+  // `is_sample_data: false` counts as evidence of live data. This used to
+  // test `=== true`, so a payload that omitted the flag entirely — a backend
+  // stub, a shape change, a proxy that dropped it — rendered as live.
+  return (payload as { is_sample_data?: unknown }).is_sample_data !== false;
 }
 
 // ---------------------------------------------------------------------------

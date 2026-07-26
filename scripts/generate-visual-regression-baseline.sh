@@ -108,7 +108,6 @@ function settingsState(density) {
     },
     llm: { provider: "", model: "", host: "", apiKey: "" },
     telegram: { enabled: false, botToken: "", chatId: "" },
-    whatsapp: { enabled: false, phoneE164: "", adminUrl: "" },
     dataPaths: { fastStoragePath: "", archiveStoragePath: "" },
     name: "Visual Baseline",
     interests: [],

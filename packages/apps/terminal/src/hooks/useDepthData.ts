@@ -2,7 +2,9 @@
  * TanStack Query hook for fetching market depth data from the OpenAlgo API.
  *
  * Returns bid/ask depth levels for a given symbol. Polls every 1 second
- * to build up the time-series needed for the DepthHeatmap widget.
+ * to build up the time-series the DOM Heatmap accumulates. (Written for
+ * the retired DepthHeatmap widget, which merged into DOM Heatmap; the Tape
+ * and DOM / Ladder surfaces share this same cache.)
  *
  * In explore mode, this hook is disabled (the widget uses synthetic data).
  */

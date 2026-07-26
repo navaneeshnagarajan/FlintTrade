@@ -84,10 +84,10 @@ under `[packages]` / gateway metadata. The 2026-05 sync added
   broker 'X' yet"). FlintTrade exposes these through the safety proxy
   at `/api/v1/orders/gtt-{place,modify,cancel}`.
 - **New exchanges** — `NCO` (NSE Commodities), `MCX_INDEX`, `GLOBAL_INDEX`.
-- **WhatsApp bot** — `POST /api/v1/whatsapp/notify`. FlintTrade exposes
-  the outbound test endpoint at `/ft-api/api/v1/alerts/whatsapp/test`
-  (blueprint prefix `/api/v1`, so the WSGI `/ft-api` strip resolves it to
-  `/api/v1/alerts/whatsapp/test`).
+- **WhatsApp bot** — `POST /api/v1/whatsapp/notify` exists upstream in
+  OpenAlgo. FlintTrade no longer proxies or exposes it: WhatsApp support was
+  removed on 2026-07-26 (maintainer ruling D3). Telegram remains the
+  supported notification channel because it carries the kill switch.
 - **opengreeks** — Rust-based replacement for `py_vollib`. Same response
   shape, ~12× faster on option-chain refresh. No FlintTrade change.
 

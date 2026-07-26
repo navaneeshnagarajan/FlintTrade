@@ -269,6 +269,41 @@ export function saveTabs(tabs: WatchlistTab[]): void {
   }
 }
 
+/**
+ * Add a symbol to the operator's first watchlist tab.
+ *
+ * The single entry point for other widgets (the Scanner's "Add to watchlist"
+ * button) to put a symbol on the watchlist. It exists because the Scanner
+ * used to write straight to `LS_KEY_LEGACY`, which `loadTabs` only reads when
+ * the canonical multi-tab key is absent — so on any already-migrated install
+ * the write vanished while the button still flipped to a green "Added" badge.
+ *
+ * @returns true when the symbol is on the list afterwards (added or already
+ *          present), false when persistence is unavailable — so the caller can
+ *          avoid claiming success it cannot vouch for.
+ */
+export function addSymbolToWatchlist(item: WatchlistItem): boolean {
+  try {
+    const tabs = loadTabs();
+    if (tabs.length === 0) return false;
+    const target = tabs[0];
+    const exists = target.symbols.some(
+      (s) => s.symbol === item.symbol && s.exchange === item.exchange,
+    );
+    if (!exists) {
+      const next = tabs.map((tab, i) =>
+        i === 0 ? { ...tab, symbols: [...tab.symbols, item] } : tab,
+      );
+      saveTabs(next);
+      // saveTabs swallows quota errors, so confirm the write landed.
+      return localStorage.getItem(LS_KEY_MULTI) !== null;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function loadViewSettings(): WatchlistViewSettings {
   const parsed = safeParse(localStorage.getItem(LS_KEY_VIEW), watchlistViewSchema);
   if (!parsed) return DEFAULT_VIEW_SETTINGS;

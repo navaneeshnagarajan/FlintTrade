@@ -84,8 +84,6 @@ integrations/webhooks:
   purpose: "TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge."
   entry_points:
     - "src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake"
-    - "src/flinttrade_webhooks/tradingview.py — TradingView alert ingestion"
-    - "src/flinttrade_webhooks/chartink.py — ChartInk scanner integration"
 services/ai:
   language: Python
   purpose: "Local LLM client, RAG pipeline, multi-agent trading team, ML signal generation, and skill swarm."

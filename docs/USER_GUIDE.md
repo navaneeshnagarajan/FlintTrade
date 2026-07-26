@@ -263,52 +263,48 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (102)
+### The widgets (69)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
-under `packages/apps/terminal/src/widgets/`. The lists below are
-representative, not exhaustive; run the widget registry
-(`packages/apps/terminal/src/layout/widgetFactory.tsx`) for the exact current
-count:
+under `packages/apps/terminal/src/widgets/`. The lists below are generated
+from the widget registry
+(`packages/apps/terminal/src/layout/widgetFactory.tsx`) and are exhaustive:
 
-- **Trading** — Dashboard, Scalper, Positions, Orders, Holdings,
-  Trade Book, Order Pad, Intraday P&L, MTM Monitor, Risk Panel, Action
-  Center, Position Heat Map, Trade Copier, Portfolio Allocation, Quick
-  Trade, Session Stats, Risk Dashboard, Trade Log, Trade Performance,
-  Strategy Monitor, Net Positions, and Order Ladder.
-- **Analysis** — Chart, Multi Chart, Option Chain, OI Chart,
-  Straddle, Depth, Greeks, Sector Map, GEX Dashboard, Vol Surface, IV
-  Smile, Straddle P&L, OI Profile, Order Flow, Depth Heatmap,
-  Three-Panel Chart, OI Heatmap, Greeks Surface, Pivot Points, Order
-  Book Replay, Market Breadth, Volatility Cone, Heat Calendar, VWAP
-  Bands, Correlation Pairs, Multi-Timeframe, PCR Trend, Instrument
-  Compare, Spread View, Greeks Heatmap, Gap Analysis, Implied Move,
-  Options Flow, Market Microstructure, Correlation Matrix, IV Skew,
-  Sector Performance, Footprint Chart, DOM Heatmap, FII Long/Short,
-  Gamma Density, Arbitrage Scanner, Index Contribution, Pattern
-  Detection, and Time & Sales.
-- **Utility** — Watchlist, Calculator, News Feed, Ticker, AI
-  Advisor, Pre-Market Scanner, Price Alerts, System Health, Funding
-  Rates, Currency Converter, Earnings Calendar, Global Indices,
-  Strategy Templates, Audit Trail, Economic Calendar, Profit Target
-  Calc, Expiry Countdown, Position Sizing, Market Clock, Trade Ideas,
-  Tick Speed, and Market Summary.
-
+- **Trading** — Scalper, Positions, Fills, P&L Monitor, Orders, Holdings,
+  Order Pad, Action Center, Trade Copier, Smart Order, Portfolio Allocation,
+  Quick Trade, Risk, Strategy Monitor, DOM / Ladder, Forever (GTT) Orders,
+  Super Orders, and Conditional Triggers
+- **Analysis** — Chart, Market Overview, Option Chain, Historical Chain, OI
+  Analytics, Straddle & Implied Move, Greeks, Dealer Gamma, Arbitrage
+  Scanner, Pattern Detection, Tape & Microstructure, Vol Surface, IV Smile &
+  Skew, Straddle P&L, Order Flow, Portfolio Optimiser, Condition Scanner,
+  Pivot Points, Volatility Cone, VWAP Bands, Correlation Pairs, Multi-
+  Timeframe, PCR Trend, Instrument Compare, Greeks Matrix, Gap Analysis,
+  Correlation Matrix, Delivery Data, and DOM Heatmap
+- **Utility** — Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
+  Advisor, AI Backends, AI Team, Obsidian Vault, Price Alerts,
+  Reconciliation, Funding Rates, Currency Converter, Earnings Calendar,
+  Strategy Templates, Audit Trail, Economic Calendar, Expiry Countdown,
+  Market Clock, Trade Ideas, Tick Speed, and Journal Entries
 Every widget is registered in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
-### The 14 workspace presets
+### The 17 workspace presets
 
 A preset is a pre-built layout you can apply instantly from the command
 palette (Ctrl + K → "preset"). Built-in presets include:
 
-- **Scalper Zone** — chart, level-2 depth, order pad, positions, scalper panel.
+- **Scalper Zone** — chart, order ladder, order pad, positions, scalper panel.
 - **Options Desk** — option chain, chart, Greeks, positions, straddle P&L.
-- **Market Watch** — multi-symbol watchlist, chart, price ticker, dashboard.
-- **Analysis** — chart with indicators, OI chart, depth, positions, news.
-- **Risk Monitor** — dashboard, risk panel, MTM monitor, positions, orders.
-- **Investor View** — chart, watchlist, holdings, dashboard (SIPs, net worth
+- **Market Watch** — multi-symbol watchlist, chart, price ticker, indices.
+- **Analysis** — chart with indicators, OI analytics, positions, news.
+- **Risk Monitor** — indices, risk, P&L monitor, positions, orders.
+- **Trading Desk** — indices, positions, risk and orders; the composition that
+  replaced the old Dashboard widget.
+- **Three Panel** — CE, index and PE charts with synchronised time scales on
+  the nearest-expiry ATM strikes.
+- **Investor View** — chart, watchlist, holdings, indices (SIPs, net worth
   and mutual funds live on the Invest page).
-- … plus eight more.
+- … plus nine more.
 
 Presets are serialised via the Dockview API. You can save your own custom
 preset from Settings → Workspace.
@@ -499,7 +495,7 @@ sections:
 | **General** | `ui.theme`, `ui.density` | Theme (Graphite / Midnight / Ember), light / dark / system, UI density. |
 | **Workspace** | `storage.fast`, `storage.archive` | SSD vs HDD paths for tick data vs archive. |
 | **AI** | `llm.provider`, `llm.host`, `llm.model` | Managed Ollama runtime plus OpenAI, Anthropic, Groq, Hermes, and custom endpoints. |
-| **Notifications** | `telegram.*`, `whatsapp.*` | Telegram bot token, chat ID, kill-switch enable. |
+| **Notifications** | `telegram.*` | Telegram bot token, chat ID, kill-switch enable. |
 | **Risk** | `risk.daily_pnl_pause_pct`, `risk.daily_pnl_kill_pct` | Daily P&L percentages for a reversible new-order pause and a latched new-order hard stop; neither activates Layer 5. |
 | **Order safety** | `sebi.rate_limit_*` | Per-endpoint rate limits and kill-switch settings. (The audit log is append-only with operator-controlled retention — there is no automatic purge.) |
 

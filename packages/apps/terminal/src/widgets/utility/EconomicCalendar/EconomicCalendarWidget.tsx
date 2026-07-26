@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { istToday } from "@/lib/ist";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { getEconomicCalendar, type BackendEconomicEvent } from "@/services/ftApi";
 import {
@@ -74,22 +75,26 @@ const COUNTRIES = Object.keys(COUNTRY_FLAGS) as Country[];
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 function formatEventDate(iso: string): string {
+  // Parsed at local midnight and formatted in the local zone, so the rendered
+  // weekday/day/month always match the ISO string it came from.
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 }
 
+// Event dates arrive as IST trading days, so "today" and "past" must be judged
+// against the IST calendar. The UTC-based toIsoDate this replaced (toISOString()
+// yields the UTC day) drifted in both directions: it read a day behind IST for
+// the whole 00:00–05:30 IST window, and for an operator in a zone behind UTC it
+// read a day ahead through their evening. Either way today's events lost the
+// "Today" heading and were greyed out as past.
+
 function isToday(iso: string): boolean {
-  return iso === toIsoDate(new Date());
+  return iso === istToday();
 }
 
 function isPast(iso: string): boolean {
-  const today = toIsoDate(new Date());
-  return iso < today;
+  return iso < istToday();
 }
 
 // ---------------------------------------------------------------------------

@@ -13,8 +13,13 @@ vi.mock("@/stores/themeStore", () => ({
     selector({ setTheme: vi.fn(), setMode: vi.fn(), mode: "dark" }),
 }));
 
-import { useCommandRegistry } from "../useCommandRegistry";
+import {
+  BEGINNER_WIDGET_IDS,
+  INTERMEDIATE_WIDGET_IDS,
+  useCommandRegistry,
+} from "../useCommandRegistry";
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
+import { widgetCatalog } from "@/layout/widgetFactory";
 
 describe("useCommandRegistry — layout preset commands", () => {
   it("exposes one Apply-layout command per built-in workspace preset", () => {
@@ -43,5 +48,29 @@ describe("useCommandRegistry — layout preset commands", () => {
     const { result } = renderHook(() => useCommandRegistry());
     const hits = result.current.searchCommands("scalper");
     expect(hits.some((c) => c.id === "layout:options-scalper")).toBe(true);
+  });
+});
+
+describe("useCommandRegistry — skill-tier widget gates", () => {
+  // Both gates match on catalogue id, so a wrong id fails silently and
+  // *subtracts* a widget from the tier. That is what happened: `depth` stayed
+  // on the intermediate list after being merged into `orderladder`, and `pnl`
+  // was never a catalogue id at all (`intradaypnl` is), so intermediate users
+  // lost the DOM / Ladder and Intraday P&L without a single failing test.
+  const catalogIds = new Set(widgetCatalog.map((widget) => widget.id));
+
+  it.each([
+    ["beginner", BEGINNER_WIDGET_IDS],
+    ["intermediate", INTERMEDIATE_WIDGET_IDS],
+  ])("gates the %s tier only on ids the catalogue still carries", (_tier, ids) => {
+    const unknown = [...ids].filter((id) => !catalogIds.has(id)).sort();
+    expect(unknown).toEqual([]);
+  });
+
+  it("keeps the beginner tier a subset of the intermediate tier", () => {
+    const missing = [...BEGINNER_WIDGET_IDS]
+      .filter((id) => !INTERMEDIATE_WIDGET_IDS.has(id))
+      .sort();
+    expect(missing).toEqual([]);
   });
 });

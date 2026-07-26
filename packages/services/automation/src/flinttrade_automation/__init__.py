@@ -1,11 +1,10 @@
-"""FlintTrade automation package — cron, Telegram, post-market, n8n, flows."""
+"""FlintTrade automation package — cron, Telegram, post-market, flows."""
 
 from flinttrade_core.version import APP_VERSION
 
 __version__ = APP_VERSION
 
 from .cron_manager import CronManager, JobDefinition, JobHistory, JobStatus
-from .n8n_bridge import N8nBridge, N8nBridgeError
 from .post_market import (
     DailyReport,
     PostMarketAnalysis,
@@ -14,8 +13,6 @@ from .post_market import (
 )
 from .telegram_bot import BotConfig, CommandResult, TelegramApiError, TelegramBot, TelegramClient
 from .totp_login import LoginResult, is_trading_day
-from .whatsapp_alerts import WhatsAppAlerter, WhatsAppConfig
-from .whatsapp_alerter import AlertRouter, AlertRouterConfig, WhatsAppAlerter as WhatsAppBridgeAlerter
 from .flows import FlowDefinition, FlowError, FlowManager
 from .flow_nodes import (
     AlertNode,
@@ -55,16 +52,6 @@ __all__ = [
     "DailyReport",
     "TradeEntry",
     "StrategyPerformance",
-    # WhatsApp (webhook-based)
-    "WhatsAppAlerter",
-    "WhatsAppConfig",
-    # WhatsApp (wabridge sidecar)
-    "WhatsAppBridgeAlerter",
-    "AlertRouter",
-    "AlertRouterConfig",
-    # n8n
-    "N8nBridge",
-    "N8nBridgeError",
     # Flows
     "FlowManager",
     "FlowDefinition",

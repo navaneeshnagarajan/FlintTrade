@@ -26,6 +26,7 @@ import {
   createFlintChartOIProfileBarData,
   getFlintChartIndicatorPaneSpec,
 } from "@flinttrade/design-system";
+import { istParts, istToday, lastIstWeekdayOfMonth, toIstIsoDate } from "@/lib/ist";
 import { lightweightHistogramRuntime } from "@/lib/lightweightChartRuntime";
 import { getFtOIProfile } from "@/services/ftApi";
 
@@ -44,26 +45,52 @@ export interface UseOIOverlayParams {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Last Thursday of the current month as YYYY-MM-DD — nearest NFO expiry. */
-function getNearestExpiry(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  // Last day of the current month
-  const lastDay = new Date(year, month + 1, 0);
-  const dayOfWeek = lastDay.getDay(); // 0=Sun … 6=Sat, 4=Thu
-  // How many days to subtract to reach the last Thursday
-  const diff = dayOfWeek >= 4 ? dayOfWeek - 4 : dayOfWeek + 3;
-  const lastThursday = new Date(year, month + 1, -(diff));
+/**
+ * Weekday the monthly NFO contract is ASSUMED to expire on
+ * (4 = Thursday, JS weekday numbering).
+ *
+ * This is a configured assumption, not a verified exchange rule: NSE has
+ * revised its expiry weekday since 2023 and nothing in this repository pins the
+ * current one. It mirrors ``NSE_EXPIRY_WEEKDAY`` in ExpiryCountdownWidget —
+ * both should move to a shared exchange-rules module once one exists, so the
+ * rule is confirmed in a single place.
+ *
+ * It is only a FALLBACK contract guess: the authoritative expiry list is the
+ * broker/symbol-master feed behind ``getExpiry`` in ``@/services/api``, which
+ * the option-chain surfaces already use. Wiring it here needs an
+ * underlying-exchange → derivatives-exchange mapping (this hook is handed
+ * ``NSE``/``NSE_INDEX``/``MCX``, not ``NFO``), which does not exist yet.
+ */
+const ASSUMED_MONTHLY_EXPIRY_WEEKDAY = 4;
 
-  if (now > lastThursday) {
-    // Step to the last Thursday of the next month
-    const nextLast = new Date(year, month + 2, 0);
-    const nDow = nextLast.getDay();
-    const nDiff = nDow >= 4 ? nDow - 4 : nDow + 3;
-    return new Date(year, month + 2, -nDiff).toISOString().slice(0, 10);
-  }
-  return lastThursday.toISOString().slice(0, 10);
+/**
+ * The nearest monthly NFO expiry as ``YYYY-MM-DD``, in IST.
+ *
+ * Every read is IST: the calendar month, the weekday of its last day and the
+ * emitted ISO date all come from ``@/lib/ist``. The previous version mixed
+ * browser-local ``new Date(y, m, d)`` maths with a UTC ``toISOString()`` tail,
+ * so an operator outside India could ask the backend for the wrong contract —
+ * on a machine west of IST the month, the weekday and the date could each land
+ * a day out.
+ *
+ * The expiry day itself still returns that day's contract: it trades until the
+ * 15:30 IST close, and its OI is exactly what a chart wants to show.
+ *
+ * Exported for its tests: the fetched contract is a correctness surface, not a
+ * cosmetic one.
+ *
+ * @param now - The current instant; defaults to now.
+ * @returns The ISO date of the assumed nearest monthly expiry.
+ */
+export function getNearestExpiry(now: Date = new Date()): string {
+  const { year, month } = istParts(now);
+  const todayKey = toIstIsoDate(now);
+  const thisMonth = toIstIsoDate(
+    lastIstWeekdayOfMonth(year, month, ASSUMED_MONTHLY_EXPIRY_WEEKDAY),
+  );
+  if (thisMonth >= todayKey) return thisMonth;
+  // Month index 12 rolls into January of the following year.
+  return toIstIsoDate(lastIstWeekdayOfMonth(year, month + 1, ASSUMED_MONTHLY_EXPIRY_WEEKDAY));
 }
 
 export function useOIOverlay({
@@ -117,8 +144,10 @@ export function useOIOverlay({
     } catch { /* ignore */ }
 
     if (!latestTime) {
-      // Fall back to today's date string if the chart has no data yet
-      latestTime = new Date().toISOString().slice(0, 10) as unknown as Time;
+      // Fall back to today's date string if the chart has no data yet. The
+      // trading day is the IST one — `toISOString()` would still be reading
+      // yesterday for the whole IST early morning.
+      latestTime = istToday() as unknown as Time;
     }
 
     try {

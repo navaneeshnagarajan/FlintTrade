@@ -278,6 +278,10 @@ def get_crypto_funding_rates() -> Any:
 _SAMPLE_GLOBAL_INDICES: list[dict[str, Any]] = [
     {"id": "NIFTY",   "name": "Nifty 50",    "region": "India",  "ltp": 24850.50, "change":  142.30, "change_pct": 0.57, "history": [24700, 24750, 24780, 24820, 24850]},
     {"id": "SENSEX",  "name": "BSE Sensex",  "region": "India",  "ltp": 81420.30, "change":  484.20, "change_pct": 0.60, "history": [80900, 81000, 81200, 81350, 81420]},
+    # GIFT Nifty (NSE IX, quoted in USD) is the pre-open indicator Indian desks
+    # read before 09:15. Carried over from the retired Market Intelligence
+    # global-indices table, which was the only surface that listed it.
+    {"id": "GIFTNIFTY", "name": "GIFT Nifty", "region": "India", "ltp": 24902.00, "change": 51.50, "change_pct": 0.21, "history": [24790, 24830, 24860, 24890, 24902]},
     {"id": "SPX",     "name": "S&P 500",     "region": "US",     "ltp":  5874.20, "change":   12.40, "change_pct": 0.21, "history": [5840, 5850, 5860, 5870, 5874]},
     {"id": "DJI",     "name": "Dow Jones",   "region": "US",     "ltp": 43240.10, "change":  -85.20, "change_pct": -0.20, "history": [43350, 43320, 43290, 43260, 43240]},
     {"id": "NDX",     "name": "Nasdaq 100",  "region": "US",     "ltp": 20410.50, "change":   98.30, "change_pct": 0.48, "history": [20280, 20320, 20360, 20390, 20410]},

@@ -222,26 +222,32 @@ function InstrumentCompareWidget() {
     });
   }, []);
 
-  // Build active series from symbols (use sample data for matching symbols)
+  // Series for the symbols that have illustrative data. A symbol WITHOUT any
+  // is skipped, not invented: this used to synthesise `100 + idx * 0.5` for an
+  // unknown symbol, so typing a real ticker drew a smooth rising line that
+  // looked like that instrument's performance. The "Sample data" badge does
+  // not excuse a fabricated series attributed to a named instrument.
   const activeSeries = useMemo(() => {
     return symbols
       .map((sym, i) => {
         if (!sym) return null;
         const sample = SAMPLE_SERIES.find((s) => s.symbol === sym);
-        // If no sample data, generate synthetic flat data so the slot still renders
-        const points: SeriesPoint[] = sample
-          ? sample.points
-          : Array.from({ length: 20 }, (_, idx) => ({ session: idx, value: 100 + idx * 0.5 }));
-        const normalised = normalise(points);
+        if (!sample) return null;
         return {
           symbol: sym,
-          normalised,
+          normalised: normalise(sample.points),
           colour: SERIES_COLOURS[i % SERIES_COLOURS.length],
           index: i,
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
   }, [symbols]);
+
+  /** Symbols the operator typed that this widget has no series for. */
+  const unchartedSymbols = useMemo(
+    () => symbols.filter((sym) => sym && !SAMPLE_SERIES.some((s) => s.symbol === sym)),
+    [symbols],
+  );
 
   const comparisonChart = useMemo(() => buildComparisonChart(activeSeries), [activeSeries]);
   const activeCount = symbols.filter(Boolean).length;
@@ -290,6 +296,15 @@ function InstrumentCompareWidget() {
           </span>
         )}
       </div>
+
+      {/* Named, not drawn. A symbol with no illustrative series is listed here
+          rather than given an invented line. */}
+      {unchartedSymbols.length > 0 && (
+        <p className="flex-none px-2 pb-1 text-xxs text-text-muted" role="note">
+          No illustrative series for {unchartedSymbols.join(", ")} — this widget
+          has no live price source, so nothing is drawn for {unchartedSymbols.length === 1 ? "it" : "them"}.
+        </p>
+      )}
 
       {/* Chart */}
       <div className="flex-1 min-h-0 overflow-hidden px-1 pt-1">

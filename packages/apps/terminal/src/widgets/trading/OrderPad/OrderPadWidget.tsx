@@ -45,6 +45,13 @@ import { searchSymbol, placeOrder, getSymbol } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { useMargin } from "@/hooks/useMargin";
 import { useBrokerCapabilities } from "@/hooks/useBrokerCapabilities";
+import {
+  checkLotMultiple,
+  checkOrderEntryMode,
+  checkPriceForOrderType,
+  isDerivativeExchange,
+  OPTIONS_EXCHANGES,
+} from "@/lib/orderGuards";
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
@@ -62,16 +69,9 @@ const TRIGGER_ENABLED = new Set<OrderTypeValue>(["SL", "SL-M"]);
 
 const DEBOUNCE_MS = 300;
 
-/** Exchanges that have option strikes (NFO = NSE F&O, BFO = BSE F&O). */
-const OPTIONS_EXCHANGES = new Set(["NFO", "BFO"]);
-
-/**
- * Derivative exchanges where quantity MUST be a positive multiple of the
- * instrument's lot size. Submissions fail closed when the lot size is
- * unknown — a wrong F&O quantity is a broker rejection at best and an
- * unintended position size at worst.
- */
-const DERIVATIVE_EXCHANGES = new Set(["NFO", "BFO", "MCX", "CDS"]);
+// Lot-size, price, mode and derivative-exchange rules live in
+// @/lib/orderGuards so every order-entry surface refuses the same things for
+// the same reasons. OPTIONS_EXCHANGES drives the premium prefill below.
 
 // NOTE: A "strike offset" selector (ATM/ITMn/OTMn) previously lived here. It
 // computed a strike from the OPTION CONTRACT'S OWN PREMIUM (mistaking it for
@@ -616,24 +616,52 @@ function OrderPadWidget(props: WidgetProps) {
   const isPracticeOrExplore = appMode === "practice" || appMode === "explore";
 
   const onSubmit: SubmitHandler<OrderFormValues> = async (values) => {
+    clearErrors("qty");
+
+    // Explore mode has no broker behind it — every price on screen is demo
+    // data. The backend refuses too (403 mode_blocked), but the operator is
+    // told here rather than after a round trip.
+    const modeRefusal = checkOrderEntryMode(appMode);
+    if (modeRefusal) {
+      showToast("error", modeRefusal, 6000);
+      return;
+    }
+
     // F&O lot-multiple validation. Quantity on a derivative exchange must be a
     // positive multiple of the instrument's lot size; when the lot size is
     // unknown (symbol lookup failed) the submission fails closed rather than
     // sending a quantity the broker may reject — or worse, partially accept.
-    clearErrors("qty");
-    if (DERIVATIVE_EXCHANGES.has(values.exchange)) {
-      if (!lotSizeKnown || lotSize <= 0) {
-        const msg = `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`;
-        setError("qty", { type: "validate", message: msg });
-        showToast("error", msg, 6000);
-        return;
-      }
-      if (values.qty <= 0 || values.qty % lotSize !== 0) {
-        const msg = `Quantity must be a positive multiple of the lot size (${lotSize}) for ${values.exchange}.`;
-        setError("qty", { type: "validate", message: msg });
-        showToast("error", msg, 6000);
-        return;
-      }
+    const lotRefusal = checkLotMultiple(
+      values.exchange,
+      values.qty,
+      { lotSize, verified: lotSizeKnown },
+      values.symbol,
+    );
+    if (lotRefusal) {
+      const msg = isDerivativeExchange(values.exchange) && !lotSizeKnown
+        ? `Lot size unknown for ${values.symbol} (${values.exchange}) — cannot validate the F&O quantity. Reselect the symbol and try again.`
+        : lotRefusal;
+      setError("qty", { type: "validate", message: msg });
+      showToast("error", msg, 6000);
+      return;
+    }
+
+    // A LIMIT/SL order must carry a real price and an SL/SL-M a real trigger.
+    // Sending ₹0 is a guaranteed broker rejection, and a lenient bridge could
+    // treat it as marketable — turning a price-protected order into an
+    // unprotected market order.
+    const priceRefusal = checkPriceForOrderType(
+      values.orderType,
+      priceEnabled ? values.price : 1,
+      triggerEnabled ? values.trigPrice : 1,
+    );
+    if (priceRefusal) {
+      setError(priceEnabled && (values.price ?? 0) <= 0 ? "price" : "trigPrice", {
+        type: "validate",
+        message: priceRefusal,
+      });
+      showToast("error", priceRefusal, 6000);
+      return;
     }
 
     // For a market-type order (MARKET / SL-M) the user never sets a price. In
@@ -653,6 +681,12 @@ function OrderPadWidget(props: WidgetProps) {
       quantity: values.qty,
       price: priceEnabled ? (values.price ?? 0) : practiceMarketFill ? ltp : 0,
       triggerPrice: triggerEnabled ? (values.trigPrice ?? 0) : 0,
+      // The pad has always offered a disclosed-quantity input, but the value
+      // was dropped before dispatch — operator intent silently discarded. The
+      // backend has accepted `disclosed_quantity` all along.
+      ...(values.discQty != null && values.discQty > 0
+        ? { disclosedQuantity: values.discQty }
+        : {}),
       strategy: "FlintOrderPad",
     };
     lastParamsRef.current = params;

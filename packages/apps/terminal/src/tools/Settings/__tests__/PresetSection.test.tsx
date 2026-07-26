@@ -115,13 +115,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { WorkspacePresetRecord } from "@/services/ftApi";
 
+// `depth` was retired into `orderladder` by the widget merge — a fixture must
+// not keep a dead id alive, or it quietly certifies a preset an operator can
+// no longer build.
 const BUILTIN_PRESET: WorkspacePresetRecord = {
   id: "scalper-zone",
   name: "Scalper Zone",
-  description: "Chart + Order Pad + Depth + Positions",
+  description: "Chart + Order Pad + DOM / Ladder + Positions",
   icon: "Zap",
   is_builtin: true,
-  widgets: ["chart", "orderpad", "depth", "positions"],
+  widgets: ["chart", "orderpad", "orderladder", "positions"],
 };
 
 const CUSTOM_PRESET: WorkspacePresetRecord = {

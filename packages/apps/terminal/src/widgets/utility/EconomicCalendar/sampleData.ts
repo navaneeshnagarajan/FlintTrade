@@ -3,6 +3,8 @@
  * Events are illustrative only, not real financial data.
  */
 
+import { toIstIsoDate } from "@/lib/ist";
+
 export type Impact = "high" | "medium" | "low";
 export type Country = "IN" | "US" | "EU" | "GB" | "JP" | "CN";
 
@@ -18,10 +20,17 @@ export interface EconomicEvent {
   actual?: string;       // Only for past events
 }
 
+/**
+ * An IST calendar date, offset by whole days from today.
+ *
+ * Must agree with the widget's ``istToday()`` comparison, or the offset-0 event
+ * loses its "Today" heading and renders as past.
+ *
+ * @param offset - Days from today; negative for the past.
+ * @returns The ISO date ``YYYY-MM-DD`` of that IST day.
+ */
 function isoDate(offset: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return toIstIsoDate(new Date(Date.now() + offset * 86_400_000));
 }
 
 export const COUNTRY_FLAGS: Record<Country, string> = {

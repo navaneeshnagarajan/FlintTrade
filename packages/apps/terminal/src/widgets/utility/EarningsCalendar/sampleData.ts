@@ -3,6 +3,8 @@
  * Companies and dates are illustrative only — not real financial data.
  */
 
+import { toIstIsoDate } from "@/lib/ist";
+
 export interface EarningsEntry {
   symbol: string;
   company: string;
@@ -14,11 +16,18 @@ export interface EarningsEntry {
   sector: string;
 }
 
-// Build sample entries relative to today so calendar always looks populated
+/**
+ * An IST calendar date, offset by whole days from today.
+ *
+ * Sample entries are built relative to today so the calendar always looks
+ * populated. The date must be the IST trading day, matching the grid's cell
+ * keys — a UTC date would drop every entry one square to the left.
+ *
+ * @param offset - Days from today; negative for the past.
+ * @returns The ISO date ``YYYY-MM-DD`` of that IST day.
+ */
 function isoDate(offset: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return toIstIsoDate(new Date(Date.now() + offset * 86_400_000));
 }
 
 export const SAMPLE_EARNINGS: EarningsEntry[] = [

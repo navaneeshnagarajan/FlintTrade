@@ -49,7 +49,7 @@ function pid(base: string): string {
 function applyScalperZone(api: DockviewApi): void {
   const chartId = pid("chart");
   const orderPadId = pid("orderpad");
-  const depthId = pid("depth");
+  const depthId = pid("orderladder");
   const positionsId = pid("positions");
   const scalperId = pid("scalper");
 
@@ -65,8 +65,11 @@ function applyScalperZone(api: DockviewApi): void {
 
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "orderladder",
+    // NSE tick puts each broker level on its own row — the retired
+    // Depth widget\'s 5-level table.
+    params: { tick: 0.05 },
+    title: "DOM / Ladder",
     position: { referencePanel: orderPadId, direction: "below" },
   });
 
@@ -150,14 +153,14 @@ function applyOptionsDesk(api: DockviewApi): void {
 // │ Watchlist│      Chart         │
 // │          │                    │
 // ├──────────┼────────────────────┤
-// │  Ticker  │    Dashboard       │
+// │  Ticker  │    Indices         │
 // └──────────┴────────────────────┘
 // ---------------------------------------------------------------------------
 function applyMarketWatch(api: DockviewApi): void {
   const watchlistId = pid("watchlist");
   const chartId = pid("chart");
   const tickerId = pid("ticker");
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
 
   api.addPanel({
     id: watchlistId,
@@ -182,9 +185,9 @@ function applyMarketWatch(api: DockviewApi): void {
   });
 
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 200,
   });
@@ -204,7 +207,7 @@ function applyMarketWatch(api: DockviewApi): void {
 function applyAnalysis(api: DockviewApi): void {
   const chartId = pid("chart");
   const oiChartId = pid("oichart");
-  const depthId = pid("depth");
+  const depthId = pid("orderladder");
   const positionsId = pid("positions");
   const newsId = pid("news");
 
@@ -220,8 +223,11 @@ function applyAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "orderladder",
+    // NSE tick puts each broker level on its own row — the retired
+    // Depth widget\'s 5-level table.
+    params: { tick: 0.05 },
+    title: "DOM / Ladder",
     position: { referencePanel: oiChartId, direction: "below" },
   });
 
@@ -245,7 +251,7 @@ function applyAnalysis(api: DockviewApi): void {
 // Preset 5 — Risk Monitor
 //
 // ┌──────────────┬───────────────┐
-// │  Dashboard   │  Risk Panel   │
+// │  Indices     │  Risk Panel   │
 // ├──────────────┼───────────────┤
 // │  MTM Monitor │  Positions    │
 // ├──────────────┴───────────────┤
@@ -253,27 +259,27 @@ function applyAnalysis(api: DockviewApi): void {
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applyRiskMonitor(api: DockviewApi): void {
-  const dashboardId = pid("dashboard");
-  const riskPanelId = pid("riskpanel");
-  const mtmMonitorId = pid("mtmmonitor");
+  const indexStripId = pid("indexstrip");
+  const riskPanelId = pid("riskdashboard");
+  const mtmMonitorId = pid("pnlmonitor");
   const positionsId = pid("positions");
   const ordersId = pid("orders");
 
-  api.addPanel({ id: dashboardId, component: "dashboard", title: "Dashboard" });
+  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices" });
 
   api.addPanel({
     id: riskPanelId,
-    component: "riskpanel",
-    title: "Risk Panel",
-    position: { referencePanel: dashboardId, direction: "right" },
+    component: "riskdashboard",
+    title: "Risk",
+    position: { referencePanel: indexStripId, direction: "right" },
     initialWidth: 340,
   });
 
   api.addPanel({
     id: mtmMonitorId,
-    component: "mtmmonitor",
+    component: "pnlmonitor",
     title: "MTM Monitor",
-    position: { referencePanel: dashboardId, direction: "below" },
+    position: { referencePanel: indexStripId, direction: "below" },
   });
 
   api.addPanel({
@@ -300,14 +306,14 @@ function applyRiskMonitor(api: DockviewApi): void {
 // │    Chart     ├───────────────┤
 // │              │   Holdings    │
 // ├──────────────┴───────────────┤
-// │          Dashboard           │
+// │          Indices             │
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applyInvestorView(api: DockviewApi): void {
   const chartId = pid("chart");
   const watchlistId = pid("watchlist");
   const holdingsId = pid("holdings");
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
 
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
@@ -327,9 +333,9 @@ function applyInvestorView(api: DockviewApi): void {
   });
 
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 220,
   });
@@ -349,9 +355,9 @@ function applyInvestorView(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyOptionsAnalysis(api: DockviewApi): void {
   const optionChainId = pid("optionchain");
-  const ivSkewId = pid("ivskew");
+  const ivSkewId = pid("ivsmile");
   const greeksHeatmapId = pid("greeksheatmap");
-  const impliedMoveId = pid("impliedmove");
+  const impliedMoveId = pid("straddle");
   const straddlePnlId = pid("straddlepnl");
 
   api.addPanel({
@@ -363,7 +369,9 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: ivSkewId,
-    component: "ivskew",
+    component: "ivsmile",
+    // The skew projection is what this preset slot has always shown.
+    params: { view: "skew" },
     title: "IV Skew",
     position: { referencePanel: optionChainId, direction: "below" },
     initialWidth: 340,
@@ -378,7 +386,8 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 
   api.addPanel({
     id: impliedMoveId,
-    component: "impliedmove",
+    component: "straddle",
+    params: { view: "impliedmove" },
     title: "Implied Move",
     position: { referencePanel: ivSkewId, direction: "below" },
     initialHeight: 220,
@@ -404,40 +413,35 @@ function applyOptionsAnalysis(api: DockviewApi): void {
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applySectorView(api: DockviewApi): void {
-  const sectorMapId = pid("sectormap");
-  const sectorPerfId = pid("sectorperformance");
-  const marketBreadthId = pid("marketbreadth");
-  const heatCalendarId = pid("heatcalendar");
+  const sectorMapId = pid("marketoverview");
+  const sectorPerfId = pid("marketoverview");
+  const marketBreadthId = pid("marketoverview");
   const correlationMatrixId = pid("correlationmatrix");
 
   api.addPanel({
     id: sectorMapId,
-    component: "sectormap",
+    component: "marketoverview",
     title: "Sector Map",
+    params: { tab: "sectors" },
   });
 
   api.addPanel({
     id: sectorPerfId,
-    component: "sectorperformance",
+    component: "marketoverview",
     title: "Sector Performance",
+    params: { tab: "sectors", view: "bars" },
     position: { referencePanel: sectorMapId, direction: "right" },
     initialWidth: 360,
   });
 
   api.addPanel({
     id: marketBreadthId,
-    component: "marketbreadth",
+    component: "marketoverview",
     title: "Market Breadth",
     position: { referencePanel: sectorMapId, direction: "below" },
     initialHeight: 220,
   });
 
-  api.addPanel({
-    id: heatCalendarId,
-    component: "heatcalendar",
-    title: "Heat Calendar",
-    position: { referencePanel: marketBreadthId, direction: "right" },
-  });
 
   api.addPanel({
     id: correlationMatrixId,
@@ -463,7 +467,6 @@ function applyOrderAutomation(api: DockviewApi): void {
   const strategyMonitorId = pid("strategymonitor");
   const flowBuilderId = pid("flowbuilder-tab");
   const strategyTemplatesId = pid("strategytemplates");
-  const sessionStatsId = pid("sessionstats");
 
   api.addPanel({
     id: strategyMonitorId,
@@ -488,12 +491,6 @@ function applyOrderAutomation(api: DockviewApi): void {
     initialHeight: 240,
   });
 
-  api.addPanel({
-    id: sessionStatsId,
-    component: "sessionstats",
-    title: "Session Stats",
-    position: { referencePanel: strategyTemplatesId, direction: "right" },
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -509,10 +506,9 @@ function applyOrderAutomation(api: DockviewApi): void {
 // ---------------------------------------------------------------------------
 function applyPortfolioManager(api: DockviewApi): void {
   const portfolioAllocId = pid("portfolioallocation");
-  const netPositionId = pid("netposition");
-  const positionHeatmapId = pid("positionheatmap");
+  const netPositionId = pid("positions");
+  const positionHeatmapId = pid("positions");
   const riskDashboardId = pid("riskdashboard");
-  const tradePerformanceId = pid("tradeperformance");
 
   api.addPanel({
     id: portfolioAllocId,
@@ -522,7 +518,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 
   api.addPanel({
     id: netPositionId,
-    component: "netposition",
+    component: "positions",
+    params: { view: "net" },
     title: "Net Positions",
     position: { referencePanel: portfolioAllocId, direction: "right" },
     initialWidth: 340,
@@ -530,7 +527,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 
   api.addPanel({
     id: positionHeatmapId,
-    component: "positionheatmap",
+    component: "positions",
+    params: { view: "heat" },
     title: "Position Heat Map",
     position: { referencePanel: portfolioAllocId, direction: "below" },
     initialHeight: 220,
@@ -543,13 +541,6 @@ function applyPortfolioManager(api: DockviewApi): void {
     position: { referencePanel: positionHeatmapId, direction: "right" },
   });
 
-  api.addPanel({
-    id: tradePerformanceId,
-    component: "tradeperformance",
-    title: "Trade Performance",
-    position: { referencePanel: positionHeatmapId, direction: "below" },
-    initialHeight: 200,
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -564,8 +555,8 @@ function applyPortfolioManager(api: DockviewApi): void {
 // └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
 function applyMarketOverview(api: DockviewApi): void {
-  const marketSummaryId = pid("marketsummary");
-  const globalIndicesId = pid("globalindices");
+  const marketSummaryId = pid("marketoverview");
+  const globalIndicesId = pid("marketoverview");
   const economicCalId = pid("economiccalendar");
   const earningsCalId = pid("earningscalendar");
   const marketClockId = pid("marketclock");
@@ -573,14 +564,15 @@ function applyMarketOverview(api: DockviewApi): void {
 
   api.addPanel({
     id: marketSummaryId,
-    component: "marketsummary",
+    component: "marketoverview",
     title: "Market Summary",
   });
 
   api.addPanel({
     id: globalIndicesId,
-    component: "globalindices",
+    component: "marketoverview",
     title: "Global Indices",
+    params: { tab: "indices" },
     position: { referencePanel: marketSummaryId, direction: "right" },
     initialWidth: 360,
   });
@@ -620,20 +612,20 @@ function applyMarketOverview(api: DockviewApi): void {
 // Preset 12 — Quick Scalper
 //
 // ┌────────────┬──────────────┬──────────┐
-// │ Quick Trade│DepthHeatmap  │TickSpeed │
+// │ Quick Trade│DOM Heatmap   │TickSpeed │
 // ├────────────┼──────────────┴──────────┤
-// │ Order Lad. │   Microstructure        │
+// │ Order Lad. │   Tape & Microstructure │
 // ├────────────┴─────────────────────────┤
 // │          Intraday P&L                │
 // └──────────────────────────────────────┘
 // ---------------------------------------------------------------------------
 function applyQuickScalper(api: DockviewApi): void {
   const quickTradeId = pid("quicktrade");
-  const depthHeatmapId = pid("depthheatmap");
+  const depthHeatmapId = pid("domheatmap");
   const tickSpeedId = pid("tickspeed");
   const orderLadderId = pid("orderladder");
-  const microstructureId = pid("microstructure");
-  const intradayPnlId = pid("intradaypnl");
+  const microstructureId = pid("timesales");
+  const intradayPnlId = pid("pnlmonitor");
 
   api.addPanel({
     id: quickTradeId,
@@ -644,8 +636,10 @@ function applyQuickScalper(api: DockviewApi): void {
 
   api.addPanel({
     id: depthHeatmapId,
-    component: "depthheatmap",
-    title: "Depth Heatmap",
+    component: "domheatmap",
+    title: "DOM Heatmap",
+    // The gamma power-scale is the look the retired Depth Heatmap had.
+    params: { scale: "gamma" },
     position: { referencePanel: quickTradeId, direction: "right" },
   });
 
@@ -667,14 +661,16 @@ function applyQuickScalper(api: DockviewApi): void {
 
   api.addPanel({
     id: microstructureId,
-    component: "microstructure",
-    title: "Market Microstructure",
+    component: "timesales",
+    // The statistics-only view is what this slot has always shown.
+    params: { view: "stats" },
+    title: "Tape & Microstructure",
     position: { referencePanel: orderLadderId, direction: "right" },
   });
 
   api.addPanel({
     id: intradayPnlId,
-    component: "intradaypnl",
+    component: "pnlmonitor",
     title: "Intraday P&L",
     position: { referencePanel: orderLadderId, direction: "below" },
     initialHeight: 180,
@@ -694,7 +690,9 @@ function applyEverything(api: DockviewApi): void {
   const chartId = pid("chart");
   api.addPanel({ id: chartId, component: "chart", title: "Chart" });
 
-  for (const comp of ["chartgrid", "threepanel", "multitimeframe"] as const) {
+  for (const comp of [
+    "multitimeframe",
+  ] as const) {
     api.addPanel({
       id: pid(comp),
       component: comp,
@@ -713,7 +711,9 @@ function applyEverything(api: DockviewApi): void {
     initialWidth: 360,
   });
 
-  for (const comp of ["orderpad", "quicktrade", "orderladder"] as const) {
+  for (const comp of [
+    "orderpad", "quicktrade", "orderladder",
+  ] as const) {
     api.addPanel({
       id: pid(comp),
       component: comp,
@@ -734,8 +734,7 @@ function applyEverything(api: DockviewApi): void {
 
   for (const comp of [
     "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "greekssurface", "ivsmile", "ivskew", "oiprofile", "oiheatmap",
-    "impliedmove", "optionsflow", "volatilitycone",
+    "ivsmile", "volatilitycone",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -746,21 +745,20 @@ function applyEverything(api: DockviewApi): void {
   }
 
   // ---------- Row 2 left: Analysis ----------
-  const depthId = pid("depth");
+  // Anchored on the depth heatmap. This slot held `depth` before that widget
+  // merged into the ladder; keeping it as a ladder panel would have opened the
+  // same widget twice, since the Trading group above already adds one.
+  const depthId = pid("domheatmap");
   api.addPanel({
     id: depthId,
-    component: "depth",
-    title: "Depth",
+    component: "domheatmap",
+    title: "DOM Heatmap",
     position: { referencePanel: chartId, direction: "below" },
     initialHeight: 300,
   });
 
   for (const comp of [
-    "depthheatmap", "gex", "volsurface", "orderflow", "sectormap",
-    "sectorperformance", "marketbreadth", "correlationpairs",
-    "correlationmatrix", "instrumentcompare", "spreadview", "pcrtrend",
-    "gapanalysis", "heatcalendar", "vwapbands", "pivotpoints",
-    "orderbookreplay", "microstructure",
+    "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs", "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "vwapbands", "pivotpoints", "timesales",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -771,25 +769,22 @@ function applyEverything(api: DockviewApi): void {
   }
 
   // ---------- Row 2 center: Positions / Risk ----------
-  const dashboardId = pid("dashboard");
+  const indexStripId = pid("indexstrip");
   api.addPanel({
-    id: dashboardId,
-    component: "dashboard",
-    title: "Dashboard",
+    id: indexStripId,
+    component: "indexstrip",
+    title: "Indices",
     position: { referencePanel: depthId, direction: "right" },
   });
 
   for (const comp of [
-    "positions", "orders", "holdings", "tradebook", "intradaypnl",
-    "mtmmonitor", "positionheatmap", "portfolioallocation", "netposition",
-    "sessionstats", "tradeperformance", "tradelog", "riskpanel",
-    "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+    "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
   ] as const) {
     api.addPanel({
       id: pid(comp),
       component: comp,
       title: comp,
-      position: { referencePanel: dashboardId, direction: "within" },
+      position: { referencePanel: indexStripId, direction: "within" },
     });
   }
 
@@ -799,16 +794,12 @@ function applyEverything(api: DockviewApi): void {
     id: watchlistId,
     component: "watchlist",
     title: "Watchlist",
-    position: { referencePanel: dashboardId, direction: "right" },
+    position: { referencePanel: indexStripId, direction: "right" },
     initialWidth: 320,
   });
 
   for (const comp of [
-    "calculator", "news", "ticker", "aiadvisor", "scanner", "alerts",
-    "health", "fundingrate", "currencyconverter", "earningscalendar",
-    "globalindices", "strategytemplates", "audittrail", "economiccalendar",
-    "profittarget", "expirycountdown", "positionsizing", "marketclock",
-    "tradeidea", "tickspeed", "marketsummary",
+    "calculator", "news", "ticker", "aiadvisor", "conditionscanner", "alerts", "fundingrate", "currencyconverter", "earningscalendar", "marketoverview", "strategytemplates", "audittrail", "economiccalendar", "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown", "marketclock", "tradeidea", "tickspeed",
   ] as const) {
     api.addPanel({
       id: pid(comp),
@@ -900,13 +891,173 @@ function applyOptionsScalper(api: DockviewApi): void {
 }
 
 // ---------------------------------------------------------------------------
+// Preset 15 — Multi Chart
+//
+// The 2×2 chart grid, expressed as a layout template instead of a widget (it
+// replaces the retired `chartgrid` widget). Every cell is a full ChartWidget
+// panel — indicators, drawings, OI overlay, quotes, replay and display
+// settings all come along, each panel keeps its own indicator/display
+// configuration (ChartWidget keys those by panel id), and the whole grid is
+// persisted with the workspace layout instead of being lost on reload.
+//
+// ┌──────────────┬──────────────┐
+// │    NIFTY     │  BANKNIFTY   │
+// ├──────────────┼──────────────┤
+// │   FINNIFTY   │  MIDCPNIFTY  │
+// └──────────────┴──────────────┘
+//
+// The four NSE index defaults mirror the retired widget's default cells. Each
+// chart is pinned via panel params so it holds its instrument instead of
+// following the global watchlist selection; any cell can be re-pointed from its
+// own symbol search, and panels can be closed or dragged for a 1, 2H or 2V
+// arrangement through Dockview itself.
+// ---------------------------------------------------------------------------
+function applyMultiChart(api: DockviewApi): void {
+  const gridInterval = "5m";
+  const cell = (symbol: string) => ({
+    symbol,
+    exchange: "NSE_INDEX",
+    interval: gridInterval,
+  });
+
+  const topLeftId = pid("chart-nifty");
+  const topRightId = pid("chart-banknifty");
+  const bottomLeftId = pid("chart-finnifty");
+  const bottomRightId = pid("chart-midcpnifty");
+
+  // Top-left: the benchmark index.
+  api.addPanel({
+    id: topLeftId,
+    component: "chart",
+    title: "NIFTY",
+    params: cell("NIFTY"),
+  });
+
+  // Top-right.
+  api.addPanel({
+    id: topRightId,
+    component: "chart",
+    title: "BANKNIFTY",
+    params: cell("BANKNIFTY"),
+    position: { referencePanel: topLeftId, direction: "right" },
+  });
+
+  // Bottom-left, beneath the benchmark.
+  api.addPanel({
+    id: bottomLeftId,
+    component: "chart",
+    title: "FINNIFTY",
+    params: cell("FINNIFTY"),
+    position: { referencePanel: topLeftId, direction: "below" },
+  });
+
+  // Bottom-right completes the 2×2.
+  api.addPanel({
+    id: bottomRightId,
+    component: "chart",
+    title: "MIDCPNIFTY",
+    params: cell("MIDCPNIFTY"),
+    position: { referencePanel: topRightId, direction: "below" },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Preset registry (exported)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Preset — Trading Desk (the retired Dashboard widget as a composition)
+//
+// ┌──────────────────────────────┐
+// │        Indices strip         │
+// ├──────────────┬───────────────┤
+// │  Positions   │     Risk      │
+// ├──────────────┴───────────────┤
+// │           Orders             │
+// └──────────────────────────────┘
+// ---------------------------------------------------------------------------
+function applyTradingDesk(api: DockviewApi): void {
+  const indexStripId = pid("indexstrip");
+  const positionsId = pid("positions");
+  const riskId = pid("riskdashboard");
+  const ordersId = pid("orders");
+
+  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices", initialHeight: 150 });
+
+  api.addPanel({
+    id: positionsId,
+    component: "positions",
+    title: "Positions",
+    position: { referencePanel: indexStripId, direction: "below" },
+  });
+
+  api.addPanel({
+    id: riskId,
+    component: "riskdashboard",
+    title: "Risk",
+    position: { referencePanel: positionsId, direction: "right" },
+    initialWidth: 340,
+  });
+
+  api.addPanel({
+    id: ordersId,
+    component: "orders",
+    title: "Orders",
+    position: { referencePanel: positionsId, direction: "below" },
+    initialHeight: 200,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preset — Three Panel (CE | Index | PE)
+//
+// Replaces the retired `threepanel` widget. Three full ChartWidget panels —
+// nearest-expiry ATM CE, the underlying index (wider centre), nearest-expiry
+// ATM PE — sharing one time-scale sync group, so scroll/zoom in any panel
+// moves all three. Each cell keeps the full chart surface (indicators,
+// drawings, replay, per-panel settings) and the layout survives reload.
+// ---------------------------------------------------------------------------
+function applyThreePanel(api: DockviewApi): void {
+  const legInterval = "5m"; // ThreePanel's default interval
+  const syncGroup = "three-panel";
+
+  const indexId = pid("chart-index");
+  const ceId = pid("chart-ce");
+  const peId = pid("chart-pe");
+
+  // Centre: the underlying index, wider than the option legs.
+  api.addPanel({
+    id: indexId,
+    component: "chart",
+    title: "Index",
+    params: { symbol: "NIFTY", exchange: "NSE_INDEX", interval: legInterval, syncGroup },
+  });
+
+  // Left: the ATM call.
+  api.addPanel({
+    id: ceId,
+    component: "chart",
+    title: "CE",
+    params: { optionLeg: { underlying: "NIFTY", leg: "CE" }, interval: legInterval, syncGroup },
+    position: { referencePanel: indexId, direction: "left" },
+    initialWidth: 380,
+  });
+
+  // Right: the ATM put.
+  api.addPanel({
+    id: peId,
+    component: "chart",
+    title: "PE",
+    params: { optionLeg: { underlying: "NIFTY", leg: "PE" }, interval: legInterval, syncGroup },
+    position: { referencePanel: indexId, direction: "right" },
+    initialWidth: 380,
+  });
+}
+
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "scalper-zone",
     name: "Scalper Zone",
-    description: "Chart + Order Pad + Depth + Positions + Scalper",
+    description: "Chart + Order Pad + DOM / Ladder + Positions + Scalper",
     icon: "Zap",
     apply: applyScalperZone,
   },
@@ -916,6 +1067,13 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     description: "Four-chart desk — Index + Futures + CE/PE strike charts + Option Chain",
     icon: "Crosshair",
     apply: applyOptionsScalper,
+  },
+  {
+    id: "multi-chart",
+    name: "Multi Chart",
+    description: "Four independent charts in a 2×2 grid — NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY",
+    icon: "LayoutGrid",
+    apply: applyMultiChart,
   },
   {
     id: "options-desk",
@@ -934,35 +1092,49 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "analysis",
     name: "Analysis",
-    description: "Chart + OI Chart + Depth + Positions + News",
+    description: "Chart + OI Analytics + DOM / Ladder + Positions + News",
     icon: "BarChart3",
     apply: applyAnalysis,
   },
   {
     id: "risk-monitor",
     name: "Risk Monitor",
-    description: "Dashboard + Risk Panel + MTM Monitor + Positions + Orders",
+    description: "Dashboard + Risk + MTM Monitor + Positions + Orders",
     icon: "ShieldAlert",
     apply: applyRiskMonitor,
   },
   {
     id: "investor-view",
     name: "Investor View",
-    description: "Chart + Watchlist + Holdings + Dashboard",
+    description: "Chart + Watchlist + Holdings + Indices",
     icon: "TrendingUp",
     apply: applyInvestorView,
   },
   {
+    id: "trading-desk",
+    name: "Trading Desk",
+    description: "Indices + Positions + Risk + Orders — the retired Dashboard as a composition",
+    icon: "LayoutDashboard",
+    apply: applyTradingDesk,
+  },
+  {
+    id: "three-panel",
+    name: "Three Panel",
+    description: "CE | Index | PE — three time-synchronised charts on the nearest-expiry ATM strikes",
+    icon: "Columns3",
+    apply: applyThreePanel,
+  },
+  {
     id: "options-analysis",
     name: "Options Analysis",
-    description: "Option Chain + IV Skew + Greeks Heatmap + Implied Move + Straddle P&L",
+    description: "Option Chain + IV Smile & Skew + Greeks Matrix + Straddle & Implied Move + Straddle P&L",
     icon: "Sigma",
     apply: applyOptionsAnalysis,
   },
   {
     id: "sector-view",
     name: "Sector View",
-    description: "Sector Map + Sector Performance + Market Breadth + Heat Calendar + Correlation Matrix",
+    description: "Market Overview + Heat Calendar + Correlation Matrix",
     icon: "Map",
     apply: applySectorView,
   },
@@ -976,7 +1148,7 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "portfolio-manager",
     name: "Portfolio Manager",
-    description: "Portfolio Allocation + Net Positions + Position Heatmap + Risk Dashboard + Trade Performance",
+    description: "Portfolio Allocation + Positions (net and heat-map views) + Risk + Trade Performance",
     icon: "PieChart",
     apply: applyPortfolioManager,
   },
@@ -990,14 +1162,14 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
   {
     id: "quick-scalper",
     name: "Quick Scalper",
-    description: "Quick Trade + Order Ladder + Depth Heatmap + Microstructure + Tick Speed + Intraday P&L",
+    description: "Quick Trade + Order Ladder + DOM Heatmap + Tape & Microstructure + Tick Speed + Intraday P&L",
     icon: "Gauge",
     apply: applyQuickScalper,
   },
   {
     id: "everything",
     name: "Everything",
-    description: "All widgets in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
+    description: "A broad sweep of the widget catalogue in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
     icon: "LayoutDashboard",
     apply: applyEverything,
   },

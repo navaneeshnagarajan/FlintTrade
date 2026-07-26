@@ -52,9 +52,28 @@ export interface SkillState {
   clearRouteOverride: (domain: Domain) => void;
   setHelpPref: (key: keyof HelpPrefs, value: boolean) => void;
   /**
+   * Action names already counted into `widgetsUsed`, so a widget viewed a
+   * hundred times still counts once. Persisted — the metric is "distinct
+   * widgets you have used", not "views this session".
+   */
+  seenWidgetActions: string[];
+
+  /**
    * Increment a named counter for a domain.
-   * E.g. trackAction("trade", "ordersPlaced") increments metrics.trade.ordersPlaced.
-   * Unknown action names are silently ignored.
+   *
+   * Two shapes are accepted:
+   * - A declared metric key — trackAction("trade", "ordersPlaced")
+   *   increments metrics.trade.ordersPlaced directly.
+   * - A widget-view event — trackAction("trade", "widget_view_<name>")
+   *   increments the domain's `widgetsUsed` once per DISTINCT name.
+   *   Every widget emits one of these on mount, and for months they were
+   *   all silently dropped: `widgetsUsed` gates the trade
+   *   intermediate → advanced suggestion at 15, so that suggestion could
+   *   never fire.
+   *
+   * Anything else (fine-grained interaction telemetry like
+   * "calculator_tab_sizing") has no declared counter and is a no-op by
+   * design — but that is now this documented contract, not an accident.
    */
   trackAction: (domain: Domain, action: string) => void;
   dismissSuggestion: (key: string) => void;
@@ -84,6 +103,7 @@ const defaultState = {
   helpPrefs: defaultHelpPrefs(),
   metrics: defaultMetrics(),
   dismissedSuggestions: [] as string[],
+  seenWidgetActions: [] as string[],
 };
 
 // ---------------------------------------------------------------------------
@@ -116,6 +136,23 @@ const storeImpl: StateCreator<SkillState, [["zustand/persist", unknown]]> = (
   trackAction: (domain, action) =>
     set((state) => {
       const domainMetrics = state.metrics[domain] as Record<string, unknown>;
+
+      // Widget-view events count as "a distinct widget used", once each.
+      if (action.startsWith("widget_view_")) {
+        if (state.seenWidgetActions.includes(action)) return state;
+        if (typeof domainMetrics["widgetsUsed"] !== "number") return state;
+        return {
+          seenWidgetActions: [...state.seenWidgetActions, action],
+          metrics: {
+            ...state.metrics,
+            [domain]: {
+              ...domainMetrics,
+              widgetsUsed: (domainMetrics["widgetsUsed"] as number) + 1,
+            },
+          },
+        };
+      }
+
       // Only increment if the key exists and is currently a number
       if (typeof domainMetrics[action] !== "number") return state;
       return {
@@ -180,14 +217,24 @@ const storeImpl: StateCreator<SkillState, [["zustand/persist", unknown]]> = (
 
 const persistedStore = persist(storeImpl, {
   name: "flinttrade:skill",
-  version: 1,
+  version: 2,
   partialize: (state) => ({
     globalLevel: state.globalLevel,
     routeOverrides: state.routeOverrides,
     helpPrefs: state.helpPrefs,
     metrics: state.metrics,
     dismissedSuggestions: state.dismissedSuggestions,
+    seenWidgetActions: state.seenWidgetActions,
   }),
+  // v1 → v2: seenWidgetActions added so widget_view_* events can feed
+  // `widgetsUsed`. Old snapshots simply start with an empty seen-set.
+  migrate: (persisted, version) => {
+    const state = persisted as Partial<SkillState>;
+    if (version < 2 && !Array.isArray(state.seenWidgetActions)) {
+      state.seenWidgetActions = [];
+    }
+    return state as SkillState;
+  },
 });
 
 // ---------------------------------------------------------------------------

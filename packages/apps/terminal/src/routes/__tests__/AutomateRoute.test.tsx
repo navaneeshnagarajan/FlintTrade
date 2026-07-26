@@ -64,7 +64,6 @@ vi.mock("../automate/LogsSection", () => ({ default: () => <div data-testid="log
 vi.mock("../automate/StrategiesSection", () => ({ default: () => <div data-testid="strategies-section">Strategies</div> }));
 vi.mock("../automate/SettingsSection", () => ({ default: () => <div data-testid="settings-section">Settings</div> }));
 vi.mock("../automate/WebhooksSection", () => ({ default: () => <div data-testid="webhooks-section">Webhooks</div> }));
-vi.mock("../automate/N8nSection", () => ({ default: () => <div data-testid="n8n-section">N8n</div> }));
 
 // Mock the sidebar to render a simple version
 vi.mock("../automate/AutomateSidebar", async () => {
@@ -132,7 +131,7 @@ describe("AutomateRoute", () => {
     expect(screen.getByText("Schedules")).toBeInTheDocument();
     expect(screen.getByText("Monitors")).toBeInTheDocument();
     expect(screen.getByText("Strategies")).toBeInTheDocument();
-    expect(screen.getByText("n8n Bridge")).toBeInTheDocument();
+    expect(screen.getByText("Webhooks")).toBeInTheDocument();
     expect(screen.getByText("Execution Logs")).toBeInTheDocument();
   });
 
