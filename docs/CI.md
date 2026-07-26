@@ -311,6 +311,49 @@ If you add a new GitHub Actions workflow:
 
 ---
 
+## Known-red: `electron-desktop-tests` (since 2026-07-23)
+
+Red on `main` since a6f92464, the Electron source-bootstrap migration; green
+through 07a0f434 on 2026-07-20. Roughly 19 failing locations in
+`electron/bootstrap-io.test.ts` and `electron/bootstrap.test.ts` — the
+process-containment cases. They pass on macOS (953 tests) and fail on the
+Ubuntu runner.
+
+**Two traps, both measured, both of which have already cost a lot of time.**
+
+**1. A plausible hypothesis about `ps` formatting is FALSE.** The containment
+sweep tags processes with a `FLINTTRADE_PROCESS_ANCHOR` environment marker and
+finds them in `ps` output. It is tempting to conclude that procps does not
+append the environment when an explicit `-o command=` format is given. Measured
+on the runner:
+
+```
+ps axeww -o …command= : status=0 markerFound=TRUE  bytes=189656
+/proc/<pid>/environ   : exact-match count=1
+drain-loop replay     : escaped_matched=[4732]
+```
+
+Enumeration, parsing and detection all work correctly on Linux. **The bug is
+downstream of detection.** Chasing this cost two reverted cgroup
+implementations and a `/proc` code path that fixed nothing.
+
+**2. `gh run view --log-failed` on an IN-PROGRESS run returns a PARTIAL log.**
+Failure counts read from it are far below reality — readings of "3 failing
+locations" came from partial logs, while a control run of the identical commit
+returned 19. Wait for the run to complete, and re-run the same commit before
+believing any delta between two numbers.
+
+Reproduce on ubuntu-22.04 + Node 22 (Docker is sufficient). This is fail-closed
+containment — the guardian that stops orphaned bootstrap processes surviving —
+so do not relax an assertion or extend a timeout to get green.
+
+Fuller history, including five approaches tried and reverted, lives in
+`.local/specs/desktop-linux-ci/DIAGNOSIS.md` on the maintainer's machine
+(`.local/` is gitignored, so it does not travel to a fresh worktree — which is
+why the essentials are recorded here instead).
+
+---
+
 *Owners: any contributor who touches a file under `.github/workflows/`
 should update this document in the same commit so the contract stays
 current.*
