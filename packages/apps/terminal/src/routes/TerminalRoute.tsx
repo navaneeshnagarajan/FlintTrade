@@ -561,9 +561,9 @@ export default function TerminalRoute() {
 
       // Dispatch active-widget context for AITutorPill whenever a panel gains focus.
       // AITutorPill subscribes via window.addEventListener("flinttrade:active-widget").
-      const d3aw = event.api.onDidActivePanelChange((panel) => {
+      const d3aw = event.api.onDidActivePanelChange((change) => {
         window.dispatchEvent(
-          new CustomEvent("flinttrade:active-widget", { detail: panel?.id ?? null }),
+          new CustomEvent("flinttrade:active-widget", { detail: change.panel?.id ?? null }),
         );
       });
       readyDisposablesRef.current.push(d3aw);

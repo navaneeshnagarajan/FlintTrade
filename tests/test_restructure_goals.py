@@ -661,8 +661,8 @@ def test_desktop_release_does_not_require_numba_stack() -> None:
     default_deps = ditto_manifest.split("[project.optional-dependencies]", 1)[0]
     requirements = (ROOT / "requirements.lock").read_text(encoding="utf-8")
 
-    assert '"numba>=0.59"' not in default_deps
-    assert 'numba = ["numba>=0.59"]' in ditto_manifest
+    assert '"numba>=' not in default_deps
+    assert 'numba = ["numba>=' in ditto_manifest
     assert "llvmlite==" not in requirements
     assert "numba==" not in requirements
 

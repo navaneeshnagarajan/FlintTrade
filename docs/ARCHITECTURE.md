@@ -18,7 +18,7 @@ WebSocket contracts, see [API.md](API.md). For repo conventions, see
 flowchart LR
     subgraph Clients["Browser / Electron client"]
         T[Terminal React App]
-        DESKTOP[Electron 40 shell]
+        DESKTOP[Electron 43 shell]
         SITE[Public docs site]
         DS[Design system]
         DESKTOP --> T

@@ -43,14 +43,14 @@ members = [
 # entry points when present (see [tool.pytest.ini_options] note below).
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
+    "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
     "pytest-xdist>=3.6",
     "pytest-randomly>=3.15",
     "pytest-timeout>=2.3",    # CI runs `pytest --timeout=60 --timeout-method=thread`
                              # (test.yml / nightly); the plugin must be in the synced env
     "pyfakefs>=5.6",          # baselines §4.4 disk-full migration test (HI24)
-    "ruff>=0.8",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
+    "ruff>=0.15.22",              # lint gate — CI runs `uv run ruff check` (test.yml), so it
                              # must be in the synced env, not merely on PATH
 ]
 
@@ -109,3 +109,8 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+
+# ruff 0.16 widened its default rule set; pin the pre-0.16 defaults so the
+# lint gate stays behaviour-compatible across ruff upgrades.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

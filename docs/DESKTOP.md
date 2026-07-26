@@ -2,7 +2,7 @@
 
 FlintTrade is a self-hosted web app first. The backend serves the terminal and
 API from one origin, and a normal browser remains the primary supported way to
-run it. The desktop package is a small Electron 40 shell around that same local
+run it. The desktop package is a small Electron 43 shell around that same local
 application.
 
 > **Installer availability:** no desktop installer release is published yet; the
