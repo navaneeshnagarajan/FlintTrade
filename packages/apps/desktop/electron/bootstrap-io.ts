@@ -720,48 +720,9 @@ watchdog=
 enumerator=
 ${probes}
 fi
-proc_tr=
-proc_grep=
-for candidate_tr in /usr/bin/tr /bin/tr; do
-  if [ -x "$candidate_tr" ]; then proc_tr=$candidate_tr; break; fi
-done
-for candidate_grep in /bin/grep /usr/bin/grep; do
-  if [ -x "$candidate_grep" ]; then proc_grep=$candidate_grep; break; fi
-done
-snapshot_tagged_proc_descendants() {
-  # Linux only: /proc/<pid>/environ is the authoritative record of a process's
-  # environment. The ps path below depends on the enumerator rendering the
-  # environment into an explicit "-o command=" field, which is a formatting
-  # promise rather than a guarantee. Reading /proc removes that dependency on
-  # the one platform that offers it.
-  #
-  # Entries are NUL separated, so they are split to lines and matched WHOLE
-  # (grep -x): a token that is only a PREFIX of a longer one must not match,
-  # which the prefix-match test pins.
-  [ -d /proc ] || return 0
-  # Resolve the helpers by absolute path, the same way the ps enumerator is
-  # resolved above: this script runs with no guaranteed PATH, so a bare tr or
-  # grep would silently produce nothing rather than failing loudly.
-  [ -n "$proc_tr" ] && [ -n "$proc_grep" ] || return 0
-  for environ_path in /proc/[0-9]*/environ; do
-    [ -r "$environ_path" ] || continue
-    if "$proc_tr" '\0' '\n' < "$environ_path" 2>/dev/null | "$proc_grep" -q -x -F -- "$containment_marker"; then
-      proc_pid=$(printf '%s' "$environ_path" | "$proc_tr" -dc '0-9')
-      case "$proc_pid" in
-        ''|*[!0-9]*) continue ;;
-      esac
-      printf '%s\n' "$proc_pid"
-    fi
-  done
-  return 0
-}
 snapshot_tagged_descendants() {
   [ -n "$enumerator" ] || return 1
   tagged_snapshot=$("$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o command= 2>/dev/null) || return 1
-  # Union of both sources. This can only ever surface MORE tagged processes
-  # than the ps scan alone, so it cannot weaken containment; duplicates are
-  # harmless because the caller only sends signals.
-  snapshot_tagged_proc_descendants
   while read -r tagged_member tagged_parent tagged_group tagged_rest; do
     case "$tagged_member" in
       ''|*[!0-9]*) continue ;;
