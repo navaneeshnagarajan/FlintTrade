@@ -937,7 +937,10 @@ done
 # is the REASON the command ended, and overwriting it with a generic 1 loses
 # that and tells the caller the wrong story. Containment still happened either
 # way -- that is reported separately.
-if [ "$descendants" -eq 1 ] && [ "$status" -eq 0 ]; then status=1; fi
+# String comparison, not -eq: $status is deliberately EMPTY on the normal
+# start path, and a -eq test on an empty value is an ERROR in POSIX sh, not a false. That
+# error tripped the script and took 2 failing tests to 18.
+if [ "$descendants" -eq 1 ] && [ "$status" = "0" ]; then status=1; fi
 printf 'settled\t%s\t%s\n' "$status" "$descendants" >&3
 if IFS= read -r release && [ "$release" = FLINTTRADE_RELEASE ]; then
   wait "$watchdog" 2>/dev/null || :
