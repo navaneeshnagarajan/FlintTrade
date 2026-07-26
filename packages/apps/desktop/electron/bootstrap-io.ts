@@ -878,6 +878,16 @@ FLINT_SNAPSHOT_PARENT
     case "$member" in
       FLINTTRADE_PROBE|'') continue ;;
     esac
+    # A zombie is not an uncontained descendant: it holds no memory, runs no
+    # code and cannot write a file -- it is a process that has ALREADY been
+    # killed and is waiting to be reaped. It still appears in ps and still
+    # carries its process group, so counting it flips the reported status to
+    # "descendants escaped" and masks the real outcome (a cancel or a
+    # timeout). The faster the containment kills, the more likely a scan lands
+    # on one.
+    case " $rest " in
+      *"<defunct>"*) continue ;;
+    esac
     if [ "$member_group" = "$$" ] &&
        [ "$member" != "$$" ] &&
        [ "$member" != "$watchdog" ] &&
