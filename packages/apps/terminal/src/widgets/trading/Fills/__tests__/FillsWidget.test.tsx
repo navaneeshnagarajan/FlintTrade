@@ -259,6 +259,21 @@ describe("buildFillRows", () => {
     expect(rows.map((r) => r.symbol)).toEqual(["BANKNIFTY FUT", "BANKNIFTY FUT"]);
   });
 
+  it("excludes unmatched dispatch-time rows that carry no fill evidence", () => {
+    // Backend auto-journal rows are written at broker dispatch with NULL
+    // pnl/entry/exit (the API returns null despite the declared number type),
+    // so a resting, cancelled or rejected order must never surface as a fill.
+    const dispatchRow = {
+      ...JOURNAL_TRADES[0],
+      pnl: null as unknown as number,
+      entry_price: 0,
+      exit_price: 0,
+    };
+    const rows = buildFillRows([], [dispatchRow, JOURNAL_TRADES[1]]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].pnl).toBe(5625);
+  });
+
   it("keeps unmatched tradebook rows with null enrichment", () => {
     const rows = buildFillRows(BOOK_TRADES, []);
     expect(rows).toHaveLength(3);

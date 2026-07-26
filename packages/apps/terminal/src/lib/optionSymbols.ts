@@ -64,8 +64,9 @@ function expiryEpoch(expiry: string): number | null {
 }
 
 /**
- * Pick the nearest expiry that is still in the future on the IST trading
- * calendar, or null when the list carries none.
+ * Pick the nearest expiry that is still tradable on the IST trading calendar
+ * (future dates, plus today's expiry until the 15:30 IST close), or null when
+ * the list carries none.
  *
  * Shared by every widget that must choose an expiry for the operator instead of
  * leaving the choice to a server-side default: an unspecified expiry is filled
@@ -78,13 +79,22 @@ export function selectFutureExpiry(expiries: readonly string[], now = new Date()
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value);
   const today = Date.UTC(part("year"), part("month") - 1, part("day"));
+  // The front contract stays tradable through its own expiry session; dropping
+  // it at midnight would jump every dependent widget to the next expiry for
+  // the whole of expiry day.
+  const beforeTradingClose = part("hour") * 60 + part("minute") < 15 * 60 + 30;
   return expiries
     .flatMap((expiry) => {
       const timestamp = expiryEpoch(expiry);
-      return timestamp !== null && timestamp > today ? [{ expiry, timestamp }] : [];
+      const tradable =
+        timestamp !== null && (timestamp > today || (timestamp === today && beforeTradingClose));
+      return tradable ? [{ expiry, timestamp }] : [];
     })
     .sort((left, right) => left.timestamp - right.timestamp)[0]?.expiry ?? null;
 }

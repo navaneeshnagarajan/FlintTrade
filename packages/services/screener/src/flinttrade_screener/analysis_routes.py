@@ -1420,17 +1420,24 @@ def iv_smile_endpoint() -> Any:
     non_empty = [e for e in unique if e]
     expiries = (non_empty or unique[:1])[:_MAX_IV_SMILE_EXPIRIES]
 
-    curves: list[dict[str, Any]] = []
-    used_sample = False
+    live_curves: list[dict[str, Any]] = []
+    sample_curves: list[dict[str, Any]] = []
     spot = 0.0
     for expiry in expiries:
         curve, curve_used_sample, curve_spot = _iv_smile_curve(symbol, exchange, expiry)
-        curves.append(curve)
-        used_sample = used_sample or curve_used_sample
+        (sample_curves if curve_used_sample else live_curves).append(curve)
         # The spot is a property of the underlying, not the expiry; take the
         # first live one so a sample-backed tail expiry cannot overwrite it.
         if spot <= 0.0 or (not curve_used_sample and curve_spot > 0.0):
             spot = curve_spot
+
+    # Partial fallback, mirroring _iv_smile_curve's contract: when at least one
+    # expiry produced a live curve, omit the sample-backed curves rather than
+    # collapsing the whole response into is_sample_data=True — sample points
+    # must never ship under a live flag, and a response-wide sample flag makes
+    # the connected widget discard every valid live curve.
+    curves = live_curves if live_curves else sample_curves
+    used_sample = not live_curves
 
     expiry = expiries[0]
     iv_smile_data = {

@@ -244,7 +244,7 @@ The terminal is a single React 19 + TypeScript application built with
 Vite 6. Layout is managed by [Dockview v5.1](https://dockview.dev/),
 which provides drag-and-drop panels, tabs, floating windows, and
 serialisable layouts. Users compose their workspace from 69 widgets
-(23 trading + 35 analysis + 24 utility) split across 12 routes.
+(18 trading + 29 analysis + 22 utility) split across 12 routes.
 
 ### State architecture
 

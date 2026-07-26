@@ -624,6 +624,26 @@ class TestIVSmileEndpoint:
         assert curve["points"]
         assert curve["atm_iv"] > 0.0
 
+    def test_ivsmile_mixed_expiries_keep_live_curves_and_omit_fallback(self, app, client):
+        """One live expiry beside one unusable expiry must not poison the response.
+
+        The connected widget accepts data only when is_sample_data is exactly
+        False, so collapsing mixed results into a response-wide sample flag
+        would discard every valid live curve; sample-backed fallback curves
+        are omitted instead.
+        """
+        app.config["REGISTRY"] = _ConnectedRegistry()
+
+        _, body = _post(
+            client,
+            "/api/v1/ivsmile",
+            {"symbol": "NIFTY", "exchange": "NFO", "expiries": [_future_expiry(), "not-an-expiry"]},
+        )
+
+        assert body["is_sample_data"] is False
+        assert len(body["data"]["curves"]) == 1
+        assert body["data"]["curves"][0]["atm_iv"] > 0.0
+
     @pytest.mark.parametrize("expiry", ["not-an-expiry", "2020-01-01", pytest.param("today", id="same-day")])
     def test_live_ivsmile_requires_strictly_future_expiry(self, app, client, expiry):
         app.config["REGISTRY"] = _PayloadRegistry(_chain_payload())

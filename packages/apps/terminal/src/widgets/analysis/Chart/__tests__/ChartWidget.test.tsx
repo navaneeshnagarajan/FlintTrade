@@ -71,6 +71,9 @@ const chartInitMocks = vi.hoisted(() => {
     setVisibleLogicalRange: vi.fn(),
     subscribeVisibleLogicalRangeChange: vi.fn(),
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
+    setVisibleRange: vi.fn(),
+    subscribeVisibleTimeRangeChange: vi.fn(),
+    unsubscribeVisibleTimeRangeChange: vi.fn(),
   };
   const chart = {
     applyOptions: vi.fn(),
@@ -1236,11 +1239,13 @@ describe("ChartWidget time-scale sync (params.syncGroup)", () => {
     expect(chartSyncMocks.subscribeChartSync).not.toHaveBeenCalled();
     expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
     // Only the pre-existing persistence handler subscribes to range changes —
-    // exactly-previous behaviour with no syncGroup.
+    // exactly-previous behaviour with no syncGroup, and no time-range
+    // subscription at all.
     expect(chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+    expect(chartInitMocks.timeScale.subscribeVisibleTimeRangeChange).not.toHaveBeenCalled();
   });
 
-  it("publishes visible-logical-range changes to its sync group", () => {
+  it("publishes visible-time-range changes to its sync group", () => {
     chartInitMocks.setReady(true);
     render(<ChartWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", syncGroup: "three-panel" }} />);
 
@@ -1248,10 +1253,13 @@ describe("ChartWidget time-scale sync (params.syncGroup)", () => {
     const [group, memberId] = chartSyncMocks.subscribeChartSync.mock.calls[0];
     expect(group).toBe("three-panel");
 
-    // calls[0] is the persistence handler, calls[1] the sync publisher.
-    const rangeSubscriptions = chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange.mock.calls;
-    expect(rangeSubscriptions).toHaveLength(2);
-    const publishHandler = rangeSubscriptions[1][0] as (range: { from: number; to: number } | null) => void;
+    // The persistence handler stays on the logical-range subscription; the
+    // sync publisher rides the time-range subscription so option panels with
+    // missing bars stay aligned to the same market interval.
+    expect(chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+    const rangeSubscriptions = chartInitMocks.timeScale.subscribeVisibleTimeRangeChange.mock.calls;
+    expect(rangeSubscriptions).toHaveLength(1);
+    const publishHandler = rangeSubscriptions[0][0] as (range: { from: number; to: number } | null) => void;
 
     act(() => { publishHandler({ from: 3, to: 40 }); });
 
@@ -1271,12 +1279,12 @@ describe("ChartWidget time-scale sync (params.syncGroup)", () => {
 
   it("applies a range received from the group without re-publishing it", () => {
     chartInitMocks.setReady(true);
-    // Simulate the real chart: setting the visible logical range synchronously
-    // fires every range-change subscription with the applied range. Without
+    // Simulate the real chart: setting the visible time range synchronously
+    // fires every time-range subscription with the applied range. Without
     // the apply guard this would boomerang straight back onto the bus.
-    chartInitMocks.timeScale.setVisibleLogicalRange.mockImplementation(
+    chartInitMocks.timeScale.setVisibleRange.mockImplementation(
       (range: { from: number; to: number }) => {
-        chartInitMocks.timeScale.subscribeVisibleLogicalRangeChange.mock.calls.forEach((call) => {
+        chartInitMocks.timeScale.subscribeVisibleTimeRangeChange.mock.calls.forEach((call) => {
           (call[0] as (r: { from: number; to: number }) => void)(range);
         });
       },
@@ -1288,7 +1296,7 @@ describe("ChartWidget time-scale sync (params.syncGroup)", () => {
 
     act(() => { busListener({ from: 5, to: 55 }); });
 
-    expect(chartInitMocks.timeScale.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 5, to: 55 });
+    expect(chartInitMocks.timeScale.setVisibleRange).toHaveBeenCalledWith({ from: 5, to: 55 });
     expect(chartSyncMocks.publishChartSync).not.toHaveBeenCalled();
   });
 });

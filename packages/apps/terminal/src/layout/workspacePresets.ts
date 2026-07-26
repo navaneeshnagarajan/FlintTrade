@@ -422,12 +422,14 @@ function applySectorView(api: DockviewApi): void {
     id: sectorMapId,
     component: "marketoverview",
     title: "Sector Map",
+    params: { tab: "sectors" },
   });
 
   api.addPanel({
     id: sectorPerfId,
     component: "marketoverview",
     title: "Sector Performance",
+    params: { tab: "sectors", view: "bars" },
     position: { referencePanel: sectorMapId, direction: "right" },
     initialWidth: 360,
   });
@@ -570,6 +572,7 @@ function applyMarketOverview(api: DockviewApi): void {
     id: globalIndicesId,
     component: "marketoverview",
     title: "Global Indices",
+    params: { tab: "indices" },
     position: { referencePanel: marketSummaryId, direction: "right" },
     initialWidth: 360,
   });

@@ -11,10 +11,13 @@
  *
  * Broker tradebook rows are left-joined with backend auto-journal rows
  * (matched by broker order id, else by exact symbol|side|qty|price), and
- * unmatched journal rows are appended so recorded fills survive a tradebook
- * outage. Where the two stores disagree on a fill fact (qty/price/time), the
- * broker tradebook wins — it is the execution record; the journal is derived
- * from it and only contributes enrichment.
+ * unmatched journal rows are appended only when they carry definitive fill
+ * evidence (realised P&L or an entry/exit price) so recorded fills survive a
+ * tradebook outage without promoting dispatch-time rows — resting, cancelled
+ * or rejected orders are journalled at broker dispatch and must never surface
+ * on this execution-only surface. Where the two stores disagree on a fill
+ * fact (qty/price/time), the broker tradebook wins — it is the execution
+ * record; the journal is derived from it and only contributes enrichment.
  */
 
 import type { JournalTrade } from "@/services/ftApi";
@@ -281,7 +284,12 @@ export function buildFillRows(
   });
 
   journal.forEach((j, i) => {
-    if (!consumed.has(i)) merged.push(j);
+    if (consumed.has(i)) return;
+    // Journal rows are stamped at broker dispatch (accepted, not necessarily
+    // executed) — append an unmatched row only when it carries definitive
+    // fill evidence, so resting, cancelled or rejected orders never surface
+    // as fills on this execution-only surface.
+    if (j.pnl !== null || j.entryPrice !== null || j.exitPrice !== null) merged.push(j);
   });
 
   return merged.sort((a, b) => b.timeSortMs - a.timeSortMs);

@@ -160,18 +160,26 @@ describe("Dealer Gamma widget — density view", () => {
     expect(mockHook).toHaveBeenLastCalledWith("NIFTY", "NFO", "", false);
   });
 
-  it("parses ISO and market expiry formats while excluding the current IST date", () => {
+  it("parses ISO and market expiry formats, keeping today's expiry before the IST close", () => {
+    // 00:00 UTC = 05:30 IST on the 24th — the front contract is still trading.
     expect(selectFutureExpiry(
       ["24JUL26", "2026-07-30", "23-JUL-26"],
       new Date("2026-07-24T00:00:00Z"),
+    )).toBe("24JUL26");
+    // 10:30 UTC = 16:00 IST — past the 15:30 close, today's contract is done.
+    expect(selectFutureExpiry(
+      ["24JUL26", "2026-07-30", "23-JUL-26"],
+      new Date("2026-07-24T10:30:00Z"),
     )).toBe("2026-07-30");
   });
 
   it("uses Asia/Kolkata calendar semantics around UTC midnight", () => {
+    // 19:00 UTC on the 23rd = 00:30 IST on the 24th — the 23rd is stale and
+    // the 24th is the front contract for the coming session.
     expect(selectFutureExpiry(
       ["23-JUL-26", "24-JUL-26", "25-JUL-26"],
       new Date("2026-07-23T19:00:00Z"),
-    )).toBe("25-JUL-26");
+    )).toBe("24-JUL-26");
   });
 
   it.each([

@@ -47,6 +47,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
+import { istToday } from "@/lib/ist";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/formatters";
 import { Badge } from "@/components/ui/badge";
@@ -196,7 +197,15 @@ export function FillsTable({ startDate, endDate, className }: FillsTableProps) {
   const [symbolSearch, setSymbolSearch] = useState("");
 
   // --- Data plane 1: broker tradebook (session fills) ---
-  const tradebookEnabled = accountReadsEnabled && !ranged;
+  // Practice has no journal history, so a ranged view whose window includes
+  // today's IST session must keep the sandbox tradebook active — otherwise
+  // the Trade Review Log has no Practice data source at all. Live keeps the
+  // historical journal-only rule: its ranged journal query covers today.
+  const today = istToday();
+  const rangeIncludesToday =
+    startDate !== undefined && endDate !== undefined && startDate <= today && today <= endDate;
+  const tradebookEnabled =
+    accountReadsEnabled && (!ranged || (mode === "practice" && rangeIncludesToday));
   const tradebookQuery = useTradebook({ enabled: tradebookEnabled });
 
   // --- Data plane 2: auto-journal fills (live-mode enrichment + history) ---

@@ -703,12 +703,16 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   // ---------------------------------------------------------------------------
   // Same-window time-scale sync (params.syncGroup)
   //
-  // Publish this chart's visible-logical-range changes to the group and apply
-  // ranges published by other members. isApplyingSyncRangeRef guards the
-  // feedback loop: applying a received range fires this chart's own
-  // range-change subscription synchronously, which must not re-publish (the
-  // bus already never echoes a publication back to its publisher). With no
-  // syncGroup the effect is a no-op and behaviour is exactly as before.
+  // Publish this chart's visible-time-range changes to the group and apply
+  // ranges published by other members. Time (not logical index) is the sync
+  // unit: option series start later and can miss intervals, so equal bar
+  // indices land on different timestamps — only a shared time window keeps
+  // CE, index and PE aligned to the same market interval.
+  // isApplyingSyncRangeRef guards the feedback loop: applying a received
+  // range fires this chart's own range-change subscription synchronously,
+  // which must not re-publish (the bus already never echoes a publication
+  // back to its publisher). With no syncGroup the effect is a no-op and
+  // behaviour is exactly as before.
   // ---------------------------------------------------------------------------
   const syncGroup = pinnedParams?.syncGroup;
   const [syncMemberId] = useState(() => `chart-${Math.random().toString(36).slice(2)}`);
@@ -720,25 +724,27 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     if (!chart) return;
     const timeScale = chart.timeScale();
 
-    const publishRange = (range: LogicalRange | null) => {
+    const publishRange = (range: { from: Time; to: Time } | null) => {
       if (!range || isApplyingSyncRangeRef.current) return;
-      if (!Number.isFinite(range.from) || !Number.isFinite(range.to) || range.to <= range.from) return;
-      publishChartSync(syncGroup, syncMemberId, { from: range.from, to: range.to });
+      const from = range.from as number;
+      const to = range.to as number;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+      publishChartSync(syncGroup, syncMemberId, { from, to });
     };
-    timeScale.subscribeVisibleLogicalRangeChange(publishRange);
+    timeScale.subscribeVisibleTimeRangeChange(publishRange);
 
     const unsubscribe = subscribeChartSync(syncGroup, syncMemberId, (range) => {
       isApplyingSyncRangeRef.current = true;
       try {
-        timeScale.setVisibleLogicalRange(range);
-      } catch { /* chart may be disposing */ }
+        timeScale.setVisibleRange({ from: range.from as Time, to: range.to as Time });
+      } catch { /* chart may be disposing, or has no data yet */ }
       finally {
         isApplyingSyncRangeRef.current = false;
       }
     });
 
     return () => {
-      timeScale.unsubscribeVisibleLogicalRangeChange(publishRange);
+      timeScale.unsubscribeVisibleTimeRangeChange(publishRange);
       unsubscribe();
     };
   }, [syncGroup, syncMemberId, chartRef]);
