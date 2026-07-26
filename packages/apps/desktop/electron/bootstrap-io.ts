@@ -932,7 +932,12 @@ FLINT_SNAPSHOT_MEMBERS
   done
   /bin/sleep 0.02
 done
-if [ "$descendants" -eq 1 ]; then status=1; fi
+# Descendants were found and drained. Report that as the outcome only when
+# the command itself had no other verdict: a timeout (124) or a cancel (130)
+# is the REASON the command ended, and overwriting it with a generic 1 loses
+# that and tells the caller the wrong story. Containment still happened either
+# way -- that is reported separately.
+if [ "$descendants" -eq 1 ] && [ "$status" -eq 0 ]; then status=1; fi
 printf 'settled\t%s\t%s\n' "$status" "$descendants" >&3
 if IFS= read -r release && [ "$release" = FLINTTRADE_RELEASE ]; then
   wait "$watchdog" 2>/dev/null || :
