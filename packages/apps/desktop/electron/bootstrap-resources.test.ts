@@ -301,5 +301,11 @@ exit 0
       );
       expect(parsed.status, parsed.stderr?.toString() ?? "").toBe(0);
     },
+    // PowerShell cold start on the Linux runner is genuinely slow -- measured
+    // at 8036 ms against vitest's 5000 ms default, and this spawns it TWICE
+    // (probe, then parse). The failure was a startup-time timeout, not a parse
+    // error, so the budget needs to reflect what pwsh actually costs rather
+    // than what a fast local shell costs.
+    30_000,
   );
 });
