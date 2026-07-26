@@ -52,6 +52,44 @@ describe("linux containment probe", () => {
     const cg = spawnSync("/bin/sh", ["-c", "sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null; echo '---'; [ -w /sys/fs/cgroup ] && echo 'root writable' || echo 'root not writable'"], { encoding: "utf8" });
     report.push(`cgroup: ${(cg.stdout ?? "").trim().replace(/\n/g, " | ")}`);
 
+    // 6. Replay the drain loop's ACTUAL parse against real ps output: the
+    //    self-probe pid lookup (whose failure path sleeps forever) and the
+    //    space-delimited marker match.
+    const drain = spawnSync("/bin/sh", ["-c", `
+      containment_marker='${marker}'
+      snapshot=$(
+        /bin/ps axeww -o pid= -o ppid= -o pgid= -o command= 2>/dev/null &
+        probe=$!
+        printf 'FLINTTRADE_PROBE %s\n' "$probe"
+        wait "$probe"
+      )
+      probe=
+      probe_parent=
+      while read -r first second third rest; do
+        if [ "$first" = FLINTTRADE_PROBE ]; then probe=$second; fi
+      done <<EOS
+$snapshot
+EOS
+      while read -r member parent member_group rest; do
+        if [ "$member" = "$probe" ]; then probe_parent=$parent; fi
+      done <<EOS2
+$snapshot
+EOS2
+      echo "probe_pid=$probe probe_parent_found=\${probe_parent:-NONE}"
+      escaped=
+      while read -r member parent member_group rest; do
+        case "$member" in FLINTTRADE_PROBE|'') continue ;; esac
+        case " $rest " in
+          *" $containment_marker "*) escaped="$escaped $member" ;;
+        esac
+      done <<EOS3
+$snapshot
+EOS3
+      echo "escaped_matched=[$escaped]"
+    `], { encoding: "utf8" });
+    report.push(`drain-loop replay: ${(drain.stdout ?? "").trim().replace(/\n/g, " | ")}`);
+    report.push(`drain-loop stderr: ${(drain.stderr ?? "").trim().slice(0, 200)}`);
+
     try { process.kill(pid!, "SIGKILL"); } catch { /* already gone */ }
 
     console.log(`\n===== CONTAINMENT PROBE =====\n${report.join("\n")}\n=============================\n`);
