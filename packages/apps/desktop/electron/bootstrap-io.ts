@@ -792,11 +792,7 @@ trap on_term TERM
       watchdog_empty_scans=0
       watchdog_attempts=$((watchdog_attempts + 1))
       for tagged_member in $watchdog_tagged; do
-        # Escalate after TWO sightings, not ten. Each round costs a full
-        # process enumeration, so ten rounds is not a fixed grace period -- it
-        # is ten times however long ps takes on this host. See the drain loop
-        # below for the measurement that motivated this.
-        if [ "$watchdog_attempts" -gt 2 ]; then
+        if [ "$watchdog_attempts" -gt 10 ]; then
           /bin/kill -KILL "$tagged_member" 2>/dev/null || :
         else
           /bin/kill -TERM "$tagged_member" 2>/dev/null || :
@@ -910,21 +906,7 @@ FLINT_SNAPSHOT_MEMBERS
   fi
   if [ -n "$external" ]; then /bin/kill -TERM -$$ 2>/dev/null || :; fi
   for escaped_member in $escaped; do
-    # Escalate to SIGKILL after TWO sightings rather than ten.
-    #
-    # The escalation was counted in ITERATIONS, but an iteration is not a
-    # fixed cost: it is a full ps axeww run plus three shell parse passes over
-    # its output. Measured on the CI runner that output is ~189 KB, so ten
-    # rounds ran well past a second; on a developer's Mac the same ten rounds
-    # finish in a fraction of that. A descendant that ignores SIGTERM -- which
-    # is exactly what an escapee does -- therefore survived long enough on
-    # Linux to fire a 600-1500 ms timer, and did not on macOS. Same code, same
-    # logic, different wall-clock.
-    #
-    # Two sightings still gives a well-behaved process a genuine chance to
-    # exit on TERM, but bounds the grace to two enumeration cycles instead of
-    # ten times an unknown constant.
-    if [ "$drain_attempts" -gt 2 ]; then
+    if [ "$drain_attempts" -gt 10 ]; then
       /bin/kill -KILL "$escaped_member" 2>/dev/null || :
     else
       /bin/kill -TERM "$escaped_member" 2>/dev/null || :
