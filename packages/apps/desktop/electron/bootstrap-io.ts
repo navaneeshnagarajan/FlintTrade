@@ -742,8 +742,13 @@ snapshot_tagged_descendants() {
 $tagged_candidates
 FLINT_TAGGED_SNAPSHOT
 }
+cancel_pending=
 on_term() {
-  if [ -n "$target" ]; then /bin/kill -TERM "$target" 2>/dev/null || :; fi
+  if [ -n "$target" ]; then
+    /bin/kill -TERM "$target" 2>/dev/null || :
+  else
+    cancel_pending=1
+  fi
 }
 trap on_term TERM
 (
@@ -804,6 +809,7 @@ fi
   exec "$@" </dev/null 3>&- 4<&-
 ) &
 target=$!
+if [ -n "$cancel_pending" ]; then /bin/kill -TERM "$target" 2>/dev/null || :; fi
 wait "$target"
 status=$?
 target=
