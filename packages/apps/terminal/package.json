@@ -39,7 +39,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "dockview": "^5.1.0",
-    "dockview-react": "^5.1.0",
+    "dockview-react": "^7.0.4",
     "framer-motion": "^12.38.0",
     "geist": "^1.7.0",
     "jotai": "^2.18.1",

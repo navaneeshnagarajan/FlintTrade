@@ -194,8 +194,8 @@ importers:
         specifier: ^5.1.0
         version: 5.2.0(react@19.2.6)
       dockview-react:
-        specifier: ^5.1.0
-        version: 5.2.0(react@19.2.6)
+        specifier: ^7.0.4
+        version: 7.0.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       framer-motion:
         specifier: ^12.38.0
         version: 12.40.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -1208,6 +1208,7 @@ packages:
   '@plotly/mapbox-gl@1.13.4':
     resolution: {integrity: sha512-sR3/Pe5LqT/fhYgp4rT4aSFf1rTsxMbGiH6Hojc7PH36ny5Bn17iVFUjpzycafETURuFbLZUfjODO8LvSI+5zQ==}
     engines: {node: '>=6.4.0'}
+    deprecated: This package is deprecated as of August 2026. plotly.js v4 uses MapLibre for map traces — see https://github.com/maplibre/maplibre-gl-js.
 
   '@plotly/point-cluster@3.1.9':
     resolution: {integrity: sha512-MwaI6g9scKf68Orpr1pHZ597pYx9uP8UEFXLPbsCmuw3a84obwz6pnMXGc90VhgDNeNiLEdlmuK7CPo+5PIxXw==}
@@ -3391,13 +3392,22 @@ packages:
   dockview-core@5.2.0:
     resolution: {integrity: sha512-Gib8yhK2Ng7w47ASvbUZ7GdhBYbeXEflbIDxf/vobdQBMrN/QXmPaouSsSSkEx5YH0N8ap8GYljfvqjug7h5Fg==}
 
-  dockview-react@5.2.0:
-    resolution: {integrity: sha512-xJU5EiViiYYoP0ez5KxN8I+5CWSiPC27KVgVJBpRYRYJN6wKjMUpUqqSHwTlN1PGw5OzCu7UGQlUl1RQew74ag==}
+  dockview-core@7.0.4:
+    resolution: {integrity: sha512-AiIzD6ov153L/VuhqVBg5KD5oSAgJGH7L1xvzV/X+ghIEOTFfEQYEBGNd/ys+ZjQfdGRogHSeQ0v9JF/L6JrPg==}
+
+  dockview-react@7.0.4:
+    resolution: {integrity: sha512-eUhR3J3prpuFcaPJwQ4rzcRAghO3p4JVXlj5zfdQTlb3Qwa8VUpy3KvyV6BCsIjNk1toTdd8/NyADcZXMvpmtA==}
+    peerDependencies:
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   dockview@5.2.0:
     resolution: {integrity: sha512-Eh+SWt+AydcyeVmYkwP+Yxax0XpYSQfXsc4Rad9k+6QEddkSCn4hcjsdxp9lLsw/CaMy39jHawbDVxPMC4kvTg==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  dockview@7.0.4:
+    resolution: {integrity: sha512-n6n9WpYZgp/WY8SgvP4hr9qh01ZXhSGIRmlhoJXxRU3f34bwxCbFyOhBArV4W8quolX8OQe1yPfAUwUUjdnZPA==}
 
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
@@ -9594,16 +9604,22 @@ snapshots:
 
   dockview-core@5.2.0: {}
 
-  dockview-react@5.2.0(react@19.2.6):
+  dockview-core@7.0.4: {}
+
+  dockview-react@7.0.4(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
     dependencies:
-      dockview: 5.2.0(react@19.2.6)
-    transitivePeerDependencies:
-      - react
+      dockview: 7.0.4
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
 
   dockview@5.2.0(react@19.2.6):
     dependencies:
       dockview-core: 5.2.0
       react: 19.2.6
+
+  dockview@7.0.4:
+    dependencies:
+      dockview-core: 7.0.4
 
   dom-accessibility-api@0.5.16: {}
 
