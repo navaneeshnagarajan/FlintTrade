@@ -29,7 +29,7 @@ sentence-transformers>=3.0
 structlog>=24.1.0
 flask-cors>=6.0.5
 flask-limiter>=3.5
-sentry-sdk[flask]>=2.0
+sentry-sdk[flask]>=2.66.1
 # psutil for HealthMonitor.check_thread_count + check_memory; without it
 # the health monitor returns "skipped" and tests asserting baseline state
 # fail in CI environments that don't ship psutil by transitive pull-in.
