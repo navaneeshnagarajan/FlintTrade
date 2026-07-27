@@ -80,8 +80,9 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
     const api = get().workspaceApi;
     if (!api) return;
     applyPresetImpl(api, presetId);
-    // After applying, the onModelChange listener in TerminalRoute will
-    // auto-save the new layout to the active tab — no manual save needed.
+    // After applying, the model-level change listener TerminalRoute
+    // registers in loadModel auto-saves the new layout to the tab that
+    // owns the model — no manual save needed, mounted view or not.
   },
 });
 

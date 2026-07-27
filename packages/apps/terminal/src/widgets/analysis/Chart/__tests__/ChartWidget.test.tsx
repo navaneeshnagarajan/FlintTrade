@@ -315,6 +315,13 @@ vi.mock("@/hooks/useChartTheme", () => ({
 
 import { createStore, Provider } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import {
+  broadcastInstrument,
+  channelInstrumentAtoms,
+  DEFAULT_CHANNEL_ID,
+} from "@/services/fdc3/channels";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { searchSymbol } from "@/services/api";
 import ChartWidget from "../ChartWidget";
 import { useIndicators } from "../useIndicators";
 
@@ -1080,6 +1087,150 @@ describe("ChartWidget selection-follow (selectedSymbolAtom)", () => {
       expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "TCS", exchange: "NSE" });
     });
     expect(screen.getByText("INFY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FDC3 user channels (params.channel)
+//
+// Phase 2 of the FINOS migration: the unpinned chart follows the instrument
+// broadcast on its joined user channel. No `channel` param means the default
+// (red) channel — whose atom aliases the legacy selectedSymbolAtom, which the
+// selection-follow suite above still pins — and `channel: "none"` means
+// joined to nothing at all.
+// ---------------------------------------------------------------------------
+
+describe("ChartWidget FDC3 channel follow (params.channel)", () => {
+  const TCS = { symbol: "TCS", exchange: "NSE" };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+    chartInitMocks.reset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("follows an instrument broadcast on its joined channel", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget {...makeWidgetPanelProps({ params: { channel: "fdc3.channel.green" } })} />
+      </Provider>,
+    );
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+
+    act(() => {
+      broadcastInstrument(store, "fdc3.channel.green", TCS);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("TCS")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("NIFTY")).not.toBeInTheDocument();
+  });
+
+  it("ignores broadcasts on channels it is not joined to", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget {...makeWidgetPanelProps({ params: { channel: "fdc3.channel.green" } })} />
+      </Provider>,
+    );
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+
+    act(() => {
+      broadcastInstrument(store, "fdc3.channel.blue", TCS);
+    });
+
+    await waitFor(() => {
+      expect(store.get(channelInstrumentAtoms["fdc3.channel.blue"])).toEqual(TCS);
+    });
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+
+  it("joined to no channel (channel: \"none\"), ignores every broadcast", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget {...makeWidgetPanelProps({ params: { channel: "none" } })} />
+      </Provider>,
+    );
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+
+    act(() => {
+      broadcastInstrument(store, DEFAULT_CHANNEL_ID, TCS);
+      broadcastInstrument(store, "fdc3.channel.green", { symbol: "INFY", exchange: "NSE" });
+    });
+
+    await waitFor(() => {
+      expect(store.get(selectedSymbolAtom)).toEqual(TCS);
+    });
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+    expect(screen.queryByText("INFY")).not.toBeInTheDocument();
+  });
+
+  it("keeps a pinned chart's instrument even on its joined channel", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget
+          {...makeWidgetPanelProps({
+            params: { symbol: "INFY", exchange: "NSE", channel: "fdc3.channel.green" },
+          })}
+        />
+      </Provider>,
+    );
+    expect(screen.getByText("INFY")).toBeInTheDocument();
+
+    act(() => {
+      broadcastInstrument(store, "fdc3.channel.green", TCS);
+    });
+
+    await waitFor(() => {
+      expect(store.get(channelInstrumentAtoms["fdc3.channel.green"])).toEqual(TCS);
+    });
+    expect(screen.getByText("INFY")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).not.toBeInTheDocument();
+  });
+
+  it("lets a locally searched symbol stick until the NEXT broadcast on the channel", async () => {
+    const user = userEvent.setup();
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <ChartWidget {...makeWidgetPanelProps({ params: { channel: "fdc3.channel.green" } })} />
+      </Provider>,
+    );
+
+    act(() => {
+      broadcastInstrument(store, "fdc3.channel.green", { symbol: "INFY", exchange: "NSE" });
+    });
+    await waitFor(() => expect(screen.getByText("INFY")).toBeInTheDocument());
+
+    // Pick TCS through the chart's own symbol search.
+    vi.mocked(searchSymbol).mockResolvedValue([TCS]);
+    await user.type(screen.getByPlaceholderText("Search symbol..."), "TCS");
+    await user.click(await screen.findByRole("button", { name: /TCS/ }));
+
+    await waitFor(() => expect(screen.getByText("TCS")).toBeInTheDocument());
+    expect(screen.queryByText("INFY")).not.toBeInTheDocument();
+    // The channel context is now stale relative to the local pick — it must
+    // NOT clobber it (the effect reacts only to channel-context CHANGES).
+    expect(store.get(channelInstrumentAtoms["fdc3.channel.green"]))
+      .toEqual({ symbol: "INFY", exchange: "NSE" });
+    expect(screen.getByText("TCS")).toBeInTheDocument();
+
+    // The next broadcast re-takes the chart, exactly as a watchlist click did.
+    act(() => {
+      broadcastInstrument(store, "fdc3.channel.green", { symbol: "WIPRO", exchange: "NSE" });
+    });
+    await waitFor(() => expect(screen.getByText("WIPRO")).toBeInTheDocument());
     expect(screen.queryByText("TCS")).not.toBeInTheDocument();
   });
 });

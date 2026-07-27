@@ -16,6 +16,8 @@
  *   - Auto-refresh: 3 s market hours, 30 s off-hours
  *   - Dense layout: text-xs data, text-xs headers, font-mono numbers
  *   - Glide theme uses design token hex values (surface/border/text tokens)
+ *   - FDC3 channel following: an unpinned widget retargets to an instrument
+ *     broadcast on its user channel when it is a supported underlying
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, useReducer, memo } from "react";
@@ -35,6 +37,8 @@ import {
   Layers,
 } from "lucide-react";
 import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
+import { channelFromParams } from "@/services/fdc3/channels";
+import { useChannelInstrument } from "@/services/fdc3/hooks";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
@@ -72,6 +76,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   // underlying. Previously the widget ignored params and only worked for the
   // default by coincidence.
   const pinnedSymbol = (props.params as { symbol?: string } | undefined)?.symbol;
+  const isPinned = typeof pinnedSymbol === "string" && pinnedSymbol.length > 0;
   const initialSymDef = SYMBOLS.find((s) => s.label === pinnedSymbol) ?? SYMBOLS[0];
   const [symDef, setSymDef]                     = useState<SymbolDef>(initialSymDef);
   const [exchangeOverride, setExchangeOverride] = useState<string | null>(null);
@@ -99,6 +104,35 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
     flashTimersRef.current.forEach(clearTimeout);
     flashTimersRef.current.clear();
   }, []);
+
+  // FDC3 channel membership (Phase 2). A widget pinned by params.symbol is
+  // joined to nothing and keeps ignoring broadcasts, exactly as it ignored
+  // the global selection before; `channel: "none"` opts an unpinned widget
+  // out of following as well.
+  const channelId = isPinned ? null : channelFromParams(props.params);
+  const channelInstrument = useChannelInstrument(channelId);
+
+  // Mirror of the current underlying for the follow effect, kept in a ref so
+  // the effect can depend on the channel context ALONE — a stale context must
+  // never re-apply over a fresher local pick.
+  const followedLabelRef = useRef(symDef.label);
+  useEffect(() => {
+    followedLabelRef.current = symDef.label;
+  }, [symDef.label]);
+
+  // Follow the channel: a broadcast retargets the chain only when the
+  // broadcast symbol is an underlying this chain supports — the same SYMBOLS
+  // table the pinned-param path validates against. Anything else (an equity
+  // ticker, an option leg symbol) keeps the current underlying. Retargeting
+  // mirrors a manual pick from the search combobox: new symbol definition,
+  // exchange override cleared.
+  useEffect(() => {
+    if (!channelInstrument) return;
+    const nextDef = SYMBOLS.find((s) => s.label === channelInstrument.symbol);
+    if (!nextDef || nextDef.label === followedLabelRef.current) return;
+    setSymDef(nextDef);
+    setExchangeOverride(null);
+  }, [channelInstrument]);
 
   const exchange = exchangeOverride ?? symDef.exchange;
 

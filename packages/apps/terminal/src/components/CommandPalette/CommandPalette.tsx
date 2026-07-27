@@ -20,6 +20,8 @@ import { DocsTab } from "./DocsTab";
 import { useCommandRegistry } from "./useCommandRegistry";
 import type { Command } from "./useCommandRegistry";
 import type { DocSearchResult } from "@/components/DocsSearch/DocsSearch";
+import { instrumentContext } from "@/services/fdc3/contexts";
+import { raiseIntent } from "@/services/fdc3/intents";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -141,20 +143,19 @@ export default function CommandPalette({ isOpen, onClose }: CommandPaletteProps)
     [onClose],
   );
 
-  // Symbol quick actions
+  // Symbol quick actions — chart/buy/sell raise FDC3 intents (resolved onto
+  // the same cross-route addWidget event). CreateOrder sends `action`, the
+  // key OrderPad actually reads for the side prefill; the retired inline
+  // dispatch sent `side`, which OrderPad ignored.
   const handleSymbolSelect = useCallback(
     (symbol: string, exchange: string, action: "chart" | "buy" | "sell" | "ai") => {
       onClose();
       if (action === "chart") {
-        window.dispatchEvent(
-          new CustomEvent("flinttrade:addWidget", { detail: { widgetId: "chart", props: { symbol, exchange } } }),
-        );
+        raiseIntent("ViewChart", instrumentContext({ symbol, exchange }));
       } else if (action === "buy" || action === "sell") {
-        window.dispatchEvent(
-          new CustomEvent("flinttrade:addWidget", {
-            detail: { widgetId: "orderpad", props: { symbol, exchange, side: action.toUpperCase() } },
-          }),
-        );
+        raiseIntent("CreateOrder", instrumentContext({ symbol, exchange }), {
+          side: action === "buy" ? "BUY" : "SELL",
+        });
       } else if (action === "ai") {
         window.dispatchEvent(
           new CustomEvent("flinttrade:navigate", { detail: { path: "/ai", context: { symbol, exchange } } }),

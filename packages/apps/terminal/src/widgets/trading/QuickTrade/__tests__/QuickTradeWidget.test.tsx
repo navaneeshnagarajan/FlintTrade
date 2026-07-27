@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -30,6 +30,7 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
 
 import { createStore, Provider } from "jotai";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import QuickTradeWidget from "../QuickTradeWidget";
 
 function renderQuickTrade(params: Record<string, unknown> = {}) {
@@ -83,6 +84,61 @@ describe("QuickTradeWidget", () => {
     expect(screen.getByText("TCS")).toBeInTheDocument();
     expect(screen.queryByText("Select an instrument")).toBeNull();
     await screen.findByText(/Qty: 1 × 1 = 1/);
+  });
+
+  it("follows an instrument broadcast on its FDC3 channel", async () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <QuickTradeWidget
+          {...makeWidgetPanelProps({ params: { channel: "fdc3.channel.green" } })}
+        />
+      </Provider>,
+    );
+
+    // Nothing broadcast yet — the fail-closed empty state stands.
+    expect(screen.getByText("Select an instrument")).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, "fdc3.channel.green", { symbol: "INFY", exchange: "NSE" }));
+
+    expect(screen.getByText("INFY")).toBeInTheDocument();
+    expect(screen.queryByText("Select an instrument")).toBeNull();
+    await screen.findByText(/Qty: 1 × 1 = 1/);
+  });
+
+  it("joined to no channel (channel: none) ignores broadcasts and stays fail-closed", () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <QuickTradeWidget {...makeWidgetPanelProps({ params: { channel: "none" } })} />
+      </Provider>,
+    );
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "TCS", exchange: "NSE" }));
+
+    expect(screen.getByText("Select an instrument")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).toBeNull();
+    expect(screen.queryByRole("button", { name: /buy/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /sell/i })).toBeNull();
+    expect(mockGetSymbol).not.toHaveBeenCalled();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("keeps a panel-pinned symbol over a broadcast on its channel", () => {
+    const store = createStore();
+    render(
+      <Provider store={store}>
+        <QuickTradeWidget
+          {...makeWidgetPanelProps({ params: { symbol: "RELIANCE", exchange: "NSE" } })}
+        />
+      </Provider>,
+    );
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "TCS", exchange: "BSE" }));
+
+    // The pin wins — the ticket must not silently retarget under the trader.
+    expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.queryByText("TCS")).toBeNull();
   });
 
   it("renders lot preset buttons", () => {

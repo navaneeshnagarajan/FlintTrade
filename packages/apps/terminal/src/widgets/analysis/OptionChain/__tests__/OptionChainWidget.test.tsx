@@ -5,9 +5,10 @@
  * Mocks API calls, Glide Data Grid, and custom hooks.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { Provider as JotaiProvider, createStore } from "jotai";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -109,6 +110,8 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 
 import OptionChainWidget from "../OptionChainWidget";
 import { getMaxPain, getSymbol } from "@/services/api";
+import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -396,5 +399,144 @@ describe("OptionChainWidget", () => {
     await user.click(btn);
     expect(screen.queryByRole("region", { name: "Strategy leg builder" })).toBeNull();
     expect(btn).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FDC3 channel following (Phase 2)
+// ---------------------------------------------------------------------------
+
+describe("OptionChainWidget — FDC3 channel following", () => {
+  const BANKNIFTY = { symbol: "BANKNIFTY", exchange: "NSE_INDEX" };
+
+  // Radix Popover (SymbolSearch) uses ResizeObserver internally.
+  beforeAll(() => {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  });
+
+  beforeEach(() => {
+    queryClient.clear();
+    vi.clearAllMocks();
+    optionChainHookMocks.overrides = {};
+    gridMocks.onCellClicked = null;
+    vi.mocked(getSymbol).mockReset().mockResolvedValue({} as never);
+    vi.mocked(getMaxPain).mockReset().mockResolvedValue({} as never);
+  });
+
+  /** Wrap in an explicit jotai store so tests can broadcast onto channels. */
+  function channelWrapper(store: ReturnType<typeof createStore>) {
+    return function ChannelWrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        </JotaiProvider>
+      );
+    };
+  }
+
+  it("follows an instrument broadcast on its channel", async () => {
+    const store = createStore();
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+    expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY));
+
+    // The broadcast SYMBOL becomes the chain underlying, normalised onto the
+    // chain's own exchange (NFO), not the broadcast spot exchange.
+    expect(screen.getByText(/strikes loaded for BANKNIFTY/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("BANKNIFTY", "NFO"));
+  });
+
+  it("adopts the channel's current context on mount", async () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" });
+
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+
+    expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("GOLD", "MCX"));
+  });
+
+  it('ignores broadcasts when joined to no channel (channel: "none")', async () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY);
+
+    render(
+      <OptionChainWidget {...makeWidgetPanelProps({ params: { channel: "none" } })} />,
+      { wrapper: channelWrapper(store) },
+    );
+    expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" }));
+
+    expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("NIFTY", "NFO"));
+    expect(getSymbol).not.toHaveBeenCalledWith("BANKNIFTY", expect.anything());
+    expect(getSymbol).not.toHaveBeenCalledWith("GOLD", expect.anything());
+  });
+
+  it("keeps ignoring broadcasts when pinned by params.symbol", async () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY);
+
+    render(
+      <OptionChainWidget {...makeWidgetPanelProps({ params: { symbol: "GOLD" } })} />,
+      { wrapper: channelWrapper(store) },
+    );
+    expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SENSEX", exchange: "BSE_INDEX" }));
+
+    expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("GOLD", "MCX"));
+    expect(getSymbol).not.toHaveBeenCalledWith("BANKNIFTY", expect.anything());
+    expect(getSymbol).not.toHaveBeenCalledWith("SENSEX", expect.anything());
+  });
+
+  it("keeps the current underlying when the broadcast symbol is not a supported underlying", async () => {
+    const store = createStore();
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" }));
+
+    expect(screen.getByText(/strikes loaded for NIFTY/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(getSymbol).toHaveBeenCalledWith("NIFTY", "NFO"));
+    expect(getSymbol).not.toHaveBeenCalledWith("RELIANCE", expect.anything());
+  });
+
+  it("lets a local pick beat the stale channel context, while a new broadcast still retargets", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const store = createStore();
+    render(<OptionChainWidget {...makeWidgetPanelProps()} />, {
+      wrapper: channelWrapper(store),
+    });
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, BANKNIFTY));
+    expect(screen.getByText(/strikes loaded for BANKNIFTY/)).toBeInTheDocument();
+
+    // Local pick: GOLD from the Popular list in the symbol combobox.
+    await user.click(screen.getByRole("button", { name: "Select symbol" }));
+    await user.click(await screen.findByText("GOLD"));
+    expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument();
+
+    // The stale BANKNIFTY context must not re-apply on subsequent renders.
+    await waitFor(() =>
+      expect(screen.getByText(/strikes loaded for GOLD/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/strikes loaded for BANKNIFTY/)).not.toBeInTheDocument();
+
+    // A NEW broadcast still retargets the chain.
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "SENSEX", exchange: "BSE_INDEX" }));
+    expect(screen.getByText(/strikes loaded for SENSEX/)).toBeInTheDocument();
   });
 });

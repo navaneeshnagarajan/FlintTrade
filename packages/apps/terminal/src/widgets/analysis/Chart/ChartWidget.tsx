@@ -60,8 +60,8 @@ import {
   FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS,
   FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS,
 } from "@flinttrade/design-system";
-import { useAtomValue } from "jotai";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { channelFromParams } from "@/services/fdc3/channels";
+import { useChannelInstrument } from "@/services/fdc3/hooks";
 import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
 import { isMarketHours } from "@/lib/market";
 import { publishChartSync, subscribeChartSync } from "@/lib/chartSyncBus";
@@ -457,6 +457,13 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // An optionLeg chart is pinned too: its instrument is the resolved contract,
   // which a watchlist click must not clobber.
   const isPinned = Boolean(pinnedParams?.symbol || pinnedParams?.optionLeg);
+
+  // FDC3 user-channel membership (panel config). No `channel` param means the
+  // default (red) channel — whose atom aliases the legacy selectedSymbolAtom,
+  // so unmigrated writers keep driving this chart; `channel: "none"` means
+  // joined to nothing, in which case the chart follows only its own pins and
+  // local search.
+  const channel = channelFromParams(props.params);
 
   // Workspace panel identity — the scope for this chart's indicator and display
   // settings. Null when the chart is rendered outside a panel (tests, embeds),
@@ -1147,14 +1154,16 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     setInterval(v);
   }, []);
 
-  // Standard terminal UX: a watchlist row click (or any widget that writes
-  // selectedSymbolAtom) drives the default chart. A pinned chart — one whose
-  // workspace panel params carry an explicit symbol — keeps its instrument and
-  // ignores the selection, so multi-chart preset layouts are never clobbered.
+  // Standard terminal UX: a watchlist row click (or any widget that broadcasts
+  // an instrument on this chart's FDC3 user channel) drives the default chart.
+  // A pinned chart — one whose workspace panel params carry an explicit symbol
+  // — keeps its instrument and ignores the channel, and a chart joined to no
+  // channel (`channel: "none"`) reads a constant null, so multi-chart preset
+  // layouts are never clobbered.
   // The current symbol/exchange are deliberately NOT in the deps: the effect
-  // reacts only to selection changes, so a symbol picked locally through the
-  // chart's own search sticks until the next watchlist click.
-  const selectedInstrument = useAtomValue(selectedSymbolAtom);
+  // reacts only to channel-context changes, so a symbol picked locally through
+  // the chart's own search sticks until the next broadcast.
+  const selectedInstrument = useChannelInstrument(channel);
   useEffect(() => {
     if (isPinned || !selectedInstrument) return;
     if (selectedInstrument.symbol === symbol && selectedInstrument.exchange === exchange) return;

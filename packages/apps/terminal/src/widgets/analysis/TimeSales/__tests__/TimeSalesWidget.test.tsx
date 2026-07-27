@@ -11,9 +11,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { createStore, Provider } from "jotai";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
+import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 
 vi.mock("../useTape", () => ({
   useTape: vi.fn().mockReturnValue([]),
@@ -234,6 +236,75 @@ describe("TimeSalesWidget — bid/ask imbalance", () => {
     // Disconnected: the poll must stay disabled rather than fetching a book
     // that would then be displayed beside demo statistics.
     expect(mockDepth).toHaveBeenCalledWith(expect.any(String), expect.any(String), false);
+  });
+});
+
+describe("TimeSalesWidget — FDC3 channel", () => {
+  const INFY = { symbol: "INFY", exchange: "NSE" };
+
+  function renderOnStore(store: ReturnType<typeof createStore>, props = defaultProps) {
+    return render(
+      <Provider store={store}>
+        <TimeSalesWidget {...props} />
+      </Provider>,
+    );
+  }
+
+  it("follows an instrument broadcast on its default (red) channel", () => {
+    mockConnected.mockReturnValue(true);
+    const store = createStore();
+    renderOnStore(store);
+
+    // Nothing broadcast yet → the first fallback symbol.
+    expect(screen.getByText(/RELIANCE · prints inferred/)).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, INFY));
+
+    expect(screen.getByText(/INFY · prints inferred/)).toBeInTheDocument();
+  });
+
+  it("follows only the channel it joined via params.channel", () => {
+    mockConnected.mockReturnValue(true);
+    const store = createStore();
+    renderOnStore(store, makeWidgetPanelProps({ params: { channel: "fdc3.channel.blue" } }));
+
+    // A default-channel (red) broadcast is someone else's conversation.
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, INFY));
+    expect(screen.getByText(/RELIANCE · prints inferred/)).toBeInTheDocument();
+
+    act(() => broadcastInstrument(store, "fdc3.channel.blue", { symbol: "TATASTEEL", exchange: "NSE" }));
+    expect(screen.getByText(/TATASTEEL · prints inferred/)).toBeInTheDocument();
+  });
+
+  it('joined to no channel (params.channel: "none") ignores every broadcast', () => {
+    mockConnected.mockReturnValue(true);
+    const store = createStore();
+    renderOnStore(store, makeWidgetPanelProps({ params: { channel: "none" } }));
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, INFY));
+    act(() => broadcastInstrument(store, "fdc3.channel.blue", INFY));
+
+    expect(screen.getByText(/RELIANCE · prints inferred/)).toBeInTheDocument();
+    expect(screen.queryByText(/INFY/)).not.toBeInTheDocument();
+  });
+
+  it("a local selector pick beats a later channel broadcast", () => {
+    // The pre-FDC3 "local pick beats stale global selection" pin, verbatim.
+    mockConnected.mockReturnValue(true);
+    const store = createStore();
+    renderOnStore(store);
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, INFY));
+    expect(screen.getByText(/INFY · prints inferred/)).toBeInTheDocument();
+
+    // Local pick from the fallback selector…
+    fireEvent.click(screen.getByRole("button", { name: "INFY" }));
+    fireEvent.click(screen.getByRole("button", { name: "SBIN" }));
+    expect(screen.getByText(/SBIN · prints inferred/)).toBeInTheDocument();
+
+    // …and a fresh broadcast does not displace it.
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "TCS", exchange: "NSE" }));
+    expect(screen.getByText(/SBIN · prints inferred/)).toBeInTheDocument();
   });
 });
 

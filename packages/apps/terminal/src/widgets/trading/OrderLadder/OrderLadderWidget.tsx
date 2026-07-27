@@ -12,6 +12,9 @@
  *
  * Features:
  *   - ±20 price ticks centred on the live LTP for the selected instrument
+ *   - Follows the FDC3 user channel from its panel params (no `channel` key
+ *     means red; `channel: "none"` joins nothing); an explicit symbol
+ *     prop/param pins the ladder and ignores broadcasts entirely
  *   - Real resting bid/ask quantities and order counts keyed onto those rows
  *   - Exchange picker (absorbed from Depth; the ladder took a prop only)
  *   - Bid/ask dominance footer computed with the shared `bookImbalance` kernel
@@ -47,6 +50,8 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
+import { channelFromParams } from "@/services/fdc3/channels";
+import { useChannelInstrument } from "@/services/fdc3/hooks";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useOrders } from "@/hooks/useOrders";
 import { useDepthData } from "@/hooks/useDepthData";
@@ -347,14 +352,33 @@ interface OrderLadderPanelParams {
   exchange?: string;
   /** Initial ladder grid spacing; one of TICK_OPTIONS, else 0.25. */
   tick?: number;
+  /**
+   * FDC3 user-channel membership (resolved by `channelFromParams`): absent
+   * means the default red channel; "none" means joined to nothing.
+   */
+  channel?: string;
 }
 
 type Props = Partial<WidgetProps> & OrderLadderPanelParams;
 
 function OrderLadderWidget(props: Props) {
   const panelParams = props.params as OrderLadderPanelParams | undefined;
-  const symbol = props.symbol ?? panelParams?.symbol ?? "NIFTY";
-  const initialExchange = props.exchange ?? panelParams?.exchange ?? "NSE";
+
+  // FDC3 channel membership: no `channel` param means the default red
+  // channel; `channel: "none"` (or an unknown value) joins nothing. A ladder
+  // pinned by an explicit symbol prop/param keeps ignoring channels, exactly
+  // as it ignored the global selection before the bus existed.
+  const channelId = channelFromParams(props.params);
+  const channelInstrument = useChannelInstrument(channelId);
+  const pinnedSymbol = props.symbol ?? panelParams?.symbol;
+  // A broadcast travels as a (symbol, exchange) pair — an unpinned ladder
+  // follows the venue with the symbol, so the depth query, the WS feed and
+  // the lot lookup all point at the book the broadcast actually meant.
+  const followedInstrument = pinnedSymbol == null ? channelInstrument : null;
+
+  const symbol = pinnedSymbol ?? followedInstrument?.symbol ?? "NIFTY";
+  const initialExchange =
+    props.exchange ?? panelParams?.exchange ?? followedInstrument?.exchange ?? "NSE";
   const initialTick = resolveTickSize(props.tick ?? panelParams?.tick);
 
   const mode  = useModeStore((s) => s.mode);

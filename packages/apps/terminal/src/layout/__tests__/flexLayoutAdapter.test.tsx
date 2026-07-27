@@ -10,8 +10,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { Model } from "flexlayout-react";
-import type { IJsonModel, TabNode } from "flexlayout-react";
+import type { IJsonModel, ITabRenderValues, TabNode } from "flexlayout-react";
 
 import {
   countTabs,
@@ -26,6 +27,7 @@ import {
   widgetPropsForNode,
   workspaceJson,
 } from "../flexLayoutAdapter";
+import { createTabExtrasRenderer } from "../flexLayoutAdapter";
 import { flexLayoutFactory } from "../widgetFactory";
 import { applyPreset } from "../workspacePresets";
 
@@ -148,5 +150,53 @@ describe("model document helpers", () => {
     const props = detachedPanelProps("compact-chart");
     expect(props.api.id).toBe("compact-chart");
     expect(() => props.api.updateParameters({ view: "x" })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tab-chrome channel dot (Phase 2 — FDC3 channel membership)
+// ---------------------------------------------------------------------------
+
+describe("createTabExtrasRenderer", () => {
+  function renderDotFor(config?: Record<string, unknown>) {
+    const { model, tab } = (() => {
+      const json = workspaceJson(
+        rowJson(100, [tabsetJson(100, [tabJson("chart", "Chart", { id: "tab-dot", params: config })])]),
+      );
+      const m = Model.fromJson(json);
+      return { model: m, tab: m.getNodeById("tab-dot") as TabNode };
+    })();
+    const afterConfigChange = vi.fn();
+    const renderValues: ITabRenderValues = { leading: null, content: "Chart", buttons: [] };
+    createTabExtrasRenderer(afterConfigChange)(tab, renderValues);
+    expect(renderValues.buttons).toHaveLength(1);
+    render(<>{renderValues.buttons}</>);
+    return { model, tab, afterConfigChange };
+  }
+
+  it("shows the default (red) channel for a tab with no channel config", () => {
+    renderDotFor();
+    expect(
+      screen.getByRole("button", { name: "Link channel: Red — click to change" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cycles the channel on click, persists it in the tab config, and requests a redraw", () => {
+    const { tab, afterConfigChange } = renderDotFor({ view: "candles" });
+
+    fireEvent.click(screen.getByRole("button", { name: /link channel/i }));
+
+    expect((tab.getConfig() as Record<string, unknown>).channel).toBe("fdc3.channel.green");
+    // Other config keys survive the channel write.
+    expect((tab.getConfig() as Record<string, unknown>).view).toBe("candles");
+    expect(afterConfigChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("cycles from yellow to unlinked (channel: none)", () => {
+    const { tab } = renderDotFor({ channel: "fdc3.channel.yellow" });
+
+    fireEvent.click(screen.getByRole("button", { name: /link channel/i }));
+
+    expect((tab.getConfig() as Record<string, unknown>).channel).toBe("none");
   });
 });

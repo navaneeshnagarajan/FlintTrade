@@ -21,9 +21,16 @@ import type {
   IJsonRowNode,
   IJsonTabNode,
   IJsonTabSetNode,
+  ITabRenderValues,
   TabNode,
 } from "flexlayout-react";
+import { Button } from "@/components/ui/button";
 import type { WidgetPanelApi, WidgetProps } from "@/types/widgets";
+import {
+  channelFromParams,
+  USER_CHANNELS,
+  type UserChannelId,
+} from "@/services/fdc3/channels";
 
 // ---------------------------------------------------------------------------
 // Model defaults
@@ -40,7 +47,8 @@ export const WORKSPACE_GLOBAL_ATTRIBUTES: IJsonModel["global"] = {
   tabEnableRename: false,
   tabSetEnableSingleTabStretch: true,
   // Splitter thickness is a CSS variable (--splitter-size) in FlexLayout
-  // 0.10 — set by useFlexLayoutTheme, not a model attribute.
+  // 0.10 — declared in terminal.css on the specificity-boosted
+  // .flexlayout__layout override block, not a model attribute.
   tabSetMinWidth: 100,
   tabSetMinHeight: 80,
 };
@@ -190,6 +198,81 @@ export function detachedPanelProps(id: string, params?: Record<string, unknown>)
 // ---------------------------------------------------------------------------
 // WorkspaceApi — the handle stored in layoutStore
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Tab chrome — FDC3 channel dot
+// ---------------------------------------------------------------------------
+
+/** Click cycle: red → green → blue → yellow → unlinked → red. */
+const CHANNEL_CYCLE: ReadonlyArray<UserChannelId | null> = [
+  ...USER_CHANNELS.map((c) => c.id),
+  null,
+];
+
+function WorkspaceChannelDot({
+  node,
+  afterConfigChange,
+}: {
+  node: TabNode;
+  afterConfigChange: () => void;
+}) {
+  const params = (node.getConfig() as Record<string, unknown> | undefined) ?? undefined;
+  const channelId = channelFromParams(params);
+  const meta = channelId ? USER_CHANNELS.find((c) => c.id === channelId) : undefined;
+  const next = CHANNEL_CYCLE[(CHANNEL_CYCLE.indexOf(channelId) + 1) % CHANNEL_CYCLE.length];
+  const label = meta
+    ? `Link channel: ${meta.label} — click to change`
+    : "Link channel: none — click to change";
+
+  return (
+    <Button
+      key="fdc3-channel"
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-4 w-4 shrink-0 rounded-full p-0 hover:bg-transparent"
+      aria-label={label}
+      title={label}
+      // The tab button starts drags from pointer-down — keep the dot inert
+      // for dragging and tab selection.
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        node.getModel().doAction(
+          Actions.updateNodeAttributes(node.getId(), {
+            config: { ...(params ?? {}), channel: next ?? "none" },
+          }),
+        );
+        // Config-only changes do not re-render tab content on their own —
+        // ask the host to redraw so the widget picks up its new channel.
+        afterConfigChange();
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className={meta ? "h-2 w-2 rounded-full" : "h-2 w-2 rounded-full border border-text-muted"}
+        style={meta ? { backgroundColor: meta.colour } : undefined}
+      />
+    </Button>
+  );
+}
+
+/**
+ * Build the `onRenderTab` handler for the workspace host: appends the FDC3
+ * channel dot to every tab's chrome. `afterConfigChange` must trigger the
+ * Layout's imperative `redraw()` so the panel content re-renders with its
+ * new channel membership.
+ */
+export function createTabExtrasRenderer(
+  afterConfigChange: () => void,
+): (node: TabNode, renderValues: ITabRenderValues) => void {
+  return (node, renderValues) => {
+    renderValues.buttons.push(
+      <WorkspaceChannelDot key="fdc3-channel" node={node} afterConfigChange={afterConfigChange} />,
+    );
+  };
+}
 
 export interface AddPanelOptions {
   id?: string;

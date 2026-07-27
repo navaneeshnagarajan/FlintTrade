@@ -205,6 +205,15 @@ function withMeasuredContainer(run: () => void) {
 // ---------------------------------------------------------------------------
 
 describe("PositionsWidget", () => {
+  afterEach(async () => {
+    // Radix focus-scope schedules a setTimeout on dialog unmount; drain it
+    // INSIDE this test's jsdom realm. Left pending, it fires during the
+    // next test file's realm swap and crashes the run with "parameter 1 is
+    // not of type 'Event'" — the cross-file flake that intermittently
+    // failed the whole trading bucket.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPlaceOrder.mockReset();
