@@ -130,6 +130,9 @@ const lazyWidgets = {
   // Wave 36 — historical option-chain archive
   historicalchain: lazy(() => import("@/widgets/analysis/HistoricalChain/HistoricalChainWidget")),
 
+  // FINOS migration Phase 3 — Perspective analytics
+  portfoliopivot: lazy(() => import("@/widgets/analysis/PortfolioPivot/PortfolioPivotWidget")),
+
   // Annotated trade journal (SQLite + FTS5 store)
   tradejournal: lazy(() => import("@/widgets/utility/TradeJournal/TradeJournalWidget")),
 };
@@ -584,6 +587,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "deliverydata", name: "Delivery Data", icon: "Package", category: "Analysis", description: "Delivery percentage per scrip with open/high/low/close and traded volume, sorted into conviction bands — sample data only, no delivery source is wired yet" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
+  { id: "portfoliopivot", name: "Portfolio Pivot", icon: "Table2", category: "Analysis", description: "FINOS Perspective pivot over the live position book — group, aggregate, filter and export your open positions, with the view saved per panel" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },

@@ -23,11 +23,13 @@ describe("exportToCSV", () => {
       revokeObjectURL: revokeObjectURLSpy,
     });
 
+    // Cast via the overloaded signature's return union: the Perspective
+    // viewer packages ambiently augment createElement's overloads.
     vi.spyOn(document, "createElement").mockReturnValue({
       href: "",
       download: "",
       click: clickSpy,
-    } as unknown as HTMLAnchorElement);
+    } as unknown as ReturnType<typeof document.createElement>);
   });
 
   it("does nothing for empty data", () => {
@@ -109,7 +111,7 @@ describe("exportToCSV", () => {
     const data = [{ X: 1 }];
     const anchor = { href: "", download: "", click: clickSpy };
     vi.spyOn(document, "createElement").mockReturnValue(
-      anchor as unknown as HTMLAnchorElement,
+      anchor as unknown as ReturnType<typeof document.createElement>,
     );
 
     exportToCSV(data, "my-holdings-2025");

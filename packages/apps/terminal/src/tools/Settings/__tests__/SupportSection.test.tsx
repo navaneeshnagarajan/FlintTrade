@@ -96,11 +96,13 @@ describe("SupportSection", () => {
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
     const click = vi.fn();
     const originalCreateElement = document.createElement.bind(document);
-    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+    // The Perspective viewer packages ambiently augment createElement's
+    // overloads — implement against the generic signature and cast.
+    vi.spyOn(document, "createElement").mockImplementation(((tagName: string) => {
       const element = originalCreateElement(tagName);
       if (tagName === "a") element.click = click;
       return element;
-    });
+    }) as typeof document.createElement);
     const user = userEvent.setup();
     render(<SupportSection />);
     await screen.findByText("v0.6.0-beta.1");

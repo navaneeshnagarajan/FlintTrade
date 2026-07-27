@@ -198,7 +198,7 @@ guard → mode guard → FlintTrade sandbox → simulated fill →
 WebSocket back to the front-end. No real money moved.
 
 ![Trade workspace](screenshots/04-trade.png)
-*The /trade workspace with Dockview tabs, order pad, positions, and chart.*
+*The /trade workspace with FlexLayout tabs, order pad, positions, and chart.*
 
 ---
 
@@ -241,7 +241,7 @@ cancel orders or flatten positions.
 
 ## 5. Workspace tour
 
-FlintTrade's workspace is a [Dockview](https://github.com/mathuo/dockview)
+FlintTrade's workspace is a [FlexLayout](https://github.com/caplin/FlexLayout)
 canvas. Every widget is a panel you can drag, tab, stack, float, or pop out
 into its own window. Layouts persist in `~/.flinttrade/workspace.json` and
 sync across sessions.
@@ -254,7 +254,7 @@ sync across sessions.
 | `/explore` | Demo mode with sample data — no broker connection needed. |
 | `/setup` | First-time wizard (Quick / Guided / Advanced paths). |
 | `/settings` | Standalone settings page (workspace.json editor with form UI). |
-| `/trade` | Order-workflow workspace — Dockview canvas, widgets, and presets. |
+| `/trade` | Order-workflow workspace — FlexLayout canvas, widgets, and presets. |
 | `/invest` | Portfolio-record workspace — holdings, net worth, SIPs, and mutual-fund tracker. |
 | `/learn` | Learning workspace — courses, glossary, examples, and sandbox workflows. |
 | `/lab` | Strategy Lab — backtest, forward test, optimise. |
@@ -263,7 +263,7 @@ sync across sessions.
 | `/ditto` | Multi-account management — mirror, margin, risk. |
 | `/admin` | Admin panel (development builds only) — security, health, traffic. |
 
-### The widgets (69)
+### The widgets (70)
 
 Widgets are organised into three categories — Trading / Analysis / Utility —
 under `packages/apps/terminal/src/widgets/`. The lists below are generated
@@ -280,7 +280,7 @@ from the widget registry
   Skew, Straddle P&L, Order Flow, Portfolio Optimiser, Condition Scanner,
   Pivot Points, Volatility Cone, VWAP Bands, Correlation Pairs, Multi-
   Timeframe, PCR Trend, Instrument Compare, Greeks Matrix, Gap Analysis,
-  Correlation Matrix, Delivery Data, and DOM Heatmap
+  Correlation Matrix, Delivery Data, DOM Heatmap, and Portfolio Pivot
 - **Utility** — Watchlist, Index Strip, Calculator, News Feed, Ticker, AI
   Advisor, AI Backends, AI Team, Obsidian Vault, Price Alerts,
   Reconciliation, Funding Rates, Currency Converter, Earnings Calendar,
@@ -306,7 +306,7 @@ palette (Ctrl + K → "preset"). Built-in presets include:
   and mutual funds live on the Invest page).
 - … plus nine more.
 
-Presets are serialised via the Dockview API. You can save your own custom
+Presets are declarative FlexLayout documents. You can save your own custom
 preset from Settings → Workspace.
 
 ---

@@ -57,6 +57,14 @@ export default defineConfig({
       // prebundling for @floating-ui and plotly.js on newer dependency graphs.
       target: "es2022",
     },
+    // Perspective ships WASM + workers resolved via import.meta.url;
+    // esbuild prebundling breaks those relative asset URLs, so the three
+    // packages must reach the browser unbundled in dev.
+    exclude: [
+      "@finos/perspective",
+      "@finos/perspective-viewer",
+      "@finos/perspective-viewer-datagrid",
+    ],
   },
   server: {
     host: "127.0.0.1",
@@ -126,6 +134,11 @@ export default defineConfig({
           // FlexLayout — workspace engine; large, only needed on /terminal
           if (id.includes("node_modules/flexlayout-react")) {
             return "vendor-flexlayout";
+          }
+          // Perspective — WASM analytics engine; only loaded by the
+          // Portfolio Pivot widget (lazy)
+          if (id.includes("node_modules/@finos/perspective")) {
+            return "vendor-perspective";
           }
           // Lightweight Charts — only loaded when ChartWidget mounts
           if (
