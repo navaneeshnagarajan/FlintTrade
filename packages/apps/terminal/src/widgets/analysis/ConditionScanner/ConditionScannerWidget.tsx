@@ -462,12 +462,12 @@ function ConditionScannerWidget(props: WidgetProps) {
 
   const handleScanChange = useCallback((next: string) => {
     setScanKey(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), scan: next });
+    props.api.updateParameters({ scan: next });
   }, [panelParams, props.api]);
 
   const handleViewChange = useCallback((next: ScannerView) => {
     setView((current) => (current === next ? current : next));
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api]);
 
   const handleRun = useCallback(() => {

@@ -942,7 +942,7 @@ function StraddleWidget(props: WidgetProps) {
   const handleViewChange = useCallback((next: ViewMode) => {
     if (next === view) return;
     setView(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api, view]);
 
   // Stable chart data arrays

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
@@ -31,11 +31,11 @@ import {
   createWorkspaceApi,
   createWorkspaceModel,
   detachedPanelProps,
+  emptyWorkspaceJson,
   tryCreateWorkspaceModel,
 } from "@/layout/flexLayoutAdapter";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillContent } from "@/hooks/useSkillContent";
-import { useFlexLayoutTheme } from "@/hooks/useFlexLayoutTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
@@ -441,6 +441,15 @@ export default function TerminalRoute() {
   // (the FlexLayout model-recreation trap, upstream #456/#524).
   const [model, setModel] = useState<Model | null>(null);
   const modelRef = useRef<Model | null>(null);
+  // The workspace tab that OWNS the current model — saves are bound to it,
+  // never to whatever tab is active when the debounce fires (audit finding:
+  // Delete Workspace must not overwrite the surviving tab's saved layout).
+  const modelTabIdRef = useRef<string | null>(null);
+  // The model-level change listener — registered via Model.addChangeListener
+  // so bookkeeping runs even while the <Layout> view is unmounted (compact
+  // workspace, tool overlay); the view's own listener only exists while it
+  // is mounted (audit finding: adds were silently unpersisted).
+  const modelListenerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastActiveWidgetRef = useRef<string | null>(null);
 
@@ -467,11 +476,6 @@ export default function TerminalRoute() {
   const skillContent = useSkillContent();
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
   const flexThemeClass = resolvedMode === "light" ? "flexlayout__theme_light" : "flexlayout__theme_dark";
-  const flexThemeCssVars = useFlexLayoutTheme();
-  const flexThemeStyle = useMemo(
-    () => flexThemeCssVars as React.CSSProperties,
-    [flexThemeCssVars],
-  );
 
   const setWorkspaceApi = useLayoutStore((s) => s.setWorkspaceApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
@@ -500,14 +504,32 @@ export default function TerminalRoute() {
   // ---------------------------------------------------------------------------
   const scheduleLayoutSave = useCallback((current: Model) => {
     // Debounced 500ms to avoid thrashing on rapid panel ops / drag frames.
+    // Saves bind to the tab that owned the model when the change happened,
+    // NOT the tab active when the timer fires.
+    const owningTabId = modelTabIdRef.current;
+    if (!owningTabId) return;
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      const activeTabId = useLayoutStore.getState().activeTabId;
       useLayoutStore.getState().saveTabLayout(
-        activeTabId,
+        owningTabId,
         current.toJson() as unknown as Record<string, unknown>,
       );
     }, 500);
+  }, []);
+
+  // Flush a pending debounced save immediately (model replacement, tab
+  // switch, unmount) so changes made within the last 500ms are not lost.
+  const flushPendingSave = useCallback(() => {
+    if (saveTimerRef.current === undefined) return;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = undefined;
+    const owningTabId = modelTabIdRef.current;
+    const current = modelRef.current;
+    if (!owningTabId || !current) return;
+    useLayoutStore.getState().saveTabLayout(
+      owningTabId,
+      current.toJson() as unknown as Record<string, unknown>,
+    );
   }, []);
 
   // Dispatch active-widget context for AITutorPill whenever the focused
@@ -520,22 +542,36 @@ export default function TerminalRoute() {
     window.dispatchEvent(new CustomEvent("flinttrade:active-widget", { detail: activeId }));
   }, []);
 
-  // Explicit loads replace the model instance (restore / preset / clear).
-  const loadModel = useCallback((next: Model) => {
-    modelRef.current = next;
-    setModel(next);
-    setPanelCount(countTabs(next));
-    broadcastActiveWidget(next);
-    scheduleLayoutSave(next);
+  // Shared bookkeeping for any model mutation: overlay count, active-widget
+  // broadcast, debounced persistence.
+  const afterModelMutation = useCallback((current: Model) => {
+    setPanelCount(countTabs(current));
+    broadcastActiveWidget(current);
+    scheduleLayoutSave(current);
   }, [broadcastActiveWidget, scheduleLayoutSave]);
 
+  // Explicit loads replace the model instance (restore / preset apply).
   // In-place mutations (drags, adds, closes, selects, param updates) arrive
-  // through the Layout host's onModelChange.
-  const handleModelChange = useCallback((changed: Model) => {
-    setPanelCount(countTabs(changed));
-    broadcastActiveWidget(changed);
-    scheduleLayoutSave(changed);
-  }, [broadcastActiveWidget, scheduleLayoutSave]);
+  // through a MODEL-level change listener, not the <Layout> view's
+  // onModelChange prop: the view only forwards changes while it is mounted,
+  // and the workspace api must keep persisting while the compact workspace
+  // or a full-page tool overlay has the canvas unmounted.
+  const loadModel = useCallback((next: Model) => {
+    // Any change still pending against the previous model belongs to it —
+    // flush before rebinding, then detach its listener.
+    flushPendingSave();
+    const previous = modelRef.current;
+    if (previous && modelListenerRef.current) {
+      previous.removeChangeListener(modelListenerRef.current);
+    }
+    const listener = () => afterModelMutation(next);
+    next.addChangeListener(listener);
+    modelListenerRef.current = listener;
+    modelRef.current = next;
+    modelTabIdRef.current = useLayoutStore.getState().activeTabId;
+    setModel(next);
+    afterModelMutation(next);
+  }, [afterModelMutation, flushPendingSave]);
 
   // Mount: restore the active workspace tab (or apply the skill default),
   // then hand the workspace api to the layout store for chrome consumers
@@ -576,16 +612,40 @@ export default function TerminalRoute() {
     const api = createWorkspaceApi(() => modelRef.current ?? initialModel, loadModel);
     setWorkspaceApi(api);
     return () => {
-      clearTimeout(saveTimerRef.current);
+      // Persist any change still inside the 500ms debounce window, then
+      // detach the model listener so the unmounted route stops observing.
+      flushPendingSave();
+      const current = modelRef.current;
+      if (current && modelListenerRef.current) {
+        current.removeChangeListener(modelListenerRef.current);
+      }
+      modelListenerRef.current = null;
       if (useLayoutStore.getState().workspaceApi === api) {
         setWorkspaceApi(null);
       }
       modelRef.current = null;
+      modelTabIdRef.current = null;
     };
     // level intentionally omitted — we only use it for the initial layout
     // decision. Re-running on every skill change would reset the layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadModel, setWorkspaceApi]);
+  }, [loadModel, setWorkspaceApi, flushPendingSave]);
+
+  // React to workspace-tab switches (including Delete Workspace, which
+  // activates the surviving tab): flush the outgoing tab's pending save,
+  // then load the newly active tab's layout. Skipped when the current model
+  // already belongs to the active tab — true right after mount, and after
+  // new-from-template flows where applyPreset already loaded a model bound
+  // to the new tab.
+  const activeWorkspaceTabId = useLayoutStore((s) => s.activeTabId);
+  useEffect(() => {
+    if (modelTabIdRef.current === null || modelTabIdRef.current === activeWorkspaceTabId) return;
+    const saved = useLayoutStore.getState().getTabLayout(activeWorkspaceTabId);
+    const restored =
+      saved && isFlexLayoutDocument(saved) ? tryCreateWorkspaceModel(saved) : null;
+    // A tab with no (or unreadable) saved layout starts as a blank canvas.
+    loadModel(restored ?? createWorkspaceModel(emptyWorkspaceJson()));
+  }, [activeWorkspaceTabId, loadModel]);
 
   // Listen for the custom event dispatched by DailyWelcome's "Open Trade Review" link,
   // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).
@@ -697,13 +757,14 @@ export default function TerminalRoute() {
                 <div
                   className={`h-full w-full overflow-hidden relative ${flexThemeClass}`}
                   data-tour-target="workspace"
-                  style={flexThemeStyle}
                 >
+                  {/* No onModelChange prop: mutations are observed via the
+                      model-level change listener registered in loadModel,
+                      which keeps working while this view is unmounted. */}
                   {model && (
                     <Layout
                       model={model}
                       factory={flexLayoutFactory}
-                      onModelChange={handleModelChange}
                       realtimeResize
                     />
                   )}

@@ -1056,20 +1056,20 @@ function DOMHeatmapWidget(props: WidgetProps) {
 
   const handleSymbolChange = useCallback((next: string) => {
     setSymbol(next);
-    props.api?.updateParameters({ ...(panelParams ?? {}), symbol: next });
+    props.api?.updateParameters({ symbol: next });
   }, [panelParams, props.api]);
 
   const handleViewModeChange = useCallback((next: ViewMode) => {
     if (next === viewMode) return;
     setViewMode(next);
     if (next === "live") setIsPlaying(false);
-    props.api?.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api?.updateParameters({ view: next });
   }, [panelParams, props.api, viewMode]);
 
   const handleScaleChange = useCallback((next: IntensityScale) => {
     if (next === scale) return;
     setScale(next);
-    props.api?.updateParameters({ ...(panelParams ?? {}), scale: next });
+    props.api?.updateParameters({ scale: next });
   }, [panelParams, props.api, scale]);
 
   // ── Pointer handlers: crosshair layer + value readout ──────────────────────

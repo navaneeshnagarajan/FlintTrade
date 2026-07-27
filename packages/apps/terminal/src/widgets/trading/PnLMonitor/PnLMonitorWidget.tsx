@@ -254,7 +254,7 @@ function PnLMonitorWidget(props: WidgetProps) {
     const resolved = resolvePnLMonitorView(next);
     setView((current) => {
       if (current === resolved) return current;
-      props.api.updateParameters({ ...(panelParams ?? {}), view: resolved });
+      props.api.updateParameters({ view: resolved });
       return resolved;
     });
   }, [panelParams, props.api]);

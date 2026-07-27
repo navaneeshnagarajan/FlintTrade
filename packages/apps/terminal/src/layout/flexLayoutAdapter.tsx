@@ -199,16 +199,15 @@ export interface AddPanelOptions {
 }
 
 /**
- * The workspace handle chrome consumers use (WidgetPicker, AppLayout,
- * applySetupChoices, the `flinttrade:addWidget` listener). Same verbs the
- * Dockview handle exposed, FlintTrade-owned.
+ * The workspace handle chrome consumers use (WidgetPicker, AppLayout's
+ * layout export, applyPreset, the `flinttrade:addWidget` listener).
+ * Deliberately minimal — only verbs with a live consumer; grow it when a
+ * consumer arrives, not before.
  */
 export interface WorkspaceApi {
   addPanel(options: AddPanelOptions): void;
-  clear(): void;
   panelCount(): number;
   toJSON(): Record<string, unknown>;
-  fromJSON(layout: Record<string, unknown>): void;
   /** Replace the whole model with a preset document. */
   loadModelJson(json: IJsonModel): void;
 }
@@ -234,10 +233,8 @@ export function createWorkspaceApi(
         loadModel(createWorkspaceModel(workspaceJson(rowJson(100, [tabsetJson(100, [tab])]))));
       }
     },
-    clear: () => loadModel(createWorkspaceModel(emptyWorkspaceJson())),
     panelCount: () => countTabs(getModel()),
     toJSON: () => getModel().toJson() as unknown as Record<string, unknown>,
-    fromJSON: (layout) => loadModel(createWorkspaceModel(layout as unknown as IJsonModel)),
     loadModelJson: (json) => loadModel(createWorkspaceModel(json)),
   };
 }

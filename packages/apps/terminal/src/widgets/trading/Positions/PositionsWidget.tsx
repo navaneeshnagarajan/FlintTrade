@@ -559,7 +559,7 @@ function PositionsWidget(props: WidgetProps) {
     (next: ViewMode) => {
       if (next === view) return;
       setView(next);
-      props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+      props.api.updateParameters({ view: next });
     },
     [panelParams, props.api, view],
   );
@@ -567,7 +567,7 @@ function PositionsWidget(props: WidgetProps) {
   const handleGroupChange = useCallback(
     (next: GroupMode) => {
       setGroupMode(next);
-      props.api.updateParameters({ ...(panelParams ?? {}), group: next });
+      props.api.updateParameters({ group: next });
     },
     [panelParams, props.api],
   );

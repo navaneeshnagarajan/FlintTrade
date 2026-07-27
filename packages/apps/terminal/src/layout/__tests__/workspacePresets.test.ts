@@ -38,10 +38,8 @@ function mockApi(): { api: WorkspaceApi; loaded: IJsonModel[] } {
   const loaded: IJsonModel[] = [];
   const api = {
     addPanel: vi.fn(),
-    clear: vi.fn(),
     panelCount: vi.fn(() => 0),
     toJSON: vi.fn(() => ({})),
-    fromJSON: vi.fn(),
     loadModelJson: vi.fn((json: IJsonModel) => {
       loaded.push(json);
     }),

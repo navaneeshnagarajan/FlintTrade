@@ -639,13 +639,13 @@ function GreeksHeatmapWidget(props: WidgetProps) {
   const handleProjectionChange = useCallback((next: Projection) => {
     if (next === projection) return;
     setProjection(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), projection: next });
+    props.api.updateParameters({ projection: next });
   }, [panelParams, projection, props.api]);
 
   const handleMetricChange = useCallback((next: MetricKey) => {
     if (next === metric) return;
     setMetric(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), metric: next });
+    props.api.updateParameters({ metric: next });
   }, [metric, panelParams, props.api]);
 
   const handleResetView = useCallback(() => {

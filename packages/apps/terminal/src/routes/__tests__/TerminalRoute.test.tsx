@@ -33,7 +33,7 @@ const mockLayoutState = vi.hoisted(() => {
     presetPickerOpen: false,
     setPresetPickerOpen: vi.fn(),
     activeTabId: "default",
-    getTabLayout: vi.fn(() => null),
+    getTabLayout: vi.fn<(id: string) => Record<string, unknown> | null>(() => null),
     saveTabLayout: vi.fn(),
   };
   state.setWorkspaceApi = vi.fn((api: Record<string, unknown> | null) => {
@@ -148,10 +148,6 @@ vi.mock("@/hooks/useGlobalKeys", () => ({
 
 vi.mock("@/hooks/useSkillLevel", () => ({
   useSkillLevel: vi.fn().mockReturnValue("intermediate"),
-}));
-
-vi.mock("@/hooks/useFlexLayoutTheme", () => ({
-  useFlexLayoutTheme: vi.fn().mockReturnValue({}),
 }));
 
 // Tour
@@ -568,5 +564,124 @@ describe("TerminalRoute", () => {
     expect(api.panelCount()).toBe(before + 1);
     expect(JSON.stringify(api.toJSON())).toContain('"threepanel"');
     expect(JSON.stringify(api.toJSON())).toContain("Three-Panel Chart");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mount-restore and persistence paths (Phase 1 audit regressions)
+// ---------------------------------------------------------------------------
+
+import { buildPresetJsonById } from "@/layout/workspacePresets";
+
+describe("TerminalRoute saved-layout restore", () => {
+  beforeEach(() => {
+    setViewportWidth(1280);
+    mockTradingState.mode = "live";
+    mockLayoutState.workspaceApi = null;
+    mockLayoutState.getTabLayout.mockReturnValue(null);
+    vi.clearAllMocks();
+    mockGetSafetyConfig.mockReset().mockResolvedValue({ ...inactiveSafetyConfig });
+  });
+
+  function registeredApi(): WorkspaceApi {
+    return mockLayoutState.workspaceApi as unknown as WorkspaceApi;
+  }
+
+  it("restores a persisted FlexLayout document instead of the default preset", async () => {
+    // trading-desk: indexstrip + positions + riskdashboard + orders
+    mockLayoutState.getTabLayout.mockReturnValue(
+      buildPresetJsonById("trading-desk") as unknown as Record<string, unknown>,
+    );
+    renderTerminalRoute();
+
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const doc = JSON.stringify(registeredApi().toJSON());
+    expect(doc).toContain('"riskdashboard"');
+    expect(doc).not.toContain('"ticker"'); // market-watch default NOT applied
+  });
+
+  it("falls back to the skill default for a pre-migration Dockview document", async () => {
+    mockLayoutState.getTabLayout.mockReturnValue({
+      grid: { root: {} },
+      panels: { "chart-1": { id: "chart-1" } },
+      activeGroup: "1",
+    });
+    renderTerminalRoute();
+
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    // Skill level is mocked intermediate — market-watch (watchlist/chart/ticker/indexstrip).
+    const doc = JSON.stringify(registeredApi().toJSON());
+    expect(doc).toContain('"ticker"');
+    expect(doc).not.toContain('"grid"');
+  });
+
+  it("consumes a setup-wizard __pendingPreset exactly once, persisting the resolved layout", async () => {
+    mockLayoutState.getTabLayout.mockReturnValue({ __pendingPreset: "trading-desk" });
+    renderTerminalRoute();
+
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    expect(JSON.stringify(registeredApi().toJSON())).toContain('"riskdashboard"');
+    // The resolved document (not the placeholder) was saved synchronously.
+    const saved = mockLayoutState.saveTabLayout.mock.calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).layout !== undefined,
+    );
+    expect(saved).toBeDefined();
+    expect(JSON.stringify(saved![1])).toContain('"riskdashboard"');
+  });
+
+  it("persists widget adds even though the Layout view is stubbed out (model-level listener)", async () => {
+    renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    mockLayoutState.saveTabLayout.mockClear();
+
+    window.dispatchEvent(
+      new CustomEvent("flinttrade:addWidget", { detail: { widgetId: "threepanel" } }),
+    );
+
+    // The 500ms debounce must land a save containing the new tab.
+    await waitFor(
+      () => {
+        const call = mockLayoutState.saveTabLayout.mock.calls.at(-1);
+        expect(call).toBeDefined();
+        expect(JSON.stringify(call![1])).toContain('"threepanel"');
+        expect(call![0]).toBe("default");
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it("on workspace-tab switch, flushes the outgoing tab's save and loads the incoming tab", async () => {
+    const { rerender, queryClient } = renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    mockLayoutState.saveTabLayout.mockClear();
+
+    // Switch to a second tab that has a saved single-widget layout.
+    mockLayoutState.activeTabId = "second";
+    mockLayoutState.getTabLayout.mockImplementation((id: string) =>
+      id === "second"
+        ? (buildPresetJsonById("trading-desk") as unknown as Record<string, unknown>)
+        : null,
+    );
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TerminalRoute />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      // The incoming tab's layout is now live on the api…
+      expect(JSON.stringify(registeredApi().toJSON())).toContain('"riskdashboard"');
+    });
+    // …and every save issued during the switch targeted the tab that owned
+    // the model at the time — never the freshly activated tab with the
+    // outgoing tab's document (the Delete Workspace clobber).
+    for (const call of mockLayoutState.saveTabLayout.mock.calls) {
+      if (call[0] === "second") {
+        expect(JSON.stringify(call[1])).toContain('"riskdashboard"');
+      } else {
+        expect(call[0]).toBe("default");
+      }
+    }
+    mockLayoutState.activeTabId = "default";
   });
 });

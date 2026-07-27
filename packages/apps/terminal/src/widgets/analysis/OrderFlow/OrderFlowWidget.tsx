@@ -823,7 +823,6 @@ function OrderFlowWidget(props: WidgetProps) {
     const nextExchange = resolveOrderFlowExchange(nextSymbol);
     setInstrument({ symbol: nextSymbol, explicitExchange: nextExchange });
     props.api.updateParameters({
-      ...(panelParams ?? {}),
       symbol: nextSymbol,
       exchange: nextExchange,
     });
@@ -835,7 +834,6 @@ function OrderFlowWidget(props: WidgetProps) {
     if (nextView === viewMode) return;
     setViewMode(nextView);
     props.api.updateParameters({
-      ...(panelParams ?? {}),
       view: nextView,
     });
   }, [panelParams, props.api, viewMode]);

@@ -440,7 +440,7 @@ function OrderLadderWidget(props: Props) {
   // layout reopens on the same book (this is also how the retired `depth` id
   // reproduces its 5-level view: params { tick: 0.05 }).
   const persistParams = useCallback((patch: Record<string, unknown>) => {
-    props.api?.updateParameters({ ...(panelParams ?? {}), ...patch });
+    props.api?.updateParameters({ ...patch });
   }, [panelParams, props.api]);
 
   const handleExchangeChange = useCallback((next: string) => {

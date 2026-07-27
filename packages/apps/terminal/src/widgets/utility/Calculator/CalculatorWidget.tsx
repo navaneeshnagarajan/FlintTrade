@@ -1491,7 +1491,7 @@ function CalculatorWidget(props: WidgetProps) {
       const resolved = resolveCalculatorTab(next);
       if (resolved === tab) return;
       setTab(resolved);
-      props.api?.updateParameters({ ...(panelParams ?? {}), tab: resolved });
+      props.api?.updateParameters({ tab: resolved });
     },
     [panelParams, props.api, tab],
   );

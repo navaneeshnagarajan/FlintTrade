@@ -97,32 +97,80 @@ html.density-compact {
 .cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
 
 /* ---------- FlexLayout theme overrides — compact, content-first ----------
-   Token-derived colours arrive as inline CSS variables from
-   useFlexLayoutTheme (they win over these class rules); this block carries
-   the structural, non-token chrome: slim tabs, quiet splitters, and the
-   close-button-on-hover behaviour. var() colours here flip automatically
-   with html.theme-light because they reference FlintTrade tokens. */
-.flexlayout__theme_dark,
-.flexlayout__theme_light {
+   flexlayout-react's combined.css declares its CSS variables ON
+   .flexlayout__layout (scoped under the theme class), so overrides must
+   land on that same element — variables set on an ancestor (class or
+   inline) are defeated by the element's own declarations. The doubled
+   .flexlayout__layout class boosts specificity above combined.css so this
+   block wins regardless of bundle emission order. var() references to
+   FlintTrade tokens flip automatically with html.theme-light and with
+   runtime theme changes — no JS re-resolution needed. */
+.flexlayout__theme_dark .flexlayout__layout.flexlayout__layout,
+.flexlayout__theme_light .flexlayout__layout.flexlayout__layout {
   /* Slim tab bar — less chrome, more content */
   --font-size: 11px;
+  --font-family: inherit;
+  --splitter-size: 4px;
+  --splitter-active-size: 8px;
 
-  /* Tab colours — subtle, not attention-grabbing */
-  --color-tabset-background: var(--color-surface-card);
-  --color-tabset-background-selected: var(--color-surface-card);
-  --color-tab-selected-background: var(--color-surface-card);
+  /* Core scale — drives most derived surfaces */
+  --color-text: var(--color-text-primary, #e4e4e7);
+  --color-background: var(--color-surface-base, #0a0a0f);
+  --color-base: var(--color-surface-base, #0a0a0f);
+  --color-1: var(--color-surface-card, #16161f);
+  --color-2: var(--color-surface-card, #16161f);
+  --color-3: var(--color-surface-hover, var(--color-card-hover, #24242e));
+  --color-4: var(--color-border-subtle, #2a2a3a);
+  --color-5: var(--color-surface-hover, var(--color-card-hover, #24242e));
+  --color-6: var(--color-border-subtle, #2a2a3a);
+
+  /* Tabsets and tabs — subtle, not attention-grabbing */
+  --color-tabset-background: var(--color-surface-card, #16161f);
+  --color-tabset-background-selected: var(--color-surface-card, #16161f);
+  --color-tabset-background-maximized: var(--color-surface-card, #16161f);
+  --color-tabset-divider-line: var(--color-border-subtle, #2a2a3a);
+  --color-tab-selected: var(--color-text-primary, #e4e4e7);
+  --color-tab-selected-background: var(--color-surface-hover, #24242e);
+  --color-tab-unselected: var(--color-text-muted, #8b8b95);
   --color-tab-unselected-background: transparent;
-  --color-tab-selected: var(--color-text-primary);
-  --color-tab-unselected: var(--color-text-muted);
 
-  /* Clean separators / quiet splitters */
-  --color-tabset-divider-line: var(--color-border-subtle);
+  /* Borders (unused in Phase 1 — kept on-theme for when they arrive) */
+  --color-border-background: var(--color-surface-base, #0a0a0f);
+  --color-border-divider-line: var(--color-border-subtle, #2a2a3a);
+  --color-border-tab-selected: var(--color-text-primary, #e4e4e7);
+  --color-border-tab-selected-background: var(--color-surface-hover, #24242e);
+  --color-border-tab-unselected: var(--color-text-muted, #8b8b95);
+  --color-border-tab-unselected-background: var(--color-surface-card, #16161f);
+
+  /* Quiet splitters */
   --color-splitter: transparent;
-  --color-splitter-hover: var(--color-border-strong);
-  --color-splitter-drag: var(--color-border-strong);
+  --color-splitter-hover: var(--color-accent, #6366f1);
+  --color-splitter-drag: var(--color-accent, #6366f1);
 
-  /* Backgrounds */
-  --color-background: var(--color-surface-base);
+  /* Drag affordances */
+  --color-drag1: var(--color-accent, #6366f1);
+  --color-drag2: var(--color-accent, #6366f1);
+  --color-drag1-background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+  --color-drag2-background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+  --color-drag-rect-border: var(--color-accent, #6366f1);
+  --color-drag-rect-background: var(--color-surface-card, #16161f);
+  --color-drag-rect: var(--color-text-primary, #e4e4e7);
+
+  /* Overflow / popup menu */
+  --color-popup-border: var(--color-border-subtle, #2a2a3a);
+  --color-popup-unselected: var(--color-text-primary, #e4e4e7);
+  --color-popup-unselected-background: var(--color-surface-card, #16161f);
+  --color-popup-selected: var(--color-text-primary, #e4e4e7);
+  --color-popup-selected-background: var(--color-surface-hover, #24242e);
+
+  /* Icons, edge indicators, focus */
+  --color-icon: var(--color-text-muted, #8b8b95);
+  --color-overflow: var(--color-text-muted, #8b8b95);
+  --color-edge-marker: var(--color-border-subtle, #2a2a3a);
+  --color-edge-icon: var(--color-text-muted, #8b8b95);
+  --color-focus: var(--color-accent, #6366f1);
+  --color-toolbar-button-hover: var(--color-surface-hover, #24242e);
+  --color-float-window-header-background: var(--color-surface-card, #16161f);
 }
 
 /* Hide close buttons on tabs — less visual noise; show only on hover of the

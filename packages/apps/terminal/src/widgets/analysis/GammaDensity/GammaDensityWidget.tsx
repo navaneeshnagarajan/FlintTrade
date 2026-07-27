@@ -199,7 +199,7 @@ function GammaDensityWidget(props: WidgetProps) {
   const handleViewChange = useCallback((next: DealerGammaView) => {
     setView((current) => {
       if (current === next) return current;
-      props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+      props.api.updateParameters({ view: next });
       return next;
     });
   }, [panelParams, props.api]);

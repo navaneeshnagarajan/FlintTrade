@@ -630,13 +630,13 @@ function OIChartWidget(props: WidgetProps) {
   const handleViewChange = useCallback((next: ViewMode) => {
     if (next === view) return;
     setView(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api, view]);
 
   const handlePriceToggle = useCallback(() => {
     setShowPrice((current) => {
       const next = !current;
-      props.api.updateParameters({ ...(panelParams ?? {}), price: next });
+      props.api.updateParameters({ price: next });
       return next;
     });
   }, [panelParams, props.api]);

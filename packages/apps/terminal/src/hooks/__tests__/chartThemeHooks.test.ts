@@ -5,7 +5,7 @@
  *   - useLightweightChartTheme
  *   - usePlotlyTheme
  *   - useGlideTheme
- *   - useDockviewTheme
+ * (Workspace-canvas theming is pure CSS in terminal.css — no hook.)
  *
  * Strategy:
  *   - Mock getComputedStyle to return deterministic CSS var values
@@ -73,7 +73,6 @@ vi.mock("@/stores/themeStore", () => ({
 import { useLightweightChartTheme } from "../useChartTheme";
 import { usePlotlyTheme } from "../usePlotlyTheme";
 import { useGlideTheme } from "../useGlideTheme";
-import { useFlexLayoutTheme } from "../useFlexLayoutTheme";
 
 // ---------------------------------------------------------------------------
 // useLightweightChartTheme
@@ -238,58 +237,6 @@ describe("useGlideTheme", () => {
   it("reads --color-accent from CSS vars", () => {
     const { result } = renderHook(() => useGlideTheme());
     expect(result.current.accentColor).toBe("#6366f1");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// useFlexLayoutTheme
-// ---------------------------------------------------------------------------
-
-describe("useFlexLayoutTheme", () => {
-  it("returns a non-empty Record<string, string>", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    expect(typeof result.current).toBe("object");
-    expect(Object.keys(result.current).length).toBeGreaterThan(0);
-  });
-
-  it("all keys are CSS custom properties", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    for (const key of Object.keys(result.current)) {
-      expect(key.startsWith("--")).toBe(true);
-    }
-  });
-
-  it("all values are non-empty strings", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    for (const value of Object.values(result.current)) {
-      expect(typeof value).toBe("string");
-      expect(value.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("has background color override", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    expect(result.current["--color-background"]).toBeTruthy();
-  });
-
-  it("has drag affordance colour using accent", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    // Accent is #6366f1 — the drag edge/outline colour
-    expect(result.current["--color-drag1"]).toBe("#6366f1");
-  });
-
-  it("has splitter colours", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-    expect(result.current["--color-splitter"]).toBeTruthy();
-    expect(result.current["--color-splitter-hover"]).toBe("#6366f1");
-  });
-
-  it("sets FlexLayout tab variables used by the bundled light and dark themes", () => {
-    const { result } = renderHook(() => useFlexLayoutTheme());
-
-    expect(result.current["--color-tabset-background"]).toBe("#16161f");
-    expect(result.current["--color-tab-selected"]).toBe("#e4e4e7");
-    expect(result.current["--color-tab-unselected"]).toBe("#8b8b95");
   });
 });
 

@@ -20,13 +20,21 @@ export interface WidgetPanelApi {
   /**
    * Merge params into the panel's persisted config so view state (tab,
    * view, symbol, scale…) survives with the saved layout.
+   *
+   * Pass ONLY the keys you changed. The adapter merges them over the
+   * panel's LIVE persisted config. Never spread `props.params` into the
+   * call: the rendered params snapshot is not refreshed on config-only
+   * changes, so spreading it would silently revert other keys to their
+   * mount-time values (the stale-spread clobber the Phase 1 audit caught).
    */
   updateParameters(params: Record<string, unknown>): void;
 }
 
 /**
  * Props every workspace widget receives. `params` carries the panel config
- * (pinned symbol, view mode, sync group…); `api` is the panel handle.
+ * as it was when the panel content last rendered — treat it as the INITIAL
+ * view state plus pinning, not a live channel (config-only updates do not
+ * re-render the panel).
  */
 export interface WidgetProps {
   params?: Record<string, unknown>;

@@ -332,7 +332,7 @@ function TimeSalesWidget(props: WidgetProps) {
   const handleViewChange = useCallback((next: TapeView) => {
     if (next === view) return;
     setView(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api, view]);
 
   const content = (
