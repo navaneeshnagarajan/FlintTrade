@@ -60,8 +60,7 @@ import {
   FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS,
   FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS,
 } from "@flinttrade/design-system";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
 import { isMarketHours } from "@/lib/market";
 import { publishChartSync, subscribeChartSync } from "@/lib/chartSyncBus";
@@ -463,7 +462,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
   // so unmigrated writers keep driving this chart; `channel: "none"` means
   // joined to nothing, in which case the chart follows only its own pins and
   // local search.
-  const channel = channelFromParams(props.params);
+  const channel = useChannelMembership(props.api?.id ?? "chart-detached", props.params);
 
   // Workspace panel identity — the scope for this chart's indicator and display
   // settings. Null when the chart is rendered outside a panel (tests, embeds),

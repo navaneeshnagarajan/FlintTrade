@@ -24,13 +24,16 @@ import type {
   ITabRenderValues,
   TabNode,
 } from "flexlayout-react";
+import { useStore } from "jotai";
 import { Button } from "@/components/ui/button";
 import type { WidgetPanelApi, WidgetProps } from "@/types/widgets";
 import {
-  channelFromParams,
+  getChannelMembership,
+  setChannelMembership,
   USER_CHANNELS,
   type UserChannelId,
 } from "@/services/fdc3/channels";
+import { useChannelMembership } from "@/services/fdc3/hooks";
 
 // ---------------------------------------------------------------------------
 // Model defaults
@@ -209,20 +212,36 @@ const CHANNEL_CYCLE: ReadonlyArray<UserChannelId | null> = [
   null,
 ];
 
-function WorkspaceChannelDot({
-  node,
-  afterConfigChange,
-}: {
-  node: TabNode;
-  afterConfigChange: () => void;
-}) {
-  const params = (node.getConfig() as Record<string, unknown> | undefined) ?? undefined;
-  const channelId = channelFromParams(params);
+function WorkspaceChannelDot({ node }: { node: TabNode }) {
+  const store = useStore();
+  // Live membership — the widget follows the SAME atom, so a change here
+  // reaches it instantly even in a hidden tab FlexLayout will not
+  // re-render until revealed (Phase 2 audit finding).
+  const channelId = useChannelMembership(
+    node.getId(),
+    (node.getConfig() as Record<string, unknown> | undefined) ?? undefined,
+  );
   const meta = channelId ? USER_CHANNELS.find((c) => c.id === channelId) : undefined;
-  const next = CHANNEL_CYCLE[(CHANNEL_CYCLE.indexOf(channelId) + 1) % CHANNEL_CYCLE.length];
   const label = meta
     ? `Link channel: ${meta.label} — click to change`
     : "Link channel: none — click to change";
+
+  const cycleChannel = () => {
+    // Read the config FRESH at interaction time — the render-time snapshot
+    // can be stale between tab-strip renders (the stale-spread class of
+    // defect the Phase 1 audit established).
+    const freshParams = (node.getConfig() as Record<string, unknown> | undefined) ?? undefined;
+    const current = getChannelMembership(store, node.getId(), freshParams);
+    const next = CHANNEL_CYCLE[(CHANNEL_CYCLE.indexOf(current) + 1) % CHANNEL_CYCLE.length];
+    // Live state first (reaches the widget immediately)…
+    setChannelMembership(store, node.getId(), next);
+    // …then persist for save/restore, merging over the fresh config.
+    node.getModel().doAction(
+      Actions.updateNodeAttributes(node.getId(), {
+        config: { ...(freshParams ?? {}), channel: next ?? "none" },
+      }),
+    );
+  };
 
   return (
     <Button
@@ -233,20 +252,21 @@ function WorkspaceChannelDot({
       className="h-4 w-4 shrink-0 rounded-full p-0 hover:bg-transparent"
       aria-label={label}
       title={label}
-      // The tab button starts drags from pointer-down — keep the dot inert
-      // for dragging and tab selection.
+      // Keep the dot inert for tab selection/activation. (Tab DRAGS use the
+      // HTML5 draggable attribute on the tab element, which pointer-event
+      // propagation cannot suppress — a press-and-move on the dot still
+      // drags the tab, same as the library's own close affordance.)
       onPointerDown={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
+      // FlexLayout's tab button preventDefaults Enter/Space on keydown,
+      // which would swallow keyboard activation of this nested button —
+      // stop propagation so native activation fires onClick.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+      }}
       onClick={(e) => {
         e.stopPropagation();
-        node.getModel().doAction(
-          Actions.updateNodeAttributes(node.getId(), {
-            config: { ...(params ?? {}), channel: next ?? "none" },
-          }),
-        );
-        // Config-only changes do not re-render tab content on their own —
-        // ask the host to redraw so the widget picks up its new channel.
-        afterConfigChange();
+        cycleChannel();
       }}
     >
       <span
@@ -259,19 +279,12 @@ function WorkspaceChannelDot({
 }
 
 /**
- * Build the `onRenderTab` handler for the workspace host: appends the FDC3
- * channel dot to every tab's chrome. `afterConfigChange` must trigger the
- * Layout's imperative `redraw()` so the panel content re-renders with its
- * new channel membership.
+ * The `onRenderTab` handler for the workspace host: appends the FDC3
+ * channel dot to every tab's chrome. Membership flows through the live
+ * atoms in services/fdc3 — no host redraw is needed.
  */
-export function createTabExtrasRenderer(
-  afterConfigChange: () => void,
-): (node: TabNode, renderValues: ITabRenderValues) => void {
-  return (node, renderValues) => {
-    renderValues.buttons.push(
-      <WorkspaceChannelDot key="fdc3-channel" node={node} afterConfigChange={afterConfigChange} />,
-    );
-  };
+export function renderWorkspaceTabExtras(node: TabNode, renderValues: ITabRenderValues): void {
+  renderValues.buttons.push(<WorkspaceChannelDot key="fdc3-channel" node={node} />);
 }
 
 export interface AddPanelOptions {

@@ -14,6 +14,8 @@ import {
   broadcastInstrument,
   channelInstrumentAtoms,
   DEFAULT_CHANNEL_ID,
+  membershipAtomFor,
+  resolveMembership,
   type UserChannelId,
 } from "./channels";
 
@@ -41,4 +43,17 @@ export function useBroadcastInstrument(channelId: UserChannelId = DEFAULT_CHANNE
     (instrument: WsInstrument) => broadcastInstrument(store, channelId, instrument),
     [store, channelId],
   );
+}
+
+/**
+ * The panel's LIVE channel membership: the persisted panel config supplies
+ * the value until the tab-chrome channel dot writes an explicit override —
+ * which reaches the widget instantly, including while the panel sits in a
+ * hidden tab that FlexLayout will not re-render until revealed.
+ */
+export function useChannelMembership(
+  panelId: string,
+  params: Record<string, unknown> | undefined,
+): UserChannelId | null {
+  return resolveMembership(useAtomValue(membershipAtomFor(panelId)), params);
 }

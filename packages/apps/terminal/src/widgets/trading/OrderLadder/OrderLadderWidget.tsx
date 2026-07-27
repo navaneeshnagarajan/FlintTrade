@@ -50,8 +50,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import useWebSocket from "@/hooks/useWebSocket";
 import { useOrders } from "@/hooks/useOrders";
 import { useDepthData } from "@/hooks/useDepthData";
@@ -368,7 +367,7 @@ function OrderLadderWidget(props: Props) {
   // channel; `channel: "none"` (or an unknown value) joins nothing. A ladder
   // pinned by an explicit symbol prop/param keeps ignoring channels, exactly
   // as it ignored the global selection before the bus existed.
-  const channelId = channelFromParams(props.params);
+  const channelId = useChannelMembership(props.api?.id ?? "orderladder-detached", props.params);
   const channelInstrument = useChannelInstrument(channelId);
   const pinnedSymbol = props.symbol ?? panelParams?.symbol;
   // A broadcast travels as a (symbol, exchange) pair — an unpinned ladder
@@ -377,8 +376,14 @@ function OrderLadderWidget(props: Props) {
   const followedInstrument = pinnedSymbol == null ? channelInstrument : null;
 
   const symbol = pinnedSymbol ?? followedInstrument?.symbol ?? "NIFTY";
+  // When following, the broadcast's venue is ATOMIC with its symbol — it
+  // outranks a previously persisted exchange param, which would otherwise
+  // freeze the venue while the symbol keeps moving and leave the ladder on
+  // a mismatched (symbol, exchange) book (Phase 2 audit finding). A manual
+  // exchange pick below is a local override that yields on the next
+  // broadcast that carries a different venue.
   const initialExchange =
-    props.exchange ?? panelParams?.exchange ?? followedInstrument?.exchange ?? "NSE";
+    followedInstrument?.exchange ?? props.exchange ?? panelParams?.exchange ?? "NSE";
   const initialTick = resolveTickSize(props.tick ?? panelParams?.tick);
 
   const mode  = useModeStore((s) => s.mode);

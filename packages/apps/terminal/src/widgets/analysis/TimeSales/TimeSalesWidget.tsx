@@ -30,8 +30,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { WidgetProps } from "@/types/widgets";
 import { ChevronDown, ChevronRight, ClipboardList, Microscope } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useTape } from "./useTape";
 import { SAMPLE_TAPE, SAMPLE_TAPE_NOW } from "./sampleData";
 import { FeatureTeaser } from "@/components/teasers";
@@ -287,7 +286,7 @@ function TimeSalesWidget(props: WidgetProps) {
   const panelView = panelParams?.view;
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
-  const channelInstrument = useChannelInstrument(channelFromParams(props.params));
+  const channelInstrument = useChannelInstrument(useChannelMembership(props.api.id, props.params));
   const [manual, setManual] = useState<WsInstrument | null>(null);
   const [view, setView] = useState<TapeView>(() => resolveTapeView(panelView));
   const [statsOpen, setStatsOpen] = useState(true);

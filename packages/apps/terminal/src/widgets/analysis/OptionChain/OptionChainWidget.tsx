@@ -37,8 +37,7 @@ import {
   Layers,
 } from "lucide-react";
 import { getInstruments, getOptionSymbol, getSymbol, placeOrder, getMaxPain } from "@/services/api";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import { isMarketHours } from "@/lib/market";
 import { useModeStore } from "@/stores/modeStore";
@@ -109,7 +108,8 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   // joined to nothing and keeps ignoring broadcasts, exactly as it ignored
   // the global selection before; `channel: "none"` opts an unpinned widget
   // out of following as well.
-  const channelId = isPinned ? null : channelFromParams(props.params);
+  const liveChannel = useChannelMembership(props.api?.id ?? "optionchain-detached", props.params);
+  const channelId = isPinned ? null : liveChannel;
   const channelInstrument = useChannelInstrument(channelId);
 
   // Mirror of the current underlying for the follow effect, kept in a ref so

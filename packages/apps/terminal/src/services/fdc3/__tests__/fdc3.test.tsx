@@ -35,7 +35,7 @@ describe("fdc3 contexts", () => {
     const ctx = instrumentContext(NIFTY);
     expect(ctx.type).toBe(INSTRUMENT_CONTEXT_TYPE);
     expect(ctx.id.ticker).toBe("NIFTY");
-    expect(ctx.market).toEqual({ MIC: "XNSE", COUNTRY_ISOCODE: "IN" });
+    expect(ctx.market).toEqual({ MIC: "XNSE", COUNTRY_ISOALPHA2: "IN" });
     expect(ctx.exchange).toBe("NSE_INDEX");
   });
 

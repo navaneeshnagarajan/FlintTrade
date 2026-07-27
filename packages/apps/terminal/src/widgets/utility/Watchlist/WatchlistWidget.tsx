@@ -27,9 +27,9 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { channelFromParams, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
+import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
 import { instrumentContext } from "@/services/fdc3/contexts";
-import { useBroadcastInstrument } from "@/services/fdc3/hooks";
+import { useBroadcastInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { raiseIntent } from "@/services/fdc3/intents";
 import type { WidgetProps } from "@/types/widgets";
 
@@ -61,7 +61,7 @@ import { SymbolRow } from "./SymbolRow";
 // Main widget
 // ---------------------------------------------------------------------------
 
-function WatchlistWidget({ params }: WidgetProps) {
+function WatchlistWidget({ params, api }: WidgetProps) {
   const [tabs, setTabs]               = useState<WatchlistTab[]>(() => loadTabs());
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [showSearch, setShowSearch]   = useState(false);
@@ -73,11 +73,13 @@ function WatchlistWidget({ params }: WidgetProps) {
   const [viewSettings, setViewSettings] = useState(() => loadViewSettings());
   const menuRef                       = useRef<HTMLDivElement | null>(null);
 
-  // FDC3 channel membership is panel config: no `channel` key means the
-  // default (red) channel — exactly what the legacy selectedSymbolAtom
-  // writers set — and `channel: "none"` means joined to nothing. The
-  // watchlist is a BROADCASTER, so joined-to-none clicks broadcast nowhere.
-  const channel = channelFromParams(params);
+  // FDC3 channel membership: seeded from panel config (no `channel` key
+  // means the default red channel — exactly what the legacy
+  // selectedSymbolAtom writers set; `channel: "none"` means joined to
+  // nothing), then LIVE via the membership atom so the tab-chrome dot
+  // retargets this broadcaster instantly. Joined-to-none clicks broadcast
+  // nowhere.
+  const channel = useChannelMembership(api.id, params);
   const broadcast = useBroadcastInstrument(channel ?? DEFAULT_CHANNEL_ID);
   const broadcastSelection = useCallback(
     (item: WatchlistItem) => {

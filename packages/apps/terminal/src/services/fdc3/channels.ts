@@ -81,6 +81,59 @@ export function channelFromParams(params: Record<string, unknown> | undefined): 
 }
 
 // ---------------------------------------------------------------------------
+// Live channel membership (per panel)
+// ---------------------------------------------------------------------------
+
+/**
+ * Membership is LIVE state, not a render-frozen prop: FlexLayout only
+ * re-renders visible tab content, so a widget in a hidden-but-mounted tab
+ * would keep following its old channel until revealed if it read
+ * `params.channel` alone (Phase 2 audit finding). The persisted `channel`
+ * key in the tab config remains the save/restore source of truth; the
+ * atoms carry only EXPLICIT overrides written by the tab-chrome dot —
+ * `undefined` means "defer to the panel params", so resolution is always
+ * per-store and never frozen at atom-creation time.
+ */
+const membershipAtoms = new Map<string, PrimitiveAtom<UserChannelId | null | undefined>>();
+
+export function membershipAtomFor(
+  panelId: string,
+): PrimitiveAtom<UserChannelId | null | undefined> {
+  let existing = membershipAtoms.get(panelId);
+  if (!existing) {
+    existing = atom<UserChannelId | null | undefined>(undefined);
+    membershipAtoms.set(panelId, existing);
+  }
+  return existing;
+}
+
+/** Resolve an override + params pair to the effective membership. */
+export function resolveMembership(
+  override: UserChannelId | null | undefined,
+  params: Record<string, unknown> | undefined,
+): UserChannelId | null {
+  return override === undefined ? channelFromParams(params) : override;
+}
+
+/** Set a panel's live membership (the channel dot's write path). */
+export function setChannelMembership(
+  store: JotaiStore,
+  panelId: string,
+  channelId: UserChannelId | null,
+): void {
+  store.set(membershipAtomFor(panelId), channelId);
+}
+
+/** Read a panel's effective membership without subscribing. */
+export function getChannelMembership(
+  store: JotaiStore,
+  panelId: string,
+  params: Record<string, unknown> | undefined,
+): UserChannelId | null {
+  return resolveMembership(store.get(membershipAtomFor(panelId)), params);
+}
+
+// ---------------------------------------------------------------------------
 // Channel context state (Jotai)
 // ---------------------------------------------------------------------------
 

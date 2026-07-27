@@ -816,6 +816,30 @@ describe("OrderLadderWidget FDC3 channels", () => {
     expect(screen.getByLabelText("Exchange").textContent).toBe("NFO");
   });
 
+  it("a broadcast venue outranks a previously persisted exchange param (audit regression)", () => {
+    // The persisted-pick clobber: an unpinned ladder whose operator once
+    // changed the exchange (persisting params.exchange) must NOT keep that
+    // venue when a later broadcast retargets the book — a broadcast's
+    // (symbol, exchange) pair is atomic.
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" });
+    renderOnStore(store, { params: { exchange: "BSE" } }); // persisted pick, no symbol pin
+
+    expect(screen.getByText("RELIANCE")).toBeTruthy();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("NSE");
+    expect(mockDepthQuery).toHaveBeenCalledWith("RELIANCE", "NSE", false);
+  });
+
+  it("a manual exchange pick yields to the next broadcast that carries a different venue", () => {
+    const store = createStore();
+    renderOnStore(store); // unpinned, red channel, defaults NIFTY@NSE
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" }));
+
+    expect(screen.getByText("GOLD")).toBeTruthy();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("MCX");
+  });
+
   it("a prop-pinned ladder keeps ignoring channels", () => {
     const store = createStore();
     broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "BSE" });

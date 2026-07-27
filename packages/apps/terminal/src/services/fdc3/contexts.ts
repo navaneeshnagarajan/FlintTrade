@@ -24,7 +24,7 @@ export interface FlintInstrumentContext extends Context {
   };
   market?: {
     MIC?: string;
-    COUNTRY_ISOCODE?: string;
+    COUNTRY_ISOALPHA2?: string;
   };
   /** FlintTrade extension: the exchange string the backend understands. */
   exchange: string;
@@ -49,7 +49,7 @@ export function instrumentContext(instrument: WsInstrument): FlintInstrumentCont
     type: INSTRUMENT_CONTEXT_TYPE,
     name: instrument.symbol,
     id: { ticker: instrument.symbol },
-    ...(mic ? { market: { MIC: mic, COUNTRY_ISOCODE: "IN" } } : {}),
+    ...(mic ? { market: { MIC: mic, COUNTRY_ISOALPHA2: "IN" } } : {}),
     exchange: instrument.exchange,
   };
 }

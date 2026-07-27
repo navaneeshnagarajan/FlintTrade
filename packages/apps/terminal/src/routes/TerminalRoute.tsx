@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { Layout } from "flexlayout-react";
-import type { ILayoutApi, Model } from "flexlayout-react";
+import type { Model } from "flexlayout-react";
 import "flexlayout-react/style/combined.css";
 import {
   CandlestickChart,
@@ -28,11 +28,11 @@ import { flexLayoutFactory, widgetCatalog, widgetComponents } from "@/layout/wid
 import { buildPresetJsonById } from "@/layout/workspacePresets";
 import {
   countTabs,
-  createTabExtrasRenderer,
   createWorkspaceApi,
   createWorkspaceModel,
   detachedPanelProps,
   emptyWorkspaceJson,
+  renderWorkspaceTabExtras,
   tryCreateWorkspaceModel,
 } from "@/layout/flexLayoutAdapter";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
@@ -442,12 +442,6 @@ export default function TerminalRoute() {
   // (the FlexLayout model-recreation trap, upstream #456/#524).
   const [model, setModel] = useState<Model | null>(null);
   const modelRef = useRef<Model | null>(null);
-  // Imperative Layout handle — the tab-chrome channel dot needs redraw()
-  // because config-only changes do not re-render panel content.
-  const layoutApiRef = useRef<ILayoutApi | null>(null);
-  const [tabExtrasRenderer] = useState(() =>
-    createTabExtrasRenderer(() => layoutApiRef.current?.redraw()),
-  );
   // The workspace tab that OWNS the current model — saves are bound to it,
   // never to whatever tab is active when the debounce fires (audit finding:
   // Delete Workspace must not overwrite the surviving tab's saved layout).
@@ -770,10 +764,9 @@ export default function TerminalRoute() {
                       which keeps working while this view is unmounted. */}
                   {model && (
                     <Layout
-                      ref={layoutApiRef}
                       model={model}
                       factory={flexLayoutFactory}
-                      onRenderTab={tabExtrasRenderer}
+                      onRenderTab={renderWorkspaceTabExtras}
                       realtimeResize
                     />
                   )}

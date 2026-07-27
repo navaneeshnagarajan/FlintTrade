@@ -11,12 +11,19 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { createStore, Provider } from "jotai";
+import {
+  broadcastInstrument,
+  channelInstrumentAtoms,
+  getChannelMembership,
+} from "@/services/fdc3/channels";
 import { Model } from "flexlayout-react";
 import type { IJsonModel, ITabRenderValues, TabNode } from "flexlayout-react";
 
 import {
   countTabs,
   createWorkspaceApi,
+  renderWorkspaceTabExtras,
   createWorkspaceModel,
   detachedPanelProps,
   emptyWorkspaceJson,
@@ -27,7 +34,6 @@ import {
   widgetPropsForNode,
   workspaceJson,
 } from "../flexLayoutAdapter";
-import { createTabExtrasRenderer } from "../flexLayoutAdapter";
 import { flexLayoutFactory } from "../widgetFactory";
 import { applyPreset } from "../workspacePresets";
 
@@ -157,21 +163,23 @@ describe("model document helpers", () => {
 // Tab-chrome channel dot (Phase 2 — FDC3 channel membership)
 // ---------------------------------------------------------------------------
 
-describe("createTabExtrasRenderer", () => {
+describe("renderWorkspaceTabExtras (channel dot)", () => {
+  let dotSeq = 0;
+
   function renderDotFor(config?: Record<string, unknown>) {
-    const { model, tab } = (() => {
-      const json = workspaceJson(
-        rowJson(100, [tabsetJson(100, [tabJson("chart", "Chart", { id: "tab-dot", params: config })])]),
-      );
-      const m = Model.fromJson(json);
-      return { model: m, tab: m.getNodeById("tab-dot") as TabNode };
-    })();
-    const afterConfigChange = vi.fn();
+    // Unique panel id per test — membership atoms are module-keyed by id.
+    const panelId = `tab-dot-${++dotSeq}`;
+    const json = workspaceJson(
+      rowJson(100, [tabsetJson(100, [tabJson("chart", "Chart", { id: panelId, params: config })])]),
+    );
+    const model = Model.fromJson(json);
+    const tab = model.getNodeById(panelId) as TabNode;
+    const store = createStore();
     const renderValues: ITabRenderValues = { leading: null, content: "Chart", buttons: [] };
-    createTabExtrasRenderer(afterConfigChange)(tab, renderValues);
+    renderWorkspaceTabExtras(tab, renderValues);
     expect(renderValues.buttons).toHaveLength(1);
-    render(<>{renderValues.buttons}</>);
-    return { model, tab, afterConfigChange };
+    render(<Provider store={store}>{renderValues.buttons}</Provider>);
+    return { model, tab, store, panelId };
   }
 
   it("shows the default (red) channel for a tab with no channel config", () => {
@@ -181,22 +189,39 @@ describe("createTabExtrasRenderer", () => {
     ).toBeInTheDocument();
   });
 
-  it("cycles the channel on click, persists it in the tab config, and requests a redraw", () => {
-    const { tab, afterConfigChange } = renderDotFor({ view: "candles" });
+  it("cycles the channel on click, updating LIVE membership and persisting config", () => {
+    const { tab, store, panelId } = renderDotFor({ view: "candles" });
 
     fireEvent.click(screen.getByRole("button", { name: /link channel/i }));
 
+    // Live membership updated (what mounted widgets follow, hidden or not)…
+    expect(getChannelMembership(store, panelId, undefined)).toBe("fdc3.channel.green");
+    // …and persisted into the tab config for save/restore.
     expect((tab.getConfig() as Record<string, unknown>).channel).toBe("fdc3.channel.green");
     // Other config keys survive the channel write.
     expect((tab.getConfig() as Record<string, unknown>).view).toBe("candles");
-    expect(afterConfigChange).toHaveBeenCalledTimes(1);
   });
 
   it("cycles from yellow to unlinked (channel: none)", () => {
-    const { tab } = renderDotFor({ channel: "fdc3.channel.yellow" });
+    const { tab, store, panelId } = renderDotFor({ channel: "fdc3.channel.yellow" });
 
     fireEvent.click(screen.getByRole("button", { name: /link channel/i }));
 
+    expect(getChannelMembership(store, panelId, undefined)).toBeNull();
     expect((tab.getConfig() as Record<string, unknown>).channel).toBe("none");
+  });
+
+  it("a live widget hook follows the dot click without any re-render of the panel", () => {
+    const { store, panelId } = renderDotFor({ channel: "fdc3.channel.blue" });
+
+    // Simulate the widget side: subscribe to the membership atom the same
+    // way useChannelMembership does, then broadcast on the NEW channel.
+    fireEvent.click(screen.getByRole("button", { name: /link channel/i })); // blue → yellow
+    expect(getChannelMembership(store, panelId, undefined)).toBe("fdc3.channel.yellow");
+    broadcastInstrument(store, "fdc3.channel.yellow", { symbol: "NIFTY", exchange: "NSE_INDEX" });
+    const followed = store.get(
+      channelInstrumentAtoms[getChannelMembership(store, panelId, undefined)!],
+    );
+    expect(followed).toEqual({ symbol: "NIFTY", exchange: "NSE_INDEX" });
   });
 });

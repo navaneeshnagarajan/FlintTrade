@@ -12,11 +12,13 @@ vi.mock("../useSymbolSearch", () => ({
   useSymbolSearch: (...args: unknown[]) => mockUseSymbolSearch(...args),
 }));
 
-vi.mock("jotai", () => ({
+vi.mock("jotai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("jotai")>()),
   useAtomValue: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("@/atoms/marketAtoms", () => ({
+vi.mock("@/atoms/marketAtoms", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/atoms/marketAtoms")>()),
   tickAtomFamily: vi.fn().mockReturnValue({}),
 }));
 

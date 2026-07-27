@@ -58,8 +58,7 @@ import {
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -345,7 +344,8 @@ function OrderPadWidget(props: WidgetProps) {
   // key; `channel: "none"` joins nothing) and the channel's instrument
   // slots between the params prefill and the NIFTY default.
   const isPinned = prefill.symbol != null;
-  const channel = isPinned ? null : channelFromParams(props.params);
+  const liveChannel = useChannelMembership(props.api.id, props.params);
+  const channel = isPinned ? null : liveChannel;
   const channelInstrument = useChannelInstrument(channel);
 
   const initialSymbol = prefill.symbol ?? channelInstrument?.symbol ?? "NIFTY";
@@ -433,9 +433,12 @@ function OrderPadWidget(props: WidgetProps) {
     const { symbol: chSymbol, exchange: chExchange } = channelInstrument;
     if (!chSymbol || !chExchange) return;
     setValue("symbol", chSymbol);
-    setValue("exchange", chExchange);
+    // An exchange-only prefill (params.exchange with no symbol) is still a
+    // pin for the VENUE — params beat channels in every branch (Phase 2
+    // audit finding); the metadata lookup fails closed on a mismatch.
+    if (prefill.exchange == null) setValue("exchange", chExchange);
     setQuery(chSymbol);
-  }, [isPinned, channelInstrument, setValue]);
+  }, [isPinned, channelInstrument, setValue, prefill.exchange]);
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
   // On match, qty is set to the instrument's lotsize so the first order is valid.

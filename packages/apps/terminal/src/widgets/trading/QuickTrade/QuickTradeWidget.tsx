@@ -22,8 +22,7 @@ import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "luci
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { placeOrder, getSymbol } from "@/services/api";
-import { channelFromParams } from "@/services/fdc3/channels";
-import { useChannelInstrument } from "@/services/fdc3/hooks";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
@@ -191,7 +190,7 @@ function QuickTradeWidget(props: WidgetProps) {
   // never silently default to NIFTY/NSE and let a click place an order the
   // trader did not target.
   const prefill = (props.params ?? {}) as QuickTradePrefill;
-  const channel = channelFromParams(props.params);
+  const channel = useChannelMembership(props.api.id, props.params);
   const selectedInstrument = useChannelInstrument(channel);
   const symbol = prefill.symbol ?? selectedInstrument?.symbol ?? "";
   const exchange =
