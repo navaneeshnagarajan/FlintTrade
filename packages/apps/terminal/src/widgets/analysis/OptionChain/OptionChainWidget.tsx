@@ -57,17 +57,17 @@ import type {
   InstrumentRecord,
 } from "./types";
 import { SYMBOLS, VIEWS, OPTION_CHAIN_EXCHANGES } from "./types";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
-function OptionChainWidget(props: Partial<IDockviewPanelProps> = {}) {
+function OptionChainWidget(props: Partial<WidgetProps> = {}) {
   const glideTheme = useGlideTheme();
   const mode = useModeStore((s) => s.mode);
   const isExplore = mode === "explore";
-  // Honour a pinned symbol from the Dockview panel params (e.g. the options-
+  // Honour a pinned symbol from the workspace panel params (e.g. the options-
   // scalper preset pins `{ symbol: "NIFTY" }`). Falls back to the first known
   // underlying. Previously the widget ignored params and only worked for the
   // default by coincidence.

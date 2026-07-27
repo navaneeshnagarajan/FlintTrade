@@ -1,5 +1,3 @@
-import type { IDockviewPanelProps } from "dockview-react";
-
 export interface WidgetMeta {
   id: string;
   name: string;
@@ -8,8 +6,31 @@ export interface WidgetMeta {
   description?: string;
 }
 
-export interface WidgetProps extends IDockviewPanelProps {
-  // Additional FlintTrade-specific props can go here
+/**
+ * The panel-scoped API a widget receives from the workspace layer.
+ *
+ * This is FlintTrade's own contract, implemented over flexlayout-react —
+ * widgets never import the docking library directly, which is what made the
+ * Dockview → FlexLayout swap a retype rather than a rewrite. Keep it narrow:
+ * the audited widget surface uses exactly `id` and `updateParameters`.
+ */
+export interface WidgetPanelApi {
+  /** Stable panel (tab node) id — chart display settings are keyed by it. */
+  readonly id: string;
+  /**
+   * Merge params into the panel's persisted config so view state (tab,
+   * view, symbol, scale…) survives with the saved layout.
+   */
+  updateParameters(params: Record<string, unknown>): void;
+}
+
+/**
+ * Props every workspace widget receives. `params` carries the panel config
+ * (pinned symbol, view mode, sync group…); `api` is the panel handle.
+ */
+export interface WidgetProps {
+  params?: Record<string, unknown>;
+  api: WidgetPanelApi;
 }
 
 // NOTE: A `WidgetId` union type previously lived here listing 30 hardcoded

@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 vi.mock("../useTape", () => ({
   useTape: vi.fn().mockReturnValue([]),
@@ -50,8 +50,8 @@ const mockUseTape = useTape as ReturnType<typeof vi.fn>;
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockDepth = useDepthData as ReturnType<typeof vi.fn>;
 
-const defaultProps = makeDockviewPanelProps();
-const statsViewProps = makeDockviewPanelProps({ params: { view: "stats" } });
+const defaultProps = makeWidgetPanelProps();
+const statsViewProps = makeWidgetPanelProps({ params: { view: "stats" } });
 
 /** A print `agoMs` before now, so it lands inside the live statistics window. */
 function livePrint(id: number, agoMs: number, qty: number, side: TapePrint["side"]): TapePrint {
@@ -264,7 +264,7 @@ describe("TimeSalesWidget — panel params", () => {
     mockConnected.mockReturnValue(true);
     mockUseTape.mockReturnValue([livePrint(1, 500, 100, "buy")]);
 
-    render(<TimeSalesWidget {...makeDockviewPanelProps({ params: { view: "candlestick" } })} />);
+    render(<TimeSalesWidget {...makeWidgetPanelProps({ params: { view: "candlestick" } })} />);
 
     expect(screen.getByRole("table")).toBeInTheDocument();
   });

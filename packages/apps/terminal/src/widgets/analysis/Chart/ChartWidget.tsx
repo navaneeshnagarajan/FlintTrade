@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo, type PointerEvent as ReactPointerEvent } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import {
   FLINT_CHART_VIEW_STATE_STORAGE_KEY,
   FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
@@ -142,7 +142,7 @@ function loadSavedChartView() {
 }
 
 /**
- * Scope a chart storage key to a single Dockview panel.
+ * Scope a chart storage key to a single workspace panel.
  *
  * Indicator and display settings are per chart panel, not per workspace: a
  * layout can hold several charts (the Multi Chart preset lays out four) and
@@ -154,10 +154,10 @@ function loadSavedChartView() {
  *     configurations, which symbol keying could not express;
  *   - changing a chart's symbol no longer swaps the indicator setup underneath
  *     the trader.
- * Dockview serialises panel ids into the persisted layout, so a panel-scoped
+ * The workspace layout serialises panel ids into the persisted document, so a panel-scoped
  * key survives a reload exactly as the layout itself does.
  *
- * Charts rendered outside a Dockview panel (no panel id) keep writing the
+ * Charts rendered outside a workspace panel (no panel id) keep writing the
  * legacy workspace-wide key.
  */
 function createFlintChartPanelStorageKey(baseKey: string, panelId: string | null): string {
@@ -442,7 +442,7 @@ interface ChartPanelParams {
   optionLeg?: { underlying: string; leg: OptionType };
 }
 
-function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
+function ChartWidget(props: Partial<WidgetProps> = {}) {
   const track = useTrackBehavior();
   const dataScope = useDataScope();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -458,7 +458,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   // which a watchlist click must not clobber.
   const isPinned = Boolean(pinnedParams?.symbol || pinnedParams?.optionLeg);
 
-  // Dockview panel identity — the scope for this chart's indicator and display
+  // Workspace panel identity — the scope for this chart's indicator and display
   // settings. Null when the chart is rendered outside a panel (tests, embeds),
   // in which case the legacy workspace-wide keys are used unchanged.
   const panelId = props.api?.id ?? null;
@@ -1149,7 +1149,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
 
   // Standard terminal UX: a watchlist row click (or any widget that writes
   // selectedSymbolAtom) drives the default chart. A pinned chart — one whose
-  // Dockview panel params carry an explicit symbol — keeps its instrument and
+  // workspace panel params carry an explicit symbol — keeps its instrument and
   // ignores the selection, so multi-chart preset layouts are never clobbered.
   // The current symbol/exchange are deliberately NOT in the deps: the effect
   // reacts only to selection changes, so a symbol picked locally through the

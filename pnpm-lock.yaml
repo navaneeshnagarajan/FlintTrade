@@ -190,12 +190,9 @@ importers:
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
-      dockview:
-        specifier: ^7.0.4
-        version: 7.0.4
-      dockview-react:
-        specifier: ^7.0.4
-        version: 7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      flexlayout-react:
+        specifier: ^0.10.1
+        version: 0.10.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       framer-motion:
         specifier: ^12.42.2
         version: 12.42.2(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -3889,18 +3886,6 @@ packages:
   dmg-builder@26.15.3:
     resolution: {integrity: sha512-O3zJUFUYHJKgzPqioHxfxzBzlSC1eXCSr79gMSBKBP5AgjjpmrydMsMLotEg9fAJF36vdUncb+4ndRNxoPdlSQ==}
 
-  dockview-core@7.0.4:
-    resolution: {integrity: sha512-AiIzD6ov153L/VuhqVBg5KD5oSAgJGH7L1xvzV/X+ghIEOTFfEQYEBGNd/ys+ZjQfdGRogHSeQ0v9JF/L6JrPg==}
-
-  dockview-react@7.0.4:
-    resolution: {integrity: sha512-eUhR3J3prpuFcaPJwQ4rzcRAghO3p4JVXlj5zfdQTlb3Qwa8VUpy3KvyV6BCsIjNk1toTdd8/NyADcZXMvpmtA==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
-  dockview@7.0.4:
-    resolution: {integrity: sha512-n6n9WpYZgp/WY8SgvP4hr9qh01ZXhSGIRmlhoJXxRU3f34bwxCbFyOhBArV4W8quolX8OQe1yPfAUwUUjdnZPA==}
-
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
 
@@ -4217,6 +4202,13 @@ packages:
 
   flatten-vertex-data@1.0.2:
     resolution: {integrity: sha512-BvCBFK2NZqerFTdMDgqfHBwxYWnxeCkwONsw6PvBMcUXqo8U/KDWwmXhqx1x2kLIg7DqIsJfOaJFOmlua3Lxuw==}
+
+  flexlayout-react@0.10.1:
+    resolution: {integrity: sha512-Mv3tnxAboy9PmiX6M8O8VsnFa1kX64j/2HlT/qUTRL27h3QLLFw5H4FONM7Xv3SkUUMUQFgXaw5F1dMv5kYM9g==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   font-atlas@2.1.0:
     resolution: {integrity: sha512-kP3AmvX+HJpW4w3d+PiPR2X6E1yvsBXt2yhuCw+yReO9F1WYhvZwx3c95DGZGwg9xYzDGrgJYa885xmVA+28Cg==}
@@ -10512,18 +10504,6 @@ snapshots:
       - electron-builder-squirrel-windows
       - supports-color
 
-  dockview-core@7.0.4: {}
-
-  dockview-react@7.0.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
-    dependencies:
-      dockview: 7.0.4
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-
-  dockview@7.0.4:
-    dependencies:
-      dockview-core: 7.0.4
-
   dom-accessibility-api@0.5.16: {}
 
   dom-accessibility-api@0.6.3: {}
@@ -10938,6 +10918,11 @@ snapshots:
   flatten-vertex-data@1.0.2:
     dependencies:
       dtype: 2.0.0
+
+  flexlayout-react@0.10.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   font-atlas@2.1.0:
     dependencies:

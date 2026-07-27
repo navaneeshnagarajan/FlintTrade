@@ -123,9 +123,9 @@ export default defineConfig({
           ) {
             return "vendor-router";
           }
-          // Dockview — workspace engine; large, only needed on /terminal
-          if (id.includes("node_modules/dockview")) {
-            return "vendor-dockview";
+          // FlexLayout — workspace engine; large, only needed on /terminal
+          if (id.includes("node_modules/flexlayout-react")) {
+            return "vendor-flexlayout";
           }
           // Lightweight Charts — only loaded when ChartWidget mounts
           if (

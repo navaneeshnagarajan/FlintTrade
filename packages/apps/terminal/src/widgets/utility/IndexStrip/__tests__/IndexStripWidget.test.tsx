@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { createStore, Provider } from "jotai";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { tickAtomFamily } from "@/atoms/marketAtoms";
 import IndexStripWidget from "../IndexStripWidget";
 
@@ -35,7 +35,7 @@ function seedTick(
   store.set(tickAtomFamily(key), tick as never);
 }
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 function renderWidget() {
   return render(

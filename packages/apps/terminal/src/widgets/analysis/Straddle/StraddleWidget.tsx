@@ -1,7 +1,7 @@
 /**
  * StraddleWidget — ATM straddle price tracker and implied-move range.
  *
- * Two presentations of ONE fetch, chosen by the Dockview panel parameter
+ * Two presentations of ONE fetch, chosen by the workspace panel parameter
  * `params.view`:
  *   - `straddle`    (default) — straddle price over time on a Lightweight
  *                    Charts line, with Spot and Synthetic Future overlays.
@@ -34,7 +34,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import type { ISeriesApi, LineData, Time } from "lightweight-charts";
 import { createFlintLineChart } from "@flinttrade/design-system";
 import { useLightweightChartTheme } from "@/hooks/useChartTheme";
@@ -128,7 +128,7 @@ function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to straddle. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to straddle. */
 function resolveViewMode(value: unknown): ViewMode {
   return isViewMode(value) ? value : "straddle";
 }
@@ -753,7 +753,7 @@ function StraddleChartFill({ straddlePoints, spotPoints, synfutPoints, activeOve
 // Main widget
 // ---------------------------------------------------------------------------
 
-function StraddleWidget(props: IDockviewPanelProps) {
+function StraddleWidget(props: WidgetProps) {
   const panelParams = props.params as StraddlePanelParams | undefined;
   const panelView = panelParams?.view;
 

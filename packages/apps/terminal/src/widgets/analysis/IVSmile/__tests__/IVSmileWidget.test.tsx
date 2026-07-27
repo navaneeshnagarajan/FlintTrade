@@ -19,7 +19,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { IDockviewPanelProps } from "dockview";
+import type { WidgetProps } from "@/types/widgets";
 
 vi.mock("@/components/charts/PlotlyChart", () => ({
   PlotlyChart: () => <div data-testid="plotly-chart" />,
@@ -53,7 +53,7 @@ vi.mock("@/components/teasers", () => ({
 
 import { useIVSmile } from "../useIVSmile";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import IVSmileWidget from "../IVSmileWidget";
 import { SAMPLE_IV_SMILE_DATA } from "../sampleData";
 
@@ -103,7 +103,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 function renderWidget(params: Record<string, unknown> = {}) {
-  return render(<IVSmileWidget {...makeDockviewPanelProps({ params })} />, { wrapper });
+  return render(<IVSmileWidget {...makeWidgetPanelProps({ params })} />, { wrapper });
 }
 
 beforeAll(() => {
@@ -284,9 +284,9 @@ describe("IVSmileWidget — skew view", () => {
     const updateParameters = vi.fn();
     render(
       <IVSmileWidget
-        {...makeDockviewPanelProps({
+        {...makeWidgetPanelProps({
           params: { view: "smile" },
-          api: { updateParameters } as unknown as IDockviewPanelProps["api"],
+          api: { updateParameters } as unknown as WidgetProps["api"],
         })}
       />,
       { wrapper },

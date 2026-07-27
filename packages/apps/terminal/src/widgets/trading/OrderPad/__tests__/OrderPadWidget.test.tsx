@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -64,7 +64,7 @@ const mockGetSymbol = vi.mocked(getSymbol);
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -120,7 +120,7 @@ describe("OrderPadWidget", () => {
     // A watchlist quick-Sell opens the ticket prefilled — the side seeds to SELL.
     render(
       <OrderPadWidget
-        {...makeDockviewPanelProps({
+        {...makeWidgetPanelProps({
           params: { symbol: "RELIANCE", exchange: "NSE", action: "SELL" },
         })}
       />,
@@ -301,7 +301,7 @@ describe("OrderPadWidget options premium prefill", () => {
   function renderOptionsPad(): void {
     render(
       <OrderPadWidget
-        {...makeDockviewPanelProps({
+        {...makeWidgetPanelProps({
           params: { symbol: "NIFTY28MAR2422000CE", exchange: "NFO" },
         })}
       />,
@@ -365,7 +365,7 @@ describe("OrderPadWidget F&O lot-size validation", () => {
   function renderNfoPad(): void {
     render(
       <OrderPadWidget
-        {...makeDockviewPanelProps({
+        {...makeWidgetPanelProps({
           params: { symbol: "NIFTY28MAR2422000CE", exchange: "NFO" },
         })}
       />,

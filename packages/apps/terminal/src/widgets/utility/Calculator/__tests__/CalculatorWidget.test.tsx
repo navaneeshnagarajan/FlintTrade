@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -48,12 +48,12 @@ import CalculatorWidget from "../CalculatorWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 /** Render with a `tab` panel param, as a retired id or a saved layout would. */
 function renderWithTab(tab: string) {
   return render(
-    <CalculatorWidget {...makeDockviewPanelProps<{ tab: string }>({ params: { tab } })} />,
+    <CalculatorWidget {...makeWidgetPanelProps<{ tab: string }>({ params: { tab } })} />,
   );
 }
 
@@ -146,7 +146,7 @@ describe("CalculatorWidget shell", () => {
 
   it("persists the chosen tab into the panel params", async () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps();
+    const props = makeWidgetPanelProps();
     render(<CalculatorWidget {...props} api={{ ...props.api, updateParameters }} />);
 
     await openTab(/brokerage/i);

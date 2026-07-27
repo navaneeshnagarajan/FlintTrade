@@ -166,7 +166,7 @@ function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }:
 // Main widget
 // ---------------------------------------------------------------------------
 
-/** Prefill params carried by a Dockview panel launching quicktrade. */
+/** Prefill params carried by a workspace panel launching quicktrade. */
 interface QuickTradePrefill {
   symbol?: string;
   exchange?: string;
@@ -176,7 +176,7 @@ function QuickTradeWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const track = useTrackBehavior();
 
-  // Dockview delivers launcher-provided values under props.params — reading
+  // The workspace layer delivers launcher-provided values under props.params — reading
   // top-level props silently dropped every prefill (the old hardcoded-NIFTY
   // bug). When no params are given, follow the workspace's selected
   // instrument (e.g. the active Watchlist row) so the ticket targets what the

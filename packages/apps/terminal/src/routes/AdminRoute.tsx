@@ -209,7 +209,7 @@ const WIDGETS: WidgetInfo[] = ADMIN_WIDGET_SHOWCASE.flatMap(({ id, status }) => 
 });
 
 const FEATURES: FeatureInfo[] = [
-  { name: "Dockview Workspace", status: "live", route: "/trade" },
+  { name: "FlexLayout Workspace", status: "live", route: "/trade" },
   { name: "Multi-broker Gateway", status: "live", route: "/settings" },
   { name: "Option Chain (real-time)", status: "live", route: "/trade" },
   { name: "Dealer Gamma (GEX + density)", status: "live", route: "/trade" },

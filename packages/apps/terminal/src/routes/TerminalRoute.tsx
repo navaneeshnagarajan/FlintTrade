@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
-import { DockviewReact } from "dockview-react";
-import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from "dockview-react";
-import "dockview-react/dist/styles/dockview.css";
+import { Layout } from "flexlayout-react";
+import type { Model } from "flexlayout-react";
+import "flexlayout-react/style/combined.css";
 import {
   CandlestickChart,
   FileEdit,
@@ -24,11 +24,18 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
 import WidgetPicker from "@/chrome/WidgetPicker";
 import PresetPicker from "@/chrome/PresetPicker";
-import { widgetCatalog, widgetComponents } from "@/layout/widgetFactory";
-import { applyPreset } from "@/layout/workspacePresets";
+import { flexLayoutFactory, widgetCatalog, widgetComponents } from "@/layout/widgetFactory";
+import { buildPresetJsonById } from "@/layout/workspacePresets";
+import {
+  countTabs,
+  createWorkspaceApi,
+  createWorkspaceModel,
+  detachedPanelProps,
+  tryCreateWorkspaceModel,
+} from "@/layout/flexLayoutAdapter";
 import { useSkillLevel } from "@/hooks/useSkillLevel";
 import { useSkillContent } from "@/hooks/useSkillContent";
-import { useDockviewTheme } from "@/hooks/useDockviewTheme";
+import { useFlexLayoutTheme } from "@/hooks/useFlexLayoutTheme";
 import { SpotlightTour } from "@/components/help/SpotlightTour";
 import { RouteBanner } from "@/components/help/RouteBanner";
 import { TOUR_DEFINITIONS } from "@/lib/tourDefinitions";
@@ -235,64 +242,24 @@ function KillSwitchPill() {
 
 /**
  * Returns the best default preset for the given skill level on /trade.
- *   Beginner      → "beginner-core" (applied manually — 5 widgets)
+ *   Beginner      → "beginner-core" (the unlisted 5-widget beginner layout)
  *   Intermediate  → "market-watch"
  *   Advanced      → "scalper-zone"
  */
 function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): string {
   if (level === "advanced") return "scalper-zone";
   if (level === "intermediate") return "market-watch";
-  return "beginner-core"; // handled as a special case below
+  return "beginner-core"; // resolved by buildPresetJsonById like any other id
 }
 
 /**
- * Apply the beginner-friendly 5-widget layout:
- * Index Strip, Chart, Watchlist, OrderPad, Positions — an always-visible
- * index strip on top, then a simple left/right split. The strip replaces the
- * retired Dashboard widget (its positions/orders tables and funds cards were
- * duplicates of the Positions, Orders and Risk widgets; the index cards were
- * the part a beginner layout actually needs at a glance).
+ * True when a persisted layout blob is a FlexLayout model document. Layouts
+ * saved by the Dockview-era terminal have `grid`/`panels` roots instead —
+ * those are not restorable after the migration, so the caller falls back to
+ * the skill-appropriate default preset rather than an empty canvas.
  */
-function applyBeginnerLayout(api: import("dockview-react").DockviewApi): void {
-  const ts = Date.now();
-  const chartId = `chart-${ts}-a`;
-  const watchlistId = `watchlist-${ts}-b`;
-  const orderpadId = `orderpad-${ts}-c`;
-  const positionsId = `positions-${ts}-d`;
-  const indexStripId = `indexstrip-${ts}-e`;
-
-  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
-
-  api.addPanel({
-    id: indexStripId,
-    component: "indexstrip",
-    title: "Indices",
-    position: { referencePanel: chartId, direction: "above" },
-    initialHeight: 150,
-  });
-
-  api.addPanel({
-    id: watchlistId,
-    component: "watchlist",
-    title: "Watchlist",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 240,
-  });
-
-  api.addPanel({
-    id: orderpadId,
-    component: "orderpad",
-    title: "Order Pad",
-    position: { referencePanel: watchlistId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 200,
-  });
+function isFlexLayoutDocument(layout: Record<string, unknown>): boolean {
+  return typeof layout.layout === "object" && layout.layout !== null;
 }
 
 // Full-page tools available from the TOOLS dropdown on /trade.
@@ -358,7 +325,7 @@ function TradeCompactWorkspace({
   const tabRefs = useRef<Partial<Record<CompactTradeWidgetId, HTMLButtonElement | null>>>({});
   const activeWidget = COMPACT_TRADE_WIDGETS.find((widget) => widget.id === activeWidgetId) ?? COMPACT_TRADE_WIDGETS[0];
   const ActiveWidgetPanel = widgetComponents[activeWidget.id];
-  const panelProps = {} as IDockviewPanelProps;
+  const panelProps = detachedPanelProps(`compact-${activeWidget.id}`);
 
   function handleTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | undefined;
@@ -468,19 +435,19 @@ export default function TerminalRoute() {
   const [activeTool, setActiveTool] = useState<ToolId | null>(null);
   const [panelCount, setPanelCount] = useState<number | null>(null);
   const isCompactWorkspace = useCompactTradeWorkspace();
-  // d1/d2/d4 — subscriptions created inside onDockviewReady; cleaned up on unmount.
-  const readyDisposablesRef = useRef<Array<{ dispose(): void }>>([]);
-  // d3 — auto-save subscription managed by its own useEffect.
-  const saveDisposableRef = useRef<{ dispose(): void } | null>(null);
+  // The FlexLayout model is owned here as React state and replaced ONLY on
+  // explicit loads (saved-layout restore, preset apply, clear) — never
+  // derived during render, which would remount every widget on every render
+  // (the FlexLayout model-recreation trap, upstream #456/#524).
+  const [model, setModel] = useState<Model | null>(null);
+  const modelRef = useRef<Model | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const mountedDockviewApiRef = useRef<DockviewApi | null>(null);
-  // rAF handle for coalesced ARIA injection.
-  const ariaRafRef = useRef<number | undefined>(undefined);
+  const lastActiveWidgetRef = useRef<string | null>(null);
 
   // ---------------------------------------------------------------------------
   // Resizable panels — layout persistence via localStorage
   // ---------------------------------------------------------------------------
-  // Horizontal layout: [dockview, right-panel]. The v2 key ignores older
+  // Horizontal layout: [workspace canvas, right-panel]. The v2 key ignores older
   // persisted layouts that included the retired internal trade sidebar.
   const { defaultLayout: hLayout, onLayoutChanged: onHLayoutChanged } = useDefaultLayout({
     id: "trade-h-layout-v2",
@@ -499,14 +466,14 @@ export default function TerminalRoute() {
   const level = useSkillLevel("trade");
   const skillContent = useSkillContent();
   const resolvedMode = useThemeStore((s) => s.getResolvedMode());
-  const dockviewThemeClass = resolvedMode === "light" ? "dockview-theme-light" : "dockview-theme-dark";
-  const dockviewThemeCssVars = useDockviewTheme();
-  const dockviewStyle = useMemo(
-    () => dockviewThemeCssVars as React.CSSProperties,
-    [dockviewThemeCssVars],
+  const flexThemeClass = resolvedMode === "light" ? "flexlayout__theme_light" : "flexlayout__theme_dark";
+  const flexThemeCssVars = useFlexLayoutTheme();
+  const flexThemeStyle = useMemo(
+    () => flexThemeCssVars as React.CSSProperties,
+    [flexThemeCssVars],
   );
 
-  const setDockviewApi = useLayoutStore((s) => s.setDockviewApi);
+  const setWorkspaceApi = useLayoutStore((s) => s.setWorkspaceApi);
   const widgetPickerOpen = useLayoutStore((s) => s.widgetPickerOpen);
   const setWidgetPickerOpen = useLayoutStore((s) => s.setWidgetPickerOpen);
   const presetPickerOpen = useLayoutStore((s) => s.presetPickerOpen);
@@ -526,140 +493,99 @@ export default function TerminalRoute() {
   }, [activeTool, presetPickerOpen, widgetPickerOpen, setPresetPickerOpen, setWidgetPickerOpen]);
 
   // ---------------------------------------------------------------------------
-  // ARIA injection for Dockview panels (Issue #46)
-  // Dockview v5 does not expose ARIA props. We patch the DOM after every
-  // layout change so that tabs satisfy WCAG 2.1 SC 4.1.2 (name, role, value).
+  // Model bookkeeping shared by every mutation path.
+  // (No ARIA patching here: FlexLayout renders role="tab"/"tablist",
+  // aria-selected, aria-controls and keyboard focus natively — the
+  // Dockview-era DOM patch for Issue #46 is obsolete.)
   // ---------------------------------------------------------------------------
-  const applyDockviewAria = useCallback(() => {
-    // tablist role on every tab strip container
-    document.querySelectorAll(".dv-tabs-container").forEach((container) => {
-      container.setAttribute("role", "tablist");
-      container.querySelectorAll(".dv-tab").forEach((tab) => {
-        tab.setAttribute("role", "tab");
-        tab.setAttribute(
-          "aria-selected",
-          tab.classList.contains("dv-active-tab") ? "true" : "false",
-        );
-      });
-    });
-    // tabpanel role on every panel content container
-    document.querySelectorAll(".dv-content-container").forEach((panel) => {
-      panel.setAttribute("role", "tabpanel");
-    });
-  }, []);
-
-  const onDockviewReady = useCallback(
-    (event: DockviewReadyEvent) => {
-      mountedDockviewApiRef.current = event.api;
-      setDockviewApi(event.api);
-
-      // Track panel count for the empty-state overlay.
-      setPanelCount(event.api.panels.length);
-      const d1 = event.api.onDidAddPanel(() => setPanelCount(event.api.panels.length));
-      const d2 = event.api.onDidRemovePanel(() => setPanelCount(event.api.panels.length));
-      readyDisposablesRef.current.push(d1, d2);
-
-      // Dispatch active-widget context for AITutorPill whenever a panel gains focus.
-      // AITutorPill subscribes via window.addEventListener("flinttrade:active-widget").
-      const d3aw = event.api.onDidActivePanelChange((change) => {
-        window.dispatchEvent(
-          new CustomEvent("flinttrade:active-widget", { detail: change.panel?.id ?? null }),
-        );
-      });
-      readyDisposablesRef.current.push(d3aw);
-
-      // Re-apply ARIA attributes after every Dockview layout mutation so that
-      // newly added/removed tabs and panels stay annotated.
-      // rAF coalescing prevents redundant DOM queries on every drag frame.
-      const d4 = event.api.onDidLayoutChange(() => {
-        if (ariaRafRef.current !== undefined) cancelAnimationFrame(ariaRafRef.current);
-        ariaRafRef.current = requestAnimationFrame(applyDockviewAria);
-      });
-      readyDisposablesRef.current.push(d4);
-      // Apply once immediately after Dockview finishes its initial render.
-      // rAF ensures the DOM has been painted before we query it.
-      requestAnimationFrame(applyDockviewAria);
-
+  const scheduleLayoutSave = useCallback((current: Model) => {
+    // Debounced 500ms to avoid thrashing on rapid panel ops / drag frames.
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
       const activeTabId = useLayoutStore.getState().activeTabId;
-      const savedLayout = useLayoutStore.getState().getTabLayout(activeTabId);
-
-      if (savedLayout) {
-        // Check if the setup wizard left a pending preset request instead of a
-        // real serialized layout.
-        const pendingPreset = (savedLayout as Record<string, unknown>).__pendingPreset;
-        if (typeof pendingPreset === "string") {
-          // Clear the placeholder and apply the chosen preset.
-          useLayoutStore.getState().saveTabLayout(activeTabId, {});
-          applyPreset(event.api, pendingPreset);
-        } else {
-          try {
-            // Restore the persisted layout for this workspace tab.
-            // Cast through unknown because we store as Record<string,unknown> in Zustand.
-            event.api.fromJSON(savedLayout as unknown as Parameters<typeof event.api.fromJSON>[0]);
-          } catch {
-            // Corrupted saved layout — apply skill-appropriate default
-            const skillPreset = getDefaultPresetId(level);
-            if (skillPreset === "beginner-core") {
-              applyBeginnerLayout(event.api);
-            } else {
-              applyPreset(event.api, skillPreset);
-            }
-          }
-        }
-      } else {
-        // No layout saved yet — apply the skill-appropriate default preset.
-        // Beginner: 5 core widgets (indexstrip, chart, watchlist, orderpad, positions)
-        // Intermediate: Market Watch preset
-        // Advanced: Scalper Zone preset
-        const skillPreset = getDefaultPresetId(level);
-        if (skillPreset === "beginner-core") {
-          applyBeginnerLayout(event.api);
-        } else {
-          applyPreset(event.api, skillPreset);
-        }
-      }
-    },
-    // level intentionally omitted — we only use it for the initial layout decision.
-    // Re-running onDockviewReady on every skill change would reset the layout.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setDockviewApi, applyDockviewAria]
-  );
-
-  // Cleanup d1/d2/d4 (onReady subscriptions) on unmount.
-  useEffect(() => {
-    return () => {
-      readyDisposablesRef.current.forEach((d) => d.dispose());
-      readyDisposablesRef.current = [];
-      if (ariaRafRef.current !== undefined) cancelAnimationFrame(ariaRafRef.current);
-      const mountedApi = mountedDockviewApiRef.current;
-      if (mountedApi && useLayoutStore.getState().dockviewApi === mountedApi) {
-        setDockviewApi(null);
-      }
-      mountedDockviewApiRef.current = null;
-    };
-  }, [setDockviewApi]);
-
-  // Auto-save layout on changes (debounced 500ms to avoid thrashing on rapid panel ops).
-  // d3 is managed independently of the onReady disposables so its cleanup
-  // does not accidentally dispose d1/d2/d4.
-  useEffect(() => {
-    const api = useLayoutStore.getState().dockviewApi;
-    if (!api) return;
-    const d3 = api.onDidLayoutChange(() => {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        const activeTabId = useLayoutStore.getState().activeTabId;
-        const layout = api.toJSON();
-        useLayoutStore.getState().saveTabLayout(activeTabId, layout as unknown as Record<string, unknown>);
-      }, 500);
-    });
-    saveDisposableRef.current = d3;
-    return () => {
-      saveDisposableRef.current?.dispose();
-      saveDisposableRef.current = null;
-      clearTimeout(saveTimerRef.current);
-    };
+      useLayoutStore.getState().saveTabLayout(
+        activeTabId,
+        current.toJson() as unknown as Record<string, unknown>,
+      );
+    }, 500);
   }, []);
+
+  // Dispatch active-widget context for AITutorPill whenever the focused
+  // panel changes. AITutorPill subscribes via
+  // window.addEventListener("flinttrade:active-widget").
+  const broadcastActiveWidget = useCallback((current: Model) => {
+    const activeId = current.getActiveTabset()?.getSelectedNode()?.getId() ?? null;
+    if (activeId === lastActiveWidgetRef.current) return;
+    lastActiveWidgetRef.current = activeId;
+    window.dispatchEvent(new CustomEvent("flinttrade:active-widget", { detail: activeId }));
+  }, []);
+
+  // Explicit loads replace the model instance (restore / preset / clear).
+  const loadModel = useCallback((next: Model) => {
+    modelRef.current = next;
+    setModel(next);
+    setPanelCount(countTabs(next));
+    broadcastActiveWidget(next);
+    scheduleLayoutSave(next);
+  }, [broadcastActiveWidget, scheduleLayoutSave]);
+
+  // In-place mutations (drags, adds, closes, selects, param updates) arrive
+  // through the Layout host's onModelChange.
+  const handleModelChange = useCallback((changed: Model) => {
+    setPanelCount(countTabs(changed));
+    broadcastActiveWidget(changed);
+    scheduleLayoutSave(changed);
+  }, [broadcastActiveWidget, scheduleLayoutSave]);
+
+  // Mount: restore the active workspace tab (or apply the skill default),
+  // then hand the workspace api to the layout store for chrome consumers
+  // (WidgetPicker, AppLayout, the command palette's addWidget events).
+  useEffect(() => {
+    const store = useLayoutStore.getState();
+    const activeTabId = store.activeTabId;
+    const savedLayout = store.getTabLayout(activeTabId);
+
+    const defaultJson = () =>
+      buildPresetJsonById(getDefaultPresetId(level)) ?? buildPresetJsonById("market-watch");
+
+    let initialModel: Model;
+    const pendingPreset = savedLayout
+      ? (savedLayout as Record<string, unknown>).__pendingPreset
+      : undefined;
+    if (typeof pendingPreset === "string") {
+      // The setup wizard left a preset request instead of a real layout.
+      initialModel = createWorkspaceModel(buildPresetJsonById(pendingPreset) ?? defaultJson());
+      // Persist the resolved layout synchronously so the request is consumed
+      // exactly once (StrictMode double-mount replays this effect).
+      store.saveTabLayout(
+        activeTabId,
+        initialModel.toJson() as unknown as Record<string, unknown>,
+      );
+    } else if (savedLayout && isFlexLayoutDocument(savedLayout)) {
+      // Restore the persisted layout; corrupt documents fall back to the
+      // skill-appropriate default preset.
+      initialModel = tryCreateWorkspaceModel(savedLayout) ?? createWorkspaceModel(defaultJson());
+    } else {
+      // No layout saved yet — or a pre-migration Dockview document, which is
+      // not restorable — apply the skill-appropriate default preset.
+      // Beginner: 5 core widgets; Intermediate: Market Watch; Advanced: Scalper Zone.
+      initialModel = createWorkspaceModel(defaultJson());
+    }
+    loadModel(initialModel);
+
+    const api = createWorkspaceApi(() => modelRef.current ?? initialModel, loadModel);
+    setWorkspaceApi(api);
+    return () => {
+      clearTimeout(saveTimerRef.current);
+      if (useLayoutStore.getState().workspaceApi === api) {
+        setWorkspaceApi(null);
+      }
+      modelRef.current = null;
+    };
+    // level intentionally omitted — we only use it for the initial layout
+    // decision. Re-running on every skill change would reset the layout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadModel, setWorkspaceApi]);
 
   // Listen for the custom event dispatched by DailyWelcome's "Open Trade Review" link,
   // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).
@@ -690,21 +616,16 @@ export default function TerminalRoute() {
       const widgetId = detail?.widgetId;
       if (!widgetId || !(widgetId in widgetComponents)) return;
 
-      const api = useLayoutStore.getState().dockviewApi;
+      const api = useLayoutStore.getState().workspaceApi;
       if (!api) return;
 
       const meta = widgetCatalog.find((widget) => widget.id === widgetId);
-      const panelOptions: Parameters<typeof api.addPanel>[0] = {
+      api.addPanel({
         id: `${widgetId}-${Date.now()}`,
         component: widgetId,
         title: detail.title ?? meta?.name ?? widgetId,
-      };
-
-      if (detail.props) {
-        panelOptions.params = detail.props;
-      }
-
-      api.addPanel(panelOptions);
+        ...(detail.props ? { params: detail.props } : {}),
+      });
     }
 
     window.addEventListener("flinttrade:addWidget", onAddWidget);
@@ -725,7 +646,7 @@ export default function TerminalRoute() {
         hintId="trade-shortcuts"
         text="Press Ctrl+K to open the command palette. Use X to exit all positions and C to cancel all orders."
       />
-      {/* Main content: Dockview canvas OR full-page tool */}
+      {/* Main content: workspace canvas OR full-page tool */}
       {activeTool && ToolComponent ? (
         <div className="flex-1 overflow-auto">
           <Suspense
@@ -751,7 +672,7 @@ export default function TerminalRoute() {
         /* ------------------------------------------------------------------ *
          * Resizable panel shell — vertical outer split + horizontal inner split
          * Bottom panel is collapsed by default (collapsedSize={0}).
-         * Dockview MUST sit inside overflow-hidden to prevent sash drift.
+         * The workspace canvas MUST sit inside overflow-hidden to prevent splitter drift.
          * ------------------------------------------------------------------ */
         <Group
           orientation="vertical"
@@ -759,7 +680,7 @@ export default function TerminalRoute() {
           defaultLayout={vLayout}
           onLayoutChanged={onVLayoutChanged}
         >
-          {/* ---- Main row: dockview + right panel ---- */}
+          {/* ---- Main row: workspace canvas + right panel ---- */}
           <Panel id="trade-main" defaultSize={75} minSize={40}>
             <Group
               orientation="horizontal"
@@ -767,21 +688,25 @@ export default function TerminalRoute() {
               defaultLayout={hLayout}
               onLayoutChanged={onHLayoutChanged}
             >
-              {/* Center: Dockview canvas */}
+              {/* Center: FlexLayout canvas */}
               <Panel id="trade-dockview">
-                {/* overflow-hidden is mandatory — Dockview measures its parent
-                    to compute sash positions. Without it, height calculations break. */}
+                {/* overflow-hidden is mandatory — the layout engine measures its
+                    parent to compute splitter positions. The theme class must sit
+                    on an ancestor of .flexlayout__layout, and the inline CSS-var
+                    overrides cascade down into it. */}
                 <div
-                  className="h-full w-full overflow-hidden relative"
+                  className={`h-full w-full overflow-hidden relative ${flexThemeClass}`}
                   data-tour-target="workspace"
-                  style={dockviewStyle}
+                  style={flexThemeStyle}
                 >
-                  <DockviewReact
-                    className={dockviewThemeClass}
-                    onReady={onDockviewReady}
-                    components={widgetComponents}
-                    singleTabMode="fullwidth"
-                  />
+                  {model && (
+                    <Layout
+                      model={model}
+                      factory={flexLayoutFactory}
+                      onModelChange={handleModelChange}
+                      realtimeResize
+                    />
+                  )}
                   {/* Empty-state overlay: shown when the canvas has no open panels */}
                   {panelCount === 0 && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">

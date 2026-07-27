@@ -47,8 +47,8 @@ describe("design-system extraction contract", () => {
     const terminalCss = readRepoFile("packages/apps/terminal/src/terminal.css");
 
     for (const terminalOnlySelector of [
-      ".dockview-theme-dark",
-      ".dockview-theme-light",
+      ".flexlayout__theme_dark",
+      ".flexlayout__theme_light",
       "[data-separator]",
       "body {",
       "*:focus-visible",

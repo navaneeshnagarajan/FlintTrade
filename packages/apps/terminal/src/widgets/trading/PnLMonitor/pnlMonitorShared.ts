@@ -21,7 +21,7 @@ import { isMarketHours } from "@/lib/market";
 import type { Position } from "@/types/api";
 
 // ---------------------------------------------------------------------------
-// View mode (Dockview panel params)
+// View mode (workspace panel params)
 // ---------------------------------------------------------------------------
 
 /** Presentation of the P&L plane. `live` is both retired widgets' home view. */
@@ -33,7 +33,7 @@ function isPnLMonitorView(value: unknown): value is PnLMonitorView {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to live. */
+/** Resolves the `params.view` panel parameter, defaulting to live. */
 export function resolvePnLMonitorView(value: unknown): PnLMonitorView {
   return isPnLMonitorView(value) ? value : "live";
 }

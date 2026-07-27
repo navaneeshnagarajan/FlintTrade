@@ -106,7 +106,7 @@ export function persistSetupChoices(choices: SetupChoices): string {
 
   const wizardPreset = getPresetName(experience, interests);
   const actualPresetId = mapWizardPreset(wizardPreset);
-  const api = useLayoutStore.getState().dockviewApi;
+  const api = useLayoutStore.getState().workspaceApi;
   if (api) {
     useLayoutStore.getState().applyPreset(actualPresetId);
   } else {

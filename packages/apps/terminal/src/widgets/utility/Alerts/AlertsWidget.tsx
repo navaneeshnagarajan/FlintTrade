@@ -7,7 +7,7 @@
  *   - Alerts persisted to localStorage (`flinttrade:alerts`)
  *   - LTP polling via OpenAlgo REST (5s market hours, 60s off-hours)
  *   - Auto-transitions armed → triggered when price condition is met
- *   - Compact Dockview-panel layout using FlintTrade design tokens
+ *   - Compact workspace-panel layout using FlintTrade design tokens
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";

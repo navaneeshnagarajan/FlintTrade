@@ -76,7 +76,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 // ---------------------------------------------------------------------------
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import OIChartWidget from "../OIChartWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -87,7 +87,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 function renderWidget(params: Record<string, unknown> = {}) {
-  return render(<OIChartWidget {...makeDockviewPanelProps({ params })} />, { wrapper });
+  return render(<OIChartWidget {...makeWidgetPanelProps({ params })} />, { wrapper });
 }
 
 function deferred<T>() {
@@ -159,9 +159,9 @@ describe("OI Analytics — shell and bars view", () => {
     const updateParameters = vi.fn();
     render(
       <OIChartWidget
-        {...makeDockviewPanelProps({
+        {...makeWidgetPanelProps({
           params: { view: "bars" },
-          api: { updateParameters } as unknown as ReturnType<typeof makeDockviewPanelProps>["api"],
+          api: { updateParameters } as unknown as ReturnType<typeof makeWidgetPanelProps>["api"],
         })}
       />,
       { wrapper },

@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -54,7 +54,7 @@ import OrdersWidget, { isOpenOrderStatus } from "../OrdersWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 function renderWidget() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

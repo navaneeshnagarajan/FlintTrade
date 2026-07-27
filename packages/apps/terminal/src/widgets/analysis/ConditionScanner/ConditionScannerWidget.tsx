@@ -53,7 +53,7 @@ import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react";
 import {
   Radar, Loader2, Play, RefreshCw, TrendingUp, TrendingDown, Plus, ArrowUpRight,
 } from "lucide-react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   useReactTable,
@@ -95,7 +95,7 @@ interface ConditionScannerPanelParams {
   scan?: string;
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to scans. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to scans. */
 function resolveView(view: string | undefined): ScannerView {
   return view === "sectors" ? "sectors" : "scans";
 }
@@ -417,7 +417,7 @@ function sectorColumns(): ColumnDef<SectorMoverRow, unknown>[] {
 // Widget
 // ---------------------------------------------------------------------------
 
-function ConditionScannerWidget(props: IDockviewPanelProps) {
+function ConditionScannerWidget(props: WidgetProps) {
   const panelParams = props.params as ConditionScannerPanelParams | undefined;
   const initialScan = typeof panelParams?.scan === "string" ? panelParams.scan : "";
 

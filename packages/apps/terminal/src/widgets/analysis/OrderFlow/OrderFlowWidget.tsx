@@ -14,7 +14,7 @@
  * left as a red bar. The POC (Point of Control — highest total volume) is
  * highlighted per column with an amber fill and border.
  *
- * The initial view mode comes from the Dockview panel parameter `params.view`
+ * The initial view mode comes from the workspace panel parameter `params.view`
  * (defaulting to "footprint"), which is how the retired `footprint` widget id
  * resolves to its original delta presentation. Toggling the view writes the
  * choice back into the panel parameters so saved layouts round-trip.
@@ -80,7 +80,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { useOrderFlow } from "@/hooks/useOrderFlow";
 import type { FootprintBucket } from "@/hooks/useOrderFlow";
 import { getOrderFlowDataState } from "@/services/ftApi.data";
@@ -133,7 +133,7 @@ function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to footprint. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to footprint. */
 function resolveViewMode(value: unknown): ViewMode {
   return isViewMode(value) ? value : "footprint";
 }
@@ -782,7 +782,7 @@ const VIEW_MODE_LABELS: Record<ViewMode, string> = {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-function OrderFlowWidget(props: IDockviewPanelProps) {
+function OrderFlowWidget(props: WidgetProps) {
   const panelParams = props.params as OrderFlowPanelParams | undefined;
   const panelSymbol = panelParams?.symbol;
   const panelExchange = panelParams?.exchange;

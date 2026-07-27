@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks — factory functions only; no variable references (hoisting safety)
@@ -33,7 +33,7 @@ import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import QuickTradeWidget from "../QuickTradeWidget";
 
 function renderQuickTrade(params: Record<string, unknown> = {}) {
-  return render(<QuickTradeWidget {...makeDockviewPanelProps({ params })} />);
+  return render(<QuickTradeWidget {...makeWidgetPanelProps({ params })} />);
 }
 
 beforeEach(() => {
@@ -76,7 +76,7 @@ describe("QuickTradeWidget", () => {
 
     render(
       <Provider store={store}>
-        <QuickTradeWidget {...makeDockviewPanelProps({ params: {} })} />
+        <QuickTradeWidget {...makeWidgetPanelProps({ params: {} })} />
       </Provider>,
     );
 

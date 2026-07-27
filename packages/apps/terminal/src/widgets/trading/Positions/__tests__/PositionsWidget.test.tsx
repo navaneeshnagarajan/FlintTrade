@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // Force DEV mode so ftApi.helpers' getBase() returns "/ft-api" — the convert
 // and exit-all actions go through the real helpers with a stubbed fetch.
@@ -163,11 +163,11 @@ function mockBrokerAccountMatch(
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 /** Panel props that open the widget on one of the two absorbed views. */
 function viewProps(view: "table" | "net" | "heat") {
-  return makeDockviewPanelProps<Record<string, unknown>>({ params: { view } });
+  return makeWidgetPanelProps<Record<string, unknown>>({ params: { view } });
 }
 
 function queryResult(overrides = {}) {

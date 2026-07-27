@@ -76,7 +76,7 @@ export function AboutSection() {
               {[
                 ["Version",  APP_VERSION_TAG],
                 ["React",    "19"          ],
-                ["Dockview", "5.1"         ],
+                ["FlexLayout", "0.10"      ],
                 ["License",  "AGPL-3.0"   ],
               ].map(([key, val]) => (
                 <tr key={key} className="border-b border-border-default last:border-0">

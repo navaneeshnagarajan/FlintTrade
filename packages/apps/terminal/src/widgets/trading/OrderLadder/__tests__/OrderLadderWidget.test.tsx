@@ -757,7 +757,7 @@ describe("OrderLadderWidget exchange picker", () => {
     expect(screen.getByLabelText("Exchange").textContent).toBe("NSE_FO");
   });
 
-  it("accepts symbol / exchange / tick from Dockview panel params", () => {
+  it("accepts symbol / exchange / tick from workspace panel params", () => {
     mockMode.value = "live";
     mockWsTicks.value = { "NSE_INDEX:NIFTY": { ltp: 100 } };
     render(<OrderLadderWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", tick: 0.05 }} />);

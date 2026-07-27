@@ -6,7 +6,7 @@
  * (exchange, entry/exit prices, realised P&L, fees, strategy) and per-fill
  * screenshot annotations ported from the Trade Journal tool.
  *
- * This is a thin Dockview wrapper; all behaviour lives in the embeddable
+ * This is a thin workspace-panel wrapper; all behaviour lives in the embeddable
  * {@link FillsTable}, which the Trade Review tool reuses for its Log tab.
  */
 

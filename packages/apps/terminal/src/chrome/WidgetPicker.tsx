@@ -330,8 +330,8 @@ function LockedNotice({ widgetName, onDismiss }: LockedNoticeProps) {
 }
 
 /**
- * WidgetPicker -- shadcn Dialog for adding widgets to the Dockview canvas.
- * Uses dockviewApi from layoutStore to add panels directly.
+ * WidgetPicker -- shadcn Dialog for adding widgets to the workspace canvas.
+ * Uses workspaceApi from layoutStore to add panels directly.
  * Reads feature gate status per widget: locked widgets show a lock icon and
  * inform the user how to unlock; preview widgets show a subtle "Preview" badge.
  *
@@ -340,7 +340,7 @@ function LockedNotice({ widgetName, onDismiss }: LockedNoticeProps) {
  * without touching the feature-gate system.
  */
 export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPickerProps) {
-  const dockviewApi = useLayoutStore((s) => s.dockviewApi);
+  const workspaceApi = useLayoutStore((s) => s.workspaceApi);
   const [lockedNotice, setLockedNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -359,15 +359,15 @@ export default function WidgetPicker({ isOpen, onClose, allowedIds }: WidgetPick
   }, [isOpen]);
 
   const handleAddWidget = useCallback((widget: WidgetMeta) => {
-    if (!dockviewApi) return;
+    if (!workspaceApi) return;
     const panelId = `${widget.id}-${Date.now()}`;
-    dockviewApi.addPanel({
+    workspaceApi.addPanel({
       id: panelId,
       component: widget.id,
       title: widget.name,
     });
     onClose();
-  }, [dockviewApi, onClose]);
+  }, [workspaceApi, onClose]);
 
   const handleLocked = (widgetName: string) => {
     setLockedNotice(widgetName);

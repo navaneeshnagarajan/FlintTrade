@@ -247,7 +247,7 @@ describe("useWorkspaceLifecycle.newFromTemplate", () => {
     name: "Scalper Zone",
     description: "Test preset",
     icon: "Zap",
-    apply: vi.fn(),
+    build: vi.fn(() => ({ layout: { type: "row" as const, children: [] } })),
   };
 
   it("calls addTab with the preset name", () => {

@@ -2,7 +2,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 vi.mock("@flinttrade/design-system", () => ({
   FlintMultiLineChart: () => <div data-testid="density-chart" />,
@@ -57,13 +57,13 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 /** Default panel props — density view, the widget's default presentation. */
-function densityProps(overrides?: Parameters<typeof makeDockviewPanelProps>[0]) {
-  return makeDockviewPanelProps(overrides);
+function densityProps(overrides?: Parameters<typeof makeWidgetPanelProps>[0]) {
+  return makeWidgetPanelProps(overrides);
 }
 
 /** Panel props carrying the retired `gex` id's view parameter. */
-function exposureProps(overrides?: Parameters<typeof makeDockviewPanelProps>[0]) {
-  return makeDockviewPanelProps({ params: { view: "exposure" }, ...overrides });
+function exposureProps(overrides?: Parameters<typeof makeWidgetPanelProps>[0]) {
+  return makeWidgetPanelProps({ params: { view: "exposure" }, ...overrides });
 }
 
 const IDLE_QUERY = {
@@ -376,7 +376,7 @@ describe("Dealer Gamma widget — view mode", () => {
 
   it("falls back to the density view for an unrecognised params.view", async () => {
     render(
-      <GammaDensityWidget {...makeDockviewPanelProps({ params: { view: "candlestick" } })} />,
+      <GammaDensityWidget {...makeWidgetPanelProps({ params: { view: "candlestick" } })} />,
       { wrapper },
     );
 
@@ -386,7 +386,7 @@ describe("Dealer Gamma widget — view mode", () => {
 
   it("persists a view switch into the panel params", async () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({ params: { view: "density" } });
+    const props = makeWidgetPanelProps({ params: { view: "density" } });
     render(
       <GammaDensityWidget {...props} api={{ ...props.api, updateParameters }} />,
       { wrapper },

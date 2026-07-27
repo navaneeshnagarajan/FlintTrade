@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { reconciliationKeys } from "@/lib/reconciliationApi";
 import type {
   ReconciliationOutcomesResult,
@@ -96,7 +96,7 @@ import ReconciliationWidget from "./ReconciliationWidget";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 function makeJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -397,7 +397,7 @@ describe("ReconciliationWidget", () => {
     liveOutcomes = [makeOutcome({ adapter_id: "upstox", account_id: "ACC2" })];
     rerender(
       <ReconciliationWidget
-        {...makeDockviewPanelProps({ params: { revision: 1 } })}
+        {...makeWidgetPanelProps({ params: { revision: 1 } })}
       />,
     );
     expect(screen.getByRole("alertdialog")).toHaveTextContent(
@@ -407,7 +407,7 @@ describe("ReconciliationWidget", () => {
     liveOutcomes = [];
     rerender(
       <ReconciliationWidget
-        {...makeDockviewPanelProps({ params: { revision: 2 } })}
+        {...makeWidgetPanelProps({ params: { revision: 2 } })}
       />,
     );
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -1141,7 +1141,7 @@ describe("ReconciliationWidget", () => {
     };
     rerender(
       <ReconciliationWidget
-        {...makeDockviewPanelProps({ params: { refreshGeneration: 1 } })}
+        {...makeWidgetPanelProps({ params: { refreshGeneration: 1 } })}
       />,
     );
 

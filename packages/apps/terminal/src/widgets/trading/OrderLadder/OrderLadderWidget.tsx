@@ -34,7 +34,7 @@
 
 import { useState, useMemo, useCallback, useEffect, memo } from "react";
 import { useAtomValue } from "jotai";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { ArrowUpDown, X, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
@@ -341,7 +341,7 @@ function LevelRow({ level, isCenter, order, maxQty, qty, disabled, onBid, onAsk,
 // Main widget
 // ---------------------------------------------------------------------------
 
-/** Panel parameters (Dockview `params`) this widget understands. */
+/** Panel parameters (workspace `params`) this widget understands. */
 interface OrderLadderPanelParams {
   symbol?: string;
   exchange?: string;
@@ -349,7 +349,7 @@ interface OrderLadderPanelParams {
   tick?: number;
 }
 
-type Props = Partial<IDockviewPanelProps> & OrderLadderPanelParams;
+type Props = Partial<WidgetProps> & OrderLadderPanelParams;
 
 function OrderLadderWidget(props: Props) {
   const panelParams = props.params as OrderLadderPanelParams | undefined;

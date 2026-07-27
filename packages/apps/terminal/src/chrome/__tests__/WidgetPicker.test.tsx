@@ -13,7 +13,7 @@ import "@testing-library/jest-dom";
 // Layout store
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ dockviewApi: null }),
+    selector({ workspaceApi: null }),
 }));
 
 // Widget catalog — provide a representative test catalog

@@ -2,19 +2,25 @@
  * workspacePresets.ts
  *
  * Defines the built-in workspace layout presets for the FlintTrade terminal.
- * Each preset is applied programmatically via Dockview's `addPanel()` API so
- * that panels are positioned relative to each other — no serialized JSON is
- * stored, which means presets stay stable across Dockview version upgrades.
+ * Each preset is a pure builder returning a FlexLayout `IJsonModel` document
+ * (rows → tabsets → tabs, explicit weights everywhere). Builders run fresh on
+ * every apply so panel ids are unique per application, and no serialised
+ * library-version-specific state is stored in this file — presets stay stable
+ * across FlexLayout upgrades.
  *
- * Direction reference (Dockview):
- *   "right"  — new panel opens to the right of the reference panel
- *   "below"  — new panel opens below the reference panel
- *   "left"   — new panel opens to the left of the reference panel
- *   "above"  — new panel opens above the reference panel
- *   "within" — new panel added as a new tab inside the same group
+ * Geometry reference (FlexLayout): the root row lays children out
+ * HORIZONTALLY; a row nested inside it lays out VERTICALLY, and so on,
+ * alternating by depth. Weights are relative within one row.
  */
 
-import type { DockviewApi } from "dockview-react";
+import type { IJsonModel } from "flexlayout-react";
+import {
+  rowJson,
+  tabJson,
+  tabsetJson,
+  workspaceJson,
+  type WorkspaceApi,
+} from "@/layout/flexLayoutAdapter";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,14 +31,7 @@ export interface WorkspacePreset {
   name: string;
   description: string;
   icon: string; // lucide-react icon name
-  apply: (api: DockviewApi) => void;
-}
-
-// ---------------------------------------------------------------------------
-// Helper: generate a stable-per-call unique panel id
-// ---------------------------------------------------------------------------
-function pid(base: string): string {
-  return `${base}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  build: () => IJsonModel;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,47 +45,22 @@ function pid(base: string): string {
 // │   Positions      │ Scalper  │
 // └──────────────────┴──────────┘
 // ---------------------------------------------------------------------------
-function applyScalperZone(api: DockviewApi): void {
-  const chartId = pid("chart");
-  const orderPadId = pid("orderpad");
-  const depthId = pid("orderladder");
-  const positionsId = pid("positions");
-  const scalperId = pid("scalper");
-
-  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
-
-  api.addPanel({
-    id: orderPadId,
-    component: "orderpad",
-    title: "Order Pad",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 280,
-  });
-
-  api.addPanel({
-    id: depthId,
-    component: "orderladder",
-    // NSE tick puts each broker level on its own row — the retired
-    // Depth widget\'s 5-level table.
-    params: { tick: 0.05 },
-    title: "DOM / Ladder",
-    position: { referencePanel: orderPadId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 200,
-  });
-
-  api.addPanel({
-    id: scalperId,
-    component: "scalper",
-    title: "Scalper",
-    position: { referencePanel: positionsId, direction: "right" },
-  });
+function buildScalperZone(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(75, [
+        tabsetJson(70, [tabJson("chart", "Chart")]),
+        tabsetJson(30, [tabJson("positions", "Positions")]),
+      ]),
+      rowJson(25, [
+        tabsetJson(35, [tabJson("orderpad", "Order Pad")]),
+        // NSE tick puts each broker level on its own row — the retired
+        // Depth widget's 5-level table.
+        tabsetJson(35, [tabJson("orderladder", "DOM / Ladder", { params: { tick: 0.05 } })]),
+        tabsetJson(30, [tabJson("scalper", "Scalper")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -100,49 +74,22 @@ function applyScalperZone(api: DockviewApi): void {
 // │  Positions   │   Straddle    │
 // └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
-function applyOptionsDesk(api: DockviewApi): void {
-  const optionChainId = pid("optionchain");
-  const chartId = pid("chart");
-  const greeksId = pid("greeks");
-  const positionsId = pid("positions");
-  const straddleId = pid("straddle");
-
-  api.addPanel({
-    id: optionChainId,
-    component: "optionchain",
-    title: "Option Chain",
-    initialHeight: 320,
-  });
-
-  api.addPanel({
-    id: chartId,
-    component: "chart",
-    title: "Chart",
-    position: { referencePanel: optionChainId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: greeksId,
-    component: "greeks",
-    title: "Greeks",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 200,
-  });
-
-  api.addPanel({
-    id: straddleId,
-    component: "straddle",
-    title: "Straddle",
-    position: { referencePanel: positionsId, direction: "right" },
-  });
+function buildOptionsDesk(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(38, [tabJson("optionchain", "Option Chain")]),
+        rowJson(37, [
+          tabsetJson(62, [tabJson("chart", "Chart")]),
+          tabsetJson(38, [tabJson("greeks", "Greeks")]),
+        ]),
+        rowJson(25, [
+          tabsetJson(62, [tabJson("positions", "Positions")]),
+          tabsetJson(38, [tabJson("straddle", "Straddle")]),
+        ]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -156,41 +103,19 @@ function applyOptionsDesk(api: DockviewApi): void {
 // │  Ticker  │    Indices         │
 // └──────────┴────────────────────┘
 // ---------------------------------------------------------------------------
-function applyMarketWatch(api: DockviewApi): void {
-  const watchlistId = pid("watchlist");
-  const chartId = pid("chart");
-  const tickerId = pid("ticker");
-  const indexStripId = pid("indexstrip");
-
-  api.addPanel({
-    id: watchlistId,
-    component: "watchlist",
-    title: "Watchlist",
-    initialWidth: 280,
-  });
-
-  api.addPanel({
-    id: chartId,
-    component: "chart",
-    title: "Chart",
-    position: { referencePanel: watchlistId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: tickerId,
-    component: "ticker",
-    title: "Ticker",
-    position: { referencePanel: watchlistId, direction: "below" },
-    initialHeight: 200,
-  });
-
-  api.addPanel({
-    id: indexStripId,
-    component: "indexstrip",
-    title: "Indices",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 200,
-  });
+function buildMarketWatch(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(25, [
+        tabsetJson(72, [tabJson("watchlist", "Watchlist")]),
+        tabsetJson(28, [tabJson("ticker", "Ticker")]),
+      ]),
+      rowJson(75, [
+        tabsetJson(72, [tabJson("chart", "Chart")]),
+        tabsetJson(28, [tabJson("indexstrip", "Indices")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -204,47 +129,23 @@ function applyMarketWatch(api: DockviewApi): void {
 // │  Positions   │   News        │
 // └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
-function applyAnalysis(api: DockviewApi): void {
-  const chartId = pid("chart");
-  const oiChartId = pid("oichart");
-  const depthId = pid("orderladder");
-  const positionsId = pid("positions");
-  const newsId = pid("news");
-
-  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
-
-  api.addPanel({
-    id: oiChartId,
-    component: "oichart",
-    title: "OI Chart",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: depthId,
-    component: "orderladder",
-    // NSE tick puts each broker level on its own row — the retired
-    // Depth widget\'s 5-level table.
-    params: { tick: 0.05 },
-    title: "DOM / Ladder",
-    position: { referencePanel: oiChartId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 200,
-  });
-
-  api.addPanel({
-    id: newsId,
-    component: "news",
-    title: "News",
-    position: { referencePanel: positionsId, direction: "right" },
-  });
+function buildAnalysis(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(70, [
+        tabsetJson(70, [tabJson("chart", "Chart")]),
+        rowJson(30, [
+          tabsetJson(60, [tabJson("positions", "Positions")]),
+          tabsetJson(40, [tabJson("news", "News")]),
+        ]),
+      ]),
+      rowJson(30, [
+        tabsetJson(50, [tabJson("oichart", "OI Chart")]),
+        // NSE tick — see Scalper Zone note.
+        tabsetJson(50, [tabJson("orderladder", "DOM / Ladder", { params: { tick: 0.05 } })]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -258,44 +159,22 @@ function applyAnalysis(api: DockviewApi): void {
 // │         Orders               │
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
-function applyRiskMonitor(api: DockviewApi): void {
-  const indexStripId = pid("indexstrip");
-  const riskPanelId = pid("riskdashboard");
-  const mtmMonitorId = pid("pnlmonitor");
-  const positionsId = pid("positions");
-  const ordersId = pid("orders");
-
-  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices" });
-
-  api.addPanel({
-    id: riskPanelId,
-    component: "riskdashboard",
-    title: "Risk",
-    position: { referencePanel: indexStripId, direction: "right" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: mtmMonitorId,
-    component: "pnlmonitor",
-    title: "MTM Monitor",
-    position: { referencePanel: indexStripId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: mtmMonitorId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: ordersId,
-    component: "orders",
-    title: "Orders",
-    position: { referencePanel: mtmMonitorId, direction: "below" },
-    initialHeight: 200,
-  });
+function buildRiskMonitor(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        rowJson(30, [
+          tabsetJson(65, [tabJson("indexstrip", "Indices")]),
+          tabsetJson(35, [tabJson("riskdashboard", "Risk")]),
+        ]),
+        rowJson(45, [
+          tabsetJson(50, [tabJson("pnlmonitor", "MTM Monitor")]),
+          tabsetJson(50, [tabJson("positions", "Positions")]),
+        ]),
+        tabsetJson(25, [tabJson("orders", "Orders")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -309,36 +188,21 @@ function applyRiskMonitor(api: DockviewApi): void {
 // │          Indices             │
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
-function applyInvestorView(api: DockviewApi): void {
-  const chartId = pid("chart");
-  const watchlistId = pid("watchlist");
-  const holdingsId = pid("holdings");
-  const indexStripId = pid("indexstrip");
-
-  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
-
-  api.addPanel({
-    id: watchlistId,
-    component: "watchlist",
-    title: "Watchlist",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 300,
-  });
-
-  api.addPanel({
-    id: holdingsId,
-    component: "holdings",
-    title: "Holdings",
-    position: { referencePanel: watchlistId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: indexStripId,
-    component: "indexstrip",
-    title: "Indices",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 220,
-  });
+function buildInvestorView(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        rowJson(75, [
+          tabsetJson(72, [tabJson("chart", "Chart")]),
+          rowJson(28, [
+            tabsetJson(50, [tabJson("watchlist", "Watchlist")]),
+            tabsetJson(50, [tabJson("holdings", "Holdings")]),
+          ]),
+        ]),
+        tabsetJson(25, [tabJson("indexstrip", "Indices")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -353,194 +217,96 @@ function applyInvestorView(api: DockviewApi): void {
 // │  Move    │                   │
 // └──────────┴───────────────────┘
 // ---------------------------------------------------------------------------
-function applyOptionsAnalysis(api: DockviewApi): void {
-  const optionChainId = pid("optionchain");
-  const ivSkewId = pid("ivsmile");
-  const greeksHeatmapId = pid("greeksheatmap");
-  const impliedMoveId = pid("straddle");
-  const straddlePnlId = pid("straddlepnl");
-
-  api.addPanel({
-    id: optionChainId,
-    component: "optionchain",
-    title: "Option Chain",
-    initialHeight: 320,
-  });
-
-  api.addPanel({
-    id: ivSkewId,
-    component: "ivsmile",
-    // The skew projection is what this preset slot has always shown.
-    params: { view: "skew" },
-    title: "IV Skew",
-    position: { referencePanel: optionChainId, direction: "below" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: greeksHeatmapId,
-    component: "greeksheatmap",
-    title: "Greeks Heatmap",
-    position: { referencePanel: ivSkewId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: impliedMoveId,
-    component: "straddle",
-    params: { view: "impliedmove" },
-    title: "Implied Move",
-    position: { referencePanel: ivSkewId, direction: "below" },
-    initialHeight: 220,
-  });
-
-  api.addPanel({
-    id: straddlePnlId,
-    component: "straddlepnl",
-    title: "Straddle P&L",
-    position: { referencePanel: impliedMoveId, direction: "right" },
-  });
+function buildOptionsAnalysis(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(38, [tabJson("optionchain", "Option Chain")]),
+        rowJson(37, [
+          // The skew projection is what this preset slot has always shown.
+          tabsetJson(35, [tabJson("ivsmile", "IV Skew", { params: { view: "skew" } })]),
+          tabsetJson(65, [tabJson("greeksheatmap", "Greeks Heatmap")]),
+        ]),
+        rowJson(25, [
+          tabsetJson(35, [tabJson("straddle", "Implied Move", { params: { view: "impliedmove" } })]),
+          tabsetJson(65, [tabJson("straddlepnl", "Straddle P&L")]),
+        ]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Preset 8 — Sector View
 //
 // ┌──────────────┬───────────────┐
-// │  Sector Map  │ Sector Perf.  │
-// ├──────────────┼───────────────┤
-// │Market Breadth│ Heat Calendar │
-// ├──────────────┴───────────────┤
-// │     Correlation Matrix       │
-// └──────────────────────────────┘
+// │  Sector Map  │               │
+// ├──────────────┤ Sector Perf.  │
+// │Market Breadth│               │
+// ├──────────────┤               │
+// │ Corr. Matrix │               │
+// └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
-function applySectorView(api: DockviewApi): void {
-  const sectorMapId = pid("marketoverview");
-  const sectorPerfId = pid("marketoverview");
-  const marketBreadthId = pid("marketoverview");
-  const correlationMatrixId = pid("correlationmatrix");
-
-  api.addPanel({
-    id: sectorMapId,
-    component: "marketoverview",
-    title: "Sector Map",
-    params: { tab: "sectors" },
-  });
-
-  api.addPanel({
-    id: sectorPerfId,
-    component: "marketoverview",
-    title: "Sector Performance",
-    params: { tab: "sectors", view: "bars" },
-    position: { referencePanel: sectorMapId, direction: "right" },
-    initialWidth: 360,
-  });
-
-  api.addPanel({
-    id: marketBreadthId,
-    component: "marketoverview",
-    title: "Market Breadth",
-    position: { referencePanel: sectorMapId, direction: "below" },
-    initialHeight: 220,
-  });
-
-
-  api.addPanel({
-    id: correlationMatrixId,
-    component: "correlationmatrix",
-    title: "Correlation Matrix",
-    position: { referencePanel: marketBreadthId, direction: "below" },
-    initialHeight: 200,
-  });
+function buildSectorView(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(62, [
+        tabsetJson(40, [tabJson("marketoverview", "Sector Map", { params: { tab: "sectors" } })]),
+        tabsetJson(35, [tabJson("marketoverview", "Market Breadth", { params: { tab: "breadth" } })]),
+        tabsetJson(25, [tabJson("correlationmatrix", "Correlation Matrix")]),
+      ]),
+      tabsetJson(38, [
+        tabJson("marketoverview", "Sector Performance", { params: { tab: "sectors", view: "bars" } }),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Preset 9 — Order Automation
 //
 // ┌────────────────┬──────────────┐
-// │Strategy Monitor│  Flow Builder│  (tab)
-// │                │  Backtest Lab│
-// ├────────────────┼──────────────┤
-// │Strategy        │ Session Stats│
+// │Strategy Monitor│ Chart (Algo) │
+// ├────────────────┤              │
+// │Strategy        │              │
 // │ Templates      │              │
 // └────────────────┴──────────────┘
+// Flow Builder lives at /automate — the chart stands in as analysis surface.
 // ---------------------------------------------------------------------------
-function applyOrderAutomation(api: DockviewApi): void {
-  const strategyMonitorId = pid("strategymonitor");
-  const flowBuilderId = pid("flowbuilder-tab");
-  const strategyTemplatesId = pid("strategytemplates");
-
-  api.addPanel({
-    id: strategyMonitorId,
-    component: "strategymonitor",
-    title: "Strategy Monitor",
-  });
-
-  // Flow Builder lives at /automate — open chart as a stand-in analysis panel
-  api.addPanel({
-    id: flowBuilderId,
-    component: "chart",
-    title: "Chart (Algo)",
-    position: { referencePanel: strategyMonitorId, direction: "right" },
-    initialWidth: 400,
-  });
-
-  api.addPanel({
-    id: strategyTemplatesId,
-    component: "strategytemplates",
-    title: "Strategy Templates",
-    position: { referencePanel: strategyMonitorId, direction: "below" },
-    initialHeight: 240,
-  });
-
+function buildOrderAutomation(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(55, [
+        tabsetJson(62, [tabJson("strategymonitor", "Strategy Monitor")]),
+        tabsetJson(38, [tabJson("strategytemplates", "Strategy Templates")]),
+      ]),
+      tabsetJson(45, [tabJson("chart", "Chart (Algo)")]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Preset 10 — Portfolio Manager
 //
 // ┌──────────────────┬────────────┐
-// │PortfolioAllocation│Net Position│
-// ├──────────────────┼────────────┤
-// │ Position Heatmap  │RiskDashboard│
-// ├──────────────────┴────────────┤
-// │       Trade Performance        │
-// └────────────────────────────────┘
+// │PortfolioAlloc.   │            │
+// ├──────────┬───────┤NetPosition │
+// │ Heat Map │ Risk  │            │
+// └──────────┴───────┴────────────┘
 // ---------------------------------------------------------------------------
-function applyPortfolioManager(api: DockviewApi): void {
-  const portfolioAllocId = pid("portfolioallocation");
-  const netPositionId = pid("positions");
-  const positionHeatmapId = pid("positions");
-  const riskDashboardId = pid("riskdashboard");
-
-  api.addPanel({
-    id: portfolioAllocId,
-    component: "portfolioallocation",
-    title: "Portfolio Allocation",
-  });
-
-  api.addPanel({
-    id: netPositionId,
-    component: "positions",
-    params: { view: "net" },
-    title: "Net Positions",
-    position: { referencePanel: portfolioAllocId, direction: "right" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: positionHeatmapId,
-    component: "positions",
-    params: { view: "heat" },
-    title: "Position Heat Map",
-    position: { referencePanel: portfolioAllocId, direction: "below" },
-    initialHeight: 220,
-  });
-
-  api.addPanel({
-    id: riskDashboardId,
-    component: "riskdashboard",
-    title: "Risk Dashboard",
-    position: { referencePanel: positionHeatmapId, direction: "right" },
-  });
-
+function buildPortfolioManager(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(65, [
+        tabsetJson(50, [tabJson("portfolioallocation", "Portfolio Allocation")]),
+        rowJson(50, [
+          tabsetJson(60, [tabJson("positions", "Position Heat Map", { params: { view: "heat" } })]),
+          tabsetJson(40, [tabJson("riskdashboard", "Risk Dashboard")]),
+        ]),
+      ]),
+      tabsetJson(35, [tabJson("positions", "Net Positions", { params: { view: "net" } })]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -554,58 +320,21 @@ function applyPortfolioManager(api: DockviewApi): void {
 // │ Market Clock │    News       │
 // └──────────────┴───────────────┘
 // ---------------------------------------------------------------------------
-function applyMarketOverview(api: DockviewApi): void {
-  const marketSummaryId = pid("marketoverview");
-  const globalIndicesId = pid("marketoverview");
-  const economicCalId = pid("economiccalendar");
-  const earningsCalId = pid("earningscalendar");
-  const marketClockId = pid("marketclock");
-  const newsId = pid("news");
-
-  api.addPanel({
-    id: marketSummaryId,
-    component: "marketoverview",
-    title: "Market Summary",
-  });
-
-  api.addPanel({
-    id: globalIndicesId,
-    component: "marketoverview",
-    title: "Global Indices",
-    params: { tab: "indices" },
-    position: { referencePanel: marketSummaryId, direction: "right" },
-    initialWidth: 360,
-  });
-
-  api.addPanel({
-    id: economicCalId,
-    component: "economiccalendar",
-    title: "Economic Calendar",
-    position: { referencePanel: marketSummaryId, direction: "below" },
-    initialHeight: 220,
-  });
-
-  api.addPanel({
-    id: earningsCalId,
-    component: "earningscalendar",
-    title: "Earnings Calendar",
-    position: { referencePanel: economicCalId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: marketClockId,
-    component: "marketclock",
-    title: "Market Clock",
-    position: { referencePanel: economicCalId, direction: "below" },
-    initialHeight: 160,
-  });
-
-  api.addPanel({
-    id: newsId,
-    component: "news",
-    title: "News Feed",
-    position: { referencePanel: marketClockId, direction: "right" },
-  });
+function buildMarketOverview(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(58, [
+        tabsetJson(42, [tabJson("marketoverview", "Market Summary")]),
+        tabsetJson(33, [tabJson("economiccalendar", "Economic Calendar")]),
+        tabsetJson(25, [tabJson("marketclock", "Market Clock")]),
+      ]),
+      rowJson(42, [
+        tabsetJson(42, [tabJson("marketoverview", "Global Indices", { params: { tab: "indices" } })]),
+        tabsetJson(33, [tabJson("earningscalendar", "Earnings Calendar")]),
+        tabsetJson(25, [tabJson("news", "News Feed")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -619,195 +348,85 @@ function applyMarketOverview(api: DockviewApi): void {
 // │          Intraday P&L                │
 // └──────────────────────────────────────┘
 // ---------------------------------------------------------------------------
-function applyQuickScalper(api: DockviewApi): void {
-  const quickTradeId = pid("quicktrade");
-  const depthHeatmapId = pid("domheatmap");
-  const tickSpeedId = pid("tickspeed");
-  const orderLadderId = pid("orderladder");
-  const microstructureId = pid("timesales");
-  const intradayPnlId = pid("pnlmonitor");
-
-  api.addPanel({
-    id: quickTradeId,
-    component: "quicktrade",
-    title: "Quick Trade",
-    initialWidth: 260,
-  });
-
-  api.addPanel({
-    id: depthHeatmapId,
-    component: "domheatmap",
-    title: "DOM Heatmap",
-    // The gamma power-scale is the look the retired Depth Heatmap had.
-    params: { scale: "gamma" },
-    position: { referencePanel: quickTradeId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: tickSpeedId,
-    component: "tickspeed",
-    title: "Tick Speed",
-    position: { referencePanel: depthHeatmapId, direction: "right" },
-    initialWidth: 200,
-  });
-
-  api.addPanel({
-    id: orderLadderId,
-    component: "orderladder",
-    title: "Order Ladder",
-    position: { referencePanel: quickTradeId, direction: "below" },
-    initialHeight: 260,
-  });
-
-  api.addPanel({
-    id: microstructureId,
-    component: "timesales",
-    // The statistics-only view is what this slot has always shown.
-    params: { view: "stats" },
-    title: "Tape & Microstructure",
-    position: { referencePanel: orderLadderId, direction: "right" },
-  });
-
-  api.addPanel({
-    id: intradayPnlId,
-    component: "pnlmonitor",
-    title: "Intraday P&L",
-    position: { referencePanel: orderLadderId, direction: "below" },
-    initialHeight: 180,
-  });
+function buildQuickScalper(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        rowJson(45, [
+          tabsetJson(22, [tabJson("quicktrade", "Quick Trade")]),
+          // The gamma power-scale is the look the retired Depth Heatmap had.
+          tabsetJson(58, [tabJson("domheatmap", "DOM Heatmap", { params: { scale: "gamma" } })]),
+          tabsetJson(20, [tabJson("tickspeed", "Tick Speed")]),
+        ]),
+        rowJson(35, [
+          tabsetJson(30, [tabJson("orderladder", "Order Ladder")]),
+          // The statistics-only view is what this slot has always shown.
+          tabsetJson(70, [tabJson("timesales", "Tape & Microstructure", { params: { view: "stats" } })]),
+        ]),
+        tabsetJson(20, [tabJson("pnlmonitor", "Intraday P&L")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Preset 13 — Everything
 //
 // Every widget in the catalogue, organised into 6 tabbed groups:
-//   Charts | Trading | Options | Analysis | Positions/Risk | Utility
+//   Charts | Trading | Options   (top row)
+//   Analysis | Positions/Risk | Utility   (bottom row)
 //
 // Use this to explore every widget in a single workspace.
 // ---------------------------------------------------------------------------
-function applyEverything(api: DockviewApi): void {
-  // ---------- Column 1: Charts ----------
-  const chartId = pid("chart");
-  api.addPanel({ id: chartId, component: "chart", title: "Chart" });
-
-  for (const comp of [
-    "multitimeframe",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: chartId, direction: "within" },
-    });
-  }
-
-  // ---------- Column 2: Trading core ----------
-  const scalperId = pid("scalper");
-  api.addPanel({
-    id: scalperId,
-    component: "scalper",
-    title: "Scalper",
-    position: { referencePanel: chartId, direction: "right" },
-    initialWidth: 360,
-  });
-
-  for (const comp of [
-    "orderpad", "quicktrade", "orderladder",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: scalperId, direction: "within" },
-    });
-  }
-
-  // ---------- Column 3: Options ----------
-  const optionChainId = pid("optionchain");
-  api.addPanel({
-    id: optionChainId,
-    component: "optionchain",
-    title: "Option Chain",
-    position: { referencePanel: scalperId, direction: "right" },
-    initialWidth: 380,
-  });
-
-  for (const comp of [
-    "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
-    "ivsmile", "volatilitycone",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: optionChainId, direction: "within" },
-    });
-  }
-
-  // ---------- Row 2 left: Analysis ----------
-  // Anchored on the depth heatmap. This slot held `depth` before that widget
-  // merged into the ladder; keeping it as a ladder panel would have opened the
-  // same widget twice, since the Trading group above already adds one.
-  const depthId = pid("domheatmap");
-  api.addPanel({
-    id: depthId,
-    component: "domheatmap",
-    title: "DOM Heatmap",
-    position: { referencePanel: chartId, direction: "below" },
-    initialHeight: 300,
-  });
-
-  for (const comp of [
-    "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs", "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "vwapbands", "pivotpoints", "timesales",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: depthId, direction: "within" },
-    });
-  }
-
-  // ---------- Row 2 center: Positions / Risk ----------
-  const indexStripId = pid("indexstrip");
-  api.addPanel({
-    id: indexStripId,
-    component: "indexstrip",
-    title: "Indices",
-    position: { referencePanel: depthId, direction: "right" },
-  });
-
-  for (const comp of [
-    "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation", "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: indexStripId, direction: "within" },
-    });
-  }
-
-  // ---------- Row 2 right: Utility ----------
-  const watchlistId = pid("watchlist");
-  api.addPanel({
-    id: watchlistId,
-    component: "watchlist",
-    title: "Watchlist",
-    position: { referencePanel: indexStripId, direction: "right" },
-    initialWidth: 320,
-  });
-
-  for (const comp of [
-    "calculator", "news", "ticker", "aiadvisor", "conditionscanner", "alerts", "fundingrate", "currencyconverter", "earningscalendar", "marketoverview", "strategytemplates", "audittrail", "economiccalendar", "reconciliation", "obsidian", "aibackends", "aiteam", "expirycountdown", "marketclock", "tradeidea", "tickspeed",
-  ] as const) {
-    api.addPanel({
-      id: pid(comp),
-      component: comp,
-      title: comp,
-      position: { referencePanel: watchlistId, direction: "within" },
-    });
-  }
+function buildEverything(): IJsonModel {
+  const tabs = (components: readonly string[]) => components.map((c) => tabJson(c, c));
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        rowJson(50, [
+          tabsetJson(28, [tabJson("chart", "Chart"), ...tabs(["multitimeframe"])]),
+          tabsetJson(30, [tabJson("scalper", "Scalper"), ...tabs(["orderpad", "quicktrade", "orderladder"])]),
+          tabsetJson(42, [
+            tabJson("optionchain", "Option Chain"),
+            ...tabs([
+              "oichart", "straddle", "straddlepnl", "greeks", "greeksheatmap",
+              "ivsmile", "volatilitycone",
+            ]),
+          ]),
+        ]),
+        rowJson(50, [
+          // Anchored on the DOM heatmap. This slot held `depth` before that
+          // widget merged into the ladder; a ladder panel here would open the
+          // same widget twice, since the Trading group above already has one.
+          tabsetJson(36, [
+            tabJson("domheatmap", "DOM Heatmap"),
+            ...tabs([
+              "gammadensity", "volsurface", "orderflow", "marketoverview", "correlationpairs",
+              "correlationmatrix", "instrumentcompare", "pcrtrend", "gapanalysis", "vwapbands",
+              "pivotpoints", "timesales",
+            ]),
+          ]),
+          tabsetJson(32, [
+            tabJson("indexstrip", "Indices"),
+            ...tabs([
+              "positions", "orders", "holdings", "fills", "pnlmonitor", "portfolioallocation",
+              "riskdashboard", "actioncenter", "strategymonitor", "tradecopier",
+            ]),
+          ]),
+          tabsetJson(32, [
+            tabJson("watchlist", "Watchlist"),
+            ...tabs([
+              "calculator", "news", "ticker", "aiadvisor", "conditionscanner", "alerts",
+              "fundingrate", "currencyconverter", "earningscalendar", "marketoverview",
+              "strategytemplates", "audittrail", "economiccalendar", "reconciliation",
+              "obsidian", "aibackends", "aiteam", "expirycountdown", "marketclock",
+              "tradeidea", "tickspeed",
+            ]),
+          ]),
+        ]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -829,65 +448,26 @@ function applyEverything(api: DockviewApi): void {
 // index (always a valid symbol) on a 1-minute scalping interval; the trader then
 // loads the live future and the ATM CE/PE strikes into the labelled panels.
 // ---------------------------------------------------------------------------
-function applyOptionsScalper(api: DockviewApi): void {
+function buildOptionsScalper(): IJsonModel {
   const scalpInterval = "1m";
   const index = (symbol: string) => ({
     symbol,
     exchange: "NSE_INDEX",
     interval: scalpInterval,
   });
-
-  const indexId = pid("chart-index");
-  const ceId = pid("chart-ce");
-  const peId = pid("chart-pe");
-  const futuresId = pid("chart-futures");
-  const optionChainId = pid("optionchain");
-
-  // Centre-top: the index (drives entry timing).
-  api.addPanel({
-    id: indexId,
-    component: "chart",
-    title: "Index",
-    params: index("NIFTY"),
-  });
-
-  // Left column: the CE strike chart.
-  api.addPanel({
-    id: ceId,
-    component: "chart",
-    title: "CE Strike",
-    params: index("NIFTY"),
-    position: { referencePanel: indexId, direction: "left" },
-    initialWidth: 380,
-  });
-
-  // Right column: the PE strike chart.
-  api.addPanel({
-    id: peId,
-    component: "chart",
-    title: "PE Strike",
-    params: index("NIFTY"),
-    position: { referencePanel: indexId, direction: "right" },
-    initialWidth: 380,
-  });
-
-  // Centre-bottom: the future, beneath the index.
-  api.addPanel({
-    id: futuresId,
-    component: "chart",
-    title: "Futures",
-    params: index("NIFTY"),
-    position: { referencePanel: indexId, direction: "below" },
-  });
-
-  // Below the PE strike: the option chain with OI interpretation.
-  api.addPanel({
-    id: optionChainId,
-    component: "optionchain",
-    title: "Option Chain",
-    params: { symbol: "NIFTY" },
-    position: { referencePanel: peId, direction: "below" },
-  });
+  return workspaceJson(
+    rowJson(100, [
+      tabsetJson(28, [tabJson("chart", "CE Strike", { params: index("NIFTY") })]),
+      rowJson(44, [
+        tabsetJson(50, [tabJson("chart", "Index", { params: index("NIFTY") })]),
+        tabsetJson(50, [tabJson("chart", "Futures", { params: index("NIFTY") })]),
+      ]),
+      rowJson(28, [
+        tabsetJson(50, [tabJson("chart", "PE Strike", { params: index("NIFTY") })]),
+        tabsetJson(50, [tabJson("optionchain", "Option Chain", { params: { symbol: "NIFTY" } })]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -910,62 +490,31 @@ function applyOptionsScalper(api: DockviewApi): void {
 // chart is pinned via panel params so it holds its instrument instead of
 // following the global watchlist selection; any cell can be re-pointed from its
 // own symbol search, and panels can be closed or dragged for a 1, 2H or 2V
-// arrangement through Dockview itself.
+// arrangement through the layout itself.
 // ---------------------------------------------------------------------------
-function applyMultiChart(api: DockviewApi): void {
+function buildMultiChart(): IJsonModel {
   const gridInterval = "5m";
   const cell = (symbol: string) => ({
     symbol,
     exchange: "NSE_INDEX",
     interval: gridInterval,
   });
-
-  const topLeftId = pid("chart-nifty");
-  const topRightId = pid("chart-banknifty");
-  const bottomLeftId = pid("chart-finnifty");
-  const bottomRightId = pid("chart-midcpnifty");
-
-  // Top-left: the benchmark index.
-  api.addPanel({
-    id: topLeftId,
-    component: "chart",
-    title: "NIFTY",
-    params: cell("NIFTY"),
-  });
-
-  // Top-right.
-  api.addPanel({
-    id: topRightId,
-    component: "chart",
-    title: "BANKNIFTY",
-    params: cell("BANKNIFTY"),
-    position: { referencePanel: topLeftId, direction: "right" },
-  });
-
-  // Bottom-left, beneath the benchmark.
-  api.addPanel({
-    id: bottomLeftId,
-    component: "chart",
-    title: "FINNIFTY",
-    params: cell("FINNIFTY"),
-    position: { referencePanel: topLeftId, direction: "below" },
-  });
-
-  // Bottom-right completes the 2×2.
-  api.addPanel({
-    id: bottomRightId,
-    component: "chart",
-    title: "MIDCPNIFTY",
-    params: cell("MIDCPNIFTY"),
-    position: { referencePanel: topRightId, direction: "below" },
-  });
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(50, [
+        tabsetJson(50, [tabJson("chart", "NIFTY", { params: cell("NIFTY") })]),
+        tabsetJson(50, [tabJson("chart", "FINNIFTY", { params: cell("FINNIFTY") })]),
+      ]),
+      rowJson(50, [
+        tabsetJson(50, [tabJson("chart", "BANKNIFTY", { params: cell("BANKNIFTY") })]),
+        tabsetJson(50, [tabJson("chart", "MIDCPNIFTY", { params: cell("MIDCPNIFTY") })]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Preset registry (exported)
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Preset — Trading Desk (the retired Dashboard widget as a composition)
+// Preset 16 — Trading Desk (the retired Dashboard widget as a composition)
 //
 // ┌──────────────────────────────┐
 // │        Indices strip         │
@@ -975,40 +524,23 @@ function applyMultiChart(api: DockviewApi): void {
 // │           Orders             │
 // └──────────────────────────────┘
 // ---------------------------------------------------------------------------
-function applyTradingDesk(api: DockviewApi): void {
-  const indexStripId = pid("indexstrip");
-  const positionsId = pid("positions");
-  const riskId = pid("riskdashboard");
-  const ordersId = pid("orders");
-
-  api.addPanel({ id: indexStripId, component: "indexstrip", title: "Indices", initialHeight: 150 });
-
-  api.addPanel({
-    id: positionsId,
-    component: "positions",
-    title: "Positions",
-    position: { referencePanel: indexStripId, direction: "below" },
-  });
-
-  api.addPanel({
-    id: riskId,
-    component: "riskdashboard",
-    title: "Risk",
-    position: { referencePanel: positionsId, direction: "right" },
-    initialWidth: 340,
-  });
-
-  api.addPanel({
-    id: ordersId,
-    component: "orders",
-    title: "Orders",
-    position: { referencePanel: positionsId, direction: "below" },
-    initialHeight: 200,
-  });
+function buildTradingDesk(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(20, [tabJson("indexstrip", "Indices")]),
+        rowJson(52, [
+          tabsetJson(65, [tabJson("positions", "Positions")]),
+          tabsetJson(35, [tabJson("riskdashboard", "Risk")]),
+        ]),
+        tabsetJson(28, [tabJson("orders", "Orders")]),
+      ]),
+    ]),
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Preset — Three Panel (CE | Index | PE)
+// Preset 17 — Three Panel (CE | Index | PE)
 //
 // Replaces the retired `threepanel` widget. Three full ChartWidget panels —
 // nearest-expiry ATM CE, the underlying index (wider centre), nearest-expiry
@@ -1016,41 +548,64 @@ function applyTradingDesk(api: DockviewApi): void {
 // moves all three. Each cell keeps the full chart surface (indicators,
 // drawings, replay, per-panel settings) and the layout survives reload.
 // ---------------------------------------------------------------------------
-function applyThreePanel(api: DockviewApi): void {
+function buildThreePanel(): IJsonModel {
   const legInterval = "5m"; // ThreePanel's default interval
   const syncGroup = "three-panel";
+  return workspaceJson(
+    rowJson(100, [
+      tabsetJson(28, [
+        tabJson("chart", "CE", {
+          params: { optionLeg: { underlying: "NIFTY", leg: "CE" }, interval: legInterval, syncGroup },
+        }),
+      ]),
+      tabsetJson(44, [
+        tabJson("chart", "Index", {
+          params: { symbol: "NIFTY", exchange: "NSE_INDEX", interval: legInterval, syncGroup },
+        }),
+      ]),
+      tabsetJson(28, [
+        tabJson("chart", "PE", {
+          params: { optionLeg: { underlying: "NIFTY", leg: "PE" }, interval: legInterval, syncGroup },
+        }),
+      ]),
+    ]),
+  );
+}
 
-  const indexId = pid("chart-index");
-  const ceId = pid("chart-ce");
-  const peId = pid("chart-pe");
-
-  // Centre: the underlying index, wider than the option legs.
-  api.addPanel({
-    id: indexId,
-    component: "chart",
-    title: "Index",
-    params: { symbol: "NIFTY", exchange: "NSE_INDEX", interval: legInterval, syncGroup },
-  });
-
-  // Left: the ATM call.
-  api.addPanel({
-    id: ceId,
-    component: "chart",
-    title: "CE",
-    params: { optionLeg: { underlying: "NIFTY", leg: "CE" }, interval: legInterval, syncGroup },
-    position: { referencePanel: indexId, direction: "left" },
-    initialWidth: 380,
-  });
-
-  // Right: the ATM put.
-  api.addPanel({
-    id: peId,
-    component: "chart",
-    title: "PE",
-    params: { optionLeg: { underlying: "NIFTY", leg: "PE" }, interval: legInterval, syncGroup },
-    position: { referencePanel: indexId, direction: "right" },
-    initialWidth: 380,
-  });
+// ---------------------------------------------------------------------------
+// Beginner core layout (applied for the beginner skill level; not listed in
+// the preset picker — TerminalRoute applies it by id "beginner-core")
+//
+// ┌──────────────────────────────┐
+// │        Indices strip         │
+// ├──────────────────┬───────────┤
+// │      Chart       │ Watchlist │
+// │                  ├───────────┤
+// ├──────────────────┤ Order Pad │
+// │    Positions     │           │
+// └──────────────────┴───────────┘
+// The strip replaces the retired Dashboard widget (its positions/orders
+// tables and funds cards were duplicates of the Positions, Orders and Risk
+// widgets; the index cards were the part a beginner layout needs at a glance).
+// ---------------------------------------------------------------------------
+export function buildBeginnerCore(): IJsonModel {
+  return workspaceJson(
+    rowJson(100, [
+      rowJson(100, [
+        tabsetJson(18, [tabJson("indexstrip", "Indices")]),
+        rowJson(82, [
+          rowJson(75, [
+            tabsetJson(70, [tabJson("chart", "Chart")]),
+            tabsetJson(30, [tabJson("positions", "Positions")]),
+          ]),
+          rowJson(25, [
+            tabsetJson(50, [tabJson("watchlist", "Watchlist")]),
+            tabsetJson(50, [tabJson("orderpad", "Order Pad")]),
+          ]),
+        ]),
+      ]),
+    ]),
+  );
 }
 
 export const WORKSPACE_PRESETS: WorkspacePreset[] = [
@@ -1059,133 +614,142 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     name: "Scalper Zone",
     description: "Chart + Order Pad + DOM / Ladder + Positions + Scalper",
     icon: "Zap",
-    apply: applyScalperZone,
+    build: buildScalperZone,
   },
   {
     id: "options-scalper",
     name: "Options Scalper",
     description: "Four-chart desk — Index + Futures + CE/PE strike charts + Option Chain",
     icon: "Crosshair",
-    apply: applyOptionsScalper,
+    build: buildOptionsScalper,
   },
   {
     id: "multi-chart",
     name: "Multi Chart",
     description: "Four independent charts in a 2×2 grid — NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY",
     icon: "LayoutGrid",
-    apply: applyMultiChart,
+    build: buildMultiChart,
   },
   {
     id: "options-desk",
     name: "Options Desk",
     description: "Option Chain + Chart + Greeks + Positions + Straddle",
     icon: "Grid3x3",
-    apply: applyOptionsDesk,
+    build: buildOptionsDesk,
   },
   {
     id: "market-watch",
     name: "Market Watch",
     description: "Watchlist + Chart + Ticker + Dashboard",
     icon: "Star",
-    apply: applyMarketWatch,
+    build: buildMarketWatch,
   },
   {
     id: "analysis",
     name: "Analysis",
     description: "Chart + OI Analytics + DOM / Ladder + Positions + News",
     icon: "BarChart3",
-    apply: applyAnalysis,
+    build: buildAnalysis,
   },
   {
     id: "risk-monitor",
     name: "Risk Monitor",
     description: "Dashboard + Risk + MTM Monitor + Positions + Orders",
     icon: "ShieldAlert",
-    apply: applyRiskMonitor,
+    build: buildRiskMonitor,
   },
   {
     id: "investor-view",
     name: "Investor View",
     description: "Chart + Watchlist + Holdings + Indices",
     icon: "TrendingUp",
-    apply: applyInvestorView,
+    build: buildInvestorView,
   },
   {
     id: "trading-desk",
     name: "Trading Desk",
     description: "Indices + Positions + Risk + Orders — the retired Dashboard as a composition",
     icon: "LayoutDashboard",
-    apply: applyTradingDesk,
+    build: buildTradingDesk,
   },
   {
     id: "three-panel",
     name: "Three Panel",
     description: "CE | Index | PE — three time-synchronised charts on the nearest-expiry ATM strikes",
     icon: "Columns3",
-    apply: applyThreePanel,
+    build: buildThreePanel,
   },
   {
     id: "options-analysis",
     name: "Options Analysis",
     description: "Option Chain + IV Smile & Skew + Greeks Matrix + Straddle & Implied Move + Straddle P&L",
     icon: "Sigma",
-    apply: applyOptionsAnalysis,
+    build: buildOptionsAnalysis,
   },
   {
     id: "sector-view",
     name: "Sector View",
     description: "Market Overview + Heat Calendar + Correlation Matrix",
     icon: "Map",
-    apply: applySectorView,
+    build: buildSectorView,
   },
   {
     id: "order-automation",
     name: "Order Automation",
     description: "Strategy Monitor + Chart + Strategy Templates + Session Stats",
     icon: "Bot",
-    apply: applyOrderAutomation,
+    build: buildOrderAutomation,
   },
   {
     id: "portfolio-manager",
     name: "Portfolio Manager",
     description: "Portfolio Allocation + Positions (net and heat-map views) + Risk + Trade Performance",
     icon: "PieChart",
-    apply: applyPortfolioManager,
+    build: buildPortfolioManager,
   },
   {
     id: "market-overview",
     name: "Market Overview",
     description: "Market Summary + Global Indices + Economic Calendar + Earnings Calendar + Market Clock + News",
     icon: "Globe",
-    apply: applyMarketOverview,
+    build: buildMarketOverview,
   },
   {
     id: "quick-scalper",
     name: "Quick Scalper",
     description: "Quick Trade + Order Ladder + DOM Heatmap + Tape & Microstructure + Tick Speed + Intraday P&L",
     icon: "Gauge",
-    apply: applyQuickScalper,
+    build: buildQuickScalper,
   },
   {
     id: "everything",
     name: "Everything",
     description: "A broad sweep of the widget catalogue in one workspace — Charts, Trading, Options, Analysis, Positions, Utility",
     icon: "LayoutDashboard",
-    apply: applyEverything,
+    build: buildEverything,
   },
 ];
 
 // ---------------------------------------------------------------------------
-// applyPreset — clear the canvas and apply a preset by id
+// applyPreset — replace the canvas model with a preset by id
 // ---------------------------------------------------------------------------
-export function applyPreset(api: DockviewApi, presetId: string): void {
-  const preset = WORKSPACE_PRESETS.find((p) => p.id === presetId);
-  if (!preset) {
+
+/**
+ * Build the model document for a preset id, or undefined for an unknown id.
+ * `"beginner-core"` resolves to the unlisted beginner layout.
+ */
+export function buildPresetJsonById(presetId: string): IJsonModel | undefined {
+  if (presetId === "beginner-core") return buildBeginnerCore();
+  return WORKSPACE_PRESETS.find((p) => p.id === presetId)?.build();
+}
+
+export function applyPreset(api: WorkspaceApi, presetId: string): void {
+  const json = buildPresetJsonById(presetId);
+  if (!json) {
     console.warn(`[workspacePresets] Unknown preset id: "${presetId}"`);
     return;
   }
-  api.clear();
-  preset.apply(api);
+  api.loadModelJson(json);
 }
 
 // Convenience export: the default startup preset id

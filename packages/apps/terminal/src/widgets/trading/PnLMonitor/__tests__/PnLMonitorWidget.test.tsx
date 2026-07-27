@@ -16,7 +16,7 @@ import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -129,7 +129,7 @@ function renderWidget() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const utils = render(
     <QueryClientProvider client={qc}>
-      <PnLMonitorWidget {...makeDockviewPanelProps()} />
+      <PnLMonitorWidget {...makeWidgetPanelProps()} />
     </QueryClientProvider>,
   );
   return { ...utils, qc };

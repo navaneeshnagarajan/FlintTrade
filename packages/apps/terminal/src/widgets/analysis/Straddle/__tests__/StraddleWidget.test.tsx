@@ -128,12 +128,12 @@ vi.mock("@/hooks/useChartTheme", () => ({
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import StraddleWidget, { computeImpliedMove } from "../StraddleWidget";
 
 /** Renders the widget with a Dockview panel-props stub and optional params. */
 function renderWidget(params: Record<string, unknown> = {}) {
-  return render(<StraddleWidget {...makeDockviewPanelProps({ params })} />);
+  return render(<StraddleWidget {...makeWidgetPanelProps({ params })} />);
 }
 
 /**
@@ -294,7 +294,7 @@ describe("StraddleWidget — implied-move view", () => {
 
   it("persists the chosen view into the panel params", async () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({ params: {} });
+    const props = makeWidgetPanelProps({ params: {} });
     render(<StraddleWidget {...props} api={{ ...props.api, updateParameters }} />);
 
     screen.getByRole("button", { name: "Implied Move" }).click();

@@ -2,14 +2,17 @@
  * TerminalRoute.test.tsx
  *
  * Smoke tests for the /trade workspace route.
- * Mocks dockview-react (canvas-based, not JSDOM-compatible), resizable panels,
- * chrome components, and all stores/hooks.
+ * Stubs the FlexLayout <Layout> view (canvas-heavy, not worth driving in
+ * JSDOM) while keeping the REAL Model and workspace adapter, so layout
+ * state assertions run against genuine FlexLayout documents. Also mocks
+ * resizable panels, chrome components, and all stores/hooks.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { WorkspaceApi } from "@/layout/flexLayoutAdapter";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,8 +26,8 @@ const mockTradingState = vi.hoisted(() => ({
 
 const mockLayoutState = vi.hoisted(() => {
   const state = {
-    setDockviewApi: vi.fn(),
-    dockviewApi: null as Record<string, unknown> | null,
+    setWorkspaceApi: vi.fn(),
+    workspaceApi: null as Record<string, unknown> | null,
     widgetPickerOpen: false,
     setWidgetPickerOpen: vi.fn(),
     presetPickerOpen: false,
@@ -33,24 +36,11 @@ const mockLayoutState = vi.hoisted(() => {
     getTabLayout: vi.fn(() => null),
     saveTabLayout: vi.fn(),
   };
-  state.setDockviewApi = vi.fn((api: Record<string, unknown> | null) => {
-    state.dockviewApi = api;
+  state.setWorkspaceApi = vi.fn((api: Record<string, unknown> | null) => {
+    state.workspaceApi = api;
   });
   return state;
 });
-
-const mockDockviewState = vi.hoisted(() => ({
-  api: null as {
-    panels: unknown[];
-    addPanel: ReturnType<typeof vi.fn>;
-    fromJSON: ReturnType<typeof vi.fn>;
-    toJSON: ReturnType<typeof vi.fn>;
-    onDidAddPanel: ReturnType<typeof vi.fn>;
-    onDidRemovePanel: ReturnType<typeof vi.fn>;
-    onDidActivePanelChange: ReturnType<typeof vi.fn>;
-    onDidLayoutChange: ReturnType<typeof vi.fn>;
-  } | null,
-}));
 
 const mockNavigate = vi.fn();
 const mockGetSafetyConfig = vi.hoisted(() => vi.fn());
@@ -65,26 +55,15 @@ vi.mock("@/services/ftApi", () => ({
   activateKillSwitch: (reason: string) => mockActivateKillSwitch(reason),
 }));
 
-// Dockview — canvas-based, must be fully mocked
-vi.mock("dockview-react", () => ({
-  DockviewReact: ({ onReady }: { onReady: (event: unknown) => void }) => {
-    // Fire onReady synchronously with a minimal stub API
-    const fakeApi = {
-      panels: [],
-      addPanel: vi.fn(),
-      fromJSON: vi.fn(),
-      toJSON: vi.fn().mockReturnValue({}),
-      onDidAddPanel: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-      onDidRemovePanel: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-      onDidActivePanelChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-      onDidLayoutChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-    };
-    mockDockviewState.api = fakeApi;
-    // Schedule onReady in a microtask so the component mounts first
-    Promise.resolve().then(() => onReady({ api: fakeApi }));
-    return <div data-testid="dockview-canvas" />;
-  },
-}));
+// FlexLayout — stub only the canvas view; Model/Actions stay real so the
+// workspace adapter operates on genuine documents.
+vi.mock("flexlayout-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("flexlayout-react")>();
+  return {
+    ...actual,
+    Layout: () => <div data-testid="flexlayout-canvas" />,
+  };
+});
 
 // Resizable panels
 vi.mock("react-resizable-panels", () => ({
@@ -171,8 +150,8 @@ vi.mock("@/hooks/useSkillLevel", () => ({
   useSkillLevel: vi.fn().mockReturnValue("intermediate"),
 }));
 
-vi.mock("@/hooks/useDockviewTheme", () => ({
-  useDockviewTheme: vi.fn().mockReturnValue({}),
+vi.mock("@/hooks/useFlexLayoutTheme", () => ({
+  useFlexLayoutTheme: vi.fn().mockReturnValue({}),
 }));
 
 // Tour
@@ -184,7 +163,8 @@ vi.mock("@/lib/tourDefinitions", () => ({
   TOUR_DEFINITIONS: {},
 }));
 
-// Widget factory
+// Widget factory — the compact workspace renders these directly; the
+// Layout canvas is stubbed, so flexLayoutFactory itself never runs.
 vi.mock("@/layout/widgetFactory", () => ({
   widgetComponents: {
     chart: () => <div data-testid="compact-widget-chart">Chart widget</div>,
@@ -202,11 +182,11 @@ vi.mock("@/layout/widgetFactory", () => ({
       description: "Three synchronised chart panels",
     },
   ],
+  flexLayoutFactory: vi.fn(() => null),
 }));
 
-vi.mock("@/layout/workspacePresets", () => ({
-  applyPreset: vi.fn(),
-}));
+// workspacePresets stays REAL: the mount effect builds the genuine
+// market-watch document (skill level is mocked as intermediate).
 
 // ---------------------------------------------------------------------------
 // Import after mocks
@@ -273,11 +253,10 @@ describe("TerminalRoute", () => {
     mockTradingState.totalPnl = 0;
     mockTradingState.mtmStoploss = 5000;
     mockTradingState.mode = "live";
-    mockLayoutState.dockviewApi = null;
+    mockLayoutState.workspaceApi = null;
     mockLayoutState.widgetPickerOpen = false;
     mockLayoutState.presetPickerOpen = false;
     mockLayoutState.getTabLayout.mockReturnValue(null);
-    mockDockviewState.api = null;
     vi.clearAllMocks();
     mockGetSafetyConfig.mockReset().mockResolvedValue({ ...inactiveSafetyConfig });
     mockActivateKillSwitch.mockReset();
@@ -291,14 +270,16 @@ describe("TerminalRoute", () => {
     expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
   });
 
-  it("clears the mounted Dockview API when the trade route unmounts", async () => {
+  it("registers a workspace api on mount and clears it when the trade route unmounts", async () => {
     const { unmount } = renderTerminalRoute();
 
-    await waitFor(() => expect(mockLayoutState.dockviewApi).toBe(mockDockviewState.api));
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    // A real market-watch document backs the api (4 tabs).
+    expect((mockLayoutState.workspaceApi as unknown as WorkspaceApi).panelCount()).toBe(4);
     unmount();
 
-    expect(mockLayoutState.setDockviewApi).toHaveBeenLastCalledWith(null);
-    expect(mockLayoutState.dockviewApi).toBeNull();
+    expect(mockLayoutState.setWorkspaceApi).toHaveBeenLastCalledWith(null);
+    expect(mockLayoutState.workspaceApi).toBeNull();
   });
 
   it("renders resizable panel structure with separators", () => {
@@ -524,13 +505,13 @@ describe("TerminalRoute", () => {
     expect(screen.getByTestId("preset-picker")).toBeInTheDocument();
   });
 
-  it("uses a tabbed compact workspace instead of the dockview split on narrow screens", () => {
+  it("uses a tabbed compact workspace instead of the docked split on narrow screens", () => {
     setViewportWidth(390);
 
     renderTerminalRoute();
 
     expect(screen.getByTestId("trade-compact-workspace")).toBeInTheDocument();
-    expect(screen.queryByTestId("dockview-canvas")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("flexlayout-canvas")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Chart" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("compact-widget-chart")).toBeInTheDocument();
 
@@ -573,7 +554,9 @@ describe("TerminalRoute", () => {
   it("adds a widget when the command palette dispatches flinttrade:addWidget", async () => {
     renderTerminalRoute();
 
-    await waitFor(() => expect(mockDockviewState.api).not.toBeNull());
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    const api = mockLayoutState.workspaceApi as unknown as WorkspaceApi;
+    const before = api.panelCount();
 
     window.dispatchEvent(
       new CustomEvent("flinttrade:addWidget", {
@@ -581,11 +564,9 @@ describe("TerminalRoute", () => {
       }),
     );
 
-    expect(mockDockviewState.api?.addPanel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "threepanel",
-        title: "Three-Panel Chart",
-      }),
-    );
+    // The real workspace api added a tab to the real model.
+    expect(api.panelCount()).toBe(before + 1);
+    expect(JSON.stringify(api.toJSON())).toContain('"threepanel"');
+    expect(JSON.stringify(api.toJSON())).toContain("Three-Panel Chart");
   });
 });

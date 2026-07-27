@@ -12,7 +12,7 @@ interface PageTransitionProps {
  * Design decisions:
  *   - Pure opacity fade only (no y-axis movement). Y-movement creates a
  *     "popup feel" and causes layout shifts on content-heavy routes.
- *   - /trade is skipped entirely — Dockview manages its own layout and
+ *   - /trade is skipped entirely — FlexLayout manages its own layout and
  *     panel animations; adding a wrapper would conflict.
  *   - AnimatePresence mode="wait" ensures the exiting page finishes before
  *     the entering page mounts, preventing z-index stacking artifacts.
@@ -23,7 +23,7 @@ export default function PageTransition({
   children,
   locationKey,
 }: PageTransitionProps) {
-  // /trade uses Dockview — skip the wrapper entirely.
+  // /trade uses FlexLayout — skip the wrapper entirely.
   const isTradeRoute = locationKey === "/trade";
 
   // Respect OS-level prefers-reduced-motion.

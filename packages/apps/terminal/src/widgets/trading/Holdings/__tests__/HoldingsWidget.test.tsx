@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // Mock useHoldings hook
 const mockRefetch = vi.fn();
@@ -89,19 +89,19 @@ describe("HoldingsWidget", () => {
 
   it("renders without crashing", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
-    const { container } = render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    const { container } = render(<HoldingsWidget {...makeWidgetPanelProps()} />);
     expect(container).toBeTruthy();
   });
 
   it("shows 'No holdings' when data is empty", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
     expect(screen.getByText("No holdings")).toBeInTheDocument();
   });
 
   it("displays holding rows with symbol, qty, and P&L", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     // Symbols should be displayed
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("HoldingsWidget", () => {
 
   it("shows the holdings count in the header", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     expect(screen.getByText("(2)")).toBeInTheDocument();
   });
@@ -127,14 +127,14 @@ describe("HoldingsWidget", () => {
         error: new Error("Network error"),
       }),
     );
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     expect(screen.getByText(/failed to load holdings/i)).toBeInTheDocument();
   });
 
   it("filters holdings by symbol search", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: SAMPLE_HOLDINGS }));
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     const searchInput = screen.getByPlaceholderText(/filter symbol/i);
     fireEvent.change(searchInput, { target: { value: "REL" } });
@@ -152,7 +152,7 @@ describe("HoldingsWidget", () => {
       data: [{ symbol: "NIFTY", quantity: 50, ltp: 100, pnl: 500 }],
     });
     mockDownloadReport.mockResolvedValue(3);
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /export portfolio report to excel/i }));
 
@@ -170,7 +170,7 @@ describe("HoldingsWidget", () => {
   it("emits an alert when there is nothing to export", () => {
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /export portfolio report to excel/i }));
     expect(mockEmit).toHaveBeenCalledWith(
@@ -184,7 +184,7 @@ describe("HoldingsWidget", () => {
     mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUseHoldings.mockReturnValue(queryResult({ data: [] }));
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<HoldingsWidget {...makeDockviewPanelProps()} />);
+    render(<HoldingsWidget {...makeWidgetPanelProps()} />);
 
     expect(mockUseHoldings).toHaveBeenCalledWith({ enabled: false });
     expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });

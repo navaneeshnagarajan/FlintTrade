@@ -11,7 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import type { Dispatch, SetStateAction } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { ohlcvCacheKey } from "@/lib/chartCache";
 
 // ---------------------------------------------------------------------------
@@ -1096,8 +1096,8 @@ describe("ChartWidget per-panel settings scoping", () => {
   const INDICATOR_KEY = "flinttrade:chart:indicator-settings:v1";
   const DISPLAY_KEY = "flinttrade:chart:display-settings:v1";
 
-  function panelProps(id: string): Partial<IDockviewPanelProps> {
-    return { api: { id } as unknown as IDockviewPanelProps["api"] };
+  function panelProps(id: string): Partial<WidgetProps> {
+    return { api: { id } as unknown as WidgetProps["api"] };
   }
 
   beforeEach(() => {

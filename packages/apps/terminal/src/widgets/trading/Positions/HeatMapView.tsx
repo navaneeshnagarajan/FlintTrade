@@ -32,7 +32,7 @@ export const GROUP_LABELS: Record<GroupMode, string> = {
   flat: "Flat",
 };
 
-/** Resolves the Dockview `params.group` panel parameter, defaulting to sector. */
+/** Resolves the `params.group` panel parameter, defaulting to sector. */
 export function resolveGroupMode(value: unknown): GroupMode {
   return typeof value === "string" && (GROUP_MODES as readonly string[]).includes(value)
     ? (value as GroupMode)

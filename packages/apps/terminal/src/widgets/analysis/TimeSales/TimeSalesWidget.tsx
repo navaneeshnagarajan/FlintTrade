@@ -24,7 +24,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { ChevronDown, ChevronRight, ClipboardList, Microscope } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { selectedSymbolAtom } from "@/atoms/marketAtoms";
@@ -62,7 +62,7 @@ const VIEW_LABELS: Record<TapeView, string> = {
   stats: "Statistics-only view",
 };
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to the tape. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to the tape. */
 function resolveTapeView(value: unknown): TapeView {
   return typeof value === "string" && (TAPE_VIEWS as readonly string[]).includes(value)
     ? (value as TapeView)
@@ -276,7 +276,7 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
 
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
-function TimeSalesWidget(props: IDockviewPanelProps) {
+function TimeSalesWidget(props: WidgetProps) {
   const panelParams = props.params as TimeSalesPanelParams | undefined;
   const panelView = panelParams?.view;
   const track = useTrackBehavior();

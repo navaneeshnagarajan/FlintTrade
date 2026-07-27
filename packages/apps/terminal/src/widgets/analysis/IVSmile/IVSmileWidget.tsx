@@ -1,7 +1,7 @@
 /**
  * IVSmileWidget — canonical implied-volatility curve surface for the terminal.
  *
- * Two presentations of ONE fetch, chosen by the Dockview panel parameter
+ * Two presentations of ONE fetch, chosen by the workspace panel parameter
  * `params.view`:
  *   • "smile" (default) — the Plotly call/put IV curves, multi-expiry overlay,
  *     hover readout and ATM reference line.
@@ -51,7 +51,7 @@
 
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
 import { Activity, AlertCircle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { FlintBandedLineChart } from "@flinttrade/design-system";
 import { Input } from "@/components/ui/input";
 import {
@@ -104,7 +104,7 @@ function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to smile. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to smile. */
 function resolveViewMode(value: unknown): ViewMode {
   return isViewMode(value) ? value : "smile";
 }
@@ -277,7 +277,7 @@ interface IVSmilePanelParams {
 // Main widget
 // ---------------------------------------------------------------------------
 
-function IVSmileWidget(props: IDockviewPanelProps) {
+function IVSmileWidget(props: WidgetProps) {
   const panelParams = props.params as IVSmilePanelParams | undefined;
   const panelView = panelParams?.view;
 

@@ -73,7 +73,7 @@ vi.mock("@/stores/themeStore", () => ({
 import { useLightweightChartTheme } from "../useChartTheme";
 import { usePlotlyTheme } from "../usePlotlyTheme";
 import { useGlideTheme } from "../useGlideTheme";
-import { useDockviewTheme } from "../useDockviewTheme";
+import { useFlexLayoutTheme } from "../useFlexLayoutTheme";
 
 // ---------------------------------------------------------------------------
 // useLightweightChartTheme
@@ -242,25 +242,25 @@ describe("useGlideTheme", () => {
 });
 
 // ---------------------------------------------------------------------------
-// useDockviewTheme
+// useFlexLayoutTheme
 // ---------------------------------------------------------------------------
 
-describe("useDockviewTheme", () => {
+describe("useFlexLayoutTheme", () => {
   it("returns a non-empty Record<string, string>", () => {
-    const { result } = renderHook(() => useDockviewTheme());
+    const { result } = renderHook(() => useFlexLayoutTheme());
     expect(typeof result.current).toBe("object");
     expect(Object.keys(result.current).length).toBeGreaterThan(0);
   });
 
-  it("all keys start with --dv-", () => {
-    const { result } = renderHook(() => useDockviewTheme());
+  it("all keys are CSS custom properties", () => {
+    const { result } = renderHook(() => useFlexLayoutTheme());
     for (const key of Object.keys(result.current)) {
-      expect(key.startsWith("--dv-")).toBe(true);
+      expect(key.startsWith("--")).toBe(true);
     }
   });
 
   it("all values are non-empty strings", () => {
-    const { result } = renderHook(() => useDockviewTheme());
+    const { result } = renderHook(() => useFlexLayoutTheme());
     for (const value of Object.values(result.current)) {
       expect(typeof value).toBe("string");
       expect(value.length).toBeGreaterThan(0);
@@ -268,27 +268,28 @@ describe("useDockviewTheme", () => {
   });
 
   it("has background color override", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    expect(result.current["--dv-background-color"]).toBeTruthy();
+    const { result } = renderHook(() => useFlexLayoutTheme());
+    expect(result.current["--color-background"]).toBeTruthy();
   });
 
-  it("has drag-over border color using accent", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    // Accent is #6366f1 — should appear somewhere in drag-over border
-    expect(result.current["--dv-drag-over-border-color"]).toBe("#6366f1");
+  it("has drag affordance colour using accent", () => {
+    const { result } = renderHook(() => useFlexLayoutTheme());
+    // Accent is #6366f1 — the drag edge/outline colour
+    expect(result.current["--color-drag1"]).toBe("#6366f1");
   });
 
-  it("has separator border", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    expect(result.current["--dv-separator-border"]).toBeTruthy();
+  it("has splitter colours", () => {
+    const { result } = renderHook(() => useFlexLayoutTheme());
+    expect(result.current["--color-splitter"]).toBeTruthy();
+    expect(result.current["--color-splitter-hover"]).toBe("#6366f1");
   });
 
-  it("sets Dockview tab variables used by the bundled light and dark themes", () => {
-    const { result } = renderHook(() => useDockviewTheme());
+  it("sets FlexLayout tab variables used by the bundled light and dark themes", () => {
+    const { result } = renderHook(() => useFlexLayoutTheme());
 
-    expect(result.current["--dv-tabs-and-actions-container-background-color"]).toBe("#16161f");
-    expect(result.current["--dv-activegroup-visiblepanel-tab-background-color"]).toBe("#16161f");
-    expect(result.current["--dv-activegroup-visiblepanel-tab-color"]).toBe("#e4e4e7");
+    expect(result.current["--color-tabset-background"]).toBe("#16161f");
+    expect(result.current["--color-tab-selected"]).toBe("#e4e4e7");
+    expect(result.current["--color-tab-unselected"]).toBe("#8b8b95");
   });
 });
 

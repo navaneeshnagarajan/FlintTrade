@@ -1,7 +1,7 @@
 /**
  * PositionsWidget — "Positions", the canonical position-book surface.
  *
- * THREE presentations of ONE position book, chosen by the Dockview panel
+ * THREE presentations of ONE position book, chosen by the workspace panel
  * parameter `params.view`:
  *   • "table" (default) — the sortable book with the gated write verbs
  *     (per-row square-off, per-row convert, book-level exit-all) and the Excel
@@ -144,7 +144,7 @@ function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to table. */
+/** Resolves the `params.view` panel parameter, defaulting to table. */
 function resolveViewMode(value: unknown): ViewMode {
   return isViewMode(value) ? value : "table";
 }

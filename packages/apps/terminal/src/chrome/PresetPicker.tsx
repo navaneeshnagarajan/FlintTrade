@@ -14,7 +14,7 @@
  *
  *    Workspace data is persisted to localStorage under `flinttrade:workspaces`.
  *    The layoutStore `tabs` are considered the primary source of truth for the
- *    Dockview canvas; the workspaces here store the human-readable metadata
+ *    workspace canvas; the workspaces here store the human-readable metadata
  *    (name, createdAt) and reference back to a tab id.
  */
 

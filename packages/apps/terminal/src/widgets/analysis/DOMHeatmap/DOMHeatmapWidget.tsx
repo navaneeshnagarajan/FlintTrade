@@ -29,7 +29,7 @@
  *   Replay playhead: solid amber vertical line
  *   Colour-scale legend drawn in the right margin
  *
- * View modes (Dockview panel parameter `params.view`):
+ * View modes (workspace panel parameter `params.view`):
  *   - "live"   — accumulating heatmap, polls while the tab is visible.
  *   - "replay" — polling pauses so the ring is stable, and the transport bar
  *                scrubs it. This is how the retired `orderbookreplay` id
@@ -67,7 +67,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -205,14 +205,14 @@ interface DOMHeatmapPanelParams {
 const VIEW_MODES: readonly ViewMode[] = ["live", "replay"];
 const SCALES: readonly IntensityScale[] = ["log", "gamma"];
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to live. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to live. */
 export function resolveViewMode(value: unknown): ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value)
     ? (value as ViewMode)
     : "live";
 }
 
-/** Resolves the Dockview `params.scale` panel parameter, defaulting to log1p. */
+/** Resolves the workspace `params.scale` panel parameter, defaulting to log1p. */
 export function resolveScale(value: unknown): IntensityScale {
   return typeof value === "string" && (SCALES as readonly string[]).includes(value)
     ? (value as IntensityScale)
@@ -748,7 +748,7 @@ function Scrubber({ index, total, onSeek }: ScrubberProps) {
 
 // ─── Main widget ──────────────────────────────────────────────────────────────
 
-function DOMHeatmapWidget(props: IDockviewPanelProps) {
+function DOMHeatmapWidget(props: WidgetProps) {
   const panelParams = props.params as DOMHeatmapPanelParams | undefined;
 
   const track = useTrackBehavior();

@@ -218,13 +218,13 @@ function routeLabel(pathname: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// useActiveWidgetContext — subscribes to Dockview panel focus events
+// useActiveWidgetContext — subscribes to workspace panel focus events
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the id of the currently focused Dockview panel, or null.
+ * Returns the id of the currently focused workspace panel, or null.
  * Listens for "flinttrade:active-widget" CustomEvents dispatched from
- * TerminalRoute's onDockviewReady / onDidActivePanelChange handler.
+ * TerminalRoute's broadcastActiveWidget model listener.
  */
 function useActiveWidgetContext(): string | null {
   const [activeWidget, setActiveWidget] = useState<string | null>(null);
