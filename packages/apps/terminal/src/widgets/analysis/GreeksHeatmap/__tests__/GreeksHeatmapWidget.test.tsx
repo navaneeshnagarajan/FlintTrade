@@ -390,8 +390,10 @@ describe("GreeksHeatmapWidget (Greeks Matrix)", () => {
     fireEvent.click(projectionButton("Surface"));
     expect(updateParameters).toHaveBeenCalledWith({ projection: "surface" });
 
+    // Partial patch: the metric change must NOT resend the stale projection
+    // (the old spread pattern reverted it to "grid" — the audit's clobber).
     fireEvent.click(metricButton("Vega"));
-    expect(updateParameters).toHaveBeenCalledWith({ projection: "grid", metric: "vega" });
+    expect(updateParameters).toHaveBeenCalledWith({ metric: "vega" });
   });
 
   // ---- Shell ---------------------------------------------------------------

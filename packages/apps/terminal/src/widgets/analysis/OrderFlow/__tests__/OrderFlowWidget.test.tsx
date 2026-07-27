@@ -284,10 +284,11 @@ describe("OrderFlowWidget", () => {
     });
 
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
+    // Partial patch: only the keys this interaction changed — the adapter
+    // merges them over the live panel config (stale-spread audit fix).
     expect(updateParameters).toHaveBeenCalledWith({
       symbol: "RELIANCE",
       exchange: "NSE",
-      view: "footprint",
     });
   });
 
@@ -354,11 +355,8 @@ describe("OrderFlowWidget", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Footprint with delta view" }));
 
-    expect(updateParameters).toHaveBeenCalledWith({
-      symbol: "NIFTY",
-      exchange: "NSE_INDEX",
-      view: "footprint+delta",
-    });
+    // Partial patch: only the changed key (stale-spread audit fix).
+    expect(updateParameters).toHaveBeenCalledWith({ view: "footprint+delta" });
     expect(screen.getByTestId("order-flow-chart")).toHaveAttribute(
       "data-view",
       "footprint+delta",
