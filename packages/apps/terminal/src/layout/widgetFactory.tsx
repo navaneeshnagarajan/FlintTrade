@@ -548,7 +548,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "orders", name: "Orders", icon: "ClipboardList", category: "Trading", description: "Order book showing pending, executed, and rejected orders" },
   { id: "holdings", name: "Holdings", icon: "Wallet", category: "Trading", description: "Long-term equity and mutual fund holdings with current value" },
   { id: "orderpad", name: "Order Pad", icon: "FileEdit", category: "Trading", description: "Full-featured order entry form with limit, market, and bracket orders" },
-  { id: "actioncenter", name: "Action Center", icon: "ShieldCheck", category: "Trading", description: "Approval queue for orders the safety system has held back — review each pending intent and approve or reject it before it reaches a broker" },
+  { id: "actioncenter", name: "Action Centre", icon: "ShieldCheck", category: "Trading", description: "Approval queue for orders the safety system has held back — review each pending intent and approve or reject it before it reaches a broker" },
   { id: "tradecopier", name: "Trade Copier", icon: "Copy", category: "Trading", description: "Mirror trades across multiple accounts with configurable lot multipliers" },
   { id: "smartorder", name: "Smart Order", icon: "GitFork", category: "Trading", description: "Liquidity-aware order slicing (market / depth chunks / TWAP) — every child order passes the full safety gate" },
   { id: "portfolioallocation", name: "Portfolio Allocation", icon: "PieChart", category: "Trading", description: "Pie chart breakdown of portfolio allocation by sector and instrument" },
