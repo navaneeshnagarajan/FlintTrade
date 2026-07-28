@@ -6,7 +6,7 @@ first**: the FlintTrade backend serves the full terminal UI and API from a
 single origin (port 5100), usable from any browser, with optional native
 desktop apps as convenience wrappers around the same backend. The repository
 is a Python, React, TypeScript, and Rust monorepo with a Flask backend,
-Dockview terminal, broker-gateway integration layer, sandbox mode, data
+FlexLayout terminal, broker-gateway integration layer, sandbox mode, data
 services, and developer documentation.
 
 ## Beta disclaimer
@@ -19,13 +19,14 @@ connecting a broker or enabling Live mode.
 
 ## Project scope
 
-- **Terminal app** — React 19, TypeScript, Dockview, Zustand, TanStack Query,
-  and shadcn/ui components for a local workspace.
+- **Terminal app** — React 19, TypeScript, FlexLayout, FDC3, Zustand,
+  TanStack Query, and shadcn/ui components for a local workspace.
 - **Backend services** — Python 3.12 Flask routes for auth, workspace state,
   broker-gateway orchestration, sandbox data, analytics, and automation.
 - **Gateway integration** — adapter contracts, capability metadata, encrypted
-  credential storage, WebSocket bridges, the OpenAlgo-compatible primary bridge,
-  and evidence-gated native adapter paths.
+  credential storage, WebSocket bridges, the community-tested
+  OpenAlgo-compatible bridge (the primary execution path until native brokers
+  are evidence-enabled), and evidence-gated native adapter paths.
 - **Safety model** — Explore, Practice, and Live modes with server-side checks,
   audit records, and a kill-switch boundary for order-capable routes.
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
@@ -136,7 +137,7 @@ in **[docs/DESKTOP.md](docs/DESKTOP.md)**.
 ```mermaid
 flowchart LR
     subgraph FT["FlintTrade"]
-        UI["Terminal<br/>React 19 + TypeScript<br/>Dockview workspace"]
+        UI["Terminal<br/>React 19 + TypeScript<br/>FlexLayout workspace"]
         BE["Python backend<br/>Strategy engine, AI,<br/>backtest, screener"]
         TE["ticks<br/>Rust + PyO3"]
         UI <-->|"/ft-api/v1/"| BE
@@ -166,7 +167,7 @@ and 1 Rust/PyO3 tick engine.
 | Package | Language | Purpose |
 |---|---|---|
 | `packages/apps/site` | Next.js + TS | Public documentation site and read-only docs MCP |
-| `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and Dockview terminal |
+| `packages/apps/terminal` | React + TS | Single-page workspace, home widgets, routes, tools, and FlexLayout terminal |
 | `packages/apps/desktop` | Electron 43 + TypeScript | Sandboxed desktop shell; verifies tools, builds managed local source, supervises the source guardian, and loads only its selected loopback origin |
 | `packages/core/core` | Python | Flask backend, auth, workspace, OpenAlgo-compatible client, route registration |
 | `packages/core/data` | Python | Tick capture, audit log, trade logging, SQLite sandbox state, DuckDB analytics storage |
@@ -188,7 +189,7 @@ and 1 Rust/PyO3 tick engine.
 
 | Layer | Tools |
 |---|---|
-| Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, Dockview v5, shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
+| Frontend | React 19, TypeScript 5 (strict), Tailwind CSS v4, FlexLayout (with FDC3 interop), shadcn/ui, Lightweight Charts v5, Glide Data Grid, Zustand 5, Jotai, TanStack Query 5 |
 | Backend | Python 3.12, Flask, httpx (async), pydantic, DuckDB, structlog |
 | Data | NumPy (batch indicators; optional Numba on 3 kernels), Rust/PyO3 (tick engine), QuestDB (future) |
 | AI | Managed Ollama sidecar, optional ChromaDB vector store, LightGBM (signals), MCP bridge |

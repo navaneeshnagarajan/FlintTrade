@@ -1,6 +1,6 @@
 # Terminal
 
-> Single-page terminal — Dockview workspace with home widgets, tools, routes, and workspace presets.
+> Single-page terminal — FlexLayout workspace with home widgets, tools, routes, and workspace presets.
 
 **Part of [FlintTrade](https://github.com/navaneeshnagarajan/FlintTrade)** — the open-source self-hosted trading software monorepo built with Python, React, TypeScript, and Rust.
 

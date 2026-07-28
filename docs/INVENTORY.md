@@ -69,14 +69,14 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Obsidian vault | ✅ | Read-only browser widget + agent vault context |
 | Create strategies | ✅ | StrategyBuilder (legs / payoff / margin / Pine) — Lab "Options Builder" tab; loads templates from the StrategyTemplates widget via explicit strike offsets |
 | Backtest strategies (single + portfolio) | ✅ | Lab Backtest + Portfolio tabs (132 runnable by name; 41 selectable in the Lab picker) |
-| Optimise overnight + reports + suggestions | ✅ | OvernightOptimiser + report store + Lab Optimize section |
+| Optimise overnight + reports + suggestions | ✅ | OvernightOptimiser + report store + Lab Optimise section |
 | Pick strategy per market regime | ✅ | `regime_detector` `_REGIME_STRATEGY` → RegimePanel "Suggested Strategy" |
 
 ## Manual Trading Terminal
 
 | Item | Status | Notes |
 |---|---|---|
-| Preset layouts (14) | ✅ | Dockview workspace presets |
+| Preset layouts (17) | ✅ | FlexLayout workspace presets |
 | Options-scalper 4-chart layout | ✅ | Index+Futures (centre) / CE+PE (sides) / option chain — per-panel pinned charts; tested |
 | Trading + dashboard widgets (69 registered; see `widgetFactory.tsx` for the count of record) | ✅ | Registered in `widgetFactory`, co-located tests |
 | Screens: welcome / dashboard / explore / demo | ✅ | Demo mode feeds widgets + dashboard cards from `MockDataEngine` |

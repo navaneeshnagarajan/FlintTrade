@@ -19,7 +19,7 @@ TypeScript design-system package, and 1 Rust package with Python bindings.
 | Package | Language | Purpose | Tests |
 |---|---|---|---|
 | `site` | TypeScript / Next.js | Public website, generated documentation, contribution pages, and read-only docs MCP | `packages/apps/site/src/**/*.test.ts` |
-| `terminal` | TypeScript / React | User-facing single-page application; Dockview workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
+| `terminal` | TypeScript / React | User-facing single-page application; FlexLayout workspace, home widgets, routes, and tools | `packages/apps/terminal/**/*.test.ts(x)` |
 | `desktop` | TypeScript / Electron 43 | Sandboxed native shell; verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin | `packages/apps/desktop/electron/*.test.ts` |
 | `design-system` | TypeScript / React | Shared brand tokens, layers, motion, primitives, and FlintTrade UI contracts | type-checked by app builds |
 | `core` | Python | Flask app entry point, OpenAlgo client (45+ endpoints), config, workspace, models, exceptions | `packages/core/core/tests/` |
@@ -209,7 +209,7 @@ non-trivial change.
 ## 6. Adding a widget
 
 Every widget is a self-contained TSX component that is registered as a
-Dockview panel.
+FlexLayout panel.
 
 ### Step-by-step
 
@@ -378,7 +378,7 @@ without presenting them as ready to connect.
   - `fix(engine): respect strategy isolation in closeposition`
   - `docs: add troubleshooting section for port 5100`
   - `test(core): cover JWT revocation edge cases`
-  - `chore: bump dockview to 5.1.4`
+  - `chore: bump flexlayout-react to 0.10.1`
 
 ---
 

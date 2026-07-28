@@ -10,6 +10,11 @@
 |---|---|---|---|---|
 | **OpenAlgo** | Optional broker gateway (32 brokers, REST + WebSocket) | v2.0.0 | `7e48b2e8` (v2.0.1.1, 2026-05-21) | [marketcalls/openalgo](https://github.com/marketcalls/openalgo) |
 
+The tested pin remains **v2.0.1.1**. The latest observed upstream release is
+**v2.0.1.6** (2026-07-27), pending re-verification per the
+["Bumping these"](#bumping-these) procedure below — do not treat it as a
+tested version until that procedure has run green.
+
 **OpenAlgo minimum (v2.0.0):** required only when you enable the optional
 OpenAlgo-compatible integration path. FlintTrade expects OpenAlgo's v2 API
 surface there — depth mode 4 (50-level book), structured `closeposition`
@@ -76,7 +81,7 @@ compatibility boundary. The broker list lives in [`flint.toml`](../flint.toml)
 under `[packages]` / gateway metadata. The 2026-05 sync added
 **IIFL Capital** as a distinct entry alongside the existing **IIFL** adapter.
 
-### Surface added in v2.0.1.1
+### Surface picked up at the v2.0.1.1 tested pin (added upstream between v2.0.0.8 and v2.0.1.1)
 
 - **GTT (Good Till Triggered) orders** — `placegttorder`, `modifygttorder`,
   `cancelgttorder`, `gttorderbook`. Live broker support: Dhan + Zerodha.

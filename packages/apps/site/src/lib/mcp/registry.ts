@@ -248,7 +248,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
           text: [
             `Plan a FlintTrade terminal widget named ${widget_name}.`,
             'Use docs/DEVELOPER_GUIDE.md and packages/apps/terminal/README.md.',
-            'Keep the widget functional, registered as a Dockview panel, tested with Vitest, and visually consistent with the existing terminal.',
+            'Keep the widget functional, registered as a FlexLayout panel, tested with Vitest, and visually consistent with the existing terminal.',
           ].join('\n'),
         },
       }],
