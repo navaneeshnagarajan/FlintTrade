@@ -18,6 +18,7 @@ import { OptimizeSection } from "./LabRoute/OptimizeSection";
 import { ResultsSection } from "./LabRoute/ResultsSection";
 import StrategyBuilderTool from "@/tools/StrategyBuilder/StrategyBuilderTool";
 import { hasPendingTemplate } from "@/tools/StrategyBuilder/templateBridge";
+import { hasPendingPineDraft, OPEN_STRATEGY_BUILDER_EVENT } from "@/tools/StrategyBuilder/pineBridge";
 
 export default function LabRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("lab", "daysActive"); }, []);
@@ -25,8 +26,17 @@ export default function LabRoute() {
   // A template stashed by the StrategyTemplates widget means the operator
   // just clicked "Load" there — land them straight in the Options Builder.
   const [activeTab, setActiveTab] = useState<TabId>(() =>
-    hasPendingTemplate() ? "options-builder" : "backtest",
+    hasPendingTemplate() || hasPendingPineDraft() ? "options-builder" : "backtest",
   );
+
+  // The Pine Editor's "Open in Strategy Builder" hand-off — switch to the
+  // builder tab when the editor dispatches the open event while we are
+  // already mounted (the stash covers the not-yet-mounted case above).
+  useEffect(() => {
+    function onOpenBuilder() { setActiveTab("options-builder"); }
+    window.addEventListener(OPEN_STRATEGY_BUILDER_EVENT, onOpenBuilder);
+    return () => window.removeEventListener(OPEN_STRATEGY_BUILDER_EVENT, onOpenBuilder);
+  }, []);
   const [lastResult, setLastResult] = useState<BacktestResult | null>(null);
   // Every completed run this session, keyed by strategy name — feeds the
   // Results tab's multi-run comparison (/backtest/compare).

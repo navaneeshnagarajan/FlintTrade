@@ -6,6 +6,7 @@ in app.py rewrites to /v1/* before Flask dispatch):
     POST /ft-api/v1/indicators/vwap    — VWAP with ±1σ/2σ/3σ bands
     POST /ft-api/v1/analytics/pairs   — Pair correlation and z-score signals
     POST /ft-api/v1/analytics/mtf     — Multi-timeframe signal confluence
+    POST /ft-api/v1/analytics/seasonality — Monthly/weekday/day-of-month return patterns
 
 Blueprint registered at ``/v1`` (post-strip form).
 
@@ -22,12 +23,17 @@ Pattern follows payoff_routes.py in this package.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import math
+from dataclasses import asdict
+from typing import TYPE_CHECKING, Any
 
 from flask import Blueprint, jsonify, request
 
 from .multi_timeframe import MultiTimeframeAnalyser, make_sample_mtf_data
 from .pair_correlation import PairCorrelationEngine, make_sample_pair_data
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger("flinttrade.screener.analytics_routes")
 
@@ -98,7 +104,17 @@ def indicators_vwap() -> Any:
         logger.exception("VWAP calculation failed: %s", exc)
         return jsonify({"status": "error", "message": "VWAP calculation failed"}), 500
 
-    return jsonify({"status": "success", "data": result.model_dump()})
+    # An all-zero-volume session (index symbols) makes VWAP undefined —
+    # NaN would serialise as literal ``NaN``, which is invalid JSON that
+    # browsers reject. Sanitise to null so callers can fall back honestly.
+    data = result.model_dump()
+    for key, values in data.items():
+        if isinstance(values, list):
+            data[key] = [
+                None if isinstance(v, float) and math.isnan(v) else v for v in values
+            ]
+
+    return jsonify({"status": "success", "data": data})
 
 
 # ---------------------------------------------------------------------------
@@ -287,8 +303,229 @@ def analytics_mtf() -> Any:
 
 
 # ---------------------------------------------------------------------------
+# POST /ft-api/v1/analytics/seasonality
+# ---------------------------------------------------------------------------
+
+
+@analytics_bp.route("/analytics/seasonality", methods=["POST"])
+def analytics_seasonality() -> Any:
+    """Compute monthly/weekday/day-of-month return seasonality from daily bars.
+
+    Wires the previously-unconsumed ``flinttrade_indicators.seasonality``
+    module. Callers supply daily OHLCV bars for one symbol (typically fetched
+    via the shared ``/api/v1/history`` path, matching how the MTF endpoint is
+    fed); the endpoint aggregates them into calendar-pattern statistics.
+
+    Request JSON:
+        symbol (str, optional): Label echoed back in the response
+            (default ``"NIFTY"``).
+        exchange (str, optional): Label echoed back in the response
+            (default ``"NSE_INDEX"``).
+        bars (list[dict], optional): Daily bars, oldest-first. Each bar needs
+            ``close`` (float) and one of ``timestamp``/``time``/``date`` —
+            epoch seconds, epoch milliseconds, or an ISO date string. When
+            absent, a deterministic synthetic series is used (dev fallback)
+            and ``is_sample_data`` is ``true``.
+
+    Returns:
+        JSON::
+
+            {
+              "status": "success",
+              "data": {
+                "symbol": "NIFTY",
+                "exchange": "NSE_INDEX",
+                "is_sample_data": false,
+                "monthly": [
+                  {"month": 1, "month_name": "January",
+                   "avg_return_pct": 1.2, "median_return_pct": 0.9,
+                   "std_pct": 3.1, "positive_rate": 0.6, "years_count": 10,
+                   "best_year": [2021, 6.2], "worst_year": [2020, -4.8]},
+                  ...
+                ],
+                "weekday": [
+                  {"weekday": 0, "weekday_name": "Monday",
+                   "avg_return_pct": -0.03, "std_pct": 1.1,
+                   "positive_rate": 0.49, "sample_count": 512},
+                  ...
+                ],
+                "day_of_month": [{"day": 1, "avg_return_pct": 0.12}, ...],
+                "matrix": {
+                  "years": [2016, ...],
+                  "months": [1, ..., 12],
+                  "returns": [[1.2, null, ...], ...]
+                }
+              }
+            }
+
+    Errors:
+        400: ``bars`` is not a list, or no bar could be parsed.
+        422: Series too short to compute any seasonality statistics.
+    """
+    import pandas as pd  # noqa: PLC0415
+    from flinttrade_indicators.seasonality import (  # noqa: PLC0415
+        build_seasonality_matrix,
+        compute_day_of_month_seasonality,
+        compute_monthly_seasonality,
+        compute_weekday_seasonality,
+    )
+
+    body = request.get_json(silent=True) or {}
+    symbol = str(body.get("symbol", "NIFTY"))
+    exchange = str(body.get("exchange", "NSE_INDEX"))
+    bars = body.get("bars")
+
+    is_sample_data = False
+    if not bars:
+        # Dev fallback — deterministic synthetic daily series, honestly flagged
+        logger.debug("Seasonality endpoint: no bars provided, using sample data for %s", symbol)
+        bars = _make_sample_seasonality_bars()
+        is_sample_data = True
+
+    if not isinstance(bars, list):
+        return jsonify({"status": "error", "message": "'bars' must be a non-empty list"}), 400
+
+    try:
+        ohlc = _bars_to_close_frame(bars)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    try:
+        monthly = compute_monthly_seasonality(ohlc)
+        weekday = compute_weekday_seasonality(ohlc)
+        day_of_month = compute_day_of_month_seasonality(ohlc)
+        matrix = build_seasonality_matrix(ohlc)
+    except Exception as exc:
+        logger.exception("Seasonality calculation failed for %s: %s", symbol, exc)
+        return jsonify({"status": "error", "message": "Seasonality calculation failed"}), 500
+
+    if not monthly and not weekday and not day_of_month:
+        return jsonify({
+            "status": "error",
+            "message": "Bar series too short to compute any seasonality statistics. "
+                       "Supply at least two daily closes (ideally several years).",
+        }), 422
+
+    matrix_years = [int(year) for year in matrix.index]
+    matrix_returns = [
+        [None if pd.isna(value) else round(float(value), 4) for value in row]
+        for row in matrix.to_numpy()
+    ]
+
+    return jsonify({
+        "status": "success",
+        "data": {
+            "symbol": symbol,
+            "exchange": exchange,
+            "is_sample_data": is_sample_data,
+            "monthly": [asdict(stats) for stats in monthly],
+            "weekday": [asdict(stats) for stats in weekday],
+            "day_of_month": [
+                {"day": day, "avg_return_pct": value}
+                for day, value in sorted(day_of_month.items())
+            ],
+            "matrix": {
+                "years": matrix_years,
+                "months": list(range(1, 13)),
+                "returns": matrix_returns,
+            },
+        },
+    })
+
+
+_EPOCH_MILLIS_THRESHOLD = 4_102_444_800  # beyond 2100 in seconds → millisecond stamp
+
+
+def _bars_to_close_frame(bars: list[Any]) -> pd.DataFrame:
+    """Convert request bars into the close-price DataFrame the indicators expect.
+
+    Args:
+        bars: Bar dicts, each with ``close`` and one of ``timestamp``/``time``/
+            ``date`` (epoch seconds, epoch milliseconds, or ISO string).
+
+    Returns:
+        DataFrame with a sorted ``DatetimeIndex`` and a single ``close`` column.
+
+    Raises:
+        ValueError: If no bar could be parsed into a dated close.
+    """
+    import pandas as pd  # noqa: PLC0415
+
+    stamps: list[Any] = []
+    closes: list[float] = []
+    for bar in bars:
+        if not isinstance(bar, dict):
+            continue
+        raw_ts = bar.get("timestamp", bar.get("time", bar.get("date")))
+        raw_close = bar.get("close")
+        if raw_ts is None or raw_close is None:
+            continue
+        try:
+            close = float(raw_close)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(close) or close <= 0:
+            continue
+        try:
+            if isinstance(raw_ts, bool):
+                continue
+            if isinstance(raw_ts, (int, float)):
+                seconds = float(raw_ts)
+                if seconds > _EPOCH_MILLIS_THRESHOLD:
+                    seconds /= 1000.0
+                stamp = pd.Timestamp(seconds, unit="s")
+            else:
+                stamp = pd.Timestamp(str(raw_ts))
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(stamp):
+            continue
+        stamps.append(stamp)
+        closes.append(close)
+
+    if not stamps:
+        raise ValueError(
+            "No usable bars: each bar needs a 'close' and a 'timestamp'/'time'/'date'"
+        )
+
+    frame = pd.DataFrame({"close": closes}, index=pd.DatetimeIndex(stamps))
+    return frame.sort_index()
+
+
+# ---------------------------------------------------------------------------
 # Private sample-data helpers
 # ---------------------------------------------------------------------------
+
+
+def _make_sample_seasonality_bars(years: int = 6, seed: int = 7) -> list[dict]:
+    """Generate synthetic daily close bars for seasonality dev/fallback mode.
+
+    Weekday-only bars covering ``years`` calendar years (ending 2025-12-31)
+    with a mild upward drift plus deterministic noise, so every calendar view
+    (monthly, weekday, day-of-month) has plausible non-zero statistics.
+
+    Args:
+        years: Number of calendar years to generate.
+        seed:  Random seed for reproducibility.
+
+    Returns:
+        List of bar dicts with keys ``timestamp`` (ISO date) and ``close``.
+    """
+    import random  # noqa: PLC0415
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    rng = random.Random(seed)
+    end = date(2025, 12, 31)
+    start = date(end.year - max(years, 1) + 1, 1, 1)
+    close = 20_000.0
+    bars: list[dict] = []
+    day = start
+    while day <= end:
+        if day.weekday() < 5:  # Monday–Friday trading days only
+            close = max(close * (1.0 + rng.gauss(0.0004, 0.009)), 100.0)
+            bars.append({"timestamp": day.isoformat(), "close": round(close, 2)})
+        day += timedelta(days=1)
+    return bars
 
 
 def _make_sample_vwap_bars(n: int = 75, seed: int = 0) -> list[dict]:

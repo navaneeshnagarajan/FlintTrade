@@ -133,6 +133,9 @@ const lazyWidgets = {
   // FINOS migration Phase 3 — Perspective analytics
   portfoliopivot: lazy(() => import("@/widgets/analysis/PortfolioPivot/PortfolioPivotWidget")),
 
+  // Indicator restoration wave — seasonality patterns
+  seasonality: lazy(() => import("@/widgets/analysis/Seasonality/SeasonalityWidget")),
+
   // Annotated trade journal (SQLite + FTS5 store)
   tradejournal: lazy(() => import("@/widgets/utility/TradeJournal/TradeJournalWidget")),
 };
@@ -588,6 +591,7 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "deliverydata", name: "Delivery Data", icon: "Package", category: "Analysis", description: "Delivery percentage per scrip with open/high/low/close and traded volume, sorted into conviction bands — sample data only, no delivery source is wired yet" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
   { id: "portfoliopivot", name: "Portfolio Pivot", icon: "Table2", category: "Analysis", description: "FINOS Perspective pivot over the live position book — group, aggregate, filter and export your open positions, with the view saved per panel" },
+  { id: "seasonality", name: "Seasonality", icon: "CalendarRange", category: "Analysis", description: "Monthly, weekday and day-of-month return patterns from daily price history — heat views with sample sizes, honest about thin data" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },

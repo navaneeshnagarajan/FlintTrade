@@ -1439,6 +1439,29 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
               <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shrink-0" />Chandelier Exit
               <PeriodInput value={periods.chand} onChange={(v) => setPeriods((p) => ({ ...p, chand: v }))} />
             </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTEMA} onCheckedChange={(v) => toggleIndicator("showTEMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shrink-0" />TEMA
+              <PeriodInput value={periods.tema} onChange={(v) => setPeriods((p) => ({ ...p, tema: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showT3} onCheckedChange={(v) => toggleIndicator("showT3", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block shrink-0" />T3
+              <PeriodInput value={periods.t3} onChange={(v) => setPeriods((p) => ({ ...p, t3: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTRIMA} onCheckedChange={(v) => toggleIndicator("showTRIMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />TRIMA
+              <PeriodInput value={periods.trima} onChange={(v) => setPeriods((p) => ({ ...p, trima: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMcGinley} onCheckedChange={(v) => toggleIndicator("showMcGinley", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />McGinley
+              <PeriodInput value={periods.mcginley} onChange={(v) => setPeriods((p) => ({ ...p, mcginley: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMAEnvelopes} onCheckedChange={(v) => toggleIndicator("showMAEnvelopes", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />MA Envelopes
+              <PeriodInput value={periods.mae} onChange={(v) => setPeriods((p) => ({ ...p, mae: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showSTARC} onCheckedChange={(v) => toggleIndicator("showSTARC", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shrink-0" />STARC Bands
+            </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator className="bg-border-default" />
             <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Volume</DropdownMenuLabel>
             <DropdownMenuCheckboxItem checked={indicators.showVolume} onCheckedChange={(v) => toggleIndicator("showVolume", v)} className="text-xs gap-2">
@@ -1457,10 +1480,10 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
               <PeriodInput value={periods.rsi} onChange={(v) => setPeriods((p) => ({ ...p, rsi: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showMACD} onCheckedChange={(v) => toggleIndicator("showMACD", v)} className="text-xs gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />MACD (12, 26, 9)
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />MACD
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showStoch} onCheckedChange={(v) => toggleIndicator("showStoch", v)} className="text-xs gap-2">
-              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />Stochastic (14, 3, 3)
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />Stochastic
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showATR} onCheckedChange={(v) => toggleIndicator("showATR", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />ATR
@@ -1491,6 +1514,50 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showAO} onCheckedChange={(v) => toggleIndicator("showAO", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />Awesome Oscillator
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showCMF} onCheckedChange={(v) => toggleIndicator("showCMF", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block shrink-0" />CMF
+              <PeriodInput value={periods.cmf} onChange={(v) => setPeriods((p) => ({ ...p, cmf: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showROC} onCheckedChange={(v) => toggleIndicator("showROC", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />ROC
+              <PeriodInput value={periods.roc} onChange={(v) => setPeriods((p) => ({ ...p, roc: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMomentum} onCheckedChange={(v) => toggleIndicator("showMomentum", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />Momentum
+              <PeriodInput value={periods.mom} onChange={(v) => setPeriods((p) => ({ ...p, mom: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTRIX} onCheckedChange={(v) => toggleIndicator("showTRIX", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0" />TRIX
+              <PeriodInput value={periods.trix} onChange={(v) => setPeriods((p) => ({ ...p, trix: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showChop} onCheckedChange={(v) => toggleIndicator("showChop", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />Choppiness
+              <PeriodInput value={periods.chop} onChange={(v) => setPeriods((p) => ({ ...p, chop: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showHV} onCheckedChange={(v) => toggleIndicator("showHV", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block shrink-0" />Hist Volatility
+              <PeriodInput value={periods.hv} onChange={(v) => setPeriods((p) => ({ ...p, hv: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showVortex} onCheckedChange={(v) => toggleIndicator("showVortex", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block shrink-0" />Vortex
+              <PeriodInput value={periods.vortex} onChange={(v) => setPeriods((p) => ({ ...p, vortex: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showFisher} onCheckedChange={(v) => toggleIndicator("showFisher", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 inline-block shrink-0" />Fisher
+              <PeriodInput value={periods.fisher} onChange={(v) => setPeriods((p) => ({ ...p, fisher: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showKST} onCheckedChange={(v) => toggleIndicator("showKST", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />KST
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showCoppock} onCheckedChange={(v) => toggleIndicator("showCoppock", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-400 inline-block shrink-0" />Coppock
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showAD} onCheckedChange={(v) => toggleIndicator("showAD", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />A/D Line
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showPVT} onCheckedChange={(v) => toggleIndicator("showPVT", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shrink-0" />PVT
             </DropdownMenuCheckboxItem>
             {activePaneControls.length > 0 && (
               <>

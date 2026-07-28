@@ -23,7 +23,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from .signal_models import SignalConfig, SignalEvent, normalise_instrument_identity, now_iso
-from flinttrade_indicators.streaming import StreamingEMA, StreamingRSI
+from flinttrade_indicators.streaming import StreamingEMA, StreamingMACD, StreamingRSI
 
 logger = logging.getLogger("flinttrade.ai.signal_pipeline")
 
@@ -118,9 +118,7 @@ class _InstrumentState:
         self.rsi: StreamingRSI | None = None
         self.ema_fast: StreamingEMA | None = None
         self.ema_slow: StreamingEMA | None = None
-        self.macd_fast_ema: StreamingEMA | None = None
-        self.macd_slow_ema: StreamingEMA | None = None
-        self.macd_signal_ema: StreamingEMA | None = None
+        self.macd: StreamingMACD | None = None
         self.rsi_zone: Literal["OVERSOLD", "NEUTRAL", "OVERBOUGHT"] | None = None
         self.prev_ema_fast: float | None = None
         self.prev_ema_slow: float | None = None
@@ -153,9 +151,7 @@ class _InstrumentState:
                 fast = int(params.get("fast", 12))
                 slow = int(params.get("slow", 26))
                 sig = int(params.get("signal", 9))
-                self.macd_fast_ema = StreamingEMA(period=fast)
-                self.macd_slow_ema = StreamingEMA(period=slow)
-                self.macd_signal_ema = StreamingEMA(period=sig)
+                self.macd = StreamingMACD(fast_period=fast, slow_period=slow, signal_period=sig)
 
 
 class LiveSignalPipeline:
@@ -370,63 +366,57 @@ class LiveSignalPipeline:
                 state.prev_ema_slow = slow_val
 
         # --- MACD ---
-        if state.macd_fast_ema is not None and state.macd_slow_ema is not None and state.macd_signal_ema is not None:
-            macd_fast_val = state.macd_fast_ema.update(ltp)
-            macd_slow_val = state.macd_slow_ema.update(ltp)
+        if state.macd is not None:
+            _macd_line, _signal_line, macd_hist = state.macd.update(ltp)
 
-            if macd_fast_val is not None and macd_slow_val is not None:
-                macd_line = macd_fast_val - macd_slow_val
-                signal_line = state.macd_signal_ema.update(macd_line)
+            if macd_hist is not None:
+                minimum = thresholds.get("macd_crossover_min", 0.0)
+                bullish_threshold = minimum
+                bearish_threshold = -minimum
 
-                if signal_line is not None:
-                    macd_hist = macd_line - signal_line
-                    minimum = thresholds.get("macd_crossover_min", 0.0)
-                    bullish_threshold = minimum
-                    bearish_threshold = -minimum
+                side = _nonzero_side(macd_hist)
+                if not state.macd_side_observed:
+                    state.macd_side_observed = True
+                    state.macd_last_nonzero_side = side
+                elif side is not None and side != state.macd_last_nonzero_side:
+                    state.macd_last_nonzero_side = side
+                    state.macd_armed_direction = "BUY" if side > 0 else "SELL"
 
-                    side = _nonzero_side(macd_hist)
-                    if not state.macd_side_observed:
-                        state.macd_side_observed = True
-                        state.macd_last_nonzero_side = side
-                    elif side is not None and side != state.macd_last_nonzero_side:
-                        state.macd_last_nonzero_side = side
-                        state.macd_armed_direction = "BUY" if side > 0 else "SELL"
-
-                    if state.macd_armed_direction == "BUY" and macd_hist > bullish_threshold:
-                        state.macd_armed_direction = None
-                        sig = SignalEvent(
-                            timestamp=event_timestamp,
-                            symbol=symbol,
-                            exchange=exchange,
-                            signal_type="BUY",
-                            indicator="MACD",
-                            value=macd_hist,
-                            threshold=bullish_threshold,
-                            confidence=0.60,
-                            message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
-                        )
-                        state.prev_macd_hist = macd_hist
-                        if pending_signal is None:
-                            pending_signal = sig
-
-                    elif state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
-                        state.macd_armed_direction = None
-                        sig = SignalEvent(
-                            timestamp=event_timestamp,
-                            symbol=symbol,
-                            exchange=exchange,
-                            signal_type="SELL",
-                            indicator="MACD",
-                            value=macd_hist,
-                            threshold=bearish_threshold,
-                            confidence=0.60,
-                            message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
-                        )
-                        state.prev_macd_hist = macd_hist
-                        if pending_signal is None:
-                            pending_signal = sig
-
+                if state.macd_armed_direction == "BUY" and macd_hist > bullish_threshold:
+                    state.macd_armed_direction = None
+                    sig = SignalEvent(
+                        timestamp=event_timestamp,
+                        symbol=symbol,
+                        exchange=exchange,
+                        signal_type="BUY",
+                        indicator="MACD",
+                        value=macd_hist,
+                        threshold=bullish_threshold,
+                        confidence=0.60,
+                        message=f"{symbol} MACD histogram turned positive ({macd_hist:.2f})",
+                    )
                     state.prev_macd_hist = macd_hist
+                    if pending_signal is None:
+                        pending_signal = sig
+
+                elif state.macd_armed_direction == "SELL" and macd_hist < bearish_threshold:
+                    state.macd_armed_direction = None
+                    sig = SignalEvent(
+                        timestamp=event_timestamp,
+                        symbol=symbol,
+                        exchange=exchange,
+                        signal_type="SELL",
+                        indicator="MACD",
+                        value=macd_hist,
+                        threshold=bearish_threshold,
+                        confidence=0.60,
+                        message=f"{symbol} MACD histogram turned negative ({macd_hist:.2f})",
+                    )
+                    state.prev_macd_hist = macd_hist
+                    if pending_signal is None:
+                        pending_signal = sig
+
+                state.prev_macd_hist = macd_hist
 
         return self._publish_locked(pending_signal) if pending_signal is not None else None
 

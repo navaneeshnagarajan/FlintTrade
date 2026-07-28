@@ -1,7 +1,7 @@
 // PineTab — Pine Script editor, backtest runner and results display
 // Extracted from StrategyBuilderTool.tsx
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   AlertCircle, Code2, Play, RotateCcw, ChevronDown, ChevronUp, Copy, Check,
 } from "lucide-react";
@@ -12,6 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { usePineRunner } from "./usePineRunner";
 import type { PineRunnerOptions } from "./usePineRunner";
+import {
+  LOAD_PINE_DRAFT_EVENT,
+  isPineDraft,
+  readAndClearPendingPineDraft,
+  type PineDraft,
+} from "./pineBridge";
 import { EXCHANGES, INTERVALS, PINE_TEMPLATES } from "./types";
 import { computeEquityCurve, computeMetrics } from "./utils";
 import { EquityCurveSparkline } from "./EquityCurveSparkline";
@@ -27,6 +33,26 @@ export function PineTab() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { result, bars, isRunning, error, run, reset } = usePineRunner();
+
+  // Apply a Pine SOURCE draft handed off from the Pine Script Editor
+  // (routes/lab) via pineBridge. The sessionStorage stash is the source of
+  // truth — read-and-clear so a consumed draft can never replay; the live
+  // event detail is only the fallback when storage is unavailable.
+  useEffect(() => {
+    const applyDraft = (draft: PineDraft | null) => {
+      if (!draft) return;
+      setCode(draft.source);
+      reset();
+    };
+    applyDraft(readAndClearPendingPineDraft());
+
+    const onLoad = (e: Event) => {
+      const detail: unknown = (e as CustomEvent<unknown>).detail;
+      applyDraft(readAndClearPendingPineDraft() ?? (isPineDraft(detail) ? detail : null));
+    };
+    window.addEventListener(LOAD_PINE_DRAFT_EVENT, onLoad);
+    return () => window.removeEventListener(LOAD_PINE_DRAFT_EVENT, onLoad);
+  }, [reset]);
 
   const handleRun = () => {
     void run(code, symbol, exchange, interval, dateOpts);

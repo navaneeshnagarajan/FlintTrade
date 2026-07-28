@@ -122,12 +122,11 @@ function buildMarketWatch(): IJsonModel {
 // Preset 4 — Analysis
 //
 // ┌──────────────┬───────────────┐
-// │              │   OI Chart    │
-// │    Chart     ├───────────────┤
-// │              │   Depth       │
-// ├──────────────┼───────────────┤
-// │  Positions   │   News        │
-// └──────────────┴───────────────┘
+// │    Chart     │   OI Chart    │
+// │──────┬───────├───────────────┤
+// │ Posi-│ News  │   Depth       │
+// │ tions│       │               │
+// └──────┴───────┴───────────────┘
 // ---------------------------------------------------------------------------
 function buildAnalysis(): IJsonModel {
   return workspaceJson(
@@ -375,6 +374,11 @@ function buildQuickScalper(): IJsonModel {
 // Every widget in the catalogue, organised into 6 tabbed groups:
 //   Charts | Trading | Options   (top row)
 //   Analysis | Positions/Risk | Utility   (bottom row)
+//
+// Each group opens on its ANCHOR tab (Chart, Scalper, Option Chain, DOM
+// Heatmap, Indices, Watchlist) — a deliberate change from the Dockview-era
+// behaviour, where the last-added tab of each group happened to be
+// selected; the anchor is the group's primary surface.
 //
 // Use this to explore every widget in a single workspace.
 // ---------------------------------------------------------------------------

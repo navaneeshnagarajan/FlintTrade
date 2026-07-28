@@ -214,15 +214,18 @@ const CHANNEL_CYCLE: ReadonlyArray<UserChannelId | null> = [
 
 function WorkspaceChannelDot({ node }: { node: TabNode }) {
   const store = useStore();
+  const renderConfig = (node.getConfig() as Record<string, unknown> | undefined) ?? undefined;
   // Live membership — the widget follows the SAME atom, so a change here
   // reaches it instantly even in a hidden tab FlexLayout will not
   // re-render until revealed (Phase 2 audit finding).
-  const channelId = useChannelMembership(
-    node.getId(),
-    (node.getConfig() as Record<string, unknown> | undefined) ?? undefined,
-  );
+  const channelId = useChannelMembership(node.getId(), renderConfig);
+  // A panel pinned to an explicit instrument ignores channels entirely —
+  // show that honestly rather than asserting a membership it never follows.
+  const isPinned = Boolean(renderConfig?.symbol || renderConfig?.optionLeg);
   const meta = channelId ? USER_CHANNELS.find((c) => c.id === channelId) : undefined;
-  const label = meta
+  const label = isPinned
+    ? "Pinned to its own instrument — ignores link channels"
+    : meta
     ? `Link channel: ${meta.label} — click to change`
     : "Link channel: none — click to change";
 
@@ -271,7 +274,13 @@ function WorkspaceChannelDot({ node }: { node: TabNode }) {
     >
       <span
         aria-hidden="true"
-        className={meta ? "h-2 w-2 rounded-full" : "h-2 w-2 rounded-full border border-text-muted"}
+        className={
+          meta
+            ? isPinned
+              ? "h-2 w-2 rounded-full opacity-30"
+              : "h-2 w-2 rounded-full"
+            : "h-2 w-2 rounded-full border border-text-muted"
+        }
         style={meta ? { backgroundColor: meta.colour } : undefined}
       />
     </Button>

@@ -134,6 +134,13 @@ globals().update(_try_import(".simulation", "simulation", [
     "MarketEvent", "SimulationResult", "StressTestRunner",
 ]))
 
+# --- Signal-array backtest (optional tick_engine acceleration) ---
+globals().update(_try_import(".signal_backtest", "signal_backtest", [
+    "SignalBacktestConfig", "SignalBacktestResult", "SignalTrade",
+    "TickEngineNotAvailableError", "bars_from_dicts", "ema_crossover_signals",
+    "is_tick_engine_available", "run_ema_crossover_backtest", "run_signal_backtest",
+]))
+
 # Cleanup
 del _ns, _try_import
 
@@ -175,4 +182,8 @@ __all__ = [
     "MCShuffleResult", "NoiseInjectionResult",
     "ParamSensitivityResult", "ParamSensitivityEntry",
     "DelayTestResult", "DelayTestEntry", "CrossSymbolResult",
+    # Signal-array backtest (optional tick_engine acceleration)
+    "SignalBacktestConfig", "SignalBacktestResult", "SignalTrade",
+    "TickEngineNotAvailableError", "bars_from_dicts", "ema_crossover_signals",
+    "is_tick_engine_available", "run_ema_crossover_backtest", "run_signal_backtest",
 ]

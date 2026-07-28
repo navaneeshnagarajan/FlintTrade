@@ -212,13 +212,14 @@ export function calcKeltnerChannels(
   bars: FlintChartOhlcvBar[],
   period = 20,
   mult = 2.0,
+  atrPeriod = 14,
 ): KeltnerResult {
   const n = bars.length;
   const highs = bars.map((b) => b.high);
   const lows = bars.map((b) => b.low);
   const closes = bars.map((b) => b.close);
   const middle = calcEMA(closes, period);
-  const atrVals = calcATR(highs, lows, closes).values;
+  const atrVals = calcATR(highs, lows, closes, atrPeriod).values;
   const upper: (number | null)[] = new Array(n).fill(null);
   const lower: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
@@ -742,7 +743,9 @@ export function calcIchimoku(
   for (let i = 0; i < n; i++) {
     tenkan[i] = midLine(tenkanPeriod, i);
     kijun[i] = midLine(kijunPeriod, i);
-    chikou[i] = closes[i];
+    // Chikou span: the close plotted `displacement` bars BEHIND its bar —
+    // the shift the consumer previously had to re-derive by hand.
+    if (i >= displacement) chikou[i - displacement] = closes[i];
   }
 
   for (let i = 0; i < n; i++) {

@@ -77,7 +77,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `data` | core | Py | Tick capture (opt-in via `FLINTTRADE_TICK_CAPTURE`), append-only JSONL audit log, Practice-mode sandbox engine, tax/P&L routes, DuckDB (QuestDB client exists but is dormant) |
 | `historical` | core | Py | OHLCV downloader (OpenChart/yfinance), DuckDB/Parquet pipeline, expiry tracker |
 | `indicators` | core | Py | Pure-NumPy batch indicators (110 exports; no TA-Lib — the unused extra was removed) + pure-Python streaming classes (numba accelerates only 3 batch kernels, optional) + Pine Script convert |
-| `ticks` | core | Rust+PyO3 | Tick-level backtesting simulator (was `tick-engine`) — builds and imports, but currently has zero production consumers |
+| `ticks` | core | Rust+PyO3 | Tick-level backtesting simulator (was `tick-engine`) — optional accelerated engine for `flinttrade_backtest.signal_backtest` (pure-Python default, byte-equivalence tested) |
 | `design-system` | core | TS | Shared tokens/glass/cinematic CSS, charts module (Flint* components), brand, layer scale — the consumed surface; the UI-kit/forms/motion exports are unconsumed scaffolding |
 | `engine` | services | Py | 5-layer `SafetySystem`, `gate_order`, order router, scheduler, mode guard, sandbox executor, strategies |
 | `screener` | services | Py | Option chain, OI/PCR/max-pain, IV smile, futures quadrant, portfolio Greeks, RRG, FII/DII |
@@ -88,7 +88,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | Generic HMAC-signed custom webhooks + flow builder (the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed on 2026-07-26; a retired provider source now 404s) |
-| `terminal` | apps | TS/React | SPA: FlexLayout workspace, 70 widgets, FDC3 channel bus, routes — single source of truth for UI |
+| `terminal` | apps | TS/React | SPA: FlexLayout workspace, 71 widgets, FDC3 channel bus, routes — single source of truth for UI |
 | `desktop` | apps | TS/Electron | Sandboxed Electron 43 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 

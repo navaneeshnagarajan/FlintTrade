@@ -38,6 +38,10 @@ import {
   PENDING_TEMPLATE_KEY,
   type BuilderTemplate,
 } from "../templateBridge";
+import {
+  PENDING_PINE_DRAFT_KEY,
+  stashPendingPineDraft,
+} from "../pineBridge";
 import { act } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
@@ -108,6 +112,29 @@ describe("StrategyBuilderTool", () => {
 
     await userEvent.click(shortBtn);
     expect(screen.getAllByText("SELL")).toHaveLength(2);
+  });
+
+  it("lands on the Pine tab with the handed-off source when a Pine draft is pending", () => {
+    // The Pine Script Editor (routes/lab) stashes the raw Pine SOURCE via
+    // pineBridge — the builder must open straight into its sandboxed
+    // interpreter tab with that source loaded.
+    const source = "//@version=5\nindicator(\"Hand-off\")\nplot(close)";
+    stashPendingPineDraft({ source });
+
+    render(<StrategyBuilderTool />);
+
+    const editor = screen.getByRole("textbox", { name: "Pine Script editor" });
+    expect(editor).toHaveValue(source);
+    // The stash is one-shot — consumed by PineTab on mount.
+    expect(sessionStorage.getItem(PENDING_PINE_DRAFT_KEY)).toBeNull();
+  });
+
+  it("defaults to the Strategy Legs tab when no Pine draft is pending", () => {
+    render(<StrategyBuilderTool />);
+    expect(
+      screen.queryByRole("textbox", { name: "Pine Script editor" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Long Straddle" })).toBeInTheDocument();
   });
 
   it("applies a live load-template event while mounted", () => {

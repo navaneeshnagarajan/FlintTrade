@@ -27,8 +27,7 @@
     "./brand": "./src/brand/index.ts",
     "./charts": "./src/charts/index.ts",
     "./hooks/*": "./src/hooks/*.ts",
-    "./forms": "./src/forms/index.ts",
-    "./chart-theme": "./src/chart-theme/index.ts"
+    "./forms": "./src/forms/index.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.1",

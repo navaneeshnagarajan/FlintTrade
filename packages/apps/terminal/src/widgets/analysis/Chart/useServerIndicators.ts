@@ -23,6 +23,24 @@ const SERVER_INDICATOR_KEYS = [
   "showMFI",
   "showSqueeze",
   "showAO",
+  "showTEMA",
+  "showT3",
+  "showTRIMA",
+  "showMcGinley",
+  "showMAEnvelopes",
+  "showSTARC",
+  "showCMF",
+  "showROC",
+  "showMomentum",
+  "showTRIX",
+  "showChop",
+  "showHV",
+  "showVortex",
+  "showFisher",
+  "showKST",
+  "showCoppock",
+  "showAD",
+  "showPVT",
 ] as const;
 
 export type ServerIndicatorKey = (typeof SERVER_INDICATOR_KEYS)[number];
@@ -40,6 +58,24 @@ export function serverIndicatorName(key: ServerIndicatorKey, periods: IndicatorP
     case "showMFI": return `mfi_${periods.mfi}`;
     case "showSqueeze": return "squeeze_momentum";
     case "showAO": return "awesome_oscillator";
+    case "showTEMA": return `tema_${periods.tema}`;
+    case "showT3": return `t3_${periods.t3}`;
+    case "showTRIMA": return `trima_${periods.trima}`;
+    case "showMcGinley": return `mcginley_dynamic_${periods.mcginley}`;
+    case "showMAEnvelopes": return `moving_average_envelopes_${periods.mae}`;
+    case "showSTARC": return "starc_bands";
+    case "showCMF": return `cmf_${periods.cmf}`;
+    case "showROC": return `roc_${periods.roc}`;
+    case "showMomentum": return `mom_${periods.mom}`;
+    case "showTRIX": return `trix_${periods.trix}`;
+    case "showChop": return `chop_${periods.chop}`;
+    case "showHV": return `historical_volatility_${periods.hv}`;
+    case "showVortex": return `vortex_${periods.vortex}`;
+    case "showFisher": return `fisher_transform_${periods.fisher}`;
+    case "showKST": return "kst";
+    case "showCoppock": return "coppock_curve";
+    case "showAD": return "ad";
+    case "showPVT": return "pvt";
   }
 }
 

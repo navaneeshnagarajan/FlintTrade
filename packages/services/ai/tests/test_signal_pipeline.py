@@ -25,6 +25,19 @@ class _SequenceIndicator:
         return next(self._values)
 
 
+class _SequenceMACD:
+    """Return predetermined MACD histogram tuples, mimicking StreamingMACD.update."""
+
+    def __init__(self, histograms: list[float]) -> None:
+        self._values = iter(histograms)
+        self.update_count = 0
+
+    def update(self, _price: float) -> tuple[float | None, float | None, float | None]:
+        self.update_count += 1
+        histogram = next(self._values)
+        return histogram, 0.0, histogram
+
+
 class TestSignalModels:
     """Tests for Signal and SignalConfig dataclasses."""
 
@@ -272,9 +285,7 @@ class TestLiveSignalPipeline:
         state.rsi = _SequenceIndicator([50.0, 20.0, 20.0])  # type: ignore[assignment]
         state.ema_fast = _SequenceIndicator([99.0, 101.0, 102.0])  # type: ignore[assignment]
         state.ema_slow = _SequenceIndicator([100.0, 100.0, 100.0])  # type: ignore[assignment]
-        state.macd_fast_ema = _SequenceIndicator([-1.0, 1.0, 2.0])  # type: ignore[assignment]
-        state.macd_slow_ema = _SequenceIndicator([0.0, 0.0, 0.0])  # type: ignore[assignment]
-        state.macd_signal_ema = _SequenceIndicator([0.0, 0.0, 0.0])  # type: ignore[assignment]
+        state.macd = _SequenceMACD([-1.0, 1.0, 2.0])  # type: ignore[assignment]
 
         assert pipeline.process_tick("NSE", "TEST", 100.0) is None
         signal = pipeline.process_tick("NSE", "TEST", 100.0)
@@ -284,9 +295,7 @@ class TestLiveSignalPipeline:
         assert pipeline.latest_event_id == 1
         assert state.ema_fast.update_count == 2  # type: ignore[union-attr]
         assert state.ema_slow.update_count == 2  # type: ignore[union-attr]
-        assert state.macd_fast_ema.update_count == 2  # type: ignore[union-attr]
-        assert state.macd_slow_ema.update_count == 2  # type: ignore[union-attr]
-        assert state.macd_signal_ema.update_count == 2  # type: ignore[union-attr]
+        assert state.macd.update_count == 2  # type: ignore[union-attr]
         assert state.ema_last_nonzero_side == 1
         assert state.macd_last_nonzero_side == 1
         assert pipeline.process_tick("NSE", "TEST", 100.0) is None
@@ -609,9 +618,7 @@ class TestLiveSignalPipeline:
             thresholds={"macd_crossover_min": 1.0},
         )
         state = pipeline._get_or_create_state("NSE", "TEST")
-        state.macd_fast_ema = _SequenceIndicator(histograms)  # type: ignore[assignment]
-        state.macd_slow_ema = _SequenceIndicator([0.0] * len(histograms))  # type: ignore[assignment]
-        state.macd_signal_ema = _SequenceIndicator([0.0] * len(histograms))  # type: ignore[assignment]
+        state.macd = _SequenceMACD(histograms)  # type: ignore[assignment]
 
         emissions = [
             (index, signal.signal_type)
@@ -641,9 +648,7 @@ class TestLiveSignalPipeline:
             thresholds={"macd_crossover_min": 1.0},
         )
         state = pipeline._get_or_create_state("NSE", "TEST")
-        state.macd_fast_ema = _SequenceIndicator(histograms)  # type: ignore[assignment]
-        state.macd_slow_ema = _SequenceIndicator([0.0] * len(histograms))  # type: ignore[assignment]
-        state.macd_signal_ema = _SequenceIndicator([0.0] * len(histograms))  # type: ignore[assignment]
+        state.macd = _SequenceMACD(histograms)  # type: ignore[assignment]
 
         emissions = [
             (index, signal.signal_type)
@@ -652,6 +657,68 @@ class TestLiveSignalPipeline:
         ]
 
         assert emissions == [(2, signal_type)]
+
+    @pytest.mark.unit
+    def test_macd_state_uses_streaming_macd_with_configured_periods(self) -> None:
+        """The MACD path must consume StreamingMACD from flinttrade_indicators."""
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+        from flinttrade_indicators.streaming import StreamingMACD
+
+        pipeline = LiveSignalPipeline(
+            instruments=["NSE:TEST"],
+            indicators=[{"name": "MACD", "params": {"fast": 5, "slow": 10, "signal": 3}}],
+            thresholds={},
+        )
+
+        state = pipeline._get_or_create_state("NSE", "TEST")
+
+        assert isinstance(state.macd, StreamingMACD)
+        assert state.macd.fast_period == 5
+        assert state.macd.slow_period == 10
+        assert state.macd.signal_period == 3
+
+    @pytest.mark.unit
+    def test_streaming_macd_matches_chained_ema_reference_exactly(self) -> None:
+        """StreamingMACD must reproduce the previous hand-rolled three-EMA chain bit-for-bit.
+
+        The retired implementation fed the fast/slow EMA difference into a third
+        StreamingEMA only once both were warm, and emitted histogram = macd - signal
+        only once the signal EMA was warm.  StreamingMACD performs the identical
+        operations in the identical order, so every value must match exactly.
+        """
+        from flinttrade_ai.signal_pipeline import LiveSignalPipeline
+        from flinttrade_indicators.streaming import StreamingEMA, StreamingMACD
+
+        pipeline = LiveSignalPipeline(
+            instruments=["NSE:TEST"],
+            indicators=[{"name": "MACD", "params": {"fast": 5, "slow": 10, "signal": 3}}],
+            thresholds={},
+        )
+        reference_fast = StreamingEMA(period=5)
+        reference_slow = StreamingEMA(period=10)
+        reference_signal = StreamingEMA(period=3)
+        prices = [100.0 - i * 0.3 for i in range(20)] + [94.0 + i * 1.5 for i in range(40)]
+
+        for price in prices:
+            pipeline.process_tick("NSE", "TEST", price)
+            state = pipeline._states[("NSE", "TEST")]
+            assert isinstance(state.macd, StreamingMACD)
+
+            fast_val = reference_fast.update(price)
+            slow_val = reference_slow.update(price)
+            if fast_val is None or slow_val is None:
+                assert state.macd.histogram is None
+                continue
+            macd_line = fast_val - slow_val
+            signal_line = reference_signal.update(macd_line)
+            if signal_line is None:
+                assert state.macd.macd == macd_line
+                assert state.macd.histogram is None
+                continue
+
+            assert state.macd.macd == macd_line
+            assert state.macd.signal == signal_line
+            assert state.macd.histogram == macd_line - signal_line
 
     @pytest.mark.parametrize("indicator", ["EMA_Cross", "MACD"])
     def test_first_nonzero_indicator_sample_seeds_side_without_emitting(self, indicator: str) -> None:
@@ -669,9 +736,7 @@ class TestLiveSignalPipeline:
             state.ema_fast = _SequenceIndicator([101.2, 101.4])  # type: ignore[assignment]
             state.ema_slow = _SequenceIndicator([100.0, 100.0])  # type: ignore[assignment]
         else:
-            state.macd_fast_ema = _SequenceIndicator([1.2, 1.4])  # type: ignore[assignment]
-            state.macd_slow_ema = _SequenceIndicator([0.0, 0.0])  # type: ignore[assignment]
-            state.macd_signal_ema = _SequenceIndicator([0.0, 0.0])  # type: ignore[assignment]
+            state.macd = _SequenceMACD([1.2, 1.4])  # type: ignore[assignment]
 
         results = [pipeline.process_tick("NSE", "TEST", 100.0) for _ in range(2)]
 
