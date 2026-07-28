@@ -49,7 +49,12 @@ _EVALUATOR_RE = re.compile(
     r"\b(?:eval|iex|Invoke-Expression)\b|\b(?:bash|sh|pwsh|powershell|cmd)\b[^\n]*?\s-c\b",
     re.IGNORECASE,
 )
-_QUOTED_RE = re.compile(r"(['\"])(?:\\.|(?!\1).)*\1")
+# One branch per quote style, with backslash excluded from the plain-character
+# branch so it can only be consumed by the escape branch — the two alternatives
+# never overlap, which keeps the scan linear (CodeQL py/redos on the previous
+# backreference form: an unterminated quote full of escapes backtracked
+# exponentially).
+_QUOTED_RE = re.compile(r"'(?:\\.|[^\\'])*(?:\\)?'|\"(?:\\.|[^\\\"])*(?:\\)?\"")
 
 
 def _executable_text(line: str) -> str:
