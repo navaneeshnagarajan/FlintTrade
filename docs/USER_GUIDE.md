@@ -24,17 +24,56 @@ UI and API on a single origin (port 5100), usable from any browser. The
 desktop apps are convenience wrappers around that same backend for people who
 prefer a one-click install.
 
-### Self-hosted web app (the primary path)
+### One-line install (recommended — no prerequisites)
+
+The web-app installer needs nothing pre-installed: no Python, no Node, no git,
+no bash and no make.
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/web-install.ps1 | iex
+```
+
+It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
+and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
+checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
+launcher — `~/.local/bin/flinttrade` on macOS and Linux,
+`%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut
+on Windows. Open http://127.0.0.1:5100 and follow the first-time Setup flow
+— no `.env` file is required.
+
+Removing it again is covered in [Uninstall](#13-uninstall).
+
+### Run from source (contributors)
+
+Use this when you are developing FlintTrade itself. It expects you to supply
+the toolchain yourself: git, Python 3.12+, Node 22+, `uv` and `pnpm`.
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
-uv sync && pnpm install
-make start        # backend + terminal UI on http://127.0.0.1:5100
+uv sync
+pnpm install
+pnpm --filter @flinttrade/terminal build
+python scripts/ft.py start
 ```
 
-Or run it in Docker with `make docker-up`. Open the printed URL in a browser
-and follow the first-time Setup flow — no `.env` file is required.
+The same six lines run unchanged in Windows PowerShell — do not join them with
+`&&`, which Windows PowerShell 5.1 does not support.
+`python scripts/ft.py <target>` is the cross-platform runner (no make and no
+bash needed); `make <target>` is the POSIX alias.
+
+The terminal build step is not optional: the backend serves the UI only when
+`packages/apps/terminal/dist/index.html` exists, so skipping it leaves you with
+an API and no interface.
+
+Docker (`make docker-up`) is an advanced, POSIX-only path that also needs a
+populated `.env`; it is not a zero-prerequisite way in.
 
 ### Native desktop (Electron convenience shell)
 
@@ -68,30 +107,37 @@ opens Setup only after the source guardian is healthy. Source/runtime updates
 are staged and health-proved separately from Electron-shell installer updates.
 Manual downloads and per-OS caveats are covered in [DESKTOP.md](DESKTOP.md).
 
-Contributors can package the shell locally:
+The matching desktop uninstall is in [Uninstall](#13-uninstall).
+
+Contributors can package the shell locally (these lines run unchanged in bash,
+zsh and Windows PowerShell):
 
 ```bash
 pnpm install --frozen-lockfile
-make desktop-test
-make desktop-package
+python scripts/ft.py desktop-test
+python scripts/ft.py desktop-package
 ```
 
-Install the generated package from `packages/apps/desktop/release/electron/`,
-launch FlintTrade, and follow the first-time Setup flow. Local macOS output is
-always ad-hoc sealed and has no Developer ID trust. Only release CI can use
-complete Apple distribution-signing and notarisation secrets.
+On POSIX, `make desktop-test` and `make desktop-package` are aliases for the
+same targets. Install the generated package from
+`packages/apps/desktop/release/electron/`, launch FlintTrade, and follow the
+first-time Setup flow. Local macOS output is always ad-hoc sealed and has no
+Developer ID trust. Only release CI can use complete Apple
+distribution-signing and notarisation secrets.
 
-### Contributor source mode
+### Terminal dev server (contributors)
 
-Use this only when developing FlintTrade itself. It requires Python 3.12+,
-Node.js 22+, Git, and optionally Rust for `core/ticks`.
+When you are changing terminal code, run the Vite dev server alongside the
+backend instead of the built UI. It requires Python 3.12+, Node.js 22+, Git,
+and optionally Rust for `core/ticks`.
 
 ```bash
-make setup
-make dev
+python scripts/ft.py setup
+python scripts/ft.py dev
 ```
 
-Open `http://localhost:5173` once the dev server is ready.
+Open `http://localhost:5173` once the dev server is ready. On POSIX,
+`make setup` and `make dev` are aliases for the same targets.
 
 ### Platform-specific setup
 
@@ -243,8 +289,17 @@ cancel orders or flatten positions.
 
 FlintTrade's workspace is a [FlexLayout](https://github.com/caplin/FlexLayout)
 canvas. Every widget is a panel you can drag, tab, stack, float, or pop out
-into its own window. Layouts persist in `~/.flinttrade/workspace.json` and
-sync across sessions.
+into its own window. Layouts persist in `workspace.json` inside your
+platform-specific workspace directory and sync across sessions:
+
+| Platform | Workspace directory |
+|---|---|
+| Linux | `~/.flinttrade/` |
+| macOS | `~/Library/Application Support/flinttrade/` |
+| Windows | `%APPDATA%\flinttrade\` |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` |
+
+See [Settings reference](#11-settings-reference) for what else lives there.
 
 ### The 12 routes
 
@@ -486,8 +541,8 @@ Lives in your platform-specific workspace directory:
 |---|---|
 | Linux | `~/.flinttrade/workspace.json` |
 | macOS | `~/Library/Application Support/flinttrade/workspace.json` |
-| Windows | `%APPDATA%/flinttrade/workspace.json` |
-| Override | `FLINTTRADE_HOME` environment variable |
+| Windows | `%APPDATA%\flinttrade\workspace.json` |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
 The Setup and Settings UI write `workspace.json`. Key
 sections:
@@ -533,9 +588,13 @@ Broker Gateway, keep the port in the Gateway URL or set REST Port when the URL
 omits it.
 
 ```bash
-make status          # shows FlintTrade backend health and optional OpenAlgo status
-make start-openalgo  # boots the optional local-dev OpenAlgo clone when present
+python scripts/ft.py status   # FlintTrade backend health and optional OpenAlgo status
+make start-openalgo           # POSIX only: boots the optional local-dev OpenAlgo clone
 ```
+
+`python scripts/ft.py status` works on every OS; `make status` is the POSIX
+alias. `make start-openalgo` needs bash, so on Windows start the OpenAlgo clone
+with its own launcher instead.
 
 If you installed OpenAlgo separately, start it via its own start script
 (`python app.py` from the OpenAlgo repo root, or its systemd unit).
@@ -567,8 +626,8 @@ when it detects the 401.
 1. Check the mode badge in the top bar. If it says **Explore**, no orders
    are sent at all (by design).
 2. Open the **Orderbook** widget and look at the rejection reason column.
-3. Check the FlintTrade backend logs (where you ran `python
-   packages/core/core/src/flinttrade_core/app.py` or `make start`) — every rejected order is
+3. Check the FlintTrade backend logs — the console where you ran
+   `python scripts/ft.py start` (or `make start`) — every rejected order is
    logged with the safety-layer that blocked it.
 
 ### Front-end shows stale prices
@@ -601,6 +660,71 @@ ensure the running user has write access.
 - **security.md** — for security issues (private disclosure via GitHub
   Security Advisories).
 
-If your issue requires a backend log, run with
-`FLINTTRADE_LOG_LEVEL=DEBUG` and attach the relevant lines (redact any
-broker account IDs or tokens first).
+If your issue requires a backend log, raise the log level and attach the
+relevant lines (redact any broker account IDs or tokens first):
+
+```bash
+# macOS / Linux
+FLINTTRADE_LOG_LEVEL=DEBUG python scripts/ft.py start
+```
+
+```powershell
+# Windows 10/11
+$env:FLINTTRADE_LOG_LEVEL = "DEBUG"
+python scripts/ft.py start
+```
+
+---
+
+## 13. Uninstall
+
+Uninstalling is one command on every OS, and it is the same command for a
+web-app install and a desktop install. The plain uninstall removes only the
+installed application and its launcher integration; your workspace, managed
+source, toolchain and data are retained so a reinstall can recover them.
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/uninstall.ps1 | iex
+```
+
+### Removing your data as well
+
+Add the purge flag — `--purge` on macOS/Linux, `-Purge` on Windows — to also
+delete recognised FlintTrade data (workspace, managed source and tools).
+Purge is irreversible and asks for typed or explicit scripted confirmation.
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
+```
+
+```powershell
+# Windows 10/11
+& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
+```
+
+Take a backup first if you want your workspace and settings back later — see
+[Backup and restore](setup/backup.md).
+
+### If the site is unreachable
+
+The same scripts live in the repository. From a clone or from the managed
+source checkout at `~/.flinttrade/src/FlintTrade`, run them directly:
+
+```bash
+# macOS / Linux
+bash scripts/install/flinttrade-uninstall.sh
+```
+
+```powershell
+# Windows 10/11
+powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps1
+```
+
+Both accept the same purge flag (`--purge` / `-Purge`).

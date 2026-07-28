@@ -55,7 +55,8 @@ fallbacks.
 To build the Rust `ticks` tick engine (optional unless you touch it):
 
 ```bash
-cd packages/core/ticks && cargo build --release
+cd packages/core/ticks
+cargo build --release
 ```
 
 User preferences live in `workspace.json` under your FlintTrade home, generated
@@ -74,13 +75,16 @@ OpenAlgo is optional for local development. See [`docs/setup/QUICKSTART.md`](doc
 
 ## How to run tests
 
-FlintTrade has a large Python and TypeScript test suite. Run it with:
+FlintTrade has a large Python and TypeScript test suite.
+`python scripts/ft.py <target>` is the cross-platform runner — it needs no make
+and no bash, and behaves identically on Windows, macOS and Linux.
+`make <target>` is the POSIX alias for the same targets.
 
 ```bash
-make test                                        # all pytest tests
-make test-fast                                   # stop on first failure
+python scripts/ft.py test        # all pytest tests
+python scripts/ft.py test-fast   # stop on first failure
 python -m pytest packages/core/core/tests/ -v --import-mode=importlib   # single package
-cd packages/apps/terminal && npx vitest run                             # all Vitest tests
+pnpm --filter @flinttrade/terminal test    # all Vitest tests
 ```
 
 To run a single file or a single test by name:
@@ -88,29 +92,34 @@ To run a single file or a single test by name:
 ```bash
 python -m pytest packages/core/core/tests/test_foo.py -v --import-mode=importlib
 python -m pytest packages/core/core/tests/test_foo.py::test_name -v --import-mode=importlib
-cd packages/apps/terminal && npx vitest run src/widgets/orderpad/OrderPad.test.tsx
-cd packages/apps/terminal && npx vitest run -t "places a market order"
+cd packages/apps/terminal
+npx vitest run src/widgets/orderpad/OrderPad.test.tsx
+npx vitest run -t "places a market order"
 ```
 
 `--import-mode=importlib` is required when you invoke `pytest` directly (the
-flat-package layout needs it). The `make` targets set it for you, so prefer
-`make test` unless you're iterating on a single file.
+flat-package layout needs it). The `scripts/ft.py` and `make` targets set it for
+you, so prefer `python scripts/ft.py test` unless you're iterating on a single
+file.
 
 Lint and type-checks are part of CI too — run them locally before pushing:
 
 ```bash
-make lint                                             # ruff over all Python packages
-cd packages/apps/terminal && pnpm run typecheck       # tsc --noEmit, strict mode
+python scripts/ft.py lint                          # ruff over all Python packages
+pnpm --filter @flinttrade/terminal typecheck       # tsc --noEmit, strict mode
 ```
 
 ## How to build
 
 ```bash
 # Terminal (React + Vite)
-cd packages/apps/terminal && npm run build
+pnpm --filter @flinttrade/terminal build
+```
 
+```bash
 # Rust ticks tick engine (PyO3 bindings)
-cd packages/core/ticks && cargo build --release
+cd packages/core/ticks
+cargo build --release
 ```
 
 The terminal build runs `tsc --noEmit` followed by `vite build`. A clean build is required before any commit that touches `packages/apps/terminal/`.
@@ -197,7 +206,8 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
 
 ### Python
 
-- Follow PEP 8. Lint with `ruff` — `make lint` must be clean before commit.
+- Follow PEP 8. Lint with `ruff` — `python scripts/ft.py lint` (POSIX alias:
+  `make lint`) must be clean before commit.
 - Type hints on every public function and class attribute.
 - Google-style docstrings (`Args:`, `Returns:`, `Raises:`).
 - Absolute imports only — no `from .foo import bar`.

@@ -25,6 +25,25 @@ describe('install script routes', () => {
     expect(res.headers.get('location')).toMatch(/flinttrade-install\.ps1$/);
   });
 
+  it('redirects /web-install.sh to the separate web-app installer at the same commit', () => {
+    const res = installScriptRedirect('web-sh', SOURCE_SHA);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      `https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/${SOURCE_SHA}/scripts/install/flinttrade-web-install.sh`,
+    );
+    // The web installer must never collapse into the desktop one: the desktop
+    // script is release-gated, the web script is not.
+    expect(res.headers.get('location')).not.toBe(installScriptUrl('sh', SOURCE_SHA));
+    expect(res.headers.get('location')).not.toContain('/main/');
+  });
+
+  it('redirects /web-install.ps1 to the same immutable deployment commit', () => {
+    const res = installScriptRedirect('web-ps1', SOURCE_SHA);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(installScriptUrl('web-ps1', SOURCE_SHA));
+    expect(res.headers.get('location')).toMatch(/flinttrade-web-install\.ps1$/);
+  });
+
   it('redirects /uninstall.sh to the same immutable deployment commit', () => {
     const res = installScriptRedirect('uninstall-sh', SOURCE_SHA);
     expect(res.status).toBe(302);
@@ -53,5 +72,14 @@ describe('install script routes', () => {
     expect(missing.headers.get('cache-control')).toBe('no-store');
     await expect(missing.text()).resolves.toContain('immutable FlintTrade install-script source is unavailable');
     expect(malformed).toBeNull();
+  });
+
+  it('fails closed identically for the web-app installer routes', async () => {
+    const missing = installScriptRedirect('web-ps1', null);
+
+    expect(missing.status).toBe(503);
+    expect(missing.headers.get('cache-control')).toBe('no-store');
+    await expect(missing.text()).resolves.toContain('immutable FlintTrade install-script source is unavailable');
+    expect(installScriptUrl('web-sh', 'main')).toBeNull();
   });
 });

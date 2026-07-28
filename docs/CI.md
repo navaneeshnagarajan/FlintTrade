@@ -15,7 +15,7 @@ workflow YAML should read this once.
 
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
-| `test.yml` | push to `main` / `dev`; non-draft PR | 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
+| `test.yml` | push to `main` / `dev`; non-draft PR | `changed-surfaces` classifier + 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Documentation and site edits still run `python-tests`, `node-core-tests` and `secrets-check`; the expensive lanes gate on `changed-surfaces`. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and `site.yml` itself) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Documentation changes run this workflow even though they skip the `test.yml` matrix. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | Python on macOS, Windows and Ubuntu 26.04; Electron directory packages on macOS, Windows and Linux | Catches slow-burn platform and packaging regressions before they accumulate. |
@@ -81,12 +81,25 @@ Three mechanisms keep CI inexpensive and signal-rich:
 - **Draft-PR guard.** Every job is gated on
   `github.event.pull_request.draft != true`. Open PRs as drafts while
   iterating; mark "ready for review" to trigger CI.
-- **`paths-ignore` for doc-only commits.** The `test.yml` matrix is skipped if a
-  commit only touches `*.md`, `docs/**`, `.local/**`, `notice`,
-  `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`,
-  `.github/ISSUE_TEMPLATE/**`, or the `claude*.yml` / `status-report.yml`
-  workflows themselves. Changes under `docs/**` still run `site.yml` because
-  that workflow includes documentation in its positive path filter.
+- **`paths-ignore` for genuinely inert files.** The `test.yml` matrix is skipped
+  if a commit only touches `.local/**`, `notice`, `LICENSE`, `.gitignore`,
+  `.gitattributes`, `.editorconfig`, `.github/ISSUE_TEMPLATE/**`, or the
+  `claude*.yml` / `status-report.yml` workflows themselves.
+- **Documentation and the site are deliberately NOT path-ignored.**
+  `python-tests` carries `tests/test_windows_command_docs.py`, the guard that
+  stops a Windows setup page prescribing `make` or a command fence chaining with
+  `&&`, and `packages/apps/site` carries the `desktop-copy` assertions that pin
+  the one-command install strings. Ignoring those paths skipped exactly the jobs
+  that police them, so a docs-only PR could reintroduce the defect and still
+  merge green. `python-tests`, `node-core-tests` and `secrets-check` therefore
+  always run.
+- **The `changed-surfaces` classifier keeps that cheap.** It diffs the push or PR
+  range with plain git and reports `code=false` only when every changed path is
+  documentation or site content; the four widget shards, `rust-ticks-tests` and
+  `electron-desktop-tests` gate on it. It fails **open** — an unresolvable range
+  (first push to a branch, force push, shallow history) reports `code=true` and
+  the full matrix runs. Changes under `docs/**` still run `site.yml` because that
+  workflow includes documentation in its positive path filter.
 
 ---
 
@@ -94,16 +107,22 @@ Three mechanisms keep CI inexpensive and signal-rich:
 
 If the local checklist passes, CI catches drift rather than regressions.
 
+One command per line — Windows PowerShell 5.1 has no `&&` operator, so none of
+these may be chained with it.
+
 1. **Before you commit:**
-   - `cd packages/apps/terminal && npx tsc --noEmit` — terminal type-check.
-   - `cd packages/apps/terminal && npx vitest run <changed-tests>` — or the
-     full suite if you touched the widget surface.
+   - `pnpm --filter @flinttrade/terminal typecheck` — terminal type-check.
+   - `npx vitest run <changed-tests>` from `packages/apps/terminal` — or
+     `pnpm --filter @flinttrade/terminal test` if you touched the widget
+     surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
-   - `ruff check packages/*/src/`
+   - `python scripts/ft.py lint` — runs `ruff check` over `packages/*/src/`
+     without relying on POSIX glob expansion.
 2. **Before you push:**
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.
-   - `make test` if anything inside `packages/*/src/` changed.
+   - `python scripts/ft.py test` (POSIX alias: `make test`) if anything inside
+     `packages/*/src/` changed.
 3. **Doc-only commits** (paths listed above) skip the `test.yml` matrix by
    design, but changes under `docs/**` still run the site typecheck, tests and
    build through `site.yml`.
@@ -120,7 +139,7 @@ If the local checklist passes, CI catches drift rather than regressions.
 | 2 | Contract tests (e.g. `packages/core/core/tests/test_orders_contract.py` parses `api.ts` for `postOrder("leaf", ...)` calls and asserts the matching Flask route exists) | Frontend ↔ backend route drift. |
 | 3 | `cancel-in-progress: true` on `test.yml` and `claude-code-review.yml` | Back-to-back-push runner amplification. |
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
-| 5 | `paths-ignore` for doc-only commits | Routine doc updates burning runner minutes. |
+| 5 | `paths-ignore` for inert files, plus the `changed-surfaces` classifier gating the expensive lanes on doc/site-only edits | Routine doc updates burning runner minutes — without blinding the guards that police documentation. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
 | 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional**: Codex was retired from the review pipeline (2026-06-05), so this gate is no longer part of the standard flow (claude ultracode panels → maintainer). Kept only for contributors who still run a local Codex CLI | High-level design / contract / safety issues unit tests cannot see. |
 | 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn Python and Electron-package regressions on macOS, Windows and Linux before they pile up. |
@@ -153,17 +172,21 @@ workflow log. It is the single most useful CI command — bookmark it.
 The per-push jobs are designed to be reproducible without a runner. Map the
 failed job to its local command:
 
+All terminal rows are run from `packages/apps/terminal` — `cd` there first, on
+its own line. Do not chain the `cd` with `&&`; Windows PowerShell 5.1 has no
+`&&`.
+
 | Job | Local command |
 |---|---|
-| `python-tests` | `make test` |
-| `node-core-tests` | `cd packages/apps/terminal && npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
+| `python-tests` | `python scripts/ft.py test` (POSIX alias: `make test`) |
+| `node-core-tests` | `npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
 | `node-widget-tests-1` | `... npx vitest run src/widgets/trading/ src/widgets/utility/{AIAdvisor,Alerts,AuditTrail,Calculator,CurrencyConverter,EarningsCalendar,EconomicCalendar,ExpiryCountdown,FundingRate,GlobalIndices,Health}/` |
 | `node-widget-tests-2a` | `... npx vitest run src/widgets/utility/{MarketClock,MarketSummary,News,PositionSizing,ProfitTarget,Scanner}/` |
 | `node-widget-tests-2b` | `... npx vitest run` over `src/widgets/utility/{StrategyTemplates,TickSpeed,Ticker,Watchlist,AIBackends,AITeam,Obsidian,TradeJournal}/` (one dir per invocation; `TradeIdea` excluded) |
 | `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
-| `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`) |
-| `electron-desktop-tests` | `make desktop-test && make desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
+| `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`, POSIX only) |
+| `electron-desktop-tests` | `python scripts/ft.py desktop-test`, then `python scripts/ft.py desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
 
 The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
 as the source of truth (the shard-coverage guard keeps it complete).

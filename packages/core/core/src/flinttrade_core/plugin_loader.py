@@ -1,11 +1,16 @@
 """Dynamic plugin discovery and hot-reload for FlintTrade.
 
-Users drop ``*.py`` files into ``~/.flinttrade/plugins/``.  Each file must
-contain a class named ``Plugin`` that inherits from :class:`PluginInterface`.
-The :class:`PluginLoader` discovers, loads, activates, deactivates, and hot-
-reloads those classes without modifying any core package.
+Users drop ``*.py`` files into the ``plugins/`` directory of their platform
+workspace — ``~/.flinttrade/plugins/`` on Linux, ``~/Library/Application
+Support/flinttrade/plugins/`` on macOS, ``%APPDATA%/flinttrade/plugins/`` on
+Windows, resolved by :func:`flinttrade_core.workspace.workspace_dir` so the
+``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides are honoured.  Each
+file must contain a class named ``Plugin`` that inherits from
+:class:`PluginInterface`.  The :class:`PluginLoader` discovers, loads,
+activates, deactivates, and hot-reloads those classes without modifying any
+core package.
 
-Example plugin file (``~/.flinttrade/plugins/my_plugin.py``)::
+Example plugin file (``<workspace>/plugins/my_plugin.py``)::
 
     from flinttrade_core.plugin_loader import PluginInterface, PluginContext
 
@@ -39,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from .event_bus import EventBus
+from .workspace import workspace_dir
 
 logger = logging.getLogger("flinttrade.core.plugin_loader")
 
@@ -136,8 +142,9 @@ class PluginLoader:
     :meth:`activate` in a single lock scope.
 
     Args:
-        plugin_dir: Directory to scan.  Defaults to
-            ``~/.flinttrade/plugins/`` when omitted.
+        plugin_dir: Directory to scan.  Defaults to ``plugins/`` inside the
+            platform workspace (:func:`flinttrade_core.workspace.workspace_dir`)
+            when omitted.
         context: :class:`PluginContext` passed to each plugin on activation.
 
     Example::
@@ -156,7 +163,7 @@ class PluginLoader:
         context: PluginContext | None = None,
     ) -> None:
         if plugin_dir is None:
-            plugin_dir = Path.home() / ".flinttrade" / "plugins"
+            plugin_dir = workspace_dir() / "plugins"
         self._plugin_dir = plugin_dir
         self._context = context or PluginContext(
             event_bus=EventBus(),

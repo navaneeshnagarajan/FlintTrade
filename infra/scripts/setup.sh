@@ -6,6 +6,9 @@ set -euo pipefail
 FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$FLINTTRADE_DIR"
 
+# Keep in step with package.json packageManager and scripts/install/*.
+PINNED_PNPM_VERSION="9.15.0"
+
 GREEN='\033[32m'
 RED='\033[31m'
 YELLOW='\033[33m'
@@ -50,10 +53,66 @@ check_cmd() {
     fi
 }
 
-check_cmd python3 || { echo "Install Python 3.11+: sudo apt install python3"; exit 1; }
-check_cmd pip3 || check_cmd pip || { echo "Install pip: sudo apt install python3-pip"; exit 1; }
-check_cmd git || { echo "Install git: sudo apt install git"; exit 1; }
-check_cmd curl || { echo "Install curl: sudo apt install curl"; exit 1; }
+# OS-aware remediation: 'sudo apt install' is wrong on macOS and on every
+# non-Debian distro, and telling a Windows user to apt-get anything is nonsense.
+# Usage: install_hint <portable-name> [debian-package]
+install_hint() {
+    portable="$1"
+    debian="${2:-$1}"
+    case "$(uname -s)" in
+        Darwin)
+            echo "  brew install $portable"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "  winget install $portable"
+            echo "  (or install FlintTrade directly: irm https://flinttrade.vercel.app/web-install.ps1 | iex)"
+            ;;
+        *)
+            if command -v apt-get >/dev/null 2>&1; then
+                echo "  sudo apt install $debian"
+            elif command -v dnf >/dev/null 2>&1; then
+                echo "  sudo dnf install $debian"
+            elif command -v pacman >/dev/null 2>&1; then
+                echo "  sudo pacman -S $portable"
+            else
+                echo "  install '$portable' with your distribution's package manager"
+            fi
+            ;;
+    esac
+}
+
+# The Microsoft Store ships a python3 "App execution alias" stub that exists on
+# PATH but exits 49 without running anything. Probe before trusting it.
+is_store_stub() {
+    case "$(command -v "$1" 2>/dev/null)" in
+        *WindowsApps*|*windowsapps*) return 0 ;;
+    esac
+    return 1
+}
+
+check_python() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        fail "python3: not found"
+        return 1
+    fi
+    if ! python3 -c "import sys; sys.exit(0)" >/dev/null 2>&1; then
+        if is_store_stub python3; then
+            fail "python3: Microsoft Store alias stub (exits 49, runs nothing)"
+            echo "  Disable it under Settings > Apps > Advanced app settings > App execution aliases,"
+            echo "  then install real Python 3.12+ from https://python.org"
+        else
+            fail "python3: found on PATH but does not run"
+        fi
+        return 1
+    fi
+    ok "python3: $(python3 --version 2>&1 | head -1)"
+    return 0
+}
+
+check_python || { echo "Install Python 3.12+:"; install_hint python3; exit 1; }
+check_cmd pip3 || check_cmd pip || { echo "Install pip:"; install_hint python3 python3-pip; exit 1; }
+check_cmd git || { echo "Install git:"; install_hint git; exit 1; }
+check_cmd curl || { echo "Install curl:"; install_hint curl; exit 1; }
 
 # Node is optional (for React packages)
 HAS_NODE=false
@@ -115,7 +174,7 @@ if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
     # gunicorn + eventlet are required for production but not in OpenAlgo's requirements.txt
     pip3 install gunicorn eventlet --break-system-packages -q 2>/dev/null || \
         pip3 install gunicorn eventlet -q 2>/dev/null || \
-        warn "gunicorn+eventlet install failed — make start will fall back to python app.py"
+        warn "gunicorn+eventlet install failed — the OpenAlgo local-dev service will fall back to 'python app.py'"
     ok "gunicorn + eventlet installed"
 
     # Copy .sample.env → .env if missing (OpenAlgo uses .sample.env, not .env.sample)
@@ -180,8 +239,33 @@ if [ "$HAS_NODE" = true ]; then
     header "FlintTrade Node packages"
     # pnpm workspace: a single frozen install at the repo root links every workspace
     # package (terminal, site, design-system) from the committed pnpm-lock.yaml.
-    (cd "$FLINTTRADE_DIR" && corepack enable && pnpm install --frozen-lockfile)
-    ok "workspace node_modules (pnpm --frozen-lockfile)"
+    #
+    # Resolution chain matches scripts/install/flinttrade-install.sh:688-702 —
+    # 'corepack enable' needs write access to the Node install prefix and fails on
+    # a system-managed Node, so fall through to a matching pnpm binary and finally
+    # to npx with the pinned version.
+    pnpm_run() {
+        if command -v corepack >/dev/null 2>&1; then
+            corepack pnpm "$@"
+            return $?
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ "$(pnpm --version 2>/dev/null)" = "$PINNED_PNPM_VERSION" ]; then
+            pnpm "$@"
+            return $?
+        fi
+        if command -v npx >/dev/null 2>&1; then
+            npx --yes "pnpm@$PINNED_PNPM_VERSION" "$@"
+            return $?
+        fi
+        return 127
+    }
+
+    if (cd "$FLINTTRADE_DIR" && pnpm_run install --frozen-lockfile); then
+        ok "workspace node_modules (pnpm --frozen-lockfile)"
+    else
+        warn "pnpm workspace install failed — React packages may be incomplete."
+        warn "Retry manually: npx --yes pnpm@$PINNED_PNPM_VERSION install --frozen-lockfile"
+    fi
 fi
 
 # ------------------------------------------------------------------
@@ -189,18 +273,56 @@ fi
 # ------------------------------------------------------------------
 header "Workspace"
 
-WORKSPACE_DIR="${FLINTTRADE_HOME:-$HOME/.flinttrade}"
+# Canonical per-OS workspace, honouring BOTH overrides in precedence order:
+# FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME > platform default.
+default_workspace() {
+    case "$(uname -s)" in
+        Darwin)              printf '%s' "$HOME/Library/Application Support/flinttrade" ;;
+        MINGW*|MSYS*|CYGWIN*) printf '%s' "${APPDATA:-$HOME/AppData/Roaming}/flinttrade" ;;
+        *)                   printf '%s' "$HOME/.flinttrade" ;;
+    esac
+}
+WORKSPACE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
+
+# PATH_SEP: ';' under a Windows Python (MSYS/Git Bash), ':' everywhere else.
+# Joining with ':' on Windows splits on the drive letter and breaks every import.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) PATH_SEP=';' ;;
+    *)                    PATH_SEP=':' ;;
+esac
+
 cd "$FLINTTRADE_DIR"
-PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src:${PYTHONPATH:-}" \
-    python3 -m flinttrade_core.cli init --provision-master-password >/dev/null
-ok "Workspace initialized: $WORKSPACE_DIR"
+# Do NOT swallow this failure: reporting "Workspace initialized" after the init
+# command died is how a broken install looks like a good one.
+if PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src${PATH_SEP}${PYTHONPATH:-}" \
+        python3 -m flinttrade_core.cli init --provision-master-password >/dev/null; then
+    ok "Workspace initialised: $WORKSPACE_DIR"
+else
+    fail "Workspace initialisation failed — FlintTrade will not start until this is fixed."
+    exit 1
+fi
 
 # ------------------------------------------------------------------
 # 9. Run tests
 # ------------------------------------------------------------------
 header "Verification"
 
-if python3 -m pytest "$FLINTTRADE_DIR/packages/*/tests/" "$FLINTTRADE_DIR/tests/" --tb=short --import-mode=importlib -q 2>/dev/null; then
+# The glob must be UNQUOTED to expand, and the repo nests packages three levels
+# deep (packages/<group>/<pkg>/tests), so packages/*/tests never matched anything.
+# stderr is kept: discarding it hid collection errors behind "Some tests failed".
+PYTEST_PATHS=""
+for tests_dir in "$FLINTTRADE_DIR"/packages/*/*/tests; do
+    if [ -d "$tests_dir" ]; then
+        PYTEST_PATHS="$PYTEST_PATHS $tests_dir"
+    fi
+done
+if [ -d "$FLINTTRADE_DIR/tests" ]; then
+    PYTEST_PATHS="$PYTEST_PATHS $FLINTTRADE_DIR/tests"
+fi
+
+if [ -z "$PYTEST_PATHS" ]; then
+    warn "No test directories found under $FLINTTRADE_DIR/packages/*/*/tests — skipping verification"
+elif python3 -m pytest $PYTEST_PATHS --tb=short --import-mode=importlib -q; then
     ok "All tests passing"
 else
     warn "Some tests failed — check output above"
@@ -221,13 +343,19 @@ else
     warn "Optional OpenAlgo local-dev dependencies skipped"
 fi
 [ "$HAS_NODE" = true ] && ok "React packages installed" || warn "React packages skipped (no Node.js)"
-ok "Workspace initialized"
+ok "Workspace initialised"
 echo ""
 if [ "$OPENALGO_ENV_CREATED" = true ]; then
     warn "Configure broker credentials in .local/external/openalgo/.env before trading"
 fi
-echo "Next steps:"
-echo "  1. Run: make start"
+# The cross-platform runner, not `make`. This script now runs under Git Bash / MSYS
+# too (see the MINGW*|MSYS*|CYGWIN* branches above), and `make` exists on none of
+# those hosts — printing it here as the closing instruction sent every Windows user
+# straight into "command not found" at the one moment they follow the output verbatim.
+echo "Next steps (run from $FLINTTRADE_DIR):"
+echo "  1. Start FlintTrade:  python scripts/ft.py start"
 echo "  2. Open the terminal app and finish setup"
 echo "  3. Configure OpenAlgo in Settings only if you want the OpenAlgo integration path"
-echo "  4. Run: make status"
+echo "  4. Check it is up:    python scripts/ft.py status"
+echo ""
+echo "On macOS and Linux, 'make start' and 'make status' are aliases for the same runner."

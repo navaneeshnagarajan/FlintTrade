@@ -56,8 +56,8 @@ Pick the guide for your platform and follow it end-to-end:
 A complete dev environment includes Python 3.12, Node 22.22+ (24 recommended),
 and Rust stable if you build `ticks`. OpenAlgo is optional: install it
 separately, or clone a local-dev copy into `.local/external/openalgo/` with
-`scripts/setup-test-deps.sh`, only when you want the OpenAlgo-compatible
-integration path.
+`scripts/setup-test-deps.sh` (a bash script — on Windows run it in WSL2 or Git
+Bash), only when you want the OpenAlgo-compatible integration path.
 
 For the FULL Python stack — every workspace member plus the ML/AI extras
 (vectorbt+numba backtesting, lightgbm/optuna ensemble tuning, ChromaDB RAG,
@@ -78,12 +78,14 @@ skip with a reason instead of failing.
 
 ### Python (pytest)
 
-From the repository root:
+From the repository root. `python scripts/ft.py <target>` is the cross-platform
+runner — no make and no bash needed, identical behaviour on Windows, macOS and
+Linux. `make <target>` is the POSIX alias for the same targets.
 
 ```bash
-make test           # full pytest suite
-make test-fast      # stop on first failure
-make lint           # ruff check across packages/*/src/
+python scripts/ft.py test        # full pytest suite
+python scripts/ft.py test-fast   # stop on first failure
+python scripts/ft.py lint        # ruff check across packages/*/src/
 
 # Single file
 python -m pytest packages/core/core/tests/test_app.py -v
@@ -95,18 +97,26 @@ python -m pytest packages/core/core/tests/test_app.py::TestInputValidation::test
 python -m pytest packages/services/screener/tests/
 ```
 
-> `--import-mode=importlib` is required for the flat-package layout. The
-> Makefile sets it for you; if you call `pytest` directly, add it.
+> `--import-mode=importlib` is required for the flat-package layout.
+> `scripts/ft.py` and the Makefile set it for you; if you call `pytest`
+> directly, add it.
 
 ### Terminal (Vitest)
 
-From `packages/apps/terminal/`:
+From the repository root, using the locked pnpm workspace:
 
 ```bash
-npm install
-npm run typecheck                          # tsc --noEmit only
-npm run build                              # full type-check + Vite build
-npx vitest run                             # full Vitest suite
+pnpm install --frozen-lockfile
+pnpm --filter @flinttrade/terminal typecheck   # tsc --noEmit only
+pnpm --filter @flinttrade/terminal build       # full type-check + Vite build
+pnpm --filter @flinttrade/terminal test        # full Vitest suite
+```
+
+For a single file, a single test name, or watch mode, work inside the package
+(`cd` on its own line — do not chain with `&&`):
+
+```bash
+cd packages/apps/terminal
 npx vitest run src/widgets/path/foo.test.tsx
 npx vitest run -t "renders the order pad"  # single test by name
 npx vitest                                 # watch mode (great for TDD)
@@ -143,12 +153,13 @@ cargo build --release   # produces an importable Python wheel
 ### Terminal
 
 ```bash
-cd packages/apps/terminal
-npm run build
+pnpm --filter @flinttrade/terminal build
 ```
 
 Output lands in `packages/apps/terminal/dist/`. The build runs `tsc --noEmit`
-first, then `vite build` — both must pass clean.
+first, then `vite build` — both must pass clean. The backend serves the UI only
+when `packages/apps/terminal/dist/index.html` exists, so run this once before
+`python scripts/ft.py start` on a fresh checkout.
 
 ### ticks
 
@@ -163,10 +174,9 @@ exposed through PyO3 bindings.
 ### Site
 
 ```bash
-cd packages/apps/site
-npm run typecheck
-npm run test
-npm run build
+pnpm --filter @flinttrade/site typecheck
+pnpm --filter @flinttrade/site test
+pnpm --filter @flinttrade/site build
 ```
 
 The site build regenerates the docs index, package index, version metadata,
@@ -175,10 +185,13 @@ llms files, and the read-only docs MCP content from repository source files.
 ### Desktop
 
 ```bash
-make desktop-test       # Electron TypeScript + Vitest
-make desktop-build      # verify bootstrap resources and bundle main/preload
-make desktop-package    # build and verify this host's installer
+python scripts/ft.py desktop-test     # Electron TypeScript + Vitest
+python scripts/ft.py desktop-build    # verify bootstrap resources and bundle main/preload
+python scripts/ft.py desktop-package  # build and verify this host's installer
 ```
+
+On POSIX, `make desktop-test`, `make desktop-build` and `make desktop-package`
+are aliases for the same three targets.
 
 Output lands in `packages/apps/desktop/release/electron/`. The release workflow
 produces a universal macOS DMG, Windows x64 NSIS installer, and x64/ARM64 Linux
@@ -344,8 +357,8 @@ without presenting them as ready to connect.
 
 ### Python
 
-- **PEP 8** with `ruff` as the enforcement tool. Run `make lint`
-  before committing.
+- **PEP 8** with `ruff` as the enforcement tool. Run
+  `python scripts/ft.py lint` (POSIX alias: `make lint`) before committing.
 - **Type hints** on every public function. We target Python 3.12 syntax
   (`list[int]` not `List[int]`, `X | None` not `Optional[X]`).
 - **Google-style docstrings** for every public function and class.
@@ -386,11 +399,15 @@ without presenting them as ready to connect.
 
 1. **Branch off `main`.** During pre-1.0, all commits land directly on
    `main`; for non-trivial work, open a PR to give CI a chance to run.
-2. **Run the local checklist** before pushing:
-   - `npx tsc --noEmit` in `packages/apps/terminal`
-   - `npx vitest run` (full suite or affected files)
+2. **Run the local checklist** before pushing (one command per line — Windows
+   PowerShell 5.1 has no `&&`):
+   - `pnpm --filter @flinttrade/terminal typecheck`
+   - `pnpm --filter @flinttrade/terminal test` (full suite), or `npx vitest run`
+     from `packages/apps/terminal` for affected files
    - `python -m pytest --tb=short --import-mode=importlib`
-   - `ruff check packages/*/src/`
+   - `python scripts/ft.py lint` — the shell-independent way to run
+     `ruff check` across `packages/*/src/` (a bare `ruff check packages/*/src/`
+     relies on POSIX glob expansion and does not work in PowerShell)
 3. **Open the PR.** Use the template in
    `.github/PULL_REQUEST_TEMPLATE.md`. Tick every checklist item that
    applies.

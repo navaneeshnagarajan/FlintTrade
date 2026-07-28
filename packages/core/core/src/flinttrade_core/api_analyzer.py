@@ -38,6 +38,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .workspace import workspace_dir
+
 logger = logging.getLogger("flinttrade.core.api_analyzer")
 
 # IST as a fixed-offset timezone.
@@ -120,8 +122,12 @@ class APIAnalyzer:
 
     Args:
         db_path: Path to the DuckDB file.  Defaults to
-            ``~/.flinttrade/api_analyzer.duckdb``.  Pass ``":memory:"``
-            for ephemeral in-process storage (useful in tests).
+            ``api_analyzer.duckdb`` inside the platform workspace resolved by
+            :func:`flinttrade_core.workspace.workspace_dir` — ``~/.flinttrade``
+            on Linux, ``~/Library/Application Support/flinttrade`` on macOS,
+            ``%APPDATA%/flinttrade`` on Windows, honouring the
+            ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides.  Pass
+            ``":memory:"`` for ephemeral in-process storage (useful in tests).
 
     Example::
 
@@ -139,7 +145,7 @@ class APIAnalyzer:
         import duckdb  # lazy import
 
         if db_path is None:
-            db_path = Path.home() / ".flinttrade" / "api_analyzer.duckdb"
+            db_path = workspace_dir() / "api_analyzer.duckdb"
 
         if isinstance(db_path, str) and db_path != ":memory:":
             db_path = Path(db_path)

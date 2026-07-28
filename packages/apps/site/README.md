@@ -29,8 +29,14 @@ root workspace.
 ## Tests
 
 ```bash
-cd packages/apps/site && npm run typecheck && npm run test && npm run build
+pnpm --filter @flinttrade/site typecheck
+pnpm --filter @flinttrade/site test
+pnpm --filter @flinttrade/site build
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

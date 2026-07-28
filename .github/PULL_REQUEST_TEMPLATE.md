@@ -25,11 +25,12 @@
 
 ## Testing done
 
-<!-- Commands you ran and their results. e.g.: -->
+<!-- Commands you ran and their results. One per line — Windows PowerShell has
+     no `&&`. e.g.: -->
 ```
-make test                       # 9,089 passed
-cd packages/terminal && npx vitest run  # 2,973 passed
-make lint                       # clean
+python scripts/ft.py test                   # 9,089 passed
+pnpm --filter @flinttrade/terminal test     # 2,973 passed
+python scripts/ft.py lint                   # clean
 ```
 
 ## Screenshots

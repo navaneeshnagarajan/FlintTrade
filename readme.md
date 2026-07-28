@@ -31,8 +31,9 @@ connecting a broker or enabling Live mode.
   audit records, and a kill-switch boundary for order-capable routes.
 - **Data and simulation** — DuckDB/Parquet storage, indicator packages,
   backtest services, and a Rust/PyO3 tick-processing engine.
-- **Developer tooling** — Make targets, pytest/Vitest/Playwright suites,
-  packaging scripts, CI notes, and package-level documentation.
+- **Developer tooling** — the cross-platform `scripts/ft.py` runner (with make
+  as its POSIX alias), pytest/Vitest/Playwright suites, packaging scripts, CI
+  notes, and package-level documentation.
 
 ## Supported brokers
 
@@ -44,22 +45,58 @@ matrix.
 
 ## Quickstart
 
-### Self-hosted web app (the primary path)
+### Install (recommended — no prerequisites)
 
 FlintTrade runs as a self-hosted web app: one backend process serves the
 terminal UI and the API on a single origin, and you use it from any browser.
+The one-line installer needs nothing pre-installed — no Python, no Node, no
+git, no bash and no make.
 
 ```bash
-git clone https://github.com/navaneeshnagarajan/FlintTrade.git
-cd FlintTrade
-uv sync && pnpm install
-make start        # backend + terminal UI on http://127.0.0.1:5100
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 ```
 
-Or run it in Docker with `make docker-up`. Either way, open the printed URL in
-a browser and complete the in-app Setup flow — no `.env` file is required.
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/web-install.ps1 | iex
+```
 
-### Desktop app (Electron convenience shell)
+It provisions a pinned, checksum-verified toolchain — `uv`, Python 3.12, Node
+and pnpm — under `~/.flinttrade/tools`, builds FlintTrade from a managed source
+checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
+launcher (`~/.local/bin/flinttrade` on macOS and Linux;
+`%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut
+on Windows). Open <http://127.0.0.1:5100> and complete the in-app Setup flow —
+no `.env` file is required.
+
+Uninstalling keeps your workspace and data:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/uninstall.ps1 | iex
+```
+
+Add the purge flag — `--purge` on POSIX, `-Purge` on Windows — to delete
+recognised FlintTrade data too. Purge is irreversible and asks for explicit
+confirmation:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
+```
+
+```powershell
+# Windows 10/11
+& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
+```
+
+### Desktop app
 
 The desktop app is a small Electron wrapper around the same backend, not a
 separate product surface. On first launch it verifies pinned tools, builds an
@@ -80,15 +117,43 @@ are available together:
 | Windows | `.exe` (NSIS, per-user) | x64; Windows 11 on ARM uses emulation |
 | Linux | `.AppImage` | x64 + arm64 |
 
-To build and verify the shell locally:
+Once that gate opens, the desktop install is one command:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/install.ps1 | iex
+```
+
+and the matching uninstall is:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/uninstall.ps1 | iex
+```
+
+The same `--purge` / `-Purge` flag applies. To build and verify the shell
+locally (these lines run unchanged in bash, zsh and Windows PowerShell):
 
 ```bash
 git clone https://github.com/navaneeshnagarajan/FlintTrade.git
 cd FlintTrade
 pnpm install --frozen-lockfile
-make desktop-test
-make desktop-package
+python scripts/ft.py desktop-test
+python scripts/ft.py desktop-package
 ```
+
+On POSIX, `make desktop-test` and `make desktop-package` are aliases for the
+same two targets.
 
 Output lands in `packages/apps/desktop/release/electron/`. Local macOS packages
 are always ad-hoc sealed; an ad-hoc seal verifies bundle integrity but is not
@@ -101,29 +166,68 @@ update, install and uninstall contracts.
 > OpenAlgo-compatible integration path; FlintTrade's native gateway and sandbox
 > do not require a separate OpenAlgo process.
 
+### Run from source (contributors)
+
+Use this when you are developing FlintTrade itself. Unlike the one-line
+installer it expects you to supply the toolchain: git, Python 3.12+, Node 22+,
+`uv` and `pnpm`.
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+uv sync
+pnpm install
+pnpm --filter @flinttrade/terminal build
+python scripts/ft.py start
+```
+
+The same six lines run unchanged in Windows PowerShell. Do not join them with
+`&&` — Windows PowerShell 5.1 has no `&&` operator; use `;` if you want them on
+one line.
+
+Two things that are easy to get wrong:
+
+- **Build the terminal.** The backend only serves the UI when
+  `packages/apps/terminal/dist/index.html` exists, so skipping
+  `pnpm --filter @flinttrade/terminal build` leaves you with an API and no
+  interface.
+- **`python scripts/ft.py <target>` is the cross-platform runner** — it needs
+  no make and no bash, and behaves identically on Windows, macOS and Linux.
+  `make <target>` is the POSIX alias for the same targets.
+
+Then open <http://127.0.0.1:5100> and complete the in-app Setup flow — no
+`.env` file is required.
+
+Docker is an advanced path, not a zero-prerequisite one: `make docker-up`
+needs make (POSIX only) and a populated `.env`, so use the one-line installer
+or the source checkout above to try FlintTrade for the first time.
+
 ## Contributor development
 
 ```bash
-make setup
-make dev
+python scripts/ft.py setup
+python scripts/ft.py dev
 ```
 
-The root `Makefile` is the main entry point:
+`python scripts/ft.py <target>` is the canonical cross-platform entry point;
+`make <target>` is the POSIX alias:
 
-- `make test` runs the Python pytest suites.
-- `make lint` runs Ruff over Python packages and tests.
-- `make full-check` runs a compact test, lint, and terminal typecheck pass.
-- `cd packages/apps/terminal && npm run build` runs the terminal typecheck
+- `python scripts/ft.py test` runs the Python pytest suites.
+- `python scripts/ft.py lint` runs Ruff over Python packages and tests.
+- `make full-check` runs a compact test, lint, and terminal typecheck pass
+  (POSIX only — it needs bash).
+- `pnpm --filter @flinttrade/terminal build` runs the terminal typecheck
   and Vite build.
-- `cd packages/apps/terminal && npm run test` runs Vitest.
+- `pnpm --filter @flinttrade/terminal test` runs Vitest.
 
 ### Advanced server and Docker modes
 
 Docker, Nginx, and systemd assets support long-running self-host/server
-deployments of the web app (beyond the simple `make start`/`make docker-up`
-quickstart). In those modes, `.env.example` is a dev/server fallback template
-only; in-app Setup and Settings remain the preferred way to configure
-OpenAlgo.
+deployments of the web app (beyond the simple `python scripts/ft.py start`
+quickstart). Docker additionally requires a populated `.env`, so
+`make docker-up` is not a zero-prerequisite path. In those modes,
+`.env.example` is a dev/server fallback template only; in-app Setup and
+Settings remain the preferred way to configure OpenAlgo.
 
 Architecture, per-OS install/uninstall, and the CI release matrix are documented
 in **[docs/DESKTOP.md](docs/DESKTOP.md)**.

@@ -129,7 +129,9 @@ Mirrors the same security gate OpenAlgo added in v2.0.0.7 for its
 The "Latest tested" column is what we last verified end-to-end. There is
 **no automated drift check** in CI — bumping a pin is a manual action:
 
-1. Pull the new upstream version locally (`cd .local/external/<svc> && git pull`).
+1. Pull the new upstream version locally — `cd .local/external/<svc>`, then
+   `git pull` (two commands, not an `&&` chain: Windows PowerShell 5.1 has no
+   `&&`).
 2. Run FlintTrade's integration test paths against it.
 3. If green, update the commit hash + date in this file.
 4. If anything broke, either patch FlintTrade or roll back and file an
@@ -147,7 +149,9 @@ they exist for contributors who want to run the integration test paths.
 .local/external/openalgo/
 ```
 
-Install / refresh:
+Install / refresh. This helper is a bash script, so it is POSIX-only — on
+Windows run it in WSL2 or Git Bash, or clone the upstream repository yourself
+into `.local/external/`:
 
 ```bash
 bash scripts/setup-test-deps.sh           # clone at "Latest tested" pins

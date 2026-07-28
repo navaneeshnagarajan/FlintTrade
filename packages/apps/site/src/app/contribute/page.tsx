@@ -58,11 +58,31 @@ export default function ContributePage() {
               <span>Useful first commands</span>
               <span>repo root</span>
             </header>
-            <pre>{`make setup
-make test-fast
-make lint
-cd packages/apps/terminal && npm run typecheck
-cd packages/apps/site && npm run build`}</pre>
+            <pre>{`python scripts/ft.py setup
+python scripts/ft.py test
+python scripts/ft.py lint`}</pre>
+            <p className="code-panel-note">
+              The cross-platform runner needs no make and no bash, so these lines behave identically
+              in Windows PowerShell, bash and zsh. On POSIX,{' '}
+              <span className="font-mono">make setup</span>, <span className="font-mono">make test</span>{' '}
+              and <span className="font-mono">make lint</span> are the aliases;{' '}
+              <span className="font-mono">make test-fast</span> stops at the first failure.
+            </p>
+          </div>
+          <div className="code-panel">
+            <header>
+              <span>Package checks</span>
+              <span>one command per line</span>
+            </header>
+            <pre>{`cd packages/apps/terminal
+npm run typecheck
+
+cd packages/apps/site
+npm run build`}</pre>
+            <p className="code-panel-note">
+              Windows PowerShell has no <span className="font-mono">{'&&'}</span> chaining, so the
+              directory change and the command it feeds are listed separately rather than joined.
+            </p>
           </div>
         </div>
 

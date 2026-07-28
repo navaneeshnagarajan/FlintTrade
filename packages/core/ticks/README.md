@@ -20,7 +20,8 @@ This package is part of the FlintTrade monorepo. Install via the workspace from 
 
 ```bash
 uv pip install -e packages/core/ticks
-cd packages/core/ticks && cargo test
+cd packages/core/ticks
+cargo test
 ```
 
 If you only want to use the package in isolation, the package's `pyproject.toml`,
@@ -30,8 +31,13 @@ root workspace.
 ## Tests
 
 ```bash
-cd packages/core/ticks && cargo test
+cd packages/core/ticks
+cargo test
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md](../../../docs/DEVELOPER_GUIDE.md).
 

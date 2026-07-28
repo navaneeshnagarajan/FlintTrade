@@ -90,7 +90,12 @@
     "max_ops_per_second": 10
   },
   "storage": {
-    "_comment": "Data directories. Defaults sit under your FlintTrade home; override with absolute paths or a leading ~ if you keep data elsewhere.",
+    "_comment": [
+      "Data directories. The two values below are SENTINELS, not paths — do not 'fix' them for your OS.",
+      "The exact strings '~/.flinttrade/data' and '~/.flinttrade/archive' are compared by string equality and mean 'the data/ and archive/ directories inside MY FlintTrade home', wherever that is: ~/.flinttrade on Linux, ~/Library/Application Support/flinttrade on macOS, %APPDATA%/flinttrade on Windows (or whatever FLINTTRADE_WORKSPACE_DIR / FLINTTRADE_HOME select).",
+      "So on macOS and Windows these values do NOT write to a literal ~/.flinttrade — leave them exactly as written to keep the per-OS default.",
+      "Any other value is taken literally: an absolute path, or a leading ~ for your home. Only change them if you genuinely keep data outside the workspace, and remember the uninstaller can only purge what it can resolve."
+    ],
     "archive": "~/.flinttrade/archive",
     "fast": "~/.flinttrade/data"
   },

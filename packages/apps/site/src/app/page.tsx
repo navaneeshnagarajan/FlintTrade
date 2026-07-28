@@ -142,6 +142,13 @@ export default function HomePage() {
               Install desktop app <Download aria-hidden="true" size={17} />
             </Link>
             <Link
+              className="button primary"
+              href="/download"
+              aria-label="Open the one-line install commands for the self-hosted FlintTrade web app"
+            >
+              Run the web app <TerminalSquare aria-hidden="true" size={17} />
+            </Link>
+            <Link
               className="button shimmer"
               href="/demo-app/welcome"
               target="_blank"

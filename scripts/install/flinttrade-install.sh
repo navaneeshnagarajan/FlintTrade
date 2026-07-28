@@ -58,11 +58,20 @@ Flags:
   --channel beta|stable  Release channel to install (default: beta)
   --ref <tag>            Install an exact release tag
   --build-from-source    Package the Electron shell from a trusted checkout
-  --src <dir>            Checkout used by --build-from-source
+  --src <dir>            Checkout used by --build-from-source.
+                         Default: ~/.flinttrade/source-build/FlintTrade
+                         Override with the FLINTTRADE_SRC_DIR environment
+                         variable (the flag wins over the variable).
   --update               Alias for the default install/update flow
   --yes                  Compatibility flag for the bundled updater
   --no-launch            Do not launch FlintTrade after installing
   --dry-run              Resolve and verify policy without installing
+
+Where things land:
+  ~/.flinttrade/source-build/FlintTrade  the --src checkout (multi-GB once built)
+  ~/.flinttrade/tools/source-build       its private toolchain caches
+Both live under ~/.flinttrade so uninstall.sh --purge can find and remove them,
+and so a source build never writes into your own global npm/pnpm/uv caches.
 USAGE
 }
 
@@ -685,7 +694,30 @@ assert_no_other_macos_shell_target() {
   done
 }
 
+redirect_source_build_caches() {
+  # A source build is a contributor convenience, not a licence to rewrite the
+  # operator's global toolchain state. Point every cache the JavaScript/uv
+  # toolchain honours at a private tree under the canonical tools root, exactly
+  # as packages/apps/desktop/electron/bootstrap.ts does for the managed
+  # bootstrap — so the artefacts are isolated, reproducible, and reachable by
+  # `uninstall.sh --purge` (which owns ~/.flinttrade/tools).
+  local tools="$HOME/.flinttrade/tools/source-build"
+  export COREPACK_HOME="$tools/corepack"
+  export NPM_CONFIG_CACHE="$tools/npm-cache"
+  export PNPM_HOME="$tools/pnpm-home"
+  export UV_CACHE_DIR="$tools/uv-cache"
+  export UV_PYTHON_INSTALL_DIR="$tools/python"
+  # pnpm resolves its content-addressable store under XDG_DATA_HOME, and both
+  # Corepack and pnpm fall back to XDG_CACHE_HOME; without these the redirects
+  # above still leak into ~/.cache and ~/.local/share.
+  export XDG_CACHE_HOME="$tools/xdg-cache"
+  export XDG_DATA_HOME="$tools/xdg-data"
+  mkdir -p "$COREPACK_HOME" "$NPM_CONFIG_CACHE" "$PNPM_HOME" "$UV_CACHE_DIR" \
+    "$UV_PYTHON_INSTALL_DIR" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+}
+
 pnpm_run() {
+  redirect_source_build_caches
   if need corepack; then
     corepack pnpm "$@"
     return $?
