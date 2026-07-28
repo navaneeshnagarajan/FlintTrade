@@ -1,7 +1,17 @@
 # FlintTrade on Raspberry Pi
 
 Raspberry Pi is an advanced server-style deployment target. For ordinary
-desktop use on Linux, macOS, or Windows, prefer the native desktop installer.
+use on Linux, macOS, or Windows, prefer the one-line web install:
+
+```bash
+# macOS / Linux
+curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://flinttrade.vercel.app/web-install.ps1 | iex
+```
 
 ## Requirements
 - Raspberry Pi 4 or 5 (4GB RAM minimum, 8GB recommended)

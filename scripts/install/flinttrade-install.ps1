@@ -14,6 +14,9 @@
 #                         Default: $HOME\.flinttrade\source-build\FlintTrade
 #                         Override with the FLINTTRADE_SRC_DIR environment
 #                         variable (the parameter wins over the variable).
+#                         The web installer (flinttrade-web-install.ps1) deprecates
+#                         FLINTTRADE_SRC_DIR in favour of FLINTTRADE_WEB_SRC_DIR
+#                         for its managed source checkout.
 #   -Update               Alias for the default install/update flow
 #   -Yes                  Compatibility flag for the bundled updater
 #   -NoLaunch             Do not launch FlintTrade after installing

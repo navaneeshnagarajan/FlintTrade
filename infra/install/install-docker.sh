@@ -42,13 +42,14 @@ check_command() {
 check_command docker "https://docs.docker.com/engine/install/"
 check_command curl "sudo apt-get install curl"
 
-# Check Docker Compose (v2 plugin or standalone)
+# Check Docker Compose. v2.24+ is required: docker-compose.yml uses the
+# env_file long form (path/required) that Compose v1 cannot parse at all, so
+# the old v1 fallback would fail at config load for every command.
 if docker compose version >/dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
     ok "docker compose (v2) found"
 elif command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE_CMD="docker-compose"
-    ok "docker-compose (v1) found"
+    die "Only legacy docker-compose (v1) was found. FlintTrade's compose file needs Compose v2.24+ — install the docker compose plugin from https://docs.docker.com/compose/install/"
 else
     die "Docker Compose is not installed. Install from https://docs.docker.com/compose/install/"
 fi

@@ -599,12 +599,16 @@ tracked, pulled, or called at runtime).
 ### Docker
 
 Docker is an advanced self-hosting path, not the quickstart: these targets need
-make (POSIX only), Docker, and a populated `.env`.
+make (POSIX only) and Docker. A `.env` file is optional — the default profile
+starts only the app services (backend, terminal build, nginx serving the UI at
+http://localhost:8080); the observability stack sits behind the `monitoring`
+compose profile and does require real GlitchTip secrets in `.env`.
 
 ```bash
-make docker-up     # start all services
-make docker-down   # stop
-make docker-build  # rebuild images
+make docker-up             # start the app services
+make docker-up-monitoring  # start the app plus the monitoring profile
+make docker-down           # stop (all profiles)
+make docker-build          # rebuild images
 ```
 
 ### Production

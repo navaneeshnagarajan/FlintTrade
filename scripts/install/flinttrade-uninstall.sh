@@ -636,7 +636,7 @@ path_has_symlink_below_anchor() {
 }
 
 safe_purge_targets() {
-  local target canonical home_canonical is_custom existing duplicate safe=()
+  local target canonical home_canonical existing duplicate safe=()
   home_canonical="$(cd -P "$HOME" 2>/dev/null && pwd -P)" || home_canonical="$HOME"
   # Bash 3.2 treats expansion of a declared-but-empty array as an unbound
   # variable under `set -u`; guard the expansion for a genuinely empty home.
@@ -661,9 +661,7 @@ safe_purge_targets() {
         ;;
     esac
 
-    is_custom=0
     if [ "$target" = "${WORKSPACE_DIR%/}" ] && [ "${WORKSPACE_DIR%/}" != "$(default_workspace)" ]; then
-      is_custom=1
       if ! proven_custom_workspace "$target"; then
         say "Refusing to purge $target — custom workspace identity is not proven."
         FAILED_ANY=1
@@ -722,13 +720,16 @@ purge_all_data() {
     return 0
   fi
 
+  # Bail out of an unconfirmable session BEFORE announcing the deletion list:
+  # a piped run used to print the full scary "About to DELETE" list and then
+  # keep everything, which read as a deletion that had already happened.
+  if [ "$ASSUME_YES" != "1" ] && { [ ! -t 1 ] || [ ! -r /dev/tty ]; }; then
+    say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
+    DATA_RETAINED_ANY=1
+    return 0
+  fi
   announce_purge_targets
   if [ "$ASSUME_YES" != "1" ]; then
-    if [ ! -t 1 ] || [ ! -r /dev/tty ]; then
-      say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
-      DATA_RETAINED_ANY=1
-      return 0
-    fi
     local answer=""
     printf '%s' "This is irreversible. Type 'purge' to continue: "
     read -r answer < /dev/tty || true

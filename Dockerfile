@@ -3,7 +3,14 @@
 # =============================================================================
 #
 # Build:  docker build -t flinttrade:latest .
-# Run:    docker run -d --env-file .env -p 5100:5100 flinttrade:latest
+# Run:    docker run -d -p 5100:5100 flinttrade:latest
+#         (add --env-file .env only if you keep a dev/server .env — none is required)
+#
+# This image is the backend API only. The React terminal is NOT built here:
+# .dockerignore excludes packages/apps/terminal/dist, so port 5100 serves no
+# UI from this image. In docker-compose the one-shot `terminal` service builds
+# the UI into the terminal_dist volume and Nginx serves it — Nginx is the UI
+# origin for Docker deployments.
 #
 # Uses uv (10x faster than pip) for dependency installation in the builder
 # stage, then copies only the installed packages to a minimal runtime image.

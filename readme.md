@@ -49,8 +49,9 @@ matrix.
 
 FlintTrade runs as a self-hosted web app: one backend process serves the
 terminal UI and the API on a single origin, and you use it from any browser.
-The one-line installer needs nothing pre-installed — no Python, no Node, no
-git, no bash and no make.
+The one-line installer runs in the shell your OS already ships — bash or zsh
+on macOS and Linux, built-in PowerShell on Windows — and needs no other
+toolchain: no Python, no Node, no git and no make.
 
 ```bash
 # macOS / Linux
@@ -199,8 +200,11 @@ Then open <http://127.0.0.1:5100> and complete the in-app Setup flow — no
 `.env` file is required.
 
 Docker is an advanced path, not a zero-prerequisite one: `make docker-up`
-needs make (POSIX only) and a populated `.env`, so use the one-line installer
-or the source checkout above to try FlintTrade for the first time.
+needs make (POSIX only) and Docker, so use the one-line installer or the
+source checkout above to try FlintTrade for the first time. No `.env` file is
+required for the Docker app stack either; in Docker the UI is served by Nginx
+at http://localhost:8080 (port 5100 is the API only), and the optional
+observability stack starts with `docker compose --profile monitoring up`.
 
 ## Contributor development
 
@@ -224,10 +228,14 @@ python scripts/ft.py dev
 
 Docker, Nginx, and systemd assets support long-running self-host/server
 deployments of the web app (beyond the simple `python scripts/ft.py start`
-quickstart). Docker additionally requires a populated `.env`, so
-`make docker-up` is not a zero-prerequisite path. In those modes,
-`.env.example` is a dev/server fallback template only; in-app Setup and
-Settings remain the preferred way to configure OpenAlgo.
+quickstart). `make docker-up` starts the app stack — backend, a one-shot
+terminal build, and Nginx, which serves the UI at http://localhost:8080
+(override with `FLINTTRADE_HTTP_PORT`/`FLINTTRADE_HTTPS_PORT`). A `.env`
+file is optional for the app stack; only the observability profile
+(`docker compose --profile monitoring up`, or `make docker-up-monitoring`)
+requires real GlitchTip secrets in `.env`. In those modes, `.env.example` is
+a dev/server fallback template only; in-app Setup and Settings remain the
+preferred way to configure OpenAlgo.
 
 Architecture, per-OS install/uninstall, and the CI release matrix are documented
 in **[docs/DESKTOP.md](docs/DESKTOP.md)**.

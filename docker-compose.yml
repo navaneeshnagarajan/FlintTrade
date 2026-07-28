@@ -3,18 +3,32 @@
 # =============================================================================
 #
 # Usage:
-#   docker compose up -d                  # start all services
-#   docker compose up -d --build          # rebuild and start
+#   docker compose up -d                  # start the app services (default profile)
+#   docker compose up -d --build          # rebuild and start the app services
+#   docker compose --profile monitoring up -d   # app + observability stack
 #   docker compose logs -f flinttrade     # follow FlintTrade logs
 #   docker compose down                   # stop all services
 #
+# Profiles:
+#   default      -> flinttrade (backend), terminal (one-shot UI build), nginx (UI origin)
+#   monitoring   -> Uptime Kuma, GlitchTip (+ its Postgres/Redis), VictoriaLogs, Netdata.
+#                   The GlitchTip services need real GLITCHTIP_SECRET_KEY /
+#                   GLITCHTIP_DB_PASSWORD values in .env — the baked-in defaults are
+#                   config-load placeholders only, never production credentials.
+#
 # Architecture:
-#   Nginx (80/443) -> React static files + reverse proxy to backend services
-#   OpenAlgo (5000/8765) -> Broker gateway + WebSocket market data
-#   FlintTrade (5100) -> Platform backend (strategy engine, screener, AI)
-#   Monitoring stack -> Uptime Kuma, Glitchtip, VictoriaLogs, Netdata
+#   Nginx -> React static files + reverse proxy to backend services. In Docker,
+#     Nginx is the UI origin: http://localhost:8080 by default (override the host
+#     ports with FLINTTRADE_HTTP_PORT / FLINTTRADE_HTTPS_PORT).
+#   OpenAlgo (5000/8765) -> Broker gateway + WebSocket market data (external)
+#   FlintTrade (5100) -> Platform backend (strategy engine, screener, AI). The
+#     image does not contain the built terminal, so port 5100 is API-only in
+#     Docker — the UI is served by Nginx from the terminal build volume.
+#   Monitoring stack (profile: monitoring) -> Uptime Kuma, GlitchTip,
+#     VictoriaLogs, Netdata
 #
 # All internal services bind to 127.0.0.1 only. Nginx is the sole entry point.
+# A .env file is optional: the app services start without one.
 #
 # Multi-arch builds:
 #   All base images (python:3.12-slim, node:22-alpine, nginx:alpine, etc.) support
@@ -86,7 +100,11 @@ services:
       - flinttrade_logs:/data/flinttrade/logs
     ports:
       - "127.0.0.1:5100:5100"
-    env_file: .env
+    # .env is gitignored and absent from a fresh clone; required: false keeps
+    # `docker compose up` working without it (Compose v2.24+).
+    env_file:
+      - path: .env
+        required: false
     environment:
       - FLINTTRADE_DEV=0
       - FLINTTRADE_BACKEND_PORT=5100
@@ -165,9 +183,12 @@ services:
     image: nginx:alpine
     platform: linux/amd64
     container_name: flinttrade-nginx
+    # High-port defaults so a dev machine with a busy :80/:443 still comes up.
+    # Production hosts that want the classic ports set FLINTTRADE_HTTP_PORT=80
+    # and FLINTTRADE_HTTPS_PORT=443 in .env.
     ports:
-      - "80:80"
-      - "443:443"
+      - "${FLINTTRADE_HTTP_PORT:-8080}:80"
+      - "${FLINTTRADE_HTTPS_PORT:-8443}:443"
     volumes:
       - ./infra/nginx/flinttrade.conf:/etc/nginx/conf.d/default.conf:ro
       - terminal_dist:/var/www/flinttrade/dist:ro
@@ -201,6 +222,7 @@ services:
     image: louislam/uptime-kuma:1
     platform: linux/amd64
     container_name: flinttrade-uptime-kuma
+    profiles: ["monitoring"]
     ports:
       - "127.0.0.1:3001:3001"
     volumes:
@@ -223,6 +245,7 @@ services:
     image: redis:7-alpine
     platform: linux/amd64
     container_name: flinttrade-glitchtip-redis
+    profiles: ["monitoring"]
     restart: unless-stopped
     logging:
       driver: json-file
@@ -236,14 +259,19 @@ services:
     image: glitchtip/glitchtip:latest
     platform: linux/amd64
     container_name: flinttrade-glitchtip
+    profiles: ["monitoring"]
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       glitchtip-db:
         condition: service_healthy
+    # `:-` (not `:?`) — a `:?` here aborts config load for the WHOLE compose
+    # file, so even `docker compose up flinttrade` failed on an optional
+    # sidecar. The dev-only defaults exist purely so config loads without a
+    # .env; set real values before running the monitoring profile.
     environment:
-      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}@glitchtip-db:5432/glitchtip"
-      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-flinttrade-dev-only-change-me}@glitchtip-db:5432/glitchtip"
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-flinttrade-dev-only-change-me}"
       CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
       PORT: "8000"
       GLITCHTIP_DOMAIN: "http://127.0.0.1:8000"
@@ -260,6 +288,7 @@ services:
     image: glitchtip/glitchtip:latest
     platform: linux/amd64
     container_name: flinttrade-glitchtip-worker
+    profiles: ["monitoring"]
     command: bin/run-celery-with-beat.sh
     depends_on:
       glitchtip-db:
@@ -267,8 +296,8 @@ services:
       glitchtip-redis:
         condition: service_started
     environment:
-      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}@glitchtip-db:5432/glitchtip"
-      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:?Set GLITCHTIP_SECRET_KEY in .env}"
+      DATABASE_URL: "postgres://glitchtip:${GLITCHTIP_DB_PASSWORD:-flinttrade-dev-only-change-me}@glitchtip-db:5432/glitchtip"
+      SECRET_KEY: "${GLITCHTIP_SECRET_KEY:-flinttrade-dev-only-change-me}"
       CELERY_BROKER_URL: "redis://glitchtip-redis:6379/0"
     restart: unless-stopped
     logging:
@@ -283,11 +312,12 @@ services:
     image: postgres:16-alpine
     platform: linux/amd64
     container_name: flinttrade-glitchtip-db
+    profiles: ["monitoring"]
     volumes:
       - glitchtip_pg:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: glitchtip
-      POSTGRES_PASSWORD: "${GLITCHTIP_DB_PASSWORD:?Set GLITCHTIP_DB_PASSWORD in .env}"
+      POSTGRES_PASSWORD: "${GLITCHTIP_DB_PASSWORD:-flinttrade-dev-only-change-me}"
       POSTGRES_DB: glitchtip
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U glitchtip"]
@@ -311,6 +341,7 @@ services:
     image: victoriametrics/victoria-logs:latest
     platform: linux/amd64
     container_name: flinttrade-victorialogs
+    profiles: ["monitoring"]
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -335,6 +366,7 @@ services:
     image: netdata/netdata:latest
     platform: linux/amd64
     container_name: flinttrade-netdata
+    profiles: ["monitoring"]
     ports:
       - "127.0.0.1:19999:19999"
     volumes:

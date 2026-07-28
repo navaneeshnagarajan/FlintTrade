@@ -25,7 +25,7 @@ EditorConfig sets LF endings, final newlines, two-space indentation by default, 
 
 ## Testing Guidelines
 
-Run focused tests before broad suites, for example `uv run pytest packages/integrations/gateway/tests/ -v --import-mode=importlib`, or `npx vitest run -t "places a market order"` after `cd packages/apps/terminal` (two lines, not an `&&` chain). Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as Dockview panels.
+Run focused tests before broad suites, for example `uv run pytest packages/integrations/gateway/tests/ -v --import-mode=importlib`, or `npx vitest run -t "places a market order"` after `cd packages/apps/terminal` (two lines, not an `&&` chain). Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as FlexLayout panels in `packages/apps/terminal/src/layout/widgetFactory.tsx`.
 
 ## Commit & Pull Request Guidelines
 

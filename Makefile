@@ -47,7 +47,7 @@ SHELL := /usr/bin/env bash
 #      backup, restore
 #
 # 3. Needs Docker
-#      docker-up, docker-down, docker-build
+#      docker-up, docker-up-monitoring, docker-down, docker-build
 # ============================================================================
 
 # uv creates .venv/Scripts/python.exe on Windows and .venv/bin/python on POSIX.
@@ -83,7 +83,7 @@ OPENALGO_PORT ?= 5000
 FLINTTRADE_BACKEND_PORT ?= 5100
 FLINTTRADE_BACKEND_HOST ?= 127.0.0.1
 
-.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
+.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
 
 # ======================================================================
 # Setup
@@ -208,11 +208,14 @@ clean: ## Remove build artifacts (with confirmation)
 # Docker
 # ======================================================================
 
-docker-up: ## Start all services with Docker
+docker-up: ## Start the Docker app stack (backend + terminal build + Nginx UI origin)
 	docker compose up
 
-docker-down: ## Stop Docker services
-	docker compose down
+docker-up-monitoring: ## Start the app stack plus the observability profile (needs real GlitchTip secrets in .env)
+	docker compose --profile monitoring up
+
+docker-down: ## Stop Docker services (all profiles)
+	docker compose --profile monitoring down
 
 docker-build: ## Rebuild Docker images
 	docker compose build

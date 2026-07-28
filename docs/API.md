@@ -509,7 +509,10 @@ Engine routes that bypass the core order proxy use
 
 ## 7. Example request / response
 
-The five most-used endpoints, with cURL.
+The five most-used endpoints, each shown twice: a `curl` command for
+bash/zsh, and an `Invoke-RestMethod` equivalent for Windows PowerShell
+(where `curl` is an alias for `Invoke-WebRequest`, `\` is not a line
+continuation, and environment variables are read as `$env:NAME`).
 
 ### 7.1 Exercise the practice order path
 
@@ -535,6 +538,25 @@ curl -X POST http://127.0.0.1:5100/api/v1/orders/place \
   }'
 ```
 
+```powershell
+$params = @{
+  Method      = "Post"
+  Uri         = "http://127.0.0.1:5100/api/v1/orders/place"
+  Headers     = @{ Authorization = "Bearer $env:FLINTTRADE_PRACTICE_JWT" }
+  ContentType = "application/json"
+  Body        = '{
+    "symbol": "NIFTY",
+    "exchange": "NSE",
+    "action": "BUY",
+    "quantity": 50,
+    "price": 0,
+    "product": "MIS",
+    "order_type": "MARKET"
+  }'
+}
+Invoke-RestMethod @params
+```
+
 Sandbox response shape:
 
 ```json
@@ -552,6 +574,17 @@ curl -X POST http://127.0.0.1:5000/api/v1/quotes \
   -H "X-API-KEY: $OPENALGO_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "symbol": "NIFTY", "exchange": "NSE_INDEX" }'
+```
+
+```powershell
+$params = @{
+  Method      = "Post"
+  Uri         = "http://127.0.0.1:5000/api/v1/quotes"
+  Headers     = @{ "X-API-KEY" = $env:OPENALGO_API_KEY }
+  ContentType = "application/json"
+  Body        = '{ "symbol": "NIFTY", "exchange": "NSE_INDEX" }'
+}
+Invoke-RestMethod @params
 ```
 
 Response:
@@ -580,6 +613,10 @@ curl -X POST http://127.0.0.1:5000/api/v1/positionbook \
   -H "X-API-KEY: $OPENALGO_API_KEY"
 ```
 
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5000/api/v1/positionbook" -Headers @{ "X-API-KEY" = $env:OPENALGO_API_KEY }
+```
+
 Response is a list of `Position` records — symbol, exchange, product,
 quantity, average price, last price, P&L.
 
@@ -592,14 +629,29 @@ curl -X POST http://127.0.0.1:5000/api/v1/optionchain \
   -d '{ "symbol": "NIFTY", "exchange": "NFO" }'
 ```
 
+```powershell
+$params = @{
+  Method      = "Post"
+  Uri         = "http://127.0.0.1:5000/api/v1/optionchain"
+  Headers     = @{ "X-API-KEY" = $env:OPENALGO_API_KEY }
+  ContentType = "application/json"
+  Body        = '{ "symbol": "NIFTY", "exchange": "NFO" }'
+}
+Invoke-RestMethod @params
+```
+
 Response: nested object keyed by strike, with CE and PE legs each
 containing LTP, OI, volume, IV, and Greeks.
 
 ### 7.5 Compute Gamma Exposure (FlintTrade-side)
 
 ```bash
-curl http://127.0.0.1:5100/ft-api/v1/gex?symbol=NIFTY&expiry=2026-05-28 \
+curl "http://127.0.0.1:5100/ft-api/v1/gex?symbol=NIFTY&expiry=2026-05-28" \
   -H "Authorization: Bearer $FLINTTRADE_JWT"
+```
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:5100/ft-api/v1/gex?symbol=NIFTY&expiry=2026-05-28" -Headers @{ Authorization = "Bearer $env:FLINTTRADE_JWT" }
 ```
 
 Response:

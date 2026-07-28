@@ -866,8 +866,26 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
     assert "outside the current user's home" in text
     assert "$script:DataRetainedAny = $true" in text
     assert "explicitly confirmed data was purged" in text
-    # The old shell assumed %LOCALAPPDATA%\FlintTrade directly.
-    assert 'Join-Path $env:LOCALAPPDATA "FlintTrade"' not in text
+    # The retired pre-Electron shell at %LOCALAPPDATA%\FlintTrade may only ever
+    # be deleted through an identity-proven legacy record (directory + exact
+    # NSIS uninstaller + a registry entry naming it), never by assuming the
+    # path directly. The script spells the path via $LocalAppDataRoot now, so
+    # pin the proof requirement rather than the old variable spelling.
+    assert 'Join-Path $LocalAppDataRoot "FlintTrade"' in text
+    assert "Remove-IfExists $LegacyShellInstallDir" not in text
+    assert "Remove-IfExists $DefaultInstallDir" not in text
+    legacy_proof = text[
+        text.index("function Get-ProvenLegacyShellRecord") : text.index("function Remove-ProvenLegacyShell")
+    ]
+    assert "no registry entry proves its uninstaller" in legacy_proof
+    assert 'Join-Path $canonicalDirectory "uninstall.exe"' in legacy_proof
+    legacy_removal_start = text.index("function Remove-ProvenLegacyShell")
+    legacy_removal = text[
+        legacy_removal_start : text.index("Remove-ProvenWebInstall", legacy_removal_start)
+    ]
+    assert "if (-not $LegacyRecord) { return }" in legacy_removal
+    assert "Remove-IfExists $LegacyRecord.Directory" in legacy_removal
+    assert "Remove-ProvenLegacyShell $script:LegacyShellRecord" in text
 
 
 @pytest.mark.unit

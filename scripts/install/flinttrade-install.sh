@@ -62,6 +62,9 @@ Flags:
                          Default: ~/.flinttrade/source-build/FlintTrade
                          Override with the FLINTTRADE_SRC_DIR environment
                          variable (the flag wins over the variable).
+                         The web installer (flinttrade-web-install.sh) deprecates
+                         FLINTTRADE_SRC_DIR in favour of FLINTTRADE_WEB_SRC_DIR
+                         for its managed source checkout.
   --update               Alias for the default install/update flow
   --yes                  Compatibility flag for the bundled updater
   --no-launch            Do not launch FlintTrade after installing

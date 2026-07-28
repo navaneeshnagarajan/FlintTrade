@@ -39,7 +39,13 @@ PS1 = _REPO_ROOT / "scripts" / "install" / "flinttrade-web-install.ps1"
 
 BASH = shutil.which("bash")
 NO_BASH_REASON = "bash is not available on this runner"
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+# The two engines diverge: pwsh (7+) accepts syntax Windows PowerShell 5.1
+# rejects ('&&', ternary, '??'), and the one-liner `irm ... | iex` runs under
+# whichever the operator has — so the parse gate must hold under BOTH, each
+# skipping cleanly when absent rather than silently preferring pwsh.
+PWSH = shutil.which("pwsh")
+WINDOWS_POWERSHELL = shutil.which("powershell")
+POWERSHELL = PWSH or WINDOWS_POWERSHELL
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
 
 _BOOTSTRAP_SH = _REPO_ROOT / "packages/apps/desktop/resources/bootstrap/flinttrade-bootstrap.sh"
@@ -168,12 +174,29 @@ def test_posix_web_installer_is_valid_bash() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(POWERSHELL is None, reason=NO_POWERSHELL_REASON)
-def test_windows_web_installer_parses() -> None:
+@pytest.mark.parametrize(
+    "engine",
+    [
+        pytest.param(
+            PWSH,
+            id="pwsh",
+            marks=pytest.mark.skipif(PWSH is None, reason="pwsh (PowerShell 7+) is not available on this runner"),
+        ),
+        pytest.param(
+            WINDOWS_POWERSHELL,
+            id="windows-powershell-5.1",
+            marks=pytest.mark.skipif(
+                WINDOWS_POWERSHELL is None,
+                reason="powershell.exe (Windows PowerShell 5.1) is not available on this runner",
+            ),
+        ),
+    ],
+)
+def test_windows_web_installer_parses(engine: str) -> None:
     script_path = str(PS1).replace("'", "''")
     result = subprocess.run(
         [
-            POWERSHELL,
+            engine,
             "-NoProfile",
             "-Command",
             "$errors = $null; "
