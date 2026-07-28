@@ -131,3 +131,6 @@ pnpm-audit-report.json
 cargo-audit-report.json
 supply-chain/transitive-licences.json
 packages/apps/terminal/test-results/
+
+# TypeScript incremental/composite build state (tsc -p tsconfig.node.json etc.)
+*.tsbuildinfo
