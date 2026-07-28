@@ -78,7 +78,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.185.1",
     "@vitejs/plugin-react": "^4.0.0",
-    "jsdom": "^29.0.0",
+    "jsdom": "^30.0.0",
     "mapbox-gl": "^1.13.3",
     "marked": "^17.0.5",
     "react-responsive-carousel": "^3.2.23",
