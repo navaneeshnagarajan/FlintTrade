@@ -32,6 +32,11 @@ _SCAN_GLOBS = (
     # `irm https://flinttrade.vercel.app/web-install.ps1 | iex`), so an unhashed
     # `pip install -r requirements.txt` there is exactly as dangerous as in shell.
     "scripts/**/*.ps1",
+    # The desktop bootstrap resources are where the dependency install ACTUALLY runs —
+    # the web installers delegate to them. They use `uv sync --frozen` today; scanning
+    # them keeps that true rather than trusting it.
+    "packages/apps/desktop/resources/**/*.sh",
+    "packages/apps/desktop/resources/**/*.ps1",
 )
 
 # A line that installs from a requirements file.

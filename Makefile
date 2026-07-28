@@ -2,6 +2,20 @@
 # Usage: make help
 #
 # ============================================================================
+# Shell
+# ============================================================================
+# This Makefile is the POSIX *alias* surface; scripts/ft.py is the cross-platform
+# entry point and is what Windows users run (it needs no shell at all).
+#
+# GNU Make defaults to /bin/sh, which is dash on Debian/Ubuntu. dash has no
+# `set -o pipefail` (the shell errors and aborts the recipe) and its `echo` has
+# no `-e` (the escape prefix is printed literally). The retained POSIX recipes
+# below — full-check, sync-check, logs-clear, ticks-test — use both, so bash is
+# pinned here. Removing this line silently breaks `make full-check` on the
+# primary CI/dev platform.
+SHELL := /usr/bin/env bash
+
+# ============================================================================
 # Platform support
 # ============================================================================
 # Most recipes are thin delegators to scripts/ft.py, the stdlib-only task runner
@@ -14,6 +28,10 @@
 #
 # After install, the shim makes this available as: flinttrade <same subcommands>
 #
+# `make` itself needs bash (see the Shell section above) and GNU coreutils, so on
+# Windows use scripts/ft.py — or WSL2 if you specifically want make. The grouping
+# below is about the underlying WORK, not about where `make` runs:
+#
 # 1. Works everywhere (Windows 10/11, macOS, Linux)
 #    Via scripts/ft.py:
 #      setup, start, start-gateway, stop, restart, status, dev, test, test-fast,
@@ -23,7 +41,7 @@
 #      check-python, desktop-icons, update, version-check, audit,
 #      broker-sdk-sync, broker-reference-check
 #
-# 2. POSIX only (needs bash and GNU coreutils; on Windows use WSL2)
+# 2. POSIX only (the recipe body itself needs bash and GNU coreutils)
 #      start-openalgo, start-legacy, health, ticks-test, full-check, sync-check,
 #      logs-clear, install-docker, install-server-native, install-native,
 #      backup, restore
@@ -36,10 +54,10 @@
 # Checking only the POSIX layout is what made `make` fall through to the
 # Microsoft Store python3 alias stub (which exits 49 without running anything).
 #
-# The Windows path is absolute and forward-slashed on purpose: cmd.exe rejects a
-# RELATIVE forward-slash command ('.venv/Scripts/python.exe' is "not recognized"),
-# while an MSYS/Git-Bash sh eats the backslashes of a '.venv\Scripts\python.exe'.
-# An absolute forward-slash path is the only form both shells accept.
+# The Windows branch below is for an MSYS/Git-Bash make on Windows (the only way
+# to run this Makefile there). Its path is absolute and forward-slashed on
+# purpose: an MSYS shell eats the backslashes of a '.venv\Scripts\python.exe',
+# and a relative forward-slash command is not resolvable either.
 ifeq ($(OS),Windows_NT)
   PYTHON := $(if $(wildcard .venv/Scripts/python.exe),$(CURDIR)/.venv/Scripts/python.exe,python)
 else
@@ -75,7 +93,7 @@ setup: check-python ## First-time setup — install all dependencies
 	@"$(PYTHON)" scripts/ft.py setup
 
 # Single-command check: no shell `||`, no subshell, no `echo -e`. sys.exit(str)
-# prints to stderr and exits 1, so this behaves identically under sh and cmd.exe.
+# prints to stderr and exits 1, so the message survives whatever shell runs it.
 check-python: ## Verify Python >= 3.11 (required for StrEnum)
 	@"$(PYTHON)" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 'Error: Python 3.11+ required (StrEnum support). Found: ' + sys.version.split()[0])"
 
@@ -169,8 +187,8 @@ desktop-dev: ## Run the Electron shell against its managed source bootstrap
 # ======================================================================
 
 update: ## Update Python dependencies (external test-deps live in .local/external/, update them yourself)
-	@# Unquoted, metacharacter-free echoes: cmd.exe echoes the quotes verbatim and
-	@# chokes on '&&' inside a message, so these stay plain to work on both shells.
+	@# Unquoted, metacharacter-free echoes: plain echo, never echo -e, so the text
+	@# is identical whichever POSIX shell ends up running the recipe.
 	@echo Updating Python dependencies...
 	@# Regenerate the HASHED uv.lock to newest compatible versions, then install
 	@# it. Stays inside the SC-07 hash-verified path (never an unhashed

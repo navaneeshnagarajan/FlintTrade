@@ -24,9 +24,35 @@ BACKEND_URL="http://127.0.0.1:5100"
 UNINSTALL_COMMAND="curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash"
 MANAGED_ROOT="$HOME/.flinttrade"
 TOOLS_ROOT="$MANAGED_ROOT/tools"
-SRC_DIR="${FLINTTRADE_SRC_DIR:-$MANAGED_ROOT/src/FlintTrade}"
+# The Electron desktop shell resolves exactly these two paths
+# (packages/apps/desktop/electron/paths.ts) and guards every mutation of the
+# active source with an operation lease directory created by its bootstrap
+# (packages/apps/desktop/electron/bootstrap.ts).
+DESKTOP_SOURCE_ROOT="$MANAGED_ROOT/src"
+DESKTOP_ACTIVE_SOURCE="$DESKTOP_SOURCE_ROOT/FlintTrade"
+DESKTOP_OPERATION_LEASE="$DESKTOP_SOURCE_ROOT/.flinttrade-bootstrap-operation.lock"
+# FLINTTRADE_SRC_DIR belongs to flinttrade-install.sh, where it names the
+# contributor source-build checkout (default ~/.flinttrade/source-build/
+# FlintTrade). This installer fetches, hard-resets and can replace whatever
+# directory it is given, so it owns FLINTTRADE_WEB_SRC_DIR instead and only
+# falls back to the older name behind a loud warning.
+SRC_DIR_SOURCE="default"
+if [ -n "${FLINTTRADE_WEB_SRC_DIR:-}" ]; then
+  SRC_DIR="$FLINTTRADE_WEB_SRC_DIR"
+  SRC_DIR_SOURCE="FLINTTRADE_WEB_SRC_DIR"
+elif [ -n "${FLINTTRADE_SRC_DIR:-}" ]; then
+  SRC_DIR="$FLINTTRADE_SRC_DIR"
+  SRC_DIR_SOURCE="FLINTTRADE_SRC_DIR"
+else
+  SRC_DIR="$DESKTOP_ACTIVE_SOURCE"
+fi
 SHIM_DIR="$HOME/.local/bin"
 SHIM_PATH="$SHIM_DIR/flinttrade"
+# Owner-private receipt for everything this installer writes outside the
+# managed root. The uninstaller may only delete what an installer proved it
+# created, exactly as flinttrade-install.sh proves the Electron shell.
+WEB_RECEIPT_DIR="$HOME/.local/state/flinttrade-web"
+WEB_RECEIPT_PATH="$WEB_RECEIPT_DIR/web-install.receipt"
 MANIFEST_RELATIVE="packages/apps/desktop/resources/bootstrap/tool-manifest.json"
 BOOTSTRAP_RELATIVE="packages/apps/desktop/resources/bootstrap/flinttrade-bootstrap.sh"
 ALLOWED_HOSTS="codeload.github.com github.com api.github.com nodejs.org registry.npmjs.org"
@@ -68,15 +94,22 @@ source checkout, and installs a 'flinttrade' launcher. No prior tooling needed.
 
 Flags:
   --ref <git-ref>   Branch, tag or commit to install (default: main)
-  --src <dir>       Managed source checkout (default: ~/.flinttrade/src/FlintTrade)
+  --src <dir>       Managed WEB source checkout (default: ~/.flinttrade/src/FlintTrade).
+                    This is not the contributor source-build checkout that
+                    flinttrade-install.sh manages at ~/.flinttrade/source-build/FlintTrade.
   --yes             Answer every confirmation with yes
   --no-launch       Do not offer to start FlintTrade after installing
   --dry-run         Report the plan without downloading, building or installing
   --help            Show this help and exit
 
 Environment overrides:
-  FLINTTRADE_REF, FLINTTRADE_SRC_DIR, FLINTTRADE_YES,
+  FLINTTRADE_REF, FLINTTRADE_WEB_SRC_DIR, FLINTTRADE_YES,
   FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH
+
+  FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
+  flinttrade-install.sh reads it as the contributor source-build checkout, so
+  this installer warns and asks for confirmation before managing a directory
+  that only that variable supplied.
 
 Uninstall:
   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
@@ -97,7 +130,7 @@ trap 'exit 143' TERM
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) REF="${2:?--ref needs a value}"; shift 2 ;;
-    --src) SRC_DIR="${2:?--src needs a value}"; shift 2 ;;
+    --src) SRC_DIR="${2:?--src needs a value}"; SRC_DIR_SOURCE="--src"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
     --no-launch) NO_LAUNCH=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -265,6 +298,121 @@ confirm() {
     ""|y|yes) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# ---------------------------------------------------------------------------
+# Owner-private web-install receipt.
+#
+# The uninstaller may only delete what an installer proved it wrote. This
+# mirrors flinttrade-install.sh's shell receipt: an owner-only 0700 directory,
+# an owner-only 0600 one-field-per-line file, and a SHA-256 of the launcher so
+# the uninstaller can refuse to touch anything it did not create.
+# ---------------------------------------------------------------------------
+
+canonical_web_path() {
+  local target="$1" parent
+  if [ -d "$target" ]; then
+    (cd -P "$target" 2>/dev/null && pwd -P)
+    return
+  fi
+  parent="$(cd -P "$(dirname "$target")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s' "${parent%/}" "$(basename "$target")"
+}
+
+receipt_safe_value() {
+  case "$1" in
+    *$'\n'*|*$'\r'*) die "Web-install receipt values must be single-line paths." ;;
+  esac
+}
+
+ensure_web_receipt_storage() {
+  local current="${HOME%/}" component candidate name
+  for component in .local state flinttrade-web; do
+    current="$current/$component"
+    [ ! -L "$current" ] || die "Refusing web-install receipt storage through a symbolic-link path component: $current"
+    if [ -e "$current" ]; then
+      [ -d "$current" ] && [ -O "$current" ] \
+        || die "Refusing web-install receipt storage through a non-owner-local path component: $current"
+    fi
+  done
+  mkdir -p "$WEB_RECEIPT_DIR" || die "Could not create the private web-install receipt directory."
+  [ -d "$WEB_RECEIPT_DIR" ] && [ ! -L "$WEB_RECEIPT_DIR" ] && [ -O "$WEB_RECEIPT_DIR" ] \
+    || die "The web-install receipt directory is not an owner-local ordinary directory."
+  chmod 0700 "$WEB_RECEIPT_DIR" || die "Could not make the web-install receipt directory private."
+  for candidate in "$WEB_RECEIPT_DIR"/* "$WEB_RECEIPT_DIR"/.[!.]* "$WEB_RECEIPT_DIR"/..?*; do
+    [ -e "$candidate" ] || [ -L "$candidate" ] || continue
+    name="$(basename "$candidate")"
+    case "$name" in
+      web-install.receipt|.web-install.receipt.*) ;;
+      *) die "Refusing to mix the web-install receipt with unrecognised state: $candidate" ;;
+    esac
+  done
+}
+
+write_web_install_receipt() {
+  local canonical_shim canonical_source canonical_tools shim_hash receipt_tmp platform value
+  ensure_web_receipt_storage
+  [ -f "$SHIM_PATH" ] && [ ! -L "$SHIM_PATH" ] \
+    || die "The installed launcher is not an ordinary web-install receipt candidate."
+  canonical_shim="$(canonical_web_path "$SHIM_PATH")" \
+    || die "Could not canonicalise the launcher for its web-install receipt."
+  canonical_source="$(canonical_web_path "$SRC_DIR")" \
+    || die "Could not canonicalise the managed source checkout for its web-install receipt."
+  canonical_tools="$(canonical_web_path "$TOOLS_ROOT")" || canonical_tools="$TOOLS_ROOT"
+  shim_hash="$(lowercase "$(sha256_of "$canonical_shim")")"
+  platform="$(uname -s)"
+  for value in "$platform" "$canonical_shim" "$shim_hash" "$canonical_source" "$canonical_tools"; do
+    receipt_safe_value "$value"
+  done
+  receipt_tmp="$(mktemp "$WEB_RECEIPT_DIR/.web-install.receipt.XXXXXX")" \
+    || die "Could not stage the web-install receipt."
+  TMP_DIRS+=("$receipt_tmp")
+  chmod 0600 "$receipt_tmp" || die "Could not make the staged web-install receipt private."
+  {
+    printf '%s\n' \
+      'format=flinttrade-web-install-v1' \
+      "platform=$platform" \
+      "shim=$canonical_shim" \
+      "shim_sha256=$shim_hash" \
+      "shortcut=" \
+      "source=$canonical_source" \
+      "tools=$canonical_tools"
+  } > "$receipt_tmp" || die "Could not write the web-install receipt."
+  mv "$receipt_tmp" "$WEB_RECEIPT_PATH" \
+    || die "Could not publish the web-install receipt at $WEB_RECEIPT_PATH."
+  say "Recorded the web-install receipt at $WEB_RECEIPT_PATH."
+}
+
+# ---------------------------------------------------------------------------
+# Guards for the source tree this installer shares with the desktop shell.
+# ---------------------------------------------------------------------------
+
+warn_source_dir_provenance() {
+  [ "$SRC_DIR_SOURCE" = "FLINTTRADE_SRC_DIR" ] || return 0
+  warn "FLINTTRADE_SRC_DIR is set, so this installer would manage $SRC_DIR as its web source checkout."
+  warn "flinttrade-install.sh reads that same variable as the CONTRIBUTOR source-build checkout"
+  warn "(default $MANAGED_ROOT/source-build/FlintTrade). This installer fetches, hard-resets and can"
+  warn "replace the directory it is given — including a multi-gigabyte built checkout."
+  warn "Set FLINTTRADE_WEB_SRC_DIR, or pass --src, to choose the web source checkout explicitly."
+  [ "$DRY_RUN" = "1" ] && return 0
+  if ! confirm "Continue with $SRC_DIR as the managed web source checkout?"; then
+    die "Cancelled at the source-checkout confirmation; nothing was changed."
+  fi
+}
+
+assert_desktop_not_operating() {
+  case "${SRC_DIR%/}" in
+    "$DESKTOP_ACTIVE_SOURCE"|"$DESKTOP_ACTIVE_SOURCE"/*) ;;
+    *) return 0 ;;
+  esac
+  [ -e "$DESKTOP_OPERATION_LEASE" ] || [ -L "$DESKTOP_OPERATION_LEASE" ] || return 0
+  warn "FlintTrade Desktop holds its bootstrap source-operation lease at $DESKTOP_OPERATION_LEASE."
+  warn "That lease guards every mutation of $SRC_DIR, which the desktop shell treats as its active source."
+  if [ "$DRY_RUN" = "1" ]; then
+    warn "DRY-RUN: a real run would refuse to touch that checkout until the desktop shell has quit."
+    return 0
+  fi
+  die "Quit FlintTrade Desktop and re-run; this installer never takes the desktop's lease itself."
 }
 
 # ---------------------------------------------------------------------------
@@ -523,6 +671,8 @@ acquire_source_with_archive() {
 
 acquire_source() {
   local ref="${REF:-$DEFAULT_BRANCH}"
+  warn_source_dir_provenance
+  assert_desktop_not_operating
   assert_source_dir_safe
   if [ "$DRY_RUN" = "1" ]; then
     if need git; then
@@ -557,8 +707,8 @@ desktop_marker_executable_sha256() {
 
 install_tool() {
   local tool="$1"
-  local version url sha archive_kind executable install_root marker desktop_marker
-  local archive staging archive_name recorded actual
+  local version url sha archive_kind executable install_root marker desktop_marker legacy_desktop_marker
+  local proven_marker archive staging archive_name recorded actual
   version="$(manifest_value "$tool.version")"
   url="$(manifest_value "$tool.assets.$TARGET.url")"
   sha="$(lowercase "$(manifest_value "$tool.assets.$TARGET.sha256")")"
@@ -570,7 +720,13 @@ install_tool() {
 
   install_root="$TOOLS_ROOT/$tool/$version/$TARGET"
   marker="$install_root.flinttrade-web-verified"
-  desktop_marker="$install_root.flinttrade-tool-verified.json"
+  # The Electron bootstrap writes its verification marker INSIDE the install
+  # root (packages/apps/desktop/electron/bootstrap.ts: verifiedMarker =
+  # path.join(installRoot, TOOL_VERIFICATION_MARKER)). The sibling form is only
+  # its legacyVerifiedMarker and nothing writes it any more, so read the real
+  # one first and keep the legacy path as a fallback.
+  desktop_marker="$install_root/.flinttrade-tool-verified.json"
+  legacy_desktop_marker="$install_root.flinttrade-tool-verified.json"
   TOOL_EXECUTABLE="$install_root/$executable"
 
   if [ -f "$marker" ] && [ -x "$TOOL_EXECUTABLE" ]; then
@@ -581,8 +737,17 @@ install_tool() {
     fi
   fi
 
-  if [ -f "$desktop_marker" ] && [ -x "$TOOL_EXECUTABLE" ]; then
-    recorded="$(lowercase "$(desktop_marker_executable_sha256 "$desktop_marker")")"
+  proven_marker=""
+  if [ -f "$desktop_marker" ] && [ ! -L "$desktop_marker" ]; then
+    proven_marker="$desktop_marker"
+  elif [ -f "$legacy_desktop_marker" ] && [ ! -L "$legacy_desktop_marker" ]; then
+    proven_marker="$legacy_desktop_marker"
+  fi
+  if [ -n "$proven_marker" ]; then
+    if [ ! -x "$TOOL_EXECUTABLE" ]; then
+      die "The desktop-provisioned $tool state at $install_root carries a verification marker but no usable executable. It was preserved; run the uninstaller or remove it yourself, then re-run."
+    fi
+    recorded="$(lowercase "$(desktop_marker_executable_sha256 "$proven_marker")")"
     actual="$(lowercase "$(sha256_of "$TOOL_EXECUTABLE")")"
     if [ -n "$recorded" ] && [ "$recorded" = "$actual" ]; then
       say "Reusing the desktop-provisioned $tool $version at $install_root."
@@ -614,6 +779,10 @@ install_tool() {
     die "The verified $tool archive did not contain its expected executable ($executable)."
   fi
   chmod +x "$staging/$executable" 2>/dev/null || true
+  if [ -e "$desktop_marker" ] || [ -L "$desktop_marker" ] \
+      || [ -e "$legacy_desktop_marker" ] || [ -L "$legacy_desktop_marker" ]; then
+    die "A desktop tool-verification marker appeared at $install_root while this installer was extracting $tool $version; refusing to delete a verified tool root."
+  fi
   rm -f "$marker"
   rm -rf "$install_root"
   mv "$staging" "$install_root" || die "Could not publish $tool $version at $install_root."
@@ -758,6 +927,7 @@ main() {
   RESOLVED_PYTHON="$venv_python"
   install_launcher_shim "$RESOLVED_PYTHON"
   say "Installed the launcher at $SHIM_PATH."
+  write_web_install_receipt
 
   report_paths
   offer_to_start
@@ -769,6 +939,7 @@ report_paths() {
   say "Verified tools     : $TOOLS_ROOT"
   say "Managed source     : $SRC_DIR"
   say "Launcher           : $SHIM_PATH  (also: flinttrade <subcommand>)"
+  say "Install receipt    : $WEB_RECEIPT_PATH  (the uninstaller removes only what this proves)"
   say "Runner             : python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help|desktop-test|desktop-build|desktop-package|desktop-dev>"
   say "Open FlintTrade at : $BACKEND_URL"
   say "Uninstall          : $UNINSTALL_COMMAND"

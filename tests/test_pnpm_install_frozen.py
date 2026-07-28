@@ -1,7 +1,8 @@
 """Node install-path gate (sub-spec §5.2 / §13.6): every CI/infra node install is frozen.
 
-Companion to test_no_unhashed_pip_install.py. Scans CI workflows, the Dockerfile, and
-infra/scripts shell for node dependency installs and asserts:
+Companion to test_no_unhashed_pip_install.py. Scans CI workflows, the Dockerfile,
+infra/scripts shell, the web installers and the desktop bootstrap resources for node
+dependency installs and asserts:
 
   * every `pnpm install` is `--frozen-lockfile`
   * no bare `npm install` / `npm ci` of workspace deps survives the pnpm migration
@@ -31,10 +32,26 @@ _SCAN_GLOBS = (
     # `irm https://flinttrade.vercel.app/web-install.ps1 | iex`), so they are held to the
     # same lockfile discipline as their POSIX siblings. `#` comments in both languages.
     "scripts/**/*.ps1",
+    # The desktop bootstrap resources are where the node install ACTUALLY runs: the web
+    # installers delegate, and Electron shells out to these two scripts to build the
+    # managed source checkout. Scanning only the delegating installers made the
+    # PowerShell/shell globs above vacuous for pnpm.
+    "packages/apps/desktop/resources/**/*.sh",
+    "packages/apps/desktop/resources/**/*.ps1",
 )
 
 _PNPM_INSTALL_RE = re.compile(r"\bpnpm\s+install\b")
 _NPM_INSTALL_RE = re.compile(r"\bnpm\s+(install|ci)\b")
+
+# The same install written as an argument array, which the plain forms above cannot see:
+#
+#     Invoke-Checked $Node @($CorepackJs, "pnpm", "install", "--frozen-lockfile")
+#
+# Matched against the RAW line, because `_executable_text` blanks quoted literals — and
+# here the quoted literals are the command. Requiring the two words in *separate*
+# adjacent literals keeps a diagnostic message ("pnpm install failed.") out of scope.
+_PNPM_INSTALL_ARGV_RE = re.compile(r"""(['"])pnpm\1\s*,\s*(['"])install\2""")
+_NPM_INSTALL_ARGV_RE = re.compile(r"""(['"])npm\1\s*,\s*(['"])(?:install|ci)\2""")
 
 # A line that hands a string to an evaluator: there the quoted text *is* the command,
 # so quoted literals must still be scanned.
@@ -86,10 +103,14 @@ def test_pnpm_installs_are_frozen() -> None:
             if s.startswith("name:") or s.startswith("- name:"):
                 continue
             command = _executable_text(s)
-            if _PNPM_INSTALL_RE.search(command) and "--frozen-lockfile" not in s:
+            if (_PNPM_INSTALL_RE.search(command) or _PNPM_INSTALL_ARGV_RE.search(s)) and (
+                "--frozen-lockfile" not in s
+            ):
                 # `pnpm install --frozen-lockfile` is the only blessed form
                 violations.append(f"{rel}:{n}: pnpm install without --frozen-lockfile → {s}")
-            if _NPM_INSTALL_RE.search(command) and "openalgo" not in s.lower():
+            if (
+                _NPM_INSTALL_RE.search(command) or _NPM_INSTALL_ARGV_RE.search(s)
+            ) and "openalgo" not in s.lower():
                 violations.append(f"{rel}:{n}: bare npm install/ci (use pnpm) → {s}")
     assert not violations, "Unfrozen node installs found:\n" + "\n".join(violations)
 

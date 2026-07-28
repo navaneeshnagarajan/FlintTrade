@@ -174,7 +174,7 @@ if [ -d "$OPENALGO_DIR" ] && [ -f "$OPENALGO_DIR/requirements.txt" ]; then
     # gunicorn + eventlet are required for production but not in OpenAlgo's requirements.txt
     pip3 install gunicorn eventlet --break-system-packages -q 2>/dev/null || \
         pip3 install gunicorn eventlet -q 2>/dev/null || \
-        warn "gunicorn+eventlet install failed — make start will fall back to python app.py"
+        warn "gunicorn+eventlet install failed — the OpenAlgo local-dev service will fall back to 'python app.py'"
     ok "gunicorn + eventlet installed"
 
     # Copy .sample.env → .env if missing (OpenAlgo uses .sample.env, not .env.sample)
@@ -343,13 +343,19 @@ else
     warn "Optional OpenAlgo local-dev dependencies skipped"
 fi
 [ "$HAS_NODE" = true ] && ok "React packages installed" || warn "React packages skipped (no Node.js)"
-ok "Workspace initialized"
+ok "Workspace initialised"
 echo ""
 if [ "$OPENALGO_ENV_CREATED" = true ]; then
     warn "Configure broker credentials in .local/external/openalgo/.env before trading"
 fi
-echo "Next steps:"
-echo "  1. Run: make start"
+# The cross-platform runner, not `make`. This script now runs under Git Bash / MSYS
+# too (see the MINGW*|MSYS*|CYGWIN* branches above), and `make` exists on none of
+# those hosts — printing it here as the closing instruction sent every Windows user
+# straight into "command not found" at the one moment they follow the output verbatim.
+echo "Next steps (run from $FLINTTRADE_DIR):"
+echo "  1. Start FlintTrade:  python scripts/ft.py start"
 echo "  2. Open the terminal app and finish setup"
 echo "  3. Configure OpenAlgo in Settings only if you want the OpenAlgo integration path"
-echo "  4. Run: make status"
+echo "  4. Check it is up:    python scripts/ft.py status"
+echo ""
+echo "On macOS and Linux, 'make start' and 'make status' are aliases for the same runner."

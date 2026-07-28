@@ -10,11 +10,14 @@
  * provision a pinned, checksum-verified toolchain, build the managed source
  * checkout, and install the `flinttrade` launcher. They are deliberately
  * separate files from the desktop installers so neither one inherits the
- * other's prerequisites. The desktop install scripts instead resolve the
- * current versioned GitHub release and install the matching small Electron
- * shell after verification, then leave the local source build to the shell's
- * first run. The uninstall scripts remove only receipt-proved shells and
- * integration files, and keep the workspace unless explicitly purged.
+ * other's prerequisites.
+ *
+ * The desktop install scripts instead resolve the current versioned GitHub
+ * release and install the matching small Electron shell after verification,
+ * then leave the local source build to the shell's first run.
+ *
+ * The uninstall scripts remove only receipt-proved shells and integration files,
+ * and keep the workspace unless explicitly purged.
  */
 
 const RAW_REPOSITORY =

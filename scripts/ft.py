@@ -57,8 +57,13 @@ PINNED_PNPM_VERSION = "9.15.0"
 # (external test-dep clones and archives live there and are not ours to delete).
 PRUNED_DIRS = frozenset({".git", ".venv", ".local"})
 
+# Every key here MUST have a handler in HANDLERS and MUST appear in the
+# Makefile header's "Via scripts/ft.py" list - tests/test_ft_runner.py pins all
+# three surfaces together, because a command documented in only two of them is
+# a command that exits 2 when a user runs it.
 COMMANDS: dict[str, str] = {
     "start": "Start the FlintTrade backend API on port 5100",
+    "start-gateway": "Alias for start (the standalone FlintTrade backend)",
     "stop": "Stop the FlintTrade backend listening on the backend port",
     "restart": "Stop then start the FlintTrade backend",
     "status": "Show backend, port-ownership, workspace and version status",
@@ -172,8 +177,10 @@ def resolve_python() -> str:
     Resolution order:
 
     1. The repository virtualenv - ``.venv/Scripts/python.exe`` on Windows and
-       ``.venv/bin/python`` on POSIX. ``uv`` creates only one of the two, so
-       both layouts are checked rather than assuming the POSIX one.
+       ``.venv/bin/python`` on POSIX. ``uv`` creates only one of the two, so both
+       layouts are checked rather than assuming the POSIX one, but the host's own
+       layout is always tried first: a ``.venv`` shared with a Windows host (or
+       left behind by WSL) must never win over the layout that can actually run.
     2. The interpreter currently running this script.
     3. ``python3`` then ``python`` from ``PATH``.
 
@@ -186,11 +193,10 @@ def resolve_python() -> str:
     Raises:
         SystemExit: When no usable interpreter could be found.
     """
-    venv_candidates = (
-        REPO_ROOT / ".venv" / "Scripts" / "python.exe",
-        REPO_ROOT / ".venv" / "bin" / "python",
-        REPO_ROOT / ".venv" / "bin" / "python3",
-    )
+    venv = REPO_ROOT / ".venv"
+    windows_layout = (venv / "Scripts" / "python.exe",)
+    posix_layout = (venv / "bin" / "python", venv / "bin" / "python3")
+    venv_candidates = windows_layout + posix_layout if IS_WINDOWS else posix_layout + windows_layout
     for candidate in venv_candidates:
         if candidate.is_file() and probe_python(candidate):
             return str(candidate)
@@ -263,7 +269,9 @@ def run(
         env: Environment for the child process; inherited when omitted.
         cwd: Working directory; the repository root when omitted.
         check: Raise :class:`SystemExit` with the child's code on failure.
-        quiet: Discard the child's stdout and stderr.
+        quiet: Discard the child's stdout. stderr is NEVER discarded - a quiet
+            step that fails must still say why, otherwise the runner aborts with
+            a bare exit code and the user sees nothing at all.
 
     Returns:
         The child's exit code.
@@ -271,13 +279,12 @@ def run(
     Raises:
         SystemExit: When ``check`` is set and the command failed.
     """
-    sink = subprocess.DEVNULL if quiet else None
     proc = subprocess.run(
         [str(part) for part in argv],
         env=env,
         cwd=str(cwd or REPO_ROOT),
-        stdout=sink,
-        stderr=sink,
+        stdout=subprocess.DEVNULL if quiet else None,
+        stderr=None,
         check=False,
     )
     if check and proc.returncode != 0:
@@ -438,18 +445,28 @@ def terminate_pid(pid: int) -> bool:
 def workspace_dir() -> Path:
     """Resolve the canonical per-OS FlintTrade workspace directory.
 
-    Precedence matches ``flinttrade_core.workspace``: ``FLINTTRADE_WORKSPACE_DIR``
-    beats ``FLINTTRADE_HOME``, which beats the platform default (``~/.flinttrade``
-    on Linux, ``~/Library/Application Support/flinttrade`` on macOS,
-    ``%APPDATA%/flinttrade`` on Windows).
+    MIRROR: this is a byte-for-byte behavioural twin of
+    ``flinttrade_core.workspace.workspace_dir`` / ``_default_home`` in
+    ``packages/core/core/src/flinttrade_core/workspace.py``. The two MUST agree;
+    ``tests/test_ft_runner.py`` compares them on every platform and both env
+    overrides. It is deliberately duplicated rather than imported because
+    ``scripts/ft.py`` is stdlib-only and has to run before any dependency (and
+    therefore ``flinttrade_core``) is installed - it is what installs them.
+
+    Precedence matches the core resolver: ``FLINTTRADE_WORKSPACE_DIR`` beats
+    ``FLINTTRADE_HOME``, which beats the platform default (``~/.flinttrade`` on
+    Linux, ``~/Library/Application Support/flinttrade`` on macOS,
+    ``%APPDATA%/flinttrade`` on Windows). Both overrides are resolved, exactly as
+    the core does; the platform defaults are not.
 
     Returns:
-        The workspace directory. This helper never creates it.
+        The workspace directory. Unlike the core resolver this helper never
+        creates the directory - ``status`` must be able to report its absence.
     """
     for name in ("FLINTTRADE_WORKSPACE_DIR", "FLINTTRADE_HOME"):
         value = os.environ.get(name)
         if value:
-            return Path(value).expanduser()
+            return Path(value).expanduser().resolve()
     system = platform.system()
     if system == "Darwin":
         return Path.home() / "Library" / "Application Support" / "flinttrade"
@@ -575,6 +592,35 @@ def ci_env() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+INIT_ARGV: tuple[str, ...] = ("-m", "flinttrade_core.cli", "init", "--provision-master-password")
+"""The first-run workspace/master-password provisioning step."""
+
+
+def provision_workspace(python: str, env: dict[str, str]) -> None:
+    """Run the first-run workspace provisioning step.
+
+    The step's chatty stdout is suppressed (it runs before every ``start``,
+    ``dev`` and ``setup``), but its stderr is left attached so a genuine failure
+    - a missing dependency, an unwritable workspace, a traceback - is visible.
+    Silence here reads as a hang, which is exactly the first-run experience this
+    guards against.
+
+    Args:
+        python: The interpreter resolved by :func:`resolve_python`.
+        env: The child environment from :func:`python_env`.
+
+    Raises:
+        SystemExit: When provisioning failed, after printing what to re-run.
+    """
+    code = run([python, *INIT_ARGV], env=env, check=False, quiet=True)
+    if code == 0:
+        return
+    fail(f"Workspace initialisation failed (exit {code}); any error above came from that step.")
+    fail("Re-run it on its own to see the full output:")
+    fail(f"  {python} " + " ".join(INIT_ARGV))
+    raise SystemExit(code)
+
+
 def cmd_start(_args: list[str]) -> int:
     """Start the FlintTrade backend API.
 
@@ -589,7 +635,7 @@ def cmd_start(_args: list[str]) -> int:
     header("Starting FlintTrade")
     info(f"  Backend: {BACKEND_URL}")
     info("")
-    run([python, "-m", "flinttrade_core.cli", "init", "--provision-master-password"], env=env, quiet=True)
+    provision_workspace(python, env)
     return run([python, "-m", "flinttrade_core.app"], env=env, check=False)
 
 
@@ -713,7 +759,7 @@ def cmd_dev(_args: list[str]) -> int:
     info("")
 
     DEV_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    run([python, "-m", "flinttrade_core.cli", "init", "--provision-master-password"], env=env, quiet=True)
+    provision_workspace(python, env)
 
     backend_log = (DEV_LOG_DIR / "backend.log").open("wb")
     terminal_log = (DEV_LOG_DIR / "terminal.log").open("wb")
@@ -805,7 +851,7 @@ def cmd_setup(_args: list[str]) -> int:
         info("OK workspace node_modules (pnpm --frozen-lockfile)")
 
     info("Initialising the workspace...")
-    run([python, "-m", "flinttrade_core.cli", "init", "--provision-master-password"], env=python_env(), quiet=True)
+    provision_workspace(python, python_env())
     info(f"OK Workspace initialised: {workspace_dir()}")
 
     info("")
@@ -1133,6 +1179,9 @@ def cmd_desktop_dev(_args: list[str]) -> int:
 
 HANDLERS: dict[str, Callable[[list[str]], int]] = {
     "start": cmd_start,
+    # `make start-gateway` is a plain alias for `make start`; the runner mirrors
+    # it so the Makefile header's command list is dispatchable in full.
+    "start-gateway": cmd_start,
     "stop": cmd_stop,
     "restart": cmd_restart,
     "status": cmd_status,

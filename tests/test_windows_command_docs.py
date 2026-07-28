@@ -6,9 +6,15 @@ same mistake keep shipping:
   1. A ``bash``/``sh``/``powershell`` fence chains commands with ``&&``. Stock
      Windows PowerShell 5.1 has no pipeline-chain operator, so every such line is
      a parse error for the Windows reader who is being told to paste it.
-  2. A ``powershell`` fence prescribes ``make <target>``. ``make`` is not
-     installed on Windows and the Makefile itself says its targets need WSL2 —
-     that is the docs/setup/windows.md defect this file pins shut.
+  2. A Windows-shell fence (``powershell``/``pwsh``/``ps``/``ps1`` and the
+     ``cmd``/``bat``/``batch`` family) prescribes ``make <target>``. ``make`` is
+     not installed on Windows and the Makefile itself says its targets need
+     WSL2 — that is the docs/setup/windows.md defect this file pins shut.
+
+Both checks also cover **untagged** fences. A fence with no language tag renders
+identically to a tagged one, so ```` ``` ```` + ``make setup && make start`` was a
+complete bypass of both rules; an untagged fence is now scanned line by line and
+every line that looks like a shell command is held to the same contract.
 
 It also pins the canonical one-line install/uninstall contract into readme.md and
 requires every per-OS setup page to tell the reader how to remove FlintTrade.
@@ -30,17 +36,59 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# The subset that claims to be a Windows shell: PowerShell plus the cmd.exe
+# family. `make` exists on none of them.
+_WINDOWS_SHELL_LANGS = frozenset({"powershell", "pwsh", "ps", "ps1", "cmd", "bat", "batch"})
+
 # Fences whose contents are commands a reader is expected to paste into a shell.
-_SHELL_LANGS = frozenset(
-    {"bash", "sh", "shell", "zsh", "console", "shell-session", "powershell", "pwsh", "ps", "ps1"}
+_SHELL_LANGS = (
+    frozenset({"bash", "sh", "shell", "zsh", "console", "shell-session"}) | _WINDOWS_SHELL_LANGS
 )
-# The subset that claims to be Windows PowerShell.
-_POWERSHELL_LANGS = frozenset({"powershell", "pwsh", "ps", "ps1"})
 
 _FENCE_RE = re.compile(r"^(`{3,}|~{3,})(.*)$")
 
 # `make`, `make foo`, `; make foo`, `| make foo` — i.e. make in command position.
 _MAKE_COMMAND_RE = re.compile(r"(?:^|[;|&(]\s*)make(?:\s|$)")
+
+# ---------------------------------------------------------------------------
+# Untagged-fence detection.
+#
+# A fence with no info string renders exactly like a tagged one, so it was a
+# free bypass of both rules above. We cannot assume an untagged fence is a
+# shell block (plenty hold tree output, logs or config), so it is scanned line
+# by line: only lines that are recognisably a command are held to the rules.
+# ---------------------------------------------------------------------------
+
+# An explicit prompt is unambiguous: `$ `, `> `, `PS> `, `PS C:\src>`, `C:\src>`.
+_PROMPT_RE = re.compile(r"^(?:\$|>|PS\s*[^>]*>|[A-Za-z]:\\[^>]*>)\s+")
+
+# Leading `NAME=value ` environment assignments precede the real command.
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+")
+
+# Programs a FlintTrade doc actually tells a reader to run. Kept explicit rather
+# than "any word" so prose and command output are not mistaken for commands.
+_COMMAND_HEADS = frozenset(
+    {
+        "apt", "apt-get", "bash", "brew", "cargo", "cd", "chmod", "cmd", "copy", "corepack",
+        "cp", "curl", "del", "dnf", "docker", "docker-compose", "echo", "env", "export",
+        "flinttrade", "git", "iex", "irm", "iwr", "ls", "make", "mkdir", "mv", "node", "npm",
+        "npx", "pacman", "pip", "pip3", "pnpm", "powershell", "py", "pytest", "python",
+        "python3", "pwsh", "rm", "ruff", "rustup", "set", "setx", "sh", "source", "sudo",
+        "systemctl", "tsc", "uv", "uvx", "vitest", "wget", "winget", "zsh",
+    }
+)
+
+# A script invoked by path: ./scripts/foo.sh, .\install.ps1, scripts/ft.py.
+_SCRIPT_SUFFIXES = (".sh", ".ps1", ".psm1", ".cmd", ".bat", ".py")
+
+# Documents whose audience is provably Windows. An untagged fence here is Windows
+# instructions, so the `make` ban applies to it as if it were tagged `powershell`.
+_WINDOWS_DOC_GLOBS: tuple[tuple[str, str], ...] = (
+    (
+        "docs/setup/windows.md",
+        "the per-OS Windows setup page — every fence on it is pasted into a Windows shell",
+    ),
+)
 
 # ---------------------------------------------------------------------------
 # Allowlist: fences that are legitimately POSIX-only.
@@ -71,11 +119,12 @@ _AMPERSAND_ALLOWLIST: tuple[tuple[str, str], ...] = (
     ),
 )
 
-# Intentionally empty. `make` inside a ```powershell fence is the exact reported defect;
-# there is no legitimate case for it, because `make` does not exist on Windows and the
-# cross-platform runner (`python scripts/ft.py` / `flinttrade <subcommand>`) covers every
-# target. Add an entry here only with a written justification.
-_MAKE_IN_POWERSHELL_ALLOWLIST: tuple[tuple[str, str], ...] = ()
+# Intentionally empty. `make` inside a ```powershell (or ```cmd / ```bat) fence is the
+# exact reported defect; there is no legitimate case for it, because `make` does not
+# exist on Windows and the cross-platform runner (`python scripts/ft.py` /
+# `flinttrade <subcommand>`) covers every target. Add an entry here only with a written
+# justification.
+_MAKE_IN_WINDOWS_SHELL_ALLOWLIST: tuple[tuple[str, str], ...] = ()
 
 # The canonical contract strings. These are verbatim by design — paraphrasing them is
 # the failure mode this test exists to catch.
@@ -208,6 +257,64 @@ def _allowlisted(rel_path: str, allowlist: tuple[tuple[str, str], ...]) -> bool:
     return any(fnmatch(rel_path, pattern) for pattern, _ in allowlist)
 
 
+def _looks_like_command(line: str) -> bool:
+    """Is this line of an untagged fence a shell command a reader would paste?
+
+    Recognises an explicit prompt (``$``, ``>``, ``PS C:\\src>``) or a first token
+    that names a program this project's docs actually tell people to run — after
+    stripping leading ``NAME=value`` environment assignments and any directory
+    part, so ``FOO=1 make start`` and ``./scripts/setup.sh`` both qualify.
+
+    Args:
+        line: A single line taken from an untagged fence.
+
+    Returns:
+        True when the line should be held to the shell-fence rules.
+    """
+    stripped = _strip_comment(line).strip()
+    if not stripped:
+        return False
+    if _PROMPT_RE.match(stripped):
+        return True
+    while True:
+        assignment = _ENV_ASSIGNMENT_RE.match(stripped)
+        if not assignment:
+            break
+        stripped = stripped[assignment.end() :]
+    tokens = stripped.split()
+    if not tokens:
+        return False
+    head = tokens[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    return head in _COMMAND_HEADS or head.endswith(_SCRIPT_SUFFIXES)
+
+
+def _command_lines(lang: str, body: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Return the lines of a fence that are commands for rule purposes.
+
+    A tagged shell fence is commands throughout. An untagged fence is a mixture,
+    so only the recognisably-command lines count — plus any line continuing one
+    (a trailing ``\\`` or ``` ` ```), which is part of the same command.
+
+    Args:
+        lang: The fence's normalised language tag; ``""`` when untagged.
+        body: ``(line_number, line)`` pairs making up the fence.
+
+    Returns:
+        The subset of ``body`` the fence rules apply to.
+    """
+    if lang:
+        return body
+    selected: list[tuple[int, str]] = []
+    continuing = False
+    for lineno, line in body:
+        if continuing or _looks_like_command(line):
+            selected.append((lineno, line))
+            continuing = _strip_comment(line).rstrip().endswith(("\\", "`"))
+        else:
+            continuing = False
+    return selected
+
+
 @pytest.mark.unit
 def test_shell_fences_never_chain_with_ampersand() -> None:
     """`&&` in a shell fence is a parse error for every Windows PowerShell 5.1 reader."""
@@ -218,11 +325,12 @@ def test_shell_fences_never_chain_with_ampersand() -> None:
         if _allowlisted(rel, _AMPERSAND_ALLOWLIST):
             continue
         for lang, _opened_at, body in _iter_fences(path.read_text(encoding="utf-8")):
-            if lang not in _SHELL_LANGS:
+            if lang and lang not in _SHELL_LANGS:
                 continue
-            for lineno, line in body:
+            label = f"```{lang}" if lang else "untagged"
+            for lineno, line in _command_lines(lang, body):
                 if "&&" in _strip_comment(line):
-                    violations.append(f"{rel}:{lineno}: ```{lang} fence chains with '&&' → {line.strip()}")
+                    violations.append(f"{rel}:{lineno}: {label} fence chains with '&&' → {line.strip()}")
 
     assert not violations, (
         "Shell fences must not chain commands with '&&' (Windows PowerShell 5.1 has no "
@@ -232,24 +340,31 @@ def test_shell_fences_never_chain_with_ampersand() -> None:
 
 
 @pytest.mark.unit
-def test_powershell_fences_never_prescribe_make() -> None:
-    """`make` does not exist on Windows; PowerShell blocks must use the runner instead."""
+def test_windows_shell_fences_never_prescribe_make() -> None:
+    """`make` exists on no Windows shell; those blocks must use the runner instead.
+
+    Covers PowerShell and the cmd.exe family by tag, plus untagged fences on a page
+    whose audience is provably Windows (``_WINDOWS_DOC_GLOBS``) — an untagged fence
+    on docs/setup/windows.md is still Windows instructions.
+    """
     docs = _require_git_listing()
     violations: list[str] = []
     for path in docs:
         rel = path.relative_to(_REPO_ROOT).as_posix()
-        if _allowlisted(rel, _MAKE_IN_POWERSHELL_ALLOWLIST):
+        if _allowlisted(rel, _MAKE_IN_WINDOWS_SHELL_ALLOWLIST):
             continue
+        windows_page = _allowlisted(rel, _WINDOWS_DOC_GLOBS)
         for lang, _opened_at, body in _iter_fences(path.read_text(encoding="utf-8")):
-            if lang not in _POWERSHELL_LANGS:
+            if lang not in _WINDOWS_SHELL_LANGS and not (lang == "" and windows_page):
                 continue
-            for lineno, line in body:
+            label = f"```{lang}" if lang else "untagged"
+            for lineno, line in _command_lines(lang, body):
                 command = _strip_comment(line).strip()
                 if command and _MAKE_COMMAND_RE.search(command):
-                    violations.append(f"{rel}:{lineno}: ```{lang} fence runs make → {command}")
+                    violations.append(f"{rel}:{lineno}: {label} fence runs make → {command}")
 
     assert not violations, (
-        "PowerShell fences must not prescribe `make` targets. Use the cross-platform runner:\n"
+        "Windows-shell fences must not prescribe `make` targets. Use the cross-platform runner:\n"
         "  python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help"
         "|desktop-test|desktop-build|desktop-package|desktop-dev>\n"
         "(after install the shim exposes the same subcommands as `flinttrade <subcommand>`).\n"
@@ -259,14 +374,18 @@ def test_powershell_fences_never_prescribe_make() -> None:
 
 @pytest.mark.unit
 def test_allowlist_globs_still_match_tracked_files() -> None:
-    """A typo'd or renamed-away allowlist entry is a silent hole — surface it."""
+    """A typo'd or renamed-away glob is a silent hole — surface it.
+
+    Covers the two exemption lists and ``_WINDOWS_DOC_GLOBS``: if docs/setup/windows.md
+    is ever renamed, its untagged fences would silently stop being scanned for ``make``.
+    """
     tracked = _tracked_paths()
     if not tracked:
         pytest.skip("git ls-files returned nothing (git unavailable or not a work tree)")
 
     dead = [
         f"{pattern}: matches no tracked file ({reason})"
-        for allowlist in (_AMPERSAND_ALLOWLIST, _MAKE_IN_POWERSHELL_ALLOWLIST)
+        for allowlist in (_AMPERSAND_ALLOWLIST, _MAKE_IN_WINDOWS_SHELL_ALLOWLIST, _WINDOWS_DOC_GLOBS)
         for pattern, reason in allowlist
         if not any(fnmatch(rel, pattern) for rel in tracked)
     ]

@@ -18,6 +18,8 @@ PURGE="${FLINTTRADE_UNINSTALL_PURGE:-0}"
 ASSUME_YES="${FLINTTRADE_UNINSTALL_YES:-0}"
 DRY_RUN="${FLINTTRADE_UNINSTALL_DRY_RUN:-0}"
 REMOVED_ANY=0
+SHELL_REMOVED_ANY=0
+WEB_REMOVED_ANY=0
 FAILED_ANY=0
 PURGE_COMPLETED=0
 PURGED_DATA_ANY=0
@@ -27,6 +29,19 @@ DATA_TARGETS=()
 SHELL_RECEIPT_DIR="$HOME/.local/state/flinttrade"
 SHELL_RECEIPT_PATH="$SHELL_RECEIPT_DIR/shell-install.receipt"
 SHELL_LAUNCH_LOG="$SHELL_RECEIPT_DIR/desktop-launch.log"
+# The one-line web installer records everything it writes outside the managed
+# root here (flinttrade-web-install.sh). Without it the launcher shim was
+# orphaned residue: no uninstall path could prove it, so it was either left
+# forever (macOS) or reported as an unprovable failure (Linux).
+WEB_RECEIPT_DIR="$HOME/.local/state/flinttrade-web"
+WEB_RECEIPT_PATH="$WEB_RECEIPT_DIR/web-install.receipt"
+WEB_RECEIPT_VALID=0
+WEB_SHIM_PROVEN=0
+WEB_RECEIPT_SHIM=""
+WEB_RECEIPT_SHIM_SHA256=""
+WEB_RECEIPT_SHORTCUT=""
+WEB_RECEIPT_SOURCE=""
+WEB_RECEIPT_TOOLS=""
 RECEIPT_KIND=""
 RECEIPT_TARGET=""
 RECEIPT_EXECUTABLE=""
@@ -46,10 +61,11 @@ FlintTrade Electron shell uninstaller (macOS + Linux)
 Flags:
   --purge    Also delete the workspace, Electron profile, managed source/tools,
              the source-build checkout (~/.flinttrade/source-build, or
-             FLINTTRADE_SRC_DIR when it proves to be a FlintTrade checkout),
-             the pre-workspace ~/.flinttrade data/archive/sandbox directories,
-             and legacy desktop storage. Every resolved path is printed first.
-             Irreversible after confirmation.
+             FLINTTRADE_SRC_DIR only when an installer receipt proves it is a
+             FlintTrade-managed checkout), the pre-workspace ~/.flinttrade
+             data/archive/sandbox directories, the whole ~/.flinttrade managed
+             root and legacy desktop storage. Every resolved path is printed
+             first. Irreversible after confirmation.
   --yes      Skip the typed --purge confirmation for scripted use. The full
              list of paths is still printed before anything is deleted.
   --dry-run  Print what would be removed without deleting anything.
@@ -86,6 +102,18 @@ expand_tilde() {
   esac
 }
 
+# A relative override otherwise resolves against the uninstaller's own working
+# directory at every later use, so the path that gets printed is not necessarily
+# the path that would be deleted. Resolve it once, up front.
+absolute_path() {
+  local value="$1"
+  [ -n "$value" ] || return 0
+  case "$value" in
+    /*) printf '%s' "$value" ;;
+    *) printf '%s/%s' "$(pwd -P)" "$value" ;;
+  esac
+}
+
 WORKSPACE_DIR="$(expand_tilde "${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}")"
 MANAGED_ROOT="$HOME/.flinttrade"
 SOURCE_ROOT="$MANAGED_ROOT/src"
@@ -97,7 +125,7 @@ TOOLS_ROOT="$MANAGED_ROOT/tools"
 # reach this tree — a multi-GB clone plus node_modules survived forever while
 # keep_notice claimed nothing else remained.
 SOURCE_BUILD_ROOT="$MANAGED_ROOT/source-build"
-SRC_DIR_OVERRIDE="$(expand_tilde "${FLINTTRADE_SRC_DIR:-}")"
+SRC_DIR_OVERRIDE="$(absolute_path "$(expand_tilde "${FLINTTRADE_SRC_DIR:-}")")"
 # Pre-workspace data directories. workspace.py still reads these at every
 # backend start, and its migration COPIES rather than moves — so they retain a
 # live copy of the DuckDB store, the append-only audit chain and the encrypted
@@ -153,6 +181,132 @@ private_mode() {
 refuse_unproven_shell() {
   say "Refusing to remove $1 — $2."
   FAILED_ANY=1
+}
+
+lower_hex() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+# ---------------------------------------------------------------------------
+# Web-install receipt.
+#
+# Exit status: 0 the receipt is valid, 1 no web install was ever recorded,
+# 2 the receipt exists but does not prove itself. Only status 0 authorises
+# removing anything, and status 1 is never an uninstall failure — a machine
+# without the one-line web install simply has nothing here to remove.
+# ---------------------------------------------------------------------------
+
+read_web_receipt() {
+  local line1 line2 line3 line4 line5 line6 line7 extra mode default_shim
+  [ -e "$WEB_RECEIPT_PATH" ] || [ -L "$WEB_RECEIPT_PATH" ] || return 1
+  if [ ! -d "$WEB_RECEIPT_DIR" ] || [ -L "$WEB_RECEIPT_DIR" ] || [ ! -O "$WEB_RECEIPT_DIR" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — its receipt directory is not owner-local."
+    return 2
+  fi
+  mode="$(private_mode "$WEB_RECEIPT_DIR")"
+  if [ "$mode" != "700" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — its receipt directory is not private."
+    return 2
+  fi
+  if [ ! -f "$WEB_RECEIPT_PATH" ] || [ -L "$WEB_RECEIPT_PATH" ] || [ ! -O "$WEB_RECEIPT_PATH" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt is not an owner-local ordinary file."
+    return 2
+  fi
+  mode="$(private_mode "$WEB_RECEIPT_PATH")"
+  if [ "$mode" != "600" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt is not private."
+    return 2
+  fi
+  if ! {
+    IFS= read -r line1 && IFS= read -r line2 && IFS= read -r line3 && IFS= read -r line4 \
+      && IFS= read -r line5 && IFS= read -r line6 && IFS= read -r line7 && ! IFS= read -r extra
+  } < "$WEB_RECEIPT_PATH"; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt shape is invalid."
+    return 2
+  fi
+  if [ "$line1" != "format=flinttrade-web-install-v1" ] || [ "$line2" != "platform=$OS" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt format or platform does not match."
+    return 2
+  fi
+  if [[ "$line3" != shim=* || "$line4" != shim_sha256=* || "$line5" != shortcut=* \
+      || "$line6" != source=* || "$line7" != tools=* ]]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt field names are invalid."
+    return 2
+  fi
+  WEB_RECEIPT_SHIM="${line3#shim=}"
+  WEB_RECEIPT_SHIM_SHA256="${line4#shim_sha256=}"
+  WEB_RECEIPT_SHORTCUT="${line5#shortcut=}"
+  WEB_RECEIPT_SOURCE="${line6#source=}"
+  WEB_RECEIPT_TOOLS="${line7#tools=}"
+  if [ -z "$WEB_RECEIPT_SHIM" ] || [ "${#WEB_RECEIPT_SHIM_SHA256}" -ne 64 ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt omits exact launcher identity."
+    return 2
+  fi
+  # The shortcut field is Windows-only; a POSIX receipt that fills it in was not
+  # written by flinttrade-web-install.sh.
+  if [ -n "$WEB_RECEIPT_SHORTCUT" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the receipt records a shortcut this platform never installs."
+    return 2
+  fi
+  # The receipt may only ever aim the remover at the one location the web
+  # installer writes a launcher to; it is not a general deletion instruction.
+  default_shim="$(canonical_existing_path "$HOME/.local/bin/flinttrade" 2>/dev/null)" \
+    || default_shim="$HOME/.local/bin/flinttrade"
+  if [ "$WEB_RECEIPT_SHIM" != "$default_shim" ] \
+      && [ "$WEB_RECEIPT_SHIM" != "$HOME/.local/bin/flinttrade" ]; then
+    say "Leaving $WEB_RECEIPT_PATH — the recorded launcher is not the installer-owned location."
+    return 2
+  fi
+  case "$WEB_RECEIPT_SHIM_SHA256" in
+    *[!0-9A-Fa-f]*)
+      say "Leaving $WEB_RECEIPT_PATH — the receipt contains an invalid digest."
+      return 2
+      ;;
+  esac
+  WEB_RECEIPT_VALID=1
+  return 0
+}
+
+remove_web_install() {
+  local receipt_status=0 actual
+  if read_web_receipt; then
+    receipt_status=0
+  else
+    receipt_status=$?
+  fi
+  # A missing or unproven receipt never authorises deleting a launcher, and an
+  # absent web install is not a failure.
+  [ "$receipt_status" = "0" ] || return 0
+  if [ -e "$WEB_RECEIPT_SHIM" ] || [ -L "$WEB_RECEIPT_SHIM" ]; then
+    if [ ! -f "$WEB_RECEIPT_SHIM" ] || [ -L "$WEB_RECEIPT_SHIM" ]; then
+      say "Leaving $WEB_RECEIPT_SHIM — the recorded launcher is not an ordinary file."
+      say "Keeping $WEB_RECEIPT_PATH so a later run can retry."
+      return 0
+    fi
+    actual="$(sha256_file "$WEB_RECEIPT_SHIM" 2>/dev/null || true)"
+    if [ -z "$actual" ] || [ "$(lower_hex "$actual")" != "$(lower_hex "$WEB_RECEIPT_SHIM_SHA256")" ]; then
+      say "Leaving $WEB_RECEIPT_SHIM — its SHA-256 identity does not match the web-install receipt."
+      say "Keeping $WEB_RECEIPT_PATH so a later run can retry."
+      return 0
+    fi
+    WEB_SHIM_PROVEN=1
+    remove_path "$WEB_RECEIPT_SHIM"
+    if [ "$DRY_RUN" != "1" ] && { [ -e "$WEB_RECEIPT_SHIM" ] || [ -L "$WEB_RECEIPT_SHIM" ]; }; then
+      say "Keeping $WEB_RECEIPT_PATH because the recorded launcher could not be removed."
+      return 0
+    fi
+    if [ "$DRY_RUN" != "1" ]; then
+      say "Removed the launcher recorded by $WEB_RECEIPT_PATH."
+      WEB_REMOVED_ANY=1
+    fi
+  fi
+  remove_path "$WEB_RECEIPT_PATH"
+  if [ "$DRY_RUN" != "1" ] && [ -d "$WEB_RECEIPT_DIR" ]; then
+    if rmdir "$WEB_RECEIPT_DIR" 2>/dev/null; then
+      say "Removed $WEB_RECEIPT_DIR"
+      REMOVED_ANY=1
+    fi
+  fi
 }
 
 read_shell_receipt() {
@@ -393,19 +547,48 @@ collect_data_targets() {
   add_data_target "$SOURCE_ROOT"
   add_data_target "$TOOLS_ROOT"
   add_data_target "$SOURCE_BUILD_ROOT"
-  # An FLINTTRADE_SRC_DIR override is only honoured when the directory still
-  # proves itself a FlintTrade checkout; an arbitrary env var must never be
-  # able to aim rm -rf at, say, ~/Documents.
-  if [ -n "$SRC_DIR_OVERRIDE" ] && proven_source_checkout "$SRC_DIR_OVERRIDE"; then
-    add_data_target "$SRC_DIR_OVERRIDE"
+  # An FLINTTRADE_SRC_DIR override is only honoured when an installer receipt
+  # proves the checkout is FlintTrade's own. A shape match alone is every
+  # contributor clone, so it must never aim rm -rf at a working tree that holds
+  # uncommitted work.
+  if [ -n "$SRC_DIR_OVERRIDE" ]; then
+    if proven_source_checkout "$SRC_DIR_OVERRIDE"; then
+      add_data_target "$SRC_DIR_OVERRIDE"
+    elif [ -d "$SRC_DIR_OVERRIDE" ]; then
+      say "Leaving $SRC_DIR_OVERRIDE — no FlintTrade installer receipt proves this source checkout."
+    fi
+  fi
+  if [ "$WEB_RECEIPT_VALID" = "1" ]; then
+    add_data_target "$WEB_RECEIPT_SOURCE"
+    add_data_target "$WEB_RECEIPT_TOOLS"
+    # Only a launcher whose digest still matched the receipt is purge-eligible;
+    # --purge must not finish a deletion the ordinary path already refused.
+    if [ "$WEB_SHIM_PROVEN" = "1" ]; then add_data_target "$WEB_RECEIPT_SHIM"; fi
   fi
   add_data_target "$LEGACY_DATA_DIR"
   add_data_target "$LEGACY_ARCHIVE_DIR"
   add_data_target "$LEGACY_SANDBOX_DIR"
   add_data_target "$LEGACY_DITTO_VAULT"
+  # The managed root itself, after the specific subtrees above so the printed
+  # list still names them explicitly. On macOS and Windows around nineteen
+  # modules write DIRECTLY at ~/.flinttrade/<name> — totp_auth.duckdb,
+  # totp_install_key, shortcuts.duckdb, journal.sqlite, qty_freeze.duckdb,
+  # action_center.duckdb, watchlist.db, flows/ and strategies/ among them — so
+  # enumerating only the subdirectories left TOTP secrets and realised-P&L
+  # state behind while claiming everything had been purged.
+  add_data_target "$MANAGED_ROOT"
   local candidate
   for candidate in "$@"; do add_data_target "$candidate"; done
   [ "${#DATA_TARGETS[@]}" -eq 0 ] || DATA_FOUND_ANY=1
+}
+
+web_receipt_names_source() {
+  local target="${1%/}" canonical
+  [ "$WEB_RECEIPT_VALID" = "1" ] || return 1
+  [ -n "$WEB_RECEIPT_SOURCE" ] || return 1
+  [ "$target" = "${WEB_RECEIPT_SOURCE%/}" ] && return 0
+  canonical="$(canonical_existing_path "$target")" || return 1
+  [ "$canonical" = "${WEB_RECEIPT_SOURCE%/}" ]
 }
 
 proven_source_checkout() {
@@ -414,6 +597,11 @@ proven_source_checkout() {
   for marker in .git pnpm-lock.yaml uv.lock pyproject.toml; do
     [ -e "$target/$marker" ] || return 1
   done
+  # Shape is not identity: .git + pnpm-lock.yaml + uv.lock + pyproject.toml is
+  # every contributor clone of this repository. Recursive deletion of a source
+  # checkout is authorised only by an installer-written receipt, exactly as the
+  # shell-removal path requires its own receipt.
+  web_receipt_names_source "$target" || return 1
   return 0
 }
 
@@ -564,8 +752,13 @@ purge_all_data() {
 announce_purge_targets() {
   local target
   say "About to DELETE the FlintTrade workspace, Electron profile, managed source/tools,"
-  say "source-build checkout, pre-workspace storage and legacy desktop data listed below:"
+  say "source-build checkout, pre-workspace storage, the whole ~/.flinttrade managed root"
+  say "and legacy desktop data listed below:"
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
+  say "~/.flinttrade itself also holds files written directly at its top level — the TOTP"
+  say "secret store and install key, shortcuts, the trade journal, quantity-freeze and"
+  say "action-centre stores, the watchlist, flows/ and strategies/ — so purging it is real"
+  say "trading state, not just the subdirectories named above."
   say "Any ~/.flinttrade/data, ~/.flinttrade/archive or ~/.flinttrade/sandbox path above is"
   say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
   say "audit chain and the encrypted broker-credential vault live there, so an upgraded"
@@ -580,8 +773,10 @@ keep_notice() {
   local target
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
   say "This includes the workspace, Electron profile, managed source/tools, the source-build"
-  say "checkout, any pre-workspace ~/.flinttrade data/archive/sandbox storage (including the"
-  say "encrypted broker-credential vault) and any legacy desktop storage."
+  say "checkout, the whole ~/.flinttrade managed root (its top-level TOTP, journal, shortcuts,"
+  say "quantity-freeze, action-centre, watchlist, flows and strategies state included), any"
+  say "pre-workspace ~/.flinttrade data/archive/sandbox storage (including the encrypted"
+  say "broker-credential vault) and any legacy desktop storage."
   say "To delete it too, re-run with --purge and confirm explicitly."
 }
 
@@ -789,7 +984,15 @@ validate_linux_receipt() {
 report_unreceipted_shell_paths() {
   local candidate found=0 candidates=()
   if [ "$OS" = "Darwin" ]; then
-    candidates=("/Applications/FlintTrade.app" "$HOME/Applications/FlintTrade.app" "$SHELL_RECEIPT_DIR")
+    # The web installer's launcher shim lands at the same path on macOS as on
+    # Linux; leaving it out meant a macOS uninstall silently kept a launcher
+    # pointing at a source tree it had just deleted.
+    candidates=(
+      "/Applications/FlintTrade.app"
+      "$HOME/Applications/FlintTrade.app"
+      "$HOME/.local/bin/flinttrade"
+      "$SHELL_RECEIPT_DIR"
+    )
   else
     candidates=(
       "$HOME/.local/bin/flinttrade"
@@ -855,6 +1058,7 @@ uninstall_receipted_shell() {
       return 1
     }
     remove_receipt_state || return 1
+    SHELL_REMOVED_ANY=1
     return 0
   else
     receipt_status=$?
@@ -865,6 +1069,9 @@ uninstall_receipted_shell() {
 
 uninstall_macos() {
   ELECTRON_PROFILE="$HOME/Library/Application Support/flinttrade-shell"
+  # Before the shell sweep, so a proved web launcher is already gone by the time
+  # the unreceipted-path report looks at ~/.local/bin/flinttrade.
+  remove_web_install
   uninstall_receipted_shell || true
 
   local legacy=(
@@ -882,6 +1089,9 @@ uninstall_macos() {
 
 uninstall_linux() {
   ELECTRON_PROFILE="$HOME/.config/flinttrade-shell"
+  # Before the shell sweep, so a proved web launcher is already gone by the time
+  # the unreceipted-path report looks at ~/.local/bin/flinttrade.
+  remove_web_install
   uninstall_receipted_shell || true
   if [ "$DRY_RUN" != "1" ] && command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
@@ -905,12 +1115,18 @@ elif [ "$FAILED_ANY" = "1" ]; then
 elif [ "$PURGED_DATA_ANY" = "1" ] && [ "$PURGE_COMPLETED" = "1" ]; then
   say "FlintTrade cleanup completed; explicitly confirmed data was purged."
 elif [ "$REMOVED_ANY" = "1" ]; then
+  # Removing only the one-line web install's launcher is not a shell uninstall,
+  # and saying so would be untrue on a machine that never had the desktop shell.
+  REMOVAL_SUBJECT="FlintTrade shell uninstalled cleanly"
+  if [ "$SHELL_REMOVED_ANY" != "1" ] && [ "$WEB_REMOVED_ANY" = "1" ]; then
+    REMOVAL_SUBJECT="FlintTrade web-app launcher removed cleanly"
+  fi
   if [ "$DATA_RETAINED_ANY" = "1" ]; then
-    say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
+    say "$REMOVAL_SUBJECT; retained data remains available for reinstall."
   elif [ "$PURGE" = "1" ]; then
-    say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found to purge."
+    say "$REMOVAL_SUBJECT; no recognised FlintTrade data was found to purge."
   else
-    say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found."
+    say "$REMOVAL_SUBJECT; no recognised FlintTrade data was found."
   fi
 elif [ "$DATA_RETAINED_ANY" = "1" ]; then
   say "No FlintTrade shell was removed; retained data remains available for reinstall."

@@ -15,7 +15,7 @@ workflow YAML should read this once.
 
 | Workflow | Trigger | Runner cost | Notes |
 |---|---|---|---|
-| `test.yml` | push to `main` / `dev`; non-draft PR | 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Uses `paths-ignore` so doc-only commits skip the matrix entirely. |
+| `test.yml` | push to `main` / `dev`; non-draft PR | `changed-surfaces` classifier + 9 Linux jobs | The main quality gate. Includes Electron typecheck, Vitest, bundle and Linux directory-package verification. Documentation and site edits still run `python-tests`, `node-core-tests` and `secrets-check`; the expensive lanes gate on `changed-surfaces`. |
 | `supply-chain.yml` | push to `main` / `dev`; non-draft PR (paths-ignore); weekly cron (Mon 03:00 UTC); manual dispatch | Linux jobs per-push/PR; the macOS + Windows jobs (`cross-platform-smoke`, `windows-acl-test`) gate to the weekly cron / `workflow_dispatch` only (§7) | Full supply-chain gate: python/rust/node audits, licence + provenance checks, NOTICE drift, hashed-install enforcement, Windows secret-file ACL hardening, cross-platform install smoke, lockfile drift, and the CLA GPG binding (external forks only). |
 | `site.yml` | push to `main` / `dev`; non-draft PR (path-filtered to site, terminal, design-system, package manager, docs, package README, and `site.yml` itself) | 1 Linux job | Typechecks, tests and builds the documentation site (Next.js). Documentation changes run this workflow even though they skip the `test.yml` matrix. |
 | `nightly-cross-platform.yml` | weekly cron (Sun 03:00 UTC); manual dispatch | Python on macOS, Windows and Ubuntu 26.04; Electron directory packages on macOS, Windows and Linux | Catches slow-burn platform and packaging regressions before they accumulate. |
@@ -81,12 +81,25 @@ Three mechanisms keep CI inexpensive and signal-rich:
 - **Draft-PR guard.** Every job is gated on
   `github.event.pull_request.draft != true`. Open PRs as drafts while
   iterating; mark "ready for review" to trigger CI.
-- **`paths-ignore` for doc-only commits.** The `test.yml` matrix is skipped if a
-  commit only touches `*.md`, `docs/**`, `.local/**`, `notice`,
-  `LICENSE`, `.gitignore`, `.gitattributes`, `.editorconfig`,
-  `.github/ISSUE_TEMPLATE/**`, or the `claude*.yml` / `status-report.yml`
-  workflows themselves. Changes under `docs/**` still run `site.yml` because
-  that workflow includes documentation in its positive path filter.
+- **`paths-ignore` for genuinely inert files.** The `test.yml` matrix is skipped
+  if a commit only touches `.local/**`, `notice`, `LICENSE`, `.gitignore`,
+  `.gitattributes`, `.editorconfig`, `.github/ISSUE_TEMPLATE/**`, or the
+  `claude*.yml` / `status-report.yml` workflows themselves.
+- **Documentation and the site are deliberately NOT path-ignored.**
+  `python-tests` carries `tests/test_windows_command_docs.py`, the guard that
+  stops a Windows setup page prescribing `make` or a command fence chaining with
+  `&&`, and `packages/apps/site` carries the `desktop-copy` assertions that pin
+  the one-command install strings. Ignoring those paths skipped exactly the jobs
+  that police them, so a docs-only PR could reintroduce the defect and still
+  merge green. `python-tests`, `node-core-tests` and `secrets-check` therefore
+  always run.
+- **The `changed-surfaces` classifier keeps that cheap.** It diffs the push or PR
+  range with plain git and reports `code=false` only when every changed path is
+  documentation or site content; the four widget shards, `rust-ticks-tests` and
+  `electron-desktop-tests` gate on it. It fails **open** — an unresolvable range
+  (first push to a branch, force push, shallow history) reports `code=true` and
+  the full matrix runs. Changes under `docs/**` still run `site.yml` because that
+  workflow includes documentation in its positive path filter.
 
 ---
 
@@ -126,7 +139,7 @@ these may be chained with it.
 | 2 | Contract tests (e.g. `packages/core/core/tests/test_orders_contract.py` parses `api.ts` for `postOrder("leaf", ...)` calls and asserts the matching Flask route exists) | Frontend ↔ backend route drift. |
 | 3 | `cancel-in-progress: true` on `test.yml` and `claude-code-review.yml` | Back-to-back-push runner amplification. |
 | 4 | Draft-PR guard on every test job | Wasted CI on work-in-progress PRs. |
-| 5 | `paths-ignore` for doc-only commits | Routine doc updates burning runner minutes. |
+| 5 | `paths-ignore` for inert files, plus the `changed-surfaces` classifier gating the expensive lanes on doc/site-only edits | Routine doc updates burning runner minutes — without blinding the guards that police documentation. |
 | 6 | `continue-on-error: true` confined to the nightly workflow — never `test.yml` | Cosmetic matrix entries inflating perceived failure rate. |
 | 7 | Stop-time review gate (`/codex:setup --enable-review-gate`) — **legacy/optional**: Codex was retired from the review pipeline (2026-06-05), so this gate is no longer part of the standard flow (claude ultracode panels → maintainer). Kept only for contributors who still run a local Codex CLI | High-level design / contract / safety issues unit tests cannot see. |
 | 8 | Nightly cross-platform matrix (Sunday cron) | Slow-burn Python and Electron-package regressions on macOS, Windows and Linux before they pile up. |

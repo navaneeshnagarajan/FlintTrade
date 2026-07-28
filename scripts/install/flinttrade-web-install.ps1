@@ -16,7 +16,7 @@
 
 param(
     [string]$Ref = $env:FLINTTRADE_REF,
-    [string]$SrcDir = $(if ($env:FLINTTRADE_SRC_DIR) { $env:FLINTTRADE_SRC_DIR } else { Join-Path $HOME ".flinttrade\src\FlintTrade" }),
+    [string]$SrcDir = "",
     [switch]$Yes = ($env:FLINTTRADE_YES -eq "1"),
     [switch]$DryRun = ($env:FLINTTRADE_DRY_RUN -eq "1"),
     [switch]$NoLaunch = ($env:FLINTTRADE_NO_LAUNCH -eq "1"),
@@ -35,6 +35,13 @@ $BackendUrl = "http://127.0.0.1:5100"
 $UninstallCommand = "irm https://flinttrade.vercel.app/uninstall.ps1 | iex"
 $ManagedRoot = Join-Path $HOME ".flinttrade"
 $ToolsRoot = Join-Path $ManagedRoot "tools"
+# The Electron desktop shell resolves exactly these two paths
+# (packages\apps\desktop\electron\paths.ts) and guards every mutation of the
+# active source with an operation lease directory created by its bootstrap
+# (packages\apps\desktop\electron\bootstrap.ts).
+$DesktopSourceRoot = Join-Path $ManagedRoot "src"
+$DesktopActiveSource = Join-Path $DesktopSourceRoot "FlintTrade"
+$DesktopOperationLease = Join-Path $DesktopSourceRoot ".flinttrade-bootstrap-operation.lock"
 $ManifestRelative = "packages\apps\desktop\resources\bootstrap\tool-manifest.json"
 $BootstrapRelative = "packages\apps\desktop\resources\bootstrap\flinttrade-bootstrap.ps1"
 $LocalAppDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
@@ -43,6 +50,10 @@ $ShimDir = Join-Path $LocalAppDataRoot "Programs\FlintTrade"
 $ShimPath = Join-Path $ShimDir "flinttrade.cmd"
 $StartMenuDir = Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade"
 $StartMenuShortcut = Join-Path $StartMenuDir "FlintTrade.lnk"
+# Owner-private receipt for everything this installer writes outside the managed
+# root. The uninstaller may only delete what an installer proved it created.
+$WebReceiptDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "flinttrade-web" } else { "" }
+$WebReceiptPath = if ($WebReceiptDir) { Join-Path $WebReceiptDir "web-install.receipt" } else { "" }
 
 # The allow-list constrains every URL this installer requests. GitHub redirects
 # release assets on to its own object CDN, so integrity is enforced by the
@@ -56,7 +67,8 @@ $AllowedHosts = @(
 )
 
 $script:Target = ""
-$script:SrcDir = $SrcDir
+$script:SrcDir = ""
+$script:SrcDirSource = "default"
 $script:HostGitVersion = ""
 $script:HostUvVersion = ""
 $script:HostNodeVersion = ""
@@ -83,15 +95,23 @@ source checkout, and installs a 'flinttrade' launcher. No prior tooling needed.
 
 Flags:
   -Ref <git-ref>   Branch, tag or commit to install (default: main)
-  -SrcDir <dir>    Managed source checkout (default: %USERPROFILE%\.flinttrade\src\FlintTrade)
+  -SrcDir <dir>    Managed WEB source checkout (default:
+                   %USERPROFILE%\.flinttrade\src\FlintTrade). This is not the
+                   contributor source-build checkout that flinttrade-install.ps1
+                   manages at %USERPROFILE%\.flinttrade\source-build\FlintTrade.
   -Yes             Answer every confirmation with yes
   -NoLaunch        Do not offer to start FlintTrade after installing
   -DryRun          Report the plan without downloading, building or installing
   -Help            Show this help and exit
 
 Environment overrides:
-  FLINTTRADE_REF, FLINTTRADE_SRC_DIR, FLINTTRADE_YES,
+  FLINTTRADE_REF, FLINTTRADE_WEB_SRC_DIR, FLINTTRADE_YES,
   FLINTTRADE_DRY_RUN, FLINTTRADE_NO_LAUNCH
+
+  FLINTTRADE_SRC_DIR is a deprecated fallback for FLINTTRADE_WEB_SRC_DIR here.
+  flinttrade-install.ps1 reads it as the contributor source-build checkout, so
+  this installer warns and asks for confirmation before managing a directory
+  that only that variable supplied.
 
 Uninstall:
   irm https://flinttrade.vercel.app/uninstall.ps1 | iex
@@ -302,6 +322,60 @@ function Resolve-HostToolReuse([string]$PinnedUv, [string]$PinnedNode) {
 # 3. Source acquisition
 # ---------------------------------------------------------------------------
 
+function Resolve-WebSourceDir {
+    # FLINTTRADE_SRC_DIR belongs to flinttrade-install.ps1, where it names the
+    # contributor source-build checkout. This installer fetches, hard-resets and
+    # can replace whatever directory it is given, so it owns
+    # FLINTTRADE_WEB_SRC_DIR instead and only falls back to the older name
+    # behind a loud warning.
+    if ($SrcDir) {
+        $script:SrcDir = $SrcDir
+        $script:SrcDirSource = "-SrcDir"
+        return
+    }
+    if ($env:FLINTTRADE_WEB_SRC_DIR) {
+        $script:SrcDir = $env:FLINTTRADE_WEB_SRC_DIR
+        $script:SrcDirSource = "FLINTTRADE_WEB_SRC_DIR"
+        return
+    }
+    if ($env:FLINTTRADE_SRC_DIR) {
+        $script:SrcDir = $env:FLINTTRADE_SRC_DIR
+        $script:SrcDirSource = "FLINTTRADE_SRC_DIR"
+        return
+    }
+    $script:SrcDir = $DesktopActiveSource
+    $script:SrcDirSource = "default"
+}
+
+function Confirm-SourceDirProvenance {
+    if ($script:SrcDirSource -ne "FLINTTRADE_SRC_DIR") { return }
+    Warn "FLINTTRADE_SRC_DIR is set, so this installer would manage $($script:SrcDir) as its web source checkout."
+    Warn "flinttrade-install.ps1 reads that same variable as the CONTRIBUTOR source-build checkout"
+    Warn "(default $(Join-Path $ManagedRoot 'source-build\FlintTrade')). This installer fetches, hard-resets"
+    Warn "and can replace the directory it is given - including a multi-gigabyte built checkout."
+    Warn "Set FLINTTRADE_WEB_SRC_DIR, or pass -SrcDir, to choose the web source checkout explicitly."
+    if ($DryRun) { return }
+    if (-not (Confirm-Step "Continue with $($script:SrcDir) as the managed web source checkout?")) {
+        Fail "Cancelled at the source-checkout confirmation; nothing was changed."
+    }
+}
+
+function Assert-DesktopNotOperating {
+    $active = ([string]$DesktopActiveSource).TrimEnd('\')
+    $candidate = ([string]$script:SrcDir).TrimEnd('\')
+    $inside = $candidate.Equals($active, [StringComparison]::OrdinalIgnoreCase) -or
+        $candidate.StartsWith($active + '\', [StringComparison]::OrdinalIgnoreCase)
+    if (-not $inside) { return }
+    if (-not (Test-Path -LiteralPath $DesktopOperationLease)) { return }
+    Warn "FlintTrade Desktop holds its bootstrap source-operation lease at $DesktopOperationLease."
+    Warn "That lease guards every mutation of $($script:SrcDir), which the desktop shell treats as its active source."
+    if ($DryRun) {
+        Warn "DRY-RUN: a real run would refuse to touch that checkout until the desktop shell has quit."
+        return
+    }
+    Fail "Quit FlintTrade Desktop and re-run; this installer never takes the desktop's lease itself."
+}
+
 function Assert-SourceDirSafe {
     if (-not (Test-Path -LiteralPath $script:SrcDir)) { return }
     $item = Get-Item -LiteralPath $script:SrcDir -Force
@@ -402,6 +476,8 @@ function Invoke-ArchiveSourceAcquisition([string]$GitRef) {
 function Invoke-SourceAcquisition {
     $gitRef = $DefaultBranch
     if ($Ref) { $gitRef = $Ref }
+    Confirm-SourceDirProvenance
+    Assert-DesktopNotOperating
     Assert-SourceDirSafe
     if ($DryRun) {
         if (Have git) {
@@ -478,7 +554,13 @@ function Install-VerifiedTool([string]$Tool, $Manifest) {
     $versionRoot = Join-Path (Join-Path $ToolsRoot $Tool) $version
     $installRoot = Join-Path $versionRoot $script:Target
     $marker = "$installRoot.flinttrade-web-verified"
-    $desktopMarker = "$installRoot.flinttrade-tool-verified.json"
+    # The Electron bootstrap writes its verification marker INSIDE the install
+    # root (packages\apps\desktop\electron\bootstrap.ts: verifiedMarker =
+    # path.join(installRoot, TOOL_VERIFICATION_MARKER)). The sibling form is only
+    # its legacyVerifiedMarker and nothing writes it any more, so read the real
+    # one first and keep the legacy path as a fallback.
+    $desktopMarker = Join-Path $installRoot ".flinttrade-tool-verified.json"
+    $legacyDesktopMarker = "$installRoot.flinttrade-tool-verified.json"
     $executable = Join-Path $installRoot ($relativeExecutable -replace '/', '\')
 
     if ((Test-Path -LiteralPath $marker -PathType Leaf) -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
@@ -489,8 +571,17 @@ function Install-VerifiedTool([string]$Tool, $Manifest) {
         }
     }
 
-    if ((Test-Path -LiteralPath $desktopMarker -PathType Leaf) -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
-        $recorded = Get-DesktopMarkerExecutableSha256 $desktopMarker
+    $provenMarker = ""
+    if (Test-Path -LiteralPath $desktopMarker -PathType Leaf) {
+        $provenMarker = $desktopMarker
+    } elseif (Test-Path -LiteralPath $legacyDesktopMarker -PathType Leaf) {
+        $provenMarker = $legacyDesktopMarker
+    }
+    if ($provenMarker) {
+        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            Fail "The desktop-provisioned $Tool state at $installRoot carries a verification marker but no usable executable. It was preserved; run the uninstaller or remove it yourself, then re-run."
+        }
+        $recorded = Get-DesktopMarkerExecutableSha256 $provenMarker
         $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $executable).Hash.ToLowerInvariant()
         if ($recorded -and $recorded -eq $actual) {
             Say "Reusing the desktop-provisioned $Tool $version at $installRoot."
@@ -523,6 +614,9 @@ function Install-VerifiedTool([string]$Tool, $Manifest) {
             Fail "The verified $Tool archive did not contain its expected executable ($relativeExecutable)."
         }
         if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+        if ((Test-Path -LiteralPath $desktopMarker) -or (Test-Path -LiteralPath $legacyDesktopMarker)) {
+            Fail "A desktop tool-verification marker appeared at $installRoot while this installer was extracting $Tool $version; refusing to delete a verified tool root."
+        }
         if (Test-Path -LiteralPath $installRoot) { Remove-Item -LiteralPath $installRoot -Recurse -Force }
         Move-Item -LiteralPath $staging -Destination $installRoot
     } finally {
@@ -615,6 +709,76 @@ function Install-StartMenuShortcut {
 }
 
 # ---------------------------------------------------------------------------
+# 8b. Owner-private web-install receipt
+#
+# The uninstaller may only delete what an installer proved it wrote, so record
+# the launcher shim (with its SHA-256), the Start Menu shortcut, the managed
+# source checkout and the tools root. Mirrors the POSIX installer's receipt.
+# ---------------------------------------------------------------------------
+
+function Protect-WebReceiptDirectory([string]$Path) {
+    try {
+        $acl = Get-Acl -LiteralPath $Path
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRule($existing) }
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $identity,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            $inheritance,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    } catch {
+        Warn "Could not restrict $Path to the current user: $($_.Exception.Message)"
+    }
+}
+
+function Get-ReceiptSafeValue([string]$Value) {
+    if ($Value -match "[`r`n]") { Fail "Web-install receipt values must be single-line paths." }
+    return $Value
+}
+
+function Write-WebInstallReceipt {
+    if (-not $WebReceiptDir) {
+        Fail "Could not resolve the Windows application-data folder required for the web-install receipt."
+    }
+    if (-not (Test-Path -LiteralPath $ShimPath -PathType Leaf)) {
+        Fail "The installed launcher is not an ordinary web-install receipt candidate."
+    }
+    if (-not (Test-Path -LiteralPath $WebReceiptDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $WebReceiptDir | Out-Null
+    }
+    $receiptItem = Get-Item -LiteralPath $WebReceiptDir -Force
+    if ($receiptItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Fail "Refusing a reparse-point web-install receipt directory: $WebReceiptDir"
+    }
+    Protect-WebReceiptDirectory $WebReceiptDir
+    $shim = [System.IO.Path]::GetFullPath($ShimPath)
+    $shimHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $shim).Hash.ToLowerInvariant()
+    $shortcut = ""
+    if (Test-Path -LiteralPath $StartMenuShortcut -PathType Leaf) {
+        $shortcut = [System.IO.Path]::GetFullPath($StartMenuShortcut)
+    }
+    $source = [System.IO.Path]::GetFullPath($script:SrcDir).TrimEnd('\')
+    $tools = [System.IO.Path]::GetFullPath($ToolsRoot).TrimEnd('\')
+    $lines = @(
+        "format=flinttrade-web-install-v1",
+        "platform=Windows",
+        ("shim=" + (Get-ReceiptSafeValue $shim)),
+        ("shim_sha256=" + $shimHash),
+        ("shortcut=" + (Get-ReceiptSafeValue $shortcut)),
+        ("source=" + (Get-ReceiptSafeValue $source)),
+        ("tools=" + (Get-ReceiptSafeValue $tools))
+    )
+    [System.IO.File]::WriteAllText($WebReceiptPath, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Say "Recorded the web-install receipt at $WebReceiptPath."
+}
+
+# ---------------------------------------------------------------------------
 # 9. Report and launch
 # ---------------------------------------------------------------------------
 
@@ -624,6 +788,7 @@ function Write-PathReport {
     Say "Verified tools     : $ToolsRoot"
     Say "Managed source     : $($script:SrcDir)"
     Say "Launcher           : $ShimPath  (also: flinttrade <subcommand>)"
+    Say "Install receipt    : $WebReceiptPath  (the uninstaller removes only what this proves)"
     Say "Runner             : python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help|desktop-test|desktop-build|desktop-package|desktop-dev>"
     Say "Open FlintTrade at : $BackendUrl"
     Say "Uninstall          : $UninstallCommand"
@@ -674,6 +839,7 @@ function Invoke-FlintTradeWebInstall {
     $script:Target = Get-BootstrapTarget
     Say "Detected bootstrap target: $($script:Target)"
 
+    Resolve-WebSourceDir
     $script:SrcDir = [System.IO.Path]::GetFullPath($script:SrcDir).TrimEnd('\')
 
     Write-PreflightReport
@@ -745,6 +911,7 @@ function Invoke-FlintTradeWebInstall {
     }
     Install-LauncherShim $venvPython
     Install-StartMenuShortcut
+    Write-WebInstallReceipt
 
     Write-PathReport
     Invoke-OptionalLaunch

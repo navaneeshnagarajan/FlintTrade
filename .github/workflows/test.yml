@@ -4,9 +4,15 @@ on:
     branches: [main, dev]
     types: [opened, synchronize, ready_for_review, reopened]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'packages/apps/site/**'
+      # NOTE: '**.md', 'docs/**' and 'packages/apps/site/**' are deliberately NOT
+      # ignored. python-tests is the only job that runs
+      # tests/test_windows_command_docs.py — the guard that stops a Windows setup
+      # page from telling the reader to run `make`, or a shell fence from chaining
+      # with '&&'. Ignoring documentation skipped precisely the job that polices
+      # documentation, so a docs-only PR reintroducing the defect merged green.
+      # The heavy lanes stay off doc/site edits via the `changed-surfaces`
+      # classifier below rather than via paths-ignore.
+      #
       # NOTE: flinttrade-design/ is NOT ignored — its tracked content is the
       # baselines/ artefacts that this workflow's baseline-verification job +
       # test_baseline_artifacts.py consume, so a baseline change MUST trigger
@@ -23,10 +29,8 @@ on:
   push:
     branches: [main, dev]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'packages/apps/site/**'
-      # (flinttrade-design/ not ignored — see the pull_request note above.)
+      # (documentation, the site and flinttrade-design/ are not ignored — see
+      # the pull_request note above.)
       - '.local/**'
       - 'notice'
       - 'LICENSE'
@@ -91,6 +95,58 @@ permissions:
 # want CI to run.
 jobs:
   # ----------------------------------------------------------------------
+  # Change classifier
+  #
+  # Documentation and marketing-site edits still have to run the jobs that
+  # guard them (python-tests carries tests/test_windows_command_docs.py), but
+  # they cannot break the widget shards, the Rust crate or the Electron
+  # package. This job answers one question — "did anything outside
+  # documentation and the site change?" — and the expensive lanes gate on it.
+  #
+  # Deliberately fails OPEN: an unresolvable diff range (first push to a new
+  # branch, force push, shallow history) reports code=true so the full matrix
+  # runs. Plain git, so no extra third-party action enters the supply chain.
+  # ----------------------------------------------------------------------
+  changed-surfaces:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -uo pipefail
+          resolvable=1
+          for sha in "${BASE_SHA:-}" "${HEAD_SHA:-}"; do
+            if [ -z "$sha" ] || ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              resolvable=0
+            fi
+          done
+          if [ "$resolvable" -ne 1 ]; then
+            echo "Diff range not resolvable — running the full matrix."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          echo "Changed files:"
+          echo "$changed"
+          # Anything that is not a Markdown file, not under docs/ and not under
+          # the Next.js site is code, so the expensive lanes must run.
+          if printf '%s\n' "$changed" | grep -qvE '(\.md$|^docs/|^packages/apps/site/)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Documentation/site-only change — expensive lanes skipped."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ----------------------------------------------------------------------
   # Python tests
   #
   # Parallel execution with pytest-xdist (-n auto). The test-isolation work
@@ -104,6 +160,10 @@ jobs:
   python-tests:
     # Skip the matrix on draft PRs — open as draft, push iteratively without
     # CI cost, then mark ready-for-review when you want CI to run.
+    #
+    # Deliberately NOT gated on `changed-surfaces`: this is the only job that
+    # runs tests/test_windows_command_docs.py, so it has to run on exactly the
+    # doc-only change it guards.
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     # Runaway guard. The whole suite finishes well inside this; the cap stops
@@ -177,6 +237,11 @@ jobs:
   # surfaces in the weekly run, fix-it-then commit; per-push doesn't need
   # the matrix.
 
+  # Ungated like python-tests: cheap, and it is the lane that would catch a
+  # documentation or copy change that broke the terminal's own snapshots.
+  # (The site's own suite — including desktop-copy.test.ts, which pins the
+  # canonical one-liners — runs in site.yml, which triggers on docs/** and
+  # packages/apps/site/**.)
   node-core-tests:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -200,7 +265,8 @@ jobs:
         run: pnpm --dir packages/apps/terminal run build
 
   node-widget-tests-1:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -218,7 +284,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2a:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -236,7 +303,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   node-widget-tests-2b:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -264,7 +332,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=6144'
 
   node-widget-tests-3:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -301,7 +370,8 @@ jobs:
   # whole workflow on doc-only pushes; on a code push this is a per-push Rust
   # compile, kept cheap by the cargo cache.
   rust-ticks-tests:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -317,7 +387,8 @@ jobs:
   # directory package on every non-draft code change; the weekly workflow
   # covers platform-specific packaging.
   electron-desktop-tests:
-    if: github.event.pull_request.draft != true
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
