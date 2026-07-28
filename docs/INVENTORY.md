@@ -100,7 +100,7 @@ Closed-market/no-funds verification does not prove funded live order execution.
 | Live order-flow footprint | ✅ | Aggregator fed from the tick stream (Lee-Ready side classification); honest synthetic fallback |
 | Latency observability (per-broker p50/p95/p99) | ✅ | In-memory `LatencyTracker` fed by the live order path → `/api/v1/latency/stats` → MonitoringSection `LatencyPanel` + ObservabilityDashboard; regression-tested |
 | Gated-order-path latency benchmark | ✅ | Tripwire test measures `gate_order → BrokerRouter` overhead against a mocked broker (real measured ms, generous ceiling) |
-| Persisted DuckDB latency store (histogram + slowest-N) | 🟡 | `LatencyMonitor` built + unit-tested, admin endpoints dev-only; not yet fed by the production order path (`PLAN.md` two-store dedup) |
+| Persisted DuckDB latency store (histogram + slowest-N) | 🟡 | `LatencyMonitor` built + unit-tested, admin endpoints dev-only; not yet fed by the production order path (two-store dedup tracked in the maintainer's working plan) |
 
 ## System Components
 

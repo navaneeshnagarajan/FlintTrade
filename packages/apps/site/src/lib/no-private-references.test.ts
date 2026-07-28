@@ -7,11 +7,10 @@
  * Scanned surfaces:
  *   1. Every generated docs-index entry (docs[].content and
  *      packages[].content) — what the site and docs MCP actually publish.
- *   2. The repo files readme.md, AGENTS.md, changelog.md, disclaimer.md and
- *      every docs/xx*.md on disk.
- *
- * PLAN.md is deliberately excluded: its disposition is pending a maintainer
- * decision, so it is not scanned here yet.
+ *   2. The repo files readme.md, AGENTS.md, changelog.md, disclaimer.md,
+ *      PLAN.md (the curated public roadmap since 2026-07-28; the detailed
+ *      working plan moved to the maintainer's private workspace) and every
+ *      docs/xx*.md on disk.
  *
  * docs/superpowers/plans/ was removed from the repo on 2026-07-28 (archived
  * privately per the plan's own Step B); the directory is skipped in case a
@@ -110,8 +109,7 @@ describe('no private references on public surfaces', () => {
   });
 
   it('keeps repo-root markdown and docs/ free of private references', () => {
-    // PLAN.md is deliberately absent (pending maintainer decision).
-    const rootFiles = ['readme.md', 'AGENTS.md', 'changelog.md', 'disclaimer.md'];
+    const rootFiles = ['readme.md', 'AGENTS.md', 'changelog.md', 'disclaimer.md', 'PLAN.md'];
     const files = [
       ...rootFiles.map((file) => resolve(REPO_ROOT, file)),
       ...listMarkdownFiles(resolve(REPO_ROOT, 'docs')),
