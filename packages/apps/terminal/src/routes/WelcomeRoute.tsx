@@ -11,6 +11,8 @@ import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { Monitor, Moon, Sun } from "lucide-react";
 
+import { BRAND_REVEAL_TIMELINE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK } from "@flinttrade/design-system/brand";
+
 import { Meteors } from "@/components/aceternity/meteors";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Particles } from "@/components/magicui/particles";
@@ -24,15 +26,30 @@ import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useThemeStore } from "@/stores/themeStore";
 
-const WORDMARK = "FlintTrade";
+const WORDMARK = BRAND_WORDMARK;
 
-const SLOGAN = [
-  { text: "Learn", color: "text-blue-400" },
-  { text: "Invest", color: "text-emerald-400" },
-  { text: "Trade", color: "text-amber-400" },
-  { text: "Automate", color: "text-rose-400" },
-  { text: "Analyse", color: "text-purple-400" },
-  { text: "Evolve", color: "text-cyan-400" },
+// Words come from the design-system brand copy (the single source of truth
+// shared with the public site hero). The Tailwind colour classes pair
+// one-to-one with BRAND_SLOGAN_COLOURS (blue/emerald/amber/rose/purple/cyan)
+// and must stay literal here so Tailwind's scanner generates them.
+export const SLOGAN = [
+  { text: BRAND_SLOGAN_WORDS[0], color: "text-blue-400" },
+  { text: BRAND_SLOGAN_WORDS[1], color: "text-emerald-400" },
+  { text: BRAND_SLOGAN_WORDS[2], color: "text-amber-400" },
+  { text: BRAND_SLOGAN_WORDS[3], color: "text-rose-400" },
+  { text: BRAND_SLOGAN_WORDS[4], color: "text-purple-400" },
+  { text: BRAND_SLOGAN_WORDS[5], color: "text-cyan-400" },
+] as const;
+
+// Cinematic step schedule derived from the shared brand reveal timeline so
+// the terminal welcome reveal and the site hero stay frame-matched. Exported
+// for the parity test.
+export const CINEMATIC_STEP_SCHEDULE = [
+  [1, BRAND_REVEAL_TIMELINE.sequenceStartMs],
+  [2, BRAND_REVEAL_TIMELINE.logoMs],
+  [3, BRAND_REVEAL_TIMELINE.wordmarkMs],
+  [4, BRAND_REVEAL_TIMELINE.sloganMs],
+  [5, BRAND_REVEAL_TIMELINE.contentMs],
 ] as const;
 
 const WELCOME_FEATURES = [
@@ -340,11 +357,9 @@ export default function WelcomeRoute() {
       timers.push(setTimeout(() => setStep((current) => (current < nextStep ? nextStep : current)), ms));
     };
 
-    schedule(1, 90);
-    schedule(2, 210);
-    schedule(3, 360);
-    schedule(4, 480);
-    schedule(5, 620);
+    for (const [nextStep, ms] of CINEMATIC_STEP_SCHEDULE) {
+      schedule(nextStep, ms);
+    }
 
     return () => timers.forEach(clearTimeout);
   }, []);

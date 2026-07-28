@@ -130,8 +130,9 @@ vi.mock("@/routes/LoginRoute", () => ({
 // ---------------------------------------------------------------------------
 
 import { waitFor } from "@testing-library/react";
+import { BRAND_REVEAL_TIMELINE, BRAND_SLOGAN_WORDS } from "@flinttrade/design-system/brand";
 
-import WelcomeRoute from "../WelcomeRoute";
+import WelcomeRoute, { CINEMATIC_STEP_SCHEDULE, SLOGAN } from "../WelcomeRoute";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -206,5 +207,55 @@ describe("WelcomeRoute", () => {
     expect(mockSetSetupRequired).not.toHaveBeenCalled();
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+describe("WelcomeRoute brand parity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.status = "setup-required";
+  });
+
+  it("derives the slogan words from the design-system brand copy", () => {
+    expect(SLOGAN.map((word) => word.text)).toEqual([...BRAND_SLOGAN_WORDS]);
+  });
+
+  it("renders every brand slogan word in the cinematic reveal", () => {
+    render(<WelcomeRoute />);
+
+    for (const word of BRAND_SLOGAN_WORDS) {
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === "SPAN" &&
+            (element.textContent === word || element.textContent === `${word}.`),
+        ),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("derives the step machine schedule from the shared reveal timeline", () => {
+    expect(CINEMATIC_STEP_SCHEDULE).toEqual([
+      [1, BRAND_REVEAL_TIMELINE.sequenceStartMs],
+      [2, BRAND_REVEAL_TIMELINE.logoMs],
+      [3, BRAND_REVEAL_TIMELINE.wordmarkMs],
+      [4, BRAND_REVEAL_TIMELINE.sloganMs],
+      [5, BRAND_REVEAL_TIMELINE.contentMs],
+    ]);
+    // Pin the millisecond values so a design-system timing change is a
+    // conscious, reviewed decision on both surfaces.
+    expect(CINEMATIC_STEP_SCHEDULE.map(([, ms]) => ms)).toEqual([1000, 2200, 3280, 4200, 5080]);
+  });
+
+  it("schedules the cinematic step timers with the timeline delays", () => {
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    render(<WelcomeRoute />);
+
+    const delays = timeoutSpy.mock.calls.map((call) => call[1]);
+    for (const [, ms] of CINEMATIC_STEP_SCHEDULE) {
+      expect(delays).toContain(ms);
+    }
+    timeoutSpy.mockRestore();
   });
 });

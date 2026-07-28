@@ -19,6 +19,7 @@
     "types": ["node", "vite/client"],
     "paths": {
       "@/*": ["./src/*"],
+      "@flinttrade/design-system/brand": ["../../core/design-system/src/brand/index.ts"],
       "@flinttrade/design-system": ["../../core/design-system/src/index.ts"]
     }
   },

@@ -1,4 +1,4 @@
-import { LogoIcon } from '@flinttrade/design-system/brand';
+import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
 import { ArrowRight, Bot, Cable, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -13,7 +13,7 @@ const featureCards = [
   {
     icon: TerminalSquare,
     title: 'A self-hosted workflow workspace',
-    copy: 'React, Dockview, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace.',
+    copy: 'React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace.',
   },
   {
     icon: ShieldCheck,
@@ -39,12 +39,14 @@ const docsCards = [
   { href: '/api-reference', label: 'API Reference', copy: 'FlintTrade endpoints, auth, WebSocket contracts, and OpenAlgo bridge routes.' },
 ];
 
-const wordmarkChars = 'FlintTrade'.split('');
+const wordmarkChars = BRAND_WORDMARK.split('');
 
-// Same six-word slogan cascade as the terminal WelcomeRoute. Colours and
+// Same six-word slogan cascade as the terminal WelcomeRoute, imported from
+// the design-system brand copy (the single source of truth). Colours and
 // stagger delays live in globals.css (nth-child) — the site CSP blocks
 // server-rendered style attributes, so styling must come from stylesheets.
-const sloganWords = ['Inspect', 'Build', 'Test', 'Automate', 'Analyse', 'Evolve'] as const;
+// The nth-child colour rules stay valid because the word order is preserved.
+const sloganWords = BRAND_SLOGAN_WORDS;
 
 // Same four feature chips as the terminal welcome screen.
 const welcomeFeatures = [
@@ -102,14 +104,14 @@ export default function HomePage() {
               <LogoIcon size={86} aria-hidden="true" />
             </div>
           </div>
-          <h1 aria-label="FlintTrade">
+          <h1 aria-label={BRAND_WORDMARK}>
             {wordmarkChars.map((char, index) => (
               <span aria-hidden="true" className="hero-title-char" key={`${char}-${index}`}>
                 {char}
               </span>
             ))}
           </h1>
-          <p className="sr-only">Inspect. Build. Test. Automate. Analyse. Evolve.</p>
+          <p className="sr-only">{BRAND_SLOGAN_SENTENCE}</p>
           <div className="hero-slogan" aria-hidden="true">
             {sloganWords.map((word, index) => (
               <span key={word}>
