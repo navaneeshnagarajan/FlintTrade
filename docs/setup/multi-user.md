@@ -13,5 +13,5 @@ as a parallel user table — full per-user workspace, secret, and broker-credent
 isolation, plus audit review and operational runbooks, would be prerequisites
 before any live-broker multi-user deployment.
 
-The removed code is archived (in-repo history) at
-`.local/archive/user-multi-2026-06-10/` for reference.
+The removed code remains available in git history (removed 2026-06-10)
+for reference.

@@ -72,7 +72,7 @@ describe("ActionCenterWidget", () => {
     render(<ActionCenterWidget {...defaultProps} />, {
       wrapper: createWrapper(),
     });
-    expect(screen.getByText("Action Center")).toBeInTheDocument();
+    expect(screen.getByText("Action Centre")).toBeInTheDocument();
   });
 
   it("shows empty state when no pending orders", async () => {

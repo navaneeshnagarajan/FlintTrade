@@ -2,8 +2,8 @@
 """Check that required files were touched by a restructure commit.
 
 Disposition (P23, 2026-07-06): this is a ONE-SHOT verifier written for the
-v0.6.0 restructure commits (see docs/superpowers/plans/
-2026-05-24-restructure-goal-completion.md). It deliberately has no ongoing CI
+v0.6.0 restructure commits (the restructure completion plan, removed from the
+repo on 2026-07-28, remains in git history). It deliberately has no ongoing CI
 caller — the restructure it verifies is complete, and general doc/code drift
 is guarded by live tests instead (tests/test_restructure_goals.py,
 tests/test_project_structure.py, the widget-catalogue count pins, and the site

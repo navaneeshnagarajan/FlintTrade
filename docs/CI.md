@@ -383,9 +383,8 @@ fix strengthened enforcement (faster sweeps, immediate SIGKILL for
 session-escapees) rather than weakening any assertion.
 
 Fuller history, including the approaches tried and reverted along the way,
-lives in `.local/specs/desktop-linux-ci/DIAGNOSIS.md` on the maintainer's
-machine (`.local/` is gitignored, so it does not travel to a fresh worktree —
-which is why the essentials are recorded here instead).
+is kept in the maintainer's private working notes; the essentials are
+recorded here.
 
 ---
 

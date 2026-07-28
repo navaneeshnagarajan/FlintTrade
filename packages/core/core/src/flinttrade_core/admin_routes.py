@@ -47,7 +47,7 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "orders", "name": "Orders", "category": "Trading", "status": "live"},
     {"id": "holdings", "name": "Holdings", "category": "Trading", "status": "live"},
     {"id": "orderpad", "name": "Order Pad", "category": "Trading", "status": "live"},
-    {"id": "actioncenter", "name": "Action Center", "category": "Trading", "status": "live"},
+    {"id": "actioncenter", "name": "Action Centre", "category": "Trading", "status": "live"},
     {"id": "tradecopier", "name": "Trade Copier", "category": "Trading", "status": "live"},
     {"id": "smartorder", "name": "Smart Order", "category": "Trading", "status": "live"},
     {"id": "portfolioallocation", "name": "Portfolio Allocation", "category": "Trading", "status": "live"},

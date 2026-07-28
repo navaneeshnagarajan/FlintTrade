@@ -65,7 +65,7 @@ maintainer permission.
 
 **Next-work queue (in order):**
 1. **Installed-app closeout** — build the settled macOS DMG, install through a clean Finder path, exercise first-run source bootstrap, readiness, OAuth opening, tray/hotkey/update, explicit quit and retention/purge semantics, then run the full local gate and fresh multi-agent audit. Windows/Linux runtime evidence remains CI/contributor-owned; a Mac does not prove them.
-2. **Phase 2 stabilisation remainder** — G40 broker-connect merge (`.local/specs/consolidation/BACKLOG.md`), infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
+2. **Phase 2 stabilisation remainder** — G40 broker-connect merge, infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
 3. **Phase 4 learning loop** — AI1–AI3 + the full-day Practice run; spec first in `.local/specs/`.
 4. **Phase 5 remainder** — Apple signing secrets when the maintainer adds them; never describe an ad-hoc seal as distribution signing.
 5. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.

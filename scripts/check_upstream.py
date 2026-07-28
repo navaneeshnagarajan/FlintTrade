@@ -5,8 +5,8 @@ Compares local clones (external test-deps and absorbed repo snapshots)
 against their upstream remotes. Outputs a markdown table showing what's
 behind.
 
-The external test-deps (openalgo, openclaw) used to be
-git submodules under ``infra/``. They are now plain clones under
+The external test-dep (openalgo) used to be a
+git submodule under ``infra/``. It is now a plain clone under
 ``.local/external/`` produced by ``scripts/setup-test-deps.sh``.
 
 Usage:
@@ -54,7 +54,6 @@ def check_submodules() -> list[RepoStatus]:
 
     external_test_deps = [
         (".local/external/openalgo", "marketcalls/openalgo", "main"),
-        (".local/external/openclaw", "openclaw/openclaw", "main"),
     ]
 
     for path, repo, branch in external_test_deps:

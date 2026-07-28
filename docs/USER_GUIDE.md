@@ -271,7 +271,7 @@ from the widget registry
 (`packages/apps/terminal/src/layout/widgetFactory.tsx`) and are exhaustive:
 
 - **Trading** — Scalper, Positions, Fills, P&L Monitor, Orders, Holdings,
-  Order Pad, Action Center, Trade Copier, Smart Order, Portfolio Allocation,
+  Order Pad, Action Centre, Trade Copier, Smart Order, Portfolio Allocation,
   Quick Trade, Risk, Strategy Monitor, DOM / Ladder, Forever (GTT) Orders,
   Super Orders, and Conditional Triggers
 - **Analysis** — Chart, Market Overview, Option Chain, Historical Chain, OI
@@ -359,9 +359,10 @@ Open `/lab`. The Strategy Lab is split into three sub-tools:
    (built with `react-hook-form` + `zod`).
 3. **Pick a date range.** Historical OHLCV data is sourced from your
    configured providers (OpenChart, yfinance, or a licensed feed).
-4. **Run.** The backtest engine processes ticks vector-wise (VectorBT for
-   exploration, Rust/PyO3 `ticks` for tick-level precision when
-   you opt in).
+4. **Run.** The backtest engine is FlintTrade's native event-driven simulator
+   (pure Python by default). Install the optional VectorBT extra for
+   vectorised exploration, or opt in to the Rust `ticks` engine for
+   tick-level precision.
 5. **Review.** Equity curve, Sharpe, Sortino, max drawdown, win rate,
    trade list, Monte Carlo confidence band.
 

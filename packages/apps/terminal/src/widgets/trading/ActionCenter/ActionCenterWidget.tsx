@@ -194,7 +194,7 @@ function ActionCenterWidget(_props: WidgetProps) {
         <div className="flex items-center gap-2">
           <ShieldCheck size={13} className="text-accent" aria-hidden="true" />
           <span className="text-xxs uppercase tracking-wider text-text-muted font-heading font-semibold">
-            Action Center
+            Action Centre
           </span>
           {pending.length > 0 && (
             <Badge

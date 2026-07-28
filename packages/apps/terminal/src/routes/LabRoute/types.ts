@@ -19,7 +19,7 @@ export const TABS: TabDef[] = [
   { id: "backtest", label: "Backtest", icon: FlaskConical },
   { id: "portfolio", label: "Portfolio", icon: Layers },
   { id: "forward-test", label: "Forward Test", icon: PlayCircle },
-  { id: "optimize", label: "Optimize", icon: TrendingUp },
+  { id: "optimize", label: "Optimise", icon: TrendingUp },
   { id: "results", label: "Results", icon: BarChart3 },
   { id: "options-builder", label: "Options Builder", icon: Brain },
   { id: "pine-editor", label: "Pine Editor", icon: Code2 },

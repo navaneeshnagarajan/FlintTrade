@@ -45,6 +45,7 @@ export default defineConfig({
       "@flinttrade/design-system/tokens.css": path.resolve(__dirname, "../../core/design-system/src/tokens.css"),
       "@flinttrade/design-system/glass.css": path.resolve(__dirname, "../../core/design-system/src/glass.css"),
       "@flinttrade/design-system/cinematic.css": path.resolve(__dirname, "../../core/design-system/src/cinematic.css"),
+      "@flinttrade/design-system/brand": path.resolve(__dirname, "../../core/design-system/src/brand/index.ts"),
       "@flinttrade/design-system": path.resolve(__dirname, "../../core/design-system/src/index.ts"),
       // Plotly widgets render through plotly.js-dist-min directly. Redirect
       // legacy Plotly specifiers so old imports do not leak the full bundle.
