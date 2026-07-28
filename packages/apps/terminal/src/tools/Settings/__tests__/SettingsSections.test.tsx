@@ -418,6 +418,15 @@ describe("AboutSection", () => {
     expect(screen.getByText(`Version ${APP_VERSION_TAG}`)).toBeInTheDocument();
     expect(screen.getByText(APP_VERSION_TAG)).toBeInTheDocument();
   });
+
+  it("shows the TradingView attribution required by the Lightweight Charts licence", () => {
+    render(<AboutSection />);
+
+    const attribution = screen.getByRole("link", {
+      name: /charts powered by tradingview lightweight charts/i,
+    });
+    expect(attribution).toHaveAttribute("href", "https://www.tradingview.com/");
+  });
 });
 
 // ---------------------------------------------------------------------------

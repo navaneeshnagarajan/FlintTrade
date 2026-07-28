@@ -65,6 +65,18 @@ export function AboutSection() {
             <span>License — GNU AGPL-3.0</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>
+          {/* Visible attribution + link required by the TradingView
+              Lightweight Charts licence terms. */}
+          <a
+            href="https://www.tradingview.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <ExternalLink size={12} className="flex-none text-text-muted" />
+            <span>Charts powered by TradingView Lightweight Charts™</span>
+            <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
+          </a>
         </div>
       </div>
 

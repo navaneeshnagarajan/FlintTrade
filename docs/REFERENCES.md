@@ -11,9 +11,9 @@ README.
 |---|---|
 | [OpenAlgo](https://github.com/marketcalls/openalgo) | Optional OpenAlgo-compatible REST and WebSocket bridge, broker vocabulary, and Indian-market workflow references. FlintTrade now also has its own backend, sandbox, gateway, and native broker path. |
 | [OpenClaw](https://github.com/openclaw/openclaw) | Agentic workflow and local-automation patterns. |
-| [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) | Canvas chart rendering engine used inside the terminal. FlintTrade owns the shared chart theme and shell through `@flinttrade/design-system`. |
+| [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts) | Canvas chart rendering engine used inside the terminal — charts powered by [TradingView](https://www.tradingview.com/), whose licence terms require this visible attribution (also shown on the in-app About screen). FlintTrade owns the shared chart theme and shell through `@flinttrade/design-system`. |
 | [shadcn/ui](https://ui.shadcn.com/) and Radix UI | Accessible component primitives and copy-owned component patterns. |
-| [Dockview](https://dockview.dev/) | Dockable terminal layout model. |
+| [FlexLayout](https://github.com/caplin/FlexLayout) | Dockable terminal layout model. |
 
 ## Dependency Attribution
 
