@@ -15,5 +15,12 @@ export default defineConfig({
     // 30s changes no assertion — it only stops penalising slow hardware.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Run test files one at a time. These suites spawn real /bin/sh workers,
+    // git checkouts and control pipes; concurrent files on a 2-core CI
+    // runner starve each other's children, which surfaced as a DIFFERENT
+    // test failing on every run (truncated fixture output, expired in-test
+    // waits, EPIPE on a control pipe whose child was forked out of CPU).
+    // Serialising trades ~2x wall clock for deterministic child lifecycles.
+    fileParallelism: false,
   },
 });

@@ -139,8 +139,8 @@ importers:
         specifier: ^4.23.1
         version: 4.23.1
       typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
+        specifier: ^6.0.3
+        version: 6.0.3
       vite:
         specifier: ^7.0.0
         version: 7.3.5(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)(yaml@2.9.0)
@@ -6642,6 +6642,11 @@ packages:
 
   typedarray@0.0.6:
     resolution: {integrity: sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==}
+
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -14100,6 +14105,8 @@ snapshots:
       dup: 1.0.0
 
   typedarray@0.0.6: {}
+
+  typescript@6.0.3: {}
 
   typescript@7.0.2:
     optionalDependencies:
