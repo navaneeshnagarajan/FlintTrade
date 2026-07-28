@@ -46,7 +46,7 @@ const mockNavigate = vi.fn();
 const mockGetSafetyConfig = vi.hoisted(() => vi.fn());
 const mockActivateKillSwitch = vi.hoisted(() => vi.fn());
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 

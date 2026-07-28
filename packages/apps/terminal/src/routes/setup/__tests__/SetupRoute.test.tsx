@@ -2,7 +2,7 @@
  * SetupRoute.test.tsx
  *
  * Smoke tests for the setup wizard orchestrator.
- * Mocks react-router-dom and framer-motion to keep tests lightweight.
+ * Mocks react-router and framer-motion to keep tests lightweight.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,7 +15,7 @@ import "@testing-library/jest-dom";
 
 const mockNavigate = vi.fn();
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
   Link: ({ children, to, ...props }: Record<string, unknown>) => (
     <a href={String(to)} {...props}>{children as React.ReactNode}</a>

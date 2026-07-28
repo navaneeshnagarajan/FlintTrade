@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { layerClassNames } from "@flinttrade/design-system";
 import {

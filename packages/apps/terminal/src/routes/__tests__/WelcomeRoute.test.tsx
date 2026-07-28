@@ -29,7 +29,7 @@ const {
   authState: { status: "setup-required" as string },
 }));
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
   Link: ({ children, to, ...props }: Record<string, unknown>) => (
     <a href={String(to)} {...props}>{children as React.ReactNode}</a>

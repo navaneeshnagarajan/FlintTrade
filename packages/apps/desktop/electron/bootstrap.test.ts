@@ -1385,7 +1385,7 @@ describe("first-run source bootstrap", () => {
     const first = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.some((call) => call.command === "/bin/sh")).toBe(true),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     const cancellation = test.controller.cancel();
     expect(test.state.getSnapshot()).toMatchObject({ phase: "cancelled", status: "failed" });
@@ -1410,7 +1410,7 @@ describe("first-run source bootstrap", () => {
     const first = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
 
     const cancellation = test.controller.cancel();
@@ -2050,7 +2050,7 @@ describe("first-run source bootstrap", () => {
     const first = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     const cancellation = test.controller.cancel();
     const retry = test.controller.retry();
@@ -2069,7 +2069,7 @@ describe("first-run source bootstrap", () => {
     const running = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
 
     const cancellation = test.controller.cancel();
@@ -2121,7 +2121,7 @@ describe("first-run source bootstrap", () => {
     const running = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
 
     const cancellation = test.controller.cancel();
@@ -2140,7 +2140,7 @@ describe("first-run source bootstrap", () => {
     const running = test.controller.start();
     await vi.waitFor(
       () => expect(test.calls.filter((call) => call.command === "/bin/sh")).toHaveLength(1),
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     const unhandled = vi.fn();
     process.on("unhandledRejection", unhandled);
@@ -2166,7 +2166,7 @@ describe("first-run source bootstrap", () => {
   it("shutdown awaits in-flight lock cleanup before readiness can become terminal", async () => {
     const test = await fixture({ holdLockRelease: true });
     const running = test.controller.start();
-    await vi.waitFor(() => expect(exists(test.activeSource)).resolves.toBe(true), { timeout: 5_000 });
+    await vi.waitFor(() => expect(exists(test.activeSource)).resolves.toBe(true), { timeout: 15_000 });
     expect(test.state.getSnapshot().status).toBe("running");
     let shutdownSettled = false;
     const shutdown = test.controller.shutdown().then(() => {

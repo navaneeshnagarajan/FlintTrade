@@ -9,7 +9,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import {
   Lightbulb,

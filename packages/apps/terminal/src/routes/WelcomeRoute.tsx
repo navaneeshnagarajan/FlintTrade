@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { Monitor, Moon, Sun } from "lucide-react";
 

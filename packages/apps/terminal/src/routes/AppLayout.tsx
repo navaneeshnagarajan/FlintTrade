@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router";
 import TopBarV2 from "@/chrome/TopBarV2";
 import DockSidebar from "@/chrome/DockSidebar";
 import PageTransition from "@/components/motion/PageTransition";

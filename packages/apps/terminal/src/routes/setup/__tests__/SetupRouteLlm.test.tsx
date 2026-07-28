@@ -12,7 +12,7 @@ const routeMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => routeMocks.navigate,
   Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
     <a href={to}>{children}</a>

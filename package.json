@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "workspaces": [
     "packages/core/design-system",
     "packages/apps/terminal",
@@ -12,10 +15,12 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "7.29.6",
+      "@hono/node-server": "2.0.5",
+      "body-parser@>=2.0.0 <2.3.0": "2.3.0",
       "brace-expansion@>=2.0.0 <2.1.2": "2.1.2",
       "esbuild": "0.28.1",
       "fast-uri": "4.1.1",
-      "hono": "4.12.25",
+      "hono": "4.12.27",
       "js-yaml": "4.3.0",
       "postcss": "8.5.23",
       "sharp": "0.35.3",

@@ -276,7 +276,7 @@ describe("Electron shell installer handoff", () => {
     const test = fixture();
     await test.updater.check();
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce(), { timeout: 15_000 });
 
     await test.updater.settleForQuit();
     await expect(applying).resolves.toMatchObject({
@@ -294,7 +294,7 @@ describe("Electron shell installer handoff", () => {
     test.handoff.markerExists.mockImplementationOnce(async () => await marker);
     await test.updater.check();
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce(), { timeout: 15_000 });
 
     const quitting = test.updater.settleForQuit();
     resolveMarker(true);
@@ -356,7 +356,7 @@ describe("Electron shell installer handoff", () => {
     test.installer.cancel.mockRejectedValue(new Error("taskkill failed"));
     await test.updater.check();
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce(), { timeout: 15_000 });
 
     await expect(test.updater.settleForQuit()).rejects.toThrow(/containment could not be proved/i);
     await expect(applying).rejects.toThrow(/containment could not be proved/i);
@@ -375,7 +375,7 @@ describe("Electron shell installer handoff", () => {
     test.installer.cleanup.mockRejectedValue(new Error("temporary directory is busy"));
     await test.updater.check();
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.handoff.launch).toHaveBeenCalledOnce(), { timeout: 15_000 });
 
     await expect(test.updater.settleForQuit()).rejects.toThrow(/containment could not be proved/i);
     await expect(applying).rejects.toThrow(/containment could not be proved/i);

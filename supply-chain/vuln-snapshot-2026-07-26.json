@@ -544,15 +544,20 @@
       "name": "yfinance",
       "version": "1.4.0",
       "vulns": []
+    },
+    {
+      "name": "zstandard",
+      "version": "0.25.0",
+      "vulns": []
     }
   ],
   "fixes": [],
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-07-13T09:59:18.730077Z",
-    "audited_at": "2026-07-13T09:59:18.730077Z",
-    "requirements_lock_sha256": "654de09caf8cc6b8dd9e7ada45ac6a8adfc97f67a93a55efbbcb32874ccef9c9",
+    "generated_at": "2026-07-26T06:35:48.777775Z",
+    "audited_at": "2026-07-26T06:35:48.777775Z",
+    "requirements_lock_sha256": "f69e3fad575d6c072558c0f74c951ed114a9e400edbbf3c3e4b300cd8a7a6df5",
     "pip_audit_exit_code": 0
   }
 }

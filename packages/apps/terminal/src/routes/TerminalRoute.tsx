@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";

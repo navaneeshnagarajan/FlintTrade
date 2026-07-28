@@ -53,7 +53,7 @@ Pick the guide for your platform and follow it end-to-end:
 - [Raspberry Pi setup](setup/raspberry-pi.md)
 - [Quick start (cross-platform)](setup/QUICKSTART.md)
 
-A complete dev environment includes Python 3.12, Node 22+ (24 recommended),
+A complete dev environment includes Python 3.12, Node 22.22+ (24 recommended),
 and Rust stable if you build `ticks`. OpenAlgo is optional: install it
 separately, or clone a local-dev copy into `.local/external/openalgo/` with
 `scripts/setup-test-deps.sh`, only when you want the OpenAlgo-compatible

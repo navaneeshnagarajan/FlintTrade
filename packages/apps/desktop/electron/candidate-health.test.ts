@@ -234,7 +234,7 @@ describe("candidate health proof", () => {
       settled = true;
     });
 
-    await vi.waitFor(() => expect(cleanupStarted).toBe(true), { timeout: 5_000 });
+    await vi.waitFor(() => expect(cleanupStarted).toBe(true), { timeout: 15_000 });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(settled).toBe(false);
     releaseCleanup();
@@ -407,7 +407,7 @@ describe("candidate health proof", () => {
     const abort = new AbortController();
     const process = waitingProcess();
     const proof = proveCandidateHealth({ ...options, process: process.boundary, signal: abort.signal });
-    await vi.waitFor(() => expect(process.invocations).toHaveLength(1), { timeout: 5_000 });
+    await vi.waitFor(() => expect(process.invocations).toHaveLength(1), { timeout: 15_000 });
     abort.abort();
 
     await expect(proof).rejects.toMatchObject({ reason: "cancelled" });

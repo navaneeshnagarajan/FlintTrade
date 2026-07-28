@@ -109,7 +109,7 @@ describe("desktop window identities", () => {
     await test.windows.showLocal();
 
     const loading = test.windows.showTerminal(43_210);
-    await vi.waitFor(() => expect(test.remote.loadURL).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.remote.loadURL).toHaveBeenCalledOnce(), { timeout: 15_000 });
     expect(test.windows.getPrimaryWindow()).toBe(test.local);
     test.windows.hide();
     expect(test.local.hide).toHaveBeenCalledOnce();

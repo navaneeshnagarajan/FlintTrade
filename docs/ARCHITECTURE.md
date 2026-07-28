@@ -284,7 +284,7 @@ duplicated:
 | Static grid | TanStack Table v8 | Headless, sortable, filterable. |
 | State | Zustand v5 + Jotai + TanStack Query v5 | Separation of concerns by boundary. |
 | Forms | react-hook-form + zod | Runtime validation, type inference. |
-| Router | react-router-dom | Lazy-loaded route modules. |
+| Router | react-router (v8; RouterProvider from `react-router/dom`) | Lazy-loaded route modules. |
 
 ### Chart ownership boundary
 

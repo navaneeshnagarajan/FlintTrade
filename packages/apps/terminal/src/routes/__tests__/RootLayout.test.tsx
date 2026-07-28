@@ -13,7 +13,7 @@ import "@testing-library/jest-dom";
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   Outlet: () => <div data-testid="outlet-content">Child Route</div>,
   useLocation: () => ({ pathname: "/trade" }),
 }));

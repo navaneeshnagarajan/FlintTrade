@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Moon, Sun, Monitor } from "lucide-react";
 
 import { Meteors } from "@/components/aceternity/meteors";

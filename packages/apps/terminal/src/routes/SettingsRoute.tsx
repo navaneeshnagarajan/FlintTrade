@@ -9,7 +9,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef, type JSX } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { RouteBanner } from "@/components/help/RouteBanner";
 import { CinematicLayout } from "@/components/layout/CinematicLayout";
 import { ArrowLeft, RefreshCw } from "lucide-react";

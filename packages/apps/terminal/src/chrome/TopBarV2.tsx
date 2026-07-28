@@ -20,7 +20,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import { AnimatePresence } from "framer-motion";
 import { Search, Maximize2, Minimize2, Settings, Wrench } from "lucide-react";
 import { LogoIcon } from "@/components/brand/Logo";

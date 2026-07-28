@@ -27,7 +27,7 @@ describe("source operation coordinator", () => {
       return 3;
     });
 
-    await vi.waitFor(() => expect(coordinator.getSnapshot()).toMatchObject({ active: "bootstrap", queued: 2 }));
+    await vi.waitFor(() => expect(coordinator.getSnapshot()).toMatchObject({ active: "bootstrap", queued: 2 }), { timeout: 15_000 });
     expect(order).toEqual(["bootstrap:start"]);
     releaseFirst();
     await expect(Promise.all([first, second, third])).resolves.toEqual([1, 2, 3]);

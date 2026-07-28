@@ -1,5 +1,7 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from "vite";
+// defineConfig comes from vitest/config (not vite) so the `test` block
+// typechecks: the vitest module augmentation lands on vitest's own vite 7
+// module identity, not the vite 6 copy this package resolves.
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { visualizer } from "rollup-plugin-visualizer";

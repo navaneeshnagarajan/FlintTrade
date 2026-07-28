@@ -1,11 +1,11 @@
 /**
  * floating-dock.tsx
  * Aceternity UI — macOS-style floating dock navigation.
- * Adapted: next/link → react-router-dom Link, next/image → lucide-react icons,
+ * Adapted: next/link → react-router Link, next/image → lucide-react icons,
  *          framer-motion v12, TypeScript strict, no `any`.
  */
 import { useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 import {
   motion,
   useMotionValue,

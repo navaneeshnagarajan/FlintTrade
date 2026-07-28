@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { X, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTradingStore } from "@/stores/tradingStore";

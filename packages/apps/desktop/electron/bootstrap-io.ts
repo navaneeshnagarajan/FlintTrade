@@ -471,17 +471,34 @@ function hasWindowsSupervisorSettledProof(stderr: string, token: string, stderrT
   );
 }
 
+/**
+ * Streams that already carry the permanent last-resort error swallow. A pipe
+ * whose child exits mid-write emits "error" asynchronously; without a
+ * persistent listener that emission crashes the process as an unhandled
+ * "error" event even though every write call site handles its own failure.
+ */
+const swallowedControlStreams = new WeakSet<NodeJS.WritableStream>();
+
 async function writeControlLine(
   control: NodeJS.WritableStream,
   line: string,
   end = false,
 ): Promise<void> {
+  if (!swallowedControlStreams.has(control)) {
+    swallowedControlStreams.add(control);
+    control.on("error", () => {
+      // Deliberate no-op: per-write failures are surfaced by the callback and
+      // the transient listener below; this only stops Node treating a late
+      // EPIPE from an exited child as an unhandled "error" event.
+    });
+  }
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
     control.once("error", onError);
-    const complete = () => {
+    const complete = (error?: Error | null) => {
       control.removeListener("error", onError);
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
     if (end && "end" in control && typeof control.end === "function") control.end(line, complete);
     else if ("write" in control && typeof control.write === "function") control.write(line, complete);

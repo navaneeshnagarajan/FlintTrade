@@ -1,7 +1,11 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
-import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router";
+// RouterProvider must come from react-router/dom: the root export is the
+// non-DOM variant without ReactDOM.flushSync wiring, so navigate/submit
+// flushSync opt-ins would silently degrade to transitions.
+import { RouterProvider } from "react-router/dom";
 import { Provider as JotaiProvider } from "jotai";
 import { MotionConfig } from "framer-motion";
 import { QueryProvider } from "./providers/QueryProvider";

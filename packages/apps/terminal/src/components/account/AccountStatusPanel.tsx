@@ -9,7 +9,7 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Wifi, WifiOff, ShieldAlert, ShieldCheck } from "lucide-react";
 import { get } from "@/services/ftApi";
 
