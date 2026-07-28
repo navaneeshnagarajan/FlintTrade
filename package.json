@@ -13,6 +13,13 @@
     "packages/apps/desktop"
   ],
   "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@glideapps/glide-data-grid>marked": "18",
+        "@napi-rs/wasm-runtime>@emnapi/core": "1",
+        "@napi-rs/wasm-runtime>@emnapi/runtime": "1"
+      }
+    },
     "overrides": {
       "@babel/core": "7.29.6",
       "@hono/node-server": "2.0.10",
