@@ -34,7 +34,7 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 - **Pipeline:** build agents (Codex or claude) → claude ultracode multi-agent review panels → maintainer. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
 - **Full arsenal:** for substantial work use the ultracode `Workflow` tool (fan-out → adversarial verify → synthesise), relevant skills, specialised agents, and MCP (a library-docs MCP for APIs, the browser-preview toolset for UI). Don't fall back to bare read/edit when a specialised tool fits.
 - **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter or `OpenAlgoClient.place_order` ungated.
-- **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the living roadmap; `changelog.md` is for **shipped** code only (no in-flight design entries).
+- **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the curated public roadmap (the detailed working plan lives at `.local/agent-context/PLAN.md`); `changelog.md` is for **shipped** code only (no in-flight design entries).
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
 - **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
 
@@ -59,9 +59,10 @@ release reset to a clean `v0.0.1` baseline, and the site withholds install
 commands until the four Electron installers plus `SHA256SUMS.txt` exist together.
 Local macOS output is always ad-hoc sealed; release CI alone can use
 complete Apple signing and notarisation secrets. Count pins remain 102
-widgets, 35 brokers and 18 packages. `PLAN.md` is the roadmap of record — resume
-from its phase tracker, never restart planning, and never push without explicit
-maintainer permission.
+widgets, 35 brokers and 18 packages. `PLAN.md` is the curated public roadmap;
+the detailed working plan of record lives at `.local/agent-context/PLAN.md` —
+resume from its phase tracker, never restart planning, and never push without
+explicit maintainer permission.
 
 **Next-work queue (in order):**
 1. **Installed-app closeout** — build the settled macOS DMG, install through a clean Finder path, exercise first-run source bootstrap, readiness, OAuth opening, tray/hotkey/update, explicit quit and retention/purge semantics, then run the full local gate and fresh multi-agent audit. Windows/Linux runtime evidence remains CI/contributor-owned; a Mac does not prove them.
