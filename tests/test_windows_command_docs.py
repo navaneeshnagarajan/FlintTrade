@@ -426,3 +426,63 @@ def test_every_per_os_setup_page_documents_uninstall(page: str, command: str) ->
     assert command in text, (
         f"{page} must document how to remove FlintTrade with the canonical command: {command}"
     )
+
+
+# ---------------------------------------------------------------------------
+# MDX-compiled docs must not use angle-bracket autolinks.
+#
+# The public site converts a fixed list of docs (declared in
+# packages/apps/site/scripts/generate-content.mjs) into MDX pages. MDX has no
+# markdown autolink syntax: `<http://127.0.0.1:5100>` is parsed as a JSX tag
+# named `http` with a namespace separator, and the compiler fails the whole
+# site build with "Unexpected character `/` (U+002F) before local name". This
+# broke the first Vercel deploy of the Windows-install branch — readme.md may
+# keep autolinks (GitHub renders them; it is not MDX-compiled), but every doc
+# the generator maps must spell URLs bare or as [text](url) links.
+# ---------------------------------------------------------------------------
+_AUTOLINK_RE = re.compile(r"<https?://[^>]+>")
+_GENERATOR = _REPO_ROOT / "packages" / "apps" / "site" / "scripts" / "generate-content.mjs"
+_GENERATOR_DOC_RE = re.compile(r"\[\s*'(docs/[^']+\.md)'")
+
+
+def _site_compiled_docs() -> tuple[Path, ...]:
+    """Return every repo doc the site generator converts into an MDX page.
+
+    Read from the generator source itself so a newly mapped doc is covered
+    automatically instead of the list here going stale.
+
+    Returns:
+        Absolute paths of the mapped docs that exist in the repo.
+    """
+    text = _GENERATOR.read_text(encoding="utf-8")
+    return tuple(
+        _REPO_ROOT / rel for rel in _GENERATOR_DOC_RE.findall(text) if (_REPO_ROOT / rel).is_file()
+    )
+
+
+@pytest.mark.unit
+def test_generator_doc_mapping_is_readable() -> None:
+    """The generator must exist and map at least the known core docs."""
+    assert _GENERATOR.is_file(), "site content generator moved — update _GENERATOR"
+    mapped = {path.relative_to(_REPO_ROOT).as_posix() for path in _site_compiled_docs()}
+    assert "docs/USER_GUIDE.md" in mapped, (
+        "generate-content.mjs no longer maps docs/USER_GUIDE.md — the parser regex in this "
+        "guard has probably gone stale; fix _GENERATOR_DOC_RE rather than deleting the test"
+    )
+
+
+@pytest.mark.unit
+def test_site_compiled_docs_have_no_mdx_hostile_autolinks() -> None:
+    """No `<http://…>` autolink may appear in a doc the site compiles as MDX."""
+    violations: list[str] = []
+    for path in _site_compiled_docs():
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for match in _AUTOLINK_RE.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            violations.append(f"{rel}:{line}: {match.group(0)}")
+    assert not violations, (
+        "Angle-bracket autolinks break the site's MDX compilation (the URL is parsed as a "
+        "JSX tag and the whole deploy fails). Write the URL bare or as [text](url):\n"
+        + "\n".join(violations)
+    )

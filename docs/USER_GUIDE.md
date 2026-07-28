@@ -44,7 +44,7 @@ and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
 launcher — `~/.local/bin/flinttrade` on macOS and Linux,
 `%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut
-on Windows. Open <http://127.0.0.1:5100> and follow the first-time Setup flow
+on Windows. Open http://127.0.0.1:5100 and follow the first-time Setup flow
 — no `.env` file is required.
 
 Removing it again is covered in [Uninstall](#13-uninstall).

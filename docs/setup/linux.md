@@ -14,7 +14,7 @@ pnpm) into `~/.flinttrade/tools`, builds FlintTrade from a managed source
 checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
 launcher at `~/.local/bin/flinttrade`. No `sudo` is used.
 
-Then open <http://127.0.0.1:5100> and complete Setup. Broker/OpenAlgo
+Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
 configuration is handled in the UI; no `.env` file is required. Your workspace
 lives at `~/.flinttrade/` (override with `FLINTTRADE_WORKSPACE_DIR`, or
 `FLINTTRADE_HOME`).
@@ -113,7 +113,7 @@ pnpm --filter @flinttrade/terminal build
 python scripts/ft.py start
 ```
 
-Then open <http://127.0.0.1:5100>. The terminal build step is not optional: the
+Then open http://127.0.0.1:5100. The terminal build step is not optional: the
 backend serves the UI only when `packages/apps/terminal/dist/index.html`
 exists, so skipping it leaves you with an API and no interface.
 
@@ -124,7 +124,7 @@ python scripts/ft.py setup
 python scripts/ft.py dev
 ```
 
-Then open <http://localhost:5173>. `python scripts/ft.py <target>` works on
+Then open http://localhost:5173. `python scripts/ft.py <target>` works on
 every OS; `make <target>` is the POSIX alias for the same targets.
 
 ## Server services (advanced)

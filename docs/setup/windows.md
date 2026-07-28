@@ -28,7 +28,7 @@ checkout at `~\.flinttrade\src\FlintTrade`, and installs a launcher at
 `%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut.
 The install is per-user — **no admin rights needed**.
 
-Then open <http://127.0.0.1:5100> and complete Setup. Broker/OpenAlgo
+Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
 configuration is handled in the app; no `.env` file is required. Your workspace
 lives at `%APPDATA%\flinttrade\` (override with `FLINTTRADE_WORKSPACE_DIR`, or
 `FLINTTRADE_HOME`).
@@ -133,7 +133,7 @@ pnpm --filter @flinttrade/terminal build
 python scripts/ft.py start
 ```
 
-Then open <http://127.0.0.1:5100>. The terminal build step is not optional: the
+Then open http://127.0.0.1:5100. The terminal build step is not optional: the
 backend serves the UI only when `packages/apps/terminal/dist/index.html`
 exists, so skipping it leaves you with an API and no interface.
 
@@ -144,7 +144,7 @@ python scripts/ft.py setup
 python scripts/ft.py dev
 ```
 
-Then open <http://localhost:5173>.
+Then open http://localhost:5173.
 
 Note: systemd is not available on Windows.
 Use Task Scheduler or NSSM to run as a Windows service.
