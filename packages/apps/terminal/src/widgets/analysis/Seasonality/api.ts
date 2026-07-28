@@ -24,7 +24,7 @@ export interface SeasonalityMonthlyRow {
   month_name: string;
   avg_return_pct: number;
   median_return_pct: number;
-  std_pct: number;
+  std_pct: number | null;
   positive_rate: number;
   years_count: number;
   /** `[year, return_pct]` of the strongest occurrence. */
@@ -37,7 +37,7 @@ export interface SeasonalityWeekdayRow {
   weekday: number;
   weekday_name: string;
   avg_return_pct: number;
-  std_pct: number;
+  std_pct: number | null;
   positive_rate: number;
   sample_count: number;
 }

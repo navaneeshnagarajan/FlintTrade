@@ -352,17 +352,21 @@ function VWAPBandsWidget() {
   // backend VWAP route. Only enabled once a broker is connected AND a usable
   // session exists: posting an empty bar list would make the backend fall
   // back to SYNTHETIC sample bars, which must never surface under a "Live"
-  // badge. The queryKey fingerprints the session (length + last bar) so a
-  // refetched history recomputes the bands.
-  const lastBar = liveBars.at(-1);
+  // badge. The queryKey fingerprints EVERY bar's OHLCV — the server compute
+  // is cumulative over the whole session, so a revised historical candle must
+  // invalidate the cache, not just a new final bar.
+  const sessionFingerprint = useMemo(() => {
+    let hash = 0;
+    for (const bar of liveBars) {
+      const chunk = `${bar.timestamp}|${bar.open}|${bar.high}|${bar.low}|${bar.close}|${bar.volume}`;
+      for (let i = 0; i < chunk.length; i += 1) {
+        hash = (Math.imul(hash, 31) + chunk.charCodeAt(i)) | 0;
+      }
+    }
+    return hash;
+  }, [liveBars]);
   const { data: serverBands } = useQuery({
-    queryKey: [
-      "vwap-bands",
-      symbol,
-      liveBars.length,
-      lastBar?.timestamp ?? "",
-      lastBar?.close ?? 0,
-    ],
+    queryKey: ["vwap-bands", symbol, liveBars.length, sessionFingerprint],
     queryFn: () =>
       postVwapBands(
         liveBars.map(({ timestamp, open, high, low, close, volume }) => ({

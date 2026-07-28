@@ -14,6 +14,14 @@ import type { IndicatorComputeSeries } from "@/services/ftApi.analysis";
 import type { IndicatorState, IndicatorPeriods } from "./types";
 
 /** Chart toggles served by the backend, with their request-name builders. */
+/**
+ * Hard cap the compute endpoint enforces per request (indicators_routes.py
+ * rejects larger payloads with 400). Responses for longer histories describe
+ * only the trailing slice of this length — consumers must re-align (see the
+ * padding in useIndicators).
+ */
+export const SERVER_INDICATOR_MAX_BARS = 2000;
+
 const SERVER_INDICATOR_KEYS = [
   "showKAMA",
   "showALMA",
@@ -112,7 +120,7 @@ export function useServerIndicators({ barsRef, indicators, periods }: UseServerI
       setServerData({});
       return;
     }
-    const requestBars = bars.slice(-2000).map((b) => ({
+    const requestBars = bars.slice(-SERVER_INDICATOR_MAX_BARS).map((b) => ({
       time: b.timestamp,
       open: b.open,
       high: b.high,
