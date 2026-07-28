@@ -32,7 +32,7 @@
     },
     {
       "name": "apscheduler",
-      "version": "3.11.2",
+      "version": "3.11.3",
       "vulns": []
     },
     {
@@ -137,12 +137,12 @@
     },
     {
       "name": "duckdb",
-      "version": "1.5.3",
+      "version": "1.5.5",
       "vulns": []
     },
     {
       "name": "filelock",
-      "version": "3.29.5",
+      "version": "3.32.0",
       "vulns": []
     },
     {
@@ -152,7 +152,7 @@
     },
     {
       "name": "flask-cors",
-      "version": "6.0.2",
+      "version": "6.0.5",
       "vulns": []
     },
     {
@@ -232,7 +232,7 @@
     },
     {
       "name": "lightgbm",
-      "version": "4.6.0",
+      "version": "4.7.0",
       "vulns": []
     },
     {
@@ -387,7 +387,7 @@
     },
     {
       "name": "pyotp",
-      "version": "2.9.0",
+      "version": "2.10.0",
       "vulns": []
     },
     {
@@ -437,7 +437,7 @@
     },
     {
       "name": "scipy",
-      "version": "1.17.1",
+      "version": "1.18.0",
       "vulns": []
     },
     {
@@ -447,7 +447,7 @@
     },
     {
       "name": "sentry-sdk",
-      "version": "2.60.0",
+      "version": "2.66.1",
       "vulns": []
     },
     {
@@ -462,7 +462,7 @@
     },
     {
       "name": "structlog",
-      "version": "25.5.0",
+      "version": "26.1.0",
       "vulns": []
     },
     {
@@ -522,7 +522,7 @@
     },
     {
       "name": "websockets",
-      "version": "16.0",
+      "version": "16.1.1",
       "vulns": []
     },
     {
@@ -542,7 +542,7 @@
     },
     {
       "name": "yfinance",
-      "version": "1.4.0",
+      "version": "1.5.2",
       "vulns": []
     },
     {
@@ -555,9 +555,9 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-07-19T06:29:24.145653Z",
-    "audited_at": "2026-07-19T06:29:24.145653Z",
-    "requirements_lock_sha256": "f69e3fad575d6c072558c0f74c951ed114a9e400edbbf3c3e4b300cd8a7a6df5",
+    "generated_at": "2026-07-28T14:23:11.252231Z",
+    "audited_at": "2026-07-28T14:23:11.252231Z",
+    "requirements_lock_sha256": "f64f5c44f11c27a62c43e05f9d91dd9ae6c908131652f2595a0472e0731237b0",
     "pip_audit_exit_code": 0
   }
 }
