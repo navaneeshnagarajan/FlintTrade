@@ -846,6 +846,38 @@ def test_unix_fresh_install_ignores_untrusted_inherited_appimage(tmp_path: Path)
 
 
 @pytest.mark.unit
+def test_unix_appimage_installer_uses_only_the_packaged_flinttrade_icon(tmp_path: Path) -> None:
+    canonical = b"canonical FlintTrade icon"
+    decoy = b"unrelated bundled PNG"
+    appimage = (
+        "#!/bin/sh\n"
+        'if [ "${1:-}" = "--appimage-extract" ]; then\n'
+        '  [ "${2:-}" = "resources/icons/app.png" ] || exit 72\n'
+        "  mkdir -p squashfs-root/resources/icons squashfs-root/usr/share/pixmaps\n"
+        f"  printf '%s' {canonical.decode()!r} > squashfs-root/resources/icons/app.png\n"
+        f"  printf '%s' {decoy.decode()!r} > squashfs-root/usr/share/pixmaps/decoy.png\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n"
+    ).encode()
+
+    result = _run(tmp_path, "--no-launch", asset_bytes=appimage)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    installed_icon = (
+        tmp_path
+        / ".local"
+        / "share"
+        / "icons"
+        / "hicolor"
+        / "128x128"
+        / "apps"
+        / "flinttrade.png"
+    )
+    assert installed_icon.read_bytes() == canonical
+
+
+@pytest.mark.unit
 def test_unix_fresh_install_refuses_unproved_existing_appimage_target(tmp_path: Path) -> None:
     target = tmp_path / ".local" / "bin" / "flinttrade.AppImage"
     target.parent.mkdir(parents=True)

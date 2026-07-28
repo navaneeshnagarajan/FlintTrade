@@ -27,6 +27,12 @@ file:
 | Linux ARM64 | `FlintTrade-<version>-linux-arm64.AppImage` |
 | All platforms | `SHA256SUMS.txt` |
 
+The macOS, Windows, Linux and tray assets are generated from the same canonical
+FlintTrade angular `F` and green flint-spark mark used by the terminal and
+public site.
+
+![FlintTrade app icon in the locally built macOS DMG](screenshots/13-desktop-dmg-icon.png)
+
 The installer contains Electron, the local splash, bootstrap resources and
 licence notices. It does not contain a frozen Python backend, a prebuilt
 terminal, or a separately downloaded runtime payload. The shell builds an
