@@ -70,7 +70,7 @@ vi.mock("@/stores/settingsStore", () => ({
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: Object.assign(() => ({}), {
     getState: () => ({
-      dockviewApi: null,
+      workspaceApi: null,
       activeTabId: "trade",
       applyPreset: vi.fn(),
       saveTabLayout: vi.fn(),

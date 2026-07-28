@@ -40,7 +40,7 @@ vi.mock("@/stores/skillStore", () => ({
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: {
     getState: () => ({
-      dockviewApi: null,
+      workspaceApi: null,
       activeTabId: "trade",
       applyPreset: storeMocks.applyPreset,
       saveTabLayout: storeMocks.saveTabLayout,

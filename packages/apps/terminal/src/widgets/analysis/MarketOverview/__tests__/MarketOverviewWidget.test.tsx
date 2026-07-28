@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
@@ -41,7 +41,7 @@ import MarketOverviewWidget, {
 } from "../MarketOverviewWidget";
 
 function renderWidget(params?: Record<string, unknown>, apiOverrides?: { updateParameters?: ReturnType<typeof vi.fn> }) {
-  const props = makeDockviewPanelProps<Record<string, unknown>>({ params: params ?? {} });
+  const props = makeWidgetPanelProps<Record<string, unknown>>({ params: params ?? {} });
   const api = apiOverrides
     ? ({ ...props.api, ...apiOverrides } as typeof props.api)
     : props.api;

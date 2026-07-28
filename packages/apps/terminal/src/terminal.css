@@ -96,66 +96,93 @@ html.density-compact {
 .cell-flash-up { animation: cell-flash-up 0.3s ease-out; }
 .cell-flash-down { animation: cell-flash-down 0.3s ease-out; }
 
-/* ---------- Dockview theme overrides — compact, content-first ---------- */
-.dockview-theme-dark,
-.dockview-theme-light {
+/* ---------- FlexLayout theme overrides — compact, content-first ----------
+   flexlayout-react's combined.css declares its CSS variables ON
+   .flexlayout__layout (scoped under the theme class), so overrides must
+   land on that same element — variables set on an ancestor (class or
+   inline) are defeated by the element's own declarations. The doubled
+   .flexlayout__layout class boosts specificity above combined.css so this
+   block wins regardless of bundle emission order. var() references to
+   FlintTrade tokens flip automatically with html.theme-light and with
+   runtime theme changes — no JS re-resolution needed. */
+.flexlayout__theme_dark .flexlayout__layout.flexlayout__layout,
+.flexlayout__theme_light .flexlayout__layout.flexlayout__layout {
   /* Slim tab bar — less chrome, more content */
-  --dv-tabs-and-actions-container-height: 28px;
-  --dv-tabs-and-actions-container-font-size: 11px;
-  --dv-tab-font-size: 11px;
+  --font-size: 11px;
+  --font-family: inherit;
+  --splitter-size: 4px;
+  --splitter-active-size: 8px;
 
-  /* Tab colors — subtle, not attention-grabbing */
-  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
-  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-tab-divider-color: transparent;
-  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+  /* Core scale — drives most derived surfaces */
+  --color-text: var(--color-text-primary, #e4e4e7);
+  --color-background: var(--color-surface-base, #0a0a0f);
+  --color-base: var(--color-surface-base, #0a0a0f);
+  --color-1: var(--color-surface-card, #16161f);
+  --color-2: var(--color-surface-card, #16161f);
+  --color-3: var(--color-surface-hover, var(--color-card-hover, #24242e));
+  --color-4: var(--color-border-subtle, #2a2a3a);
+  --color-5: var(--color-surface-hover, var(--color-card-hover, #24242e));
+  --color-6: var(--color-border-subtle, #2a2a3a);
 
-  /* Clean separators */
-  --dv-separator-border: var(--color-border-subtle);
-  --dv-paneview-header-border-color: var(--color-border-subtle);
-  --dv-sash-color: transparent;
-  --dv-active-sash-color: var(--color-border-strong);
+  /* Tabsets and tabs — subtle, not attention-grabbing */
+  --color-tabset-background: var(--color-surface-card, #16161f);
+  --color-tabset-background-selected: var(--color-surface-card, #16161f);
+  --color-tabset-background-maximized: var(--color-surface-card, #16161f);
+  --color-tabset-divider-line: var(--color-border-subtle, #2a2a3a);
+  --color-tab-selected: var(--color-text-primary, #e4e4e7);
+  --color-tab-selected-background: var(--color-surface-hover, #24242e);
+  --color-tab-unselected: var(--color-text-muted, #8b8b95);
+  --color-tab-unselected-background: transparent;
 
-  /* Backgrounds */
-  --dv-background-color: var(--color-surface-base);
-  --dv-group-view-background-color: var(--color-surface-base);
+  /* Borders (unused in Phase 1 — kept on-theme for when they arrive) */
+  --color-border-background: var(--color-surface-base, #0a0a0f);
+  --color-border-divider-line: var(--color-border-subtle, #2a2a3a);
+  --color-border-tab-selected: var(--color-text-primary, #e4e4e7);
+  --color-border-tab-selected-background: var(--color-surface-hover, #24242e);
+  --color-border-tab-unselected: var(--color-text-muted, #8b8b95);
+  --color-border-tab-unselected-background: var(--color-surface-card, #16161f);
+
+  /* Quiet splitters */
+  --color-splitter: transparent;
+  --color-splitter-hover: var(--color-accent, #6366f1);
+  --color-splitter-drag: var(--color-accent, #6366f1);
+
+  /* Drag affordances */
+  --color-drag1: var(--color-accent, #6366f1);
+  --color-drag2: var(--color-accent, #6366f1);
+  --color-drag1-background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+  --color-drag2-background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+  --color-drag-rect-border: var(--color-accent, #6366f1);
+  --color-drag-rect-background: var(--color-surface-card, #16161f);
+  --color-drag-rect: var(--color-text-primary, #e4e4e7);
+
+  /* Overflow / popup menu */
+  --color-popup-border: var(--color-border-subtle, #2a2a3a);
+  --color-popup-unselected: var(--color-text-primary, #e4e4e7);
+  --color-popup-unselected-background: var(--color-surface-card, #16161f);
+  --color-popup-selected: var(--color-text-primary, #e4e4e7);
+  --color-popup-selected-background: var(--color-surface-hover, #24242e);
+
+  /* Icons, edge indicators, focus */
+  --color-icon: var(--color-text-muted, #8b8b95);
+  --color-overflow: var(--color-text-muted, #8b8b95);
+  --color-edge-marker: var(--color-border-subtle, #2a2a3a);
+  --color-edge-icon: var(--color-text-muted, #8b8b95);
+  --color-focus: var(--color-accent, #6366f1);
+  --color-toolbar-button-hover: var(--color-surface-hover, #24242e);
+  --color-float-window-header-background: var(--color-surface-card, #16161f);
 }
 
-/* Hide close buttons on tabs — less visual noise */
-.dockview-theme-dark .dv-default-tab-action,
-.dockview-theme-light .dv-default-tab-action {
+/* Hide close buttons on tabs — less visual noise; show only on hover of the
+   selected tab. (aria-keyshortcuts still advertises the keyboard close.) */
+.flexlayout__theme_dark .flexlayout__tab_button_trailing,
+.flexlayout__theme_light .flexlayout__tab_button_trailing {
   display: none;
 }
 
-/* Show close button only on hover of active tab */
-.dockview-theme-dark .dv-tab.dv-active-tab:hover .dv-default-tab-action,
-.dockview-theme-light .dv-tab.dv-active-tab:hover .dv-default-tab-action {
+.flexlayout__theme_dark .flexlayout__tab_button--selected:hover .flexlayout__tab_button_trailing,
+.flexlayout__theme_light .flexlayout__tab_button--selected:hover .flexlayout__tab_button_trailing {
   display: flex;
-}
-
-/* ---------- Dockview light theme overrides ---------- */
-html.theme-light .dockview-theme-light,
-html.theme-light .dockview-theme-dark {
-  --dv-tabs-and-actions-container-background-color: var(--color-surface-card);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--color-surface-card);
-  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-surface-elevated);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-tab-divider-color: transparent;
-  --dv-activegroup-visiblepanel-tab-color: var(--color-text-primary);
-  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text-muted);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
-  --dv-separator-border: var(--color-border-default);
-  --dv-paneview-header-border-color: var(--color-border-default);
-  --dv-background-color: var(--color-surface-base);
-  --dv-group-view-background-color: var(--color-surface-base);
 }
 
 /* ---------- react-resizable-panels separator (sash) styling ---------- */

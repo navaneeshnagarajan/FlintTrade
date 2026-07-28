@@ -949,6 +949,29 @@ describe("useWsBridge — wsUrl guard", () => {
 // ---------------------------------------------------------------------------
 
 describe("useWsBridge — selected-instrument subscription", () => {
+  it("subscribes independently per FDC3 channel (not just the red/legacy selection)", async () => {
+    // Arrange
+    const { channelInstrumentAtoms } = await import("@/services/fdc3/channels");
+    renderHook(() => useWsBridge(), { wrapper: makeWrapper(_jotaiStore) });
+
+    // Act — instruments land on two non-red channels
+    act(() => {
+      _jotaiStore.set(channelInstrumentAtoms["fdc3.channel.green"], { symbol: "TCS", exchange: "NSE" });
+      _jotaiStore.set(channelInstrumentAtoms["fdc3.channel.blue"], { symbol: "GOLD", exchange: "MCX" });
+    });
+
+    // Assert — one live subscription per channel
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith([{ symbol: "TCS", exchange: "NSE" }], "ltp");
+    expect(fakeWs!.subscribe).toHaveBeenCalledWith([{ symbol: "GOLD", exchange: "MCX" }], "ltp");
+
+    // And clearing one channel unsubscribes only that channel's instrument.
+    act(() => {
+      _jotaiStore.set(channelInstrumentAtoms["fdc3.channel.blue"], null);
+    });
+    expect(fakeWs!.unsubscribe).toHaveBeenCalledWith([{ symbol: "GOLD", exchange: "MCX" }], "ltp");
+    expect(fakeWs!.unsubscribe).not.toHaveBeenCalledWith([{ symbol: "TCS", exchange: "NSE" }], "ltp");
+  });
+
   it("subscribes to a selection that existed before the bridge mounted", () => {
     // Arrange — a watchlist click happened before the bridge (re)mounted
     _jotaiStore.set(selectedSymbolAtom, { symbol: "RELIANCE", exchange: "NSE" });

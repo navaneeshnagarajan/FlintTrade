@@ -18,7 +18,7 @@
  * added, and only the ACTIVE view's query is enabled, so the merge does not
  * double the 30s market-hours poll.
  *
- * The initial view comes from the Dockview panel parameter `params.view`,
+ * The initial view comes from the workspace panel parameter `params.view`,
  * which is how the retired `gex` widget id resolves to its original look.
  * Toggling writes the choice back into the panel params so saved layouts
  * round-trip.
@@ -44,7 +44,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, BarChart3, ChevronDown, LineChart, Loader2, RefreshCw } from "lucide-react";
-import type { IDockviewPanelProps } from "dockview";
+import type { WidgetProps } from "@/types/widgets";
 import type { Data, Layout } from "plotly.js";
 import { FlintMultiLineChart } from "@flinttrade/design-system";
 import { useGammaDensity } from "./useGammaDensity";
@@ -76,7 +76,7 @@ const SYMBOL_EXCHANGE: Record<string, string> = {
 const INR = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 // ---------------------------------------------------------------------------
-// View mode (Dockview panel params)
+// View mode (workspace panel params)
 // ---------------------------------------------------------------------------
 
 /** Presentation of the dealer-gamma plane. `exposure` is the retired GEX widget. */
@@ -93,7 +93,7 @@ function isDealerGammaView(value: unknown): value is DealerGammaView {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to density. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to density. */
 export function resolveDealerGammaView(value: unknown): DealerGammaView {
   return isDealerGammaView(value) ? value : "density";
 }
@@ -184,7 +184,7 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
 // Main widget
 // ---------------------------------------------------------------------------
 
-function GammaDensityWidget(props: IDockviewPanelProps) {
+function GammaDensityWidget(props: WidgetProps) {
   const panelParams = props.params as DealerGammaPanelParams | undefined;
   const [view, setView] = useState<DealerGammaView>(() => resolveDealerGammaView(panelParams?.view));
   const [symbol, setSymbol] = useState("NIFTY");
@@ -199,7 +199,7 @@ function GammaDensityWidget(props: IDockviewPanelProps) {
   const handleViewChange = useCallback((next: DealerGammaView) => {
     setView((current) => {
       if (current === next) return current;
-      props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+      props.api.updateParameters({ view: next });
       return next;
     });
   }, [panelParams, props.api]);

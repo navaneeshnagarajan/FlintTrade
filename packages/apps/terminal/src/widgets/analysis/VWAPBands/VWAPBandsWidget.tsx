@@ -8,11 +8,16 @@
  *
  * DATA HONESTY: when a broker is connected, the widget fetches live intraday
  * 5-minute bars via the shared `/api/v1/history` path (`getHistory`) and shows
- * a "Live" badge; VWAP is computed from those real bars. When no broker is
- * connected — or the broker returns no bars for the latest session (market
- * closed, holiday) — the widget falls back to deterministic SAMPLE bars and
- * shows an amber "Sample data" badge so the data is never mistaken for live.
- * There is no deceptive "auto-refresh" clock; TanStack Query owns refetching.
+ * a "Live" badge. The bands for those real bars come from the backend route
+ * POST /v1/indicators/vwap (server maths is CANONICAL — volume-weighted σ
+ * about the running VWAP, i.e. anchored-VWAP bands); while that call is in
+ * flight or if it fails (e.g. an all-zero-volume index session has no defined
+ * VWAP server-side), the widget computes locally from the SAME live bars, so
+ * the "Live" badge stays honest either way. When no broker is connected — or
+ * the broker returns no bars for the latest session (market closed, holiday) —
+ * the widget falls back to deterministic SAMPLE bars and shows an amber
+ * "Sample data" badge so the data is never mistaken for live. There is no
+ * deceptive "auto-refresh" clock; TanStack Query owns refetching.
  */
 
 import { useState, useMemo, memo } from "react";
@@ -23,6 +28,7 @@ import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
 import type { OHLCVBar as ApiBar } from "@/types/api";
+import { postVwapBands, type VwapBandsResponse } from "./api";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +41,12 @@ interface OHLCVBar {
   low: number;
   close: number;
   volume: number;
+}
+
+/** A live session bar — an {@link OHLCVBar} that also carries the ISO
+ *  wall-clock timestamp the server VWAP route needs. */
+interface SessionBar extends OHLCVBar {
+  timestamp: string; // "YYYY-MM-DDTHH:MM:SS" (IST)
 }
 
 interface VWAPPoint {
@@ -50,8 +62,18 @@ interface VWAPPoint {
 }
 
 // ---------------------------------------------------------------------------
-// VWAP computation
+// VWAP computation — LOCAL FALLBACK ONLY
 // ---------------------------------------------------------------------------
+//
+// The backend route POST /v1/indicators/vwap is canonical when a broker is
+// connected. Its maths differs from this fallback: the server uses the
+// volume-weighted deviation of typical price about the running VWAP (anchored-
+// VWAP bands), whereas this local version uses the UNWEIGHTED std-dev of
+// typical prices about their own mean — so bands visibly change width when
+// the server responds. This version stays for (a) sample bars in Explore /
+// disconnected states, and (b) an honest live fallback while the server call
+// is in flight or when it fails (a zero-volume index session has no defined
+// VWAP server-side, but real prices are still worth charting).
 
 function computeVWAP(bars: OHLCVBar[]): VWAPPoint[] {
   let cumTPV = 0;
@@ -106,15 +128,16 @@ const IST_OFFSET_SECONDS = 5.5 * 3600; // +05:30, applied as a fixed wall-clock 
  * fields so the displayed wall-clock is IST regardless of the viewer's local
  * timezone (and deterministic under test).
  */
-function toSessionBars(raw: ApiBar[] | undefined | null): OHLCVBar[] {
+function toSessionBars(raw: ApiBar[] | undefined | null): SessionBar[] {
   if (!raw || raw.length === 0) return [];
 
   const dated = raw.map((bar) => {
     const shifted = new Date((bar.timestamp + IST_OFFSET_SECONDS) * 1000);
     const iso = shifted.toISOString();
     return {
-      date: iso.slice(0, 10),   // YYYY-MM-DD (IST)
-      time: iso.slice(11, 16),  // HH:MM (IST)
+      date: iso.slice(0, 10),        // YYYY-MM-DD (IST)
+      time: iso.slice(11, 16),       // HH:MM (IST)
+      timestamp: iso.slice(0, 19),   // YYYY-MM-DDTHH:MM:SS (IST) — server bar shape
       open: bar.open,
       high: bar.high,
       low: bar.low,
@@ -127,6 +150,47 @@ function toSessionBars(raw: ApiBar[] | undefined | null): OHLCVBar[] {
   return dated
     .filter((bar) => bar.date === latestDate)
     .map(({ date: _date, ...bar }) => bar);
+}
+
+/**
+ * Zip a server VWAP-bands response with the live bars it was computed from.
+ *
+ * Returns `null` when the payload is unusable (missing, or any series does
+ * not match the bar count — a contract break), so the caller can fall back to
+ * the local computation from the same real bars. Individual bars whose values
+ * are not finite numbers (e.g. a zero-cumulative-volume prefix, where VWAP is
+ * undefined) are skipped rather than plotted as garbage; fewer than two
+ * usable points also yields `null`.
+ */
+function toServerPoints(
+  data: VwapBandsResponse | undefined,
+  bars: SessionBar[],
+): VWAPPoint[] | null {
+  if (!data) return null;
+  const series = [
+    data.vwap,
+    data.upper_1, data.upper_2, data.upper_3,
+    data.lower_1, data.lower_2, data.lower_3,
+  ];
+  if (series.some((arr) => !Array.isArray(arr) || arr.length !== bars.length)) return null;
+
+  const points: VWAPPoint[] = [];
+  bars.forEach((bar, index) => {
+    const values = series.map((arr) => arr[index]);
+    if (values.some((value) => typeof value !== "number" || !Number.isFinite(value))) return;
+    points.push({
+      time: bar.time,
+      price: bar.close,
+      vwap: data.vwap[index],
+      upper1: data.upper_1[index],
+      lower1: data.lower_1[index],
+      upper2: data.upper_2[index],
+      lower2: data.lower_2[index],
+      upper3: data.upper_3[index],
+      lower3: data.lower_3[index],
+    });
+  });
+  return points.length >= 2 ? points : null;
 }
 
 /** Inclusive YYYY-MM-DD range covering ~the last week, so at least one full
@@ -284,11 +348,44 @@ function VWAPBandsWidget() {
   const liveBars = useMemo(() => toSessionBars(liveRaw), [liveRaw]);
   const isLive = isConnected && liveBars.length >= 2;
 
+  // Server-computed bands (canonical) — POST the live session bars to the
+  // backend VWAP route. Only enabled once a broker is connected AND a usable
+  // session exists: posting an empty bar list would make the backend fall
+  // back to SYNTHETIC sample bars, which must never surface under a "Live"
+  // badge. The queryKey fingerprints the session (length + last bar) so a
+  // refetched history recomputes the bands.
+  const lastBar = liveBars.at(-1);
+  const { data: serverBands } = useQuery({
+    queryKey: [
+      "vwap-bands",
+      symbol,
+      liveBars.length,
+      lastBar?.timestamp ?? "",
+      lastBar?.close ?? 0,
+    ],
+    queryFn: () =>
+      postVwapBands(
+        liveBars.map(({ timestamp, open, high, low, close, volume }) => ({
+          timestamp, open, high, low, close, volume,
+        })),
+      ),
+    enabled: isLive,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   const bars = useMemo(
     () => (isLive ? liveBars : buildSampleBars(BASE_PRICES[symbol] ?? 22500)),
     [isLive, liveBars, symbol],
   );
-  const points = useMemo(() => computeVWAP(bars), [bars]);
+  // Server bands win whenever they are present and usable; otherwise compute
+  // locally — from the live bars while the server call is pending/failed, or
+  // from the labelled sample bars when disconnected (behaviour unchanged).
+  const serverPoints = useMemo(
+    () => (isLive ? toServerPoints(serverBands, liveBars) : null),
+    [isLive, serverBands, liveBars],
+  );
+  const points = useMemo(() => serverPoints ?? computeVWAP(bars), [serverPoints, bars]);
   const vwapChart = useMemo(() => buildVWAPChart(points), [points]);
 
   const latestPoint = points[points.length - 1];
@@ -314,7 +411,7 @@ function VWAPBandsWidget() {
             className="ml-1 px-1.5 py-0.5 text-xxs bg-profit/10 text-profit border border-profit/30 rounded"
             role="status"
             aria-label="Showing live intraday data from the connected broker"
-            title="Live intraday 5-minute bars from the connected broker."
+            title="Live intraday 5-minute bars from the connected broker; bands are computed by the FlintTrade backend when available."
           >
             Live
           </span>

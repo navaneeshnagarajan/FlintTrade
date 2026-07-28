@@ -29,27 +29,70 @@ def indicators_compute() -> tuple[Any, int]:
         indicators (list[str]): Indicator names such as ``"ema_20"``,
             ``"macd"``, ``"bollinger_bands_20"``, ``"atr_14"``.
 
+            Names accepting a trailing period suffix (``<name>_<n>``):
+            ema, sma, dema, wma, hull, alma, kama, tema, t3, trima,
+            mcginley_dynamic, moving_average_envelopes, rsi, williams_r,
+            cci, stoch_rsi (suffix sets the RSI period; the stochastic
+            window and %K/%D smoothing keep package defaults), mfi, cmf,
+            roc, mom, trix, vortex, chop, fisher_transform,
+            bollinger_bands, atr, keltner_channels, donchian_channels,
+            chandelier_exit, historical_volatility, vwma.
+
+            Fixed-parameter names (exact match, package defaults): macd,
+            starc_bands, kst, coppock_curve, awesome_oscillator,
+            squeeze_momentum, obv, ad, pvt.  vwap, supertrend and
+            parabolic_sar also use fixed defaults.
+
     Returns:
         JSON with ``status`` and ``data`` mapping each indicator name to
         its computed values on success, or ``status`` and ``message``
         on error.  Arrays contain ``null`` for bars with insufficient
         history.  Multi-line indicators (MACD, Bollinger Bands, Keltner
-        Channels) return a dict of named sub-arrays.
+        Channels, Supertrend, Moving Average Envelopes, Donchian
+        Channels, Chandelier Exit, STARC Bands, Stochastic RSI, Vortex,
+        KST, Fisher Transform, Squeeze Momentum) return a dict of named
+        sub-arrays.
     """
     from flinttrade_indicators import (  # noqa: PLC0415
+        ad,
+        alma,
         atr,
+        awesome_oscillator,
         bollinger_bands,
         cci,
+        chandelier_exit,
+        chop,
+        cmf,
+        coppock_curve,
         dema,
+        donchian_channels,
         ema,
+        fisher_transform,
+        historical_volatility,
         hull,
+        kama,
         keltner_channels,
+        kst,
         macd,
+        mcginley_dynamic,
+        mfi,
+        mom,
+        moving_average_envelopes,
         obv,
         parabolic_sar,
+        pvt,
+        roc,
         rsi,
         sma,
+        squeeze_momentum,
+        starc_bands,
+        stoch_rsi,
         supertrend,
+        t3,
+        tema,
+        trima,
+        trix,
+        vortex,
         vwap,
         vwma,
         williams_r,
@@ -139,6 +182,43 @@ def indicators_compute() -> tuple[Any, int]:
                 period = _parse_period(key, 20)
                 result[ind_name] = _to_list(hull(closes, period))
 
+            elif key.startswith("alma"):
+                period = _parse_period(key, 9)
+                result[ind_name] = _to_list(alma(closes, period))
+
+            elif key.startswith("kama"):
+                period = _parse_period(key, 10)
+                result[ind_name] = _to_list(kama(closes, period))
+
+            # "tema"/"t3"/"trima"/"trix" share a leading "t" but none is a
+            # prefix of another, so plain startswith cannot shadow here.
+            elif key.startswith("tema"):
+                period = _parse_period(key, 20)
+                result[ind_name] = _to_list(tema(closes, period))
+
+            elif key.startswith("t3"):
+                period = _parse_period(key, 5)
+                result[ind_name] = _to_list(t3(closes, period))
+
+            elif key.startswith("trima"):
+                period = _parse_period(key, 20)
+                result[ind_name] = _to_list(trima(closes, period))
+
+            elif key.startswith("mcginley_dynamic"):
+                period = _parse_period(key, 14)
+                result[ind_name] = _to_list(mcginley_dynamic(closes, period))
+
+            # Checked before the "mom" oscillator below, and distinct from it
+            # anyway ("moving…" does not start with "mom").
+            elif key.startswith("moving_average_envelopes"):
+                period = _parse_period(key, 20)
+                upper, middle, lower = moving_average_envelopes(closes, period)
+                result[ind_name] = {
+                    "upper": _to_list(upper),
+                    "middle": _to_list(middle),
+                    "lower": _to_list(lower),
+                }
+
             elif key.startswith("vwap"):
                 result[ind_name] = _to_list(
                     vwap(highs, lows, closes, volumes)
@@ -178,6 +258,76 @@ def indicators_compute() -> tuple[Any, int]:
                 period = _parse_period(key, 20)
                 result[ind_name] = _to_list(cci(highs, lows, closes, period))
 
+            elif key.startswith("stoch_rsi"):
+                # Suffix sets the RSI period; stochastic window and %K/%D
+                # smoothing keep package defaults.
+                period = _parse_period(key, 14)
+                stoch_k, stoch_d = stoch_rsi(closes, period)
+                result[ind_name] = {
+                    "k": _to_list(stoch_k),
+                    "d": _to_list(stoch_d),
+                }
+
+            elif key.startswith("mfi"):
+                period = _parse_period(key, 14)
+                result[ind_name] = _to_list(mfi(highs, lows, closes, volumes, period))
+
+            elif key.startswith("cmf"):
+                period = _parse_period(key, 20)
+                result[ind_name] = _to_list(cmf(highs, lows, closes, volumes, period))
+
+            elif key.startswith("roc"):
+                period = _parse_period(key, 12)
+                result[ind_name] = _to_list(roc(closes, period))
+
+            elif key.startswith("trix"):
+                period = _parse_period(key, 18)
+                result[ind_name] = _to_list(trix(closes, period))
+
+            elif key.startswith("mom"):
+                period = _parse_period(key, 10)
+                result[ind_name] = _to_list(mom(closes, period))
+
+            elif key == "awesome_oscillator":
+                result[ind_name] = _to_list(awesome_oscillator(highs, lows))
+
+            elif key == "squeeze_momentum":
+                sq_mom, sq_on = squeeze_momentum(highs, lows, closes)
+                result[ind_name] = {
+                    "momentum": _to_list(sq_mom),
+                    "squeeze_on": [bool(v) for v in sq_on],
+                }
+
+            elif key.startswith("vortex"):
+                period = _parse_period(key, 14)
+                vi_plus, vi_minus = vortex(highs, lows, closes, period)
+                result[ind_name] = {
+                    "plus": _to_list(vi_plus),
+                    "minus": _to_list(vi_minus),
+                }
+
+            elif key.startswith("chop"):
+                period = _parse_period(key, 14)
+                result[ind_name] = _to_list(chop(highs, lows, closes, period))
+
+            elif key.startswith("fisher_transform"):
+                period = _parse_period(key, 9)
+                fisher_line, fisher_signal = fisher_transform(highs, lows, period)
+                result[ind_name] = {
+                    "fisher": _to_list(fisher_line),
+                    "signal": _to_list(fisher_signal),
+                }
+
+            elif key == "kst":
+                kst_line, kst_signal = kst(closes)
+                result[ind_name] = {
+                    "line": _to_list(kst_line),
+                    "signal": _to_list(kst_signal),
+                }
+
+            elif key == "coppock_curve":
+                result[ind_name] = _to_list(coppock_curve(closes))
+
             # --- volatility ---
             elif key.startswith("bollinger_bands"):
                 period = _parse_period(key, 20)
@@ -203,6 +353,35 @@ def indicators_compute() -> tuple[Any, int]:
                     "lower": _to_list(lower),
                 }
 
+            elif key.startswith("donchian_channels"):
+                period = _parse_period(key, 20)
+                upper, middle, lower = donchian_channels(highs, lows, period)
+                result[ind_name] = {
+                    "upper": _to_list(upper),
+                    "middle": _to_list(middle),
+                    "lower": _to_list(lower),
+                }
+
+            elif key.startswith("chandelier_exit"):
+                period = _parse_period(key, 22)
+                long_stop, short_stop = chandelier_exit(highs, lows, closes, period)
+                result[ind_name] = {
+                    "long": _to_list(long_stop),
+                    "short": _to_list(short_stop),
+                }
+
+            elif key == "starc_bands":
+                upper, middle, lower = starc_bands(highs, lows, closes)
+                result[ind_name] = {
+                    "upper": _to_list(upper),
+                    "middle": _to_list(middle),
+                    "lower": _to_list(lower),
+                }
+
+            elif key.startswith("historical_volatility"):
+                period = _parse_period(key, 10)
+                result[ind_name] = _to_list(historical_volatility(closes, period))
+
             # --- volume ---
             elif key == "obv":
                 result[ind_name] = _to_list(obv(closes, volumes))
@@ -210,6 +389,12 @@ def indicators_compute() -> tuple[Any, int]:
             elif key.startswith("vwma"):
                 period = _parse_period(key, 20)
                 result[ind_name] = _to_list(vwma(closes, volumes, period))
+
+            elif key == "ad":
+                result[ind_name] = _to_list(ad(highs, lows, closes, volumes))
+
+            elif key == "pvt":
+                result[ind_name] = _to_list(pvt(closes, volumes))
 
             else:
                 result[ind_name] = {"error": f"unknown indicator: {ind_name!r}"}

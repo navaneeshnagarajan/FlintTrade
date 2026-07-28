@@ -15,10 +15,10 @@ interface ToolEntry {
 }
 
 /**
- * Tools available on the /trade route — these overlay the Dockview canvas.
+ * Tools available on the /trade route — these overlay the workspace canvas.
  *
  * "Market Intelligence" was removed here (ruling D4): every one of its tabs is
- * now served by a Dockview widget — Market Overview (breadth, sectors, flows,
+ * now served by a workspace widget — Market Overview (breadth, sectors, flows,
  * indices), OI Analytics (OI profile, signals, max pain), Dealer Gamma (GEX),
  * IV Smile & Skew, Correlation Matrix and Delivery Data.
  */

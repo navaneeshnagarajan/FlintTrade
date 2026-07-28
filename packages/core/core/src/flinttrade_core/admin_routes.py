@@ -88,6 +88,8 @@ _WIDGET_REGISTRY: list[dict[str, str]] = [
     {"id": "correlationmatrix", "name": "Correlation Matrix", "category": "Analysis", "status": "live"},
     {"id": "deliverydata", "name": "Delivery Data", "category": "Analysis", "status": "live"},
     {"id": "domheatmap", "name": "DOM Heatmap", "category": "Analysis", "status": "live"},
+    {"id": "portfoliopivot", "name": "Portfolio Pivot", "category": "Analysis", "status": "live"},
+    {"id": "seasonality", "name": "Seasonality", "category": "Analysis", "status": "live"},
     # Utility
     {"id": "watchlist", "name": "Watchlist", "category": "Utility", "status": "live"},
     {"id": "indexstrip", "name": "Index Strip", "category": "Utility", "status": "live"},

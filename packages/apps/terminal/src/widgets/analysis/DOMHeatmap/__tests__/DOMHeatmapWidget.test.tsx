@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -93,10 +93,10 @@ import { generateDepthHeatmapData } from "../depthHeatmapData";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const liveProps = makeDockviewPanelProps();
+const liveProps = makeWidgetPanelProps();
 
 function replayProps() {
-  return makeDockviewPanelProps({ params: { view: "replay" } });
+  return makeWidgetPanelProps({ params: { view: "replay" } });
 }
 
 /** Give an element a real box so pointer hit-testing has geometry in JSDOM. */
@@ -367,7 +367,7 @@ describe("DOMHeatmapWidget — intensity scale", () => {
 
   it("switching to gamma flips the pressed state and persists to panel params", () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({
+    const props = makeWidgetPanelProps({
       params: {},
       api: { ...liveProps.api, updateParameters },
     });
@@ -383,7 +383,7 @@ describe("DOMHeatmapWidget — intensity scale", () => {
   });
 
   it("honours params.scale — this is how the retired depthheatmap id keeps its look", () => {
-    const props = makeDockviewPanelProps({ params: { scale: "gamma" } });
+    const props = makeWidgetPanelProps({ params: { scale: "gamma" } });
     render(<DOMHeatmapWidget {...props} />);
     expect(screen.getByLabelText("Gamma power intensity scale")).toHaveAttribute(
       "aria-pressed",
@@ -591,7 +591,7 @@ describe("DOMHeatmapWidget — replay transport", () => {
 
   it("persists the chosen view into panel params", () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({
+    const props = makeWidgetPanelProps({
       params: {},
       api: { ...liveProps.api, updateParameters },
     });

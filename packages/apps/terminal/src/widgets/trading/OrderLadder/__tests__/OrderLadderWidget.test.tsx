@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { createStore, Provider } from "jotai";
 import type { Order } from "@/types/api";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,8 @@ import OrderLadderWidget, {
   type PendingOrder,
 } from "../OrderLadderWidget";
 import { bookImbalance, normaliseDepth } from "@/lib/depth";
+import { broadcastInstrument, DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 /** Drive the merged widget's shared depth query with a raw wire payload. */
 function setBook(raw: unknown): void {
@@ -742,6 +745,117 @@ describe("OrderLadderWidget explore sample book", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FDC3 channel bus — the ladder follows the instrument broadcast on its user
+// channel unless pinned by an explicit symbol prop/param. Broadcasts go
+// through a per-test jotai store so nothing leaks into the default store the
+// provider-less suites read.
+// ---------------------------------------------------------------------------
+
+describe("OrderLadderWidget FDC3 channels", () => {
+  function renderOnStore(
+    store: ReturnType<typeof createStore>,
+    overrides?: Parameters<typeof makeWidgetPanelProps>[0],
+  ): void {
+    render(
+      <Provider store={store}>
+        <OrderLadderWidget {...makeWidgetPanelProps(overrides)} />
+      </Provider>,
+    );
+  }
+
+  it("follows an instrument broadcast on its default (red) channel", () => {
+    const store = createStore();
+    renderOnStore(store);
+    expect(screen.getByText("NIFTY")).toBeTruthy();
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" }));
+
+    expect(screen.getByText("RELIANCE")).toBeTruthy();
+    expect(screen.queryByText("NIFTY")).toBeNull();
+  });
+
+  it("follows the venue with the symbol — the broadcast retargets the whole book", () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" });
+    renderOnStore(store);
+
+    expect(screen.getByText("GOLD")).toBeTruthy();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("MCX");
+    expect(mockDepthQuery).toHaveBeenCalledWith("GOLD", "MCX", false);
+  });
+
+  it('joined to no channel (params.channel: "none") ignores broadcasts', () => {
+    const store = createStore();
+    renderOnStore(store, { params: { channel: "none" } });
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" }));
+
+    expect(screen.getByText("NIFTY")).toBeTruthy();
+    expect(screen.queryByText("RELIANCE")).toBeNull();
+  });
+
+  it("joined to green ignores red broadcasts and follows green ones", () => {
+    const store = createStore();
+    renderOnStore(store, { params: { channel: "fdc3.channel.green" } });
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" }));
+    expect(screen.queryByText("RELIANCE")).toBeNull();
+    expect(screen.getByText("NIFTY")).toBeTruthy();
+
+    act(() => broadcastInstrument(store, "fdc3.channel.green", { symbol: "TCS", exchange: "NSE" }));
+    expect(screen.getByText("TCS")).toBeTruthy();
+  });
+
+  it("a params-pinned ladder keeps ignoring channels (symbol AND venue)", () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "BSE" });
+    renderOnStore(store, { params: { symbol: "BANKNIFTY", exchange: "NFO" } });
+
+    expect(screen.getByText("BANKNIFTY")).toBeTruthy();
+    expect(screen.queryByText("RELIANCE")).toBeNull();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("NFO");
+  });
+
+  it("a broadcast venue outranks a previously persisted exchange param (audit regression)", () => {
+    // The persisted-pick clobber: an unpinned ladder whose operator once
+    // changed the exchange (persisting params.exchange) must NOT keep that
+    // venue when a later broadcast retargets the book — a broadcast's
+    // (symbol, exchange) pair is atomic.
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "NSE" });
+    renderOnStore(store, { params: { exchange: "BSE" } }); // persisted pick, no symbol pin
+
+    expect(screen.getByText("RELIANCE")).toBeTruthy();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("NSE");
+    expect(mockDepthQuery).toHaveBeenCalledWith("RELIANCE", "NSE", false);
+  });
+
+  it("a manual exchange pick yields to the next broadcast that carries a different venue", () => {
+    const store = createStore();
+    renderOnStore(store); // unpinned, red channel, defaults NIFTY@NSE
+
+    act(() => broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "GOLD", exchange: "MCX" }));
+
+    expect(screen.getByText("GOLD")).toBeTruthy();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("MCX");
+  });
+
+  it("a prop-pinned ladder keeps ignoring channels", () => {
+    const store = createStore();
+    broadcastInstrument(store, DEFAULT_CHANNEL_ID, { symbol: "RELIANCE", exchange: "BSE" });
+    render(
+      <Provider store={store}>
+        <OrderLadderWidget symbol="FINNIFTY" exchange="NFO" />
+      </Provider>,
+    );
+
+    expect(screen.getByText("FINNIFTY")).toBeTruthy();
+    expect(screen.queryByText("RELIANCE")).toBeNull();
+    expect(screen.getByLabelText("Exchange").textContent).toBe("NFO");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Exchange picker — absorbed from Depth; the ladder took a prop only.
 // ---------------------------------------------------------------------------
 
@@ -757,7 +871,7 @@ describe("OrderLadderWidget exchange picker", () => {
     expect(screen.getByLabelText("Exchange").textContent).toBe("NSE_FO");
   });
 
-  it("accepts symbol / exchange / tick from Dockview panel params", () => {
+  it("accepts symbol / exchange / tick from workspace panel params", () => {
     mockMode.value = "live";
     mockWsTicks.value = { "NSE_INDEX:NIFTY": { ltp: 100 } };
     render(<OrderLadderWidget params={{ symbol: "NIFTY", exchange: "NSE_INDEX", tick: 0.05 }} />);

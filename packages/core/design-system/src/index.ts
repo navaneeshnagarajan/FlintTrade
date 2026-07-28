@@ -1,5 +1,4 @@
 export * from "./brand"
-export * from "./chart-theme"
 export * from "./charts"
 export * from "./components"
 export * from "./forms"

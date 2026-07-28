@@ -2,8 +2,9 @@
  * QuickTradeWidget — Ultra-compact one-click order entry for scalpers.
  *
  * Features:
- *   - Symbol + exchange from panel params, falling back to the workspace's
- *     selected instrument (Watchlist selection), then NIFTY/NSE
+ *   - Symbol + exchange from panel params, falling back to the instrument
+ *     broadcast on the widget's FDC3 user channel (red by default — the
+ *     Watchlist selection), then failing closed with no instrument at all
  *   - Large BUY / SELL buttons side by side
  *   - Quantity lot presets: 1, 2, 5, 10 — sized by the instrument's REAL lot
  *     size (quantity = lots × lot size, fetched via getSymbol)
@@ -17,12 +18,11 @@
  */
 
 import { useState, useCallback, useEffect, memo } from "react";
-import { useAtomValue } from "jotai";
 import { Zap, CheckCircle2, AlertCircle, Loader2, MousePointerClick } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { placeOrder, getSymbol } from "@/services/api";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useModeStore } from "@/stores/modeStore";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import {
@@ -166,7 +166,11 @@ function ConfirmOverlay({ symbol, action, lots, quantity, onConfirm, onCancel }:
 // Main widget
 // ---------------------------------------------------------------------------
 
-/** Prefill params carried by a Dockview panel launching quicktrade. */
+/**
+ * Prefill params carried by a workspace panel launching quicktrade. The
+ * panel's FDC3 channel membership also rides `props.params` (under
+ * `channel`) but is resolved separately via `channelFromParams`.
+ */
 interface QuickTradePrefill {
   symbol?: string;
   exchange?: string;
@@ -176,15 +180,18 @@ function QuickTradeWidget(props: WidgetProps) {
   const mode = useModeStore((s) => s.mode);
   const track = useTrackBehavior();
 
-  // Dockview delivers launcher-provided values under props.params — reading
+  // The workspace layer delivers launcher-provided values under props.params — reading
   // top-level props silently dropped every prefill (the old hardcoded-NIFTY
-  // bug). When no params are given, follow the workspace's selected
-  // instrument (e.g. the active Watchlist row) so the ticket targets what the
-  // trader is actually looking at. With neither, fail closed: render an
-  // explicit "select an instrument" state — never silently default to
-  // NIFTY/NSE and let a click place an order the trader did not target.
+  // bug). When no params pin a symbol, follow the instrument broadcast on the
+  // widget's FDC3 user channel (red by default — the active Watchlist row) so
+  // the ticket targets what the trader is actually looking at; a panel joined
+  // to no channel (`channel: "none"`) follows nothing but its own pins. With
+  // neither, fail closed: render an explicit "select an instrument" state —
+  // never silently default to NIFTY/NSE and let a click place an order the
+  // trader did not target.
   const prefill = (props.params ?? {}) as QuickTradePrefill;
-  const selectedInstrument = useAtomValue(selectedSymbolAtom);
+  const channel = useChannelMembership(props.api.id, props.params);
+  const selectedInstrument = useChannelInstrument(channel);
   const symbol = prefill.symbol ?? selectedInstrument?.symbol ?? "";
   const exchange =
     prefill.exchange ?? (prefill.symbol ? "NSE" : selectedInstrument?.exchange ?? "");

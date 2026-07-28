@@ -16,6 +16,9 @@
  *   - Success / error toast after placement
  *   - Default: NIFTY, NSE, BUY, MIS, MARKET, qty 1
  *   - react-hook-form + zod validation
+ *   - FDC3 channel follower — an unpinned pad prefills from (and follows)
+ *     the instrument broadcast on its joined user channel; a pad opened
+ *     with explicit symbol params (a CreateOrder intent) ignores channels
  */
 
 import { useState, useEffect, useRef, useCallback, memo } from "react";
@@ -55,6 +58,7 @@ import {
 import type { PlaceOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { isMarketHours, tickKeyFor } from "@/lib/market";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -327,12 +331,25 @@ interface OrderPadPrefill {
 }
 
 function OrderPadWidget(props: WidgetProps) {
-  // Optional prefill from a launcher (e.g. a watchlist row-hover Buy/Sell).
-  // Only seeds the initial form; the user still reviews and submits, and
-  // submission stays on the existing gated placeOrder path.
+  // Optional prefill from a launcher (e.g. a CreateOrder intent or a
+  // watchlist row-hover Buy/Sell). Only seeds the initial form; the user
+  // still reviews and submits, and submission stays on the existing gated
+  // placeOrder path.
   const prefill = (props.params ?? {}) as OrderPadPrefill;
-  const initialSymbol = prefill.symbol ?? "NIFTY";
-  const initialExchange = prefill.exchange ?? "NSE";
+
+  // FDC3 channel membership (Phase 2). A pad opened with an explicit
+  // `symbol` param is PINNED: it joins no channel and ignores broadcasts
+  // entirely, exactly as it ignored the global selection before. Otherwise
+  // the pad reads its joined channel (red when params carry no `channel`
+  // key; `channel: "none"` joins nothing) and the channel's instrument
+  // slots between the params prefill and the NIFTY default.
+  const isPinned = prefill.symbol != null;
+  const liveChannel = useChannelMembership(props.api.id, props.params);
+  const channel = isPinned ? null : liveChannel;
+  const channelInstrument = useChannelInstrument(channel);
+
+  const initialSymbol = prefill.symbol ?? channelInstrument?.symbol ?? "NIFTY";
+  const initialExchange = prefill.exchange ?? channelInstrument?.exchange ?? "NSE";
   const initialAction: "BUY" | "SELL" = prefill.action === "SELL" ? "SELL" : "BUY";
 
   // Symbol search state (outside react-hook-form — ephemeral UI state)
@@ -403,6 +420,25 @@ function OrderPadWidget(props: WidgetProps) {
 
   // Options-specific: the tick for an NFO/BFO contract IS the option premium.
   const isOptionsExchange = OPTIONS_EXCHANGES.has(exchange);
+
+  // Follow the joined channel: a fresh broadcast retargets the pad exactly
+  // like picking the instrument from the search dropdown. The effect keys on
+  // the broadcast object's identity, so an instrument already sitting on the
+  // channel never re-asserts itself over a later local pick — local pick
+  // beats stale channel context — while every NEW broadcast wins. Pinned
+  // pads read a null channel and never enter. The truthiness guards keep the
+  // form safe should a malformed context ever reach the channel atom.
+  useEffect(() => {
+    if (isPinned || !channelInstrument) return;
+    const { symbol: chSymbol, exchange: chExchange } = channelInstrument;
+    if (!chSymbol || !chExchange) return;
+    setValue("symbol", chSymbol);
+    // An exchange-only prefill (params.exchange with no symbol) is still a
+    // pin for the VENUE — params beat channels in every branch (Phase 2
+    // audit finding); the metadata lookup fails closed on a mismatch.
+    if (prefill.exchange == null) setValue("exchange", chExchange);
+    setQuery(chSymbol);
+  }, [isPinned, channelInstrument, setValue, prefill.exchange]);
 
   // Fetch instrument metadata when symbol or exchange changes and auto-fill lot size.
   // On match, qty is set to the instrument's lotsize so the first order is valid.

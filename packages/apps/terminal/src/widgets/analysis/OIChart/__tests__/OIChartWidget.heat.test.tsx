@@ -49,7 +49,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import OIChartWidget from "../OIChartWidget";
 import { buildSampleChain } from "../sampleData";
 
@@ -63,7 +63,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 /** The heat view is what the retired `oiheatmap` panel id resolves to. */
 function renderHeat() {
   return render(
-    <OIChartWidget {...makeDockviewPanelProps({ params: { view: "heat" } })} />,
+    <OIChartWidget {...makeWidgetPanelProps({ params: { view: "heat" } })} />,
     { wrapper },
   );
 }

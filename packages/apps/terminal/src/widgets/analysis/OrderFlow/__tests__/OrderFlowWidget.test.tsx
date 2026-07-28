@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before component import
@@ -112,9 +112,9 @@ function hookResult(overrides = {}) {
   };
 }
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
-const deltaViewProps = makeDockviewPanelProps({
+const deltaViewProps = makeWidgetPanelProps({
   params: { view: "footprint+delta" },
 });
 
@@ -256,10 +256,10 @@ describe("OrderFlowWidget", () => {
   });
 
   it("syncs Dockview symbol and exchange parameter changes", () => {
-    const initialProps = makeDockviewPanelProps({
+    const initialProps = makeWidgetPanelProps({
       params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
     });
-    const updatedProps = makeDockviewPanelProps({
+    const updatedProps = makeWidgetPanelProps({
       params: { symbol: "RELIANCE", exchange: "BSE" },
     });
     const { rerender } = render(<OrderFlowWidget {...initialProps} />);
@@ -273,7 +273,7 @@ describe("OrderFlowWidget", () => {
 
   it("clears an explicit NSE index exchange when the user changes symbol", () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({
+    const props = makeWidgetPanelProps({
       params: { symbol: "NIFTY", exchange: "NSE_INDEX", view: "footprint" },
       api: { ...defaultProps.api, updateParameters },
     });
@@ -284,10 +284,11 @@ describe("OrderFlowWidget", () => {
     });
 
     expect(mockUseOrderFlow).toHaveBeenLastCalledWith("RELIANCE", "NSE", 300, 20);
+    // Partial patch: only the keys this interaction changed — the adapter
+    // merges them over the live panel config (stale-spread audit fix).
     expect(updateParameters).toHaveBeenCalledWith({
       symbol: "RELIANCE",
       exchange: "NSE",
-      view: "footprint",
     });
   });
 
@@ -339,14 +340,14 @@ describe("OrderFlowWidget", () => {
   });
 
   it("ignores an unrecognised view parameter", () => {
-    const props = makeDockviewPanelProps({ params: { view: "candlestick" } });
+    const props = makeWidgetPanelProps({ params: { view: "candlestick" } });
     render(<OrderFlowWidget {...props} />);
     expect(screen.getByTestId("order-flow-chart")).toHaveAttribute("data-view", "footprint");
   });
 
   it("persists the chosen view into the panel parameters", () => {
     const updateParameters = vi.fn();
-    const props = makeDockviewPanelProps({
+    const props = makeWidgetPanelProps({
       params: { symbol: "NIFTY", exchange: "NSE_INDEX" },
       api: { ...defaultProps.api, updateParameters },
     });
@@ -354,11 +355,8 @@ describe("OrderFlowWidget", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Footprint with delta view" }));
 
-    expect(updateParameters).toHaveBeenCalledWith({
-      symbol: "NIFTY",
-      exchange: "NSE_INDEX",
-      view: "footprint+delta",
-    });
+    // Partial patch: only the changed key (stale-spread audit fix).
+    expect(updateParameters).toHaveBeenCalledWith({ view: "footprint+delta" });
     expect(screen.getByTestId("order-flow-chart")).toHaveAttribute(
       "data-view",
       "footprint+delta",

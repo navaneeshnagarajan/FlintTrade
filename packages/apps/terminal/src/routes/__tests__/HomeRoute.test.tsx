@@ -134,18 +134,17 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 // ---------------------------------------------------------------------------
 // Mock Jotai atoms
 // ---------------------------------------------------------------------------
-vi.mock("jotai", () => ({
+vi.mock("jotai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("jotai")>()),
   useAtomValue: () => null,
-  atom: vi.fn(() => ({ read: vi.fn() })),
 }));
 
-vi.mock("@/atoms/marketAtoms", () => ({
-  niftyAtom: {},
-  bankniftyAtom: {},
-  sensexAtom: {},
-  vixAtom: {},
-  goldAtom: {},
-}));
+vi.mock("@/atoms/marketAtoms", async (importOriginal) =>
+  // Real module — useAtomValue is stubbed above, so the real atoms are
+  // inert here, and the FDC3 channel graph (which imports
+  // selectedSymbolAtom) keeps resolving.
+  await importOriginal<typeof import("@/atoms/marketAtoms")>(),
+);
 
 // ---------------------------------------------------------------------------
 // Import component under test

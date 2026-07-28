@@ -5,7 +5,7 @@
  *   - useLightweightChartTheme
  *   - usePlotlyTheme
  *   - useGlideTheme
- *   - useDockviewTheme
+ * (Workspace-canvas theming is pure CSS in terminal.css — no hook.)
  *
  * Strategy:
  *   - Mock getComputedStyle to return deterministic CSS var values
@@ -73,7 +73,6 @@ vi.mock("@/stores/themeStore", () => ({
 import { useLightweightChartTheme } from "../useChartTheme";
 import { usePlotlyTheme } from "../usePlotlyTheme";
 import { useGlideTheme } from "../useGlideTheme";
-import { useDockviewTheme } from "../useDockviewTheme";
 
 // ---------------------------------------------------------------------------
 // useLightweightChartTheme
@@ -238,57 +237,6 @@ describe("useGlideTheme", () => {
   it("reads --color-accent from CSS vars", () => {
     const { result } = renderHook(() => useGlideTheme());
     expect(result.current.accentColor).toBe("#6366f1");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// useDockviewTheme
-// ---------------------------------------------------------------------------
-
-describe("useDockviewTheme", () => {
-  it("returns a non-empty Record<string, string>", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    expect(typeof result.current).toBe("object");
-    expect(Object.keys(result.current).length).toBeGreaterThan(0);
-  });
-
-  it("all keys start with --dv-", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    for (const key of Object.keys(result.current)) {
-      expect(key.startsWith("--dv-")).toBe(true);
-    }
-  });
-
-  it("all values are non-empty strings", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    for (const value of Object.values(result.current)) {
-      expect(typeof value).toBe("string");
-      expect(value.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("has background color override", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    expect(result.current["--dv-background-color"]).toBeTruthy();
-  });
-
-  it("has drag-over border color using accent", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    // Accent is #6366f1 — should appear somewhere in drag-over border
-    expect(result.current["--dv-drag-over-border-color"]).toBe("#6366f1");
-  });
-
-  it("has separator border", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-    expect(result.current["--dv-separator-border"]).toBeTruthy();
-  });
-
-  it("sets Dockview tab variables used by the bundled light and dark themes", () => {
-    const { result } = renderHook(() => useDockviewTheme());
-
-    expect(result.current["--dv-tabs-and-actions-container-background-color"]).toBe("#16161f");
-    expect(result.current["--dv-activegroup-visiblepanel-tab-background-color"]).toBe("#16161f");
-    expect(result.current["--dv-activegroup-visiblepanel-tab-color"]).toBe("#e4e4e7");
   });
 });
 

@@ -53,7 +53,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import OIChartWidget from "../OIChartWidget";
 import { SAMPLE_PAIN_ROWS, SAMPLE_STRIKE_CELLS, SAMPLE_MAX_PAIN } from "../sampleData";
 
@@ -66,7 +66,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 function renderPain(params: Record<string, unknown> = {}) {
   return render(
-    <OIChartWidget {...makeDockviewPanelProps({ params: { view: "pain", ...params } })} />,
+    <OIChartWidget {...makeWidgetPanelProps({ params: { view: "pain", ...params } })} />,
     { wrapper },
   );
 }
@@ -222,7 +222,7 @@ describe("OI Analytics Max Pain view", () => {
     expect(screen.queryByRole("button", { name: "OI Increase" })).not.toBeInTheDocument();
     // …and keeps it on the chain views.
     render(
-      <OIChartWidget {...makeDockviewPanelProps({ params: { view: "bars" } })} />,
+      <OIChartWidget {...makeWidgetPanelProps({ params: { view: "bars" } })} />,
       { wrapper },
     );
     expect(screen.getByRole("button", { name: "OI Increase" })).toBeInTheDocument();

@@ -17,9 +17,10 @@ import type { WsTick } from "@/types/api";
 // Mock the indicesSummaryAtom via the marketAtoms module
 const mockIndicesData: { name: string; data: WsTick | null }[] = [];
 
-vi.mock("@/atoms/marketAtoms", () => {
+vi.mock("@/atoms/marketAtoms", async (importOriginal) => {
   const { atom } = require("jotai");
   return {
+    ...(await importOriginal<typeof import("@/atoms/marketAtoms")>()),
     indicesSummaryAtom: atom(() => mockIndicesData),
   };
 });

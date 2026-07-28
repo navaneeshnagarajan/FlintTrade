@@ -26,11 +26,19 @@ vi.mock("@/components/DocsSearch/DocsSearch", () => ({
   searchDocs: mockSearchDocs,
 }));
 
-vi.mock("jotai", () => ({
+vi.mock("jotai", async (importOriginal) => ({
+  // Real jotai (marketAtoms calls atom() at module scope, and the FDC3
+  // channel atoms load transitively through the palette's intent path)…
+  ...(await importOriginal<typeof import("jotai")>()),
+  // …with reads stubbed as before: every atom reads null in this suite.
   useAtomValue: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("@/atoms/marketAtoms", () => ({
+vi.mock("@/atoms/marketAtoms", async (importOriginal) => ({
+  // The real module (the FDC3 red channel aliases selectedSymbolAtom, which
+  // the palette's intent path now pulls in transitively)…
+  ...(await importOriginal<typeof import("@/atoms/marketAtoms")>()),
+  // …with the tick family stubbed as before.
   tickAtomFamily: vi.fn().mockReturnValue({}),
 }));
 

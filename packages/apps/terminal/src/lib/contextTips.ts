@@ -6,7 +6,7 @@
  * beginner + intermediate, and advanced users see all.
  *
  * Triggers follow the convention:
- *   "widget:<widgetName>"   — shown inside a specific Dockview widget
+ *   "widget:<widgetName>"   — shown inside a specific workspace widget
  *   "route:<routeName>"     — shown on a route page
  *   "action:<actionName>"   — shown after a user action (first-order, etc.)
  */

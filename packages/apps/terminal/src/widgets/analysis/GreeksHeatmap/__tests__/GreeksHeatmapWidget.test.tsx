@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { IDockviewPanelProps } from "dockview";
+import type { WidgetProps } from "@/types/widgets";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -39,7 +39,7 @@ import React from "react";
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getExpiry } from "@/services/api";
 import { getFtIVSmile } from "@/services/ftApi.analysis";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import GreeksHeatmapWidget from "../GreeksHeatmapWidget";
 import { SAMPLE_GREEKS_HEATMAP_DATA, SYMBOL_CHOICES } from "../GreeksHeatmapWidget";
 
@@ -76,12 +76,12 @@ function emptySmile() {
 
 function renderWidget(
   params: Record<string, unknown> = {},
-  overrides: Partial<IDockviewPanelProps> = {},
+  overrides: Partial<WidgetProps> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <GreeksHeatmapWidget {...makeDockviewPanelProps({ params, ...overrides })} />
+      <GreeksHeatmapWidget {...makeWidgetPanelProps({ params, ...overrides })} />
     </QueryClientProvider>,
   );
 }
@@ -384,14 +384,16 @@ describe("GreeksHeatmapWidget (Greeks Matrix)", () => {
     const updateParameters = vi.fn();
     renderWidget(
       { projection: "grid" },
-      { api: { updateParameters } as unknown as IDockviewPanelProps["api"] },
+      { api: { updateParameters } as unknown as WidgetProps["api"] },
     );
 
     fireEvent.click(projectionButton("Surface"));
     expect(updateParameters).toHaveBeenCalledWith({ projection: "surface" });
 
+    // Partial patch: the metric change must NOT resend the stale projection
+    // (the old spread pattern reverted it to "grid" — the audit's clobber).
     fireEvent.click(metricButton("Vega"));
-    expect(updateParameters).toHaveBeenCalledWith({ projection: "grid", metric: "vega" });
+    expect(updateParameters).toHaveBeenCalledWith({ metric: "vega" });
   });
 
   // ---- Shell ---------------------------------------------------------------

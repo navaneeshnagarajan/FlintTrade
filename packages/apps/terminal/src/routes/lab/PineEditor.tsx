@@ -9,6 +9,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
+  Brain,
   Code2,
   Play,
   Loader2,
@@ -31,6 +32,7 @@ import {
   compilePineScript,
   type PineCompileResult,
 } from "@/services/ftApi";
+import { sendPineDraftToBuilder } from "@/tools/StrategyBuilder/pineBridge";
 
 // ---------------------------------------------------------------------------
 // Pre-built Pine Script templates
@@ -124,12 +126,17 @@ alertcondition(ta.crossover(close, st), title="Buy Signal")`,
 export default function PineEditor() {
   const [code, setCode] = useState<string>(PINE_TEMPLATES[0].code);
   const [copied, setCopied] = useState(false);
+  const [sentToBuilder, setSentToBuilder] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (copiedTimerRef.current !== null) {
         clearTimeout(copiedTimerRef.current);
+      }
+      if (sentTimerRef.current !== null) {
+        clearTimeout(sentTimerRef.current);
       }
     };
   }, []);
@@ -154,6 +161,18 @@ export default function PineEditor() {
       compileMutation.reset();
     }
   }, [compileMutation]);
+
+  // Hand the raw Pine SOURCE (never the compiled Python) to the Strategy
+  // Builder's sandboxed interpreter via pineBridge. Compiled Python is a
+  // display/copy artefact only — executing it is a deliberate non-goal.
+  const handleOpenInBuilder = useCallback(() => {
+    if (!sendPineDraftToBuilder({ source: code })) return;
+    setSentToBuilder(true);
+    if (sentTimerRef.current !== null) {
+      clearTimeout(sentTimerRef.current);
+    }
+    sentTimerRef.current = setTimeout(() => setSentToBuilder(false), 4000);
+  }, [code]);
 
   const handleCopyOutput = useCallback(() => {
     if (result?.python_code) {
@@ -198,6 +217,17 @@ export default function PineEditor() {
         </h2>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleOpenInBuilder}
+            disabled={!code.trim()}
+            className="gap-2"
+            title="Hand this Pine source to the Strategy Builder's sandboxed interpreter"
+          >
+            <Brain className="w-4 h-4" />
+            Open in Strategy Builder
+          </Button>
+
           <Select onValueChange={handleTemplateChange}>
             <SelectTrigger className="w-52 bg-surface-card border-border-default">
               <SelectValue placeholder="Load template..." />
@@ -225,6 +255,17 @@ export default function PineEditor() {
           </Button>
         </div>
       </div>
+
+      {/* Hand-off confirmation */}
+      {sentToBuilder && (
+        <p
+          role="status"
+          className="flex items-center gap-1.5 text-xs text-emerald-400 flex-shrink-0"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+          Pine source sent — open the Options Builder&apos;s Pine Script tab to run it.
+        </p>
+      )}
 
       {/* Editor + Output split */}
       <div className="flex-1 grid grid-cols-2 gap-4 min-h-0">
@@ -319,7 +360,11 @@ export default function PineEditor() {
                     </div>
                   )}
 
-                  {/* Python code */}
+                  {/* Python code (display + copy only — never executed here) */}
+                  <p className="text-xs text-text-muted">
+                    Compiled Python is for display and copying only — execution happens
+                    via the Strategy Builder&apos;s sandboxed Pine interpreter.
+                  </p>
                   <pre className="text-sm font-mono text-text-primary bg-surface-base rounded p-3 whitespace-pre-wrap leading-relaxed">
                     {result.python_code}
                   </pre>

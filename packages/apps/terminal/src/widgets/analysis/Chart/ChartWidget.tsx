@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo, type PointerEvent as ReactPointerEvent } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import {
   FLINT_CHART_VIEW_STATE_STORAGE_KEY,
   FLINT_CHART_DISPLAY_SETTINGS_STORAGE_KEY,
@@ -60,8 +60,7 @@ import {
   FLINT_CHART_INDICATOR_PANE_SIZE_SHORT_LABELS,
   FLINT_CHART_INDICATOR_PANE_STRETCH_FACTORS,
 } from "@flinttrade/design-system";
-import { useAtomValue } from "jotai";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { readOhlcvCache, writeOhlcvCache } from "@/lib/chartCache";
 import { isMarketHours } from "@/lib/market";
 import { publishChartSync, subscribeChartSync } from "@/lib/chartSyncBus";
@@ -101,6 +100,7 @@ import { useDrawingTools } from "./useDrawingTools";
 import { useIndicators } from "./useIndicators";
 import { useChartReplay } from "./useChartReplay";
 import { useOIOverlay } from "./useOIOverlay";
+import { useServerIndicators } from "./useServerIndicators";
 import { ReplayBar } from "./ReplayBar";
 import type {
   SymbolSearchResult,
@@ -142,7 +142,7 @@ function loadSavedChartView() {
 }
 
 /**
- * Scope a chart storage key to a single Dockview panel.
+ * Scope a chart storage key to a single workspace panel.
  *
  * Indicator and display settings are per chart panel, not per workspace: a
  * layout can hold several charts (the Multi Chart preset lays out four) and
@@ -154,10 +154,10 @@ function loadSavedChartView() {
  *     configurations, which symbol keying could not express;
  *   - changing a chart's symbol no longer swaps the indicator setup underneath
  *     the trader.
- * Dockview serialises panel ids into the persisted layout, so a panel-scoped
+ * The workspace layout serialises panel ids into the persisted document, so a panel-scoped
  * key survives a reload exactly as the layout itself does.
  *
- * Charts rendered outside a Dockview panel (no panel id) keep writing the
+ * Charts rendered outside a workspace panel (no panel id) keep writing the
  * legacy workspace-wide key.
  */
 function createFlintChartPanelStorageKey(baseKey: string, panelId: string | null): string {
@@ -442,7 +442,7 @@ interface ChartPanelParams {
   optionLeg?: { underlying: string; leg: OptionType };
 }
 
-function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
+function ChartWidget(props: Partial<WidgetProps> = {}) {
   const track = useTrackBehavior();
   const dataScope = useDataScope();
   useEffect(() => { track("trade", "widgetsUsed"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -458,7 +458,14 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
   // which a watchlist click must not clobber.
   const isPinned = Boolean(pinnedParams?.symbol || pinnedParams?.optionLeg);
 
-  // Dockview panel identity — the scope for this chart's indicator and display
+  // FDC3 user-channel membership (panel config). No `channel` param means the
+  // default (red) channel — whose atom aliases the legacy selectedSymbolAtom,
+  // so unmigrated writers keep driving this chart; `channel: "none"` means
+  // joined to nothing, in which case the chart follows only its own pins and
+  // local search.
+  const channel = useChannelMembership(props.api?.id ?? "chart-detached", props.params);
+
+  // Workspace panel identity — the scope for this chart's indicator and display
   // settings. Null when the chart is rendered outside a panel (tests, embeds),
   // in which case the legacy workspace-wide keys are used unchanged.
   const panelId = props.api?.id ?? null;
@@ -930,6 +937,17 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
 
   const refreshIndicatorsRef = useRef<(() => void) | null>(null);
 
+  // Server-computed indicator data (KAMA, ALMA, Donchian, Chandelier,
+  // StochRSI, MFI, Squeeze, AO) — fetched from the backend engine and
+  // rendered by useIndicators like any client indicator.
+  const { serverData, refreshServerIndicators } = useServerIndicators({
+    barsRef, indicators, periods,
+  });
+  const refreshServerIndicatorsRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    refreshServerIndicatorsRef.current = refreshServerIndicators;
+  }, [refreshServerIndicators]);
+
   // Indicator series lifecycle
   const { refresh: refreshIndicators } = useIndicators({
     chartRef, candleRef, volumeRef, indRef,
@@ -939,6 +957,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     indicatorLineStyles,
     indicatorPaneSizes,
     indicatorPaneStretchFactors,
+    serverData,
   });
 
   useEffect(() => {
@@ -983,6 +1002,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         candleRef.current.setData(candles);
         volumeRef.current.setData(volumes);
         refreshIndicatorsRef.current?.();
+        refreshServerIndicatorsRef.current?.();
         chartRef.current?.timeScale().fitContent();
       } catch { /* ignore */ }
     }
@@ -1040,6 +1060,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
       volumeSeries.setData([]);
     } catch { /* chart may be disposing */ }
     refreshIndicatorsRef.current?.();
+    refreshServerIndicatorsRef.current?.();
 
     function applyBars(data: OhlcvBar[]) {
       if (cancelled) return;
@@ -1067,6 +1088,7 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
         timeScale?.fitContent();
       }
       refreshIndicatorsRef.current?.();
+      refreshServerIndicatorsRef.current?.();
     }
 
     (async () => {
@@ -1147,14 +1169,16 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
     setInterval(v);
   }, []);
 
-  // Standard terminal UX: a watchlist row click (or any widget that writes
-  // selectedSymbolAtom) drives the default chart. A pinned chart — one whose
-  // Dockview panel params carry an explicit symbol — keeps its instrument and
-  // ignores the selection, so multi-chart preset layouts are never clobbered.
+  // Standard terminal UX: a watchlist row click (or any widget that broadcasts
+  // an instrument on this chart's FDC3 user channel) drives the default chart.
+  // A pinned chart — one whose workspace panel params carry an explicit symbol
+  // — keeps its instrument and ignores the channel, and a chart joined to no
+  // channel (`channel: "none"`) reads a constant null, so multi-chart preset
+  // layouts are never clobbered.
   // The current symbol/exchange are deliberately NOT in the deps: the effect
-  // reacts only to selection changes, so a symbol picked locally through the
-  // chart's own search sticks until the next watchlist click.
-  const selectedInstrument = useAtomValue(selectedSymbolAtom);
+  // reacts only to channel-context changes, so a symbol picked locally through
+  // the chart's own search sticks until the next broadcast.
+  const selectedInstrument = useChannelInstrument(channel);
   useEffect(() => {
     if (isPinned || !selectedInstrument) return;
     if (selectedInstrument.symbol === symbol && selectedInstrument.exchange === exchange) return;
@@ -1399,6 +1423,45 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
               <span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0" />VWMA
               <PeriodInput value={periods.vwma} onChange={(v) => setPeriods((p) => ({ ...p, vwma: v }))} />
             </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showKAMA} onCheckedChange={(v) => toggleIndicator("showKAMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 inline-block shrink-0" />KAMA
+              <PeriodInput value={periods.kama} onChange={(v) => setPeriods((p) => ({ ...p, kama: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showALMA} onCheckedChange={(v) => toggleIndicator("showALMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />ALMA
+              <PeriodInput value={periods.alma} onChange={(v) => setPeriods((p) => ({ ...p, alma: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showDonchian} onCheckedChange={(v) => toggleIndicator("showDonchian", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />Donchian
+              <PeriodInput value={periods.donchian} onChange={(v) => setPeriods((p) => ({ ...p, donchian: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showChandelier} onCheckedChange={(v) => toggleIndicator("showChandelier", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shrink-0" />Chandelier Exit
+              <PeriodInput value={periods.chand} onChange={(v) => setPeriods((p) => ({ ...p, chand: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTEMA} onCheckedChange={(v) => toggleIndicator("showTEMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shrink-0" />TEMA
+              <PeriodInput value={periods.tema} onChange={(v) => setPeriods((p) => ({ ...p, tema: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showT3} onCheckedChange={(v) => toggleIndicator("showT3", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block shrink-0" />T3
+              <PeriodInput value={periods.t3} onChange={(v) => setPeriods((p) => ({ ...p, t3: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTRIMA} onCheckedChange={(v) => toggleIndicator("showTRIMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />TRIMA
+              <PeriodInput value={periods.trima} onChange={(v) => setPeriods((p) => ({ ...p, trima: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMcGinley} onCheckedChange={(v) => toggleIndicator("showMcGinley", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />McGinley
+              <PeriodInput value={periods.mcginley} onChange={(v) => setPeriods((p) => ({ ...p, mcginley: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMAEnvelopes} onCheckedChange={(v) => toggleIndicator("showMAEnvelopes", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />MA Envelopes
+              <PeriodInput value={periods.mae} onChange={(v) => setPeriods((p) => ({ ...p, mae: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showSTARC} onCheckedChange={(v) => toggleIndicator("showSTARC", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shrink-0" />STARC Bands
+            </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator className="bg-border-default" />
             <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Volume</DropdownMenuLabel>
             <DropdownMenuCheckboxItem checked={indicators.showVolume} onCheckedChange={(v) => toggleIndicator("showVolume", v)} className="text-xs gap-2">
@@ -1417,10 +1480,10 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
               <PeriodInput value={periods.rsi} onChange={(v) => setPeriods((p) => ({ ...p, rsi: v }))} />
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showMACD} onCheckedChange={(v) => toggleIndicator("showMACD", v)} className="text-xs gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />MACD (12, 26, 9)
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />MACD
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showStoch} onCheckedChange={(v) => toggleIndicator("showStoch", v)} className="text-xs gap-2">
-              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />Stochastic (14, 3, 3)
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />Stochastic
             </DropdownMenuCheckboxItem>
             <DropdownMenuCheckboxItem checked={indicators.showATR} onCheckedChange={(v) => toggleIndicator("showATR", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />ATR
@@ -1437,6 +1500,64 @@ function ChartWidget(props: Partial<IDockviewPanelProps> = {}) {
             <DropdownMenuCheckboxItem checked={indicators.showCCI} onCheckedChange={(v) => toggleIndicator("showCCI", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />CCI
               <PeriodInput value={periods.cci} onChange={(v) => setPeriods((p) => ({ ...p, cci: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showStochRSI} onCheckedChange={(v) => toggleIndicator("showStochRSI", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shrink-0" />Stoch RSI
+              <PeriodInput value={periods.stochRsi} onChange={(v) => setPeriods((p) => ({ ...p, stochRsi: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMFI} onCheckedChange={(v) => toggleIndicator("showMFI", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />MFI
+              <PeriodInput value={periods.mfi} onChange={(v) => setPeriods((p) => ({ ...p, mfi: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showSqueeze} onCheckedChange={(v) => toggleIndicator("showSqueeze", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />Squeeze Momentum
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showAO} onCheckedChange={(v) => toggleIndicator("showAO", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />Awesome Oscillator
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showCMF} onCheckedChange={(v) => toggleIndicator("showCMF", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block shrink-0" />CMF
+              <PeriodInput value={periods.cmf} onChange={(v) => setPeriods((p) => ({ ...p, cmf: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showROC} onCheckedChange={(v) => toggleIndicator("showROC", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0" />ROC
+              <PeriodInput value={periods.roc} onChange={(v) => setPeriods((p) => ({ ...p, roc: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMomentum} onCheckedChange={(v) => toggleIndicator("showMomentum", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />Momentum
+              <PeriodInput value={periods.mom} onChange={(v) => setPeriods((p) => ({ ...p, mom: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showTRIX} onCheckedChange={(v) => toggleIndicator("showTRIX", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0" />TRIX
+              <PeriodInput value={periods.trix} onChange={(v) => setPeriods((p) => ({ ...p, trix: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showChop} onCheckedChange={(v) => toggleIndicator("showChop", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />Choppiness
+              <PeriodInput value={periods.chop} onChange={(v) => setPeriods((p) => ({ ...p, chop: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showHV} onCheckedChange={(v) => toggleIndicator("showHV", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block shrink-0" />Hist Volatility
+              <PeriodInput value={periods.hv} onChange={(v) => setPeriods((p) => ({ ...p, hv: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showVortex} onCheckedChange={(v) => toggleIndicator("showVortex", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block shrink-0" />Vortex
+              <PeriodInput value={periods.vortex} onChange={(v) => setPeriods((p) => ({ ...p, vortex: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showFisher} onCheckedChange={(v) => toggleIndicator("showFisher", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 inline-block shrink-0" />Fisher
+              <PeriodInput value={periods.fisher} onChange={(v) => setPeriods((p) => ({ ...p, fisher: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showKST} onCheckedChange={(v) => toggleIndicator("showKST", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-500 inline-block shrink-0" />KST
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showCoppock} onCheckedChange={(v) => toggleIndicator("showCoppock", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-400 inline-block shrink-0" />Coppock
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showAD} onCheckedChange={(v) => toggleIndicator("showAD", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />A/D Line
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showPVT} onCheckedChange={(v) => toggleIndicator("showPVT", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shrink-0" />PVT
             </DropdownMenuCheckboxItem>
             {activePaneControls.length > 0 && (
               <>

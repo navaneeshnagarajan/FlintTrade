@@ -111,7 +111,7 @@ describe("useOIOverlay", () => {
     render(<OIOverlayHarness />);
 
     await waitFor(() => {
-      expect(getFtOIProfile).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", "2026-07-30");
+      expect(getFtOIProfile).toHaveBeenCalledWith("NIFTY", "NSE_INDEX", "2026-07-30", 20);
     });
   });
 });

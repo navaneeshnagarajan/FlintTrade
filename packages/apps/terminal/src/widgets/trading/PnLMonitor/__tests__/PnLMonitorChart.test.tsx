@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -155,20 +155,20 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
 
   it("renders without crashing", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    const { container } = render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    const { container } = render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
     expect(container).toBeTruthy();
   });
 
   it("displays the P&L Monitor header", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.getByText("P&L Monitor")).toBeInTheDocument();
   });
 
   it("shows target and stoploss values in header", () => {
     mockUsePositions.mockReturnValue({ data: undefined });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     // Header shows "Target ₹10,000 / SL ₹5,000" — use getAllByText since
     // "Target" and "SL" also appear in the chart legend
@@ -180,7 +180,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
 
   it("renders stat cards for Realised, Unrealised, Peak, Min and Max DD", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.getByText("Realised")).toBeInTheDocument();
     expect(screen.getByText("Unrealised")).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
 
   it("shows chart legend items", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.getByText("Net P&L")).toBeInTheDocument();
     // "Drawdown" also names the view tab — the legend adds a second instance.
@@ -202,7 +202,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
     mockUsePositions.mockReturnValue({
       data: [{ pnl: 1200 }, { pnl: -300 }],
     });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(chartMocks.areaRuntime.addAreaSeries).toHaveBeenCalledTimes(2);
     expect(chartMocks.chart.addSeries).not.toHaveBeenCalled();
@@ -226,7 +226,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
 
   it("draws target and stop-loss price lines from the shared risk limits", () => {
     mockUsePositions.mockReturnValue({ data: [] });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(chartMocks.createPriceLine).toHaveBeenCalledWith(
       expect.objectContaining({ price: 10000, title: "Target" }),
@@ -245,7 +245,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
     mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUsePositions.mockReturnValue({ data: undefined });
 
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(mockUsePositions).toHaveBeenCalledWith();
     expect(mockUseFunds).toHaveBeenCalledWith();
@@ -266,7 +266,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
       isFetching: false,
       dataUpdatedAt: 0,
     });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(/position feed failed/i);
@@ -285,14 +285,14 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
       isFetching: false,
       dataUpdatedAt: Date.now(),
     });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.getByRole("alert")).toHaveTextContent(/frozen at \d{2}:\d{2}:\d{2}/i);
   });
 
   it("shows a last-updated indicator when live data is present", () => {
     mockUsePositions.mockReturnValue({ data: [], dataUpdatedAt: Date.now() });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     // Name-filtered: the sample-data badge is also a status region.
     const status = screen.getByRole("status", { name: /last updated/i });
@@ -301,7 +301,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
 
   it("flags the last-updated indicator as stale when data stops refreshing", () => {
     mockUsePositions.mockReturnValue({ data: [], dataUpdatedAt: Date.now() - 10 * 60_000 });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.getByRole("status", { name: /last updated/i })).toHaveTextContent(/stale since/i);
   });
@@ -315,7 +315,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
       error: new Error("not polled"),
       dataUpdatedAt: Date.now(),
     });
-    render(<PnLMonitorWidget {...makeDockviewPanelProps()} />, { wrapper });
+    render(<PnLMonitorWidget {...makeWidgetPanelProps()} />, { wrapper });
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /last updated/i })).not.toBeInTheDocument();

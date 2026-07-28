@@ -23,7 +23,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 const mockPrebuilt = vi.fn();
 const mockRun = vi.fn();
@@ -59,7 +59,7 @@ function wrapper() {
 
 function renderWidget(params: Record<string, unknown> = {}) {
   return render(
-    <ConditionScannerWidget {...makeDockviewPanelProps({ params })} />,
+    <ConditionScannerWidget {...makeWidgetPanelProps({ params })} />,
     { wrapper: wrapper() },
   );
 }

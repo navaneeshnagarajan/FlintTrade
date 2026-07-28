@@ -8,9 +8,11 @@ import "@testing-library/jest-dom";
 // ---------------------------------------------------------------------------
 //
 // The widget fetches live intraday bars via `getHistory` once a broker is
-// connected, and falls back to deterministic SAMPLE bars otherwise. We mock
-// both the connection signal and the history fetch so we can exercise the
-// live ("Live" badge) and disconnected ("Sample data" badge) paths.
+// connected, POSTs those bars to the backend VWAP route (`postVwapBands`,
+// co-located `../api`) for the canonical server-computed bands, and falls
+// back to deterministic SAMPLE bars otherwise. We mock the connection signal,
+// the history fetch, and the bands route so we can exercise the server-backed
+// live path, the local live fallback, and the disconnected sample path.
 
 vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: vi.fn().mockReturnValue(false),
@@ -24,17 +26,24 @@ vi.mock("@/services/api", () => ({
   getHistory: vi.fn(),
 }));
 
+vi.mock("../api", () => ({
+  postVwapBands: vi.fn(),
+}));
+
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { getHistory } from "@/services/api";
+import { postVwapBands } from "../api";
 import VWAPBandsWidget from "../VWAPBandsWidget";
 
 const mockConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
 const mockGetHistory = getHistory as ReturnType<typeof vi.fn>;
+const mockPostVwapBands = postVwapBands as ReturnType<typeof vi.fn>;
 
 /** A single IST session (2024-01-15) of 5-minute bars, epoch seconds (UTC). */
 function liveSessionBars() {
-  // 2024-01-15 09:15 IST == 03:45 UTC == 1705289100
-  const base = 1705289100;
+  // 2024-01-15 09:15 IST == 03:45 UTC == 1705290300
+  // (2024-01-15T00:00:00Z = 1705276800; +3h45m = +13500s)
+  const base = 1705290300;
   return Array.from({ length: 6 }, (_, i) => {
     const close = 22500 + i * 5;
     return {
@@ -46,6 +55,26 @@ function liveSessionBars() {
       volume: 100_000 + i * 1000,
     };
   });
+}
+
+/**
+ * A distinctive server VWAP-bands payload for `n` bars. The vwap value
+ * 12345.678 renders as "12345.68" in the stats row — a number the local
+ * fallback can never produce from `liveSessionBars()`, pinning that the
+ * displayed bands came from the SERVER.
+ */
+function serverBandsResponse(n = 6) {
+  const fill = (value: number) => Array.from({ length: n }, () => value);
+  return {
+    timestamps: Array.from({ length: n }, (_, i) => `2024-01-15T09:${15 + 5 * i}:00`),
+    vwap: fill(12345.678),
+    upper_1: fill(12400),
+    upper_2: fill(12450),
+    upper_3: fill(12500),
+    lower_1: fill(12300),
+    lower_2: fill(12250),
+    lower_3: fill(12200),
+  };
 }
 
 function renderWidget() {
@@ -61,6 +90,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockConnected.mockReturnValue(false);
   mockGetHistory.mockResolvedValue([]);
+  // Default: the bands route resolves nothing usable, so untouched tests
+  // exercise the local live fallback rather than the server path.
+  mockPostVwapBands.mockResolvedValue(undefined);
   global.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -105,6 +137,78 @@ describe("VWAPBandsWidget", () => {
     await waitFor(() => expect(mockGetHistory).toHaveBeenCalled());
     expect(screen.getByText("Sample data")).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    // Guard: an empty bar list must never reach the route — the backend would
+    // substitute synthetic sample bars, which cannot surface as "Live".
+    expect(mockPostVwapBands).not.toHaveBeenCalled();
+  });
+
+  it("connected: posts the live session bars to the backend VWAP route", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue(liveSessionBars());
+    mockPostVwapBands.mockResolvedValue(serverBandsResponse());
+    renderWidget();
+
+    await waitFor(() => expect(mockPostVwapBands).toHaveBeenCalled());
+    const bars = mockPostVwapBands.mock.calls[0][0];
+    expect(bars).toHaveLength(6);
+    // ISO IST wall-clock timestamps in the server bar shape.
+    expect(bars[0]).toEqual({
+      timestamp: "2024-01-15T09:15:00",
+      open: 22498,
+      high: 22504,
+      low: 22496,
+      close: 22500,
+      volume: 100_000,
+    });
+  });
+
+  it("connected: renders the server-computed bands (server maths is canonical)", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue(liveSessionBars());
+    mockPostVwapBands.mockResolvedValue(serverBandsResponse());
+    renderWidget();
+
+    // 12345.68 can only come from the mocked server payload — the local
+    // fallback would compute a VWAP near the 22500-ish bar prices.
+    await waitFor(() => expect(screen.getByText("12345.68")).toBeInTheDocument());
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+  });
+
+  it("disconnected: never calls the VWAP route and keeps the labelled sample fallback", () => {
+    mockConnected.mockReturnValue(false);
+    renderWidget();
+
+    expect(mockPostVwapBands).not.toHaveBeenCalled();
+    expect(mockGetHistory).not.toHaveBeenCalled();
+    expect(screen.getByText("Sample data")).toBeInTheDocument();
+  });
+
+  it("connected: falls back to locally computed bands from the same live bars when the route fails", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue(liveSessionBars());
+    // e.g. an all-zero-volume index session — VWAP undefined server-side.
+    mockPostVwapBands.mockRejectedValue(new Error("VWAP calculation failed"));
+    renderWidget();
+
+    await waitFor(() => expect(mockPostVwapBands).toHaveBeenCalled());
+    // The bars are still real, so the badge honestly stays "Live"…
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    // …the price stat comes from the real live bars…
+    expect(screen.getByText("22525.00")).toBeInTheDocument();
+    // …and the server-only value never appears.
+    expect(screen.queryByText("12345.68")).not.toBeInTheDocument();
+  });
+
+  it("connected: ignores a malformed server payload (length mismatch) and falls back locally", async () => {
+    mockConnected.mockReturnValue(true);
+    mockGetHistory.mockResolvedValue(liveSessionBars());
+    mockPostVwapBands.mockResolvedValue(serverBandsResponse(3)); // 3 ≠ 6 bars
+    renderWidget();
+
+    await waitFor(() => expect(mockPostVwapBands).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText("Live")).toBeInTheDocument());
+    expect(screen.queryByText("12345.68")).not.toBeInTheDocument();
   });
 
   it("badge is an honest, screen-reader-announced status with an explanatory title", () => {

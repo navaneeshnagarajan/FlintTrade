@@ -56,7 +56,7 @@ vi.mock("@/components/charts/PlotlyChart", () => ({
   PlotlyChart: () => <div data-testid="plotly-chart" />,
 }));
 
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import OIChartWidget from "../OIChartWidget";
 
 function analysisResponse(isSampleData?: boolean) {
@@ -92,7 +92,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 /** The signals view is what the retired `oisignals` panel id resolves to. */
 function renderSignals() {
   return render(
-    <OIChartWidget {...makeDockviewPanelProps({ params: { view: "signals" } })} />,
+    <OIChartWidget {...makeWidgetPanelProps({ params: { view: "signals" } })} />,
     { wrapper },
   );
 }

@@ -158,7 +158,7 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const pendingTradeEventRef = useRef<PendingTradeEvent | null>(null);
-  const dockviewApi = useLayoutStore((s) => s.dockviewApi);
+  const workspaceApi = useLayoutStore((s) => s.workspaceApi);
 
   // Route focus management — move keyboard focus to <main> on every route change.
   // This ensures screen-reader users and keyboard-only users land at the new
@@ -174,7 +174,7 @@ export default function AppLayout() {
   const routeTitle = ROUTE_TITLES[location.pathname] ?? "FlintTrade";
 
   // Global navigation event listener — widgets (e.g. AIAdvisor) dispatch this
-  // because they can't use useNavigate() inside Dockview panels
+  // because they can't use useNavigate() inside workspace panels
   useEffect(() => {
     const handler = (e: Event) => {
       const path = getNavigationPath(
@@ -246,7 +246,7 @@ export default function AppLayout() {
     }
 
     if (pending.name === "flinttrade:export-layout") {
-      const api = useLayoutStore.getState().dockviewApi;
+      const api = useLayoutStore.getState().workspaceApi;
       if (!api) return;
       const activeTabId = useLayoutStore.getState().activeTabId;
       downloadJson(`flinttrade-layout-${activeTabId}.json`, api.toJSON());
@@ -268,21 +268,21 @@ export default function AppLayout() {
         navigate("/trade");
         return;
       }
-      if (dockviewApi) {
+      if (workspaceApi) {
         pendingTradeEventRef.current = null;
         window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
       }
     },
-    [dockviewApi, executeTradeWorkspaceAction, location.pathname, navigate],
+    [workspaceApi, executeTradeWorkspaceAction, location.pathname, navigate],
   );
 
   useEffect(() => {
-    if (location.pathname !== "/trade" || !dockviewApi || !pendingTradeEventRef.current) return;
+    if (location.pathname !== "/trade" || !workspaceApi || !pendingTradeEventRef.current) return;
     const pending = pendingTradeEventRef.current;
     pendingTradeEventRef.current = null;
     const timer = window.setTimeout(() => executeTradeWorkspaceAction(pending), 0);
     return () => window.clearTimeout(timer);
-  }, [dockviewApi, executeTradeWorkspaceAction, location.pathname]);
+  }, [workspaceApi, executeTradeWorkspaceAction, location.pathname]);
 
   useEffect(() => {
     function handleTradeOnlyEvent(event: Event) {
@@ -291,7 +291,7 @@ export default function AppLayout() {
         navigate("/settings");
         return;
       }
-      if (location.pathname === "/trade" && dockviewApi) return;
+      if (location.pathname === "/trade" && workspaceApi) return;
       pendingTradeEventRef.current = {
         name: event.type as TradeForwardEventName,
         detail,
@@ -305,7 +305,7 @@ export default function AppLayout() {
       window.removeEventListener("flinttrade:addWidget", handleTradeOnlyEvent);
       window.removeEventListener("flinttrade:open-tool", handleTradeOnlyEvent);
     };
-  }, [dockviewApi, location.pathname, navigate]);
+  }, [workspaceApi, location.pathname, navigate]);
 
   useEffect(() => {
     function handleApplyLayout(event: Event) {

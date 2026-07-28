@@ -8,12 +8,14 @@ Monte Carlo confidence intervals, an intraday session tracker, and options
 
 Status
 ------
-The crate builds, imports, and is exercised by its Rust and Python test suites,
-but it currently has **no production consumer** — no FlintTrade route, service,
-or widget dispatches to it yet. It is kept as a ready, tested capability for a
-future high-throughput backtest path. Re-exported in full here so the whole
-compiled surface is importable from Python rather than only the four core
-simulator types; wiring it into a backtest route is tracked separately.
+The crate builds, imports, and is exercised by its Rust and Python test suites.
+Its first production consumer is ``flinttrade_backtest.signal_backtest``, which
+dispatches signal-array backtests to ``TickSimulator`` as an optional
+accelerated engine (the pure-Python reference path remains the default, and the
+wheel stays optional — the desktop bootstrap excludes it). Re-exported in full
+here so the whole compiled surface is importable from Python rather than only
+the four core simulator types; the remaining surfaces (options, spreads, pairs,
+Monte Carlo, session tracking) are still awaiting consumers.
 
 Core simulation
 ---------------

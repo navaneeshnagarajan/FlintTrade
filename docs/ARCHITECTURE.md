@@ -241,10 +241,10 @@ llms files.
 ## 3. Frontend architecture (terminal)
 
 The terminal is a single React 19 + TypeScript application built with
-Vite 6. Layout is managed by [Dockview v5.1](https://dockview.dev/),
+Vite 6. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
 which provides drag-and-drop panels, tabs, floating windows, and
-serialisable layouts. Users compose their workspace from 69 widgets
-(18 trading + 29 analysis + 22 utility) split across 12 routes.
+serialisable layouts. Users compose their workspace from 71 widgets
+(18 trading + 31 analysis + 22 utility) split across 12 routes.
 
 ### State architecture
 
@@ -276,7 +276,9 @@ duplicated:
 | Build | Vite 6.4 | Fast HMR, ESM-first. |
 | CSS | Tailwind CSS v4 | `@tailwindcss/vite` plugin, no `tailwind.config.js` for tokens. |
 | Components | shadcn/ui | Copy-paste ownership, Radix accessibility primitives. |
-| Layout | Dockview v5.1 | Floating, tabs, popout, JSON-serialisable. |
+| Layout | FlexLayout 0.10 | Tabs, splits, drag-dock, JSON-serialisable. |
+| Interop | FDC3 user channels (in-process) | Colour-coded widget linking + ViewChart/CreateOrder intents. |
+| Analytics | FINOS Perspective 3.8 | WASM streaming pivot engine behind the Portfolio Pivot widget. |
 | Charts | Flint chart core over Lightweight Charts v5 | Runtime adapter, shared theme, drawing, indicator, and mini-chart contracts. |
 | Streaming grid | Glide Data Grid | Canvas-rendered, 100K updates/sec. |
 | Static grid | TanStack Table v8 | Headless, sortable, filterable. |

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "jotai";
-import { tickAtomFamily, selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { channelInstrumentAtoms, USER_CHANNELS, type UserChannelId } from "@/services/fdc3/channels";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { getWsService } from "@/services/websocket";
 import { getExpiry } from "@/services/api";
@@ -100,42 +101,52 @@ export function useWsBridge(enabled = true): void {
   const wsUrl = useConnectionStore((s) => s.wsUrl);
   const store = useStore();
 
-  // Keep a live tick subscription for the terminal-wide selected instrument
-  // (set by a watchlist row click, quick trade, etc.). Consumers that read
-  // `tickAtomFamily` for the active instrument — OrderPad fund-mode sizing,
-  // OrderLadder's shared-atom fallback, the command palette — depend on this;
-  // without it their atoms stay permanently null for non-index symbols.
-  // Implemented with store.sub (not useAtomValue) so selection changes do not
-  // re-render the app shell that mounts this bridge.
+  // Keep a live tick subscription for the instrument on EVERY FDC3 user
+  // channel (the red channel is the legacy terminal-wide selection — set by
+  // a watchlist row click, quick trade, etc.). Consumers that read
+  // `tickAtomFamily` for a channel's instrument — OrderPad fund-mode sizing,
+  // OrderLadder's shared-atom fallback, the command palette — depend on
+  // this; without it their atoms stay permanently null for non-index
+  // symbols. The WS service ref-counts subscriptions, so two channels on
+  // the same instrument are safe. Implemented with store.sub (not
+  // useAtomValue) so channel changes do not re-render the app shell that
+  // mounts this bridge.
   useEffect(() => {
     if (!enabled || !wsUrl || !apiKey) return;
     const ws = getWsService(wsUrl, apiKey);
     if (!ws) return;
 
-    let current: WsInstrument | null = null;
-    const applySelection = () => {
-      const next = store.get(selectedSymbolAtom);
+    const current = new Map<UserChannelId, WsInstrument>();
+    const applyChannel = (channelId: UserChannelId) => {
+      const next = store.get(channelInstrumentAtoms[channelId]);
+      const previous = current.get(channelId);
       if (
-        current &&
+        previous &&
         next &&
-        current.symbol === next.symbol &&
-        current.exchange === next.exchange
+        previous.symbol === next.symbol &&
+        previous.exchange === next.exchange
       ) {
         return;
       }
-      if (current) ws.unsubscribe([current], "ltp");
-      current = next ? { symbol: next.symbol, exchange: next.exchange } : null;
-      if (current) ws.subscribe([current], "ltp");
+      if (previous) {
+        ws.unsubscribe([previous], "ltp");
+        current.delete(channelId);
+      }
+      if (next) {
+        const instrument: WsInstrument = { symbol: next.symbol, exchange: next.exchange };
+        current.set(channelId, instrument);
+        ws.subscribe([instrument], "ltp");
+      }
     };
 
-    applySelection();
-    const unsubSelection = store.sub(selectedSymbolAtom, applySelection);
+    const unsubs = USER_CHANNELS.map((channel) => {
+      applyChannel(channel.id);
+      return store.sub(channelInstrumentAtoms[channel.id], () => applyChannel(channel.id));
+    });
     return () => {
-      unsubSelection();
-      if (current) {
-        ws.unsubscribe([current], "ltp");
-        current = null;
-      }
+      unsubs.forEach((unsub) => unsub());
+      current.forEach((instrument) => ws.unsubscribe([instrument], "ltp"));
+      current.clear();
     };
   }, [enabled, store, apiKey, wsUrl]);
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { StateCreator } from "zustand";
-import type { DockviewApi } from "dockview-react";
+import type { WorkspaceApi } from "@/layout/flexLayoutAdapter";
 import { applyPreset as applyPresetImpl } from "@/layout/workspacePresets";
 
 interface LayoutTab {
@@ -13,7 +13,7 @@ interface LayoutTab {
 interface LayoutStore {
   tabs: LayoutTab[];
   activeTabId: string;
-  dockviewApi: DockviewApi | null;
+  workspaceApi: WorkspaceApi | null;
   widgetPickerOpen: boolean;
   presetPickerOpen: boolean;
   addTab: (name?: string) => void;
@@ -22,7 +22,7 @@ interface LayoutStore {
   renameTab: (id: string, name: string) => void;
   saveTabLayout: (id: string, layout: Record<string, unknown>) => void;
   getTabLayout: (id: string) => Record<string, unknown> | undefined;
-  setDockviewApi: (api: DockviewApi | null) => void;
+  setWorkspaceApi: (api: WorkspaceApi | null) => void;
   setWidgetPickerOpen: (open: boolean) => void;
   setPresetPickerOpen: (open: boolean) => void;
   applyPreset: (presetId: string) => void;
@@ -37,7 +37,7 @@ const defaultTabId = generateId();
 const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (set, get) => ({
   tabs: [{ id: defaultTabId, name: "Workspace" }],
   activeTabId: defaultTabId,
-  dockviewApi: null,
+  workspaceApi: null,
   widgetPickerOpen: false,
   presetPickerOpen: false,
   addTab: (name) => {
@@ -73,15 +73,16 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   getTabLayout: (id) => {
     return get().tabs.find((t) => t.id === id)?.serializedLayout;
   },
-  setDockviewApi: (api) => set({ dockviewApi: api }),
+  setWorkspaceApi: (api) => set({ workspaceApi: api }),
   setWidgetPickerOpen: (open) => set({ widgetPickerOpen: open }),
   setPresetPickerOpen: (open) => set({ presetPickerOpen: open }),
   applyPreset: (presetId) => {
-    const api = get().dockviewApi;
+    const api = get().workspaceApi;
     if (!api) return;
     applyPresetImpl(api, presetId);
-    // After applying, the onDidLayoutChange listener in TerminalRoute will
-    // auto-save the new layout to the active tab — no manual save needed.
+    // After applying, the model-level change listener TerminalRoute
+    // registers in loadModel auto-saves the new layout to the tab that
+    // owns the model — no manual save needed, mounted view or not.
   },
 });
 

@@ -45,7 +45,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { atom, useStore } from "jotai";
-import { tickAtomFamily, selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { tickAtomFamily } from "@/atoms/marketAtoms";
+import { channelInstrumentAtoms, USER_CHANNELS } from "@/services/fdc3/channels";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { getWsService } from "@/services/websocket";
 import { getTicker } from "@/services/api";
@@ -125,13 +126,14 @@ function displayKey(inst: WsInstrument): string {
 /**
  * Order subscribed instruments by fallback priority and split at the cap.
  *
- * Priority: (1) the terminal-wide selected instrument, (2) always-visible
- * index instruments (ticker bar), (3) the remainder most-recently-subscribed
- * first. Exported for tests.
+ * Priority: (1) the instruments on the FDC3 user channels (red first — the
+ * legacy terminal-wide selection), (2) always-visible index instruments
+ * (ticker bar), (3) the remainder most-recently-subscribed first. Exported
+ * for tests.
  */
 export function prioritiseFallbackInstruments(
   subscribed: WsInstrument[],
-  selected: WsInstrument | null,
+  selected: WsInstrument | null | Array<WsInstrument | null>,
   cap: number = MAX_INSTRUMENTS,
 ): { polled: WsInstrument[]; dropped: WsInstrument[] } {
   const seen = new Set<string>();
@@ -143,9 +145,11 @@ export function prioritiseFallbackInstruments(
     ordered.push(inst);
   };
 
-  // 1. The selected instrument drives the chart/OrderPad — always first.
-  if (selected?.symbol && selected.exchange) {
-    push({ symbol: selected.symbol, exchange: selected.exchange });
+  // 1. Channel instruments drive charts/OrderPads — always first.
+  for (const inst of Array.isArray(selected) ? selected : [selected]) {
+    if (inst?.symbol && inst.exchange) {
+      push({ symbol: inst.symbol, exchange: inst.exchange });
+    }
   }
   // 2. Index instruments back the always-visible ticker bar.
   for (const inst of subscribed) {
@@ -207,7 +211,7 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
 
     const { polled, dropped } = prioritiseFallbackInstruments(
       allSubscribed,
-      store.get(selectedSymbolAtom),
+      USER_CHANNELS.map((c) => store.get(channelInstrumentAtoms[c.id])),
     );
     const polledKeys = polled.map(displayKey);
     const droppedKeys = dropped.map(displayKey);

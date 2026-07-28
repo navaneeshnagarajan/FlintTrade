@@ -1,7 +1,8 @@
 import { lazy, Suspense, Component, useCallback } from "react";
 import type { ReactNode, ErrorInfo } from "react";
-import type { IDockviewPanelProps } from "dockview-react";
-import type { WidgetMeta } from "@/types/widgets";
+import type { TabNode } from "flexlayout-react";
+import type { WidgetMeta, WidgetProps } from "@/types/widgets";
+import { widgetPropsForNode } from "@/layout/flexLayoutAdapter";
 
 // ---------------------------------------------------------------------------
 // Lazy-load all widgets -- each is a separate chunk for code splitting
@@ -129,6 +130,12 @@ const lazyWidgets = {
   // Wave 36 — historical option-chain archive
   historicalchain: lazy(() => import("@/widgets/analysis/HistoricalChain/HistoricalChainWidget")),
 
+  // FINOS migration Phase 3 — Perspective analytics
+  portfoliopivot: lazy(() => import("@/widgets/analysis/PortfolioPivot/PortfolioPivotWidget")),
+
+  // Indicator restoration wave — seasonality patterns
+  seasonality: lazy(() => import("@/widgets/analysis/Seasonality/SeasonalityWidget")),
+
   // Annotated trade journal (SQLite + FTS5 store)
   tradejournal: lazy(() => import("@/widgets/utility/TradeJournal/TradeJournalWidget")),
 };
@@ -141,11 +148,12 @@ const lazyWidgets = {
  * Widgets that have been merged into a canonical surface.
  *
  * A retired id is REMOVED from {@link widgetCatalog} — it no longer appears in
- * the picker — but MUST stay resolvable in {@link widgetComponents}, because
- * Dockview looks a saved panel's `component` string up in that map alone, and
- * `routes/TerminalRoute.tsx` discards the operator's ENTIRE saved layout tab
- * when any component fails to resolve. A retired id that stopped resolving
- * would not degrade one panel; it would wipe the workspace.
+ * the picker — but MUST stay resolvable in {@link widgetComponents}: the
+ * FlexLayout factory looks a saved tab's `component` string up in that map
+ * alone, and an id that stopped resolving degrades that panel to an error
+ * card, silently costing the operator the view they saved. (Under the old
+ * Dockview host an unresolved id wiped the ENTIRE saved tab; FlexLayout
+ * degrades one panel, but the contract stays: retired ids keep resolving.)
  *
  * Each entry names the canonical widget and the panel params that reproduce
  * the retired widget's presentation, so an operator who saved a layout
@@ -582,6 +590,8 @@ export const widgetCatalog: WidgetMeta[] = [
   { id: "correlationmatrix", name: "Correlation Matrix", icon: "Grid2x2", category: "Analysis", description: "Full correlation matrix heatmap for a configurable basket of instruments" },
   { id: "deliverydata", name: "Delivery Data", icon: "Package", category: "Analysis", description: "Delivery percentage per scrip with open/high/low/close and traded volume, sorted into conviction bands — sample data only, no delivery source is wired yet" },
   { id: "domheatmap", name: "DOM Heatmap", icon: "Flame", category: "Analysis", description: "Depth-of-market heatmap showing where large orders sit and are pulled over time — live accumulation or scrub-back replay of the captured snapshots, with log or gamma intensity" },
+  { id: "portfoliopivot", name: "Portfolio Pivot", icon: "Table2", category: "Analysis", description: "FINOS Perspective pivot over the live position book — group, aggregate, filter and export your open positions, with the view saved per panel" },
+  { id: "seasonality", name: "Seasonality", icon: "CalendarRange", category: "Analysis", description: "Monthly, weekday and day-of-month return patterns from daily price history — heat views with sample sizes, honest about thin data" },
 
   // Utility
   { id: "watchlist", name: "Watchlist", icon: "Star", category: "Utility", description: "Customisable instrument watchlist with live LTP and change data" },
@@ -688,13 +698,13 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 // ---------------------------------------------------------------------------
-// Dockview panel wrapper: wraps each lazy widget in Suspense + ErrorBoundary
+// Panel wrapper: wraps each lazy widget in Suspense + ErrorBoundary
 // ---------------------------------------------------------------------------
 function createWidgetPanel(
   widgetId: string,
-  LazyWidget: React.LazyExoticComponent<React.ComponentType<IDockviewPanelProps>>
-): React.FC<IDockviewPanelProps> {
-  const PanelComponent: React.FC<IDockviewPanelProps> = (props) => (
+  LazyWidget: React.LazyExoticComponent<React.ComponentType<WidgetProps>>
+): React.FC<WidgetProps> {
+  const PanelComponent: React.FC<WidgetProps> = (props) => (
     <Suspense fallback={<WidgetSkeleton />}>
       <WidgetErrorBoundary name={widgetId}>
         <LazyWidget {...props} />
@@ -706,7 +716,7 @@ function createWidgetPanel(
 }
 
 // ---------------------------------------------------------------------------
-// Export: widgetComponents record for DockviewReact `components` prop
+// Export: widgetComponents record resolved by the FlexLayout factory
 // ---------------------------------------------------------------------------
 /**
  * Wrap a canonical widget so a retired id keeps resolving, with the params
@@ -747,10 +757,10 @@ function MovedWidgetNotice({ retiredId, movedTo }: {
 function createRetiredWidgetPanel(
   retiredId: string,
   spec: RetiredWidget,
-  resolved: Record<string, React.FC<IDockviewPanelProps>>,
-): React.FC<IDockviewPanelProps> {
+  resolved: Record<string, React.FC<WidgetProps>>,
+): React.FC<WidgetProps> {
   if (isMovedWidget(spec)) {
-    const PanelComponent: React.FC<IDockviewPanelProps> = () => (
+    const PanelComponent: React.FC<WidgetProps> = () => (
       <MovedWidgetNotice retiredId={retiredId} movedTo={spec.movedTo} />
     );
     PanelComponent.displayName = `Retired(${retiredId}→${spec.movedTo.destination})`;
@@ -758,7 +768,7 @@ function createRetiredWidgetPanel(
   }
   const { component, params } = spec;
   const Canonical = resolved[component];
-  const PanelComponent: React.FC<IDockviewPanelProps> = (props) => {
+  const PanelComponent: React.FC<WidgetProps> = (props) => {
     if (!Canonical) return <WidgetError name={retiredId} message="Canonical widget missing" onRetry={() => {}} />;
     const merged = { ...props, params: { ...params, ...(props.params ?? {}) } };
     return <Canonical {...merged} />;
@@ -767,15 +777,15 @@ function createRetiredWidgetPanel(
   return PanelComponent;
 }
 
-const liveWidgetComponents: Record<string, React.FC<IDockviewPanelProps>> =
+const liveWidgetComponents: Record<string, React.FC<WidgetProps>> =
   Object.fromEntries(
     Object.entries(lazyWidgets).map(([id, LazyWidget]) => [
       id,
-      createWidgetPanel(id, LazyWidget as React.LazyExoticComponent<React.ComponentType<IDockviewPanelProps>>),
+      createWidgetPanel(id, LazyWidget as React.LazyExoticComponent<React.ComponentType<WidgetProps>>),
     ])
   );
 
-export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> = {
+export const widgetComponents: Record<string, React.FC<WidgetProps>> = {
   ...liveWidgetComponents,
   ...Object.fromEntries(
     Object.entries(RETIRED_WIDGET_IDS).map(([retiredId, spec]) => [
@@ -784,3 +794,32 @@ export const widgetComponents: Record<string, React.FC<IDockviewPanelProps>> = {
     ]),
   ),
 };
+
+// ---------------------------------------------------------------------------
+// FlexLayout tab factory
+// ---------------------------------------------------------------------------
+/**
+ * The `factory` prop for the FlexLayout `<Layout>` host: resolves the tab's
+ * `component` id in {@link widgetComponents} and renders it with the
+ * FlintTrade panel props bridged from the tab node.
+ *
+ * An unresolvable id renders the widget error surface INSIDE the tab rather
+ * than failing the whole model load — under FlexLayout a saved layout with a
+ * stale id degrades one panel, it never wipes the tab (the Dockview-era
+ * wipe hazard is gone, but the retired-id map above still gives operators
+ * their canonical widget back instead of an error card).
+ */
+export function flexLayoutFactory(node: TabNode): ReactNode {
+  const componentId = node.getComponent();
+  const WidgetComponent = componentId ? widgetComponents[componentId] : undefined;
+  if (!WidgetComponent) {
+    return (
+      <WidgetError
+        name={componentId ?? "unknown"}
+        message="Unknown widget id in saved layout"
+        onRetry={() => {}}
+      />
+    );
+  }
+  return <WidgetComponent {...widgetPropsForNode(node)} />;
+}

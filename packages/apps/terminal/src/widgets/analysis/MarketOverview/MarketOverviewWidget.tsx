@@ -139,7 +139,7 @@ function MarketOverviewWidget(props: WidgetProps) {
       const resolved = resolveMarketOverviewTab(next);
       if (resolved === tab) return;
       setTab(resolved);
-      props.api?.updateParameters({ ...(panelParams ?? {}), tab: resolved });
+      props.api?.updateParameters({ tab: resolved });
     },
     [panelParams, props.api, tab],
   );

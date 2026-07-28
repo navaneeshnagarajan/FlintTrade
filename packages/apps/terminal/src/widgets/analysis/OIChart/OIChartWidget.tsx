@@ -1,7 +1,7 @@
 /**
  * OIChartWidget — "OI Analytics", the canonical open-interest surface.
  *
- * FOUR presentations of ONE option-chain snapshot, chosen by the Dockview panel
+ * FOUR presentations of ONE option-chain snapshot, chosen by the workspace panel
  * parameter `params.view`:
  *   • "bars" (default) — Plotly grouped CE/PE OI bars by strike with the
  *     per-strike PCR overlay, ATM and max-pain rules.
@@ -61,7 +61,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense, memo } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { AlertCircle, Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { useQuery } from "@tanstack/react-query";
 import { getExpiry, getOptionChain, getQuotes, getMaxPain } from "@/services/api";
 import {
@@ -140,7 +140,7 @@ function isViewMode(value: unknown): value is ViewMode {
   return typeof value === "string" && (VIEW_MODES as readonly string[]).includes(value);
 }
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to bars. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to bars. */
 function resolveViewMode(value: unknown): ViewMode {
   return isViewMode(value) ? value : "bars";
 }
@@ -339,7 +339,7 @@ interface OIAnalyticsPanelParams {
 // Main widget
 // ---------------------------------------------------------------------------
 
-function OIChartWidget(props: IDockviewPanelProps) {
+function OIChartWidget(props: WidgetProps) {
   const panelParams = props.params as OIAnalyticsPanelParams | undefined;
   const initialView = resolveViewMode(panelParams?.view);
 
@@ -630,13 +630,13 @@ function OIChartWidget(props: IDockviewPanelProps) {
   const handleViewChange = useCallback((next: ViewMode) => {
     if (next === view) return;
     setView(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api, view]);
 
   const handlePriceToggle = useCallback(() => {
     setShowPrice((current) => {
       const next = !current;
-      props.api.updateParameters({ ...(panelParams ?? {}), price: next });
+      props.api.updateParameters({ price: next });
       return next;
     });
   }, [panelParams, props.api]);

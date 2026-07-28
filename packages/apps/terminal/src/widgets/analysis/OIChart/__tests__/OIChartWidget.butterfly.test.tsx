@@ -95,7 +95,7 @@ vi.mock("lightweight-charts", () => ({
 }));
 
 import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import OIChartWidget from "../OIChartWidget";
 
 const mockUseBrokerConnected = useBrokerConnected as ReturnType<typeof vi.fn>;
@@ -108,7 +108,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 /** The butterfly view is what the retired `oiprofile` panel id resolves to. */
 function renderButterfly(params: Record<string, unknown> = {}) {
   return render(
-    <OIChartWidget {...makeDockviewPanelProps({ params: { view: "butterfly", ...params } })} />,
+    <OIChartWidget {...makeWidgetPanelProps({ params: { view: "butterfly", ...params } })} />,
     { wrapper },
   );
 }
@@ -264,7 +264,7 @@ describe("OI Analytics spot price strip", () => {
     mockUseBrokerConnected.mockReturnValue(true);
 
     render(
-      <OIChartWidget {...makeDockviewPanelProps({ params: { view: "bars" } })} />,
+      <OIChartWidget {...makeWidgetPanelProps({ params: { view: "bars" } })} />,
       { wrapper },
     );
 

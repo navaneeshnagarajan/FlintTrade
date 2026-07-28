@@ -18,6 +18,8 @@ import numpy as np
 import pytest
 from flask import Flask
 
+pytestmark = pytest.mark.unit
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,6 +80,47 @@ def _build_fake_indicators_modules() -> dict[str, types.ModuleType]:
     ))
     mod.supertrend = MagicMock(return_value=(
         np.full(30, 105.0), np.full(30, True),
+    ))
+
+    def _fake_periodic(*args) -> np.ndarray:
+        """Single-line fake: NaN warm-up of ``period`` bars, then the period value.
+
+        The route passes the parsed period as the last positional argument,
+        so the output depends on the period — letting tests assert that a
+        ``_20`` suffix actually reached the indicator function.
+        """
+        n = len(args[0])
+        period = int(args[-1])
+        out = np.full(n, float(period))
+        out[: min(period, n)] = np.nan
+        return out
+
+    # New single-line indicators with a period argument
+    for name in ("alma", "kama", "tema", "t3", "trima", "mcginley_dynamic",
+                 "mfi", "cmf", "roc", "mom", "trix", "chop",
+                 "historical_volatility"):
+        setattr(mod, name, MagicMock(side_effect=_fake_periodic))
+
+    # New single-line indicators without a period argument
+    for name in ("ad", "pvt", "awesome_oscillator", "coppock_curve"):
+        setattr(mod, name, MagicMock(return_value=np.full(30, 105.0)))
+
+    # New three-line band indicators (upper, middle, lower)
+    for name in ("donchian_channels", "moving_average_envelopes",
+                 "starc_bands"):
+        setattr(mod, name, MagicMock(return_value=(
+            np.full(30, 110.0), np.full(30, 105.0), np.full(30, 100.0),
+        )))
+
+    # New two-line indicators (pairs of arrays)
+    for name in ("chandelier_exit", "stoch_rsi", "vortex", "kst",
+                 "fisher_transform"):
+        setattr(mod, name, MagicMock(return_value=(
+            np.full(30, 1.0), np.full(30, 0.5),
+        )))
+
+    mod.squeeze_momentum = MagicMock(return_value=(
+        np.full(30, 1.0), np.full(30, True),
     ))
 
     # Streaming sub-module (imported by flinttrade_ai.signal_pipeline)
@@ -197,3 +240,116 @@ class TestIndicatorsCompute:
         assert resp.status_code == 200
         data = resp.get_json()
         assert "error" in data["data"]["nonexistent_indicator"]
+
+    def test_new_single_line_indicators(self, client):
+        """New single-line indicators return bar-count arrays with None warm-up."""
+        names = [
+            "alma_20", "kama_10", "tema_20", "t3_5", "trima_20",
+            "mcginley_dynamic_14", "mfi_14", "cmf_20", "roc_12", "mom_10",
+            "trix_18", "chop_14", "historical_volatility_10",
+        ]
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": names,
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        for name in names:
+            values = data[name]
+            assert isinstance(values, list), name
+            assert len(values) == 30, name
+            assert values[0] is None, name       # leading warm-up bar
+            assert values[-1] is not None, name  # computed once warmed up
+
+    def test_new_periodless_indicators(self, client):
+        """Cumulative/fixed-window indicators accept their exact names only."""
+        names = ["ad", "pvt", "awesome_oscillator", "coppock_curve"]
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": names,
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        for name in names:
+            assert isinstance(data[name], list), name
+            assert len(data[name]) == 30, name
+
+    def test_donchian_channels_multiline(self, client):
+        """Donchian Channels return upper/middle/lower sub-arrays."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": ["donchian_channels_20"],
+        })
+        assert resp.status_code == 200
+        channels = resp.get_json()["data"]["donchian_channels_20"]
+        assert set(channels) == {"upper", "middle", "lower"}
+        for line in channels.values():
+            assert len(line) == 30
+
+    def test_stoch_rsi_multiline(self, client):
+        """Stochastic RSI returns %K and %D sub-arrays."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": ["stoch_rsi_14"],
+        })
+        assert resp.status_code == 200
+        stoch = resp.get_json()["data"]["stoch_rsi_14"]
+        assert set(stoch) == {"k", "d"}
+        assert len(stoch["k"]) == 30
+        assert len(stoch["d"]) == 30
+
+    @pytest.mark.parametrize(("name", "keys"), [
+        ("moving_average_envelopes_20", {"upper", "middle", "lower"}),
+        ("starc_bands", {"upper", "middle", "lower"}),
+        ("chandelier_exit_22", {"long", "short"}),
+        ("vortex_14", {"plus", "minus"}),
+        ("kst", {"line", "signal"}),
+        ("fisher_transform_9", {"fisher", "signal"}),
+    ])
+    def test_multiline_indicator_keys(self, client, name, keys):
+        """Each multi-line indicator returns its documented sub-array keys."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": [name],
+        })
+        assert resp.status_code == 200
+        payload = resp.get_json()["data"][name]
+        assert set(payload) == keys
+        for line in payload.values():
+            assert len(line) == 30
+
+    def test_squeeze_momentum_multiline(self, client):
+        """Squeeze Momentum returns a momentum array plus boolean squeeze flags."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": ["squeeze_momentum"],
+        })
+        assert resp.status_code == 200
+        squeeze = resp.get_json()["data"]["squeeze_momentum"]
+        assert set(squeeze) == {"momentum", "squeeze_on"}
+        assert len(squeeze["momentum"]) == 30
+        assert len(squeeze["squeeze_on"]) == 30
+        assert all(isinstance(flag, bool) for flag in squeeze["squeeze_on"])
+
+    def test_alma_period_suffix_changes_output(self, client):
+        """The parsed period suffix is forwarded to the indicator function."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": ["alma_10", "alma_50"],
+        })
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        # The fake emits NaN for the first ``period`` bars, so a period of
+        # 10 warms up mid-series while 50 exceeds the 30-bar window.
+        assert data["alma_10"] != data["alma_50"]
+        assert data["alma_10"][10] == 10.0
+        assert all(v is None for v in data["alma_50"])
+
+    def test_fixed_name_with_suffix_is_unknown(self, client):
+        """Fixed-parameter names are exact-match; a suffixed form is unknown."""
+        resp = client.post("/api/v1/indicators/compute", json={
+            "bars": _sample_bars(),
+            "indicators": ["kst_9"],
+        })
+        assert resp.status_code == 200
+        assert "error" in resp.get_json()["data"]["kst_9"]

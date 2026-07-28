@@ -12,7 +12,8 @@
  *   - Debounced symbol search (300ms) with dropdown autocomplete
  *   - Per-row sparkline built from last 20 LTP samples
  *   - Right-click context menu on symbol to remove
- *   - Click writes { symbol, exchange } to selectedSymbolAtom (Jotai)
+ *   - Click broadcasts { symbol, exchange } on the widget's FDC3 user
+ *     channel (red by default; `channel: "none"` broadcasts nowhere)
  *   - Dense dark layout matching FlintTrade terminal theme
  *
  * Modules:
@@ -25,9 +26,12 @@
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { Plus, TrendingUp, Trash2, MoreVertical, SlidersHorizontal, X } from "lucide-react";
-import { useSetAtom } from "jotai";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
 import { Button } from "@/components/ui/button";
+import { DEFAULT_CHANNEL_ID } from "@/services/fdc3/channels";
+import { instrumentContext } from "@/services/fdc3/contexts";
+import { useBroadcastInstrument, useChannelMembership } from "@/services/fdc3/hooks";
+import { raiseIntent } from "@/services/fdc3/intents";
+import type { WidgetProps } from "@/types/widgets";
 
 import {
   loadTabs,
@@ -57,11 +61,7 @@ import { SymbolRow } from "./SymbolRow";
 // Main widget
 // ---------------------------------------------------------------------------
 
-interface WatchlistWidgetProps {
-  node?: unknown;
-}
-
-function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
+function WatchlistWidget({ params, api }: WidgetProps) {
   const [tabs, setTabs]               = useState<WatchlistTab[]>(() => loadTabs());
   const [activeTabIdx, setActiveTabIdx] = useState(0);
   const [showSearch, setShowSearch]   = useState(false);
@@ -73,7 +73,20 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   const [viewSettings, setViewSettings] = useState(() => loadViewSettings());
   const menuRef                       = useRef<HTMLDivElement | null>(null);
 
-  const setSelectedSymbol = useSetAtom(selectedSymbolAtom);
+  // FDC3 channel membership: seeded from panel config (no `channel` key
+  // means the default red channel — exactly what the legacy
+  // selectedSymbolAtom writers set; `channel: "none"` means joined to
+  // nothing), then LIVE via the membership atom so the tab-chrome dot
+  // retargets this broadcaster instantly. Joined-to-none clicks broadcast
+  // nowhere.
+  const channel = useChannelMembership(api.id, params);
+  const broadcast = useBroadcastInstrument(channel ?? DEFAULT_CHANNEL_ID);
+  const broadcastSelection = useCallback(
+    (item: WatchlistItem) => {
+      if (channel) broadcast({ symbol: item.symbol, exchange: item.exchange });
+    },
+    [channel, broadcast],
+  );
 
   // Keep active index within bounds when tabs change
   useEffect(() => {
@@ -239,24 +252,21 @@ function WatchlistWidget({ node: _node }: WatchlistWidgetProps) {
   }, []);
 
   const handleSelect = useCallback((item: WatchlistItem) => {
-    setSelectedSymbol({ symbol: item.symbol, exchange: item.exchange });
-  }, [setSelectedSymbol]);
+    broadcastSelection(item);
+  }, [broadcastSelection]);
 
   // Row-hover quick Buy/Sell: focus the symbol and open a PREFILLED order ticket.
   // This never places an order — the ticket's own (gated) submit path is
-  // unchanged; we only launch the OrderPad panel with symbol/exchange/side set.
+  // unchanged; the CreateOrder intent only launches the OrderPad panel with
+  // symbol/exchange/side set (same flinttrade:addWidget detail as before).
   const handleQuickTrade = useCallback((item: WatchlistItem, side: "BUY" | "SELL") => {
-    setSelectedSymbol({ symbol: item.symbol, exchange: item.exchange });
-    window.dispatchEvent(
-      new CustomEvent("flinttrade:addWidget", {
-        detail: {
-          widgetId: "orderpad",
-          title: `Order — ${item.symbol}`,
-          props: { symbol: item.symbol, exchange: item.exchange, action: side },
-        },
-      }),
+    broadcastSelection(item);
+    raiseIntent(
+      "CreateOrder",
+      instrumentContext({ symbol: item.symbol, exchange: item.exchange }),
+      { side, title: `Order — ${item.symbol}` },
     );
-  }, [setSelectedSymbol]);
+  }, [broadcastSelection]);
 
   // Close overflow menu on outside click
   useEffect(() => {

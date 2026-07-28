@@ -77,7 +77,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `data` | core | Py | Tick capture (opt-in via `FLINTTRADE_TICK_CAPTURE`), append-only JSONL audit log, Practice-mode sandbox engine, tax/P&L routes, DuckDB (QuestDB client exists but is dormant) |
 | `historical` | core | Py | OHLCV downloader (OpenChart/yfinance), DuckDB/Parquet pipeline, expiry tracker |
 | `indicators` | core | Py | Pure-NumPy batch indicators (110 exports; no TA-Lib — the unused extra was removed) + pure-Python streaming classes (numba accelerates only 3 batch kernels, optional) + Pine Script convert |
-| `ticks` | core | Rust+PyO3 | Tick-level backtesting simulator (was `tick-engine`) — builds and imports, but currently has zero production consumers |
+| `ticks` | core | Rust+PyO3 | Tick-level backtesting simulator (was `tick-engine`) — optional accelerated engine for `flinttrade_backtest.signal_backtest` (pure-Python default, byte-equivalence tested) |
 | `design-system` | core | TS | Shared tokens/glass/cinematic CSS, charts module (Flint* components), brand, layer scale — the consumed surface; the UI-kit/forms/motion exports are unconsumed scaffolding |
 | `engine` | services | Py | 5-layer `SafetySystem`, `gate_order`, order router, scheduler, mode guard, sandbox executor, strategies |
 | `screener` | services | Py | Option chain, OI/PCR/max-pain, IV smile, futures quadrant, portfolio Greeks, RRG, FII/DII |
@@ -88,7 +88,7 @@ Each data shape enters through one path only. Duplicate it and you guarantee a b
 | `journal` | services | Py | Trade journal, trade logging, execution analytics, realised P&L |
 | `gateway` | integrations | Py | Native broker gateway — `BrokerAdapter` protocol, `BrokerRouter`, `BROKER_CATALOG` (35 brokers), encrypted credential vault, WS bridge, OpenAlgo bridge adapter |
 | `webhooks` | integrations | Py | Generic HMAC-signed custom webhooks + flow builder (the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed on 2026-07-26; a retired provider source now 404s) |
-| `terminal` | apps | TS/React | SPA: Dockview workspace, 69 widgets, routes — single source of truth for UI |
+| `terminal` | apps | TS/React | SPA: FlexLayout workspace, 71 widgets, FDC3 channel bus, routes — single source of truth for UI |
 | `desktop` | apps | TS/Electron | Sandboxed Electron 43 shell — verifies tools, builds managed local source, supervises its guardian, and loads only the selected loopback origin |
 | `site` | apps | TS/Next | Next.js + fumadocs public site, generated docs, docs MCP |
 
@@ -107,7 +107,7 @@ These cause real failures, not just style nits:
 - **British English** in docstrings, comments, and **user-visible strings** (behaviour, organise, colour, centred…). Code identifiers keep upstream spelling. Indian market terms always win: "expiry" (never "expiration"), "lakh", "crore", "scrip".
 - **Conventional Commits** are mandatory (`feat|fix|docs|test|chore|refactor|perf|ci(scope): …`). Scope is the package name or focus area.
 - **Never** `git add -A` / `git add .` — stage explicitly. Never commit `.env`, API keys, broker account names, fund amounts, order IDs, or personal hostnames/IPs. Never push without explicit permission, and never with `--no-verify` or `dangerouslySkipPermissions`.
-- Every new widget is a Dockview panel registered in [packages/apps/terminal/src/layout/widgetFactory.tsx](packages/apps/terminal/src/layout/widgetFactory.tsx) with a co-located `<Name>.test.tsx`.
+- Every new widget is a workspace (FlexLayout) panel registered in [packages/apps/terminal/src/layout/widgetFactory.tsx](packages/apps/terminal/src/layout/widgetFactory.tsx) with a co-located `<Name>.test.tsx`.
 - **Don't touch OpenAlgo's SQLite directly** — concurrent access corrupts it. Go through the REST API; `flinttrade_core.openalgo_client` is the only path in.
 - **Port 5100 is FlintTrade's backend, not OpenAlgo.** OpenAlgo uses 5000-5009. Don't propose consolidating.
 - **no-overscope**: personal-use open-source (operator == user == data principal). Don't add DPDPA / §65B / CERT-In / RBI / vendor-SEBI compliance ceremony. Only AGPL licence compliance + OpenAlgo-parity observability apply.

@@ -1,6 +1,6 @@
 /**
  * GreeksHeatmapWidget — "Greeks Matrix": ONE option-greeks dataset rendered
- * under two projections, chosen by the Dockview panel parameter
+ * under two projections, chosen by the workspace panel parameter
  * `params.projection`:
  *   • "grid"    (default) — the 2-D heat table: rows are expiries (near → far),
  *     columns are strikes (low → high), cell colour encodes the metric.
@@ -45,7 +45,7 @@
 import { useState, useMemo, useEffect, useCallback, memo } from "react";
 import { Grid3x3, AlertCircle, RotateCcw, ChevronUp, ChevronDown } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { IDockviewPanelProps } from "dockview";
+import type { WidgetProps } from "@/types/widgets";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -560,7 +560,7 @@ interface GreeksMatrixPanelParams {
 // Main widget
 // ---------------------------------------------------------------------------
 
-function GreeksHeatmapWidget(props: IDockviewPanelProps) {
+function GreeksHeatmapWidget(props: WidgetProps) {
   const panelParams = props.params as GreeksMatrixPanelParams | undefined;
 
   const track = useTrackBehavior();
@@ -639,13 +639,13 @@ function GreeksHeatmapWidget(props: IDockviewPanelProps) {
   const handleProjectionChange = useCallback((next: Projection) => {
     if (next === projection) return;
     setProjection(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), projection: next });
+    props.api.updateParameters({ projection: next });
   }, [panelParams, projection, props.api]);
 
   const handleMetricChange = useCallback((next: MetricKey) => {
     if (next === metric) return;
     setMetric(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), metric: next });
+    props.api.updateParameters({ metric: next });
   }, [metric, panelParams, props.api]);
 
   const handleResetView = useCallback(() => {

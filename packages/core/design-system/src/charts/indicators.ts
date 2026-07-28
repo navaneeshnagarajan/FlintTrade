@@ -30,6 +30,33 @@ export type FlintChartIndicatorKey =
   | "showKeltner"
   | "showVWMA"
   | "showOI"
+  // Server-computed tier — series fetched from POST /api/v1/indicators/compute
+  | "showKAMA"
+  | "showALMA"
+  | "showDonchian"
+  | "showChandelier"
+  | "showStochRSI"
+  | "showMFI"
+  | "showSqueeze"
+  | "showAO"
+  | "showTEMA"
+  | "showT3"
+  | "showTRIMA"
+  | "showMcGinley"
+  | "showMAEnvelopes"
+  | "showSTARC"
+  | "showCMF"
+  | "showROC"
+  | "showMomentum"
+  | "showTRIX"
+  | "showChop"
+  | "showHV"
+  | "showVortex"
+  | "showFisher"
+  | "showKST"
+  | "showCoppock"
+  | "showAD"
+  | "showPVT"
 
 export interface FlintChartIndicatorState {
   showEMA20: boolean
@@ -56,6 +83,32 @@ export interface FlintChartIndicatorState {
   showKeltner: boolean
   showVWMA: boolean
   showOI: boolean
+  showKAMA: boolean
+  showALMA: boolean
+  showDonchian: boolean
+  showChandelier: boolean
+  showStochRSI: boolean
+  showMFI: boolean
+  showSqueeze: boolean
+  showAO: boolean
+  showTEMA: boolean
+  showT3: boolean
+  showTRIMA: boolean
+  showMcGinley: boolean
+  showMAEnvelopes: boolean
+  showSTARC: boolean
+  showCMF: boolean
+  showROC: boolean
+  showMomentum: boolean
+  showTRIX: boolean
+  showChop: boolean
+  showHV: boolean
+  showVortex: boolean
+  showFisher: boolean
+  showKST: boolean
+  showCoppock: boolean
+  showAD: boolean
+  showPVT: boolean
 }
 
 export type FlintChartIndicatorPeriodKey =
@@ -77,6 +130,37 @@ export type FlintChartIndicatorPeriodKey =
   | "vwma"
   | "atr"
   | "adx"
+  | "kama"
+  | "alma"
+  | "donchian"
+  | "chand"
+  | "stochRsi"
+  | "mfi"
+  | "macdFast"
+  | "macdSlow"
+  | "macdSignalPeriod"
+  | "stochKPeriod"
+  | "stochDPeriod"
+  | "stochSmooth"
+  | "ichiTenkan"
+  | "ichiKijun"
+  | "ichiSenkouB"
+  | "psarAf"
+  | "psarMaxAf"
+  | "keltnerAtr"
+  | "tema"
+  | "t3"
+  | "trima"
+  | "mcginley"
+  | "mae"
+  | "cmf"
+  | "roc"
+  | "mom"
+  | "trix"
+  | "chop"
+  | "hv"
+  | "vortex"
+  | "fisher"
 
 export interface FlintChartIndicatorPeriods {
   ema1: number
@@ -97,6 +181,37 @@ export interface FlintChartIndicatorPeriods {
   vwma: number
   atr: number
   adx: number
+  kama: number
+  alma: number
+  donchian: number
+  chand: number
+  stochRsi: number
+  mfi: number
+  macdFast: number
+  macdSlow: number
+  macdSignalPeriod: number
+  stochKPeriod: number
+  stochDPeriod: number
+  stochSmooth: number
+  ichiTenkan: number
+  ichiKijun: number
+  ichiSenkouB: number
+  psarAf: number
+  psarMaxAf: number
+  keltnerAtr: number
+  tema: number
+  t3: number
+  trima: number
+  mcginley: number
+  mae: number
+  cmf: number
+  roc: number
+  mom: number
+  trix: number
+  chop: number
+  hv: number
+  vortex: number
+  fisher: number
 }
 
 export type FlintChartIndicatorColor = (typeof FLINT_CHART_INDICATOR_PALETTE)[number]
@@ -118,7 +233,7 @@ export interface FlintChartIndicatorDefinition {
   defaultColor: FlintChartIndicatorColor
   periods: readonly FlintChartIndicatorPeriodControl[]
   hasLineStyle: boolean
-  priceScaleId: "right" | "vol" | "rsi" | "macd" | "stoch" | "atr" | "adx" | "wr" | "cci" | "obv" | "oi"
+  priceScaleId: "right" | "vol" | "rsi" | "macd" | "stoch" | "atr" | "adx" | "wr" | "cci" | "obv" | "oi" | "stochrsi" | "mfi" | "squeeze" | "ao" | "cmf" | "roc" | "mom" | "trix" | "chop" | "hv" | "vortex" | "fisher" | "kst" | "coppock" | "ad" | "pvt"
 }
 
 export interface FlintChartIndicatorPaneSpec {
@@ -246,6 +361,43 @@ export type FlintChartIndicatorSeriesRefKey =
   | "keltnerMiddle"
   | "keltnerLower"
   | "vwma"
+  | "kama"
+  | "alma"
+  | "donUpper"
+  | "donMiddle"
+  | "donLower"
+  | "chandLong"
+  | "chandShort"
+  | "stochRsiK"
+  | "stochRsiD"
+  | "mfi"
+  | "squeezeHist"
+  | "aoHist"
+  | "tema"
+  | "t3"
+  | "trima"
+  | "mcginley"
+  | "maeUpper"
+  | "maeMiddle"
+  | "maeLower"
+  | "starcUpper"
+  | "starcMiddle"
+  | "starcLower"
+  | "cmf"
+  | "roc"
+  | "mom"
+  | "trix"
+  | "chop"
+  | "hv"
+  | "vortexPlus"
+  | "vortexMinus"
+  | "fisher"
+  | "fisherSignal"
+  | "kstLine"
+  | "kstSignal"
+  | "coppock"
+  | "ad"
+  | "pvt"
 
 interface FlintChartIndicatorSeriesRenderSpecBase {
   key: string
@@ -357,6 +509,32 @@ export const FLINT_CHART_DEFAULT_INDICATORS: FlintChartIndicatorState = {
   showKeltner: false,
   showVWMA: false,
   showOI: false,
+  showKAMA: false,
+  showALMA: false,
+  showDonchian: false,
+  showChandelier: false,
+  showStochRSI: false,
+  showMFI: false,
+  showSqueeze: false,
+  showAO: false,
+  showTEMA: false,
+  showT3: false,
+  showTRIMA: false,
+  showMcGinley: false,
+  showMAEnvelopes: false,
+  showSTARC: false,
+  showCMF: false,
+  showROC: false,
+  showMomentum: false,
+  showTRIX: false,
+  showChop: false,
+  showHV: false,
+  showVortex: false,
+  showFisher: false,
+  showKST: false,
+  showCoppock: false,
+  showAD: false,
+  showPVT: false,
 }
 
 export const FLINT_CHART_DEFAULT_PERIODS: FlintChartIndicatorPeriods = {
@@ -378,6 +556,37 @@ export const FLINT_CHART_DEFAULT_PERIODS: FlintChartIndicatorPeriods = {
   vwma: 20,
   atr: 14,
   adx: 14,
+  kama: 10,
+  alma: 9,
+  donchian: 20,
+  chand: 22,
+  stochRsi: 14,
+  mfi: 14,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignalPeriod: 9,
+  stochKPeriod: 14,
+  stochDPeriod: 3,
+  stochSmooth: 3,
+  ichiTenkan: 9,
+  ichiKijun: 26,
+  ichiSenkouB: 52,
+  psarAf: 0.02,
+  psarMaxAf: 0.2,
+  keltnerAtr: 14,
+  tema: 20,
+  t3: 5,
+  trima: 20,
+  mcginley: 14,
+  mae: 20,
+  cmf: 20,
+  roc: 12,
+  mom: 10,
+  trix: 18,
+  chop: 14,
+  hv: 10,
+  vortex: 14,
+  fisher: 9,
 }
 
 export const FLINT_CHART_INDICATOR_PALETTE = [
@@ -471,6 +680,46 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
     priceScaleId: "right",
   },
   {
+    key: "showKAMA",
+    name: "KAMA",
+    description: "Kaufman Adaptive Moving Average - adapts smoothing to market noise. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#e879f9",
+    periods: [{ field: "kama", label: "Period", min: 2, max: 200, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showALMA",
+    name: "ALMA",
+    description: "Arnaud Legoux Moving Average - Gaussian-weighted, low lag. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#f59e0b",
+    periods: [{ field: "alma", label: "Period", min: 2, max: 200, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showDonchian",
+    name: "Donchian Channels",
+    description: "Highest-high / lowest-low channel with midline. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#38bdf8",
+    periods: [{ field: "donchian", label: "Period", min: 2, max: 200, step: 1 }],
+    hasLineStyle: false,
+    priceScaleId: "right",
+  },
+  {
+    key: "showChandelier",
+    name: "Chandelier Exit",
+    description: "ATR-based trailing stop lines for long and short. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#ec4899",
+    periods: [{ field: "chand", label: "Period", min: 2, max: 100, step: 1 }],
+    hasLineStyle: false,
+    priceScaleId: "right",
+  },
+  {
     key: "showBB",
     name: "Bollinger Bands",
     description: "Volatility envelope: SMA +/- N standard deviations.",
@@ -492,6 +741,7 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
     periods: [
       { field: "keltner", label: "Period", min: 2, max: 200, step: 1 },
       { field: "keltnerMult", label: "Mult", min: 0.5, max: 5, step: 0.1 },
+      { field: "keltnerAtr", label: "ATR period", min: 2, max: 100, step: 1 },
     ],
     hasLineStyle: true,
     priceScaleId: "right",
@@ -525,7 +775,11 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
     description: "Multi-line Japanese trend and support/resistance system.",
     category: "Overlays",
     defaultColor: "#22c55e",
-    periods: [],
+    periods: [
+      { field: "ichiTenkan", label: "Tenkan", min: 2, max: 100, step: 1 },
+      { field: "ichiKijun", label: "Kijun", min: 2, max: 200, step: 1 },
+      { field: "ichiSenkouB", label: "Senkou B", min: 2, max: 300, step: 1 },
+    ],
     hasLineStyle: false,
     priceScaleId: "right",
   },
@@ -545,7 +799,10 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
     description: "Stop-and-reverse trend-following dots.",
     category: "Overlays",
     defaultColor: "#fbbf24",
-    periods: [],
+    periods: [
+      { field: "psarAf", label: "AF step", min: 0.001, max: 0.2, step: 0.005 },
+      { field: "psarMaxAf", label: "AF max", min: 0.05, max: 1, step: 0.05 },
+    ],
     hasLineStyle: false,
     priceScaleId: "right",
   },
@@ -592,20 +849,28 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
   {
     key: "showMACD",
     name: "MACD",
-    description: "Moving Average Convergence Divergence (12, 26, 9).",
+    description: "Moving Average Convergence Divergence.",
     category: "Oscillators",
     defaultColor: "#3b82f6",
-    periods: [],
+    periods: [
+      { field: "macdFast", label: "Fast", min: 2, max: 100, step: 1 },
+      { field: "macdSlow", label: "Slow", min: 2, max: 200, step: 1 },
+      { field: "macdSignalPeriod", label: "Signal", min: 2, max: 100, step: 1 },
+    ],
     hasLineStyle: false,
     priceScaleId: "macd",
   },
   {
     key: "showStoch",
     name: "Stochastic",
-    description: "Stochastic oscillator K and D lines (14, 3, 3).",
+    description: "Stochastic oscillator K and D lines.",
     category: "Oscillators",
     defaultColor: "#f97316",
-    periods: [],
+    periods: [
+      { field: "stochKPeriod", label: "%K", min: 2, max: 100, step: 1 },
+      { field: "stochDPeriod", label: "%D", min: 1, max: 50, step: 1 },
+      { field: "stochSmooth", label: "Smooth", min: 1, max: 50, step: 1 },
+    ],
     hasLineStyle: true,
     priceScaleId: "stoch",
   },
@@ -649,6 +914,226 @@ export const FLINT_CHART_INDICATOR_DEFINITIONS: readonly FlintChartIndicatorDefi
     hasLineStyle: true,
     priceScaleId: "cci",
   },
+  {
+    key: "showStochRSI",
+    name: "Stoch RSI",
+    description: "Stochastic oscillator applied to RSI - %K and %D lines. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#06b6d4",
+    periods: [{ field: "stochRsi", label: "RSI period", min: 2, max: 100, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "stochrsi",
+  },
+  {
+    key: "showMFI",
+    name: "MFI",
+    description: "Money Flow Index - volume-weighted RSI from 0 to 100. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#84cc16",
+    periods: [{ field: "mfi", label: "Period", min: 2, max: 100, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "mfi",
+  },
+  {
+    key: "showSqueeze",
+    name: "Squeeze Momentum",
+    description: "Bollinger-inside-Keltner squeeze with momentum histogram. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#94a3b8",
+    periods: [],
+    hasLineStyle: false,
+    priceScaleId: "squeeze",
+  },
+  {
+    key: "showAO",
+    name: "Awesome Oscillator",
+    description: "Median-price momentum histogram (5/34). Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#fb923c",
+    periods: [],
+    hasLineStyle: false,
+    priceScaleId: "ao",
+  },
+  {
+    key: "showTEMA",
+    name: "TEMA",
+    description: "Triple Exponential Moving Average - further lag reduction. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#06b6d4",
+    periods: [{ field: "tema", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showT3",
+    name: "T3",
+    description: "Tillson T3 moving average - smooth and responsive. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#a855f7",
+    periods: [{ field: "t3", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showTRIMA",
+    name: "TRIMA",
+    description: "Triangular Moving Average - double-smoothed midpoint weighting. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#84cc16",
+    periods: [{ field: "trima", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showMcGinley",
+    name: "McGinley Dynamic",
+    description: "Self-adjusting moving average that hugs price. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#f97316",
+    periods: [{ field: "mcginley", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "right",
+  },
+  {
+    key: "showMAEnvelopes",
+    name: "MA Envelopes",
+    description: "Percentage envelopes around a moving average. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#38bdf8",
+    periods: [{ field: "mae", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: false,
+    priceScaleId: "right",
+  },
+  {
+    key: "showSTARC",
+    name: "STARC Bands",
+    description: "Stoller Average Range Channels - ATR bands around an SMA. Computed server-side.",
+    category: "Overlays",
+    defaultColor: "#ec4899",
+    periods: [],
+    hasLineStyle: false,
+    priceScaleId: "right",
+  },
+  {
+    key: "showCMF",
+    name: "CMF",
+    description: "Chaikin Money Flow - volume-weighted accumulation from -1 to 1. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#22c55e",
+    periods: [{ field: "cmf", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "cmf",
+  },
+  {
+    key: "showROC",
+    name: "ROC",
+    description: "Rate of Change - percentage momentum. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#3b82f6",
+    periods: [{ field: "roc", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "roc",
+  },
+  {
+    key: "showMomentum",
+    name: "Momentum",
+    description: "Raw price momentum over N bars. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#f59e0b",
+    periods: [{ field: "mom", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "mom",
+  },
+  {
+    key: "showTRIX",
+    name: "TRIX",
+    description: "Triple-smoothed EMA rate of change. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#14b8a6",
+    periods: [{ field: "trix", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "trix",
+  },
+  {
+    key: "showChop",
+    name: "Choppiness",
+    description: "Choppiness Index - trending versus ranging from 0 to 100. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#94a3b8",
+    periods: [{ field: "chop", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "chop",
+  },
+  {
+    key: "showHV",
+    name: "Historical Volatility",
+    description: "Annualised close-to-close volatility. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#6366f1",
+    periods: [{ field: "hv", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: true,
+    priceScaleId: "hv",
+  },
+  {
+    key: "showVortex",
+    name: "Vortex",
+    description: "Vortex Indicator VI+ and VI- trend lines. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#22c55e",
+    periods: [{ field: "vortex", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: false,
+    priceScaleId: "vortex",
+  },
+  {
+    key: "showFisher",
+    name: "Fisher Transform",
+    description: "Gaussian price transform with signal line. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#e879f9",
+    periods: [{ field: "fisher", label: "Period", min: 2, max: 300, step: 1 }],
+    hasLineStyle: false,
+    priceScaleId: "fisher",
+  },
+  {
+    key: "showKST",
+    name: "KST",
+    description: "Know Sure Thing - weighted multi-ROC momentum with signal. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#f97316",
+    periods: [],
+    hasLineStyle: false,
+    priceScaleId: "kst",
+  },
+  {
+    key: "showCoppock",
+    name: "Coppock Curve",
+    description: "Long-horizon momentum bottoming indicator. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#ef4444",
+    periods: [],
+    hasLineStyle: true,
+    priceScaleId: "coppock",
+  },
+  {
+    key: "showAD",
+    name: "Accumulation/Distribution",
+    description: "Cumulative volume flow line. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#84cc16",
+    periods: [],
+    hasLineStyle: true,
+    priceScaleId: "ad",
+  },
+  {
+    key: "showPVT",
+    name: "PVT",
+    description: "Price Volume Trend - cumulative volume-weighted change. Computed server-side.",
+    category: "Oscillators",
+    defaultColor: "#fbbf24",
+    periods: [],
+    hasLineStyle: true,
+    priceScaleId: "pvt",
+  },
 ] as const
 
 export const FLINT_CHART_INDICATOR_DEFAULT_COLORS: Readonly<Record<FlintChartIndicatorKey, FlintChartIndicatorColor>> =
@@ -672,6 +1157,22 @@ export const FLINT_CHART_INDICATOR_PANE_SPECS: Readonly<Record<string, FlintChar
   cci: { scaleId: "cci", scaleMargins: { top: 0.7, bottom: 0.05 } },
   obv: { scaleId: "obv", scaleMargins: { top: 0.7, bottom: 0.05 } },
   oi: { scaleId: "oi", scaleMargins: { top: 0.75, bottom: 0 }, borderVisible: false },
+  stochrsi: { scaleId: "stochrsi", scaleMargins: { top: 0.65, bottom: 0.05 } },
+  mfi: { scaleId: "mfi", scaleMargins: { top: 0.75, bottom: 0.05 } },
+  squeeze: { scaleId: "squeeze", scaleMargins: { top: 0.65, bottom: 0.05 } },
+  ao: { scaleId: "ao", scaleMargins: { top: 0.65, bottom: 0.05 } },
+  cmf: { scaleId: "cmf", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  roc: { scaleId: "roc", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  mom: { scaleId: "mom", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  trix: { scaleId: "trix", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  chop: { scaleId: "chop", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  hv: { scaleId: "hv", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  vortex: { scaleId: "vortex", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  fisher: { scaleId: "fisher", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  kst: { scaleId: "kst", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  coppock: { scaleId: "coppock", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  ad: { scaleId: "ad", scaleMargins: { top: 0.7, bottom: 0.05 } },
+  pvt: { scaleId: "pvt", scaleMargins: { top: 0.7, bottom: 0.05 } },
 }
 
 export const FLINT_CHART_INDICATOR_PANE_SIZE_OPTIONS = ["compact", "balanced", "expanded"] as const
@@ -708,6 +1209,22 @@ export const FLINT_CHART_INDICATOR_PANE_LABELS: Readonly<Record<string, string>>
   cci: "CCI",
   obv: "OBV",
   oi: "OI",
+  stochrsi: "Stoch RSI",
+  mfi: "MFI",
+  squeeze: "Squeeze",
+  ao: "Awesome Osc",
+  cmf: "CMF",
+  roc: "ROC",
+  mom: "Momentum",
+  trix: "TRIX",
+  chop: "Choppiness",
+  hv: "Hist Vol",
+  vortex: "Vortex",
+  fisher: "Fisher",
+  kst: "KST",
+  coppock: "Coppock",
+  ad: "A/D",
+  pvt: "PVT",
 }
 
 export const FLINT_CHART_INDICATOR_DEFAULT_PANE_SIZES: Readonly<FlintChartIndicatorPaneSizes> =
@@ -1164,6 +1681,97 @@ export function createFlintChartIndicatorSeriesRenderPlan({
   }
   if (normalisedIndicators.showVWMA) {
     addLineSeries("showVWMA", "vwma", keyedLineOptions("showVWMA", `VWMA${normalisedPeriods.vwma}`))
+  }
+
+  // --- Server-computed tier (series data arrives from the backend) ---
+  if (normalisedIndicators.showKAMA) {
+    addLineSeries("showKAMA", "kama", keyedLineOptions("showKAMA", `KAMA${normalisedPeriods.kama}`))
+  }
+  if (normalisedIndicators.showALMA) {
+    addLineSeries("showALMA", "alma", keyedLineOptions("showALMA", `ALMA${normalisedPeriods.alma}`))
+  }
+  if (normalisedIndicators.showDonchian) {
+    addLineSeries("showDonchian", "donUpper", { color: "rgba(56,189,248,0.5)", lineStyle: 2, priceScaleId: "right", title: "DC Upper" })
+    addLineSeries("showDonchian", "donMiddle", { color: "#38bdf8", priceScaleId: "right", title: "DC Mid" })
+    addLineSeries("showDonchian", "donLower", { color: "rgba(56,189,248,0.5)", lineStyle: 2, priceScaleId: "right", title: "DC Lower" })
+  }
+  if (normalisedIndicators.showChandelier) {
+    addLineSeries("showChandelier", "chandLong", { color: "#22c55e", lineStyle: 2, priceScaleId: "right", title: "CE Long" })
+    addLineSeries("showChandelier", "chandShort", { color: "#ef4444", lineStyle: 2, priceScaleId: "right", title: "CE Short" })
+  }
+  if (normalisedIndicators.showStochRSI) {
+    addLineSeries("showStochRSI", "stochRsiK", keyedLineOptions("showStochRSI", `StochRSI %K(${normalisedPeriods.stochRsi})`, { lastValueVisible: true }))
+    addLineSeries("showStochRSI", "stochRsiD", { color: "#f97316", priceScaleId: "stochrsi", title: "StochRSI %D" })
+  }
+  if (normalisedIndicators.showMFI) {
+    addLineSeries("showMFI", "mfi", keyedLineOptions("showMFI", `MFI(${normalisedPeriods.mfi})`, { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showSqueeze) {
+    addHistogramSeries("showSqueeze", "squeezeHist", { priceScaleId: "squeeze", title: "Squeeze" })
+  }
+  if (normalisedIndicators.showAO) {
+    addHistogramSeries("showAO", "aoHist", { priceScaleId: "ao", title: "AO" })
+  }
+  if (normalisedIndicators.showTEMA) {
+    addLineSeries("showTEMA", "tema", keyedLineOptions("showTEMA", "TEMA"))
+  }
+  if (normalisedIndicators.showT3) {
+    addLineSeries("showT3", "t3", keyedLineOptions("showT3", "T3"))
+  }
+  if (normalisedIndicators.showTRIMA) {
+    addLineSeries("showTRIMA", "trima", keyedLineOptions("showTRIMA", "TRIMA"))
+  }
+  if (normalisedIndicators.showMcGinley) {
+    addLineSeries("showMcGinley", "mcginley", keyedLineOptions("showMcGinley", "McGinley Dynamic"))
+  }
+  if (normalisedIndicators.showMAEnvelopes) {
+    addLineSeries("showMAEnvelopes", "maeUpper", { color: "rgba(56,189,248,0.5)", lineStyle: 2, priceScaleId: "right", title: "Env Upper" })
+    addLineSeries("showMAEnvelopes", "maeMiddle", { color: "#38bdf8", priceScaleId: "right", title: "Env Mid" })
+    addLineSeries("showMAEnvelopes", "maeLower", { color: "rgba(56,189,248,0.5)", lineStyle: 2, priceScaleId: "right", title: "Env Lower" })
+  }
+  if (normalisedIndicators.showSTARC) {
+    addLineSeries("showSTARC", "starcUpper", { color: "rgba(236,72,153,0.5)", lineStyle: 2, priceScaleId: "right", title: "STARC Upper" })
+    addLineSeries("showSTARC", "starcMiddle", { color: "#ec4899", priceScaleId: "right", title: "STARC Mid" })
+    addLineSeries("showSTARC", "starcLower", { color: "rgba(236,72,153,0.5)", lineStyle: 2, priceScaleId: "right", title: "STARC Lower" })
+  }
+  if (normalisedIndicators.showCMF) {
+    addLineSeries("showCMF", "cmf", keyedLineOptions("showCMF", "CMF", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showROC) {
+    addLineSeries("showROC", "roc", keyedLineOptions("showROC", "ROC", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showMomentum) {
+    addLineSeries("showMomentum", "mom", keyedLineOptions("showMomentum", "Momentum", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showTRIX) {
+    addLineSeries("showTRIX", "trix", keyedLineOptions("showTRIX", "TRIX", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showChop) {
+    addLineSeries("showChop", "chop", keyedLineOptions("showChop", "Choppiness", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showHV) {
+    addLineSeries("showHV", "hv", keyedLineOptions("showHV", "Historical Volatility", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showVortex) {
+    addLineSeries("showVortex", "vortexPlus", keyedLineOptions("showVortex", "VI+", { lastValueVisible: true }))
+    addLineSeries("showVortex", "vortexMinus", { color: "#ef4444", priceScaleId: "vortex", title: "VI-" })
+  }
+  if (normalisedIndicators.showFisher) {
+    addLineSeries("showFisher", "fisher", keyedLineOptions("showFisher", "Fisher", { lastValueVisible: true }))
+    addLineSeries("showFisher", "fisherSignal", { color: "#f97316", priceScaleId: "fisher", title: "Fisher Signal" })
+  }
+  if (normalisedIndicators.showKST) {
+    addLineSeries("showKST", "kstLine", keyedLineOptions("showKST", "KST", { lastValueVisible: true }))
+    addLineSeries("showKST", "kstSignal", { color: "#94a3b8", priceScaleId: "kst", title: "KST Signal" })
+  }
+  if (normalisedIndicators.showCoppock) {
+    addLineSeries("showCoppock", "coppock", keyedLineOptions("showCoppock", "Coppock Curve", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showAD) {
+    addLineSeries("showAD", "ad", keyedLineOptions("showAD", "Accumulation/Distribution", { lastValueVisible: true }))
+  }
+  if (normalisedIndicators.showPVT) {
+    addLineSeries("showPVT", "pvt", keyedLineOptions("showPVT", "PVT", { lastValueVisible: true }))
   }
 
   return { lifecyclePlan, paneLayoutPlan, lineSeries, histogramSeries }

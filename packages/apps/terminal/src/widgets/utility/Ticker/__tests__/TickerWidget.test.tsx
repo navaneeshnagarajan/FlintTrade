@@ -13,13 +13,14 @@ import { render, screen } from "@testing-library/react";
 // ---------------------------------------------------------------------------
 
 // Mock Jotai tickAtomFamily — returns null tick atom (no WS data in test)
-vi.mock("@/atoms/marketAtoms", () => ({
+vi.mock("@/atoms/marketAtoms", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/atoms/marketAtoms")>()),
   tickAtomFamily: () => ({ init: null }),
 }));
 
-vi.mock("jotai", () => ({
+vi.mock("jotai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("jotai")>()),
   useAtomValue: () => null,
-  atom: (v: unknown) => ({ init: v }),
 }));
 
 // ---------------------------------------------------------------------------

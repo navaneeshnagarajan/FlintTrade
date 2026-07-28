@@ -2,7 +2,9 @@
  * WatchlistWidget.test.tsx
  *
  * Tests for the multi-tab Watchlist widget.
- * Covers: rendering, default symbols, tab switching, add tab, empty state.
+ * Covers: rendering, default symbols, tab switching, add tab, empty state,
+ * and the FDC3 channel bus (row-click broadcasts, joined-to-none silence,
+ * quick-trade CreateOrder intent).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -33,15 +35,6 @@ vi.mock("@/lib/market", () => ({
   isMarketHours: () => false,
 }));
 
-vi.mock("jotai", () => ({
-  useSetAtom: () => vi.fn(),
-  atom:       (v: unknown) => v,
-}));
-
-vi.mock("@/atoms/marketAtoms", () => ({
-  selectedSymbolAtom: {},
-}));
-
 // Mock localStorage
 const mockLocalStorage: Record<string, string> = {};
 vi.stubGlobal("localStorage", {
@@ -55,10 +48,44 @@ vi.stubGlobal("localStorage", {
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
+import { createStore, Provider } from "jotai";
 import WatchlistWidget from "../WatchlistWidget";
 import { getMultiQuotes } from "@/services/api";
+import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import {
+  channelInstrumentAtoms,
+  DEFAULT_CHANNEL_ID,
+  subscribeChannelInstrument,
+  USER_CHANNELS,
+} from "@/services/fdc3/channels";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 const mockGetMultiQuotes = vi.mocked(getMultiQuotes);
+
+// ---------------------------------------------------------------------------
+// Render helper — real jotai store so channel broadcasts are observable
+// ---------------------------------------------------------------------------
+
+function renderWidget(params?: Record<string, unknown>) {
+  const store = createStore();
+  const props = makeWidgetPanelProps({ params: params ?? {} });
+  const view = render(
+    <Provider store={store}>
+      <WatchlistWidget {...props} />
+    </Provider>,
+  );
+  return { ...view, store, props };
+}
+
+/** Capture flinttrade:addWidget event details for the current test. */
+function captureAddWidget(): { events: Array<Record<string, unknown>>; stop: () => void } {
+  const events: Array<Record<string, unknown>> = [];
+  const listener = ((e: Event) => {
+    events.push((e as CustomEvent<Record<string, unknown>>).detail);
+  }) as EventListener;
+  window.addEventListener("flinttrade:addWidget", listener);
+  return { events, stop: () => window.removeEventListener("flinttrade:addWidget", listener) };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -77,17 +104,17 @@ describe("WatchlistWidget", () => {
   // --- Existing tests preserved ---
 
   it("renders without crashing", () => {
-    const { container } = render(<WatchlistWidget />);
+    const { container } = renderWidget();
     expect(container.firstChild).toBeInTheDocument();
   });
 
   it("shows the Watchlist heading", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getByText("Watchlist")).toBeInTheDocument();
   });
 
   it("shows default symbols (NIFTY, BANKNIFTY, SBIN, RELIANCE, HDFCBANK)", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getByText("NIFTY")).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
     expect(screen.getByText("SBIN")).toBeInTheDocument();
@@ -96,13 +123,13 @@ describe("WatchlistWidget", () => {
   });
 
   it("shows symbol count badge", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     // Default watchlist has 5 symbols
     expect(screen.getByText("5")).toBeInTheDocument();
   });
 
   it("has an Add symbol button", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getByLabelText("Add symbol")).toBeInTheDocument();
   });
 
@@ -110,25 +137,25 @@ describe("WatchlistWidget", () => {
     mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
       { id: "t1", name: "Watchlist 1", symbols: [] },
     ]);
-    render(<WatchlistWidget />);
+    renderWidget();
     const addButtons = screen.getAllByLabelText("Add symbol");
     expect(addButtons.length).toBeGreaterThanOrEqual(1);
   });
 
-  // --- New multi-tab tests ---
+  // --- Multi-tab tests ---
 
   it("renders the default tab pill labelled 'Watchlist 1'", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getAllByRole("tab", { name: /watchlist 1/i })[0]).toBeInTheDocument();
   });
 
   it("shows the 'Add watchlist tab' button", () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getByLabelText("Add watchlist tab")).toBeInTheDocument();
   });
 
   it("adds a new tab when '+' tab button is clicked", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     const addTabBtn = screen.getByLabelText("Add watchlist tab");
     await userEvent.click(addTabBtn);
     expect(screen.getAllByRole("tab", { name: /watchlist 2/i })[0]).toBeInTheDocument();
@@ -140,7 +167,7 @@ describe("WatchlistWidget", () => {
       { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "NIFTY", exchange: "NSE_INDEX" }] },
       { id: "t2", name: "My Options",  symbols: [{ symbol: "BANKNIFTY", exchange: "NSE_INDEX" }] },
     ]);
-    render(<WatchlistWidget />);
+    renderWidget();
 
     // Default tab 1 is active — NIFTY visible
     expect(screen.getByText("NIFTY")).toBeInTheDocument();
@@ -158,7 +185,7 @@ describe("WatchlistWidget", () => {
       { id: "t1", name: "Tab A", symbols: [{ symbol: "SBIN",    exchange: "NSE" }] },
       { id: "t2", name: "Tab B", symbols: [{ symbol: "HDFCBANK", exchange: "NSE" }] },
     ]);
-    render(<WatchlistWidget />);
+    renderWidget();
 
     // Tab A active by default — SBIN visible, HDFCBANK not in symbol list
     expect(screen.getByText("SBIN")).toBeInTheDocument();
@@ -178,13 +205,13 @@ describe("WatchlistWidget", () => {
       symbols: [],
     }));
     mockLocalStorage["flinttrade:watchlists"] = JSON.stringify(fiveTabs);
-    render(<WatchlistWidget />);
+    renderWidget();
     // "Add watchlist tab" button should not be rendered
     expect(screen.queryByLabelText("Add watchlist tab")).not.toBeInTheDocument();
   });
 
   it("tab context menu appears on right-click of a tab", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     const tab = screen.getAllByRole("tab", { name: /watchlist 1/i })[0];
     fireEvent.contextMenu(tab);
     expect(screen.getByRole("menuitem", { name: /rename/i })).toBeInTheDocument();
@@ -197,7 +224,7 @@ describe("WatchlistWidget", () => {
       { symbol: "TCS",      exchange: "NSE" },
     ];
     mockLocalStorage["flinttrade:watchlist"] = JSON.stringify(legacy);
-    render(<WatchlistWidget />);
+    renderWidget();
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
     expect(screen.getByText("TCS")).toBeInTheDocument();
   });
@@ -205,7 +232,7 @@ describe("WatchlistWidget", () => {
   // ── Interaction tests ────────────────────────────────────────────────────
 
   it("opens the symbol search dialog when Add symbol button is clicked", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     const addBtn = screen.getByLabelText("Add symbol");
     await userEvent.click(addBtn);
     // SearchDialog renders with role="dialog" and aria-label="Search symbols"
@@ -214,7 +241,7 @@ describe("WatchlistWidget", () => {
   });
 
   it("typing in the symbol search input updates the input value", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     const addBtn = screen.getByLabelText("Add symbol");
     await userEvent.click(addBtn);
 
@@ -224,7 +251,7 @@ describe("WatchlistWidget", () => {
   });
 
   it("clicking Close search button dismisses the search dialog", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
     await userEvent.click(screen.getByLabelText("Add symbol"));
     expect(screen.getByRole("dialog", { name: /search symbols/i })).toBeInTheDocument();
 
@@ -242,7 +269,7 @@ describe("WatchlistWidget", () => {
         { symbol: "RELIANCE", exchange: "NSE" },
       ]},
     ]);
-    render(<WatchlistWidget />);
+    renderWidget();
 
     // Right-click the NIFTY symbol row button
     const niftyRow = screen.getByRole("button", { name: "NIFTY" });
@@ -254,7 +281,7 @@ describe("WatchlistWidget", () => {
   });
 
   it("opens the column manager and persists optional columns", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
 
     await userEvent.click(screen.getByLabelText("More options"));
     await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
@@ -271,7 +298,7 @@ describe("WatchlistWidget", () => {
   });
 
   it("formula selector enables the formula column", async () => {
-    render(<WatchlistWidget />);
+    renderWidget();
 
     await userEvent.click(screen.getByLabelText("More options"));
     await userEvent.click(screen.getByRole("menuitem", { name: /manage columns/i }));
@@ -312,10 +339,105 @@ describe("WatchlistWidget", () => {
       },
     ]);
 
-    render(<WatchlistWidget />);
+    renderWidget();
 
     expect(await screen.findByText("Range %")).toBeInTheDocument();
     expect(screen.getByText("+20.00%")).toBeInTheDocument();
     expect(screen.getByText("1.2L")).toBeInTheDocument();
+  });
+
+  // ── FDC3 channel bus ─────────────────────────────────────────────────────
+
+  it("row click broadcasts on the default (red) channel and legacy readers follow", async () => {
+    const { store } = renderWidget();
+
+    // A follower subscribed to the widget's channel sees the broadcast.
+    const seen: Array<unknown> = [];
+    const unsubscribe = subscribeChannelInstrument(store, DEFAULT_CHANNEL_ID, (i) => seen.push(i));
+
+    await userEvent.click(screen.getByRole("button", { name: "NIFTY" }));
+
+    expect(seen).toEqual([{ symbol: "NIFTY", exchange: "NSE_INDEX" }]);
+    expect(store.get(channelInstrumentAtoms[DEFAULT_CHANNEL_ID]))
+      .toEqual({ symbol: "NIFTY", exchange: "NSE_INDEX" });
+    // The red channel aliases selectedSymbolAtom — unmigrated consumers
+    // observe exactly what setSelectedSymbol writers used to set.
+    expect(store.get(selectedSymbolAtom)).toEqual({ symbol: "NIFTY", exchange: "NSE_INDEX" });
+    unsubscribe();
+  });
+
+  it("row click broadcasts on the widget's OWN channel from panel params", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "SBIN", exchange: "NSE" }] },
+    ]);
+    const { store } = renderWidget({ channel: "fdc3.channel.green" });
+
+    await userEvent.click(screen.getByRole("button", { name: "SBIN" }));
+
+    expect(store.get(channelInstrumentAtoms["fdc3.channel.green"]))
+      .toEqual({ symbol: "SBIN", exchange: "NSE" });
+    // Nothing leaks onto the default (red) channel.
+    expect(store.get(channelInstrumentAtoms[DEFAULT_CHANNEL_ID])).toBeNull();
+  });
+
+  it("joined to no channel (channel: 'none') broadcasts nowhere", async () => {
+    const { store } = renderWidget({ channel: "none" });
+
+    await userEvent.click(screen.getByRole("button", { name: "NIFTY" }));
+
+    for (const meta of USER_CHANNELS) {
+      expect(store.get(channelInstrumentAtoms[meta.id])).toBeNull();
+    }
+  });
+
+  it("quick trade raises CreateOrder with the same addWidget detail as before", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "SBIN", exchange: "NSE" }] },
+    ]);
+    const { events, stop } = captureAddWidget();
+    const { store } = renderWidget();
+
+    fireEvent.click(screen.getByLabelText("Buy SBIN"));
+    fireEvent.click(screen.getByLabelText("Sell SBIN"));
+
+    expect(events).toEqual([
+      {
+        widgetId: "orderpad",
+        title: "Order — SBIN",
+        props: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+      },
+      {
+        widgetId: "orderpad",
+        title: "Order — SBIN",
+        props: { symbol: "SBIN", exchange: "NSE", action: "SELL" },
+      },
+    ]);
+    // Quick trade also focuses the instrument on the widget's channel.
+    expect(store.get(channelInstrumentAtoms[DEFAULT_CHANNEL_ID]))
+      .toEqual({ symbol: "SBIN", exchange: "NSE" });
+    stop();
+  });
+
+  it("quick trade still opens the order ticket when joined to no channel", async () => {
+    mockLocalStorage["flinttrade:watchlists"] = JSON.stringify([
+      { id: "t1", name: "Watchlist 1", symbols: [{ symbol: "SBIN", exchange: "NSE" }] },
+    ]);
+    const { events, stop } = captureAddWidget();
+    const { store } = renderWidget({ channel: "none" });
+
+    fireEvent.click(screen.getByLabelText("Buy SBIN"));
+
+    expect(events).toEqual([
+      {
+        widgetId: "orderpad",
+        title: "Order — SBIN",
+        props: { symbol: "SBIN", exchange: "NSE", action: "BUY" },
+      },
+    ]);
+    // …but the selection broadcast goes nowhere.
+    for (const meta of USER_CHANNELS) {
+      expect(store.get(channelInstrumentAtoms[meta.id])).toBeNull();
+    }
+    stop();
   });
 });

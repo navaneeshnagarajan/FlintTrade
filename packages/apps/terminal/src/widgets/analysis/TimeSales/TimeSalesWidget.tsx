@@ -4,9 +4,10 @@
  * Streams inferred trade prints for the selected instrument: the OpenAlgo
  * WebSocket carries quote ticks (LTP + cumulative volume), not per-trade data,
  * so each print is derived from a tick (size = volume delta, aggressor side by
- * the tick rule) and the header says so honestly. Follows the workspace's
- * selected symbol (watchlist click) with a local selector fallback; sample tape
- * + preview teaser when disconnected.
+ * the tick rule) and the header says so honestly. Follows the instrument
+ * broadcast on its FDC3 user channel (red by default — the watchlist click)
+ * with a local selector fallback; sample tape + preview teaser when
+ * disconnected.
  *
  * Absorbed the retired Market Microstructure widget. That widget showed the
  * right statistics over invented data — it generated its own ticks with
@@ -20,14 +21,16 @@
  *   `view` — "tape" (default: statistics header above the print table) or
  *   "stats" (statistics only, for a narrow panel). The retired
  *   `microstructure` id maps to "stats".
+ *   `channel` — FDC3 user-channel membership (services/fdc3/channels.ts).
+ *   Absent means the default red channel; "none" leaves the widget joined
+ *   to nothing, following only its own selector.
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { useAtomValue } from "jotai";
-import type { IDockviewPanelProps } from "dockview-react";
+import type { WidgetProps } from "@/types/widgets";
 import { ChevronDown, ChevronRight, ClipboardList, Microscope } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
-import { selectedSymbolAtom } from "@/atoms/marketAtoms";
+import { useChannelInstrument, useChannelMembership } from "@/services/fdc3/hooks";
 import { useTape } from "./useTape";
 import { SAMPLE_TAPE, SAMPLE_TAPE_NOW } from "./sampleData";
 import { FeatureTeaser } from "@/components/teasers";
@@ -62,7 +65,7 @@ const VIEW_LABELS: Record<TapeView, string> = {
   stats: "Statistics-only view",
 };
 
-/** Resolves the Dockview `params.view` panel parameter, defaulting to the tape. */
+/** Resolves the workspace `params.view` panel parameter, defaulting to the tape. */
 function resolveTapeView(value: unknown): TapeView {
   return typeof value === "string" && (TAPE_VIEWS as readonly string[]).includes(value)
     ? (value as TapeView)
@@ -72,6 +75,8 @@ function resolveTapeView(value: unknown): TapeView {
 interface TimeSalesPanelParams {
   /** Initial view — how the retired `microstructure` id selects its old look. */
   view?: string;
+  /** FDC3 user-channel membership — resolved through `channelFromParams`. */
+  channel?: string;
 }
 
 // ─── Print table ─────────────────────────────────────────────────────────────
@@ -276,18 +281,18 @@ function TapeStatsPanel({ stats, imbalance }: TapeStatsPanelProps) {
 
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
-function TimeSalesWidget(props: IDockviewPanelProps) {
+function TimeSalesWidget(props: WidgetProps) {
   const panelParams = props.params as TimeSalesPanelParams | undefined;
   const panelView = panelParams?.view;
   const track = useTrackBehavior();
   const isConnected = useBrokerConnected();
-  const selected = useAtomValue(selectedSymbolAtom);
+  const channelInstrument = useChannelInstrument(useChannelMembership(props.api.id, props.params));
   const [manual, setManual] = useState<WsInstrument | null>(null);
   const [view, setView] = useState<TapeView>(() => resolveTapeView(panelView));
   const [statsOpen, setStatsOpen] = useState(true);
 
-  // Workspace selection wins unless the user picked one locally after that.
-  const instrument = manual ?? selected ?? FALLBACK_SYMBOLS[0];
+  // The channel's broadcast wins unless the user picked one locally after that.
+  const instrument = manual ?? channelInstrument ?? FALLBACK_SYMBOLS[0];
 
   const liveTape = useTape(instrument, isConnected);
   const tape = isConnected ? liveTape : SAMPLE_TAPE;
@@ -332,7 +337,7 @@ function TimeSalesWidget(props: IDockviewPanelProps) {
   const handleViewChange = useCallback((next: TapeView) => {
     if (next === view) return;
     setView(next);
-    props.api.updateParameters({ ...(panelParams ?? {}), view: next });
+    props.api.updateParameters({ view: next });
   }, [panelParams, props.api, view]);
 
   const content = (

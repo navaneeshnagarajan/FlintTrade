@@ -16,6 +16,7 @@ import {
   readAndClearPendingTemplate,
   type BuilderTemplate,
 } from "./templateBridge";
+import { hasPendingPineDraft } from "./pineBridge";
 import { LegsTab } from "./LegsTab";
 import { PayoffTab } from "./PayoffTab";
 import { MarginTab } from "./MarginTab";
@@ -26,6 +27,12 @@ interface Props {
 }
 
 export default function StrategyBuilderTool({ onClose }: Props) {
+  // A Pine draft stashed by the Pine Script Editor means the operator just
+  // clicked "Open in Strategy Builder" — land them straight in the Pine tab.
+  // Peek only (non-destructive): PineTab does the read-and-clear on mount.
+  const [initialTab] = useState<"pine" | "legs">(() =>
+    hasPendingPineDraft() ? "pine" : "legs",
+  );
   const [legs, setLegs] = useState<Leg[]>([]);
   const [underlying, setUnderlying] = useState<Underlying>(UNDERLYINGS[0]);
   const [atm, setAtm] = useState(UNDERLYINGS[0].symbol === "NIFTY" ? 22500 : 48000);
@@ -145,7 +152,7 @@ export default function StrategyBuilderTool({ onClose }: Props) {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="legs" className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue={initialTab} className="flex-1 flex flex-col min-h-0">
         <TabsList className="shrink-0 rounded-none bg-surface-base border-b border-border-default justify-start px-3 h-8 gap-1">
           <TabsTrigger value="legs"   className="text-xs font-medium h-6 data-[state=active]:bg-surface-elevated data-[state=active]:text-text-primary text-text-muted">
             <Brain      size={11} className="mr-1" aria-hidden="true" />Strategy Legs

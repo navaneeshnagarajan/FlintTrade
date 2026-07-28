@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { makeDockviewPanelProps } from "@/test-utils/dockviewPanelProps";
+import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // Force DEV mode so ftApi.helpers' getBase() returns "/ft-api" — the convert
 // and exit-all actions go through the real helpers with a stubbed fetch.
@@ -163,11 +163,11 @@ function mockBrokerAccountMatch(
 // Helpers
 // ---------------------------------------------------------------------------
 
-const defaultProps = makeDockviewPanelProps();
+const defaultProps = makeWidgetPanelProps();
 
 /** Panel props that open the widget on one of the two absorbed views. */
 function viewProps(view: "table" | "net" | "heat") {
-  return makeDockviewPanelProps<Record<string, unknown>>({ params: { view } });
+  return makeWidgetPanelProps<Record<string, unknown>>({ params: { view } });
 }
 
 function queryResult(overrides = {}) {
@@ -205,6 +205,15 @@ function withMeasuredContainer(run: () => void) {
 // ---------------------------------------------------------------------------
 
 describe("PositionsWidget", () => {
+  afterEach(async () => {
+    // Radix focus-scope schedules a setTimeout on dialog unmount; drain it
+    // INSIDE this test's jsdom realm. Left pending, it fires during the
+    // next test file's realm swap and crashes the run with "parameter 1 is
+    // not of type 'Event'" — the cross-file flake that intermittently
+    // failed the whole trading bucket.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPlaceOrder.mockReset();
