@@ -142,6 +142,18 @@ function createIndicatorRefs(): IndicatorSeriesRefs {
     stochK: null,
     vwap: null,
     vwma: null,
+    kama: null,
+    alma: null,
+    donUpper: null,
+    donMiddle: null,
+    donLower: null,
+    chandLong: null,
+    chandShort: null,
+    stochRsiK: null,
+    stochRsiD: null,
+    mfi: null,
+    squeezeHist: null,
+    aoHist: null,
     williamsR: null,
     wma: null,
   };
@@ -172,7 +184,8 @@ function IndicatorsHarness({ indicators }: IndicatorsHarnessProps = {}) {
       ...FLINT_CHART_INDICATOR_DEFAULT_PANE_SIZES,
       macd: "expanded",
     },
-    indicatorPaneStretchFactors: {
+    serverData: {},
+      indicatorPaneStretchFactors: {
       ...FLINT_CHART_INDICATOR_DEFAULT_PANE_STRETCH_FACTORS,
       macd: 1.5,
     },

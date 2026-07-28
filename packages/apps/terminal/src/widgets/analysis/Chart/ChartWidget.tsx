@@ -100,6 +100,7 @@ import { useDrawingTools } from "./useDrawingTools";
 import { useIndicators } from "./useIndicators";
 import { useChartReplay } from "./useChartReplay";
 import { useOIOverlay } from "./useOIOverlay";
+import { useServerIndicators } from "./useServerIndicators";
 import { ReplayBar } from "./ReplayBar";
 import type {
   SymbolSearchResult,
@@ -936,6 +937,17 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
 
   const refreshIndicatorsRef = useRef<(() => void) | null>(null);
 
+  // Server-computed indicator data (KAMA, ALMA, Donchian, Chandelier,
+  // StochRSI, MFI, Squeeze, AO) — fetched from the backend engine and
+  // rendered by useIndicators like any client indicator.
+  const { serverData, refreshServerIndicators } = useServerIndicators({
+    barsRef, indicators, periods,
+  });
+  const refreshServerIndicatorsRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    refreshServerIndicatorsRef.current = refreshServerIndicators;
+  }, [refreshServerIndicators]);
+
   // Indicator series lifecycle
   const { refresh: refreshIndicators } = useIndicators({
     chartRef, candleRef, volumeRef, indRef,
@@ -945,6 +957,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     indicatorLineStyles,
     indicatorPaneSizes,
     indicatorPaneStretchFactors,
+    serverData,
   });
 
   useEffect(() => {
@@ -989,6 +1002,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
         candleRef.current.setData(candles);
         volumeRef.current.setData(volumes);
         refreshIndicatorsRef.current?.();
+        refreshServerIndicatorsRef.current?.();
         chartRef.current?.timeScale().fitContent();
       } catch { /* ignore */ }
     }
@@ -1046,6 +1060,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
       volumeSeries.setData([]);
     } catch { /* chart may be disposing */ }
     refreshIndicatorsRef.current?.();
+    refreshServerIndicatorsRef.current?.();
 
     function applyBars(data: OhlcvBar[]) {
       if (cancelled) return;
@@ -1073,6 +1088,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
         timeScale?.fitContent();
       }
       refreshIndicatorsRef.current?.();
+      refreshServerIndicatorsRef.current?.();
     }
 
     (async () => {
@@ -1407,6 +1423,22 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
               <span className="w-2 h-2 rounded-full bg-teal-400 inline-block shrink-0" />VWMA
               <PeriodInput value={periods.vwma} onChange={(v) => setPeriods((p) => ({ ...p, vwma: v }))} />
             </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showKAMA} onCheckedChange={(v) => toggleIndicator("showKAMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-400 inline-block shrink-0" />KAMA
+              <PeriodInput value={periods.kama} onChange={(v) => setPeriods((p) => ({ ...p, kama: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showALMA} onCheckedChange={(v) => toggleIndicator("showALMA", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block shrink-0" />ALMA
+              <PeriodInput value={periods.alma} onChange={(v) => setPeriods((p) => ({ ...p, alma: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showDonchian} onCheckedChange={(v) => toggleIndicator("showDonchian", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />Donchian
+              <PeriodInput value={periods.donchian} onChange={(v) => setPeriods((p) => ({ ...p, donchian: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showChandelier} onCheckedChange={(v) => toggleIndicator("showChandelier", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-pink-500 inline-block shrink-0" />Chandelier Exit
+              <PeriodInput value={periods.chand} onChange={(v) => setPeriods((p) => ({ ...p, chand: v }))} />
+            </DropdownMenuCheckboxItem>
             <DropdownMenuSeparator className="bg-border-default" />
             <DropdownMenuLabel className="text-xs text-text-muted uppercase tracking-wider px-2 py-1">Volume</DropdownMenuLabel>
             <DropdownMenuCheckboxItem checked={indicators.showVolume} onCheckedChange={(v) => toggleIndicator("showVolume", v)} className="text-xs gap-2">
@@ -1445,6 +1477,20 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
             <DropdownMenuCheckboxItem checked={indicators.showCCI} onCheckedChange={(v) => toggleIndicator("showCCI", v)} className="text-xs gap-2">
               <span className="w-2 h-2 rounded-full bg-sky-400 inline-block shrink-0" />CCI
               <PeriodInput value={periods.cci} onChange={(v) => setPeriods((p) => ({ ...p, cci: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showStochRSI} onCheckedChange={(v) => toggleIndicator("showStochRSI", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block shrink-0" />Stoch RSI
+              <PeriodInput value={periods.stochRsi} onChange={(v) => setPeriods((p) => ({ ...p, stochRsi: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showMFI} onCheckedChange={(v) => toggleIndicator("showMFI", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-lime-500 inline-block shrink-0" />MFI
+              <PeriodInput value={periods.mfi} onChange={(v) => setPeriods((p) => ({ ...p, mfi: v }))} />
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showSqueeze} onCheckedChange={(v) => toggleIndicator("showSqueeze", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block shrink-0" />Squeeze Momentum
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={indicators.showAO} onCheckedChange={(v) => toggleIndicator("showAO", v)} className="text-xs gap-2">
+              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block shrink-0" />Awesome Oscillator
             </DropdownMenuCheckboxItem>
             {activePaneControls.length > 0 && (
               <>

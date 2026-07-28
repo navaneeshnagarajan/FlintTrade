@@ -39,6 +39,7 @@ import type {
   IndicatorSeriesRefs,
   PivotRefs,
 } from "./types";
+import { serverIndicatorName, type ServerIndicatorData } from "./useServerIndicators";
 
 // ---------------------------------------------------------------------------
 // Hook
@@ -57,6 +58,8 @@ interface UseIndicatorsOptions {
   indicatorLineStyles: Record<FlintChartIndicatorKey, FlintChartIndicatorLineStyle>;
   indicatorPaneSizes: Record<string, FlintChartIndicatorPaneSize>;
   indicatorPaneStretchFactors: FlintChartIndicatorPaneStretchFactors;
+  /** Server-computed series keyed by compute-route request name. */
+  serverData: ServerIndicatorData;
 }
 
 export function useIndicators({
@@ -72,6 +75,7 @@ export function useIndicators({
   indicatorLineStyles,
   indicatorPaneSizes,
   indicatorPaneStretchFactors,
+  serverData,
 }: UseIndicatorsOptions) {
   const pivotRef = useRef<PivotRefs>({ lines: [], series: null });
   const previousIndicatorRenderPlanRef = useRef<FlintChartIndicatorSeriesRenderPlan | null>(null);
@@ -442,6 +446,108 @@ export function useIndicators({
       ind.vwma.applyOptions(options);
       ind.vwma.setData(buildLineData(times, calcVWMA(bars, periods.vwma)));
     } else if (ind.vwma) { removeSeries(ind.vwma); ind.vwma = null; }
+
+    // --- Server-computed tier (data via useServerIndicators) ---
+    // A missing entry means the fetch has not landed yet: keep whatever the
+    // series already shows rather than clearing it, so a slow backend never
+    // blanks an indicator mid-session.
+    const serverLine = (name: string): (number | null)[] | null => {
+      const entry = serverData[name];
+      return Array.isArray(entry) ? entry : null;
+    };
+    const serverDict = (name: string): Record<string, (number | null)[] | boolean[]> | null => {
+      const entry = serverData[name];
+      return entry && !Array.isArray(entry) && !("error" in entry)
+        ? (entry as Record<string, (number | null)[] | boolean[]>)
+        : null;
+    };
+    const numeric = (values: (number | null)[] | boolean[] | undefined): (number | null)[] =>
+      (values ?? []).map((v) => (typeof v === "number" ? v : null));
+
+    if (indicators.showKAMA) {
+      const values = serverLine(serverIndicatorName("showKAMA", periods));
+      const options = lineOptions("kama");
+      if (!options) return;
+      if (!ind.kama) ind.kama = addLineSeries(options);
+      ind.kama.applyOptions(options);
+      if (values) ind.kama.setData(buildLineData(times, values));
+    } else if (ind.kama) { removeSeries(ind.kama); ind.kama = null; }
+
+    if (indicators.showALMA) {
+      const values = serverLine(serverIndicatorName("showALMA", periods));
+      const options = lineOptions("alma");
+      if (!options) return;
+      if (!ind.alma) ind.alma = addLineSeries(options);
+      ind.alma.applyOptions(options);
+      if (values) ind.alma.setData(buildLineData(times, values));
+    } else if (ind.alma) { removeSeries(ind.alma); ind.alma = null; }
+
+    if (indicators.showDonchian) {
+      const dc = serverDict(serverIndicatorName("showDonchian", periods));
+      const upperOptions = lineOptions("donUpper");
+      const middleOptions = lineOptions("donMiddle");
+      const lowerOptions = lineOptions("donLower");
+      if (!upperOptions || !middleOptions || !lowerOptions) return;
+      if (!ind.donUpper) ind.donUpper = addLineSeries(upperOptions);
+      if (!ind.donMiddle) ind.donMiddle = addLineSeries(middleOptions);
+      if (!ind.donLower) ind.donLower = addLineSeries(lowerOptions);
+      if (dc) {
+        ind.donUpper.setData(buildLineData(times, numeric(dc.upper)));
+        ind.donMiddle.setData(buildLineData(times, numeric(dc.middle)));
+        ind.donLower.setData(buildLineData(times, numeric(dc.lower)));
+      }
+    } else { for (const key of ["donUpper", "donMiddle", "donLower"] as const) { if (ind[key]) { removeSeries(ind[key]!); ind[key] = null; } } }
+
+    if (indicators.showChandelier) {
+      const ce = serverDict(serverIndicatorName("showChandelier", periods));
+      const longOptions = lineOptions("chandLong");
+      const shortOptions = lineOptions("chandShort");
+      if (!longOptions || !shortOptions) return;
+      if (!ind.chandLong) ind.chandLong = addLineSeries(longOptions);
+      if (!ind.chandShort) ind.chandShort = addLineSeries(shortOptions);
+      if (ce) {
+        ind.chandLong.setData(buildLineData(times, numeric(ce.long)));
+        ind.chandShort.setData(buildLineData(times, numeric(ce.short)));
+      }
+    } else { for (const key of ["chandLong", "chandShort"] as const) { if (ind[key]) { removeSeries(ind[key]!); ind[key] = null; } } }
+
+    if (indicators.showStochRSI) {
+      const sr = serverDict(serverIndicatorName("showStochRSI", periods));
+      const kOptions = lineOptions("stochRsiK");
+      const dOptions = lineOptions("stochRsiD");
+      if (!kOptions || !dOptions) return;
+      if (!ind.stochRsiK) { ind.stochRsiK = addLineSeries(kOptions); applyPaneScale("stochrsi"); }
+      if (!ind.stochRsiD) ind.stochRsiD = addLineSeries(dOptions);
+      if (sr) {
+        ind.stochRsiK.setData(buildLineData(times, numeric(sr.k)));
+        ind.stochRsiD.setData(buildLineData(times, numeric(sr.d)));
+      }
+    } else { for (const key of ["stochRsiK", "stochRsiD"] as const) { if (ind[key]) { removeSeries(ind[key]!); ind[key] = null; } } }
+
+    if (indicators.showMFI) {
+      const values = serverLine(serverIndicatorName("showMFI", periods));
+      const options = lineOptions("mfi");
+      if (!options) return;
+      if (!ind.mfi) { ind.mfi = addLineSeries(options); applyPaneScale("mfi"); }
+      ind.mfi.applyOptions(options);
+      if (values) ind.mfi.setData(buildLineData(times, values));
+    } else if (ind.mfi) { removeSeries(ind.mfi); ind.mfi = null; }
+
+    if (indicators.showSqueeze) {
+      const sq = serverDict(serverIndicatorName("showSqueeze", periods));
+      const options = histogramOptions("squeezeHist");
+      if (!options) return;
+      if (!ind.squeezeHist) { ind.squeezeHist = addHistogramSeries(options); applyPaneScale("squeeze"); }
+      if (sq) ind.squeezeHist.setData(buildHistData(times, numeric(sq.momentum)));
+    } else if (ind.squeezeHist) { removeSeries(ind.squeezeHist); ind.squeezeHist = null; }
+
+    if (indicators.showAO) {
+      const values = serverLine(serverIndicatorName("showAO", periods));
+      const options = histogramOptions("aoHist");
+      if (!options) return;
+      if (!ind.aoHist) { ind.aoHist = addHistogramSeries(options); applyPaneScale("ao"); }
+      if (values) ind.aoHist.setData(buildHistData(times, values));
+    } else if (ind.aoHist) { removeSeries(ind.aoHist); ind.aoHist = null; }
   }, [
     indicatorColors,
     indicatorLineStyles,
@@ -449,6 +555,7 @@ export function useIndicators({
     indicatorPaneStretchFactors,
     indicators,
     periods,
+    serverData,
     chartRef,
     candleRef,
     volumeRef,

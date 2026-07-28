@@ -90,6 +90,18 @@ export function useChartInit(
     keltnerMiddle: null,
     keltnerLower: null,
     vwma: null,
+    kama: null,
+    alma: null,
+    donUpper: null,
+    donMiddle: null,
+    donLower: null,
+    chandLong: null,
+    chandShort: null,
+    stochRsiK: null,
+    stochRsiD: null,
+    mfi: null,
+    squeezeHist: null,
+    aoHist: null,
   });
 
   useEffect(() => {
@@ -159,6 +171,18 @@ export function useChartInit(
         keltnerMiddle: null,
         keltnerLower: null,
         vwma: null,
+        kama: null,
+        alma: null,
+        donUpper: null,
+        donMiddle: null,
+        donLower: null,
+        chandLong: null,
+        chandShort: null,
+        stochRsiK: null,
+        stochRsiD: null,
+        mfi: null,
+        squeezeHist: null,
+        aoHist: null,
       };
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

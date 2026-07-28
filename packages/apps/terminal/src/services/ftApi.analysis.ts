@@ -425,6 +425,33 @@ export const getFtOIProfile = (
     ...(strike_count !== undefined ? { strike_count } : {}),
   });
 
+// --- Server-computed chart indicators (restored 2026-07-28; the original
+// client was trimmed as dead in 2c89987e while the backend route stayed) ---
+
+/** OHLCV bar accepted by POST /api/v1/indicators/compute. */
+export interface IndicatorBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+/** One computed indicator: a value series, named sub-series, or an error. */
+export type IndicatorComputeSeries =
+  | (number | null)[]
+  | Record<string, (number | null)[] | boolean[]>
+  | { error: string };
+
+/**
+ * Compute named indicators server-side over a bar series. Names follow the
+ * route's convention — period-suffixed (``"kama_10"``) or exact
+ * (``"awesome_oscillator"``); multi-line indicators return named sub-arrays.
+ */
+export const computeIndicators = (bars: IndicatorBar[], indicators: string[]) =>
+  post<Record<string, IndicatorComputeSeries>>("indicators/compute", { bars, indicators });
+
 export const compilePineScript = (code: string) =>
   post<PineCompileResult>("indicators/pine/compile", { code });
 

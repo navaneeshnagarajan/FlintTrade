@@ -82,6 +82,19 @@ export interface IndicatorSeriesRefs {
   keltnerMiddle: ISeriesApi<"Line"> | null;
   keltnerLower: ISeriesApi<"Line"> | null;
   vwma: ISeriesApi<"Line"> | null;
+  // Server-computed tier (data from POST /api/v1/indicators/compute)
+  kama: ISeriesApi<"Line"> | null;
+  alma: ISeriesApi<"Line"> | null;
+  donUpper: ISeriesApi<"Line"> | null;
+  donMiddle: ISeriesApi<"Line"> | null;
+  donLower: ISeriesApi<"Line"> | null;
+  chandLong: ISeriesApi<"Line"> | null;
+  chandShort: ISeriesApi<"Line"> | null;
+  stochRsiK: ISeriesApi<"Line"> | null;
+  stochRsiD: ISeriesApi<"Line"> | null;
+  mfi: ISeriesApi<"Line"> | null;
+  squeezeHist: ISeriesApi<"Histogram"> | null;
+  aoHist: ISeriesApi<"Histogram"> | null;
 }
 
 export interface HlineRef {
