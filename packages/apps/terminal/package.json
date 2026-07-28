@@ -84,7 +84,7 @@
     "react-responsive-carousel": "^3.2.23",
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vite": "^6.4.3",
     "vitest": "^4.1.10"
   }
