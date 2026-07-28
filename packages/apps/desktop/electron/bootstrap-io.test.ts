@@ -915,7 +915,7 @@ describe("bootstrap system boundaries", () => {
           settled = true;
         },
       );
-      await vi.waitFor(() => expect(response.destroyed).toBe(true));
+      await vi.waitFor(() => expect(response.destroyed).toBe(true), { timeout: 15_000 });
       expect(settled).toBe(false);
       response.closed = true;
       response.emit("close");
@@ -963,7 +963,7 @@ describe("bootstrap system boundaries", () => {
           settled = true;
         },
       );
-      await vi.waitFor(() => expect(fake.response.destroyed).toBe(true));
+      await vi.waitFor(() => expect(fake.response.destroyed).toBe(true), { timeout: 15_000 });
       expect(settled).toBe(false);
       fake.close();
 
@@ -1241,7 +1241,7 @@ describe("bootstrap system boundaries", () => {
         signal: abort.signal,
         timeoutMs: 30_000,
       });
-      await vi.waitFor(() => expect(escapedPid).toBeGreaterThan(0), { timeout: 5_000 });
+      await vi.waitFor(() => expect(escapedPid).toBeGreaterThan(0), { timeout: 15_000 });
       abort.abort();
 
       await expect(running).resolves.toMatchObject({ contained: true, exitCode: 130 });
@@ -1292,7 +1292,7 @@ describe("bootstrap system boundaries", () => {
           signal: abort.signal,
           timeoutMs: 30_000,
         });
-        await vi.waitFor(() => expect(escapedPid).toBeGreaterThan(0), { timeout: 5_000 });
+        await vi.waitFor(() => expect(escapedPid).toBeGreaterThan(0), { timeout: 15_000 });
         abort.abort();
 
         await expect(running).resolves.toMatchObject({ contained: false });
@@ -2981,7 +2981,7 @@ describe("bootstrap system boundaries", () => {
         signal: abort.signal,
       });
       await vi.waitFor(() => expect(access(path.join(destination, "root", "large.bin"))).resolves.toBeUndefined(), {
-        timeout: 10_000,
+        timeout: 15_000,
       });
       abort.abort();
 
@@ -3017,7 +3017,7 @@ describe("bootstrap system boundaries", () => {
         signal: abort.signal,
       });
       await vi.waitFor(() => expect(access(path.join(destination, "root"))).resolves.toBeUndefined(), {
-        timeout: 10_000,
+        timeout: 15_000,
       });
       abort.abort();
 

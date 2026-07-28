@@ -28,9 +28,9 @@ vi.mock("framer-motion", () => ({
   ),
 }));
 
-// Mock react-router-dom
+// Mock react-router
 const mockNavigate = vi.fn();
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 

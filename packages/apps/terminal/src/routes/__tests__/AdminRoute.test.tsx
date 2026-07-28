@@ -2,7 +2,7 @@
  * AdminRoute.test.tsx
  *
  * Smoke tests for the /admin dev dashboard.
- * Mocks fetch and react-router-dom to keep tests lightweight.
+ * Mocks fetch and react-router to keep tests lightweight.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,7 +15,7 @@ import "@testing-library/jest-dom";
 
 const mockNavigate = vi.fn();
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mockNavigate,
 }));
 

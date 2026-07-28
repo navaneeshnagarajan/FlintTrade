@@ -1,7 +1,7 @@
 import { LogoIcon } from '@flinttrade/design-system/brand';
-import { Github } from 'lucide-react';
 import Link from 'next/link';
 
+import { GithubIcon } from '@/components/github-icon';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 const navItems = [
@@ -41,7 +41,7 @@ export function SiteHeader() {
           rel="noreferrer"
           aria-label="Open FlintTrade on GitHub"
         >
-          <Github aria-hidden="true" />
+          <GithubIcon aria-hidden="true" />
         </Link>
       </div>
     </header>

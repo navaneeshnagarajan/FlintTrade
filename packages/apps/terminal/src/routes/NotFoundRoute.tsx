@@ -5,7 +5,7 @@
  * Provides two escape hatches: Go Home (/) and Explore (/explore).
  */
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { LogoIcon } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 

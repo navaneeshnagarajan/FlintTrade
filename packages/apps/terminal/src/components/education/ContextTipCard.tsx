@@ -6,7 +6,7 @@
  * Respects user skill level and inline-hints preference.
  */
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { Lightbulb, X } from "lucide-react";
 import { Button } from "@/components/ui/button";

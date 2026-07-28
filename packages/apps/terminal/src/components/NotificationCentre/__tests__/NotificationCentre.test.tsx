@@ -29,7 +29,7 @@ vi.mock("@/components/ui/button", () => ({
 }));
 
 const mockNavigate = vi.fn();
-vi.mock("react-router-dom", () => ({ useNavigate: () => mockNavigate }));
+vi.mock("react-router", () => ({ useNavigate: () => mockNavigate }));
 
 import { NotificationBell, NotificationPanel } from "../NotificationCentre";
 import * as store from "../notificationStore";

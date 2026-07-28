@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai";
 import { useRef, useEffect, useState, memo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { indicesSummaryAtom } from "@/atoms/marketAtoms";
 import { GlossaryTooltip } from "@/components/ui/GlossaryTooltip";
 import { isMarketHours } from "@/lib/market";

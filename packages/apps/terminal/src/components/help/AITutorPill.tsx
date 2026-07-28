@@ -37,7 +37,7 @@
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent } from "react";
 import { safeParse, sseTokenSchema } from "@/lib/safeParse";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sparkles, X, Send, Bot, Settings } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";

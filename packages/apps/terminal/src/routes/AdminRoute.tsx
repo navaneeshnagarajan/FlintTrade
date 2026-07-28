@@ -10,7 +10,7 @@ import { useState, useEffect, useRef, useCallback, type JSX } from "react";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import { ArrowLeft, Package, LayoutGrid, Globe, Flag, GitBranch, Network, ScrollText, X, Activity } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { SystemMetricsPanel } from "./admin/SystemMetricsPanel";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { useAuthStore } from "@/stores/authStore";

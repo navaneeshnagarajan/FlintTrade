@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useRef, useCallback, forwardRef, type KeyboardEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import { layerClassNames } from "@flinttrade/design-system";
 import { useModeStore } from "@/stores/modeStore";

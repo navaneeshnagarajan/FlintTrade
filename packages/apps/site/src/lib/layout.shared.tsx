@@ -1,6 +1,7 @@
 import { LogoIcon } from '@flinttrade/design-system/brand';
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { Github } from 'lucide-react';
+
+import { GithubIcon } from '@/components/github-icon';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -23,7 +24,7 @@ export function baseOptions(): BaseLayoutProps {
         type: 'icon',
         text: 'GitHub',
         label: 'GitHub repository',
-        icon: <Github className="size-4" />,
+        icon: <GithubIcon className="size-4" />,
         url: 'https://github.com/navaneeshnagarajan/FlintTrade',
         external: true,
       },

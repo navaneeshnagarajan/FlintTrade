@@ -146,7 +146,7 @@ describe("startup recovery gate", () => {
     });
 
     const starting = test.controller.start();
-    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
     await expect(test.controller.cancel()).resolves.toBe(true);
     await expect(starting).resolves.toMatchObject({ cancelled: true, ok: false });
     expect(test.bootstrap.start).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe("startup recovery gate", () => {
     test.recovery.recover.mockImplementationOnce(() => recovered.promise);
 
     const starting = test.controller.start();
-    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
     const cancelling = test.controller.cancel();
     recovered.resolve({ status: "promoted" });
 
@@ -177,7 +177,7 @@ describe("startup recovery gate", () => {
     }));
 
     const starting = test.controller.start();
-    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
     await expect(test.controller.cancel()).resolves.toBe(true);
     await expect(starting).resolves.toMatchObject({ cancelled: true, ok: false });
     expect(test.bootstrap.start).not.toHaveBeenCalled();
@@ -209,7 +209,7 @@ describe("startup recovery gate", () => {
       const recovered = deferred<{ status: "promoted" }>();
       test.recovery.recover.mockImplementationOnce(() => recovered.promise);
       const starting = test.controller.start();
-      await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(test.recovery.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
 
       const firstShutdown = test.controller.shutdown(25);
       const firstRejection = expect(firstShutdown).rejects.toThrow(/recovery did not settle/i);

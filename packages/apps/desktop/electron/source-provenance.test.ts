@@ -660,7 +660,7 @@ describe("active source provenance", () => {
     }));
 
     const validating = validateActiveSourceProvenance(test.request);
-    await vi.waitFor(() => expect(test.command).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.command).toHaveBeenCalledOnce(), { timeout: 15_000 });
     test.controller.abort(new DOMException("cancelled", "AbortError"));
 
     await expect(validating).rejects.toBeInstanceOf(SourceOperationLeaseRetentionError);

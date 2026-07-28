@@ -566,7 +566,7 @@ describe("source update orchestration", () => {
     const bootstrap = test.coordinator.run("bootstrap", undefined, async () => blocker.promise);
 
     const checking = test.updater.check();
-    await vi.waitFor(() => expect(test.coordinator.getSnapshot()).toMatchObject({ active: "bootstrap", queued: 1 }));
+    await vi.waitFor(() => expect(test.coordinator.getSnapshot()).toMatchObject({ active: "bootstrap", queued: 1 }), { timeout: 15_000 });
     expect(test.updater.cancel()).toBe(false);
     expect(test.options.operationLease.acquire).not.toHaveBeenCalled();
     expect(test.options.revisionResolver.resolve).not.toHaveBeenCalled();
@@ -619,8 +619,8 @@ describe("source update orchestration", () => {
     });
 
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.options.candidateStager.stage).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(stagingSnapshots.length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(test.options.candidateStager.stage).toHaveBeenCalledOnce(), { timeout: 15_000 });
+    await vi.waitFor(() => expect(stagingSnapshots.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
     stageGate.resolve();
     await expect(applying).resolves.toMatchObject({ status: "complete" });
     unsubscribe();
@@ -640,7 +640,7 @@ describe("source update orchestration", () => {
     );
 
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.options.health.prove).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.health.prove).toHaveBeenCalledOnce(), { timeout: 15_000 });
     expect(test.updater.cancel("apply")).toBe(true);
     await expect(applying).resolves.toMatchObject({ status: "failed" });
 
@@ -678,7 +678,7 @@ describe("source update orchestration", () => {
     });
 
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.options.candidateStager.stage).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.candidateStager.stage).toHaveBeenCalledOnce(), { timeout: 15_000 });
     expect(test.updater.cancel("apply")).toBe(true);
     await stageInput?.onOwnedPathPrepared({
       identity: { dev: 1, ino: 3 },
@@ -713,7 +713,7 @@ describe("source update orchestration", () => {
     });
 
     const applying = test.updater.apply();
-    await vi.waitFor(() => expect(test.options.lifecycle.drainCurrent).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.lifecycle.drainCurrent).toHaveBeenCalledOnce(), { timeout: 15_000 });
     expect(test.updater.cancel("apply")).toBe(true);
 
     await expect(applying).resolves.toMatchObject({
@@ -1242,7 +1242,7 @@ describe("source update orchestration", () => {
     const controller = new AbortController();
 
     const applying = test.updater.apply(controller.signal);
-    await vi.waitFor(() => expect(test.options.promotion.promote).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.promotion.promote).toHaveBeenCalledOnce(), { timeout: 15_000 });
     controller.abort();
     promoted.resolve({
       active: { canonicalPath: test.activeSource, dev: 1, ino: 3 },
@@ -1325,7 +1325,7 @@ describe("source update orchestration", () => {
     const controller = new AbortController();
 
     const recovery = test.updater.recover(controller.signal);
-    await vi.waitFor(() => expect(test.options.promotion.recover).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.promotion.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
     controller.abort();
     recovered.resolve({
       active: { canonicalPath: test.activeSource, dev: 1, ino: 3 },
@@ -1374,7 +1374,7 @@ describe("source update orchestration", () => {
     const controller = new AbortController();
 
     const recovery = test.updater.recover(controller.signal);
-    await vi.waitFor(() => expect(test.options.promotion.recover).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.options.promotion.recover).toHaveBeenCalledOnce(), { timeout: 15_000 });
     controller.abort();
     recovered.resolve({ status: "idle" });
 

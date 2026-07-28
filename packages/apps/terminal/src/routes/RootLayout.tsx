@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router";
 import { useThemeStore } from "@/stores/themeStore";
 import { useApplyFontScale } from "@/hooks/useApplyFontScale";
 import { AITutorPill } from "@/components/help/AITutorPill";

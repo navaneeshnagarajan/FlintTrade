@@ -1,7 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
-import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate } from "react-router";
 import { Provider as JotaiProvider } from "jotai";
 import { MotionConfig } from "framer-motion";
 import { QueryProvider } from "./providers/QueryProvider";

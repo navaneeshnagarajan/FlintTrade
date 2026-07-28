@@ -2,7 +2,7 @@
  * AboutSection — version info, links, and build details.
  */
 
-import { Settings, Github, ExternalLink } from "lucide-react";
+import { Settings, GitBranch, ExternalLink } from "lucide-react";
 import { APP_VERSION_TAG } from "@/lib/appVersion";
 import { widgetCatalog } from "@/layout/widgetFactory";
 import { SectionTitle } from "./shared";
@@ -41,7 +41,7 @@ export function AboutSection() {
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-3 py-2 rounded border border-border-default bg-surface-card hover:bg-surface-hover text-xs text-text-secondary hover:text-text-primary transition-colors"
           >
-            <Github size={12} className="flex-none text-text-muted" />
+            <GitBranch size={12} className="flex-none text-text-muted" />
             <span>GitHub — navaneeshnagarajan/FlintTrade</span>
             <ExternalLink size={10} className="ml-auto text-text-muted flex-none" />
           </a>

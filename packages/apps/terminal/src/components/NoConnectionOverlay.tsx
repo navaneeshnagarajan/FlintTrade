@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, Settings, RefreshCw } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router";
 import { layerClassNames } from "@flinttrade/design-system";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

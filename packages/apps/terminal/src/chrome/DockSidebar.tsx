@@ -18,7 +18,7 @@
  */
 
 import { useRef, useCallback, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router";
 import { motion, Reorder, useSpring, useTransform } from "framer-motion";
 import {
   Home,

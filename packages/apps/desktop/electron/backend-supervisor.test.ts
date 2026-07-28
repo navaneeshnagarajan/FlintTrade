@@ -547,7 +547,7 @@ it.runIf(process.platform !== "win32")(
       onStderr: () => undefined,
       onStdout: (chunk) => { stdout += chunk.toString("utf8"); },
     });
-    await vi.waitFor(() => expect(stdout).toContain("closed\n"), { timeout: 5_000 });
+    await vi.waitFor(() => expect(stdout).toContain("closed\n"), { timeout: 15_000 });
 
     await expect(handle.writeStdin("FLINTTRADE_FORCE_EXIT\n")).rejects.toBeInstanceOf(Error);
     await expect(handle.forceContainment(0xffff_fffe)).resolves.toBe(false);

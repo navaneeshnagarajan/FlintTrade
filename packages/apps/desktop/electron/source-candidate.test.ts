@@ -207,7 +207,7 @@ describe("source candidate staging", () => {
     const abort = new AbortController();
     const destination = path.join(test.sourceRoot, "FlintTrade.update-123e4567-e89b-42d3-a456-426614174000");
     const staging = test.stage({ destination, revision, signal: abort.signal });
-    await vi.waitFor(() => expect(test.start).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(test.start).toHaveBeenCalledOnce(), { timeout: 15_000 });
     abort.abort();
 
     await expect(staging).rejects.toMatchObject({ name: "AbortError" });

@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   setupFlintTradeAccount: vi.fn(),
 }));
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router", () => ({
   useNavigate: () => mocks.navigate,
   Link: ({ children, to, ...props }: Record<string, unknown>) => (
     <a href={String(to)} {...props}>{children as React.ReactNode}</a>

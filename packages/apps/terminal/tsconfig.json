@@ -16,9 +16,9 @@
     "allowJs": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "baseUrl": ".",
+    "types": ["node", "vite/client"],
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["./src/*"],
       "@flinttrade/design-system": ["../../core/design-system/src/index.ts"],
       "@flinttrade/design-system/*": ["../../core/design-system/src/*"]
     }
