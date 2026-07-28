@@ -386,6 +386,9 @@ interface FixtureOptions {
   rootAliasAtBoundary?: boolean;
   spuriousAbortError?: boolean;
   sourceMutationAtBoundary?: "after-marker" | "before-rename";
+  toolPromotionFailure?: "after";
+  toolMarkerWriteFailure?: "once";
+  toolReservedMarker?: "file";
   touchTrackedDuringBuild?: boolean;
   mutateTrackedDuringBuild?: boolean;
   uncontainedOnAbort?: boolean;
@@ -414,6 +417,8 @@ async function fixture(options: FixtureOptions = {}) {
   });
   let appendFailures = 0;
   let outputLogFailed = false;
+  let toolMarkerWriteFailures = 0;
+  let toolPromotionFailures = 0;
   let buildMutated = false;
   const gitExploitFilter = path.join(root, "bootstrap-swap-filter.sh");
   const gitExploitCanary = `${gitExploitFilter}.called`;
@@ -758,6 +763,9 @@ async function fixture(options: FixtureOptions = {}) {
           await mkdir(path.dirname(executable), { recursive: true });
           await writeFile(executable, "uv");
           await chmod(executable, 0o755);
+          if (options.toolReservedMarker === "file") {
+            await writeFile(path.join(destination, ".flinttrade-tool-verified.json"), "archive-controlled");
+          }
           return [manifest.uv.assets[target]!.executable];
         }
         if (name.startsWith("node-")) {
@@ -823,6 +831,27 @@ async function fixture(options: FixtureOptions = {}) {
           throw new Error("final log write failed");
         }
         await nodeDependencies.fileSystem.appendText(target, content);
+      },
+      promoteAbsent: async (source, destination, identity) => {
+        await nodeDependencies.fileSystem.promoteAbsent(source, destination, identity);
+        if (
+          options.toolPromotionFailure === "after" &&
+          destination.includes(`${path.sep}tools${path.sep}uv${path.sep}`) &&
+          toolPromotionFailures++ === 0
+        ) {
+          throw new Error("interrupted immediately after atomic tool promotion");
+        }
+      },
+      writeTextAbsent: async (target, content) => {
+        if (
+          path.basename(target) === ".flinttrade-tool-verified.json" &&
+          options.toolMarkerWriteFailure === "once" &&
+          toolMarkerWriteFailures++ === 0
+        ) {
+          await nodeDependencies.fileSystem.writeTextAbsent(target, '{"schemaVersion":');
+          throw new Error("interrupted tool verification marker write");
+        }
+        await nodeDependencies.fileSystem.writeTextAbsent(target, content);
       },
     },
   };
@@ -1637,7 +1666,7 @@ describe("first-run source bootstrap", () => {
       ok: false,
     });
     expect(await readFile(sentinel, "utf8")).toBe("foreign");
-    expect(await exists(`${installRoot}.flinttrade-tool-verified.json`)).toBe(false);
+    expect(await exists(path.join(installRoot, ".flinttrade-tool-verified.json"))).toBe(false);
   });
 
   it("fails closed and preserves a tool whose installed tree and marker were modified together", async () => {
@@ -1645,7 +1674,7 @@ describe("first-run source bootstrap", () => {
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
     const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
-    const markerPath = `${installRoot}.flinttrade-tool-verified.json`;
+    const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     await writeFile(executable, "tampered");
     await chmod(executable, 0o755);
     const forgedTree = await test.dependencies.fileSystem.snapshotSourceTree(installRoot);
@@ -1669,7 +1698,7 @@ describe("first-run source bootstrap", () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
     const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
-    const markerPath = `${installRoot}.flinttrade-tool-verified.json`;
+    const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const externalMarker = path.join(test.root, "external-tool-marker.json");
     await writeFile(externalMarker, await readFile(markerPath));
     await rm(markerPath);
@@ -1685,21 +1714,89 @@ describe("first-run source bootstrap", () => {
     expect(await readFile(externalMarker, "utf8")).toContain('"schemaVersion":2');
   });
 
-  it("fails closed and preserves a tool root whose verification marker is missing", async () => {
+  it("keeps a partial marker write inside an unpromoted candidate and succeeds on retry", async () => {
+    const test = await fixture({ toolMarkerWriteFailure: "once" });
+    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/interrupted tool verification marker write/i),
+      ok: false,
+    });
+    expect(await exists(installRoot)).toBe(false);
+    expect(await exists(markerPath)).toBe(false);
+
+    await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+    expect(JSON.parse(await readFile(markerPath, "utf8"))).toMatchObject({
+      archiveSha256: manifest.uv.assets["darwin-arm64"]!.sha256,
+      schemaVersion: 2,
+      version: manifest.uv.version,
+    });
+  });
+
+  it("rejects an archive that claims FlintTrade's reserved internal tool marker", async () => {
+    const test = await fixture({ toolReservedMarker: "file" });
+    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/reserved verification marker/i),
+      ok: false,
+    });
+    expect(await exists(installRoot)).toBe(false);
+  });
+
+  it("retries cleanly when the marker-bearing tool root was promoted before interruption", async () => {
+    const test = await fixture({ toolPromotionFailure: "after" });
+    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
+
+    await expect(test.controller.start()).resolves.toMatchObject({
+      error: expect.stringMatching(/interrupted immediately after atomic tool promotion/i),
+      ok: false,
+    });
+    expect(await exists(installRoot)).toBe(true);
+    expect(JSON.parse(await readFile(markerPath, "utf8"))).toMatchObject({
+      schemaVersion: 2,
+      version: manifest.uv.version,
+    });
+
+    await expect(test.controller.retry()).resolves.toMatchObject({ ok: true, revision });
+  });
+
+  it("accepts the exact legacy sibling marker used by pre-release tool installs", async () => {
+    const test = await fixture();
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
+    const internalMarker = path.join(installRoot, ".flinttrade-tool-verified.json");
+    const legacyMarker = `${installRoot}.flinttrade-tool-verified.json`;
+    await rename(internalMarker, legacyMarker);
+    await rm(test.activeSource, { recursive: true });
+
+    await expect(test.controller.start()).resolves.toMatchObject({ ok: true, revision });
+    expect(JSON.parse(await readFile(legacyMarker, "utf8"))).toMatchObject({
+      schemaVersion: 2,
+      version: manifest.uv.version,
+    });
+  });
+
+  it("fails closed and preserves an altered tool root whose verification marker is missing", async () => {
     const test = await fixture();
     await expect(test.controller.start()).resolves.toMatchObject({ ok: true });
     const installRoot = path.join(test.root, "tools", "uv", "0.11.16", "darwin-arm64");
     const executable = path.join(installRoot, manifest.uv.assets["darwin-arm64"]!.executable);
-    const markerPath = `${installRoot}.flinttrade-tool-verified.json`;
+    const markerPath = path.join(installRoot, ".flinttrade-tool-verified.json");
     const originalExecutable = await readFile(executable);
     await rm(markerPath);
+    await writeFile(executable, "altered");
+    await chmod(executable, 0o755);
     await rm(test.activeSource, { recursive: true });
 
     await expect(test.controller.start()).resolves.toMatchObject({
       error: expect.stringMatching(/existing uv tool state.*preserved/i),
       ok: false,
     });
-    expect(await readFile(executable)).toEqual(originalExecutable);
+    expect(await readFile(executable)).not.toEqual(originalExecutable);
+    expect(await readFile(executable, "utf8")).toBe("altered");
     expect(await exists(markerPath)).toBe(false);
   });
 

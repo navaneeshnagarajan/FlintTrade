@@ -22,6 +22,9 @@ $SourceRoot = Join-Path $ManagedRoot "src"
 $ToolsRoot = Join-Path $ManagedRoot "tools"
 $script:RemovedAny = $false
 $script:FailedAny = $false
+$script:PurgeCompleted = $false
+$script:PurgedDataAny = $false
+$script:DataRetainedAny = $false
 
 function Say([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Cyan }
 function Warn([string]$Message) { Write-Host "[flinttrade] $Message" -ForegroundColor Yellow }
@@ -425,10 +428,18 @@ function Test-SafePurgeTarget([string]$Target) {
     try { $canonical = (Resolve-Path -LiteralPath $Target -ErrorAction Stop).Path.TrimEnd('\', '/') } catch { $canonical = $full }
     $homeFull = [System.IO.Path]::GetFullPath($HOME).TrimEnd('\', '/')
     try { $homeCanonical = (Resolve-Path -LiteralPath $HOME -ErrorAction Stop).Path.TrimEnd('\', '/') } catch { $homeCanonical = $homeFull }
+    $homePrefix = $homeFull + [System.IO.Path]::DirectorySeparatorChar
+    $homeCanonicalPrefix = $homeCanonical + [System.IO.Path]::DirectorySeparatorChar
     $root = [System.IO.Path]::GetPathRoot($full).TrimEnd('\', '/')
     try { Get-Item -LiteralPath $Target -Force -ErrorAction Stop | Out-Null } catch { return $false }
     if (Test-PathContainsReparsePoint $Target) {
         Warn "Refusing to purge $Target because the target or one of its ancestors is a reparse point."
+        $script:FailedAny = $true
+        return $false
+    }
+    if (-not $full.StartsWith($homePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $canonical.StartsWith($homeCanonicalPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Warn "Refusing to purge $Target because it is outside the current user's home."
         $script:FailedAny = $true
         return $false
     }
@@ -471,11 +482,17 @@ if ($Purge) {
         if ($proceed) {
             Say "Purging explicitly confirmed FlintTrade data:"
             $purgeTargets | ForEach-Object { Say "  $_"; Remove-IfExists $_ }
+            if (-not $script:FailedAny) {
+                $script:PurgeCompleted = $true
+                $script:PurgedDataAny = $true
+            }
         } else {
             Say "Purge cancelled; FlintTrade data kept."
+            $script:DataRetainedAny = $true
         }
     }
 } elseif ($dataTargets) {
+    $script:DataRetainedAny = $true
     Say "The following FlintTrade data was kept:"
     $dataTargets | ForEach-Object { Say "  $_" }
     Say "This includes the workspace, Electron profile, managed source/tools and any legacy desktop storage."
@@ -486,8 +503,18 @@ if ($DryRun) {
     Say "Dry run complete; nothing was deleted."
 } elseif ($script:FailedAny) {
     throw "[flinttrade] Uninstall finished with some paths left behind (see above)."
+} elseif ($script:PurgedDataAny -and $script:PurgeCompleted) {
+    Say "FlintTrade cleanup completed; explicitly confirmed data was purged."
 } elseif ($script:RemovedAny) {
-    Say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
+    if ($script:DataRetainedAny) {
+        Say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
+    } elseif ($Purge) {
+        Say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found to purge."
+    } else {
+        Say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found."
+    }
+} elseif ($script:DataRetainedAny) {
+    Say "No FlintTrade shell was removed; retained data remains available for reinstall."
 } else {
     Say "Nothing to remove; the FlintTrade shell does not appear to be installed."
 }

@@ -7,8 +7,8 @@
  * or a release tag changes later. The install scripts then resolve the current
  * versioned GitHub release and install the matching small Electron shell after
  * verification, then leave the local source build to the shell's first run.
- * The uninstall scripts remove the app plus its disposable residue and keep the
- * workspace unless explicitly purged.
+ * The uninstall scripts remove only receipt-proved shells and integration files,
+ * and keep the workspace unless explicitly purged.
  */
 
 const RAW_REPOSITORY =

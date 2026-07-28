@@ -169,7 +169,11 @@ export interface BootstrapDependencies {
     reserveTemporaryDirectory(parent: string, prefix: string): Promise<TemporaryDirectoryReservation>;
     rename(source: string, destination: string): Promise<void>;
     sha256(target: string): Promise<string>;
-    snapshotSourceTree(root: string): Promise<SourceTreeIdentity>;
+    snapshotSourceTree(
+      root: string,
+      ignoredRoots?: readonly string[],
+      ignoredFiles?: readonly string[],
+    ): Promise<SourceTreeIdentity>;
     verifySourceTree(
       root: string,
       identity: SourceTreeIdentity,
@@ -308,6 +312,8 @@ interface ToolVerificationMarker {
   treeDigest: string;
   version: string;
 }
+
+const TOOL_VERIFICATION_MARKER = ".flinttrade-tool-verified.json";
 
 const metadataPolicy: DownloadPolicy = Object.freeze({
   allowedHosts: ["api.github.com"],
@@ -1030,7 +1036,8 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
   ): Promise<{ executable: string; tree: SourceTreeIdentity }> => {
     const installRoot = path.join(desktopPaths.toolsRoot, tool, version, target);
     const executable = path.join(installRoot, ...asset.executable.split("/"));
-    const verifiedMarker = `${installRoot}.flinttrade-tool-verified.json`;
+    const verifiedMarker = path.join(installRoot, TOOL_VERIFICATION_MARKER);
+    const legacyVerifiedMarker = `${installRoot}.flinttrade-tool-verified.json`;
     const downloads = path.join(desktopPaths.toolsRoot, ".downloads");
     const archive = uniqueDownloadPath(downloads, archiveName(asset.url), attempt);
     const extracting = await dependencies.fileSystem.reserveTemporaryDirectory(
@@ -1068,34 +1075,67 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     ) {
       throw new Error(`${tool} archive did not contain its expected executable as a confined executable regular file.`);
     }
+    if (expectedTree.entries.some((entry) => entry.path === TOOL_VERIFICATION_MARKER)) {
+      throw new Error(`${tool} archive contained FlintTrade's reserved verification marker.`);
+    }
+    const marker: ToolVerificationMarker = {
+      archiveSha256: asset.sha256,
+      executable: asset.executable,
+      executableSha256: expectedExecutable.sha256,
+      schemaVersion: 2,
+      treeDigest: expectedTree.digest,
+      version,
+    };
+    const proveInstalledTree = async (markerPath: string): Promise<SourceTreeIdentity> => {
+      const rootIdentity = await dependencies.fileSystem.directoryIdentity(installRoot);
+      await dependencies.fileSystem.assertDirectoryIdentity(installRoot, rootIdentity);
+      const verified = JSON.parse(
+        await dependencies.fileSystem.readTextNoFollow(markerPath),
+      ) as Partial<ToolVerificationMarker>;
+      await dependencies.fileSystem.assertDirectoryIdentity(installRoot, rootIdentity);
+      const tree = await dependencies.fileSystem.snapshotSourceTree(
+        installRoot,
+        [],
+        markerPath === verifiedMarker ? [TOOL_VERIFICATION_MARKER] : [],
+      );
+      await dependencies.fileSystem.assertDirectoryIdentity(installRoot, rootIdentity);
+      const executableEntry = tree.entries.find((entry) => entry.path === asset.executable);
+      if (
+        verified.schemaVersion !== 2 ||
+        verified.archiveSha256 !== asset.sha256 ||
+        verified.version !== version ||
+        verified.treeDigest !== expectedTree.digest ||
+        verified.executable !== asset.executable ||
+        verified.executableSha256 !== expectedExecutable.sha256 ||
+        tree.digest !== expectedTree.digest ||
+        executableEntry?.type !== "file" ||
+        executableEntry.sha256 !== expectedExecutable.sha256 ||
+        (options.platform !== "win32" && (executableEntry.mode & 0o111) === 0)
+      ) {
+        throw new Error("The installed tool tree did not match the pinned archive.");
+      }
+      const canonicalRoot = await dependencies.fileSystem.realpath(installRoot);
+      const canonicalExecutable = await dependencies.fileSystem.realpath(executable);
+      if (!isWithin(canonicalRoot, canonicalExecutable)) {
+        throw new Error(`${tool} executable escaped its verified install root.`);
+      }
+      await dependencies.fileSystem.assertDirectoryIdentity(installRoot, rootIdentity);
+      return tree;
+    };
     const installRootExists = await dependencies.fileSystem.existsNoFollow(installRoot);
     const verifiedMarkerExists = await dependencies.fileSystem.existsNoFollow(verifiedMarker);
-    if (installRootExists || verifiedMarkerExists) {
+    const legacyVerifiedMarkerExists = await dependencies.fileSystem.existsNoFollow(legacyVerifiedMarker);
+    if (installRootExists || verifiedMarkerExists || legacyVerifiedMarkerExists) {
       try {
-        if (!installRootExists || !verifiedMarkerExists) {
+        const markerPath = verifiedMarkerExists
+          ? verifiedMarker
+          : legacyVerifiedMarkerExists
+            ? legacyVerifiedMarker
+            : null;
+        if (!installRootExists || markerPath === null) {
           throw new Error("The managed tool root and verification marker are incomplete.");
         }
-        const verified = JSON.parse(await dependencies.fileSystem.readTextNoFollow(verifiedMarker)) as Partial<ToolVerificationMarker>;
-        const tree = await dependencies.fileSystem.snapshotSourceTree(installRoot);
-        const executableEntry = tree.entries.find((entry) => entry.path === asset.executable);
-        if (
-          verified.schemaVersion === 2 &&
-          verified.archiveSha256 === asset.sha256 &&
-          verified.version === version &&
-          verified.treeDigest === expectedTree.digest &&
-          tree.digest === expectedTree.digest &&
-          verified.executable === asset.executable &&
-          executableEntry?.type === "file" &&
-          executableEntry.sha256 === expectedExecutable.sha256 &&
-          verified.executableSha256 === expectedExecutable.sha256 &&
-          (options.platform === "win32" || (executableEntry.mode & 0o111) !== 0)
-        ) {
-          const canonicalRoot = await dependencies.fileSystem.realpath(installRoot);
-          const canonicalExecutable = await dependencies.fileSystem.realpath(executable);
-          if (isWithin(canonicalRoot, canonicalExecutable)) {
-            return { executable, tree };
-          }
-        }
+        return { executable, tree: await proveInstalledTree(markerPath) };
       } catch {
         // Fall through to the preserving failure below.
       }
@@ -1105,19 +1145,26 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
     const canonicalRoot = await dependencies.fileSystem.realpath(extracting.path);
     const canonicalExecutable = await dependencies.fileSystem.realpath(extractedExecutable);
     if (!isWithin(canonicalRoot, canonicalExecutable)) throw new Error(`${tool} executable escaped its verified archive root.`);
-    const marker: ToolVerificationMarker = {
-      archiveSha256: asset.sha256,
-      executable: asset.executable,
-      executableSha256: expectedExecutable.sha256,
-      schemaVersion: 2,
-      treeDigest: expectedTree.digest,
-      version,
-    };
     await dependencies.fileSystem.mkdir(path.dirname(installRoot));
     assertAttempt(attempt, signal);
     await dependencies.fileSystem.assertDirectoryIdentity(extracting.path, extracting.identity);
+    const markerContent = `${JSON.stringify(marker)}\n`;
+    const extractingMarker = path.join(extracting.path, TOOL_VERIFICATION_MARKER);
+    await dependencies.fileSystem.writeTextAbsent(extractingMarker, markerContent);
+    await dependencies.fileSystem.assertDirectoryIdentity(extracting.path, extracting.identity);
+    if (
+      (await dependencies.fileSystem.readTextNoFollow(extractingMarker)) !== markerContent ||
+      !(await dependencies.fileSystem.verifySourceTree(
+        extracting.path,
+        expectedTree,
+        [],
+        [TOOL_VERIFICATION_MARKER],
+      ))
+    ) {
+      throw new Error(`${tool} verification marker did not settle inside the extracted tool tree.`);
+    }
+    await dependencies.fileSystem.assertDirectoryIdentity(extracting.path, extracting.identity);
     await dependencies.fileSystem.promoteAbsent(extracting.path, installRoot, extracting.identity);
-    await dependencies.fileSystem.writeTextAbsent(verifiedMarker, `${JSON.stringify(marker)}\n`);
     return { executable, tree: expectedTree };
   };
 

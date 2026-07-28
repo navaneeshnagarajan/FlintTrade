@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -54,6 +55,44 @@ describe("GitHub shell release source", () => {
       redirect: "error",
       signal: expect.any(AbortSignal),
     }));
+  });
+
+  it("accepts Electron net.fetch responses that omit Response.url", async () => {
+    const chunk = vm.runInNewContext("new Uint8Array([91, 93])") as Uint8Array;
+    expect(chunk).not.toBeInstanceOf(Uint8Array);
+    expect(ArrayBuffer.isView(chunk)).toBe(true);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    const response = releaseResponse(body, "");
+    const fetcher = vi.fn(async () => response);
+
+    await expect(
+      createGithubShellReleaseSource(fetcher).list(new AbortController().signal),
+    ).resolves.toEqual([]);
+    expect(fetcher).toHaveBeenCalledWith(FLINTTRADE_RELEASES_API, expect.objectContaining({
+      redirect: "error",
+    }));
+  });
+
+  it("rejects non-byte views even when Symbol.toStringTag impersonates Uint8Array", async () => {
+    const spoofed = new Uint16Array([0x5d5b]);
+    Object.defineProperty(spoofed, Symbol.toStringTag, { value: "Uint8Array" });
+    expect(Object.prototype.toString.call(spoofed)).toBe("[object Uint8Array]");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(spoofed as unknown as Uint8Array);
+        controller.close();
+      },
+    });
+
+    await expect(
+      createGithubShellReleaseSource(async () => releaseResponse(body))
+        .list(new AbortController().signal),
+    ).rejects.toThrow(/non-byte body/i);
   });
 
   it("rejects redirects, extra or duplicate query parameters, and fragments", async () => {

@@ -43,6 +43,14 @@ describe('Electron source-bootstrap website copy', () => {
     expect(download).not.toContain('SHA-256 verification protects the download');
   });
 
+  it('distinguishes manual Finder removal from receipt-proved uninstall', () => {
+    expect(download).toContain('copied from a DMG in Finder has no FlintTrade install receipt');
+    expect(download).toContain('move <span className="font-mono">FlintTrade.app</span>');
+    expect(download).toContain('ordinary uninstall script');
+    expect(download).toContain('only receipt-proved shells');
+    expect(installRoutes).toContain('remove only receipt-proved shells and integration files');
+  });
+
   it('keeps installer redirects described as shell delivery rather than manifest delivery', () => {
     expect(installRoutes).toContain('small Electron shell');
     expect(installRoutes).toContain('first run');

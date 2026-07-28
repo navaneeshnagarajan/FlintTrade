@@ -135,6 +135,13 @@ export default async function DownloadPage() {
               </p>
             ) : null}
 
+            <p>
+              A macOS app copied from a DMG in Finder has no FlintTrade install receipt. To remove
+              that manual copy, quit FlintTrade and move <span className="font-mono">FlintTrade.app</span>{' '}
+              to Trash; application data stays available for reinstall. The ordinary uninstall script
+              removes only receipt-proved shells installed by the one-command path.
+            </p>
+
             <div className="feature-grid">
               {primaryDownloads.map((entry) => (
                 <article className="feature-card" key={entry.asset.name}>

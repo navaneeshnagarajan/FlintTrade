@@ -16,6 +16,10 @@ ASSUME_YES="${FLINTTRADE_UNINSTALL_YES:-0}"
 DRY_RUN="${FLINTTRADE_UNINSTALL_DRY_RUN:-0}"
 REMOVED_ANY=0
 FAILED_ANY=0
+PURGE_COMPLETED=0
+PURGED_DATA_ANY=0
+DATA_FOUND_ANY=0
+DATA_RETAINED_ANY=0
 DATA_TARGETS=()
 SHELL_RECEIPT_DIR="$HOME/.local/state/flinttrade"
 SHELL_RECEIPT_PATH="$SHELL_RECEIPT_DIR/shell-install.receipt"
@@ -357,6 +361,7 @@ add_data_target() {
 
 collect_data_targets() {
   DATA_TARGETS=()
+  DATA_FOUND_ANY=0
   add_data_target "$WORKSPACE_DIR"
   add_data_target "$(default_workspace)"
   add_data_target "$ELECTRON_PROFILE"
@@ -364,6 +369,7 @@ collect_data_targets() {
   add_data_target "$TOOLS_ROOT"
   local candidate
   for candidate in "$@"; do add_data_target "$candidate"; done
+  [ "${#DATA_TARGETS[@]}" -eq 0 ] || DATA_FOUND_ANY=1
 }
 
 proven_custom_workspace() {
@@ -432,29 +438,27 @@ safe_purge_targets() {
       fi
     fi
 
-    if [ "$is_custom" != "1" ]; then
-      case "$target" in
-        "${HOME%/}"/*) ;;
-        *)
-          say "Refusing to purge $target — not a recognised FlintTrade data path."
-          FAILED_ANY=1
-          continue
-          ;;
-      esac
-      if path_has_symlink_below_anchor "$HOME" "$target"; then
-        say "Refusing to purge $target — a path component is a symbolic link."
+    case "$target" in
+      "${HOME%/}"/*) ;;
+      *)
+        say "Refusing to purge $target — not a recognised FlintTrade data path inside the current user's home."
         FAILED_ANY=1
         continue
-      fi
-      case "$canonical" in
-        "${home_canonical%/}"/*) ;;
-        *)
-          say "Refusing to purge $target — it resolves outside the current user's home."
-          FAILED_ANY=1
-          continue
-          ;;
-      esac
+        ;;
+    esac
+    if path_has_symlink_below_anchor "$HOME" "$target"; then
+      say "Refusing to purge $target — a path component is a symbolic link."
+      FAILED_ANY=1
+      continue
     fi
+    case "$canonical" in
+      "${home_canonical%/}"/*) ;;
+      *)
+        say "Refusing to purge $target — it resolves outside the current user's home."
+        FAILED_ANY=1
+        continue
+        ;;
+    esac
 
     duplicate=0
     if [ "${#safe[@]}" -gt 0 ]; then
@@ -472,7 +476,11 @@ purge_all_data() {
   collect_data_targets "$@"
   safe_purge_targets
   if [ "${#DATA_TARGETS[@]}" -eq 0 ]; then
-    say "No FlintTrade data to purge."
+    if [ "$DATA_FOUND_ANY" = "1" ]; then
+      say "No identity-proven FlintTrade data was eligible for purge."
+    else
+      say "No FlintTrade data to purge."
+    fi
     return 0
   fi
   if [ "$DRY_RUN" = "1" ]; then
@@ -484,6 +492,7 @@ purge_all_data() {
   if [ "$ASSUME_YES" != "1" ]; then
     if [ ! -t 1 ] || [ ! -r /dev/tty ]; then
       say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
+      DATA_RETAINED_ANY=1
       return 0
     fi
     say "About to DELETE the FlintTrade workspace, Electron profile, managed source/tools and legacy storage:"
@@ -493,6 +502,7 @@ purge_all_data() {
     read -r answer < /dev/tty || true
     if [ "$answer" != "purge" ]; then
       say "Purge cancelled — FlintTrade data kept."
+      DATA_RETAINED_ANY=1
       return 0
     fi
   else
@@ -503,11 +513,16 @@ purge_all_data() {
 
   local target
   for target in "${DATA_TARGETS[@]}"; do remove_path "$target"; done
+  if [ "$FAILED_ANY" != "1" ]; then
+    PURGE_COMPLETED=1
+    PURGED_DATA_ANY=1
+  fi
 }
 
 keep_notice() {
   collect_data_targets "$@"
   [ "${#DATA_TARGETS[@]}" -gt 0 ] || return 0
+  DATA_RETAINED_ANY=1
   say "The following FlintTrade data was kept:"
   local target
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
@@ -832,8 +847,18 @@ if [ "$DRY_RUN" = "1" ]; then
 elif [ "$FAILED_ANY" = "1" ]; then
   say "Uninstall finished with some paths left behind (see above)."
   exit 1
+elif [ "$PURGED_DATA_ANY" = "1" ] && [ "$PURGE_COMPLETED" = "1" ]; then
+  say "FlintTrade cleanup completed; explicitly confirmed data was purged."
 elif [ "$REMOVED_ANY" = "1" ]; then
-  say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
+  if [ "$DATA_RETAINED_ANY" = "1" ]; then
+    say "FlintTrade shell uninstalled cleanly; retained data remains available for reinstall."
+  elif [ "$PURGE" = "1" ]; then
+    say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found to purge."
+  else
+    say "FlintTrade shell uninstalled cleanly; no recognised FlintTrade data was found."
+  fi
+elif [ "$DATA_RETAINED_ANY" = "1" ]; then
+  say "No FlintTrade shell was removed; retained data remains available for reinstall."
 else
   say "Nothing to remove — the FlintTrade shell does not appear to be installed."
 fi
