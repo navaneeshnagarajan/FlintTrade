@@ -244,7 +244,7 @@ The terminal is a single React 19 + TypeScript application built with
 Vite 6. Layout is managed by [FlexLayout 0.10](https://github.com/caplin/FlexLayout),
 which provides drag-and-drop panels, tabs, floating windows, and
 serialisable layouts. Users compose their workspace from 71 widgets
-(18 trading + 29 analysis + 22 utility) split across 12 routes.
+(18 trading + 31 analysis + 22 utility) split across 12 routes.
 
 ### State architecture
 

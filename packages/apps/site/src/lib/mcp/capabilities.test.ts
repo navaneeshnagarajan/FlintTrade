@@ -46,11 +46,11 @@ describe('docs index generation', () => {
     const architectureDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/ARCHITECTURE.md');
     const userGuideDoc = docsIndex.docs.find((doc) => doc.sourcePath === 'docs/USER_GUIDE.md');
 
-    expect(architectureDoc?.content).toContain('69 widgets');
-    expect(architectureDoc?.content).toContain('18 trading + 29 analysis + 22 utility');
-    expect(userGuideDoc?.content).toContain('The widgets (69)');
-    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`71 ${'widgets'}`);
-    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`38 ${'analysis'}`);
+    expect(architectureDoc?.content).toContain('71 widgets');
+    expect(architectureDoc?.content).toContain('18 trading + 31 analysis + 22 utility');
+    expect(userGuideDoc?.content).toContain('The widgets (71)');
+    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`69 ${'widgets'}`);
+    expect(`${architectureDoc?.content ?? ''}\n${userGuideDoc?.content ?? ''}`).not.toContain(`29 ${'analysis'}`);
   });
 
   it('publishes the current INDstocks reset semantics through generated broker docs', () => {
@@ -67,7 +67,7 @@ describe('docs index generation', () => {
   it('keeps homepage facts aligned with the audited gateway and widget state', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 
-    expect(pageSource).toContain('<strong>69</strong>');
+    expect(pageSource).toContain('<strong>71</strong>');
     expect(pageSource).not.toContain('<strong>84</strong>');
     expect(pageSource).toContain('Native broker contract and routing are safety-gated');
     expect(pageSource).toContain('adapters stay behind credential, ACL, and SDK checks');
