@@ -5,6 +5,7 @@
       "release-type": "node",
       "changelog-path": "changelog.md",
       "include-v-in-tag": true,
+      "initial-version": "0.0.1",
       "prerelease": true,
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
