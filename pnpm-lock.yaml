@@ -6,7 +6,7 @@ settings:
 
 overrides:
   '@babel/core': 7.29.6
-  '@hono/node-server': 2.0.5
+  '@hono/node-server': 2.0.10
   body-parser@>=2.0.0 <2.3.0: 2.3.0
   brace-expansion@>=2.0.0 <2.1.2: 2.1.2
   esbuild: 0.28.1
@@ -865,8 +865,8 @@ packages:
       react-dom: ^16.12.0 || 17.x || 18.x || 19.x
       react-responsive-carousel: ^3.2.7
 
-  '@hono/node-server@2.0.5':
-    resolution: {integrity: sha512-yQFvDmyDo3y6rEOJZDUYPJ49DIKTPpIk4kGvm40xx4Ejne0Pu9a1+exxPN+C1UppWK/WGZX9F++/Xs231tE86g==}
+  '@hono/node-server@2.0.10':
+    resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: 4.12.27
@@ -7595,7 +7595,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@hono/node-server@2.0.5(hono@4.12.27)':
+  '@hono/node-server@2.0.10(hono@4.12.27)':
     dependencies:
       hono: 4.12.27
 
@@ -7877,7 +7877,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.26.0(zod@4.4.3)':
     dependencies:
-      '@hono/node-server': 2.0.5(hono@4.12.27)
+      '@hono/node-server': 2.0.10(hono@4.12.27)
       ajv: 8.20.0
       ajv-formats: 3.0.1
       content-type: 1.0.5

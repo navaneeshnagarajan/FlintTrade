@@ -15,7 +15,7 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "7.29.6",
-      "@hono/node-server": "2.0.5",
+      "@hono/node-server": "2.0.10",
       "body-parser@>=2.0.0 <2.3.0": "2.3.0",
       "brace-expansion@>=2.0.0 <2.1.2": "2.1.2",
       "esbuild": "0.28.1",
