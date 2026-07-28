@@ -5,6 +5,25 @@
 # contributor-only -BuildFromSource path packages only the Electron shell.
 #
 #   irm https://flinttrade.vercel.app/install.ps1 | iex
+#
+# Parameters:
+#   -Channel beta|stable  Release channel to install (default: beta)
+#   -Ref <tag>            Install an exact release tag
+#   -BuildFromSource      Package the Electron shell from a trusted checkout
+#   -SrcDir <dir>         Checkout used by -BuildFromSource.
+#                         Default: $HOME\.flinttrade\source-build\FlintTrade
+#                         Override with the FLINTTRADE_SRC_DIR environment
+#                         variable (the parameter wins over the variable).
+#   -Update               Alias for the default install/update flow
+#   -Yes                  Compatibility flag for the bundled updater
+#   -NoLaunch             Do not launch FlintTrade after installing
+#   -DryRun               Resolve and verify policy without installing
+#
+# Where things land:
+#   $HOME\.flinttrade\source-build\FlintTrade   the -SrcDir checkout, multi-GB
+#                                               once built
+# It sits under $HOME\.flinttrade so `uninstall.ps1 -Purge` can find and remove
+# it; the workspace itself stays in %APPDATA%\flinttrade.
 
 param(
     [string]$Channel = $(if ($env:FLINTTRADE_CHANNEL) { $env:FLINTTRADE_CHANNEL } else { "beta" }),

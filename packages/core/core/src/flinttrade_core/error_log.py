@@ -37,6 +37,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .workspace import workspace_dir
+
 logger = logging.getLogger("flinttrade.core.error_log")
 
 # IST as a fixed-offset timezone — no pytz dependency required.
@@ -148,8 +150,12 @@ class ErrorLog:
 
     Args:
         db_path: Path to the DuckDB file.  Defaults to
-            ``~/.flinttrade/error_log.duckdb``.  Pass ``":memory:"`` for
-            ephemeral in-process storage (useful in tests).
+            ``error_log.duckdb`` inside the platform workspace resolved by
+            :func:`flinttrade_core.workspace.workspace_dir` — ``~/.flinttrade``
+            on Linux, ``~/Library/Application Support/flinttrade`` on macOS,
+            ``%APPDATA%/flinttrade`` on Windows, honouring the
+            ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides.  Pass
+            ``":memory:"`` for ephemeral in-process storage (useful in tests).
 
     Example::
 
@@ -162,7 +168,7 @@ class ErrorLog:
         import duckdb  # lazy — avoids penalising startup if unused
 
         if db_path is None:
-            db_path = Path.home() / ".flinttrade" / "error_log.duckdb"
+            db_path = workspace_dir() / "error_log.duckdb"
 
         if isinstance(db_path, str) and db_path != ":memory:":
             db_path = Path(db_path)

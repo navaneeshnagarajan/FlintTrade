@@ -22,8 +22,40 @@ export const revalidate = 300;
 export const metadata = {
   title: 'Download',
   description:
-    'Check FlintTrade Electron installer availability for macOS, Windows, and Linux.',
+    'Install the self-hosted FlintTrade web app in one line, and check Electron installer availability for macOS, Windows, and Linux.',
 };
+
+// The self-hosted web app is the primary path: it needs nothing pre-installed
+// and, unlike the desktop shell, it does not wait on a published release. These
+// commands are the canonical one-liners and must stay byte-for-byte identical
+// to the ones in the setup docs and the repository readme.
+const webInstallCommands = [
+  {
+    platform: 'macOS / Linux',
+    command: 'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
+    needs: 'No prerequisites. Provisions a pinned, checksum-verified toolchain, builds the managed source checkout, and installs the flinttrade launcher.',
+  },
+  {
+    platform: 'Windows 10/11',
+    command: 'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
+    needs: 'No prerequisites. Same bootstrap in PowerShell, with a per-user launcher and a Start Menu shortcut.',
+  },
+] as const;
+
+const uninstallCommands = [
+  {
+    platform: 'macOS / Linux',
+    command: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash',
+    purge: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge',
+    needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add --purge.',
+  },
+  {
+    platform: 'Windows 10/11',
+    command: 'irm https://flinttrade.vercel.app/uninstall.ps1 | iex',
+    purge: '& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge',
+    needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add -Purge.',
+  },
+] as const;
 
 const guarantees = [
   {
@@ -81,7 +113,18 @@ function primaryDownloadsFor(manifest: DesktopReleaseManifest) {
   ].filter((entry): entry is { title: string; asset: DesktopReleaseAsset } => entry.asset != null);
 }
 
-async function releaseForDownloadPage(): Promise<DesktopReleaseManifest> {
+/**
+ * Outcome of the release lookup. `lookupFailed` separates "we could not ask
+ * GitHub" from "GitHub answered and there is no complete release yet" — the
+ * two used to collapse into the same pending copy, which told a visitor that
+ * nothing was published when in fact we simply had not looked successfully.
+ */
+interface DesktopReleaseLookup {
+  manifest: DesktopReleaseManifest;
+  lookupFailed: boolean;
+}
+
+async function releaseForDownloadPage(): Promise<DesktopReleaseLookup> {
   try {
     const response = await fetch(GITHUB_RELEASES_URL, {
       headers: {
@@ -90,16 +133,75 @@ async function releaseForDownloadPage(): Promise<DesktopReleaseManifest> {
       },
       next: { revalidate: 300 },
     });
-    if (!response.ok) return DEFAULT_DESKTOP_RELEASE;
+    if (!response.ok) return { manifest: DEFAULT_DESKTOP_RELEASE, lookupFailed: true };
     const releases = (await response.json()) as GitHubRelease[];
-    return selectDesktopRelease(releases, { channel: 'beta' }) ?? DEFAULT_DESKTOP_RELEASE;
+    return {
+      manifest: selectDesktopRelease(releases, { channel: 'beta' }) ?? DEFAULT_DESKTOP_RELEASE,
+      lookupFailed: false,
+    };
   } catch {
-    return DEFAULT_DESKTOP_RELEASE;
+    return { manifest: DEFAULT_DESKTOP_RELEASE, lookupFailed: true };
   }
 }
 
+/**
+ * Shown whenever the desktop shell cannot be offered. A failed lookup and an
+ * unpublished release are different facts, so they get different copy — and
+ * neither of them withholds the web app, which is installable in every state.
+ */
+function DesktopShellUnavailable({ lookupFailed }: { lookupFailed: boolean }) {
+  if (lookupFailed) {
+    return (
+      <section aria-labelledby="electron-release-lookup-failed">
+        <h2 id="electron-release-lookup-failed">Desktop release status temporarily unavailable</h2>
+        <p>
+          The GitHub release feed could not be reached from this deployment, so desktop installer
+          availability could not be checked just now. This is a temporary lookup failure, not a
+          statement that an installer does or does not exist. Reload shortly, or read the{' '}
+          <a href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
+            GitHub release history
+          </a>{' '}
+          directly. The web app above is unaffected.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section aria-labelledby="electron-installer-pending">
+      <h2 id="electron-installer-pending">Electron installer release pending</h2>
+      <p>
+        No complete, checksum-published Electron installer release is available yet. Existing
+        GitHub releases may use the previous desktop packaging, so this page does not expose
+        download buttons or one-command install instructions until the full Electron asset set
+        is published and verified.
+      </p>
+      <p>
+        Follow the{' '}
+        <a href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
+          GitHub release history
+        </a>{' '}
+        or return here after the Electron release is published. Until then, the self-hosted web
+        app above is the supported way to run FlintTrade.
+      </p>
+    </section>
+  );
+}
+
+/** Closing disclaimer lead-in; it must never claim a fact the lookup did not establish. */
+function desktopAvailabilityNote(
+  manifest: DesktopReleaseManifest,
+  installerReleaseAvailable: boolean,
+  lookupFailed: boolean,
+): string {
+  if (installerReleaseAvailable) return `${manifest.tag} is not production ready.`;
+  if (lookupFailed) {
+    return 'FlintTrade remains beta software and desktop installer availability could not be checked.';
+  }
+  return 'FlintTrade remains beta software and no Electron installer is currently offered.';
+}
+
 export default async function DownloadPage() {
-  const manifest = await releaseForDownloadPage();
+  const { manifest, lookupFailed } = await releaseForDownloadPage();
   const installerReleaseAvailable = manifest.assets.length > 0;
   const primaryDownloads = primaryDownloadsFor(manifest);
   const releaseChannel = releaseChannelLabel(manifest);
@@ -112,9 +214,68 @@ export default async function DownloadPage() {
     <main className="site-shell">
       <SiteHeader />
       <section className="subpage">
-        <h1>Download FlintTrade Desktop.</h1>
+        <h1>Install FlintTrade.</h1>
+
+        <section aria-labelledby="web-app-install">
+          <h2 id="web-app-install">Install the self-hosted web app</h2>
+          <p>
+            This is the primary path and it needs nothing pre-installed — no Python, no Node, no
+            git, no bash and no make. The installer provisions a pinned, checksum-verified
+            toolchain, builds FlintTrade from a managed source checkout, and installs a{' '}
+            <span className="font-mono">flinttrade</span> launcher. Open{' '}
+            <span className="font-mono">http://127.0.0.1:5100</span> and complete Setup; no{' '}
+            <span className="font-mono">.env</span> file is required.
+          </p>
+          <div className="stack">
+            {webInstallCommands.map((entry) => (
+              <div className="code-panel" key={entry.platform}>
+                <header>
+                  <span>{entry.platform}</span>
+                  <span>terminal</span>
+                </header>
+                <pre>
+                  <code>{entry.command}</code>
+                </pre>
+                <p className="code-panel-note">{entry.needs}</p>
+              </div>
+            ))}
+          </div>
+          {sourceSha === null ? (
+            <p>
+              This site deployment has no immutable source identity, so those bootstrap URLs answer
+              503 rather than redirect. Clone the repository and run{' '}
+              <span className="font-mono">scripts/install/flinttrade-web-install.sh</span> (or{' '}
+              <span className="font-mono">flinttrade-web-install.ps1</span>) directly until the site
+              is redeployed from a known commit.
+            </p>
+          ) : null}
+        </section>
+
+        <section aria-labelledby="uninstall-flinttrade">
+          <h2 id="uninstall-flinttrade">Uninstall</h2>
+          <p>
+            The same one-line shape removes FlintTrade. Your workspace and its data survive by
+            default; the purge form deletes them too, and that deletion cannot be undone.
+          </p>
+          <div className="stack">
+            {uninstallCommands.map((entry) => (
+              <div className="code-panel" key={entry.platform}>
+                <header>
+                  <span>{entry.platform}</span>
+                  <span>terminal</span>
+                </header>
+                <pre>
+                  <code>{`${entry.command}\n${entry.purge}`}</code>
+                </pre>
+                <p className="code-panel-note">{entry.needs}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         {installerReleaseAvailable ? (
           <>
+            <h2>FlintTrade Desktop</h2>
             <p>
               FlintTrade ships a small Electron shell for macOS, Windows, and Linux. The current{' '}
               {releaseChannel} release is <span className="font-mono">{manifest.tag}</span>. Its first
@@ -226,22 +387,7 @@ export default async function DownloadPage() {
             </p>
           </>
         ) : (
-          <section aria-labelledby="electron-installer-pending">
-            <h2 id="electron-installer-pending">Electron installer release pending</h2>
-            <p>
-              No complete, checksum-published Electron installer release is available yet. Existing
-              GitHub releases may use the previous desktop packaging, so this page does not expose
-              download buttons or one-command install instructions until the full Electron asset set
-              is published and verified.
-            </p>
-            <p>
-              Follow the{' '}
-              <a href="https://github.com/navaneeshnagarajan/FlintTrade/releases" target="_blank" rel="noopener noreferrer">
-                GitHub release history
-              </a>{' '}
-              or return here after the Electron release is published.
-            </p>
-          </section>
+          <DesktopShellUnavailable lookupFailed={lookupFailed} />
         )}
 
         <div className="section-actions">
@@ -268,9 +414,7 @@ export default async function DownloadPage() {
         </div>
 
         <p className="hero-disclaimer">
-          {installerReleaseAvailable
-            ? `${manifest.tag} is not production ready.`
-            : 'FlintTrade remains beta software and no Electron installer is currently offered.'}{' '}
+          {desktopAvailabilityNote(manifest, installerReleaseAvailable, lookupFailed)}{' '}
           Use Explore and Practice modes first; Live mode remains your own risk.
         </p>
       </section>

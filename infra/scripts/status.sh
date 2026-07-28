@@ -42,14 +42,21 @@ fi
 echo ""
 echo "Ports:"
 for port in $FLINTTRADE_BACKEND_PORT $OPENALGO_PORT 5173 3000; do
+    HAVE_PROBE=true
     if command -v ss >/dev/null 2>&1; then
         PROC=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -o 'users:(.*' | head -1)
     elif command -v lsof >/dev/null 2>&1; then
         PROC=$(lsof -i ":$port" -sTCP:LISTEN 2>/dev/null | tail -1 | awk '{print $1}')
     else
+        # Neither probe exists, so we know NOTHING about this port. Reporting
+        # "free" here would be a lie that sends users to debug a port conflict
+        # that the tool told them did not exist.
         PROC=""
+        HAVE_PROBE=false
     fi
-    if [ -n "$PROC" ]; then
+    if [ "$HAVE_PROBE" = false ]; then
+        echo "  :$port — unknown (install 'ss' (iproute2) or 'lsof' to inspect port ownership)"
+    elif [ -n "$PROC" ]; then
         echo "  :$port — in use ($PROC)"
     else
         echo "  :$port — free"

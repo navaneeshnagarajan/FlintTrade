@@ -4,7 +4,10 @@
 #
 # Prerequisites:
 #   - restic installed (https://restic.net)
-#   - Password file at ~/.flinttrade/backup-password (or set RESTIC_PASSWORD_FILE)
+#   - Password file at <workspace>/backup-password (or set RESTIC_PASSWORD_FILE),
+#     where <workspace> is ~/.flinttrade on Linux,
+#     ~/Library/Application Support/flinttrade on macOS, %APPDATA%\flinttrade on
+#     Windows; override with FLINTTRADE_WORKSPACE_DIR or FLINTTRADE_HOME
 #   - RESTIC_REPOSITORY set (default: /var/backups/flinttrade)
 #
 # Usage:
@@ -14,8 +17,20 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────────────
+# Resolve the REAL per-OS workspace rather than assuming ~/.flinttrade, which is
+# only correct on Linux. Overrides in precedence order:
+# FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME > platform default.
+default_workspace() {
+    case "$(uname -s)" in
+        Darwin)               printf '%s' "$HOME/Library/Application Support/flinttrade" ;;
+        MINGW*|MSYS*|CYGWIN*) printf '%s' "${APPDATA:-$HOME/AppData/Roaming}/flinttrade" ;;
+        *)                    printf '%s' "$HOME/.flinttrade" ;;
+    esac
+}
+WORKSPACE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
+
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/var/backups/flinttrade}"
-RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-$HOME/.flinttrade/backup-password}"
+RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-$WORKSPACE_DIR/backup-password}"
 export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE
 
 LOG_TAG="flinttrade-backup"
@@ -34,8 +49,8 @@ fi
 BACKUP_PATHS=()
 
 # User data directory (auth.db, credentials.db, DuckDB, chroma, jwt_secret, workspace.json)
-if [ -d "$HOME/.flinttrade" ]; then
-    BACKUP_PATHS+=("$HOME/.flinttrade")
+if [ -d "$WORKSPACE_DIR" ]; then
+    BACKUP_PATHS+=("$WORKSPACE_DIR")
 fi
 
 # Environment config
@@ -51,7 +66,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
 fi
 
 if [ ${#BACKUP_PATHS[@]} -eq 0 ]; then
-    die "No backup paths found. Ensure ~/.flinttrade exists or /opt/flinttrade/.env is present."
+    die "No backup paths found. Ensure $WORKSPACE_DIR exists or /opt/flinttrade/.env is present."
 fi
 
 log "Backing up ${#BACKUP_PATHS[@]} path(s) to $RESTIC_REPOSITORY"

@@ -36,42 +36,54 @@ infra_bp = Blueprint("infra", __name__, url_prefix="/v1/admin")
 
 
 def _get_traffic_logger():  # type: ignore[return]
-    """Return the TrafficLogger instance from app config."""
+    """Return the TrafficLogger instance from app config.
+
+    The database lives in the platform workspace (``workspace_dir()``), not a
+    hardcoded ``~/.flinttrade`` — otherwise macOS and Windows installs write
+    outside the directory the uninstaller purges and outside every
+    ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` override.
+    """
     tl = current_app.config.get("TRAFFIC_LOGGER")
     if tl is None:
-        from pathlib import Path  # noqa: PLC0415
-
         from .traffic_logger import TrafficLogger  # noqa: PLC0415
+        from .workspace import workspace_dir  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "traffic_log.duckdb"
+        db_path = workspace_dir() / "traffic_log.duckdb"
         tl = TrafficLogger(str(db_path))
         current_app.config["TRAFFIC_LOGGER"] = tl
     return tl
 
 
 def _get_latency_monitor():  # type: ignore[return]
-    """Return the LatencyMonitor instance from app config."""
+    """Return the LatencyMonitor instance from app config.
+
+    Resolved through the same ``workspace_dir()`` authority as every other
+    workspace-owned database.
+    """
     lm = current_app.config.get("LATENCY_MONITOR")
     if lm is None:
-        from pathlib import Path  # noqa: PLC0415
-
         from flinttrade_engine.latency_monitor import LatencyMonitor  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "latency_log.duckdb"
+        from .workspace import workspace_dir  # noqa: PLC0415
+
+        db_path = workspace_dir() / "latency_log.duckdb"
         lm = LatencyMonitor(str(db_path))
         current_app.config["LATENCY_MONITOR"] = lm
     return lm
 
 
 def _get_api_analyzer():  # type: ignore[return]
-    """Return the APIAnalyzer instance from app config."""
+    """Return the APIAnalyzer instance from app config.
+
+    Resolved through the same ``workspace_dir()`` authority as every other
+    workspace-owned database.
+    """
     az = current_app.config.get("API_ANALYZER")
     if az is None:
-        from pathlib import Path  # noqa: PLC0415
-
         from .api_analyzer import APIAnalyzer  # noqa: PLC0415
+        from .workspace import workspace_dir  # noqa: PLC0415
 
-        db_path = Path.home() / ".flinttrade" / "api_analyzer.duckdb"
+        db_path = workspace_dir() / "api_analyzer.duckdb"
         az = APIAnalyzer(str(db_path))
         current_app.config["API_ANALYZER"] = az
     return az

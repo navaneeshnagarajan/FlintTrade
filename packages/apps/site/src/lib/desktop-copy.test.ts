@@ -63,6 +63,26 @@ describe('Electron source-bootstrap website copy', () => {
   });
 });
 
+/**
+ * These assertions guard the DESKTOP installer copy only: the page must not
+ * advertise a desktop install before a complete, verified Electron release
+ * exists. They were originally written as a blanket `not.toContain('curl -fsSL')`
+ * because the desktop installer was the only command the page had ever shown.
+ * The page now also carries the self-hosted web-app one-liners, which are
+ * legitimate in every state (they depend on no release at all), so the checks
+ * are narrowed to the exact desktop commands rather than to the shape of a
+ * shell one-liner. Anything matching these must stay release-gated.
+ */
+const DESKTOP_INSTALL_COMMANDS = [
+  'curl -fsSL https://flinttrade.vercel.app/install.sh | bash',
+  'irm https://flinttrade.vercel.app/install.ps1 | iex',
+] as const;
+
+const WEB_INSTALL_COMMANDS = [
+  'curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash',
+  'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
+] as const;
+
 describe('Electron installer availability copy', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -78,10 +98,49 @@ describe('Electron installer availability copy', () => {
 
     expect(html).toContain('Electron installer release pending');
     expect(html).toContain('does not expose download buttons or one-command install instructions');
-    expect(html).not.toContain('curl -fsSL');
-    expect(html).not.toContain('irm https://flinttrade.vercel.app/install.ps1');
+    for (const command of DESKTOP_INSTALL_COMMANDS) {
+      expect(html).not.toContain(command);
+    }
     expect(html).not.toContain('One-command install');
     expect(html).not.toContain(DEFAULT_DESKTOP_RELEASE.tag);
+  });
+
+  it('offers the self-hosted web app and its uninstall in the pending state', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json([])));
+    (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+
+    const html = renderToStaticMarkup(await DownloadPage());
+
+    // The desktop shell being unavailable must never leave the page with
+    // nothing installable — the web app is the primary path.
+    expect(html).toContain('Install the self-hosted web app');
+    for (const command of WEB_INSTALL_COMMANDS) {
+      expect(html).toContain(command);
+    }
+    expect(html).toContain('Uninstall');
+    expect(html).toContain('curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash');
+    expect(html).toContain('irm https://flinttrade.vercel.app/uninstall.ps1 | iex');
+  });
+
+  it('separates an unreachable release feed from a genuinely unpublished installer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('release feed unreachable');
+    }));
+    (globalThis as typeof globalThis & { React?: typeof React }).React = React;
+
+    const html = renderToStaticMarkup(await DownloadPage());
+
+    expect(html).toContain('temporarily unavailable');
+    expect(html).toContain('could not be reached from this deployment');
+    // A failed lookup proves nothing about publication, so it must not claim
+    // the release is pending, nor advertise a desktop install.
+    expect(html).not.toContain('Electron installer release pending');
+    for (const command of DESKTOP_INSTALL_COMMANDS) {
+      expect(html).not.toContain(command);
+    }
+    for (const command of WEB_INSTALL_COMMANDS) {
+      expect(html).toContain(command);
+    }
   });
 
   it('shows commands and exact release copy only for a complete verified Electron asset set', async () => {
@@ -108,8 +167,15 @@ describe('Electron installer availability copy', () => {
     const html = renderToStaticMarkup(await DownloadPage());
 
     expect(html).toContain('One-command install is unavailable');
-    expect(html).not.toContain('curl -fsSL');
+    // Narrowed for the same reason as the pending-state check above: the
+    // desktop commands stay withheld, while the web-app commands remain on the
+    // page with an explicit note that the bootstrap URLs answer 503 until this
+    // deployment has an immutable source identity.
+    for (const command of DESKTOP_INSTALL_COMMANDS) {
+      expect(html).not.toContain(command);
+    }
     expect(html).not.toContain('Read the install script');
     expect(html).toContain('Download');
+    expect(html).toContain('no immutable source identity, so those bootstrap URLs answer');
   });
 });

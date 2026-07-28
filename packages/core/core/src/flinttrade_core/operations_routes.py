@@ -2501,10 +2501,18 @@ def receive_frontend_error() -> tuple[Any, int]:
 def get_recent_logs() -> tuple[Any, int]:
     """Return recent structured log entries for the admin dashboard.
 
-    Reads the last 100 lines from the structured log file at
-    ``~/.flinttrade/logs/flinttrade.log``. Each line is expected to be a
-    JSON-encoded structlog entry; plain-text lines are wrapped in a
-    minimal dict.
+    Reads the last 100 lines from ``flinttrade.log`` inside the workspace log
+    directory (``Workspace().log_dir`` — ``~/.flinttrade/logs`` on Linux,
+    ``~/Library/Application Support/flinttrade/logs`` on macOS,
+    ``%APPDATA%/flinttrade/logs`` on Windows, and whatever
+    ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` select). Each line is
+    expected to be a JSON-encoded structlog entry; plain-text lines are wrapped
+    in a minimal dict.
+
+    The previous hardcoded ``~/.flinttrade/logs`` was wrong on macOS and
+    Windows. Note that no component currently writes ``flinttrade.log``, so
+    this panel stays empty until a writer exists — that is a separate gap, not
+    a path bug.
 
     Query parameters:
         n (int, optional): Number of lines to return (default 100, max 500).
@@ -2513,7 +2521,8 @@ def get_recent_logs() -> tuple[Any, int]:
         JSON with ``status`` and ``data`` containing a list of log entries.
     """
     import json  # noqa: PLC0415
-    from pathlib import Path  # noqa: PLC0415
+
+    from .workspace import Workspace  # noqa: PLC0415
 
     try:
         n = min(int(request.args.get("n", 100)), 500)
@@ -2522,7 +2531,7 @@ def get_recent_logs() -> tuple[Any, int]:
     except (ValueError, TypeError):
         return jsonify({"status": "error", "message": "n must be a positive integer"}), 400
 
-    log_file = Path.home() / ".flinttrade" / "logs" / "flinttrade.log"
+    log_file = Workspace().log_dir / "flinttrade.log"
     entries: list[dict[str, Any]] = []
     if log_file.exists():
         lines = log_file.read_text(encoding="utf-8", errors="replace").strip().split("\n")

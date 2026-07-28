@@ -6,16 +6,18 @@ FlintTrade is a monorepo for an Indian trading platform. Python packages live un
 
 ## Build, Test, and Development Commands
 
-Use the root `Makefile` as the main entry point.
+`python scripts/ft.py <target>` is the cross-platform entry point — it needs no make and no bash, and behaves identically on Windows, macOS and Linux. After an install the shim exposes the same subcommands as `flinttrade <target>`. `make <target>` is the POSIX alias for the same targets; a few POSIX-only targets have no `ft.py` equivalent and are marked below.
 
-- `make setup` installs project dependencies.
-- `make dev` starts the terminal dev server plus the FlintTrade backend; run `make start-openalgo` separately only for the optional OpenAlgo integration path.
-- `make test` runs all pytest suites with the required import mode.
-- `make test-fast` stops pytest on the first failure.
-- `make lint` runs Ruff over Python packages and tests.
-- `make full-check` runs a compact tests, lint, and terminal typecheck pass.
-- `cd packages/apps/terminal && npm run build` runs `tsc --noEmit` plus Vite.
-- `cd packages/apps/terminal && npm run test` runs Vitest; `npm run e2e` runs Playwright.
+- `python scripts/ft.py setup` installs project dependencies.
+- `python scripts/ft.py dev` starts the terminal dev server plus the FlintTrade backend; run `make start-openalgo` (POSIX only) separately for the optional OpenAlgo integration path.
+- `python scripts/ft.py test` runs all pytest suites with the required import mode.
+- `python scripts/ft.py test-fast` stops pytest on the first failure.
+- `python scripts/ft.py lint` runs Ruff over Python packages and tests.
+- `make full-check` (POSIX only — it needs bash) runs a compact tests, lint, and terminal typecheck pass.
+- `pnpm --filter @flinttrade/terminal build` runs `tsc --noEmit` plus Vite.
+- `pnpm --filter @flinttrade/terminal test` runs Vitest; `pnpm --filter @flinttrade/terminal e2e` runs Playwright.
+
+Never chain these with `&&` in documentation or in instructions to a contributor: Windows PowerShell 5.1 has no `&&` operator. Put one command per line, or use `;`.
 
 ## Coding Style & Naming Conventions
 
@@ -23,7 +25,7 @@ EditorConfig sets LF endings, final newlines, two-space indentation by default, 
 
 ## Testing Guidelines
 
-Run focused tests before broad suites, for example `uv run pytest packages/integrations/gateway/tests/ -v --import-mode=importlib` or `cd packages/apps/terminal && npx vitest run -t "places a market order"`. Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as Dockview panels.
+Run focused tests before broad suites, for example `uv run pytest packages/integrations/gateway/tests/ -v --import-mode=importlib`, or `npx vitest run -t "places a market order"` after `cd packages/apps/terminal` (two lines, not an `&&` chain). Pytest markers are `unit`, `integration`, and `slow`; misspelled markers fail CI. New widgets should include a co-located `<Name>.test.tsx` and be registered as Dockview panels.
 
 ## Commit & Pull Request Guidelines
 

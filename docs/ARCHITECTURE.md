@@ -3,7 +3,8 @@
 > Reflects `v0.0.1`. 18 package surfaces (13 Python + 3 apps: React
 > terminal, Electron desktop shell, Next.js site + 1 shared TypeScript
 > design-system package + 1 Rust/PyO3 tick engine).
-> Run `make test` and terminal Vitest locally for the current test counts.
+> Run `python scripts/ft.py test` and terminal Vitest locally for the current
+> test counts.
 
 This document is the architectural reference for contributors. For a
 user-facing overview, see [USER_GUIDE.md](USER_GUIDE.md). For HTTP /
@@ -544,27 +545,34 @@ comes from workspace config, with `.env` retained as an advanced fallback.
 
 ## 9. Infrastructure and deployment
 
-### Makefile
+### Task runner
 
-`Makefile` is the primary interface:
+`scripts/ft.py` is the primary interface. It is stdlib-only and behaves
+identically on Windows, macOS and Linux — no make and no bash required. After
+an install, the shim exposes the same subcommands as `flinttrade <subcommand>`.
 
 ```bash
-make setup      # first-time install (deps, workspace)
-make start      # start FlintTrade backend
-make stop       # stop FlintTrade backend
-make status     # show service and port status
-make test       # run all Python tests
-make test-fast  # stop on first failure
-make lint       # run ruff
-make dev        # start React dev server + FlintTrade backend
-make health     # health check
-make clean      # remove build artefacts
-make update     # update Python + Node deps
+python scripts/ft.py setup      # first-time install (deps, workspace)
+python scripts/ft.py start      # start FlintTrade backend
+python scripts/ft.py stop       # stop FlintTrade backend
+python scripts/ft.py status     # show service and port status
+python scripts/ft.py test       # run all Python tests
+python scripts/ft.py test-fast  # stop on first failure
+python scripts/ft.py lint       # run ruff
+python scripts/ft.py dev        # start React dev server + FlintTrade backend
+python scripts/ft.py clean      # remove build artefacts
 ```
 
+`make <target>` is the POSIX alias for each of those. A few targets are
+POSIX-only because they are bash recipes rather than `ft.py` delegators —
+`make health`, `make update`, `make full-check`, `make start-openalgo`,
+`make backup` and `make restore` among them. The Makefile header lists the full
+split.
+
 OpenAlgo is an external service; it is NOT a git submodule and is NOT
-bundled. For local development, run `scripts/setup-test-deps.sh` once per
-machine to clone a local-dev copy into `.local/external/`.
+bundled. For local development, run `scripts/setup-test-deps.sh` (a bash
+script; on Windows use WSL2 or Git Bash) once per machine to clone a local-dev
+copy into `.local/external/`.
 
 ### External test dependencies
 
@@ -589,6 +597,9 @@ tracked, pulled, or called at runtime).
 | `scripts/reset-flinttrade-state.sh` | Wipe the FlintTrade workspace for a fresh-user test. |
 
 ### Docker
+
+Docker is an advanced self-hosting path, not the quickstart: these targets need
+make (POSIX only), Docker, and a populated `.env`.
 
 ```bash
 make docker-up     # start all services

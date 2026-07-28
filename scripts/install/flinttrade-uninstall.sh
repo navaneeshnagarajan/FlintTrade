@@ -2,8 +2,11 @@
 # FlintTrade Electron shell uninstaller (macOS + Linux)
 #
 # Ordinary uninstall removes only the shell and launch integration. The trading
-# workspace, Electron profile, managed source/toolchain and legacy desktop data
-# are retained. --purge requires explicit confirmation before deleting them.
+# workspace, Electron profile, managed source/toolchain, the contributor
+# source-build checkout, the pre-workspace data directories and legacy desktop
+# data are all retained. --purge lists every resolved path and requires explicit
+# confirmation before deleting them, because for an upgraded install the
+# pre-workspace directories still hold real trading state.
 #
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 #   curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
@@ -42,8 +45,13 @@ FlintTrade Electron shell uninstaller (macOS + Linux)
 
 Flags:
   --purge    Also delete the workspace, Electron profile, managed source/tools,
-             and legacy desktop storage. Irreversible after confirmation.
-  --yes      Skip the typed --purge confirmation for scripted use.
+             the source-build checkout (~/.flinttrade/source-build, or
+             FLINTTRADE_SRC_DIR when it proves to be a FlintTrade checkout),
+             the pre-workspace ~/.flinttrade data/archive/sandbox directories,
+             and legacy desktop storage. Every resolved path is printed first.
+             Irreversible after confirmation.
+  --yes      Skip the typed --purge confirmation for scripted use. The full
+             list of paths is still printed before anything is deleted.
   --dry-run  Print what would be removed without deleting anything.
 USAGE
 }
@@ -82,6 +90,23 @@ WORKSPACE_DIR="$(expand_tilde "${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(
 MANAGED_ROOT="$HOME/.flinttrade"
 SOURCE_ROOT="$MANAGED_ROOT/src"
 TOOLS_ROOT="$MANAGED_ROOT/tools"
+# The same installer family clones the contributor checkout here
+# (flinttrade-install.sh --src defaults to $SOURCE_BUILD_ROOT/FlintTrade;
+# FLINTTRADE_SRC_DIR overrides it). On macOS the workspace lives under
+# ~/Library/Application Support, so nothing else in the purge list would ever
+# reach this tree — a multi-GB clone plus node_modules survived forever while
+# keep_notice claimed nothing else remained.
+SOURCE_BUILD_ROOT="$MANAGED_ROOT/source-build"
+SRC_DIR_OVERRIDE="$(expand_tilde "${FLINTTRADE_SRC_DIR:-}")"
+# Pre-workspace data directories. workspace.py still reads these at every
+# backend start, and its migration COPIES rather than moves — so they retain a
+# live copy of the DuckDB store, the append-only audit chain and the encrypted
+# broker-credential vault. Purging them is real data loss for an upgraded
+# install, which is why every path is printed before any confirmation.
+LEGACY_DATA_DIR="$MANAGED_ROOT/data"
+LEGACY_ARCHIVE_DIR="$MANAGED_ROOT/archive"
+LEGACY_SANDBOX_DIR="$MANAGED_ROOT/sandbox"
+LEGACY_DITTO_VAULT="$LEGACY_DATA_DIR/ditto_credentials.db"
 ELECTRON_PROFILE=""
 
 remove_path() {
@@ -367,9 +392,29 @@ collect_data_targets() {
   add_data_target "$ELECTRON_PROFILE"
   add_data_target "$SOURCE_ROOT"
   add_data_target "$TOOLS_ROOT"
+  add_data_target "$SOURCE_BUILD_ROOT"
+  # An FLINTTRADE_SRC_DIR override is only honoured when the directory still
+  # proves itself a FlintTrade checkout; an arbitrary env var must never be
+  # able to aim rm -rf at, say, ~/Documents.
+  if [ -n "$SRC_DIR_OVERRIDE" ] && proven_source_checkout "$SRC_DIR_OVERRIDE"; then
+    add_data_target "$SRC_DIR_OVERRIDE"
+  fi
+  add_data_target "$LEGACY_DATA_DIR"
+  add_data_target "$LEGACY_ARCHIVE_DIR"
+  add_data_target "$LEGACY_SANDBOX_DIR"
+  add_data_target "$LEGACY_DITTO_VAULT"
   local candidate
   for candidate in "$@"; do add_data_target "$candidate"; done
   [ "${#DATA_TARGETS[@]}" -eq 0 ] || DATA_FOUND_ANY=1
+}
+
+proven_source_checkout() {
+  local target="$1" marker
+  [ -d "$target" ] && [ ! -L "$target" ] || return 1
+  for marker in .git pnpm-lock.yaml uv.lock pyproject.toml; do
+    [ -e "$target/$marker" ] || return 1
+  done
+  return 0
 }
 
 proven_custom_workspace() {
@@ -489,15 +534,14 @@ purge_all_data() {
     return 0
   fi
 
+  announce_purge_targets
   if [ "$ASSUME_YES" != "1" ]; then
     if [ ! -t 1 ] || [ ! -r /dev/tty ]; then
       say "Non-interactive session: FlintTrade data kept (pass --yes with --purge to confirm deletion)."
       DATA_RETAINED_ANY=1
       return 0
     fi
-    say "About to DELETE the FlintTrade workspace, Electron profile, managed source/tools and legacy storage:"
-    local target answer=""
-    for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
+    local answer=""
     printf '%s' "This is irreversible. Type 'purge' to continue: "
     read -r answer < /dev/tty || true
     if [ "$answer" != "purge" ]; then
@@ -506,9 +550,7 @@ purge_all_data() {
       return 0
     fi
   else
-    say "Purging explicitly confirmed FlintTrade data:"
-    local target
-    for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
+    say "Purge explicitly confirmed with --yes; deleting every path listed above."
   fi
 
   local target
@@ -519,6 +561,17 @@ purge_all_data() {
   fi
 }
 
+announce_purge_targets() {
+  local target
+  say "About to DELETE the FlintTrade workspace, Electron profile, managed source/tools,"
+  say "source-build checkout, pre-workspace storage and legacy desktop data listed below:"
+  for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
+  say "Any ~/.flinttrade/data, ~/.flinttrade/archive or ~/.flinttrade/sandbox path above is"
+  say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
+  say "audit chain and the encrypted broker-credential vault live there, so an upgraded"
+  say "install loses real trading state here — not just a cache."
+}
+
 keep_notice() {
   collect_data_targets "$@"
   [ "${#DATA_TARGETS[@]}" -gt 0 ] || return 0
@@ -526,7 +579,9 @@ keep_notice() {
   say "The following FlintTrade data was kept:"
   local target
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
-  say "This includes the workspace, Electron profile, managed source/tools and any legacy desktop storage."
+  say "This includes the workspace, Electron profile, managed source/tools, the source-build"
+  say "checkout, any pre-workspace ~/.flinttrade data/archive/sandbox storage (including the"
+  say "encrypted broker-credential vault) and any legacy desktop storage."
   say "To delete it too, re-run with --purge and confirm explicitly."
 }
 

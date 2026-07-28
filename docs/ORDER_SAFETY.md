@@ -118,7 +118,15 @@ limits, broker-side position checks, and manual review of live-mode settings.
 ## Audit Logging
 
 FlintTrade writes local audit events for order and safety activity. The archive
-path is configurable and defaults under `~/.flinttrade/archive/audit/`.
+path is configurable and defaults to `archive/audit/` inside your workspace
+directory, which is platform-specific:
+
+| Platform | Default audit archive |
+|---|---|
+| Linux | `~/.flinttrade/archive/audit/` |
+| macOS | `~/Library/Application Support/flinttrade/archive/audit/` |
+| Windows | `%APPDATA%\flinttrade\archive\audit\` |
+| Override | `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME` (in that precedence order) |
 
 | Event | Typical fields |
 |---|---|
@@ -149,7 +157,10 @@ Operators should also configure any limits available in their broker dashboard.
 - Native-adapter broker credentials live in the encrypted gateway vault.
 - The OpenAlgo-compatible bridge stores only the OpenAlgo API key in FlintTrade;
   broker authentication remains inside OpenAlgo.
-- Secrets should be file-backed under `~/.flinttrade/` or stored in the OS
+- Secrets should be file-backed under your platform workspace directory
+  (`~/.flinttrade/` on Linux, `~/Library/Application Support/flinttrade/` on
+  macOS, `%APPDATA%\flinttrade\` on Windows; overridden by
+  `FLINTTRADE_WORKSPACE_DIR`, then `FLINTTRADE_HOME`) or stored in the OS
   keyring. Do not commit credentials or personal network details.
 
 ## Market Metadata

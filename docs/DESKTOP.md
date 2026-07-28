@@ -261,19 +261,42 @@ FlintTrade data. The script will not claim an unreceipted same-name application
 as its deletion authority.
 
 `--purge` on macOS/Linux, or `-Purge` on Windows, additionally requests deletion
-of recognised FlintTrade data:
+of recognised FlintTrade data. Purge is irreversible, requires typed or
+explicit scripted confirmation, stays within the current user's home and
+fails closed on links, reparse points, foreign ownership or an unproved custom
+workspace:
 
 ```bash
+# macOS or Linux
 curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 ```
 
 ```powershell
+# Windows
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
-Purge is irreversible, requires typed or explicit scripted confirmation, stays
-within the current user's home and fails closed on links, reparse points or an
-unproved custom workspace.
+### If the download site returns an error
+
+The hosted URLs are only a convenience redirect to the scripts in this
+repository. If `https://flinttrade.vercel.app/uninstall.sh` or
+`https://flinttrade.vercel.app/uninstall.ps1` returns an error, run the same
+uninstaller directly from a clone (or from the managed source checkout at
+`~/.flinttrade/src/FlintTrade`):
+
+```bash
+# macOS or Linux
+bash scripts/install/flinttrade-uninstall.sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps1
+```
+
+Both accept the same `--purge` / `-Purge` flag. These are the same files the
+site serves — see [`scripts/install/`](../scripts/install/).
+
 
 ## Build and verify locally
 
@@ -281,12 +304,17 @@ Shell development requires Git and Node 22.12 or newer. Use the repository's
 pinned pnpm 9.15.0; Rust is needed only for the optional `core/ticks` package,
 not for Electron packaging.
 
+These lines run unchanged in bash, zsh and Windows PowerShell:
+
 ```bash
 pnpm install --frozen-lockfile
-make desktop-test       # Electron TypeScript + Vitest
-make desktop-build      # verify resources, test, and bundle main/preload
-make desktop-package    # package and verify this host's installer
+python scripts/ft.py desktop-test     # Electron TypeScript + Vitest
+python scripts/ft.py desktop-build    # verify resources, test, and bundle main/preload
+python scripts/ft.py desktop-package  # package and verify this host's installer
 ```
+
+On POSIX, `make desktop-test`, `make desktop-build` and `make desktop-package`
+are aliases for the same three targets.
 
 Installer output lands in `packages/apps/desktop/release/electron/`.
 

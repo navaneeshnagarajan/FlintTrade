@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Reset FlintTrade user state for a fresh-install test.
 #
-# Does NOT touch OpenAlgo state (.local/external/openalgo/db/). Only wipes
-# ~/.flinttrade/ (auth.db, credentials.db, activity, security,
+# Does NOT touch OpenAlgo state (.local/external/openalgo/db/). Only wipes the
+# per-OS workspace directory (auth.db, credentials.db, activity, security,
 # traffic/error logs, jwt_secret, master_password, workspace.json,
-# contracts cache, rag store).
+# contracts cache, rag store):
+#   Linux   ~/.flinttrade
+#   macOS   ~/Library/Application Support/flinttrade
+#   Windows %APPDATA%\flinttrade
+# Overrides, in precedence order: FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME.
 #
 # Archives everything first to .local/archive/flinttrade-state-<ts>/
 # per the project's never-delete rule. Nothing is lost, just moved.
@@ -18,8 +22,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Resolve ~/.flinttrade cross-platform (macOS / Linux / MSYS / MINGW).
-STATE_DIR="${HOME}/.flinttrade"
+# Resolve the REAL per-OS workspace, honouring both env overrides in precedence
+# order: FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME > platform default.
+# Hardcoding ${HOME}/.flinttrade wiped the wrong directory on macOS and Windows
+# (where the workspace lives under Application Support / %APPDATA%), so the reset
+# silently did nothing while reporting success.
+default_workspace() {
+    case "$(uname -s)" in
+        Darwin)               printf '%s' "$HOME/Library/Application Support/flinttrade" ;;
+        MINGW*|MSYS*|CYGWIN*) printf '%s' "${APPDATA:-$HOME/AppData/Roaming}/flinttrade" ;;
+        *)                    printf '%s' "$HOME/.flinttrade" ;;
+    esac
+}
+STATE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
 PYTHON_BIN="${PYTHON:-python}"
 FLINTTRADE_PYTHONPATH="$REPO_ROOT/packages/core/core/src"
 
@@ -62,11 +77,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Wipe ~/.flinttrade/ but keep the empty dir so the backend writes cleanly.
+# 3. Wipe the workspace but keep the empty dir so the backend writes cleanly.
 # ---------------------------------------------------------------------------
 rm -rf "$STATE_DIR"
 mkdir -p "$STATE_DIR"
-echo "→ Wiped ~/.flinttrade/"
+echo "→ Wiped $STATE_DIR"
 
 # ---------------------------------------------------------------------------
 # 4. Verify OpenAlgo state is intact.
@@ -83,8 +98,14 @@ fi
 if [ "$RESTART" = true ]; then
     mkdir -p .local/dev-logs
     echo "→ Restarting FlintTrade backend in background…"
+    # ';' under a Windows Python (this script already assumes MSYS: taskkill,
+    # netstat -ano), ':' everywhere else. A ':' join splits on the drive letter.
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) PATH_SEP=';' ;;
+        *)                    PATH_SEP=':' ;;
+    esac
     PYTHONIOENCODING=utf-8 PYTHONUTF8=1 \
-        PYTHONPATH="$FLINTTRADE_PYTHONPATH:${PYTHONPATH:-}" \
+        PYTHONPATH="${FLINTTRADE_PYTHONPATH}${PATH_SEP}${PYTHONPATH:-}" \
         nohup "$PYTHON_BIN" -m flinttrade_core.app > .local/dev-logs/backend.log 2>&1 &
     disown
 

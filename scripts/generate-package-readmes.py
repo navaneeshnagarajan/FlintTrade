@@ -32,24 +32,56 @@ def link_from_package(pkg_path: str, target: str) -> str:
 
 
 def test_command(pkg_path: str, language: str) -> str:
+    """Return the package's test command block.
+
+    Every command is emitted on its own line rather than joined with ``&&``:
+    Windows PowerShell 5.1 has no ``&&`` operator, so a chained recipe is not
+    runnable on a supported platform.
+
+    Args:
+        pkg_path: Package path relative to ``packages/``, e.g. ``core/ticks``.
+        language: Language label from ``templates/package-purposes.yml``.
+
+    Returns:
+        A newline-separated command block, safe to paste into any shell.
+    """
     if pkg_path == "apps/site":
-        return "cd packages/apps/site && npm run typecheck && npm run test && npm run build"
+        return (
+            "pnpm --filter @flinttrade/site typecheck\n"
+            "pnpm --filter @flinttrade/site test\n"
+            "pnpm --filter @flinttrade/site build"
+        )
     if pkg_path == "apps/terminal":
-        return "cd packages/apps/terminal && npm run test:base && npm run build"
+        return (
+            "pnpm --filter @flinttrade/terminal test:base\n"
+            "pnpm --filter @flinttrade/terminal build"
+        )
     if pkg_path == "core/design-system":
-        return "cd packages/core/design-system && npx tsc --noEmit"
+        return "cd packages/core/design-system\nnpx tsc --noEmit"
     if language in {"Python", "Python + Numba"}:
         return f"python -m pytest packages/{pkg_path}/tests/ -v --import-mode=importlib"
     if language == "Rust + PyO3":
-        return f"cd packages/{pkg_path} && cargo test"
+        return f"cd packages/{pkg_path}\ncargo test"
     return f"# See packages/{pkg_path}/ for test instructions"
 
 
 def install_command(pkg_path: str, language: str) -> str:
+    """Return the package's install command block.
+
+    One command per line, for the same cross-platform reason as
+    :func:`test_command`.
+
+    Args:
+        pkg_path: Package path relative to ``packages/``, e.g. ``core/ticks``.
+        language: Language label from ``templates/package-purposes.yml``.
+
+    Returns:
+        A newline-separated command block, safe to paste into any shell.
+    """
     if language.startswith("TypeScript"):
         return "pnpm install"
     if language == "Rust + PyO3":
-        return f"uv pip install -e packages/{pkg_path}\ncd packages/{pkg_path} && cargo test"
+        return f"uv pip install -e packages/{pkg_path}\ncd packages/{pkg_path}\ncargo test"
     return f"uv pip install -e packages/{pkg_path}"
 
 
@@ -117,6 +149,10 @@ root workspace.
 ```bash
 {test_cmd_rendered}
 ```
+
+Run one command per line. They work unchanged in bash, zsh and Windows
+PowerShell — do not join them with `&&`, which Windows PowerShell 5.1 does not
+support.
 
 For the full test matrix, see the contributor guide at [docs/DEVELOPER_GUIDE.md]({developer_guide}).
 

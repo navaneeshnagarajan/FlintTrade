@@ -94,16 +94,22 @@ Three mechanisms keep CI inexpensive and signal-rich:
 
 If the local checklist passes, CI catches drift rather than regressions.
 
+One command per line — Windows PowerShell 5.1 has no `&&` operator, so none of
+these may be chained with it.
+
 1. **Before you commit:**
-   - `cd packages/apps/terminal && npx tsc --noEmit` — terminal type-check.
-   - `cd packages/apps/terminal && npx vitest run <changed-tests>` — or the
-     full suite if you touched the widget surface.
+   - `pnpm --filter @flinttrade/terminal typecheck` — terminal type-check.
+   - `npx vitest run <changed-tests>` from `packages/apps/terminal` — or
+     `pnpm --filter @flinttrade/terminal test` if you touched the widget
+     surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
-   - `ruff check packages/*/src/`
+   - `python scripts/ft.py lint` — runs `ruff check` over `packages/*/src/`
+     without relying on POSIX glob expansion.
 2. **Before you push:**
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.
-   - `make test` if anything inside `packages/*/src/` changed.
+   - `python scripts/ft.py test` (POSIX alias: `make test`) if anything inside
+     `packages/*/src/` changed.
 3. **Doc-only commits** (paths listed above) skip the `test.yml` matrix by
    design, but changes under `docs/**` still run the site typecheck, tests and
    build through `site.yml`.
@@ -153,17 +159,21 @@ workflow log. It is the single most useful CI command — bookmark it.
 The per-push jobs are designed to be reproducible without a runner. Map the
 failed job to its local command:
 
+All terminal rows are run from `packages/apps/terminal` — `cd` there first, on
+its own line. Do not chain the `cd` with `&&`; Windows PowerShell 5.1 has no
+`&&`.
+
 | Job | Local command |
 |---|---|
-| `python-tests` | `make test` |
-| `node-core-tests` | `cd packages/apps/terminal && npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
+| `python-tests` | `python scripts/ft.py test` (POSIX alias: `make test`) |
+| `node-core-tests` | `npx vitest run --pool=forks src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/__tests__/` |
 | `node-widget-tests-1` | `... npx vitest run src/widgets/trading/ src/widgets/utility/{AIAdvisor,Alerts,AuditTrail,Calculator,CurrencyConverter,EarningsCalendar,EconomicCalendar,ExpiryCountdown,FundingRate,GlobalIndices,Health}/` |
 | `node-widget-tests-2a` | `... npx vitest run src/widgets/utility/{MarketClock,MarketSummary,News,PositionSizing,ProfitTarget,Scanner}/` |
 | `node-widget-tests-2b` | `... npx vitest run` over `src/widgets/utility/{StrategyTemplates,TickSpeed,Ticker,Watchlist,AIBackends,AITeam,Obsidian,TradeJournal}/` (one dir per invocation; `TradeIdea` excluded) |
 | `node-widget-tests-3` | `... npx vitest run src/widgets/analysis/ src/routes/ src/tools/ src/components/ src/chrome/ src/widgets/orders/ src/widgets/account/` |
 | `secrets-check` | the inline two-pattern `grep` loop from `test.yml` (NOT gitleaks) |
-| `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`) |
-| `electron-desktop-tests` | `make desktop-test && make desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
+| `rust-ticks-tests` | `cargo test --manifest-path packages/core/ticks/Cargo.toml` (or `make ticks-test`, POSIX only) |
+| `electron-desktop-tests` | `python scripts/ft.py desktop-test`, then `python scripts/ft.py desktop-build`, then the Linux `electron-builder --dir` package and `pnpm --filter @flinttrade/desktop verify:package` |
 
 The exact per-shard path lists live in `.github/workflows/test.yml`; treat that
 as the source of truth (the shard-coverage guard keeps it complete).
