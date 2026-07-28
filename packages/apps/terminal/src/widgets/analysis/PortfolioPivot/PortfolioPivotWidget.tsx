@@ -44,6 +44,27 @@ interface PerspectiveClient {
   ): Promise<PerspectiveTable>;
 }
 
+/**
+ * One Perspective worker per app, created lazily and shared across mounts.
+ * perspective.worker() spawns a fresh dedicated WASM worker on EVERY call
+ * with no library-side caching, so a per-mount client leaked one worker per
+ * widget close/reopen cycle. Tables and viewers stay per-mount; only the
+ * client/worker is shared (Perspective's documented one-worker-per-app
+ * pattern), and it genuinely dies with the page.
+ */
+let perspectiveClientPromise: Promise<PerspectiveClient> | null = null;
+function getPerspectiveClient(): Promise<PerspectiveClient> {
+  perspectiveClientPromise ??= (async () => {
+    const [{ default: perspective }] = await Promise.all([
+      import("@finos/perspective"),
+      import("@finos/perspective-viewer"),
+      import("@finos/perspective-viewer-datagrid"),
+    ]);
+    return (await perspective.worker()) as unknown as PerspectiveClient;
+  })();
+  return perspectiveClientPromise;
+}
+
 interface PerspectiveViewerElement extends HTMLElement {
   load(table: PerspectiveTable): Promise<void>;
   restore(config: Record<string, unknown>): Promise<void>;
@@ -110,13 +131,7 @@ function PortfolioPivotWidget(props: WidgetProps) {
 
     (async () => {
       try {
-        const [{ default: perspective }] = await Promise.all([
-          import("@finos/perspective"),
-          import("@finos/perspective-viewer"),
-          import("@finos/perspective-viewer-datagrid"),
-        ]);
-        if (cancelled) return;
-        const client = (await perspective.worker()) as unknown as PerspectiveClient;
+        const client = await getPerspectiveClient();
         if (cancelled) return;
         table = await client.table(POSITION_SCHEMA);
         if (cancelled) {

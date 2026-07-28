@@ -221,7 +221,7 @@ def _compute_ema(values: Sequence[float], period: int) -> list[float | None]:
         List of the same length as *values* with ``None`` before the seed.
     """
     result: list[float | None] = [None] * len(values)
-    if not values or period == 0 or len(values) < period:
+    if not values or period <= 0 or len(values) < period:
         return result
     k = 2.0 / (float(period) + 1.0)
     seed = sum(values[:period]) / float(period)
@@ -253,9 +253,9 @@ def ema_crossover_signals(
         Signal list aligned with *closes*.
 
     Raises:
-        ValueError: If either period is 0 or *fast_period* >= *slow_period*.
+        ValueError: If either period is not positive or *fast_period* >= *slow_period*.
     """
-    if fast_period == 0 or slow_period == 0:
+    if fast_period <= 0 or slow_period <= 0:
         raise ValueError("fast_period and slow_period must be > 0")
     if fast_period >= slow_period:
         raise ValueError("fast_period must be less than slow_period")
@@ -300,7 +300,8 @@ def _validate_and_convert(
         Tuple of (converted bars, converted signals).
 
     Raises:
-        ValueError: On length mismatch, empty bars, or malformed rows.
+        ValueError: On length mismatch, empty bars, malformed rows, or
+            signals outside the -1/0/1 domain.
     """
     if len(bars) != len(signals):
         raise ValueError(
@@ -318,7 +319,13 @@ def _validate_and_convert(
             )
         rows.append([float(v) for v in bar])
 
-    return rows, [int(s) for s in signals]
+    converted: list[int] = []
+    for index, signal in enumerate(signals):
+        value = int(signal)
+        if value not in (-1, 0, 1):
+            raise ValueError(f"signal at index {index} must be -1, 0, or 1 (got {value})")
+        converted.append(value)
+    return rows, converted
 
 
 def _coerce_timestamp(value: Any, index: int) -> float:
@@ -718,7 +725,7 @@ def run_ema_crossover_backtest(
         raise ValueError(
             f'Unknown engine {engine!r}: expected "python", "auto" or "accelerated"'
         )
-    if fast_period == 0 or slow_period == 0:
+    if fast_period <= 0 or slow_period <= 0:
         raise ValueError("fast_period and slow_period must be > 0")
     if fast_period >= slow_period:
         raise ValueError("fast_period must be less than slow_period")

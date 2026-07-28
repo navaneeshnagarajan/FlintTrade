@@ -89,7 +89,22 @@ export function useIndicators({
     if (!chart) return;
     const bars = barsRef.current;
     const times = timesRef.current;
-    if (bars.length === 0 || times.length === 0) return;
+    if (bars.length === 0 || times.length === 0) {
+      // Data-identity reset (symbol/interval change empties the bar refs):
+      // blank every managed series so overlays computed for the previous
+      // identity cannot linger over the new chart while its data loads.
+      const ind = indRef.current;
+      for (const key of Object.keys(ind) as (keyof IndicatorSeriesRefs)[]) {
+        try { ind[key]?.setData([]); } catch { /* chart may be disposing */ }
+      }
+      supertrendMarkersRef.current?.setMarkers([]);
+      if (pivotRef.current.series && pivotRef.current.lines.length > 0) {
+        for (const pl of pivotRef.current.lines) { try { pivotRef.current.series.removePriceLine(pl); } catch { /* ignore */ } }
+        pivotRef.current.lines = [];
+        pivotRef.current.series = null;
+      }
+      return;
+    }
 
     const closes = bars.map((b) => b.close);
     const highs = bars.map((b) => b.high);
@@ -483,15 +498,30 @@ export function useIndicators({
     // A missing entry means the fetch has not landed yet: keep whatever the
     // series already shows rather than clearing it, so a slow backend never
     // blanks an indicator mid-session.
+    // The compute endpoint caps requests at SERVER_INDICATOR_MAX_BARS, so for
+    // longer histories the returned arrays describe only the TRAILING slice.
+    // Pad them with leading nulls (false for boolean flags) back to full bar
+    // length so positional rendering against `times` stays aligned — without
+    // this, overlays shift left by (bars - cap) and the newest bars go blank.
+    const padToBars = <T extends number | null | boolean>(values: T[], filler: T): T[] => {
+      if (values.length >= times.length) return values.slice(-times.length);
+      return [...(Array.from({ length: times.length - values.length }, () => filler) as T[]), ...values];
+    };
     const serverLine = (name: string): (number | null)[] | null => {
       const entry = serverData[name];
-      return Array.isArray(entry) ? entry : null;
+      return Array.isArray(entry) ? padToBars(entry, null) : null;
     };
     const serverDict = (name: string): Record<string, (number | null)[] | boolean[]> | null => {
       const entry = serverData[name];
-      return entry && !Array.isArray(entry) && !("error" in entry)
-        ? (entry as Record<string, (number | null)[] | boolean[]>)
-        : null;
+      if (!entry || Array.isArray(entry) || "error" in entry) return null;
+      const record = entry as Record<string, (number | null)[] | boolean[]>;
+      const padded: Record<string, (number | null)[] | boolean[]> = {};
+      for (const [key, values] of Object.entries(record)) {
+        padded[key] = typeof values[0] === "boolean"
+          ? padToBars(values as boolean[], false)
+          : padToBars(values as (number | null)[], null);
+      }
+      return padded;
     };
     const numeric = (values: (number | null)[] | boolean[] | undefined): (number | null)[] =>
       (values ?? []).map((v) => (typeof v === "number" ? v : null));

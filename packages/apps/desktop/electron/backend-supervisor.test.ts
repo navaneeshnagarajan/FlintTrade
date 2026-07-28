@@ -553,7 +553,9 @@ it.runIf(process.platform !== "win32")(
     await expect(handle.forceContainment(0xffff_fffe)).resolves.toBe(false);
     await expect(exited).resolves.toMatchObject({ signal: "SIGTERM" });
   },
-  10_000,
+  // Must exceed the 15s waitFor above, or a slow spawn dies as an opaque
+  // test-timeout instead of the waitFor's assertion.
+  20_000,
 );
 
 async function pathIsAbsent(target: string): Promise<boolean> {

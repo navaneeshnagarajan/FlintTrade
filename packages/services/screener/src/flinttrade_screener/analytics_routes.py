@@ -418,8 +418,8 @@ def analytics_seasonality() -> Any:
             "symbol": symbol,
             "exchange": exchange,
             "is_sample_data": is_sample_data,
-            "monthly": [asdict(stats) for stats in monthly],
-            "weekday": [asdict(stats) for stats in weekday],
+            "monthly": [_sanitise_stat_floats(asdict(stats)) for stats in monthly],
+            "weekday": [_sanitise_stat_floats(asdict(stats)) for stats in weekday],
             "day_of_month": [
                 {"day": day, "avg_return_pct": value}
                 for day, value in sorted(day_of_month.items())
@@ -434,6 +434,20 @@ def analytics_seasonality() -> Any:
 
 
 _EPOCH_MILLIS_THRESHOLD = 4_102_444_800  # beyond 2100 in seconds → millisecond stamp
+
+
+def _sanitise_stat_floats(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replace non-finite float values with None so jsonify emits valid JSON.
+
+    A month with a single return observation makes pandas ``std()`` (ddof=1)
+    return NaN, and Flask would serialise the bare ``NaN`` token, which the
+    browser's strict JSON parser rejects — hard-failing the Seasonality widget
+    for any scrip listed within the last couple of years.
+    """
+    return {
+        key: None if isinstance(value, float) and not math.isfinite(value) else value
+        for key, value in payload.items()
+    }
 
 
 def _bars_to_close_frame(bars: list[Any]) -> pd.DataFrame:
