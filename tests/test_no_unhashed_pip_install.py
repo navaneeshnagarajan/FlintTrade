@@ -44,9 +44,10 @@ _INSTALL_RE = re.compile(r"\b(pip3?|uv pip)\s+install\b")
 _REQ_FILE_RE = re.compile(r"requirements(\.lock|[\w.-]*\.txt)")
 
 # A line that hands a string to an evaluator: there the quoted text *is* the command,
-# so its quoted literals must still be scanned.
+# so its quoted literals must still be scanned. Covers `-c` (POSIX shells), `/c`
+# (cmd's slash spelling) and `-Command` (powershell/pwsh) alike.
 _EVALUATOR_RE = re.compile(
-    r"\b(?:eval|iex|Invoke-Expression)\b|\b(?:bash|sh|pwsh|powershell|cmd)\b[^\n]*?\s-c\b",
+    r"\b(?:eval|iex|Invoke-Expression)\b|\b(?:bash|sh|pwsh|powershell|cmd)\b[^\n]*?\s(?:[-/]c\b|-Command\b)",
     re.IGNORECASE,
 )
 # One branch per quote style, with backslash excluded from the plain-character

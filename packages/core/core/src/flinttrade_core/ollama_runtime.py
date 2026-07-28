@@ -914,6 +914,12 @@ def _open_windows_private_regular_descriptor(
             os.close(descriptor)
             raise OllamaRuntimeError(invalid_message)
         return descriptor
+    except FileNotFoundError:
+        # Parity with the POSIX descriptor path: a missing file (WinError 2)
+        # or missing ancestor (WinError 3) must propagate so callers can treat
+        # an absent marker/state file as "not present" rather than "invalid".
+        # Wrapping it below broke every absent-file probe on Windows.
+        raise
     except OllamaRuntimeError:
         raise
     except (OSError, ValueError) as exc:

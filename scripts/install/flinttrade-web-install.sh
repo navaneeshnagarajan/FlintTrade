@@ -291,7 +291,9 @@ extract_archive() {
 confirm() {
   local prompt="$1" answer=""
   if [ "$YES" = "1" ]; then return 0; fi
-  if [ ! -r /dev/tty ]; then return 0; fi
+  if [ ! -r /dev/tty ]; then
+    die "Non-interactive session: cannot ask '$prompt'. Re-run with --yes (or FLINTTRADE_YES=1) to confirm every step."
+  fi
   printf '\033[1;36m[flinttrade]\033[0m %s [Y/n] ' "$prompt" > /dev/tty
   IFS= read -r answer < /dev/tty || answer=""
   case "$(lowercase "$answer")" in
@@ -616,16 +618,27 @@ validate_source_origin() {
   esac
 }
 
-archive_url_for_ref() {
-  local ref="$1"
-  if [ -z "$ref" ] || [ "$ref" = "$DEFAULT_BRANCH" ]; then
-    printf '%s/refs/heads/%s' "$ARCHIVE_BASE_URL" "$DEFAULT_BRANCH"
-    return 0
+# A branch or tag archive cannot be hash-pinned, but it can be commit-pinned:
+# resolve the ref to its commit SHA first, then download that exact commit's
+# archive, so the installed bytes cannot drift between resolution and download
+# and the install is reproducible from the reported SHA.
+resolve_ref_commit_sha() {
+  local ref="$1" api_url response sha
+  api_url="https://api.github.com/repos/$REPO_SLUG/commits/$ref"
+  assert_trusted_url "$api_url"
+  response="$(mktemp "${TMPDIR:-/tmp}/flinttrade-ref.XXXXXX")" \
+    || die "Could not stage the commit-resolution response."
+  TMP_DIRS+=("$response")
+  download_to "$api_url" "$response"
+  sha="$(lowercase "$(json_scalars < "$response" | awk -F '\t' '$1 == "sha" { print $2; exit }')")"
+  rm -f "$response"
+  if [ "${#sha}" -ne 40 ]; then
+    die "api.github.com returned no well-formed commit SHA for '$ref'."
   fi
-  case "$ref" in
-    v[0-9]*) printf '%s/refs/tags/%s' "$ARCHIVE_BASE_URL" "$ref" ;;
-    *) printf '%s/refs/heads/%s' "$ARCHIVE_BASE_URL" "$ref" ;;
+  case "$sha" in
+    *[!0-9a-f]*) die "api.github.com returned no well-formed commit SHA for '$ref'." ;;
   esac
+  printf '%s' "$sha"
 }
 
 acquire_source_with_git() {
@@ -647,10 +660,12 @@ acquire_source_with_git() {
 }
 
 acquire_source_with_archive() {
-  local ref="$1" url staging archive extracted
-  url="$(archive_url_for_ref "$ref")"
+  local ref="$1" sha url staging archive extracted
+  say "git is not installed; resolving '$ref' to an exact commit so the archive install is reproducible..."
+  sha="$(resolve_ref_commit_sha "$ref")"
+  url="$ARCHIVE_BASE_URL/$sha"
   assert_trusted_url "$url"
-  say "git is not installed; downloading the source archive instead ($url)..."
+  say "Downloading the source archive for commit $sha ($url)..."
   staging="$(mktemp -d "${TMPDIR:-/tmp}/flinttrade-source.XXXXXX")" \
     || die "Could not create a source staging directory."
   TMP_DIRS+=("$staging")
@@ -667,6 +682,7 @@ acquire_source_with_archive() {
   mkdir -p "$(dirname "$SRC_DIR")"
   rm -rf "$SRC_DIR"
   mv "$extracted" "$SRC_DIR" || die "Could not publish the downloaded checkout at $SRC_DIR."
+  say "Installed source commit: $sha (re-run with --ref $sha to reproduce this exact install)."
 }
 
 acquire_source() {
@@ -678,7 +694,7 @@ acquire_source() {
     if need git; then
       say "DRY-RUN: would clone or fetch+reset $REPO_URL at '$ref' into $SRC_DIR"
     else
-      say "DRY-RUN: would download $(archive_url_for_ref "$ref") and extract it into $SRC_DIR"
+      say "DRY-RUN: would resolve '$ref' to a commit SHA via api.github.com, then download that commit's archive from $ARCHIVE_BASE_URL/<sha> and extract it into $SRC_DIR"
     fi
     return 0
   fi
@@ -879,8 +895,12 @@ main() {
   fi
   say "  pnpm : provided by Corepack from the verified Node install (no separate download)"
   say "  python 3.12 : installed by uv into $TOOLS_ROOT/python"
-  if ! confirm "Proceed with the downloads above?"; then
-    die "Cancelled at the download confirmation; nothing was changed."
+  # A dry run mutates nothing, so it never needs the download confirmation —
+  # this keeps piped `... | bash -s -- --dry-run` usable without --yes.
+  if [ "$DRY_RUN" != "1" ]; then
+    if ! confirm "Proceed with the downloads above?"; then
+      die "Cancelled at the download confirmation; nothing was changed."
+    fi
   fi
 
   if [ -n "$REUSE_UV" ]; then

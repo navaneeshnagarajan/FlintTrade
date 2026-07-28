@@ -26,8 +26,9 @@ prefer a one-click install.
 
 ### One-line install (recommended — no prerequisites)
 
-The web-app installer needs nothing pre-installed: no Python, no Node, no git,
-no bash and no make.
+The web-app installer runs in the shell your OS already ships (bash or zsh on
+macOS and Linux, built-in PowerShell on Windows) and needs no other toolchain:
+no Python, no Node, no git and no make.
 
 ```bash
 # macOS / Linux
@@ -72,8 +73,10 @@ The terminal build step is not optional: the backend serves the UI only when
 `packages/apps/terminal/dist/index.html` exists, so skipping it leaves you with
 an API and no interface.
 
-Docker (`make docker-up`) is an advanced, POSIX-only path that also needs a
-populated `.env`; it is not a zero-prerequisite way in.
+Docker (`make docker-up`) is an advanced, POSIX-only path — it needs make and
+Docker, so it is not a zero-prerequisite way in. A `.env` file is optional:
+the default profile starts the backend, the terminal build and nginx, and the
+UI is served at http://localhost:8080 (override with `FLINTTRADE_HTTP_PORT`).
 
 ### Native desktop (Electron convenience shell)
 

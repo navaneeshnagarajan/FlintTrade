@@ -2510,9 +2510,10 @@ def get_recent_logs() -> tuple[Any, int]:
     in a minimal dict.
 
     The previous hardcoded ``~/.flinttrade/logs`` was wrong on macOS and
-    Windows. Note that no component currently writes ``flinttrade.log``, so
-    this panel stays empty until a writer exists — that is a separate gap, not
-    a path bug.
+    Windows. The file is written by the rotating handler that
+    ``flinttrade_core.app._attach_log_file_handler`` installs during app
+    startup, so entries appear as soon as the backend emits its first log
+    record.
 
     Query parameters:
         n (int, optional): Number of lines to return (default 100, max 500).

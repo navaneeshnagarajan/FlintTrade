@@ -30,6 +30,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import secrets
 import signal
@@ -1627,9 +1628,13 @@ def _read_master_password_interactive() -> str:
         with os.fdopen(int(fd_env), "r") as fd:
             return fd.readline().rstrip("\n")
     if not sys.stdin.isatty():
+        # Resolve the real workspace path so macOS/Windows operators (and
+        # anyone using FLINTTRADE_WORKSPACE_DIR/FLINTTRADE_HOME overrides)
+        # are pointed at their actual file, not a Linux-only ~/.flinttrade.
+        password_file = _workspace_dir() / "master_password"
         raise RuntimeError(
             "master password required but no TTY available; set the hardened "
-            "~/.flinttrade/master_password file or pass FLINTTRADE_MASTER_PASSWORD_FD"
+            f"{password_file} file or pass FLINTTRADE_MASTER_PASSWORD_FD"
         )
     return getpass.getpass("FlintTrade master password: ")
 
@@ -2899,6 +2904,103 @@ def shutdown_ditto_runtime(app: Flask, *, timeout: float = 5.0) -> bool:
     return shutdown(timeout=max(0.0, timeout)) is True
 
 
+_LOG_FILE_SENTINEL = "_flinttrade_log_file_handler"
+
+
+class _WorkspaceLogFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotating handler that re-hardens ``flinttrade.log`` on every (re)open.
+
+    On Windows, files created inside a hardened workspace inherit no ACEs
+    (the root's protected DACL carries non-inheritable entries only), which
+    would leave a freshly created log file unreadable even by its owner —
+    including by the ``/api/v1/logs/recent`` reader. Hardening at open time
+    keeps the file owner-accessible after both first creation and every
+    rotation; failures are ignored because plain-permission platforms
+    already create the file readable.
+    """
+
+    def _open(self) -> Any:
+        stream = super()._open()
+        try:
+            from .secure_file import harden  # noqa: PLC0415
+
+            harden(Path(self.baseFilename))
+        except OSError:
+            pass
+        return stream
+
+
+def _attach_log_file_handler(root_logger: logging.Logger, shared_processors: list[Any]) -> None:
+    """Attach the rotating ``flinttrade.log`` writer behind the admin log panel.
+
+    This is the writer that feeds ``operations_routes.get_recent_logs``
+    (``/api/v1/logs/recent``): JSON lines are appended to
+    ``<workspace>/logs/flinttrade.log``, resolved through :class:`Workspace`
+    so ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides are
+    honoured, with rotation at ~5 MB across three backups. ``delay=True``
+    defers file creation until the first emitted record, so constructing the
+    handler never touches the disk ahead of workspace provisioning. The log
+    directory (and, via :class:`_WorkspaceLogFileHandler`, the file itself)
+    is hardened to owner-only access, which doubles as recovery for a
+    directory bricked by Windows' non-inheriting hardened workspace root.
+
+    Failures never break startup: if the log directory cannot be created or
+    the handler cannot be constructed, one warning is emitted and the admin
+    recent-logs panel simply stays empty. A sentinel attribute guards against
+    double-attach when the factory runs twice in one process; the factory's
+    root-handler sweep also removes and closes the previous instance.
+
+    Args:
+        root_logger: The stdlib root logger the handler is attached to.
+        shared_processors: The structlog pre-chain shared with the console
+            handler; applied to foreign (stdlib) records before rendering.
+    """
+    if any(getattr(h, _LOG_FILE_SENTINEL, False) for h in root_logger.handlers):
+        return
+    try:
+        from .secure_file import harden, harden_directory  # noqa: PLC0415
+        from .workspace import Workspace  # noqa: PLC0415
+
+        log_dir = Workspace().log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            harden_directory(log_dir)
+        except NotADirectoryError:
+            # A previous run may have left the directory with an empty DACL
+            # (created under a hardened workspace root, whose protected ACEs
+            # do not inherit on Windows) — stat then fails, so is_dir()
+            # reports False. The owner retains implicit WRITE_DAC, so
+            # installing the exact DACL directly recovers the directory.
+            harden(log_dir)
+        file_handler = _WorkspaceLogFileHandler(
+            log_dir / "flinttrade.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+            delay=True,
+        )
+    except OSError as exc:
+        logger.warning(
+            "Could not attach the flinttrade.log file handler (%s) — the admin recent-logs panel will stay empty",
+            exc,
+        )
+        return
+    file_handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processors=[
+                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                # Always JSON in the file — even in debug, where the console
+                # uses ConsoleRenderer — because get_recent_logs() parses
+                # each line as a JSON-encoded structlog entry.
+                structlog.processors.JSONRenderer(),
+            ],
+            foreign_pre_chain=shared_processors,
+        )
+    )
+    setattr(file_handler, _LOG_FILE_SENTINEL, True)
+    root_logger.addHandler(file_handler)
+
+
 def create_flask_app(
     safety: Any | None = None,
     scheduler: Any | None = None,
@@ -3062,6 +3164,11 @@ def create_flask_app(
     # or a previous create_flask_app() invocation) so we can't double-emit.
     for _h in list(_root_logger.handlers):
         _root_logger.removeHandler(_h)
+        if getattr(_h, _LOG_FILE_SENTINEL, False):
+            # Release the file handle so a re-run (tests build the app
+            # repeatedly in one process) never double-writes and Windows can
+            # rotate or delete the file — removeHandler alone keeps it open.
+            _h.close()
 
     _formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
@@ -3078,6 +3185,11 @@ def create_flask_app(
     setattr(_handler, _sentinel_attr, True)
     _root_logger.addHandler(_handler)
     _root_logger.setLevel(logging.INFO)
+
+    # Persistent JSON log file — <workspace>/logs/flinttrade.log — feeding
+    # the admin panel's /api/v1/logs/recent view. Best-effort: an unwritable
+    # log directory degrades to a warning, never a startup failure.
+    _attach_log_file_handler(_root_logger, _shared_processors)
 
     # ------------------------------------------------------------------
     # Production-mode path rewrite (WSGI-level, runs before URL dispatch).

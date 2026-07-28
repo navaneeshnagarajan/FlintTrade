@@ -116,8 +116,8 @@ these may be chained with it.
      `pnpm --filter @flinttrade/terminal test` if you touched the widget
      surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
-   - `python scripts/ft.py lint` — runs `ruff check` over `packages/*/src/`
-     without relying on POSIX glob expansion.
+   - `python scripts/ft.py lint` — runs `ruff check packages/ tests/`
+     (the same scope as `make lint`), shell-independent on every platform.
 2. **Before you push:**
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.

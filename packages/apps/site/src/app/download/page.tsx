@@ -46,12 +46,14 @@ const uninstallCommands = [
   {
     platform: 'macOS / Linux',
     command: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash',
+    purgeLabel: '# add --purge to also delete the workspace and its data',
     purge: 'curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge',
     needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add --purge.',
   },
   {
     platform: 'Windows 10/11',
     command: 'irm https://flinttrade.vercel.app/uninstall.ps1 | iex',
+    purgeLabel: '# add -Purge to also delete the workspace and its data',
     purge: '& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge',
     needs: 'Removes the app, launcher, and managed tools. Your workspace and its data are kept unless you add -Purge.',
   },
@@ -265,12 +267,21 @@ export default async function DownloadPage() {
                   <span>terminal</span>
                 </header>
                 <pre>
-                  <code>{`${entry.command}\n${entry.purge}`}</code>
+                  <code>{`# ordinary uninstall\n${entry.command}\n${entry.purgeLabel}\n${entry.purge}`}</code>
                 </pre>
                 <p className="code-panel-note">{entry.needs}</p>
               </div>
             ))}
           </div>
+          {sourceSha === null ? (
+            <p>
+              This site deployment has no immutable source identity, so those uninstall URLs
+              answer 503 rather than redirect. Clone the repository and run{' '}
+              <span className="font-mono">scripts/install/flinttrade-uninstall.sh</span> (or{' '}
+              <span className="font-mono">flinttrade-uninstall.ps1</span>) directly until the
+              site is redeployed from a known commit.
+            </p>
+          ) : null}
         </section>
 
         {installerReleaseAvailable ? (

@@ -85,7 +85,7 @@ Linux. `make <target>` is the POSIX alias for the same targets.
 ```bash
 python scripts/ft.py test        # full pytest suite
 python scripts/ft.py test-fast   # stop on first failure
-python scripts/ft.py lint        # ruff check across packages/*/src/
+python scripts/ft.py lint        # ruff check over packages/ and tests/
 
 # Single file
 python -m pytest packages/core/core/tests/test_app.py -v
@@ -406,8 +406,8 @@ without presenting them as ready to connect.
      from `packages/apps/terminal` for affected files
    - `python -m pytest --tb=short --import-mode=importlib`
    - `python scripts/ft.py lint` — the shell-independent way to run
-     `ruff check` across `packages/*/src/` (a bare `ruff check packages/*/src/`
-     relies on POSIX glob expansion and does not work in PowerShell)
+     `ruff check packages/ tests/` (identical on Windows, macOS and Linux;
+     the same scope `make lint` runs on POSIX)
 3. **Open the PR.** Use the template in
    `.github/PULL_REQUEST_TEMPLATE.md`. Tick every checklist item that
    applies.

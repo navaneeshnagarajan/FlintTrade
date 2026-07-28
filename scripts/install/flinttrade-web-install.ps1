@@ -228,12 +228,14 @@ function Expand-VerifiedArchive([string]$Archive, [string]$Kind, [string]$Destin
 
 function Confirm-Step([string]$Prompt) {
     if ($Yes) { return $true }
-    if (-not [Environment]::UserInteractive) { return $true }
+    if (-not [Environment]::UserInteractive) {
+        Fail "Non-interactive session: cannot ask '$Prompt'. Re-run with -Yes (or FLINTTRADE_YES=1) to confirm every step."
+    }
     $answer = ""
     try {
         $answer = Read-Host "[flinttrade] $Prompt [Y/n]"
     } catch {
-        return $true
+        Fail "Could not read a confirmation for '$Prompt'. Re-run with -Yes (or FLINTTRADE_YES=1) to confirm every step."
     }
     if ([string]::IsNullOrWhiteSpace($answer)) { return $true }
     $normalised = $answer.Trim().ToLowerInvariant()
@@ -410,12 +412,24 @@ function Assert-SourceOriginTrusted {
     }
 }
 
-function Get-ArchiveUrlForRef([string]$GitRef) {
-    if (-not $GitRef -or $GitRef -eq $DefaultBranch) {
-        return "$ArchiveBaseUrl/refs/heads/$DefaultBranch"
+# A branch or tag archive cannot be hash-pinned, but it can be commit-pinned:
+# resolve the ref to its commit SHA first, then download that exact commit's
+# archive, so the installed bytes cannot drift between resolution and download
+# and the install is reproducible from the reported SHA.
+function Resolve-RefCommitSha([string]$GitRef) {
+    $apiUrl = "https://api.github.com/repos/$RepoSlug/commits/$GitRef"
+    Assert-TrustedUrl $apiUrl
+    $response = $null
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+    } catch {
+        Fail "Could not resolve '$GitRef' to a commit SHA via api.github.com: $($_.Exception.Message)"
     }
-    if ($GitRef -match '^v[0-9]') { return "$ArchiveBaseUrl/refs/tags/$GitRef" }
-    return "$ArchiveBaseUrl/refs/heads/$GitRef"
+    $sha = ([string]$response.sha).ToLowerInvariant()
+    if ($sha -notmatch '^[0-9a-f]{40}$') {
+        Fail "api.github.com returned no well-formed commit SHA for '$GitRef'."
+    }
+    return $sha
 }
 
 function Invoke-GitSourceAcquisition([string]$GitRef) {
@@ -441,9 +455,11 @@ function Invoke-GitSourceAcquisition([string]$GitRef) {
 }
 
 function Invoke-ArchiveSourceAcquisition([string]$GitRef) {
-    $url = Get-ArchiveUrlForRef $GitRef
+    Say "git is not installed; resolving '$GitRef' to an exact commit so the archive install is reproducible..."
+    $sha = Resolve-RefCommitSha $GitRef
+    $url = "$ArchiveBaseUrl/$sha"
     Assert-TrustedUrl $url
-    Say "git is not installed; downloading the source archive instead ($url)..."
+    Say "Downloading the source archive for commit $sha ($url)..."
     $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("flinttrade-source-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $staging | Out-Null
     try {
@@ -468,6 +484,7 @@ function Invoke-ArchiveSourceAcquisition([string]$GitRef) {
             Remove-Item -LiteralPath $script:SrcDir -Recurse -Force
         }
         Move-Item -LiteralPath $extractedPath -Destination $script:SrcDir
+        Say "Installed source commit: $sha (re-run with -Ref $sha to reproduce this exact install)."
     } finally {
         Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -483,7 +500,7 @@ function Invoke-SourceAcquisition {
         if (Have git) {
             Say "DRY-RUN: would clone or fetch+reset $RepoUrl at '$gitRef' into $($script:SrcDir)"
         } else {
-            Say "DRY-RUN: would download $(Get-ArchiveUrlForRef $gitRef) and extract it into $($script:SrcDir)"
+            Say "DRY-RUN: would resolve '$gitRef' to a commit SHA via api.github.com, then download that commit's archive from $ArchiveBaseUrl/<sha> and extract it into $($script:SrcDir)"
         }
         return
     }
@@ -840,6 +857,14 @@ function Invoke-FlintTradeWebInstall {
     Say "Detected bootstrap target: $($script:Target)"
 
     Resolve-WebSourceDir
+    # Parity with the POSIX installer's '--src must be an absolute path' guard:
+    # a relative (or drive-/root-relative) path would silently resolve against
+    # the current working directory, which is never what the operator meant.
+    if (-not [System.IO.Path]::IsPathRooted($script:SrcDir) -or
+        ($script:SrcDir -match '^[A-Za-z]:($|[^\\/])') -or
+        ($script:SrcDir -match '^[\\/](?![\\/])')) {
+        Fail "-SrcDir must be an absolute path: $($script:SrcDir)"
+    }
     $script:SrcDir = [System.IO.Path]::GetFullPath($script:SrcDir).TrimEnd('\')
 
     Write-PreflightReport
@@ -879,8 +904,12 @@ function Invoke-FlintTradeWebInstall {
     }
     Say "  pnpm : provided by Corepack from the verified Node install (no separate download)"
     Say "  python 3.12 : installed by uv into $(Join-Path $ToolsRoot 'python')"
-    if (-not (Confirm-Step "Proceed with the downloads above?")) {
-        Fail "Cancelled at the download confirmation; nothing was changed."
+    # A dry run mutates nothing, so it never needs the download confirmation —
+    # this keeps non-interactive -DryRun usable without -Yes.
+    if (-not $DryRun) {
+        if (-not (Confirm-Step "Proceed with the downloads above?")) {
+            Fail "Cancelled at the download confirmation; nothing was changed."
+        }
     }
 
     $uv = $script:ReuseUv

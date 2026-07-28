@@ -54,9 +54,10 @@ _PNPM_INSTALL_ARGV_RE = re.compile(r"""(['"])pnpm\1\s*,\s*(['"])install\2""")
 _NPM_INSTALL_ARGV_RE = re.compile(r"""(['"])npm\1\s*,\s*(['"])(?:install|ci)\2""")
 
 # A line that hands a string to an evaluator: there the quoted text *is* the command,
-# so quoted literals must still be scanned.
+# so quoted literals must still be scanned. Covers `-c` (POSIX shells), `/c`
+# (cmd's slash spelling) and `-Command` (powershell/pwsh) alike.
 _EVALUATOR_RE = re.compile(
-    r"\b(?:eval|iex|Invoke-Expression)\b|\b(?:bash|sh|pwsh|powershell|cmd)\b[^\n]*?\s-c\b",
+    r"\b(?:eval|iex|Invoke-Expression)\b|\b(?:bash|sh|pwsh|powershell|cmd)\b[^\n]*?\s(?:[-/]c\b|-Command\b)",
     re.IGNORECASE,
 )
 # One branch per quote style, with backslash excluded from the plain-character

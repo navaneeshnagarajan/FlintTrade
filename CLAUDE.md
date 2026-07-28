@@ -10,12 +10,12 @@ Version: **v0.0.1** (clean-slate pre-1.0 baseline after the 2026-07-23 release r
 
 ## Commands
 
-The Makefile is the canonical entry point — `make help` lists every target. Most-used:
+`python scripts/ft.py <cmd>` is the cross-platform entry point — identical behaviour on Windows, macOS and Linux; `python scripts/ft.py help` lists every command. `make <target>` is the POSIX alias for the same targets (`make help` lists them; a few POSIX-only targets have no `ft.py` equivalent). Most-used:
 
 ```bash
-# Tests (Python via uv; flat-package layout needs --import-mode=importlib, which the Makefile sets)
-make test                                                          # all pytest
-make test-fast                                                     # pytest, stop on first failure
+# Tests (Python via uv; flat-package layout needs --import-mode=importlib, which the runner sets)
+python scripts/ft.py test                                          # all pytest (POSIX alias: make test)
+python scripts/ft.py test-fast                                     # pytest, stop on first failure (make test-fast)
 uv run pytest packages/<group>/<pkg>/tests/ -v --import-mode=importlib              # single package
 uv run pytest packages/core/core/tests/test_app.py::test_name -v --import-mode=importlib   # single test
 cd packages/apps/terminal && npx vitest run                        # all Vitest
@@ -23,21 +23,21 @@ cd packages/apps/terminal && npx vitest run src/widgets/path/foo.test.tsx
 cd packages/apps/terminal && npx vitest run -t "places a market order"
 
 # Lint / typecheck
-make lint                                                          # ruff over packages/ tests/
+python scripts/ft.py lint                                          # ruff over packages/ tests/ (make lint)
 cd packages/apps/terminal && npm run typecheck                     # tsc --noEmit (strict)
 
 # Build
 cd packages/apps/terminal && npm run build                         # tsc --noEmit + vite build
 cd packages/core/ticks && cargo build --release                    # Rust/PyO3 wheel
-make desktop-build                                                 # verify/test/bundle the Electron shell
-make desktop-package                                               # package + verify this host's Electron installer
+python scripts/ft.py desktop-build                                 # verify/test/bundle the Electron shell (make desktop-build)
+python scripts/ft.py desktop-package                               # package + verify this host's Electron installer
 
 # Dev / run
-make dev                                                           # terminal dev server + backend
-make desktop-dev                                                  # run Electron against its managed source bootstrap
-make start                                                         # FlintTrade backend (port 5100)
-make docker-up | docker-down | docker-build
-make full-check                                                    # tests + lint + typecheck snapshot
+python scripts/ft.py dev                                           # terminal dev server + backend (make dev)
+python scripts/ft.py desktop-dev                                   # run Electron against its managed source bootstrap
+python scripts/ft.py start                                         # FlintTrade backend (port 5100) (make start)
+make docker-up | docker-down | docker-build                        # POSIX-only Makefile targets
+make full-check                                                    # tests + lint + typecheck snapshot (POSIX-only)
 ```
 
 Dependencies are installed with `uv sync` (Python, incl. the dev group) and `pnpm install` (JS workspace: terminal + site + design-system + desktop).
