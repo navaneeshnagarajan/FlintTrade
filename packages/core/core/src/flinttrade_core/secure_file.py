@@ -25,6 +25,17 @@ _SE_DACL_PROTECTED = 0x1000
 _ACL_REVISION = 2
 _ACCESS_ALLOWED_ACE_TYPE = 0
 _INHERITED_ACE = 0x10
+# Inheritance ACE flags for DIRECTORY DACLs. Setting a protected DACL on a
+# directory makes Windows recalculate inheritance on every existing child; a
+# child whose DACL was purely inherited (the normal case for files created
+# under an ordinary parent) is left with an EMPTY DACL — denied to everyone,
+# including its owner — if the new directory ACEs carry no inheritance flags.
+# Directory ACEs therefore always carry OBJECT_INHERIT|CONTAINER_INHERIT so
+# both existing and future children inherit the same owner + SYSTEM grants.
+# File ACEs stay non-inheritable (the flags are meaningless on files).
+_OBJECT_INHERIT_ACE = 0x1
+_CONTAINER_INHERIT_ACE = 0x2
+_DIRECTORY_ACE_FLAGS = _OBJECT_INHERIT_ACE | _CONTAINER_INHERIT_ACE
 _FILE_ALL_ACCESS = 0x001F01FF
 _GENERIC_READ = 0x80000000
 _GENERIC_WRITE = 0x40000000
@@ -315,6 +326,7 @@ def _windows_account_sid(user: str | None = None) -> bytes:
 
 def _install_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) -> None:
     _kernel32, advapi32 = _windows_security_libraries()
+    ace_flags = _DIRECTORY_ACE_FLAGS if path.is_dir() else 0
     sid_values = (_windows_account_sid(user), _SYSTEM_SID)
     acl_size = ctypes.sizeof(_Acl) + sum(
         ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid)
@@ -328,7 +340,7 @@ def _install_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) 
         if not advapi32.AddAccessAllowedAceEx(
             acl,
             _ACL_REVISION,
-            0,
+            ace_flags,
             _FILE_ALL_ACCESS,
             sid_buffer,
         ):
@@ -354,6 +366,7 @@ def _install_exact_windows_descriptor_dacl(
     import msvcrt
 
     _kernel32, advapi32 = _windows_security_libraries()
+    ace_flags = _DIRECTORY_ACE_FLAGS if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 0
     sid_values = (_windows_account_sid(user), _SYSTEM_SID)
     acl_size = ctypes.sizeof(_Acl) + sum(
         ctypes.sizeof(_AccessAllowedAce) - ctypes.sizeof(ctypes.c_uint32) + len(sid)
@@ -367,7 +380,7 @@ def _install_exact_windows_descriptor_dacl(
         if not advapi32.AddAccessAllowedAceEx(
             acl,
             _ACL_REVISION,
-            0,
+            ace_flags,
             _FILE_ALL_ACCESS,
             sid_buffer,
         ):
@@ -391,6 +404,7 @@ def _verify_windows_security_descriptor(
     descriptor: ctypes.c_void_p,
     *,
     user: str | None,
+    expected_ace_flags: int = 0,
 ) -> tuple[bool, str]:
     _kernel32, advapi32 = _windows_security_libraries()
     if _copy_windows_sid(owner) != _windows_account_sid(user):
@@ -422,6 +436,12 @@ def _verify_windows_security_descriptor(
             return False, "DACL contains a non-allow ACE"
         if ace.header.ace_flags & _INHERITED_ACE:
             return False, "DACL contains an inherited ACE"
+        if ace.header.ace_flags != expected_ace_flags:
+            # A directory hardened before inheritance flags were introduced
+            # carries flag-less ACEs that strip every pre-existing child's
+            # inherited DACL — failing here makes harden() reinstall the
+            # corrected DACL, which restores the children on propagation.
+            return False, "DACL ACE inheritance flags do not match the object type"
         if ace.access_mask != _FILE_ALL_ACCESS:
             return False, "DACL ACE does not grant exact full control"
         sid_pointer = ctypes.c_void_p(
@@ -456,6 +476,7 @@ def _verify_exact_windows_dacl(path: pathlib.Path, *, user: str | None = None) -
             dacl,
             descriptor,
             user=user,
+            expected_ace_flags=_DIRECTORY_ACE_FLAGS if path.is_dir() else 0,
         )
     finally:
         if descriptor:
@@ -491,6 +512,9 @@ def _verify_exact_windows_descriptor_dacl(
             dacl,
             security_descriptor,
             user=user,
+            expected_ace_flags=(
+                _DIRECTORY_ACE_FLAGS if stat.S_ISDIR(os.fstat(descriptor).st_mode) else 0
+            ),
         )
     finally:
         if security_descriptor:

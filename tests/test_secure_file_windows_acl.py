@@ -146,3 +146,62 @@ def test_assert_hardened_accepts_system_ace_rejects_administrators(tmp_path):
     subprocess.run(["icacls", str(f), "/grant", "Administrators:F"], check=True,
                    capture_output=True, text=True)
     assert assert_hardened(f)[0] is False
+
+
+@windows_only
+@pytest.mark.unit
+def test_hardening_a_directory_keeps_existing_children_accessible(tmp_path):
+    """Regression: protected flag-less directory ACEs stripped every pre-existing child's DACL.
+
+    Setting a protected DACL on a directory makes Windows recalculate
+    inheritance on the children. A child created before the harden (whose DACL
+    was purely inherited from the ordinary parent chain) was left with an
+    EMPTY DACL — denied to everyone including its owner. That single defect
+    made ``workspace.json`` unreadable after the Ollama runtime hardened the
+    workspace root, failing hundreds of Windows tests. Directory ACEs now
+    carry OBJECT_INHERIT|CONTAINER_INHERIT, so existing children keep
+    inherited owner + SYSTEM access.
+    """
+    from flinttrade_core.secure_file import harden_directory
+
+    child = tmp_path / "existing.json"
+    child.write_text("{}", encoding="utf-8")
+    sub = tmp_path / "subdir"
+    sub.mkdir()
+    grandchild = sub / "nested.txt"
+    grandchild.write_text("nested", encoding="utf-8")
+
+    harden_directory(tmp_path)
+
+    # Pre-existing children must stay readable and writable after the harden.
+    assert child.read_text(encoding="utf-8") == "{}"
+    child.write_text('{"ok": true}', encoding="utf-8")
+    assert grandchild.read_text(encoding="utf-8") == "nested"
+
+    # New children keep working too.
+    fresh = tmp_path / "after.txt"
+    fresh.write_text("x", encoding="utf-8")
+    assert fresh.read_text(encoding="utf-8") == "x"
+
+    # Re-hardening (the idempotent startup path) must not regress any of it.
+    harden_directory(tmp_path)
+    assert child.read_text(encoding="utf-8") == '{"ok": true}'
+
+
+@windows_only
+@pytest.mark.unit
+def test_hardened_file_dacl_stays_strict_and_verifiable(tmp_path):
+    """Files keep exact, non-inheritable protected DACLs after the directory fix."""
+    f = tmp_path / "secret.key"
+    f.write_text("s", encoding="utf-8")
+    harden(f)
+    ok, reason = assert_hardened(f)
+    assert ok, reason
+    # Hardening the parent directory afterwards must not disturb the file's
+    # protected DACL or its verifiability.
+    from flinttrade_core.secure_file import harden_directory
+
+    harden_directory(tmp_path)
+    ok, reason = assert_hardened(f)
+    assert ok, reason
+    assert f.read_text(encoding="utf-8") == "s"
