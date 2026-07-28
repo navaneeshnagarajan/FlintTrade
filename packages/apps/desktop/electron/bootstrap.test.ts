@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { build } from "esbuild";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   BOOTSTRAP_MARKER,
@@ -31,10 +31,43 @@ import {
   type BootstrapToolManifest,
   type CommandInvocation,
 } from "./bootstrap";
-import { createNodeBootstrapDependencies } from "./bootstrap-io";
+import { createNodeBootstrapDependencies, setDurabilityFsyncForTesting } from "./bootstrap-io";
 import { createBootstrapQuitGate } from "./bootstrap-shutdown";
 import { SourceOperationLeaseRetentionError } from "./source-operation";
 import { createBootstrapState } from "./state";
+
+// This suite pays ~45-60 fsync barriers per controller.start() through the
+// durable-log and promotion paths, ~90 starts per run. No assertion here
+// depends on data surviving a kernel crash (killed fixture processes keep
+// the page cache), so the raw syscalls are disabled — writes, identity
+// re-checks and every testHook still run. The bundled crash fixtures run in
+// their own processes with their own module instance, where the flag stays
+// at its production default.
+setDurabilityFsyncForTesting(false);
+
+// Crash-fixture bundles are memoised per variant: esbuild-bundling
+// bootstrap-io plus its tar/yauzl dependency trees costs seconds, and the
+// output is identical for every test that requests the same variant.
+const crashFixtureBundles = new Map<string, Promise<string>>();
+let crashFixtureBundleRoot: Promise<string> | undefined;
+
+async function crashFixtureBundle(variant: string, make: (outfile: string) => Promise<unknown>): Promise<string> {
+  let bundle = crashFixtureBundles.get(variant);
+  if (!bundle) {
+    bundle = (async () => {
+      crashFixtureBundleRoot ??= mkdtemp(path.join(tmpdir(), "flinttrade-crash-fixture-bundles-"));
+      const outfile = path.join(await crashFixtureBundleRoot, `${variant}.mjs`);
+      await make(outfile);
+      return outfile;
+    })();
+    crashFixtureBundles.set(variant, bundle);
+  }
+  return bundle;
+}
+
+afterAll(async () => {
+  if (crashFixtureBundleRoot) await rm(await crashFixtureBundleRoot, { force: true, recursive: true });
+});
 
 const revision = "a".repeat(40);
 const nodeBytes = Buffer.from("pinned node archive");
@@ -137,15 +170,14 @@ async function crashLeaseOwner(input: {
   promoteTo?: string;
   root: string;
 }): Promise<void> {
-  const output = path.join(input.root, `lease-crash-${randomUUID()}.mjs`);
   const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
-  await build({
+  const output = await crashFixtureBundle("lease-crash", (outfile) => build({
     banner: {
       js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
     },
     bundle: true,
     format: "esm",
-    outfile: output,
+    outfile,
     platform: "node",
     stdin: {
       contents: `
@@ -170,7 +202,7 @@ async function crashLeaseOwner(input: {
       sourcefile: "lease-crash-fixture.ts",
     },
     target: "node22",
-  });
+  }));
   const child = spawn(
     process.execPath,
     [output, input.lock, input.candidate, ...(input.promoteTo ? [input.promoteTo] : [])],
@@ -200,15 +232,14 @@ async function crashDuringLeasePublication(input: {
   root: string;
   stage: "after-write" | "before-open";
 }): Promise<void> {
-  const output = path.join(input.root, `lease-publication-crash-${randomUUID()}.mjs`);
   const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
-  await build({
+  const output = await crashFixtureBundle(`lease-publication-crash-${input.stage}`, (outfile) => build({
     banner: {
       js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
     },
     bundle: true,
     format: "esm",
-    outfile: output,
+    outfile,
     platform: "node",
     stdin: {
       contents: `
@@ -237,7 +268,7 @@ async function crashDuringLeasePublication(input: {
       sourcefile: "lease-publication-crash-fixture.ts",
     },
     target: "node22",
-  });
+  }));
   const child = spawn(process.execPath, [output, input.lock], { stdio: ["ignore", "pipe", "inherit"] });
   await Promise.race([
     once(child.stdout!, "data"),
@@ -261,7 +292,6 @@ async function crashBootstrapCommandOwner(input: {
   marker: string;
   root: string;
 }): Promise<void> {
-  const output = path.join(input.root, `command-owner-crash-${randomUUID()}.mjs`);
   const bootstrapIo = path.resolve(import.meta.dirname, "bootstrap-io.ts");
   const targetScript = [
     "const {spawn}=require('node:child_process');",
@@ -270,13 +300,13 @@ async function crashBootstrapCommandOwner(input: {
     "escaped.unref();",
     "setInterval(()=>{},1000);",
   ].join("");
-  await build({
+  const output = await crashFixtureBundle("command-owner-crash", (outfile) => build({
     banner: {
       js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
     },
     bundle: true,
     format: "esm",
-    outfile: output,
+    outfile,
     platform: "node",
     stdin: {
       contents: `
@@ -305,7 +335,7 @@ async function crashBootstrapCommandOwner(input: {
       sourcefile: "command-owner-crash-fixture.ts",
     },
     target: "node22",
-  });
+  }));
   const child = spawn(process.execPath, [output, input.lock, input.marker], {
     stdio: ["ignore", "pipe", "inherit"],
   });

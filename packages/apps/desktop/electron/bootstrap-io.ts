@@ -635,7 +635,7 @@ async function writeTextAbsent(target: string, content: string): Promise<void> {
     if (!opened.isFile()) throw new Error("Exclusive bootstrap file was not a regular file.");
     await writeBufferCompletely(handle, Buffer.from(content, "utf8"));
     await handle.chmod(0o600);
-    await handle.sync();
+    await syncHandleForDurability(handle);
     const pathname = await lstat(target);
     if (
       pathname.isSymbolicLink() ||
@@ -1757,7 +1757,7 @@ async function downloadFile(
         hash.update(value);
         await writeBufferCompletely(handle, value, options.testHooks?.downloadWriteChunkBytes);
       }
-      await handle.sync();
+      await syncHandleForDurability(handle);
       const pathname = await lstat(destination);
       if (
         pathname.isSymbolicLink() ||
@@ -2661,7 +2661,7 @@ async function createStableArchiveSnapshot(
     }
     const digest = hash.digest("hex");
     if (digest !== expectedSha256) throw new Error("Bootstrap archive checksum changed before extraction.");
-    await destination.sync();
+    await syncHandleForDurability(destination);
     const metadata = await destination.stat();
     options.testHooks?.beforeArchiveSnapshotVerify?.(snapshotPath);
     const snapshotPathMetadata = await lstat(snapshotPath);
@@ -3132,11 +3132,30 @@ function createArchiveExtractor(options: BootstrapIoOptions): BootstrapDependenc
   };
 }
 
+/**
+ * Physical-fsync switch for tests. A bootstrap start crosses ~45-60 fsync
+ * barriers; no electron-suite assertion depends on data surviving a KERNEL
+ * crash (killed processes keep the page cache), so the suites may disable
+ * the raw syscalls while every write, identity re-check, ordering
+ * constraint and test hook continues to run. Production never calls this.
+ */
+let durabilityFsyncEnabled = true;
+
+export function setDurabilityFsyncForTesting(enabled: boolean): void {
+  durabilityFsyncEnabled = enabled;
+}
+
+async function syncHandleForDurability(handle: FileHandle): Promise<void> {
+  if (!durabilityFsyncEnabled) return;
+  await handle.sync();
+}
+
 export async function syncDirectoryForDurability(directory: string): Promise<void> {
+  if (!durabilityFsyncEnabled) return;
   try {
     const handle = await open(directory, "r");
     try {
-      await handle.sync();
+      await syncHandleForDurability(handle);
     } finally {
       await handle.close();
     }
@@ -3558,7 +3577,7 @@ async function registerOperationProcessAnchor(
   let finalPublished = false;
   try {
     await writeBufferCompletely(handle, Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
-    await handle.sync();
+    await syncHandleForDurability(handle);
     const written = await handle.stat();
     const publication = await lstat(publicationPath);
     if (
@@ -3901,7 +3920,7 @@ async function acquireOperationLease(
         options.testHooks?.leaseOwnerWriteChunkBytes,
         (bytesWritten) => options.testHooks?.onLeaseOwnerPublication?.("after-write", bytesWritten),
       );
-      await ownerHandle.sync();
+      await syncHandleForDurability(ownerHandle);
     } finally {
       await ownerHandle.close();
     }
@@ -4129,7 +4148,7 @@ async function preparePrivateTree(
       const metadata = await handle.stat();
       if (!metadata.isFile()) throw new Error("Managed bootstrap-user config must be a regular file.");
       await handle.chmod(0o600);
-      await handle.sync();
+      await syncHandleForDurability(handle);
     } finally {
       await handle.close();
     }
@@ -4295,11 +4314,11 @@ function createFileSystem(
             }
             offset += bytesWritten;
           }
-          await handle.sync();
+          await syncHandleForDurability(handle);
           options.testHooks?.beforeAppendParentSync?.(target);
           await assertParentIdentity();
           await assertTargetIdentity();
-          if (parentHandle) await parentHandle.sync();
+          if (parentHandle) await syncHandleForDurability(parentHandle);
           else await syncDirectoryForDurability(canonicalParent);
           await assertParentIdentity();
           await assertTargetIdentity();
@@ -4421,7 +4440,7 @@ function createFileSystem(
         identity = { dev: metadata.dev, ino: metadata.ino };
         await handle.writeFile(content, { encoding: "utf8" });
         await handle.chmod(0o600);
-        await handle.sync();
+        await syncHandleForDurability(handle);
       } catch (error) {
         preparationFailed = true;
         preparationError = error;
