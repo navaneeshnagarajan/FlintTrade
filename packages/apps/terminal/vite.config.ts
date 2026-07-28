@@ -40,6 +40,12 @@ export default defineConfig({
       : []),
   ],
   resolve: {
+    // The design-system is consumed as a file: link and declares react as a
+    // peer dependency. Vite 8's Rolldown/oxc resolver does not fall back to
+    // the consuming project's node_modules for bare imports inside linked
+    // packages the way Vite 7's resolver did, so dedupe react explicitly —
+    // this also guarantees a single React copy in the bundle.
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "src"),
       "@flinttrade/design-system/tokens.css": path.resolve(__dirname, "../../core/design-system/src/tokens.css"),
@@ -54,11 +60,13 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    esbuildOptions: {
-      // Vite's dependency optimiser otherwise asks esbuild to downlevel modern
-      // ESM dependencies to its older default browser baseline, which breaks
-      // prebundling for @floating-ui and plotly.js on newer dependency graphs.
-      target: "es2022",
+    rolldownOptions: {
+      // Vite 8's dependency optimiser runs on Rolldown (esbuildOptions is
+      // deprecated and ignored). Keep the modern target explicit so the
+      // optimiser never downlevels modern ESM dependencies below the app's
+      // build target, which previously broke prebundling for @floating-ui
+      // and plotly.js on newer dependency graphs.
+      transform: { target: "es2022" },
     },
     // Perspective ships WASM + workers resolved via import.meta.url;
     // esbuild prebundling breaks those relative asset URLs, so the three
@@ -118,119 +126,91 @@ export default defineConfig({
       // (devDependencies), so Vite bundles them cleanly. See the campaign log.
       external: [],
       output: {
-        manualChunks: (id: string) => {
-          // React core — smallest possible initial payload
-          if (
-            id.includes("node_modules/react/") ||
-            id.includes("node_modules/react-dom/") ||
-            id.includes("node_modules/scheduler/")
-          ) {
-            return "vendor-react";
-          }
-          // React Router — route shell
-          if (
-            id.includes("node_modules/react-router") ||
-            id.includes("node_modules/@remix-run/")
-          ) {
-            return "vendor-router";
-          }
-          // FlexLayout — workspace engine; large, only needed on /terminal
-          if (id.includes("node_modules/flexlayout-react")) {
-            return "vendor-flexlayout";
-          }
-          // Perspective — WASM analytics engine; only loaded by the
-          // Portfolio Pivot widget (lazy)
-          if (id.includes("node_modules/@finos/perspective")) {
-            return "vendor-perspective";
-          }
-          // Lightweight Charts — only loaded when ChartWidget mounts
-          if (
-            id.includes("node_modules/lightweight-charts") ||
-            id.includes("node_modules/fancy-canvas")
-          ) {
-            return "vendor-lwc";
-          }
-          // Plotly.js — only loaded by analysis widgets (lazy)
-          if (id.includes("node_modules/plotly.js")) return "vendor-plotly";
-          // Glide Data Grid — canvas grid for option chain / streaming tables
-          if (id.includes("node_modules/@glideapps/")) {
-            return "vendor-glide";
-          }
-          // TanStack Query + Table — shared across many widgets
-          if (id.includes("node_modules/@tanstack/")) {
-            return "vendor-tanstack";
-          }
-          // Radix UI primitives — shared by all shadcn/ui components.
-          // @floating-ui and cmdk are co-located here because they are imported
-          // directly by @radix-ui packages; placing them in the same chunk
-          // eliminates the vendor-radix → vendor-misc → vendor-radix circular
-          // dependency that Rollup would otherwise produce.
-          if (
-            id.includes("node_modules/radix-ui") ||
-            id.includes("node_modules/@radix-ui/") ||
-            id.includes("node_modules/@floating-ui/") ||
-            id.includes("node_modules/cmdk/")
-          ) {
-            return "vendor-radix";
-          }
-          // State management — Zustand + Jotai, needed immediately
-          if (
-            id.includes("node_modules/zustand") ||
-            id.includes("node_modules/jotai")
-          ) {
-            return "vendor-state";
-          }
-          // Forms + validation — react-hook-form + zod schemas
-          if (
-            id.includes("node_modules/react-hook-form") ||
-            id.includes("node_modules/@hookform/") ||
-            id.includes("node_modules/zod")
-          ) {
-            return "vendor-forms";
-          }
-          // NOTE: lucide-react is intentionally NOT assigned a manual chunk.
-          // The wildcard `import * as LucideIcons` has been removed from WidgetPicker
-          // so Rollup can now tree-shake lucide per-chunk (each widget/chrome file
-          // only pulls in the icons it explicitly imports).
-          // Framer Motion — loaded async, not needed on initial page
-          if (id.includes("node_modules/framer-motion")) return "vendor-framer";
-          // d3-* plus its thin re-export/helper packages. Keeping these together
-          // avoids Rollup circular chunks between vendor-d3 and vendor-misc.
-          if (
-            id.includes("node_modules/d3-") ||
-            id.includes("node_modules/internmap/") ||
-            id.includes("node_modules/victory-vendor/")
-          ) return "vendor-d3";
-          // Tremor wraps Recharts primitives, so keep them in one async chunk
-          // instead of creating a Rollup circular chunk pair.
-          // NOTE: @floating-ui is intentionally omitted here — it lives in
-          // vendor-radix to avoid the circular chunk warning.
-          if (
-            id.includes("node_modules/@tremor/") ||
-            id.includes("node_modules/@headlessui/") ||
-            id.includes("node_modules/react-day-picker") ||
-            id.includes("node_modules/react-transition-state")
-          ) return "vendor-chart-ui";
-          // date-fns — date formatting/parsing; pulled in by many widgets
-          if (id.includes("node_modules/date-fns/")) return "vendor-dates";
-          // Styling utilities — tiny but imported by every component
-          if (
-            id.includes("node_modules/clsx/") ||
-            id.includes("node_modules/tailwind-merge/") ||
-            id.includes("node_modules/class-variance-authority/")
-          ) {
-            return "vendor-utils";
-          }
-          // QR code renderer — only used by the auth/setup flows
-          if (id.includes("node_modules/qrcode.react/")) return "vendor-qrcode";
-          // Sentry — error monitoring, loaded lazily
-          if (id.includes("node_modules/@sentry/")) return "vendor-sentry";
-          // Resizable panels — layout utility, loaded with workspace
-          if (id.includes("node_modules/react-resizable-panels")) return "vendor-layout";
-          // Everything else in node_modules
-          if (id.includes("node_modules/")) {
-            return "vendor-misc";
-          }
+        // Vite 8 bundles with Rolldown, whose native chunking control is
+        // `codeSplitting` — the function-form `manualChunks` compat shim
+        // silently merged the vendor-react group into vendor-flexlayout, so
+        // the groups below are the direct migration of the old if-chain
+        // (first matching group wins, mirroring the original ordering).
+        codeSplitting: {
+          groups: [
+            // React core — smallest possible initial payload
+            {
+              name: "vendor-react",
+              test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/,
+            },
+            // React Router — route shell
+            {
+              name: "vendor-router",
+              test: /node_modules[\\/](?:react-router|@remix-run\/)/,
+            },
+            // FlexLayout — workspace engine; large, only needed on /terminal
+            { name: "vendor-flexlayout", test: /node_modules[\\/]flexlayout-react/ },
+            // Perspective — WASM analytics engine; only loaded by the
+            // Portfolio Pivot widget (lazy)
+            { name: "vendor-perspective", test: /node_modules[\\/]@finos\/perspective/ },
+            // Lightweight Charts — only loaded when ChartWidget mounts
+            {
+              name: "vendor-lwc",
+              test: /node_modules[\\/](?:lightweight-charts|fancy-canvas)/,
+            },
+            // Plotly.js — only loaded by analysis widgets (lazy)
+            { name: "vendor-plotly", test: /node_modules[\\/]plotly\.js/ },
+            // Glide Data Grid — canvas grid for option chain / streaming tables
+            { name: "vendor-glide", test: /node_modules[\\/]@glideapps\// },
+            // TanStack Query + Table — shared across many widgets
+            { name: "vendor-tanstack", test: /node_modules[\\/]@tanstack\// },
+            // Radix UI primitives — shared by all shadcn/ui components.
+            // @floating-ui and cmdk are co-located here because they are imported
+            // directly by @radix-ui packages; placing them in the same chunk
+            // eliminates the vendor-radix → vendor-misc → vendor-radix circular
+            // dependency that the bundler would otherwise produce.
+            {
+              name: "vendor-radix",
+              test: /node_modules[\\/](?:radix-ui|@radix-ui\/|@floating-ui\/|cmdk\/)/,
+            },
+            // State management — Zustand + Jotai, needed immediately
+            { name: "vendor-state", test: /node_modules[\\/](?:zustand|jotai)/ },
+            // Forms + validation — react-hook-form + zod schemas
+            {
+              name: "vendor-forms",
+              test: /node_modules[\\/](?:react-hook-form|@hookform\/|zod)/,
+            },
+            // NOTE: lucide-react is intentionally NOT assigned a chunk group.
+            // The wildcard `import * as LucideIcons` has been removed from WidgetPicker
+            // so the bundler can now tree-shake lucide per-chunk (each widget/chrome
+            // file only pulls in the icons it explicitly imports).
+            // Framer Motion — loaded async, not needed on initial page
+            { name: "vendor-framer", test: /node_modules[\\/]framer-motion/ },
+            // d3-* plus its thin re-export/helper packages. Keeping these together
+            // avoids circular chunks between vendor-d3 and vendor-misc.
+            {
+              name: "vendor-d3",
+              test: /node_modules[\\/](?:d3-|internmap\/|victory-vendor\/)/,
+            },
+            // Tremor wraps Recharts primitives, so keep them in one async chunk
+            // instead of creating a circular chunk pair.
+            // NOTE: @floating-ui is intentionally omitted here — it lives in
+            // vendor-radix to avoid the circular chunk warning.
+            {
+              name: "vendor-chart-ui",
+              test: /node_modules[\\/](?:@tremor\/|@headlessui\/|react-day-picker|react-transition-state)/,
+            },
+            // date-fns — date formatting/parsing; pulled in by many widgets
+            { name: "vendor-dates", test: /node_modules[\\/]date-fns\// },
+            // Styling utilities — tiny but imported by every component
+            {
+              name: "vendor-utils",
+              test: /node_modules[\\/](?:clsx|tailwind-merge|class-variance-authority)\//,
+            },
+            // QR code renderer — only used by the auth/setup flows
+            { name: "vendor-qrcode", test: /node_modules[\\/]qrcode\.react\// },
+            // Sentry — error monitoring, loaded lazily
+            { name: "vendor-sentry", test: /node_modules[\\/]@sentry\// },
+            // Resizable panels — layout utility, loaded with workspace
+            { name: "vendor-layout", test: /node_modules[\\/]react-resizable-panels/ },
+            // Everything else in node_modules
+            { name: "vendor-misc", test: /node_modules[\\/]/ },
+          ],
         },
       },
     },
