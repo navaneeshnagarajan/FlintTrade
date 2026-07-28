@@ -22,7 +22,7 @@ import { useState, useCallback } from "react";
 import {
   Zap, Grid3x3, Star, BarChart3, ShieldAlert, TrendingUp,
   Sigma, Map, Bot, PieChart, Globe, Gauge, Box,
-  Crosshair, LayoutDashboard,
+  Crosshair, LayoutDashboard, LayoutGrid, Columns3,
   Plus, Copy, Pencil, Trash2, MoreHorizontal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -55,7 +55,7 @@ import { useWorkspaceLifecycle } from "./hooks/useWorkspaceLifecycle";
 const ICON_MAP: Record<string, LucideIcon> = {
   Zap, Grid3x3, Star, BarChart3, ShieldAlert, TrendingUp,
   Sigma, Map, Bot, PieChart, Globe, Gauge,
-  Crosshair, LayoutDashboard,
+  Crosshair, LayoutDashboard, LayoutGrid, Columns3,
 };
 
 // ---------------------------------------------------------------------------
