@@ -555,8 +555,8 @@
   "_meta": {
     "schema": "flinttrade-pip-audit-v1",
     "source": "online-osv-snapshot",
-    "generated_at": "2026-07-28T14:23:11.252231Z",
-    "audited_at": "2026-07-28T14:23:11.252231Z",
+    "generated_at": "2026-07-28T15:18:14.079962Z",
+    "audited_at": "2026-07-28T15:18:14.079962Z",
     "requirements_lock_sha256": "f64f5c44f11c27a62c43e05f9d91dd9ae6c908131652f2595a0472e0731237b0",
     "pip_audit_exit_code": 0
   }
