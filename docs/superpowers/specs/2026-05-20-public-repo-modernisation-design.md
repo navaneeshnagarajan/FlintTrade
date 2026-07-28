@@ -19,7 +19,7 @@ Make FlintTrade's public surface read as a polished, contributor-ready open-sour
 | Decision | Choice | Rationale |
 |---|---|---|
 | Cleanup aggressiveness | **Comprehensive overhaul** | Repo is now public; first impression must be strong. Surgical pass leaves too many "looks unmaintained" signals. |
-| CLAUDE.md / AGENTS.md / PLAN.md (34 files total) | **Move to `.local/agent-context/` (untracked)** | Files remain useful for personal dev workflow on Nitro / Mac / Ubuntu, but stop shipping to the public repo. |
+| CLAUDE.md / AGENTS.md / PLAN.md (34 files total) | **Move to `.local/agent-context/` (untracked)** | Files remain useful for personal dev workflow across the maintainer's dev machines, but stop shipping to the public repo. |
 | README audience | **Software-first — layered** | Local operator summary on the top fold, developer view on the second fold. One README, two audiences, no promotional positioning. |
 | Per-package READMEs | **Generate tiny per-package READMEs** | After removing per-package CLAUDE.md/AGENTS.md, each `packages/<pkg>/` would be bare. A small auto-generated README keeps the package navigable on GitHub. |
 | Funding metadata | **Omit** | Keep public metadata focused on source code, setup, documentation, and contributor workflow. |
