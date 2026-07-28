@@ -235,6 +235,17 @@ DATA_KEYS = (
 )
 
 
+def _remove_linux_data_roots(home: Path) -> None:
+    for relative in (
+        ".flinttrade",
+        ".config/flinttrade-shell",
+        f".cache/{LEGACY_BUNDLE_ID}",
+        f".config/{LEGACY_BUNDLE_ID}",
+        f".local/share/{LEGACY_BUNDLE_ID}",
+    ):
+        shutil.rmtree(home / relative, ignore_errors=True)
+
+
 @pytest.mark.unit
 def test_unix_uninstaller_is_valid_bash() -> None:
     subprocess.run(["bash", "-n", str(SH)], check=True, cwd=ROOT)
@@ -450,6 +461,8 @@ def test_linux_confirmed_purge_removes_workspace_profile_source_tools_and_legacy
     assert result.returncode == 0, result.stdout + result.stderr
     for key, path in paths.items():
         assert not path.exists(), f"confirmed purge left {key}: {path}"
+    assert "explicitly confirmed data was purged" in result.stdout
+    assert "retained data remains" not in result.stdout
 
 
 @pytest.mark.unit
@@ -461,6 +474,47 @@ def test_linux_confirmed_purge_accepts_a_genuinely_empty_home_on_bash_3(tmp_path
 
 
 @pytest.mark.unit
+def test_linux_shell_only_uninstall_does_not_claim_that_data_was_retained(tmp_path: Path) -> None:
+    paths = _linux_footprint(tmp_path)
+    _remove_linux_data_roots(tmp_path)
+
+    result = _run(tmp_path, os_name="Linux")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not paths["appimage"].exists()
+    assert "no recognised FlintTrade data was found" in result.stdout
+    assert "retained data remains" not in result.stdout
+
+
+@pytest.mark.unit
+def test_linux_shell_only_purge_does_not_claim_confirmation_for_absent_data(tmp_path: Path) -> None:
+    paths = _linux_footprint(tmp_path)
+    _remove_linux_data_roots(tmp_path)
+
+    result = _run(tmp_path, "--purge", os_name="Linux")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not paths["appimage"].exists()
+    assert "no recognised FlintTrade data was found to purge" in result.stdout
+    assert "explicitly confirmed data was purged" not in result.stdout
+
+
+@pytest.mark.unit
+def test_linux_data_only_purge_reports_cleanup_without_claiming_shell_removal(tmp_path: Path) -> None:
+    workspace = tmp_path / ".flinttrade"
+    workspace.mkdir()
+    (workspace / "workspace.json").write_text('{"version":"1.0.0"}', encoding="utf-8")
+    (workspace / "credentials.db").write_text("x", encoding="utf-8")
+
+    result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not workspace.exists()
+    assert "explicitly confirmed data was purged" in result.stdout
+    assert "shell uninstalled" not in result.stdout.lower()
+
+
+@pytest.mark.unit
 def test_linux_unconfirmed_noninteractive_purge_preserves_data(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, "--purge", os_name="Linux")
@@ -469,6 +523,8 @@ def test_linux_unconfirmed_noninteractive_purge_preserves_data(tmp_path: Path) -
     for key in DATA_KEYS:
         assert paths[key].exists(), f"unconfirmed purge removed {key}"
     assert "data kept" in result.stdout.lower()
+    assert "retained data remains available for reinstall" in result.stdout
+    assert "explicitly confirmed data was purged" not in result.stdout
 
 
 @pytest.mark.unit
@@ -573,6 +629,32 @@ def test_purge_refuses_unproven_arbitrary_workspace_override(tmp_path: Path) -> 
     assert result.returncode == 1
     assert keep.read_text(encoding="utf-8") == "keep"
     assert "custom workspace identity is not proven" in result.stdout
+    assert "No identity-proven FlintTrade data was eligible for purge." in result.stdout
+    assert "No FlintTrade data to purge." not in result.stdout
+
+
+@pytest.mark.unit
+def test_purge_refuses_proven_custom_workspace_below_symlinked_parent(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    workspace = outside / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "workspace.json").write_text('{"version":"1.0.0"}', encoding="utf-8")
+    (workspace / "credentials.db").write_text("keep", encoding="utf-8")
+    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    try:
+        result = _run(
+            tmp_path,
+            "--purge",
+            "--yes",
+            os_name="Linux",
+            extra_env={"FLINTTRADE_WORKSPACE_DIR": str(tmp_path / "linked" / "workspace")},
+        )
+
+        assert result.returncode == 1
+        assert (workspace / "credentials.db").read_text(encoding="utf-8") == "keep"
+        assert "symbolic link" in result.stdout
+    finally:
+        shutil.rmtree(outside, ignore_errors=True)
 
 
 @pytest.mark.unit
@@ -609,6 +691,21 @@ def test_macos_ordinary_uninstall_preserves_electron_and_legacy_profiles(tmp_pat
         if key not in {"app", "launch_log", "receipt"}:
             assert path.exists(), f"ordinary uninstall removed retained data: {key}"
     assert str(tmp_path / "Library" / "Application Support" / "flinttrade-shell") in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(sys.platform != "darwin", reason=NO_MACOS_REASON)
+def test_macos_finder_copy_without_receipt_is_refused_and_retains_data(tmp_path: Path) -> None:
+    paths = _macos_footprint(tmp_path)
+    paths["receipt"].unlink()
+
+    result = _run(tmp_path, os_name="Darwin")
+
+    assert result.returncode == 1
+    assert paths["app"].exists()
+    assert paths["workspace"].exists()
+    assert paths["profile"].exists()
+    assert "no valid owner-local shell install receipt" in result.stdout
 
 
 @pytest.mark.unit
@@ -661,6 +758,8 @@ def test_macos_confirmed_purge_removes_all_current_and_legacy_data(tmp_path: Pat
     assert result.returncode == 0, result.stdout + result.stderr
     for key, path in paths.items():
         assert not path.exists(), f"confirmed purge left {key}: {path}"
+    assert "explicitly confirmed data was purged" in result.stdout
+    assert "retained data remains" not in result.stdout
 
 
 @pytest.mark.unit
@@ -684,7 +783,8 @@ def test_uninstall_reports_no_shell_without_destroying_retained_data(tmp_path: P
     result = _run(tmp_path, os_name="Linux")
     assert result.returncode == 0, result.stdout + result.stderr
     assert profile.exists()
-    assert "does not appear to be installed" in result.stdout
+    assert "No FlintTrade shell was removed" in result.stdout
+    assert "retained data remains available for reinstall" in result.stdout
 
 
 @pytest.mark.unit
@@ -757,9 +857,15 @@ def test_windows_uninstaller_tracks_electron_builder_and_retention_contract() ->
     purge_branch = text[purge_start:ordinary_start]
     assert "$purgeTargets = @($dataTargets | Where-Object { Test-SafePurgeTarget $_ })" in purge_branch
     assert "$purgeTargets | ForEach-Object { Say \"  $_\"; Remove-IfExists $_ }" in purge_branch
+    assert "$script:PurgeCompleted = $true" in purge_branch
+    assert "$script:PurgedDataAny = $true" in purge_branch
     assert "$dataTargets | Where-Object { Test-SafePurgeTarget $_ }" not in text[:purge_start]
     assert "Remove-IfExists $_" not in text[ordinary_start:]
     assert '$dataTargets | ForEach-Object { Say "  $_" }' in text[ordinary_start:]
+    assert "$script:PurgedDataAny -and $script:PurgeCompleted" in text
+    assert "outside the current user's home" in text
+    assert "$script:DataRetainedAny = $true" in text
+    assert "explicitly confirmed data was purged" in text
     # The old shell assumed %LOCALAPPDATA%\FlintTrade directly.
     assert 'Join-Path $env:LOCALAPPDATA "FlintTrade"' not in text
 

@@ -44,6 +44,24 @@ function cancelResponseBody(response: Response, reason: unknown): void {
   }
 }
 
+const typedArrayTagGetter = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  Symbol.toStringTag,
+)?.get;
+
+function asByteView(value: unknown): Uint8Array | null {
+  if (
+    !ArrayBuffer.isView(value) ||
+    !typedArrayTagGetter ||
+    typedArrayTagGetter.call(value) !== "Uint8Array"
+  ) {
+    return null;
+  }
+  return value instanceof Uint8Array
+    ? value
+    : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+}
+
 async function readBoundedBody(
   response: Response,
   maximumBytes: number,
@@ -66,10 +84,15 @@ async function readBoundedBody(
     for (;;) {
       const { done, value } = await raceWithAbort(reader.read(), signal, label);
       if (done) break;
-      if (!(value instanceof Uint8Array)) throw new Error(`${label} yielded a non-byte body.`);
-      if (value.byteLength > maximumBytes - total) throw new Error(`${label} exceeded its size limit.`);
-      output.set(value, total);
-      total += value.byteLength;
+      // Electron net.fetch() exposes Chromium-owned typed arrays whose realm
+      // differs from Electron main. `instanceof Uint8Array` is therefore false
+      // for valid body chunks. The intrinsic typed-array brand getter accepts
+      // those byte arrays without trusting a spoofable own Symbol.toStringTag.
+      const bytes = asByteView(value);
+      if (!bytes) throw new Error(`${label} yielded a non-byte body.`);
+      if (bytes.byteLength > maximumBytes - total) throw new Error(`${label} exceeded its size limit.`);
+      output.set(bytes, total);
+      total += bytes.byteLength;
     }
   } catch (error) {
     // Cancellation is deliberately fire-and-forget. A hostile stream may never

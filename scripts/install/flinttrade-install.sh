@@ -1126,7 +1126,7 @@ install_linux_appimage_extracted() {
   replace_directory_transactionally \
     "$staged" "$opt_dir" "$transaction_dir" "squashfs-root/AppRun" \
     || die "Could not transactionally replace the extracted FlintTrade shell; the previous shell was preserved when present."
-  icon="$(find "$opt_dir/squashfs-root" -maxdepth 4 -name '*.png' 2>/dev/null | head -1 || true)"
+  icon="$opt_dir/squashfs-root/resources/icons/app.png"
   install_linux_launcher_extras "$opt_dir/squashfs-root/AppRun" "$dest_bin" "$icon"
   atomic_write_integration_file \
     "$desktop_dir/flinttrade.desktop" 0644 "$(linux_desktop_content "$wrapper")"
@@ -1221,8 +1221,8 @@ install_linux_appimage() {
   publish_file_transactionally "$staged" "$dest"
   icon_tmp="$(mktemp -d "${TMPDIR:-/tmp}/flinttrade-icon.XXXXXX")"
   TMP_DIRS+=("$icon_tmp")
-  (cd "$icon_tmp" && "$dest" --appimage-extract '*.png' >/dev/null 2>&1) || true
-  icon="$(find "$icon_tmp/squashfs-root" -maxdepth 4 -name '*.png' 2>/dev/null | head -1 || true)"
+  (cd "$icon_tmp" && "$dest" --appimage-extract 'resources/icons/app.png' >/dev/null 2>&1) || true
+  icon="$icon_tmp/squashfs-root/resources/icons/app.png"
   install_linux_launcher_extras "$dest" "$dest_bin" "$icon"
   atomic_write_integration_file \
     "$desktop_dir/flinttrade.desktop" 0644 "$(linux_desktop_content "$wrapper")"

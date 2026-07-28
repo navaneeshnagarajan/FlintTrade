@@ -102,6 +102,10 @@
       {
         "from": "resources/icons/32x32.png",
         "to": "icons/tray.png"
+      },
+      {
+        "from": "resources/icons/128x128.png",
+        "to": "icons/app.png"
       }
     ],
     "asar": true,
@@ -117,6 +121,7 @@
     "npmRebuild": false,
     "mac": {
       "category": "public.app-category.finance",
+      "icon": "resources/icons/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "signIgnore": "flinttrade-fs-promoter\\.node$",
@@ -135,6 +140,7 @@
       ]
     },
     "win": {
+      "icon": "resources/icons/icon.ico",
       "extraResources": [
         {
           "from": "dist/native/win32-x64/flinttrade-job-supervisor.exe",
@@ -155,6 +161,7 @@
     },
     "linux": {
       "category": "Office",
+      "icon": "resources/icons/icon.png",
       "extraResources": [
         {
           "from": "dist/native/linux-${arch}/flinttrade-fs-promoter.node",
@@ -173,6 +180,9 @@
       "oneClick": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
+      "installerIcon": "resources/icons/icon.ico",
+      "uninstallerIcon": "resources/icons/icon.ico",
+      "installerHeaderIcon": "resources/icons/icon.ico",
       "uninstallDisplayName": "FlintTrade"
     }
   }

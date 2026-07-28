@@ -105,18 +105,22 @@ function response(body: BodyInit, url: string, contentType: string, extraHeaders
   return result;
 }
 
-function metadata(overrides: Partial<{ bundleUrl: string; repositoryId: number }> = {}): Response {
+function metadata(overrides: Partial<{
+  bundleUrl: string;
+  repositoryId: number;
+  responseUrl: string;
+}> = {}): Response {
   return response(JSON.stringify({
     attestations: [{
       repository_id: overrides.repositoryId ?? 1_182_820_588,
       bundle_url: overrides.bundleUrl ?? BUNDLE_URL,
       initiator: "user",
     }],
-  }), API_URL, "application/json; charset=utf-8");
+  }), overrides.responseUrl ?? API_URL, "application/json; charset=utf-8");
 }
 
-function compressedBundle(payload = statement()): Response {
-  return response(compress(Buffer.from(JSON.stringify(bundle(payload)))), BUNDLE_URL, "application/x-snappy");
+function compressedBundle(payload = statement(), responseUrl = BUNDLE_URL): Response {
+  return response(compress(Buffer.from(JSON.stringify(bundle(payload)))), responseUrl, "application/x-snappy");
 }
 
 function verifier(
@@ -199,6 +203,38 @@ describe("GitHub shell artifact attestation", () => {
       "FlintTrade-0.6.0-beta.14-linux-arm64.AppImage",
       "SHA256SUMS.txt",
     ]);
+  });
+
+  it("accepts Electron net.fetch responses that omit Response.url", async () => {
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(metadata({ responseUrl: "" }))
+      .mockResolvedValueOnce(compressedBundle(statement(), ""));
+    const test = verifier(fetcher);
+
+    await expect(test.subject.verify(input())).resolves.toEqual({
+      assetName: NAME,
+      digest: DIGEST,
+      releaseTag: TAG,
+    });
+    expect(test.verifyBundle).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      expected: /unavailable/i,
+      fetcher: () => vi.fn<Fetcher>()
+        .mockResolvedValueOnce(metadata({ responseUrl: "https://attacker.example/attestations" })),
+      label: "metadata",
+    },
+    {
+      expected: /no cryptographically valid/i,
+      fetcher: () => vi.fn<Fetcher>()
+        .mockResolvedValueOnce(metadata())
+        .mockResolvedValueOnce(compressedBundle(statement(), "https://attacker.example/bundle.sigstore.json")),
+      label: "bundle",
+    },
+  ])("rejects a wrong non-empty $label response URL", async ({ expected, fetcher }) => {
+    await expect(verifier(fetcher()).subject.verify(input())).rejects.toThrow(expected);
   });
 
   it("fails closed when Sigstore rejects the certificate, transparency log, or signature", async () => {

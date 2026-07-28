@@ -38,39 +38,56 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
 - **no-overscope:** personal-use open-source — no DPDPA / §65B / CERT-In / RBI / vendor-SEBI ceremony. Only AGPL compliance + OpenAlgo-parity observability apply.
 
-## Current handoff (2026-07-22)
+## Current handoff (2026-07-29)
 
 State at handoff: Phase 3 and the deferred-ledger clearance remain landed. The
-Tauri-to-Electron migration is active on `codex/desktop-electron-migration`:
-the Electron 43 security waist, checksum-bound first-run source bootstrap,
-journalled source updates, source guardian lifecycle, renderer update UX and
-four-installer release pipeline are implemented in reviewed commits. Task 7 is
-implemented in the settled tree: the retained Tauri/frozen-payload production
-path and dependencies are removed, active docs/config/templates describe the
-Electron source model, and legacy wording remains only where history, upgrade
-compatibility or negative regression assertions require it. The desktop
-installer contains the shell and bootstrap resources only; first launch builds
-the managed checkout at `~/.flinttrade/src/FlintTrade`, and source/runtime
-updates are distinct from Electron-shell installer updates. Task 8
-installed-app validation, the settled full gate and adversarial closeout remain
-before the migration can be called done. No desktop installer release is
-published; the prior Tauri/PyInstaller releases were deleted in the 2026-07-23
-release reset to a clean `v0.0.1` baseline, and the site withholds install
-commands until the four Electron installers plus `SHA256SUMS.txt` exist together.
-Local macOS output is always ad-hoc sealed; release CI alone can use
-complete Apple signing and notarisation secrets. Count pins remain 102
-widgets, 35 brokers and 18 packages. `PLAN.md` is the curated public roadmap;
-the detailed working plan of record lives at `.local/agent-context/PLAN.md` —
-resume from its phase tracker, never restart planning, and never push without
-explicit maintainer permission.
+Tauri-to-Electron migration merged to `main` in `a6f92464` and is complete in
+the settled tree. Electron 43.2.0 now provides the hardened shell,
+checksum-bound first-run source and tool bootstrap, journalled source updates,
+source guardian lifecycle, renderer update UX and four-installer release
+pipeline. The retained Tauri/frozen-payload production path and dependencies
+are gone. The desktop installer contains only the shell and bootstrap
+resources; first launch builds the managed checkout at
+`~/.flinttrade/src/FlintTrade`, and source/runtime updates remain distinct from
+Electron-shell installer updates.
+
+Task 8 is complete. A clean Finder-installed universal macOS DMG bootstrapped
+`main` at `3c4d0902` into empty source/workspace state, reached the real Welcome
+screen and passed the installed OAuth, tray/hotkey, update, Quit and uninstall
+acceptance. The 2026-07-29 branding follow-up replaces the generic orange
+desktop tile with the canonical FlintTrade angular `F` and green spark. One
+deterministic generator now owns every PNG, ICNS and ICO output; macOS, Windows,
+Linux and NSIS point at explicit native assets; packaged runtimes byte-verify
+the app/tray icons; Linux windows use the packaged app icon; and the AppImage
+installer selects its exact path instead of the first bundled PNG.
+
+The latest local DMG is 219,591,645 bytes with SHA-256
+`8eeb2d8dfe00cb903d7e388489bb93cc197b4f2ae22ddffe45b2ea790604914f`;
+its `app.asar` SHA-256 is
+`4bdfee7cd9b45f5846a65298f03a15dc744aa2856680545ef963ca8ba4a84b12`.
+The settled follow-up gate passed 14,880 Python tests (68 skipped), 69 Rust
+tests, 962 desktop tests (8 skipped), 5,785 terminal tests and 69 site tests,
+plus Ruff, all typechecks/builds, secrets, NOTICE/provenance/lock drift, package
+verification and a clean cross-platform icon re-review. Evidence is under
+`.local/specs/desktop-electron/evidence/icon-followup-20260729/`; the older Task
+8 bundle remains historical evidence for the installed-app acceptance.
+
+No Electron installer release is published. The site still withholds install
+commands until all four installers and `SHA256SUMS.txt` exist together. Local
+macOS output is ad-hoc sealed with no Team ID; Apple distribution
+signing/notarisation, Windows/Linux native runtime evidence and the accepted
+RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
+Count pins remain 102 widgets, 35 brokers and 18 packages. `PLAN.md` is the
+curated public roadmap; the detailed working plan of record lives at
+`.local/agent-context/PLAN.md` — resume from its phase tracker, verify branch/PR
+state live, and never push without explicit maintainer permission.
 
 **Next-work queue (in order):**
-1. **Installed-app closeout** — build the settled macOS DMG, install through a clean Finder path, exercise first-run source bootstrap, readiness, OAuth opening, tray/hotkey/update, explicit quit and retention/purge semantics, then run the full local gate and fresh multi-agent audit. Windows/Linux runtime evidence remains CI/contributor-owned; a Mac does not prove them.
-2. **Phase 2 stabilisation remainder** — G40 broker-connect merge, infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
-3. **Phase 4 learning loop** — AI1–AI3 + the full-day Practice run; spec first in `.local/specs/`.
-4. **Phase 5 remainder** — Apple signing secrets when the maintainer adds them; never describe an ad-hoc seal as distribution signing.
-5. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
-6. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
+1. **Phase 2 stabilisation remainder** — G40 broker-connect merge, infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
+2. **Phase 4 learning loop** — AI1–AI3 + the full-day Practice run; spec first in `.local/specs/`.
+3. **Phase 5 publication/signing** — publish only after native CI evidence and the complete release set; add Apple signing/notarisation secrets when the maintainer is ready, and never describe an ad-hoc seal as distribution signing.
+4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
+5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
 
 **Non-negotiables (verify before claiming done):**
 - Every reachable live order mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`; `gateway/tests/test_no_legacy_order_path.py` is the guard — run it after touching anything order-adjacent.

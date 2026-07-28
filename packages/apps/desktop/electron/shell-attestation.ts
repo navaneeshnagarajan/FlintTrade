@@ -487,7 +487,10 @@ export function createGithubShellAttestationVerifier(
         validateResponse(metadataResponse) {
           if (
             metadataResponse.status !== 200 ||
-            !isExactAttestationApiUrl(metadataResponse.url, input.digest) ||
+            // Electron net.fetch() reports an empty Response.url. The request
+            // itself is exact and redirect:"error" rejects redirects; retain
+            // strict endpoint validation whenever Electron supplies a URL.
+            (metadataResponse.url !== "" && !isExactAttestationApiUrl(metadataResponse.url, input.digest)) ||
             metadataResponse.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json" ||
             metadataResponse.headers.has("link")
           ) {
@@ -521,8 +524,10 @@ export function createGithubShellAttestationVerifier(
             validateResponse(bundleResponse) {
               if (
                 bundleResponse.status !== 200 ||
-                bundleResponse.url !== attestation.bundleUrl ||
-                !isTrustedBundleUrl(bundleResponse.url, requestTime) ||
+                (bundleResponse.url !== "" && (
+                  bundleResponse.url !== attestation.bundleUrl ||
+                  !isTrustedBundleUrl(bundleResponse.url, requestTime)
+                )) ||
                 bundleResponse.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/x-snappy"
               ) {
                 throw new Error("The GitHub attestation bundle endpoint was unavailable.");

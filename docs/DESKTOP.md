@@ -27,6 +27,12 @@ file:
 | Linux ARM64 | `FlintTrade-<version>-linux-arm64.AppImage` |
 | All platforms | `SHA256SUMS.txt` |
 
+The macOS, Windows, Linux and tray assets are generated from the same canonical
+FlintTrade angular `F` and green flint-spark mark used by the terminal and
+public site.
+
+![FlintTrade app icon in the locally built macOS DMG](screenshots/13-desktop-dmg-icon.png)
+
 The installer contains Electron, the local splash, bootstrap resources and
 licence notices. It does not contain a frozen Python backend, a prebuilt
 terminal, or a separately downloaded runtime payload. The shell builds an
@@ -228,8 +234,9 @@ runs the extracted `AppRun` instead.
 
 ## Uninstall
 
-After an Electron release is installed, ordinary uninstall removes only the
-identity-proved shell and the integration files created by the installer:
+After an Electron release is installed with the one-command installer, ordinary
+uninstall removes only the identity-proved shell and the integration files
+named by that installer's receipt:
 
 ```bash
 # macOS or Linux
@@ -246,11 +253,27 @@ data are retained so a reinstall can recover them. The uninstaller refuses to
 delete a same-name path without the exact receipt and executable/integration
 identity.
 
+A manual macOS Finder copy from the DMG deliberately has no installer receipt.
+Quit FlintTrade and move that `FlintTrade.app` to Trash in Finder; the workspace,
+Electron profile, managed source and tools remain available for reinstall. Once
+the unreceipted app is gone, the purge command below can still remove recognised
+FlintTrade data. The script will not claim an unreceipted same-name application
+as its deletion authority.
+
 `--purge` on macOS/Linux, or `-Purge` on Windows, additionally requests deletion
-of recognised FlintTrade data. Purge is irreversible, requires typed or
-explicit scripted confirmation, stays within the current user's home and
-fails closed on links, reparse points, foreign ownership or an unproved custom
-workspace.
+of recognised FlintTrade data:
+
+```bash
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
+```
+
+Purge is irreversible, requires typed or explicit scripted confirmation, stays
+within the current user's home and fails closed on links, reparse points or an
+unproved custom workspace.
 
 ## Build and verify locally
 

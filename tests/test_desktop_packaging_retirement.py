@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import runpy
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
+from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,18 +30,75 @@ def test_electron_owns_desktop_icons_and_packaged_tray_resource() -> None:
     }
     assert all(path.is_file() and path.stat().st_size > 0 for path in icons.iterdir())
     assert metadata["build"]["icon"] == "resources/icons/icon"
+    assert metadata["build"]["mac"]["icon"] == "resources/icons/icon.icns"
+    assert metadata["build"]["win"]["icon"] == "resources/icons/icon.ico"
+    assert metadata["build"]["linux"]["icon"] == "resources/icons/icon.png"
+    assert {
+        metadata["build"]["nsis"][key]
+        for key in ("installerIcon", "uninstallerIcon", "installerHeaderIcon")
+    } == {"resources/icons/icon.ico"}
     assert {
         (resource["from"], resource["to"])
         for resource in metadata["build"]["extraResources"]
         if resource.get("to") == "icons/tray.png"
     } == {("resources/icons/32x32.png", "icons/tray.png")}
+    assert {
+        (resource["from"], resource["to"])
+        for resource in metadata["build"]["extraResources"]
+        if resource.get("to") == "icons/app.png"
+    } == {("resources/icons/128x128.png", "icons/app.png")}
 
     verifier = (DESKTOP / "scripts" / "verify-electron-package.mjs").read_text(encoding="utf-8")
     main = (DESKTOP / "electron" / "main.ts").read_text(encoding="utf-8")
     generator = (ROOT / "packaging" / "make-icons.py").read_text(encoding="utf-8")
     assert 'path.join(packageRoot, "resources", "icons", "32x32.png")' in verifier
+    assert 'path.join(packageRoot, "resources", "icons", "128x128.png")' in verifier
     assert 'path.join(appRoot, "resources", "icons", "32x32.png")' in main
+    assert 'path.join(appRoot, "resources", "icons", "128x128.png")' in main
     assert '"desktop" / "resources" / "icons"' in generator
+
+
+@pytest.mark.unit
+def test_desktop_icon_generator_uses_the_canonical_flinttrade_mark(tmp_path: Path) -> None:
+    generator = runpy.run_path(str(ROOT / "packaging" / "make-icons.py"))
+    master = generator["render_master"]()
+
+    assert master.size == (1024, 1024)
+    assert master.mode == "RGBA"
+    assert master.getpixel((40, 40)) == (0, 0, 0, 0)
+
+    mark = generator["MARK"]
+    spark = generator["SPARK"]
+    spark_highlight = generator["SPARK_HIGHLIGHT"]
+    background = generator["BG"]
+
+    # Canonical angular F letterform.
+    assert master.getpixel((224, 720)) == mark
+    assert master.getpixel((480, 240)) == mark
+    assert master.getpixel((440, 496)) == mark
+
+    # Canonical green flint spark and fixed dark app tile.
+    assert master.getpixel((704, 272)) == spark
+    assert master.getpixel((760, 176)) == spark_highlight
+    assert master.getpixel((560, 720)) == background
+
+    # The retired generic orange diamond must not return.
+    assert generator.get("ACCENT") is None
+    assert generator.get("ACCENT_2") is None
+
+    generated = generator["write_icons"](tmp_path)
+    tracked_icons = DESKTOP / "resources" / "icons"
+    assert {path.name for path in generated} == {path.name for path in tracked_icons.iterdir()}
+
+    def decoded(image_path: Path) -> tuple[tuple[int, int], bytes]:
+        """Decoded pixel identity — PNG/ICO/ICNS container bytes vary with the
+        platform's Pillow compressor build, so byte equality is not portable
+        between the macOS-generated tracked assets and the Ubuntu CI runner."""
+        with Image.open(image_path) as image:
+            return image.size, image.convert("RGBA").tobytes()
+
+    for path in generated:
+        assert decoded(path) == decoded(tracked_icons / path.name)
 
 
 def test_retired_desktop_packaging_cannot_return_through_active_manifests() -> None:

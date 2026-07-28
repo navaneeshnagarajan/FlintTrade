@@ -126,7 +126,12 @@ export function createGithubShellReleaseSource(
         validateResponse(response) {
           if (
             response.status !== 200 ||
-            !validReleaseApiResponseUrl(response.url) ||
+            // Electron's net.fetch() currently leaves Response.url blank even
+            // for a successful direct request. The request URL is the exact
+            // constant above and redirect:"error" rejects every redirect, so
+            // an omitted response URL is safe; any reported URL must still
+            // match the official endpoint exactly.
+            (response.url !== "" && !validReleaseApiResponseUrl(response.url)) ||
             response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json"
           ) {
             throw new Error("The official GitHub release metadata endpoint was unavailable.");

@@ -49,6 +49,20 @@ required.
 4. Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
    in the app; no `.env` file is required.
 
+Manual Finder copies do not have the identity receipt written by the
+one-command installer. To uninstall one, quit FlintTrade and move
+`FlintTrade.app` from Applications to Trash. This retains the workspace,
+Electron profile, managed source and tools for a later reinstall. After the app
+is gone, this explicit purge flow can remove recognised retained data after
+typed confirmation:
+
+```bash
+curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
+```
+
+The receipt-based ordinary uninstall script intentionally refuses to delete an
+unreceipted same-name application.
+
 To build and verify the installer locally:
 
 ```bash

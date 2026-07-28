@@ -82,6 +82,9 @@ if (!hasSingleInstanceLock) {
   const bootstrapResources = app.isPackaged
     ? path.join(process.resourcesPath, "bootstrap")
     : path.join(appRoot, "resources", "bootstrap");
+  const appIcon = app.isPackaged
+    ? path.join(process.resourcesPath, "icons", "app.png")
+    : path.join(appRoot, "resources", "icons", "128x128.png");
   const bootstrapManifest = JSON.parse(
     readFileSync(path.join(bootstrapResources, "tool-manifest.json"), "utf8"),
   ) as BootstrapToolManifest;
@@ -328,6 +331,7 @@ if (!hasSingleInstanceLock) {
     backgroundColor: "#0b0d12",
     fullscreenable: remote,
     height: remote ? 900 : 360,
+    ...(process.platform === "linux" ? { icon: appIcon } : {}),
     maximizable: remote,
     minHeight: remote ? 640 : 360,
     minWidth: remote ? 960 : 540,
