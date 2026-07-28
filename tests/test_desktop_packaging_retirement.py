@@ -7,7 +7,9 @@ import runpy
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
+from PIL import Image
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +58,7 @@ def test_electron_owns_desktop_icons_and_packaged_tray_resource() -> None:
     assert '"desktop" / "resources" / "icons"' in generator
 
 
+@pytest.mark.unit
 def test_desktop_icon_generator_uses_the_canonical_flinttrade_mark(tmp_path: Path) -> None:
     generator = runpy.run_path(str(ROOT / "packaging" / "make-icons.py"))
     master = generator["render_master"]()
@@ -86,8 +89,16 @@ def test_desktop_icon_generator_uses_the_canonical_flinttrade_mark(tmp_path: Pat
     generated = generator["write_icons"](tmp_path)
     tracked_icons = DESKTOP / "resources" / "icons"
     assert {path.name for path in generated} == {path.name for path in tracked_icons.iterdir()}
+
+    def decoded(image_path: Path) -> tuple[tuple[int, int], bytes]:
+        """Decoded pixel identity — PNG/ICO/ICNS container bytes vary with the
+        platform's Pillow compressor build, so byte equality is not portable
+        between the macOS-generated tracked assets and the Ubuntu CI runner."""
+        with Image.open(image_path) as image:
+            return image.size, image.convert("RGBA").tobytes()
+
     for path in generated:
-        assert path.read_bytes() == (tracked_icons / path.name).read_bytes()
+        assert decoded(path) == decoded(tracked_icons / path.name)
 
 
 def test_retired_desktop_packaging_cannot_return_through_active_manifests() -> None:
