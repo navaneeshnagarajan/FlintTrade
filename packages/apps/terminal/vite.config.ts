@@ -143,7 +143,6 @@ export default defineConfig({
           // Lightweight Charts — only loaded when ChartWidget mounts
           if (
             id.includes("node_modules/lightweight-charts") ||
-            id.includes("node_modules/lightweight-charts-indicators") ||
             id.includes("node_modules/fancy-canvas")
           ) {
             return "vendor-lwc";
@@ -204,7 +203,6 @@ export default defineConfig({
           // NOTE: @floating-ui is intentionally omitted here — it lives in
           // vendor-radix to avoid the circular chunk warning.
           if (
-            id.includes("node_modules/recharts") ||
             id.includes("node_modules/@tremor/") ||
             id.includes("node_modules/@headlessui/") ||
             id.includes("node_modules/react-day-picker") ||
