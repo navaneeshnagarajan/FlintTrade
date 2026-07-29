@@ -11,8 +11,11 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 
 It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node and
 pnpm) into `~/.flinttrade/tools`, builds FlintTrade from a managed source
-checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
-launcher at `~/.local/bin/flinttrade`. No `sudo` is used.
+checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a
+`flinttrade-web` launcher at `~/.local/bin/flinttrade-web`. No `sudo` is used.
+The Electron desktop shell keeps its own checkout at `~/.flinttrade/src/FlintTrade`
+and its own `~/.local/bin/flinttrade` launcher, so the two installs never
+collide and can be run in either order.
 
 Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
 configuration is handled in the UI; no `.env` file is required. Your workspace
@@ -36,7 +39,8 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 ```
 
 If the site is unreachable, run the same script from a clone or from the
-managed source checkout at `~/.flinttrade/src/FlintTrade`:
+managed source checkout (`~/.flinttrade/web-src/FlintTrade` for the web app,
+`~/.flinttrade/src/FlintTrade` for the desktop shell):
 
 ```bash
 bash scripts/install/flinttrade-uninstall.sh

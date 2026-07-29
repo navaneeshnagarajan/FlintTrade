@@ -20,14 +20,19 @@ What is pinned here:
   * every ``pnpm install`` is ``--frozen-lockfile``;
   * both delegate the build to ``flinttrade-bootstrap`` instead of duplicating it;
   * only the expected hosts are contacted, always over https;
-  * the two scripts expose the same four flags under each platform's spelling.
+  * the two scripts expose the same four flags under each platform's spelling;
+  * nothing the web install writes collides with the Electron desktop install —
+    not the launcher, not the Start Menu entry, not the source checkout — so the
+    two documented one-liners can be run on one machine in either order.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -36,6 +41,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SH = _REPO_ROOT / "scripts" / "install" / "flinttrade-web-install.sh"
 PS1 = _REPO_ROOT / "scripts" / "install" / "flinttrade-web-install.ps1"
+DESKTOP_SH = _REPO_ROOT / "scripts" / "install" / "flinttrade-install.sh"
+DESKTOP_PS1 = _REPO_ROOT / "scripts" / "install" / "flinttrade-install.ps1"
+UNINSTALL_SH = _REPO_ROOT / "scripts" / "install" / "flinttrade-uninstall.sh"
+UNINSTALL_PS1 = _REPO_ROOT / "scripts" / "install" / "flinttrade-uninstall.ps1"
 
 BASH = shutil.which("bash")
 NO_BASH_REASON = "bash is not available on this runner"
@@ -47,6 +56,8 @@ PWSH = shutil.which("pwsh")
 WINDOWS_POWERSHELL = shutil.which("powershell")
 POWERSHELL = PWSH or WINDOWS_POWERSHELL
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
+GIT = shutil.which("git")
+NO_GIT_REASON = "git is not available on this runner"
 
 _BOOTSTRAP_SH = _REPO_ROOT / "packages/apps/desktop/resources/bootstrap/flinttrade-bootstrap.sh"
 _BOOTSTRAP_PS1 = _REPO_ROOT / "packages/apps/desktop/resources/bootstrap/flinttrade-bootstrap.ps1"
@@ -331,6 +342,409 @@ def test_web_installers_only_reach_expected_hosts_over_https(script: Path) -> No
     )
 
 
+# ---------------------------------------------------------------------------
+# Managed source identity.
+#
+# A git-less refresh deletes --src recursively before publishing the downloaded
+# checkout, so whatever authorises that deletion decides whether an operator's
+# unrelated source survives a typo. Two questions decide it, and they have
+# different answers:
+#
+#   * IS THIS FLINTTRADE'S CODE?  Repository markers answer that — and every
+#     contributor clone of this repository carries all of them, because
+#     flint.toml, pyproject.toml and pnpm-workspace.yaml are checked in;
+#   * DID THIS INSTALLER CREATE IT?  Only its own receipt answers that.
+#
+# So markers may authorise an in-place 'git fetch' + 'git reset --hard' on a
+# clean checkout and nothing more; the recursive replacement needs the receipt.
+# ---------------------------------------------------------------------------
+
+_REPO_SLUG = "navaneeshnagarajan/FlintTrade"
+NOT_POSIX_REASON = "the POSIX installer requires POSIX absolute paths for its --src guard"
+# Linux runners ship pwsh, so a PowerShell-available check is not enough on its own:
+# these cases drive -SrcDir with a Windows absolute path and rely on
+# [Environment]::GetFolderPath resolving AppData under a redirected USERPROFILE,
+# neither of which holds when pwsh runs on Linux.
+NOT_WINDOWS_REASON = "the Windows installer's path guards need Windows path semantics"
+
+
+def _posix_modes_honoured() -> bool:
+    """Whether the temp filesystem stores POSIX permission bits.
+
+    The receipt reader refuses anything that is not 0700/0600, which a Windows
+    filesystem can never report, so tests that plant a receipt would fail for a
+    reason that has nothing to do with the installer.
+
+    Returns:
+        ``True`` when a directory chmod-ed to 0700 reads back as 0700.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        probe = Path(raw) / "probe"
+        probe.mkdir()
+        probe.chmod(0o700)
+        return (probe.stat().st_mode & 0o777) == 0o700
+
+
+POSIX_MODES = _posix_modes_honoured()
+NO_POSIX_MODES_REASON = "the web-install receipt requires a filesystem that honours POSIX modes"
+
+
+def _fake_posix_bin(tmp_path: Path) -> str:
+    """Return a PATH whose ``uname`` reports a supported Linux x64 host.
+
+    Args:
+        tmp_path: Per-test temporary directory.
+
+    Returns:
+        A PATH value that puts the stub ahead of the system directories.
+    """
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    uname = bin_dir / "uname"
+    uname.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-m\" ]; then printf '%s\\n' x86_64; else printf '%s\\n' Linux; fi\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    uname.chmod(0o755)
+    return f"{bin_dir}{os.pathsep}/usr/bin:/bin"
+
+
+def _dry_run_install(tmp_path: Path, src: Path) -> subprocess.CompletedProcess[str]:
+    """Run the POSIX web installer against ``src`` without touching the network."""
+    return subprocess.run(
+        [BASH, str(SH)],
+        cwd=_REPO_ROOT,
+        env={
+            "PATH": _fake_posix_bin(tmp_path),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_WEB_SRC_DIR": str(src),
+            "FLINTTRADE_DRY_RUN": "1",
+            "FLINTTRADE_YES": "1",
+        },
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def _generic_mixed_project(root: Path) -> Path:
+    """Create the two-file shape any Python/JS project on the machine satisfies."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "package.json").write_text("{}", encoding="utf-8")
+    (root / "pyproject.toml").write_text("[project]\nname = 'somebody-elses-work'\n", encoding="utf-8")
+    (root / "main.py").write_text("print('irreplaceable')\n", encoding="utf-8")
+    return root
+
+
+def _marker_only_clone(root: Path) -> Path:
+    """Create what every contributor clone of this repository looks like.
+
+    Args:
+        root: Directory to populate.
+
+    Returns:
+        The populated directory.
+    """
+    _generic_mixed_project(root)
+    (root / "flint.toml").write_text(
+        f'[project]\nname = "FlintTrade"\nrepository = "https://github.com/{_REPO_SLUG}"\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run git inside ``root``.
+
+    Args:
+        root: Working directory for the command.
+        *args: Arguments after the executable.
+
+    Returns:
+        The completed process.
+    """
+    assert GIT is not None
+    return subprocess.run([GIT, *args], cwd=str(root), text=True, capture_output=True)
+
+
+def _committed_marker_clone(root: Path) -> Path:
+    """Create a clean contributor clone: FlintTrade's markers, all committed.
+
+    Args:
+        root: Directory to populate.
+
+    Returns:
+        The populated Git checkout.
+    """
+    _marker_only_clone(root)
+    _git(root, "init", "-q", "-b", "main", ".")
+    _git(root, "config", "user.email", "tests@flinttrade.invalid")
+    _git(root, "config", "user.name", "FlintTrade tests")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "contributor clone")
+    return root
+
+
+def _plant_web_receipt(home: Path, *, source: Path) -> Path:
+    """Plant the owner-private receipt a previous run of this installer wrote.
+
+    Args:
+        home: Fake ``$HOME`` for the installer run.
+        source: Managed source checkout the receipt records.
+
+    Returns:
+        The receipt file that was written.
+    """
+    state = home / ".local" / "state" / "flinttrade-web"
+    state.mkdir(parents=True, exist_ok=True)
+    state.chmod(0o700)
+    receipt = state / "web-install.receipt"
+    receipt.write_text(
+        "\n".join(
+            (
+                "format=flinttrade-web-install-v1",
+                "platform=Linux",
+                f"shim={(home / '.local' / 'bin' / 'flinttrade-web').as_posix()}",
+                f"shim_sha256={'0' * 64}",
+                "shortcut=",
+                f"source={source.as_posix()}",
+                f"tools={(home / '.flinttrade' / 'tools').as_posix()}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    receipt.chmod(0o600)
+    return receipt
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+def test_posix_web_installer_refuses_a_src_that_does_not_prove_flinttrade_identity(tmp_path: Path) -> None:
+    """A reused or mistyped --src holding unrelated source must never be replaced."""
+    src = _generic_mixed_project(tmp_path / "someone-elses-project")
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "nothing there proves it is a FlintTrade checkout" in result.stderr
+    assert (src / "main.py").exists(), "the installer touched an unproven source directory"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_posix_web_installer_replaces_only_a_src_its_own_receipt_names(tmp_path: Path) -> None:
+    """The receipt is the only proof that this installer created the directory."""
+    src = _generic_mixed_project(tmp_path / "checkout")
+    _plant_web_receipt(tmp_path, source=src)
+
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing there proves it is a FlintTrade checkout" not in result.stderr
+    assert "updated in place" not in result.stdout, (
+        "a receipt-proved checkout is the installer's own and may be replaced outright"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(GIT is None, reason=NO_GIT_REASON)
+def test_posix_web_installer_updates_a_marker_only_checkout_in_place(tmp_path: Path) -> None:
+    """Markers prove the code, so the clone is refreshed with git — never deleted."""
+    src = _committed_marker_clone(tmp_path / "contributor-clone")
+
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "updated in place" in result.stdout, (
+        "a clean FlintTrade clone must be refreshed with git fetch + reset, not replaced"
+    )
+    assert (src / "main.py").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(GIT is None, reason=NO_GIT_REASON)
+def test_posix_web_installer_refuses_a_marker_only_checkout_holding_uncommitted_work(
+    tmp_path: Path,
+) -> None:
+    """'git reset --hard' would silently destroy a contributor's working tree."""
+    src = _committed_marker_clone(tmp_path / "contributor-clone")
+    (src / "main.py").write_text("print('a week of unpushed work')\n", encoding="utf-8")
+
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "uncommitted changes" in result.stderr
+    assert "print('a week of unpushed work')" in (src / "main.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+def test_posix_web_installer_refuses_a_marker_only_tree_that_git_cannot_update(tmp_path: Path) -> None:
+    """Without a Git checkout the only way to 'update' is rm -rf, which markers never authorise."""
+    src = _marker_only_clone(tmp_path / "unpacked-copy")
+
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "could only be replaced wholesale" in result.stderr
+    assert "markers prove the CODE is this" in result.stderr, (
+        "the refusal must say precisely which proof was missing"
+    )
+    assert (src / "main.py").exists(), "the installer touched a directory it could not prove it owns"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.parametrize("state", ["empty", "absent"])
+def test_posix_web_installer_still_accepts_an_empty_or_absent_src(tmp_path: Path, state: str) -> None:
+    """The guard must not widen: there is nothing to destroy in an empty directory."""
+    src = tmp_path / "managed"
+    if state == "empty":
+        src.mkdir()
+    result = _dry_run_install(tmp_path, src)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "nothing there proves it is a FlintTrade checkout" not in result.stderr
+
+
+@pytest.mark.unit
+def test_windows_web_installer_requires_the_same_source_identity_proof() -> None:
+    """The .ps1 mirrors the .sh guard rather than trusting a generic project shape."""
+    source = _read(PS1)
+    for helper in ("Test-WebReceiptNamesSource", "Test-FlintTradeSourceMarkers"):
+        assert helper in source, (
+            f"flinttrade-web-install.ps1 must prove FlintTrade identity with {helper} before it "
+            "replaces an existing source directory"
+        )
+
+    body = _strip_shell_comments(source, block_comments=True)
+    guard = body[body.index("function Assert-SourceDirSafe") :]
+    guard = guard[: guard.index("\nfunction ")] if "\nfunction " in guard else guard
+    assert "Test-WebReceiptNamesSource" in guard and "Test-FlintTradeSourceMarkers" in guard, (
+        "Assert-SourceDirSafe must consult the identity proofs, not just the directory shape"
+    )
+    assert 'Join-Path $script:SrcDir "package.json"' not in guard, (
+        "package.json + pyproject.toml is every mixed Python/JS project; it cannot authorise "
+        "deleting the operator's directory"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_refuses_a_src_without_identity(tmp_path: Path) -> None:
+    """The Windows installer refuses an unproven -SrcDir before deleting anything."""
+    src = _generic_mixed_project(tmp_path / "someone-elses-project")
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(src)],
+        cwd=_REPO_ROOT,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert "nothing there proves it is a FlintTrade checkout" in combined, combined
+    assert (src / "main.py").exists(), "the installer touched an unproven source directory"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_refuses_a_marker_only_tree_it_cannot_update(tmp_path: Path) -> None:
+    """The .ps1 mirrors the split: markers alone never authorise a recursive delete."""
+    src = _marker_only_clone(tmp_path / "unpacked-copy")
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(src)],
+        cwd=_REPO_ROOT,
+        env=_windows_home_env(tmp_path),
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "markers prove the CODE is this" in combined, combined
+    assert "could only be replaced wholesale" in combined, combined
+    assert (src / "main.py").exists(), "the installer touched a directory it could not prove it owns"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "guard", "markers"),
+    [
+        (SH, "assert_source_dir_safe", "flinttrade_source_markers_present"),
+        (PS1, "Assert-SourceDirSafe", "Test-FlintTradeSourceMarkers"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_never_let_markers_authorise_a_destructive_replacement(
+    script: Path, guard: str, markers: str
+) -> None:
+    """flint.toml and the workspace members are checked in, so every clone carries them."""
+    body = _strip_shell_comments(_read(script), block_comments=script.suffix == ".ps1")
+    start = body.index(guard + "(") if script.suffix == ".sh" else body.index("function " + guard)
+    end = body.index("\n}\n", start)
+    guard_body = body[start:end]
+
+    assert markers in guard_body, f"{script.name}: the marker check left {guard}"
+    assert "status --porcelain" in guard_body, (
+        f"{script.name}: a marker-proved checkout must be refused while it holds uncommitted work"
+    )
+    assert ".git" in guard_body, (
+        f"{script.name}: markers may only authorise an in-place update of an actual Git checkout"
+    )
+    marker_index = guard_body.index(markers)
+    porcelain_index = guard_body.index("status --porcelain")
+    assert marker_index < porcelain_index, (
+        f"{script.name}: the uncommitted-work check must gate the marker branch, not precede it"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "reader", "open_call"),
+    [
+        (SH, "web_receipt_field", '< "$WEB_RECEIPT_PATH"'),
+        (PS1, "Get-RecordedWebInstallField", "Get-Content -LiteralPath $WebReceiptPath"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_read_the_receipt_through_one_strict_reader(
+    script: Path, reader: str, open_call: str
+) -> None:
+    """A second, weaker reader is simply the way round the strict one."""
+    body = _strip_shell_comments(_read(script), block_comments=script.suffix == ".ps1")
+    assert body.count(open_call) == 1, (
+        f"{script.name} opens the web-install receipt in more than one place; every trusting read "
+        f"must go through {reader}, which is the only one that checks ownership and privacy"
+    )
+    start = body.index(reader + "(") if script.suffix == ".sh" else body.index("function " + reader)
+    end = body.index("\n}\n", start)
+    reader_body = body[start:end]
+    if script.suffix == ".sh":
+        assert "private_mode" in reader_body and "-O " in reader_body, (
+            "the POSIX reader must require an owner-local 0700/0600 receipt, exactly as "
+            "flinttrade-uninstall.sh does"
+        )
+    else:
+        assert "Test-OwnerLocalWebPath" in reader_body and "ReparsePoint" in reader_body, (
+            "the Windows reader must require an owner-local receipt with no reparse alias in its "
+            "path, exactly as flinttrade-uninstall.ps1 does"
+        )
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("flag", ["--help", "--dry-run", "--yes", "--no-launch"])
 def test_posix_web_installer_supports_the_shared_flags(flag: str) -> None:
@@ -347,3 +761,681 @@ def test_windows_web_installer_supports_the_shared_flags(parameter: str) -> None
         ".ps1 installers must stay at flag parity (--help/-Help, --dry-run/-DryRun, "
         "--yes/-Yes, --no-launch/-NoLaunch)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Collisions between the web install and the Electron desktop install.
+#
+# The two installers are documented as independent one-liners, so a machine may
+# run them in either order and at any interval. Every path one of them writes
+# must therefore be a path the other never claims:
+#
+#   * on Windows, %LOCALAPPDATA%\Programs\FlintTrade is the electron-builder
+#     per-user install directory. Assert-WindowsFreshInstallAdmission in
+#     flinttrade-install.ps1 REFUSES a fresh desktop install when that directory
+#     exists without exactly one proven FlintTrade uninstall-registry identity,
+#     so a web launcher parked there locked the desktop installer out for good;
+#   * on Linux, ~/.local/bin/flinttrade is the desktop shell's own wrapper, and
+#     flinttrade-install.sh refuses to replace it unless its shell receipt
+#     proves the current contents byte for byte;
+#   * ~/.flinttrade/src/FlintTrade is the desktop shell's ACTIVE source, guarded
+#     by a bootstrap operation lease no shell script can hold (see below).
+# ---------------------------------------------------------------------------
+
+
+def _bash_path(target: Path) -> str:
+    """Render a filesystem path the way the bash on this runner spells it.
+
+    Git Bash on Windows is a POSIX shell over a Windows filesystem: ``C:\\x``
+    reaches it as ``/c/x``, and the installer's own ``--src must be an absolute
+    path`` guard rejects the drive-letter form.
+
+    Args:
+        target: Path to render.
+
+    Returns:
+        An absolute POSIX-style path.
+    """
+    text = target.as_posix()
+    if len(text) > 1 and text[1] == ":":
+        return f"/{text[0].lower()}{text[2:]}"
+    return text
+
+
+def _windows_home_env(home: Path) -> dict[str, str]:
+    """Return an environment that moves PowerShell's ``$HOME`` to ``home``.
+
+    ``[Environment]::GetFolderPath`` resolves the profile's ``AppData`` folders
+    relative to ``USERPROFILE`` and returns an empty string when they are absent,
+    so the throwaway profile has to look like a real one.
+
+    Args:
+        home: Directory to use as the profile root; its ``AppData`` folders are
+            created as a side effect.
+
+    Returns:
+        The current environment with the home-related variables replaced.
+    """
+    (home / "AppData" / "Local").mkdir(parents=True, exist_ok=True)
+    (home / "AppData" / "Roaming").mkdir(parents=True, exist_ok=True)
+    drive, _, rest = str(home).partition("\\")
+    return {
+        **os.environ,
+        "USERPROFILE": str(home),
+        "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        "APPDATA": str(home / "AppData" / "Roaming"),
+        "HOMEDRIVE": drive,
+        "HOMEPATH": f"\\{rest}",
+        "HOME": str(home),
+    }
+
+
+def _assignment(source: str, name: str) -> str:
+    """Return the right-hand side of a single-line shell/PowerShell assignment.
+
+    Args:
+        source: Full script source.
+        name: Variable name, including its ``$`` sigil for PowerShell.
+
+    Returns:
+        The assigned expression with surrounding whitespace removed.
+    """
+    match = re.search(rf"^{re.escape(name)}\s*=\s*(.+)$", source, flags=re.MULTILINE)
+    assert match is not None, f"{name} is not assigned on a single line"
+    return match.group(1).strip()
+
+
+@pytest.mark.unit
+def test_windows_web_launcher_never_squats_the_electron_install_directory() -> None:
+    """The web shim must not create %LOCALAPPDATA%\\Programs\\FlintTrade."""
+    web = _read(PS1)
+    desktop = _read(DESKTOP_PS1)
+
+    electron_dir = _assignment(desktop, "$DefaultElectronInstallDir")
+    assert r'Programs\FlintTrade"' in electron_dir, (
+        "the Electron per-user install directory moved; re-derive this test from "
+        "flinttrade-install.ps1 rather than weakening it"
+    )
+
+    shim_dir = _assignment(web, "$ShimDir")
+    assert r'Programs\FlintTradeWeb"' in shim_dir, (
+        "the web launcher directory must be its own; installing it into the Electron "
+        "per-user directory makes Assert-WindowsFreshInstallAdmission refuse every later "
+        f"desktop install (found: {shim_dir})"
+    )
+    assert not re.search(r'Programs\\FlintTrade"', shim_dir), (
+        f"$ShimDir still resolves to the Electron install directory: {shim_dir}"
+    )
+    shim_path = _assignment(web, "$ShimPath")
+    assert '"flinttrade-web.cmd"' in shim_path and '"flinttrade.cmd"' not in shim_path, (
+        "the web launcher must not be named flinttrade.cmd inside a FlintTrade-branded "
+        f"directory; the distinct name is what keeps the two installs separable (found: {shim_path})"
+    )
+
+
+@pytest.mark.unit
+def test_windows_web_start_menu_folder_never_collides_with_the_shell() -> None:
+    """The desktop uninstaller sweeps Start Menu\\Programs\\FlintTrade and fails on residue."""
+    web = _read(PS1)
+    uninstall = _read(UNINSTALL_PS1)
+
+    assert r"Start Menu\Programs\FlintTrade" in uninstall, (
+        "the desktop uninstaller no longer sweeps a Start Menu folder; re-derive this test"
+    )
+    assert r'Start Menu\Programs"' in _assignment(web, "$StartMenuRoot"), (
+        "the web installer no longer resolves the per-user Start Menu root; re-derive this test"
+    )
+    start_menu_dir = _assignment(web, "$StartMenuDir")
+    assert '"FlintTrade Web"' in start_menu_dir and '"FlintTrade"' not in start_menu_dir, (
+        "the web Start Menu folder must be its own - the desktop uninstaller reports a "
+        f"non-empty Programs\\FlintTrade folder as unproven residue (found: {start_menu_dir})"
+    )
+    shortcut = _assignment(web, "$StartMenuShortcut")
+    assert '"FlintTrade Web.lnk"' in shortcut and '"FlintTrade.lnk"' not in shortcut, (
+        "the web shortcut must not be named FlintTrade.lnk; the desktop uninstaller removes "
+        f"exactly that leaf name once it has proven the Electron shell (found: {shortcut})"
+    )
+
+
+@pytest.mark.unit
+def test_posix_web_launcher_preserves_the_electron_wrapper() -> None:
+    """~/.local/bin/flinttrade belongs to the desktop shell; the web app takes another name."""
+    web = _read(SH)
+    desktop = _read(DESKTOP_SH)
+
+    assert 'wrapper="$HOME/.local/bin/flinttrade"' in desktop, (
+        "the desktop shell's Linux wrapper moved; re-derive this test from "
+        "flinttrade-install.sh rather than weakening it"
+    )
+    assert _assignment(web, "SHIM_PATH") == '"$SHIM_DIR/flinttrade-web"', (
+        "the web launcher must not overwrite the desktop shell's ~/.local/bin/flinttrade "
+        "wrapper: doing so repoints the installed desktop entry at the web runner and makes "
+        "every later desktop update refuse to validate its integration file"
+    )
+    assert _assignment(web, "LEGACY_SHIM_PATH") == '"$SHIM_DIR/flinttrade"', (
+        "the pre-collision launcher path must stay recorded so a re-run can retire a shim "
+        "this installer's own receipt still proves it wrote"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "marker"),
+    [
+        (SH, "retire_legacy_launcher_shim"),
+        (PS1, "Remove-LegacyWebLauncher"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_retire_the_old_launcher_only_on_receipt_proof(script: Path, marker: str) -> None:
+    """A machine installed by an earlier revision must heal, never guess."""
+    source = _read(script)
+    assert marker in source, f"{script.name} has no legacy-launcher retirement step"
+    body = source[source.index(marker) :]
+    assert "shim_sha256" in body[:4500], (
+        f"{script.name} must compare the recorded SHA-256 before removing the earlier launcher; "
+        "a desktop install may have republished its own wrapper at that path since"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "uninstaller",
+    [UNINSTALL_SH, UNINSTALL_PS1],
+    ids=["uninstall.sh", "uninstall.ps1"],
+)
+def test_uninstallers_still_find_the_relocated_web_launcher(uninstaller: Path) -> None:
+    """The receipt drives removal, so its allowed locations must track the installer."""
+    source = _read(uninstaller)
+    if uninstaller.suffix == ".sh":
+        assert '"$HOME/.local/bin/flinttrade-web"' in source, (
+            "flinttrade-uninstall.sh no longer accepts the web launcher's own path, so a web "
+            "install would leave its launcher behind forever"
+        )
+        assert '"$HOME/.local/bin/flinttrade"' in source, (
+            "the pre-collision launcher path must stay acceptable so machines installed by an "
+            "earlier revision can still be uninstalled cleanly"
+        )
+    else:
+        assert '"flinttrade-web.cmd"' in source, (
+            "flinttrade-uninstall.ps1 no longer accepts the web launcher's own path, so a web "
+            "install would leave its launcher behind forever"
+        )
+        assert "FlintTrade Web.lnk" in source, (
+            "flinttrade-uninstall.ps1 no longer accepts the web Start Menu shortcut"
+        )
+        assert '"flinttrade.cmd"' in source, (
+            "the pre-collision launcher path must stay acceptable so machines installed by an "
+            "earlier revision can still be uninstalled cleanly"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The shared-source race.
+#
+# The desktop's operation lease is not a primitive an outside process can hold:
+# acquireOperationLease in packages/apps/desktop/electron/bootstrap-io.ts treats
+# any lease directory it finds as recoverable stale evidence, waits only for the
+# process records inside it, then quarantines and deletes it. A lease written by
+# a shell installer carries no process-group / supervisor record bound to a
+# containment token the Electron singleton minted, so it is stolen immediately.
+#
+# Checking the lease once and then fetching, hard-resetting and building for
+# several minutes was therefore not a guard at all. Separate trees are.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "default_source"),
+    [(SH, 'SRC_DIR="$WEB_ACTIVE_SOURCE"'), (PS1, "$script:SrcDir = $WebActiveSource")],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_default_to_their_own_source_tree(script: Path, default_source: str) -> None:
+    source = _strip_shell_comments(_read(script), block_comments=script.suffix == ".ps1")
+    assert default_source in source, (
+        f"{script.name} must default to its own managed checkout, not the desktop shell's "
+        "active source at ~/.flinttrade/src/FlintTrade"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "removed", "added"),
+    [
+        (SH, "assert_desktop_not_operating", "assert_desktop_source_not_shared"),
+        (PS1, "Assert-DesktopNotOperating", "Assert-DesktopSourceNotShared"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_refuse_the_shared_tree_instead_of_probing_the_lease(
+    script: Path, removed: str, added: str
+) -> None:
+    source = _read(script)
+    assert removed not in source, (
+        f"{script.name} still probes the desktop lease and then proceeds; the fetch, the hard "
+        "reset and the multi-minute build all happen afterwards, so a desktop started in that "
+        "window mutates the same checkout concurrently"
+    )
+    assert added in source, f"{script.name} has no shared-source refusal"
+    body = _strip_shell_comments(source, block_comments=script.suffix == ".ps1")
+    fetch_marker = "acquire_source_with_git" if script.suffix == ".sh" else "Invoke-SourceAcquisition"
+    assert body.index(added + "\n") < body.rindex(fetch_marker), (
+        f"{script.name} must refuse the overlap before any source mutation"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+def test_posix_web_installer_refuses_the_desktop_active_source(tmp_path: Path) -> None:
+    """A --src inside ~/.flinttrade/src is refused before anything is probed."""
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run", "--src", _bash_path(tmp_path / ".flinttrade" / "src" / "FlintTrade")],
+        cwd=_REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _bash_path(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in result.stderr
+    assert "Choose a source checkout outside" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+def test_posix_web_installer_refuses_a_parent_of_the_desktop_source(tmp_path: Path) -> None:
+    """The git-less refresh removes --src recursively, so a parent is just as fatal."""
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run", "--src", _bash_path(tmp_path / ".flinttrade")],
+        cwd=_REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _bash_path(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+def test_posix_web_installer_accepts_a_source_outside_the_desktop_tree(tmp_path: Path) -> None:
+    """Negative control: an unrelated --src must not trip the overlap refusal."""
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run", "--src", _bash_path(tmp_path / "elsewhere")],
+        cwd=_REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _bash_path(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+    assert "overlaps the FlintTrade Desktop shell's active source tree" not in (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL, reason=NO_POWERSHELL_REASON)
+@pytest.mark.skipif(os.name != "nt", reason=NOT_WINDOWS_REASON)
+def test_windows_web_installer_refuses_the_desktop_active_source(tmp_path: Path) -> None:
+    """-SrcDir inside the desktop source root is refused before anything is probed."""
+    shared = tmp_path / ".flinttrade" / "src" / "FlintTrade"
+    result = subprocess.run(
+        [
+            POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(PS1),
+            "-DryRun",
+            "-SrcDir",
+            str(shared),
+        ],
+        cwd=_REPO_ROOT,
+        env=_windows_home_env(tmp_path),
+        text=True,
+        capture_output=True,
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.parametrize(
+    "spelling",
+    [".flinttrade/./src/FlintTrade", ".flinttrade/src/FlintTrade/", "nowhere/../.flinttrade/src/FlintTrade"],
+    ids=["dot-component", "trailing-slash", "parent-component"],
+)
+def test_posix_web_installer_canonicalises_before_the_desktop_overlap_check(
+    tmp_path: Path, spelling: str
+) -> None:
+    """A lexical compare of the raw --src string is bypassed by every other spelling."""
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run", "--src", f"{_bash_path(tmp_path)}/{spelling}"],
+        cwd=_REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _bash_path(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+def test_posix_web_installer_resolves_a_symlinked_parent_before_the_overlap_check(tmp_path: Path) -> None:
+    """A symlinked parent spells the desktop's own tree without matching it lexically."""
+    managed = tmp_path / ".flinttrade"
+    managed.mkdir()
+    link = tmp_path / "managed-alias"
+    try:
+        link.symlink_to(managed, target_is_directory=True)
+    except (OSError, NotImplementedError):  # pragma: no cover - runner-dependent
+        pytest.skip("this runner cannot create directory symbolic links")
+    if not link.is_symlink():  # pragma: no cover - runner-dependent
+        pytest.skip("this runner materialised the symbolic link as a real directory")
+
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run", "--src", f"{_bash_path(link)}/src/FlintTrade"],
+        cwd=_REPO_ROOT,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": _bash_path(tmp_path)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(POWERSHELL is None, reason=NO_POWERSHELL_REASON)
+@pytest.mark.skipif(os.name != "nt", reason="mklink /J needs Windows")
+def test_windows_web_installer_resolves_a_junctioned_parent_before_the_overlap_check(
+    tmp_path: Path,
+) -> None:
+    """A junction spells the desktop's own tree without matching it as a string."""
+    managed = tmp_path / ".flinttrade"
+    managed.mkdir()
+    alias = tmp_path / "alias"
+    link = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(alias), str(managed)],
+        text=True,
+        capture_output=True,
+    )
+    if link.returncode != 0:  # pragma: no cover - runner-dependent
+        pytest.skip("this runner cannot create directory junctions")
+
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(alias / "src" / "FlintTrade")],
+        cwd=_REPO_ROOT,
+        env=_windows_home_env(tmp_path),
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "overlaps the FlintTrade Desktop shell's active source tree" in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "anchor"),
+    [
+        (SH, "assert_desktop_source_not_shared() {"),
+        (PS1, "function Assert-DesktopSourceNotShared {"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_canonicalise_both_sides_of_the_overlap_check(script: Path, anchor: str) -> None:
+    """The guard must compare trees, not the spellings the operator happened to type."""
+    body = _strip_shell_comments(_read(script), block_comments=script.suffix == ".ps1")
+    start = body.index(anchor)
+    guard = body[start : body.index("\n}\n", start)]
+    canonicaliser = "canonical_overlap_path" if script.suffix == ".sh" else "Get-CanonicalOverlapPath"
+    assert guard.count(canonicaliser) >= 2, (
+        f"{script.name}: both the requested source and the desktop source root must be "
+        "canonicalised before they are compared"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Machines installed by the revision that shared the desktop's source root.
+#
+# That revision defaulted the web source to ~/.flinttrade/src/FlintTrade — the
+# desktop shell's own active source. Retiring only its launcher left the web
+# checkout sitting in the desktop's tree, so the desktop and the web installer
+# still fight over one directory and the machine stays locked out of the shell.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "anchor"),
+    [
+        (SH, "migrate_legacy_web_source_checkout() {"),
+        (PS1, "function Move-LegacyWebSourceCheckout {"),
+    ],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_web_installers_migrate_rather_than_delete_a_legacy_desktop_root_checkout(
+    script: Path, anchor: str
+) -> None:
+    """The tree may be moved on receipt proof; it may never be deleted."""
+    body = _strip_shell_comments(_read(script), block_comments=script.suffix == ".ps1")
+    start = body.index(anchor)
+    migration = body[start : body.index("\n}\n", start)]
+
+    if script.suffix == ".sh":
+        assert "web_receipt_field source" in migration, (
+            "the receipt is the only thing that proves this installer created the checkout"
+        )
+        assert "mv " in migration and "rm -rf" not in migration, (
+            "an unprovable tree must never be deleted; a provable one is only ever moved"
+        )
+        assert "desktop_shell_appears_installed" in migration
+        assert "DESKTOP_OPERATION_LEASE" in migration
+    else:
+        assert 'Get-RecordedWebInstallField "source="' in migration
+        assert "Move-Item" in migration and "-Recurse" not in migration, (
+            "an unprovable tree must never be deleted; a provable one is only ever moved"
+        )
+        assert "Test-DesktopShellInstalled" in migration
+        assert "DesktopOperationLease" in migration
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_posix_web_installer_reports_the_legacy_checkout_it_would_migrate(tmp_path: Path) -> None:
+    """The upgrade is announced from the receipt, and a dry run still moves nothing."""
+    legacy = tmp_path / ".flinttrade" / "src" / "FlintTrade"
+    _marker_only_clone(legacy)
+    _plant_web_receipt(tmp_path, source=legacy)
+
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run"],
+        cwd=_REPO_ROOT,
+        env={
+            "PATH": _fake_posix_bin(tmp_path),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_YES": "1",
+        },
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "would move" in result.stdout
+    assert str(tmp_path / ".flinttrade" / "web-src" / "FlintTrade") in result.stdout
+    assert (legacy / "flint.toml").exists(), "a dry run must move nothing"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_posix_web_installer_leaves_the_legacy_checkout_when_the_desktop_shell_is_installed(
+    tmp_path: Path,
+) -> None:
+    """A tree the desktop may own is never moved; the operator is told exactly what to do."""
+    legacy = tmp_path / ".flinttrade" / "src" / "FlintTrade"
+    _marker_only_clone(legacy)
+    _plant_web_receipt(tmp_path, source=legacy)
+    shell_receipt = tmp_path / ".local" / "state" / "flinttrade" / "shell-install.receipt"
+    shell_receipt.parent.mkdir(parents=True)
+    shell_receipt.write_text("format=flinttrade-electron-shell-v1\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [BASH, str(SH), "--dry-run"],
+        cwd=_REPO_ROOT,
+        env={
+            "PATH": _fake_posix_bin(tmp_path),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_YES": "1",
+        },
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "would move" not in result.stdout
+    assert "the FlintTrade Desktop shell is installed on this machine" in result.stderr
+    assert "Decide which checkout to keep" in result.stderr
+    assert (legacy / "flint.toml").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(BASH is None, reason=NO_BASH_REASON)
+@pytest.mark.skipif(os.name != "posix", reason=NOT_POSIX_REASON)
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_posix_web_installer_moves_the_legacy_checkout_out_of_the_desktop_tree(tmp_path: Path) -> None:
+    """The real upgrade run relocates the checkout the receipt proves it created.
+
+    The stub ``git`` fails every command, so the run stops at the fetch — after
+    the migration, which is what this pins.
+    """
+    legacy = tmp_path / ".flinttrade" / "src" / "FlintTrade"
+    _marker_only_clone(legacy)
+    (legacy / ".git").mkdir()
+    _plant_web_receipt(tmp_path, source=legacy)
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir(exist_ok=True)
+    stub_git = bin_dir / "git"
+    stub_git.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    stub_git.chmod(0o755)
+
+    result = subprocess.run(
+        [BASH, str(SH)],
+        cwd=_REPO_ROOT,
+        env={
+            "PATH": _fake_posix_bin(tmp_path),
+            "HOME": str(tmp_path),
+            "FLINTTRADE_YES": "1",
+        },
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    moved = tmp_path / ".flinttrade" / "web-src" / "FlintTrade"
+    assert result.returncode != 0, "the stub git must stop the run at the fetch"
+    assert "Could not fetch" in result.stderr, result.stdout + result.stderr
+    assert not legacy.exists(), "the web checkout was left inside the desktop shell's source root"
+    assert (moved / "flint.toml").exists(), "the migrated checkout is missing from the web source root"
+
+
+# ---------------------------------------------------------------------------
+# --ref accepts a branch, a tag AND a raw commit SHA
+#
+# The flag is documented as "Branch, tag or commit", and the archive fallback
+# signs off with "re-run with --ref <sha> to reproduce this exact install".
+# `git clone --branch` resolves its argument against the remote's branches and
+# tags only, so on a fresh machine the advertised commit form failed outright —
+# and the reproducibility advice pointed at a command that could not work.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+@pytest.mark.parametrize("script", [SH, PS1], ids=["posix", "windows"])
+def test_web_installers_never_select_a_ref_with_clone_branch(script: Path) -> None:
+    """`git clone --branch` cannot select a commit, so no installer may use it."""
+    source = script.read_text(encoding="utf-8")
+    executable = "\n".join(
+        line for line in source.splitlines() if not line.lstrip().startswith("#")
+    )
+
+    assert "clone --branch" not in executable, (
+        f"{script.name} selects a ref with 'git clone --branch', which rejects a commit SHA"
+    )
+    assert "--branch" not in executable, f"{script.name} still resolves a ref against branches/tags"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("script", [SH, PS1], ids=["posix", "windows"])
+def test_web_installers_fetch_the_exact_revision_into_a_fresh_checkout(script: Path) -> None:
+    """A fresh install must init + fetch <ref> + check out FETCH_HEAD.
+
+    That sequence takes a branch, a tag and a raw commit alike, so a fresh
+    install and a refresh agree on which --ref forms exist.
+    """
+    source = script.read_text(encoding="utf-8")
+
+    for fragment in ("init --quiet", "remote add origin", "fetch --depth 1 origin", "FETCH_HEAD"):
+        assert fragment in source, f"{script.name} is missing the '{fragment}' step"
+    assert "checkout --detach --force FETCH_HEAD" in source, (
+        f"{script.name} never checks out the fetched revision"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("script", [SH, PS1], ids=["posix", "windows"])
+def test_web_installers_still_advertise_a_reproducible_commit(script: Path) -> None:
+    """The archive fallback's '--ref <sha>' advice must stay followable with Git."""
+    source = script.read_text(encoding="utf-8")
+
+    assert "to reproduce this exact install" in source
+    assert "Branch, tag or commit" in source
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(GIT is None, reason=NO_GIT_REASON)
+def test_git_clone_branch_rejects_a_commit_but_fetch_checkout_accepts_it(tmp_path: Path) -> None:
+    """Prove the premise against real Git rather than trusting the manual page.
+
+    Guards the fix from being 'simplified' back to a clone: the two commands are
+    run against one local repository, and only the installer's sequence resolves
+    a raw commit SHA.
+    """
+    origin = tmp_path / "origin"
+    origin.mkdir()
+
+    def git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([GIT, *args], cwd=str(cwd), text=True, capture_output=True)
+
+    git("init", "-q", "-b", "main", ".", cwd=origin)
+    git("config", "user.email", "tests@flinttrade.invalid", cwd=origin)
+    git("config", "user.name", "FlintTrade tests", cwd=origin)
+    (origin / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    git("add", "-A", cwd=origin)
+    git("commit", "-qm", "first", cwd=origin)
+    sha = git("rev-parse", "HEAD", cwd=origin).stdout.strip()
+    (origin / "pyproject.toml").write_text("[project]\nname = 'later'\n", encoding="utf-8")
+    git("commit", "-qam", "second", cwd=origin)
+
+    cloned = tmp_path / "cloned"
+    clone = git("clone", "--depth", "1", "--branch", sha, str(origin), str(cloned), cwd=tmp_path)
+    assert clone.returncode != 0, "git clone --branch unexpectedly accepted a raw commit SHA"
+
+    fetched = tmp_path / "fetched"
+    fetched.mkdir()
+    assert git("init", "--quiet", cwd=fetched).returncode == 0
+    assert git("remote", "add", "origin", str(origin), cwd=fetched).returncode == 0
+    assert git("fetch", "--depth", "1", "origin", sha, cwd=fetched).returncode == 0
+    assert git("checkout", "--detach", "--force", "FETCH_HEAD", cwd=fetched).returncode == 0
+    assert git("rev-parse", "HEAD", cwd=fetched).stdout.strip() == sha
+    assert (fetched / "pyproject.toml").read_text(encoding="utf-8") == "[project]\n"

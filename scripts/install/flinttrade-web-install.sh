@@ -26,11 +26,27 @@ MANAGED_ROOT="$HOME/.flinttrade"
 TOOLS_ROOT="$MANAGED_ROOT/tools"
 # The Electron desktop shell resolves exactly these two paths
 # (packages/apps/desktop/electron/paths.ts) and guards every mutation of the
-# active source with an operation lease directory created by its bootstrap
-# (packages/apps/desktop/electron/bootstrap.ts).
+# active source with an operation-lease DIRECTORY created by its bootstrap
+# (packages/apps/desktop/electron/bootstrap.ts, acquireOperationLease in
+# bootstrap-io.ts).
+#
+# That lease is deliberately NOT a mutual-exclusion primitive an outside process
+# can hold: on acquisition the desktop treats any lease it finds as recoverable
+# stale evidence, waits only for the process records INSIDE it, then quarantines
+# and deletes it. A lease carrying nothing but an owner.json is therefore stolen
+# immediately, and the only records the desktop respects are POSIX
+# process-group / Windows supervisor files bound to a containment token minted
+# by the Electron singleton. A shell installer piped through `curl | bash` is
+# not even a process-group leader, so it cannot write one honestly.
+#
+# So this installer never shares the desktop's active source tree. It keeps its
+# own checkout under $WEB_SOURCE_ROOT and refuses a --src that would aim it at
+# the desktop's, which is what makes both installers safe in either order.
 DESKTOP_SOURCE_ROOT="$MANAGED_ROOT/src"
 DESKTOP_ACTIVE_SOURCE="$DESKTOP_SOURCE_ROOT/FlintTrade"
 DESKTOP_OPERATION_LEASE="$DESKTOP_SOURCE_ROOT/.flinttrade-bootstrap-operation.lock"
+WEB_SOURCE_ROOT="$MANAGED_ROOT/web-src"
+WEB_ACTIVE_SOURCE="$WEB_SOURCE_ROOT/FlintTrade"
 # FLINTTRADE_SRC_DIR belongs to flinttrade-install.sh, where it names the
 # contributor source-build checkout (default ~/.flinttrade/source-build/
 # FlintTrade). This installer fetches, hard-resets and can replace whatever
@@ -44,15 +60,28 @@ elif [ -n "${FLINTTRADE_SRC_DIR:-}" ]; then
   SRC_DIR="$FLINTTRADE_SRC_DIR"
   SRC_DIR_SOURCE="FLINTTRADE_SRC_DIR"
 else
-  SRC_DIR="$DESKTOP_ACTIVE_SOURCE"
+  SRC_DIR="$WEB_ACTIVE_SOURCE"
 fi
+# The Electron desktop installer owns ~/.local/bin/flinttrade (see
+# preflight_linux_integrations in flinttrade-install.sh, which refuses to
+# replace that file unless its own shell receipt proves the current contents).
+# Squatting it made a web install silently repoint the desktop entry and break
+# every later desktop update, so the web launcher has its own name and the
+# desktop's is never touched.
 SHIM_DIR="$HOME/.local/bin"
-SHIM_PATH="$SHIM_DIR/flinttrade"
+SHIM_PATH="$SHIM_DIR/flinttrade-web"
+# Where earlier revisions of this installer put the launcher. Kept only so a
+# re-run can retire a shim its own receipt still proves it wrote.
+LEGACY_SHIM_PATH="$SHIM_DIR/flinttrade"
 # Owner-private receipt for everything this installer writes outside the
 # managed root. The uninstaller may only delete what an installer proved it
 # created, exactly as flinttrade-install.sh proves the Electron shell.
 WEB_RECEIPT_DIR="$HOME/.local/state/flinttrade-web"
 WEB_RECEIPT_PATH="$WEB_RECEIPT_DIR/web-install.receipt"
+# The Electron desktop installer's own receipt (flinttrade-install.sh). It is
+# read here only as evidence that the desktop shell is installed on this
+# machine; this installer never writes, moves or removes it.
+DESKTOP_SHELL_RECEIPT_PATH="$HOME/.local/state/flinttrade/shell-install.receipt"
 MANIFEST_RELATIVE="packages/apps/desktop/resources/bootstrap/tool-manifest.json"
 BOOTSTRAP_RELATIVE="packages/apps/desktop/resources/bootstrap/flinttrade-bootstrap.sh"
 ALLOWED_HOSTS="codeload.github.com github.com api.github.com nodejs.org registry.npmjs.org"
@@ -78,6 +107,17 @@ REUSE_UV=""
 REUSE_NODE=""
 REUSE_COREPACK_JS=""
 TMP_DIRS=("")
+# Set when repository markers — which every contributor clone carries — are the
+# only identity proof for $SRC_DIR. They authorise an in-place 'git fetch +
+# reset' and never the recursive replacement a git-less refresh performs.
+SOURCE_UPDATE_ONLY=0
+# Set to the destination when this run moved a legacy web checkout out of the
+# desktop shell's source root; the receipt still names the old path until it is
+# rewritten at the end of the run.
+MIGRATED_WEB_SOURCE=""
+# Why the web-install receipt storage may not be trusted, set by
+# web_receipt_storage_trusted.
+WEB_RECEIPT_STORAGE_PROBLEM=""
 
 say()  { printf '\033[1;36m[flinttrade]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[flinttrade]\033[0m %s\n' "$*" >&2; }
@@ -90,13 +130,23 @@ usage() {
 FlintTrade one-line web-app installer (macOS + Linux)
 
 Provisions a verified uv + Node toolchain, builds FlintTrade from a managed
-source checkout, and installs a 'flinttrade' launcher. No prior tooling needed.
+source checkout, and installs a 'flinttrade-web' launcher. No prior tooling
+needed. The FlintTrade Desktop shell is a separate install with its own
+launcher, source checkout and uninstall receipt; neither one touches the
+other's files, so the two can be installed in either order.
 
 Flags:
   --ref <git-ref>   Branch, tag or commit to install (default: main)
-  --src <dir>       Managed WEB source checkout (default: ~/.flinttrade/src/FlintTrade).
-                    This is not the contributor source-build checkout that
-                    flinttrade-install.sh manages at ~/.flinttrade/source-build/FlintTrade.
+  --src <dir>       Managed WEB source checkout (default: ~/.flinttrade/web-src/FlintTrade).
+                    This is neither the contributor source-build checkout that
+                    flinttrade-install.sh manages at ~/.flinttrade/source-build/FlintTrade
+                    nor the desktop shell's active source at
+                    ~/.flinttrade/src/FlintTrade, which is refused outright.
+                    An existing directory is REPLACED only when this installer's
+                    own receipt names it. A clean FlintTrade Git checkout it
+                    cannot claim is updated in place instead (git fetch + reset);
+                    anything else is refused, so a typo cannot destroy unrelated
+                    source.
   --yes             Answer every confirmation with yes
   --no-launch       Do not offer to start FlintTrade after installing
   --dry-run         Report the plan without downloading, building or installing
@@ -321,22 +371,102 @@ canonical_web_path() {
   printf '%s/%s' "${parent%/}" "$(basename "$target")"
 }
 
+# Canonicalise a path whose parents need not exist yet, the way
+# canonical_workspace_path in scripts/reset-flinttrade-state.sh does before
+# anything destructive touches the result: 'cd -P' resolves every symbolic link
+# and '.'/'..' in the deepest part that does exist, and the components below it
+# — which cannot be symbolic links, because they do not exist — are then
+# normalised lexically. Never fails: an unresolvable path canonicalises to its
+# own normalised spelling so the comparisons below still have two values.
+canonical_overlap_path() {
+  local target="$1" head="" tail="" rest component resolved
+  case "$target" in
+    /*) ;;
+    *) target="$(pwd -P)/$target" ;;
+  esac
+  head="$target"
+  while [ ! -d "$head" ] && [ "$head" != "/" ] && [ -n "$head" ]; do
+    tail="$(basename "$head")${tail:+/$tail}"
+    head="$(dirname "$head")"
+  done
+  resolved="$(cd -P "$head" 2>/dev/null && pwd -P)" || resolved=""
+  [ -n "$resolved" ] || resolved="$head"
+  rest="$tail"
+  while [ -n "$rest" ]; do
+    component="${rest%%/*}"
+    if [ "$component" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
+    case "$component" in
+      ""|".") ;;
+      "..") resolved="$(dirname "$resolved")" ;;
+      *) resolved="${resolved%/}/$component" ;;
+    esac
+  done
+  case "$resolved" in
+    /) printf '/' ;;
+    *) printf '%s' "${resolved%/}" ;;
+  esac
+}
+
+private_mode() {
+  /usr/bin/stat -c '%a' "$1" 2>/dev/null || /usr/bin/stat -f '%Lp' "$1" 2>/dev/null
+}
+
 receipt_safe_value() {
   case "$1" in
     *$'\n'*|*$'\r'*) die "Web-install receipt values must be single-line paths." ;;
   esac
 }
 
-ensure_web_receipt_storage() {
-  local current="${HOME%/}" component candidate name
+# Every component of the receipt directory must be an owner-local, non-symlink
+# directory. Both the writer below and every trusted READ of the receipt go
+# through this one check, so the installer can never accept a receipt it would
+# have refused to write.
+web_receipt_storage_trusted() {
+  local current="${HOME%/}" component
+  WEB_RECEIPT_STORAGE_PROBLEM=""
   for component in .local state flinttrade-web; do
     current="$current/$component"
-    [ ! -L "$current" ] || die "Refusing web-install receipt storage through a symbolic-link path component: $current"
-    if [ -e "$current" ]; then
-      [ -d "$current" ] && [ -O "$current" ] \
-        || die "Refusing web-install receipt storage through a non-owner-local path component: $current"
+    if [ -L "$current" ]; then
+      WEB_RECEIPT_STORAGE_PROBLEM="a symbolic-link path component: $current"
+      return 1
+    fi
+    if [ -e "$current" ] && { [ ! -d "$current" ] || [ ! -O "$current" ]; }; then
+      WEB_RECEIPT_STORAGE_PROBLEM="a non-owner-local path component: $current"
+      return 1
     fi
   done
+  return 0
+}
+
+# One field from the web-install receipt, and only when the receipt proves
+# itself exactly as flinttrade-uninstall.sh's read_web_receipt requires: an
+# owner-local 0700 directory reached through owner-local non-symlink
+# components, an owner-local 0600 ordinary file, and the v1 format line. The
+# receipt authorises destructive replacement, so a second, weaker reader would
+# simply be the way round the strict one.
+web_receipt_field() {
+  local want="$1" line index=0 value=""
+  web_receipt_storage_trusted || return 1
+  [ -d "$WEB_RECEIPT_DIR" ] && [ ! -L "$WEB_RECEIPT_DIR" ] && [ -O "$WEB_RECEIPT_DIR" ] || return 1
+  [ "$(private_mode "$WEB_RECEIPT_DIR")" = "700" ] || return 1
+  [ -f "$WEB_RECEIPT_PATH" ] && [ ! -L "$WEB_RECEIPT_PATH" ] && [ -O "$WEB_RECEIPT_PATH" ] || return 1
+  [ "$(private_mode "$WEB_RECEIPT_PATH")" = "600" ] || return 1
+  while IFS= read -r line; do
+    index=$((index + 1))
+    if [ "$index" = "1" ]; then
+      [ "$line" = "format=flinttrade-web-install-v1" ] || return 1
+      continue
+    fi
+    case "$line" in "$want="*) value="${line#"$want="}" ;; esac
+  done < "$WEB_RECEIPT_PATH"
+  [ -n "$value" ] || return 1
+  printf '%s' "$value"
+}
+
+ensure_web_receipt_storage() {
+  local candidate name
+  web_receipt_storage_trusted \
+    || die "Refusing web-install receipt storage through $WEB_RECEIPT_STORAGE_PROBLEM"
   mkdir -p "$WEB_RECEIPT_DIR" || die "Could not create the private web-install receipt directory."
   [ -d "$WEB_RECEIPT_DIR" ] && [ ! -L "$WEB_RECEIPT_DIR" ] && [ -O "$WEB_RECEIPT_DIR" ] \
     || die "The web-install receipt directory is not an owner-local ordinary directory."
@@ -402,19 +532,42 @@ warn_source_dir_provenance() {
   fi
 }
 
-assert_desktop_not_operating() {
-  case "${SRC_DIR%/}" in
-    "$DESKTOP_ACTIVE_SOURCE"|"$DESKTOP_ACTIVE_SOURCE"/*) ;;
-    *) return 0 ;;
+# The desktop's active source may never be this installer's source, at any
+# point in the run.
+#
+# Probing the lease once and then proceeding was not a guard at all: the fetch,
+# the hard reset and the multi-minute dependency build all run afterwards, and
+# FlintTrade Desktop launched at any moment in that window acquires its own
+# lease and mutates the very same checkout. Nor can this installer hold the
+# lease for the whole build — see the DESKTOP_OPERATION_LEASE note at the top of
+# this file for why a lease written by a shell script is one the desktop
+# quarantines rather than respects. The only safe answer is separate trees.
+# Both sides are canonicalised first. A lexical comparison of the raw --src
+# string was no guard at all: '/home/u/./.flinttrade/src/FlintTrade', a trailing
+# slash, '/home/u/x/../.flinttrade/src/FlintTrade' and any symlinked parent all
+# spell the desktop's own tree while matching none of the globs below, so the
+# installer went on to fetch, hard-reset and build inside it.
+assert_desktop_source_not_shared() {
+  local candidate desktop_root shared=0
+  candidate="$(canonical_overlap_path "$SRC_DIR")"
+  desktop_root="$(canonical_overlap_path "$DESKTOP_SOURCE_ROOT")"
+  if [ "$candidate" = "$desktop_root" ]; then shared=1; fi
+  # Inside the desktop tree, and — just as fatal — containing it: the git-less
+  # refresh path removes SRC_DIR recursively, which would take the desktop
+  # checkout with it.
+  case "$candidate" in
+    "$desktop_root"/*) shared=1 ;;
   esac
-  [ -e "$DESKTOP_OPERATION_LEASE" ] || [ -L "$DESKTOP_OPERATION_LEASE" ] || return 0
-  warn "FlintTrade Desktop holds its bootstrap source-operation lease at $DESKTOP_OPERATION_LEASE."
-  warn "That lease guards every mutation of $SRC_DIR, which the desktop shell treats as its active source."
-  if [ "$DRY_RUN" = "1" ]; then
-    warn "DRY-RUN: a real run would refuse to touch that checkout until the desktop shell has quit."
-    return 0
-  fi
-  die "Quit FlintTrade Desktop and re-run; this installer never takes the desktop's lease itself."
+  case "$desktop_root" in
+    "$candidate"/*) shared=1 ;;
+  esac
+  [ "$shared" = "1" ] || return 0
+  warn "$SRC_DIR overlaps the FlintTrade Desktop shell's active source tree at $DESKTOP_ACTIVE_SOURCE."
+  warn "The desktop guards every mutation of that tree with the bootstrap operation lease at"
+  warn "$DESKTOP_OPERATION_LEASE, and only its own singleton can hold one: a lease written by this"
+  warn "installer would be treated as stale evidence and deleted, so a desktop launched during the"
+  warn "fetch or the multi-minute build would corrupt the checkout underneath it."
+  die "Choose a source checkout outside $DESKTOP_SOURCE_ROOT (the default is $WEB_ACTIVE_SOURCE)."
 }
 
 # ---------------------------------------------------------------------------
@@ -599,13 +752,196 @@ dir_is_empty() {
   return 0
 }
 
+file_contains() {
+  local file="$1" needle="$2"
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  grep -Fq "$needle" "$file" 2>/dev/null
+}
+
+# The installer's own receipt is the ONLY proof that this installer created a
+# directory: it was written by a previous run and names the exact directory that
+# run managed. It is read through the strict web_receipt_field validation, so an
+# unprivate or foreign-owned receipt can never authorise a deletion.
+web_receipt_names_source() {
+  local target="${1%/}" recorded
+  recorded="$(web_receipt_field source)" || return 1
+  [ "$target" = "${recorded%/}" ] && return 0
+  [ "$(canonical_overlap_path "$target")" = "$(canonical_overlap_path "$recorded")" ]
+}
+
+# Repository identity, not project shape and NOT ownership. flint.toml is this
+# repository's own project manifest and names the repository it belongs to; the
+# workspace member sets name FlintTrade's own packages. Revisions that predate
+# flint.toml are still recognised through the second pair.
+#
+# All of those files are checked into the repository, so every contributor clone
+# on earth satisfies this — including one holding a week of uncommitted work.
+# That is why the markers authorise only the in-place update in
+# assert_source_dir_safe and never a recursive replacement.
+flinttrade_source_markers_present() {
+  local target="${1%/}"
+  if file_contains "$target/flint.toml" "$REPO_SLUG"; then return 0; fi
+  if file_contains "$target/pyproject.toml" "flinttrade-core" \
+      && file_contains "$target/pnpm-workspace.yaml" "packages/apps/terminal"; then
+    return 0
+  fi
+  return 1
+}
+
+# A git-less refresh runs 'rm -rf "$SRC_DIR"' before publishing the downloaded
+# checkout, so this guard decides whether unrelated source is destroyed. Two
+# separate questions decide it, and conflating them is what put a contributor's
+# working clone at risk:
+#
+#   * is this directory FlintTrade's code?  Repository markers answer that, and
+#     every clone of this repository carries them;
+#   * did THIS installer create this directory?  Only its own receipt answers
+#     that, and only that answer authorises a recursive replacement.
+#
+# So a receipt-proved directory may be replaced; a merely marker-proved one may
+# only be updated in place with 'git fetch' + 'git reset --hard', and not even
+# that while it holds uncommitted work. An empty or absent directory needs no
+# proof — there is nothing there to destroy — and an unproven one is refused
+# rather than emptied.
 assert_source_dir_safe() {
+  local dirty
   if [ ! -e "$SRC_DIR" ]; then return 0; fi
   if [ -L "$SRC_DIR" ]; then die "Refusing a symbolic-link managed source path: $SRC_DIR"; fi
   if [ ! -d "$SRC_DIR" ]; then die "Refusing a non-directory managed source path: $SRC_DIR"; fi
   if dir_is_empty "$SRC_DIR"; then return 0; fi
-  if [ -f "$SRC_DIR/package.json" ] && [ -f "$SRC_DIR/pyproject.toml" ]; then return 0; fi
-  die "Refusing to overwrite $SRC_DIR because it is not an empty directory or a FlintTrade checkout."
+  if web_receipt_names_source "$SRC_DIR"; then return 0; fi
+  # A tree this run has just moved out of the desktop source root was proved by
+  # that same receipt a moment ago; the receipt keeps naming the old path until
+  # it is rewritten at the end of the run.
+  if [ -n "$MIGRATED_WEB_SOURCE" ] && [ "${SRC_DIR%/}" = "${MIGRATED_WEB_SOURCE%/}" ]; then return 0; fi
+  if flinttrade_source_markers_present "$SRC_DIR"; then
+    if ! need git; then
+      warn "Refusing to replace $SRC_DIR — its FlintTrade markers prove the CODE is this"
+      warn "repository's, not that this installer created the directory, and only a web-install"
+      warn "receipt naming this exact path proves that."
+      die "git is not installed here, so this checkout could only be replaced wholesale. Install git so it can be updated in place, or pass --src (or set FLINTTRADE_WEB_SRC_DIR) to a directory this installer manages."
+    fi
+    if [ ! -d "$SRC_DIR/.git" ]; then
+      warn "Refusing to replace $SRC_DIR — its FlintTrade markers prove the CODE is this"
+      warn "repository's, not that this installer created the directory, and only a web-install"
+      warn "receipt naming this exact path proves that."
+      die "It is not a Git checkout either, so it could only be replaced wholesale. Remove it yourself if you really meant that path, or pass --src (or set FLINTTRADE_WEB_SRC_DIR) to a directory this installer manages."
+    fi
+    if ! dirty="$(git -C "$SRC_DIR" status --porcelain 2>/dev/null)"; then
+      warn "Refusing to update $SRC_DIR — 'git status' could not report whether it holds"
+      warn "uncommitted work, and this installer runs 'git reset --hard' on it."
+      die "Check that checkout by hand, or pass --src (or set FLINTTRADE_WEB_SRC_DIR) to a directory this installer manages."
+    fi
+    if [ -n "$dirty" ]; then
+      warn "Refusing to update $SRC_DIR — it is a FlintTrade checkout with uncommitted changes,"
+      warn "and no web-install receipt names it, so this installer cannot claim it created it."
+      warn "The update runs 'git fetch' + 'git reset --hard', which would discard that work."
+      die "Commit, stash or remove those changes, or pass --src (or set FLINTTRADE_WEB_SRC_DIR) to a directory this installer manages."
+    fi
+    SOURCE_UPDATE_ONLY=1
+    say "No web-install receipt names $SRC_DIR, so it will be updated in place (git fetch + reset)"
+    say "rather than replaced; its FlintTrade markers prove the code, not this installer's ownership."
+    return 0
+  fi
+  warn "Refusing to replace $SRC_DIR — nothing there proves it is a FlintTrade checkout."
+  warn "This installer deletes and republishes the directory it is given, so it replaces only a"
+  warn "directory a web-install receipt of its own names at this exact path. A clean Git checkout"
+  warn "carrying FlintTrade's identity — a flint.toml naming $REPO_SLUG, or FlintTrade's own"
+  warn "workspace members in pyproject.toml and pnpm-workspace.yaml — is updated in place instead."
+  die "Remove $SRC_DIR yourself if you really meant that path, or pass --src (or set FLINTTRADE_WEB_SRC_DIR) to the intended checkout."
+}
+
+# Evidence that the Electron desktop shell is installed on this machine. Its
+# own receipt is the authoritative one; the application bundle, the Linux
+# .desktop entry and the AppImage root are kept as fallbacks for a shell
+# installed before receipts existed. ~/.local/bin/flinttrade is deliberately NOT
+# in the list: that is exactly the path an earlier revision of THIS installer
+# wrote its launcher to, so it proves nothing either way.
+desktop_shell_appears_installed() {
+  local candidate
+  for candidate in \
+    "$DESKTOP_SHELL_RECEIPT_PATH" \
+    "/Applications/FlintTrade.app" \
+    "$HOME/Applications/FlintTrade.app" \
+    "$HOME/.local/opt/flinttrade" \
+    "$HOME/.local/share/applications/flinttrade.desktop"; do
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then return 0; fi
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Upgrade path for machines installed by the revision that shared the desktop's
+# source root.
+#
+# That revision defaulted the web source to $DESKTOP_ACTIVE_SOURCE, so a machine
+# it installed still has a web-built checkout sitting in the tree the Electron
+# desktop shell claims — the very overlap assert_desktop_source_not_shared now
+# refuses outright. Retiring only the legacy launcher healed half of that and
+# left the desktop and this installer fighting over one directory, which is the
+# same class of failure the separate-trees rule exists to prevent.
+#
+# So move that checkout to the new web source root when the receipt proves this
+# installer created it and nothing else can be claiming it, and otherwise leave
+# it exactly where it is and say what has to happen and why. A tree that cannot
+# be proved is never deleted, and never deleted at all: it is only ever moved.
+# ---------------------------------------------------------------------------
+migrate_legacy_web_source_checkout() {
+  local recorded canonical_recorded desktop_root parent
+  recorded="$(web_receipt_field source)" || return 0
+  canonical_recorded="$(canonical_overlap_path "$recorded")"
+  desktop_root="$(canonical_overlap_path "$DESKTOP_SOURCE_ROOT")"
+  case "$canonical_recorded" in
+    "$desktop_root"|"$desktop_root"/*) ;;
+    *) return 0 ;;
+  esac
+  [ "${canonical_recorded}" != "$(canonical_overlap_path "$SRC_DIR")" ] || return 0
+  [ -d "$recorded" ] && [ ! -L "$recorded" ] || return 0
+  warn "This machine was installed by an earlier revision that built the web app inside the"
+  warn "FlintTrade Desktop shell's own source root: $recorded"
+  warn "The desktop claims that tree and guards it with a lease no script can hold, so leaving a"
+  warn "web checkout there makes the two installs mutate one directory — and can leave the"
+  warn "desktop shell unable to bootstrap at all."
+  # Every refusal below is evaluated before the dry-run report, so --dry-run
+  # never promises a move this installer would not make.
+  if [ -e "$DESKTOP_OPERATION_LEASE" ] || [ -L "$DESKTOP_OPERATION_LEASE" ]; then
+    warn "Leaving $recorded — the desktop bootstrap operation lease at $DESKTOP_OPERATION_LEASE"
+    warn "says FlintTrade Desktop is working in that tree right now. Quit FlintTrade Desktop and"
+    warn "re-run this installer to complete the move."
+    return 0
+  fi
+  if desktop_shell_appears_installed; then
+    warn "Leaving $recorded — the FlintTrade Desktop shell is installed on this machine, so that"
+    warn "checkout may be the desktop's own rather than one this installer created, and this"
+    warn "installer never moves a tree it cannot prove it owns alone."
+    warn "Decide which checkout to keep, then either delete $recorded (the desktop rebuilds its"
+    warn "own on next launch) or move it to $SRC_DIR yourself, and re-run this installer."
+    return 0
+  fi
+  if [ -e "$SRC_DIR" ] || [ -L "$SRC_DIR" ]; then
+    if [ ! -d "$SRC_DIR" ] || [ -L "$SRC_DIR" ] || ! dir_is_empty "$SRC_DIR"; then
+      warn "Leaving $recorded — the new web source root $SRC_DIR already holds something, and this"
+      warn "installer will not move one checkout on top of another."
+      warn "Delete or rename whichever of the two you do not want, then re-run this installer."
+      return 0
+    fi
+  fi
+  if [ "$DRY_RUN" = "1" ]; then
+    say "DRY-RUN: would move $recorded to $SRC_DIR (this installer's receipt names it)."
+    return 0
+  fi
+  if [ -d "$SRC_DIR" ]; then rmdir "$SRC_DIR" 2>/dev/null || true; fi
+  parent="$(dirname "$SRC_DIR")"
+  mkdir -p "$parent" || die "Could not create $parent for the migrated web checkout."
+  if mv "$recorded" "$SRC_DIR" 2>/dev/null; then
+    MIGRATED_WEB_SOURCE="$SRC_DIR"
+    say "Moved the earlier web checkout out of the desktop's source root: $recorded -> $SRC_DIR"
+    rmdir "$(dirname "$recorded")" 2>/dev/null || true
+  else
+    warn "Could not move $recorded to $SRC_DIR."
+    warn "Move it yourself — or delete it, once you no longer need what it holds — so the desktop"
+    warn "shell owns $DESKTOP_SOURCE_ROOT alone, then re-run this installer."
+  fi
 }
 
 validate_source_origin() {
@@ -641,6 +977,18 @@ resolve_ref_commit_sha() {
   printf '%s' "$sha"
 }
 
+# --ref is documented as "branch, tag or commit", and the archive fallback ends
+# by telling the operator to re-run with --ref <sha>. 'git clone --branch' can
+# honour only the first two of those: its argument is resolved against the
+# remote's branches and tags, never against an arbitrary revision, so a commit
+# SHA failed on every fresh machine and made that advice unfollowable.
+#
+# 'git init' + 'git fetch <ref>' + 'git checkout FETCH_HEAD' accepts all three
+# forms through one code path — a branch name, a tag name and a raw commit SHA
+# are all valid fetch refspecs, and GitHub serves arbitrary revisions
+# (uploadpack.allowAnySHA1InWant). It is also exactly what the refresh branch
+# above already does, so a fresh install and an update now resolve --ref
+# identically instead of disagreeing about which forms exist.
 acquire_source_with_git() {
   local ref="$1"
   validate_source_origin
@@ -651,16 +999,32 @@ acquire_source_with_git() {
     git -C "$SRC_DIR" reset --hard FETCH_HEAD \
       || die "Could not reset the managed source checkout to '$ref'."
   else
-    say "Cloning FlintTrade ($ref) into $SRC_DIR..."
+    if [ "$SOURCE_UPDATE_ONLY" = "1" ]; then
+      die "Refusing to replace $SRC_DIR: only an in-place update is authorised for a checkout no web-install receipt names."
+    fi
+    say "Fetching FlintTrade ($ref) into $SRC_DIR..."
     mkdir -p "$(dirname "$SRC_DIR")"
     rm -rf "$SRC_DIR"
-    git clone --depth 1 --branch "$ref" "$REPO_URL" "$SRC_DIR" \
-      || die "Could not clone $REPO_URL at '$ref'."
+    mkdir -p "$SRC_DIR"
+    git -C "$SRC_DIR" init --quiet \
+      || die "Could not initialise a Git checkout at $SRC_DIR."
+    # Recorded so every later run's validate_source_origin has an origin to
+    # prove; a clone used to set this, and dropping it would silently retire
+    # the "is this really the official repository?" guard.
+    git -C "$SRC_DIR" remote add origin "$REPO_URL" \
+      || die "Could not record the FlintTrade origin in $SRC_DIR."
+    git -C "$SRC_DIR" fetch --depth 1 origin "$ref" \
+      || die "Could not fetch '$ref' from $REPO_URL."
+    git -C "$SRC_DIR" checkout --detach --force FETCH_HEAD \
+      || die "Could not check out '$ref' in $SRC_DIR."
   fi
 }
 
 acquire_source_with_archive() {
   local ref="$1" sha url staging archive extracted
+  if [ "$SOURCE_UPDATE_ONLY" = "1" ]; then
+    die "Refusing to replace $SRC_DIR: only an in-place update is authorised for a checkout no web-install receipt names."
+  fi
   say "git is not installed; resolving '$ref' to an exact commit so the archive install is reproducible..."
   sha="$(resolve_ref_commit_sha "$ref")"
   url="$ARCHIVE_BASE_URL/$sha"
@@ -688,11 +1052,14 @@ acquire_source_with_archive() {
 acquire_source() {
   local ref="${REF:-$DEFAULT_BRANCH}"
   warn_source_dir_provenance
-  assert_desktop_not_operating
+  assert_desktop_source_not_shared
+  # Before the identity guard, so the migrated checkout is judged where it now
+  # lives rather than refused for sitting in the desktop's tree.
+  migrate_legacy_web_source_checkout
   assert_source_dir_safe
   if [ "$DRY_RUN" = "1" ]; then
     if need git; then
-      say "DRY-RUN: would clone or fetch+reset $REPO_URL at '$ref' into $SRC_DIR"
+      say "DRY-RUN: would fetch $REPO_URL at '$ref' (branch, tag or commit) into $SRC_DIR and check it out"
     else
       say "DRY-RUN: would resolve '$ref' to a commit SHA via api.github.com, then download that commit's archive from $ARCHIVE_BASE_URL/<sha> and extract it into $SRC_DIR"
     fi
@@ -824,10 +1191,38 @@ corepack_js_for_provisioned_node() {
 # 8. Launcher shim
 # ---------------------------------------------------------------------------
 
+# Earlier revisions installed the web launcher as ~/.local/bin/flinttrade — the
+# exact file the Electron desktop installer owns. Retire that shim on a re-run,
+# but only when this installer's own receipt still proves both the path and the
+# byte-for-byte contents: if a desktop install has since republished its own
+# wrapper there, the digest no longer matches and the file is left untouched.
+retire_legacy_launcher_shim() {
+  local recorded="" recorded_hash="" actual
+  [ "$SHIM_PATH" != "$LEGACY_SHIM_PATH" ] || return 0
+  [ -f "$LEGACY_SHIM_PATH" ] && [ ! -L "$LEGACY_SHIM_PATH" ] || return 0
+  recorded="$(web_receipt_field shim)" || return 0
+  recorded_hash="$(web_receipt_field shim_sha256)" || return 0
+  [ "$recorded" = "$LEGACY_SHIM_PATH" ] || return 0
+  [ "${#recorded_hash}" -eq 64 ] || return 0
+  actual="$(sha256_of "$LEGACY_SHIM_PATH" 2>/dev/null || true)"
+  if [ -z "$actual" ] || [ "$(lowercase "$actual")" != "$(lowercase "$recorded_hash")" ]; then
+    warn "Leaving $LEGACY_SHIM_PATH — it is no longer the launcher this installer recorded."
+    return 0
+  fi
+  if rm -f "$LEGACY_SHIM_PATH"; then
+    say "Retired the earlier web launcher at $LEGACY_SHIM_PATH (it is now $SHIM_PATH)."
+  else
+    warn "Could not remove the earlier web launcher at $LEGACY_SHIM_PATH; remove it by hand."
+  fi
+}
+
 install_launcher_shim() {
   local python="$1" staged
   mkdir -p "$SHIM_DIR" || die "Could not create $SHIM_DIR."
   if [ -L "$SHIM_PATH" ]; then die "Refusing to replace a symbolic-link launcher at $SHIM_PATH."; fi
+  if [ -e "$SHIM_PATH" ] && [ ! -f "$SHIM_PATH" ]; then
+    die "Refusing to replace a non-ordinary launcher path: $SHIM_PATH"
+  fi
   staged="$(mktemp "$SHIM_DIR/.flinttrade-shim.XXXXXX")" || die "Could not stage the launcher shim."
   TMP_DIRS+=("$staged")
   cat > "$staged" <<EOF
@@ -854,6 +1249,12 @@ main() {
   local pinned_uv pinned_node pinned_pnpm uv_url node_url bootstrap venv_python
   say "FlintTrade web-app installer — no prior tooling required."
   if [ "$DRY_RUN" = "1" ]; then say "Dry run: nothing will be downloaded, built or installed."; fi
+
+  # A source checkout that overlaps the desktop shell's is a configuration
+  # error, not a runtime condition, so it is refused before anything is probed,
+  # reported or downloaded — including under --dry-run, where reporting a plan
+  # that could never run safely would be a lie.
+  assert_desktop_source_not_shared
 
   TARGET="$(detect_target)"
   say "Detected bootstrap target: $TARGET"
@@ -945,6 +1346,7 @@ main() {
     die "The bootstrap completed without a managed interpreter at $venv_python."
   fi
   RESOLVED_PYTHON="$venv_python"
+  retire_legacy_launcher_shim
   install_launcher_shim "$RESOLVED_PYTHON"
   say "Installed the launcher at $SHIM_PATH."
   write_web_install_receipt
@@ -957,8 +1359,8 @@ report_paths() {
   say "----------------------------------------------------------------"
   say "Workspace and data : $(workspace_dir)"
   say "Verified tools     : $TOOLS_ROOT"
-  say "Managed source     : $SRC_DIR"
-  say "Launcher           : $SHIM_PATH  (also: flinttrade <subcommand>)"
+  say "Managed source     : $SRC_DIR  (the desktop shell keeps its own at $DESKTOP_ACTIVE_SOURCE)"
+  say "Launcher           : $SHIM_PATH  (also: flinttrade-web <subcommand>)"
   say "Install receipt    : $WEB_RECEIPT_PATH  (the uninstaller removes only what this proves)"
   say "Runner             : python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help|desktop-test|desktop-build|desktop-package|desktop-dev>"
   say "Open FlintTrade at : $BACKEND_URL"
@@ -969,11 +1371,11 @@ report_paths() {
 
 offer_to_start() {
   if [ "$NO_LAUNCH" = "1" ]; then
-    say "Not starting FlintTrade (--no-launch). Start it later with: flinttrade start"
+    say "Not starting FlintTrade (--no-launch). Start it later with: flinttrade-web start"
     return 0
   fi
   if ! confirm "Start FlintTrade now?"; then
-    say "Not started. Start it later with: flinttrade start"
+    say "Not started. Start it later with: flinttrade-web start"
     return 0
   fi
   say "Starting FlintTrade — open $BACKEND_URL in your browser. Press Ctrl-C to stop."

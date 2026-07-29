@@ -21,7 +21,7 @@ irm https://flinttrade.vercel.app/web-install.ps1 | iex
 
 It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
-checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
+checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
 launcher. Open http://127.0.0.1:5100 and complete Setup — no `.env` file is
 required.
 

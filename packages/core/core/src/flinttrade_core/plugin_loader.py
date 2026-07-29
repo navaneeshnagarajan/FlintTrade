@@ -4,7 +4,10 @@ Users drop ``*.py`` files into the ``plugins/`` directory of their platform
 workspace — ``~/.flinttrade/plugins/`` on Linux, ``~/Library/Application
 Support/flinttrade/plugins/`` on macOS, ``%APPDATA%/flinttrade/plugins/`` on
 Windows, resolved by :func:`flinttrade_core.workspace.workspace_dir` so the
-``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides are honoured.  Each
+``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` overrides are honoured.  A
+plugin directory left behind at the old cross-platform default
+(``~/.flinttrade/plugins``) is copied into the platform workspace once, so an
+upgrade never makes an operator's installed plugins vanish.  Each
 file must contain a class named ``Plugin`` that inherits from
 :class:`PluginInterface`.  The :class:`PluginLoader` discovers, loads,
 activates, deactivates, and hot-reloads those classes without modifying any
@@ -44,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from .event_bus import EventBus
-from .workspace import workspace_dir
+from .workspace import WorkspaceStateMigrationError, plugins_dir, workspace_dir
 
 logger = logging.getLogger("flinttrade.core.plugin_loader")
 
@@ -143,8 +146,9 @@ class PluginLoader:
 
     Args:
         plugin_dir: Directory to scan.  Defaults to ``plugins/`` inside the
-            platform workspace (:func:`flinttrade_core.workspace.workspace_dir`)
-            when omitted.
+            platform workspace (:func:`flinttrade_core.workspace.plugins_dir`)
+            when omitted, which also migrates a legacy ``~/.flinttrade/plugins``
+            directory once on macOS and Windows.
         context: :class:`PluginContext` passed to each plugin on activation.
 
     Example::
@@ -163,7 +167,17 @@ class PluginLoader:
         context: PluginContext | None = None,
     ) -> None:
         if plugin_dir is None:
-            plugin_dir = workspace_dir() / "plugins"
+            # plugins_dir() copies a legacy ~/.flinttrade/plugins tree into the
+            # platform workspace once. A migration that cannot complete must not
+            # take the whole loader — and therefore the backend — down with it:
+            # the operator's plugins are still safe in the legacy directory, and
+            # a loud log plus an empty scan is recoverable, while an exception
+            # raised from a constructor at import time is not.
+            try:
+                plugin_dir = plugins_dir()
+            except WorkspaceStateMigrationError:
+                logger.exception("PluginLoader: could not migrate the legacy plugin directory")
+                plugin_dir = workspace_dir() / "plugins"
         self._plugin_dir = plugin_dir
         self._context = context or PluginContext(
             event_bus=EventBus(),

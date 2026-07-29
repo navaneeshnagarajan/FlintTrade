@@ -48,9 +48,13 @@ $LegacySandboxDir = Join-Path $ManagedRoot "sandbox"
 $LegacyDittoVault = Join-Path $LegacyDataDir "ditto_credentials.db"
 # The one-line web installer records everything it writes outside the managed
 # root here (flinttrade-web-install.ps1). Without it the launcher shim and its
-# Start Menu shortcut were orphaned residue: the shim shares a directory with
-# $DefaultInstallDir, so with no Electron registry record every uninstall
-# reported an unproven same-name install directory and failed closed.
+# Start Menu shortcut were orphaned residue. The web launcher now lives in its
+# own $WebLauncherDir and its own Start Menu folder, precisely so it can never be
+# confused with — or block — the Electron shell at $DefaultInstallDir; earlier
+# revisions put it inside $DefaultInstallDir, so with no Electron registry record
+# every uninstall reported an unproven same-name install directory and failed
+# closed.
+$WebLauncherDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "Programs\FlintTradeWeb" } else { "" }
 $WebReceiptDir = if ($LocalAppDataRoot) { Join-Path $LocalAppDataRoot "flinttrade-web" } else { "" }
 $WebReceiptPath = if ($WebReceiptDir) { Join-Path $WebReceiptDir "web-install.receipt" } else { "" }
 $script:RemovedAny = $false
@@ -60,6 +64,7 @@ $script:PurgedDataAny = $false
 $script:DataRetainedAny = $false
 $script:LegacyShellRecord = $null
 $script:WebReceipt = $null
+$script:WebReceiptRetained = $false
 $script:WebRemovedAny = $false
 $script:WebShimProven = $false
 $script:ShellRemovedAny = $false
@@ -189,18 +194,35 @@ function Read-WebInstallReceipt {
         Warn "Leaving $WebReceiptPath because the receipt omits exact launcher identity."
         return $null
     }
-    # The receipt may only ever aim the remover at the two locations the web
-    # installer writes to; it is not a general deletion instruction.
-    $expectedShim = Resolve-AbsoluteFlintPath (Join-Path $DefaultInstallDir "flinttrade.cmd")
-    $expectedShortcut = Resolve-AbsoluteFlintPath (
-        Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade\FlintTrade.lnk")
-    if (-not (Resolve-AbsoluteFlintPath $shim).Equals($expectedShim, [StringComparison]::OrdinalIgnoreCase)) {
+    # The receipt may only ever aim the remover at a location the web installer
+    # writes to; it is not a general deletion instruction. Both the current pair
+    # and the pre-collision one are accepted: revisions before
+    # %LOCALAPPDATA%\Programs\FlintTradeWeb wrote into the Electron shell's own
+    # install directory and Start Menu folder, and those machines still deserve a
+    # clean uninstall. Identity is never assumed from the path — the launcher is
+    # removed only when its SHA-256 still matches the receipt, and the shortcut
+    # only when it still points at that launcher.
+    $expectedShims = @(
+        (Resolve-AbsoluteFlintPath (Join-Path $WebLauncherDir "flinttrade-web.cmd")),
+        (Resolve-AbsoluteFlintPath (Join-Path $DefaultInstallDir "flinttrade.cmd"))
+    )
+    $expectedShortcuts = @(
+        (Resolve-AbsoluteFlintPath (
+            Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade Web\FlintTrade Web.lnk")),
+        (Resolve-AbsoluteFlintPath (
+            Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade\FlintTrade.lnk"))
+    )
+    $resolvedShim = Resolve-AbsoluteFlintPath $shim
+    if (-not @($expectedShims | Where-Object { $_.Equals($resolvedShim, [StringComparison]::OrdinalIgnoreCase) })) {
         Warn "Leaving $WebReceiptPath because the recorded launcher is not the installer-owned location."
         return $null
     }
-    if ($shortcut -and -not (Resolve-AbsoluteFlintPath $shortcut).Equals($expectedShortcut, [StringComparison]::OrdinalIgnoreCase)) {
-        Warn "Leaving $WebReceiptPath because the recorded shortcut is not the installer-owned location."
-        return $null
+    if ($shortcut) {
+        $resolvedShortcut = Resolve-AbsoluteFlintPath $shortcut
+        if (-not @($expectedShortcuts | Where-Object { $_.Equals($resolvedShortcut, [StringComparison]::OrdinalIgnoreCase) })) {
+            Warn "Leaving $WebReceiptPath because the recorded shortcut is not the installer-owned location."
+            return $null
+        }
     }
     [pscustomobject]@{
         Shim = (Resolve-AbsoluteFlintPath $shim)
@@ -274,6 +296,43 @@ function Remove-ProvenWebInstall {
     }
     Remove-EmptyOwnedDirectory (Split-Path -Parent $receipt.Shim)
     if ($receipt.Shortcut) { Remove-EmptyOwnedDirectory (Split-Path -Parent $receipt.Shortcut) }
+    # An ordinary uninstall deliberately RETAINS the managed source and tools the
+    # receipt records - and for a custom -SrcDir outside the managed root that
+    # receipt is the only thing that names them. Deleting it here left a later
+    # -Purge with no proof and no path, so the custom checkout was omitted
+    # permanently. Keep the receipt for exactly as long as it still proves
+    # retained data.
+    if (Test-WebInstallDataStillPresent) {
+        $script:WebReceiptRetained = $true
+        Say "Keeping $WebReceiptPath - it is the only proof of the retained web-install data below,"
+        Say "so a later -Purge can still find and authorise it:"
+        foreach ($retained in @([string]$receipt.Source, [string]$receipt.Tools)) {
+            if ($retained) { Say "  $retained" }
+        }
+        return
+    }
+    Remove-IfExists $WebReceiptPath
+    Remove-EmptyOwnedDirectory $WebReceiptDir
+}
+
+# Whether anything the web-install receipt records as retained data is still on
+# disk. The launcher is not retained data - it is removed by the ordinary
+# uninstall - so only the managed source and tools count here.
+function Test-WebInstallDataStillPresent {
+    if (-not $script:WebReceipt) { return $false }
+    foreach ($candidate in @([string]$script:WebReceipt.Source, [string]$script:WebReceipt.Tools)) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $true }
+    }
+    return $false
+}
+
+# The retained receipt is retired once it no longer proves anything: a -Purge in
+# this same run has just removed the recorded source and tools, so the receipt is
+# removed exactly as an ordinary uninstall would have removed it.
+function Remove-RetainedWebReceipt {
+    if (-not $script:WebReceiptRetained) { return }
+    if ($DryRun) { return }
+    if (Test-WebInstallDataStillPresent) { return }
     Remove-IfExists $WebReceiptPath
     Remove-EmptyOwnedDirectory $WebReceiptDir
 }
@@ -441,9 +500,14 @@ function Remove-ProvenShortcuts($Record) {
     $shortcutDirectory = Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade"
     $shortcutPaths = @(
         (Join-Path $RoamingAppDataRoot "Microsoft\Windows\Start Menu\Programs\FlintTrade.lnk"),
-        (Join-Path $shortcutDirectory "FlintTrade.lnk"),
-        (Join-Path ([Environment]::GetFolderPath("Desktop")) "FlintTrade.lnk")
+        (Join-Path $shortcutDirectory "FlintTrade.lnk")
     )
+    # Guarded on its root like every other Join-Path here: the Desktop known
+    # folder resolves to an empty string on a profile that has none (a redirected
+    # or freshly provisioned one), and Join-Path then throws a raw binder error
+    # that aborted the whole uninstall part-way through.
+    $desktopRoot = [Environment]::GetFolderPath("Desktop")
+    if ($desktopRoot) { $shortcutPaths += (Join-Path $desktopRoot "FlintTrade.lnk") }
     foreach ($shortcutPath in $shortcutPaths) {
         if (-not (Test-Path -LiteralPath $shortcutPath)) { continue }
         $safe = $false
@@ -933,6 +997,10 @@ if ($Purge) {
     Say "broker-credential vault) and any legacy desktop storage."
     Say "To delete it too, re-run with -Purge and confirm explicitly."
 }
+
+# After the purge/keep decision above, so a confirmed -Purge that has just
+# removed the recorded source and tools retires the receipt it was kept for.
+Remove-RetainedWebReceipt
 
 if ($DryRun) {
     Say "Dry run complete; nothing was deleted."

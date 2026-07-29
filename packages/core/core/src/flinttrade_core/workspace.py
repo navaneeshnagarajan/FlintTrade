@@ -213,6 +213,50 @@ def bhavcopy_dir() -> Path:
     return target
 
 
+def plugins_dir() -> Path:
+    """Resolve the user plugin directory and copy the legacy one once.
+
+    The default workspace moved off ``~/.flinttrade`` on macOS and Windows, so
+    plugins an operator had already dropped into ``~/.flinttrade/plugins``
+    stopped being discovered on the next upgrade — silently, because a missing
+    plugin directory is not an error. They are therefore migrated exactly like
+    the shared DuckDB, the audit chain and the Practice database before them.
+
+    The copy is skipped when ``FLINTTRADE_HOME`` or ``FLINTTRADE_WORKSPACE_DIR``
+    is set (an explicitly chosen workspace is never seeded from someone else's
+    plugins) and when the platform workspace already holds plugins
+    (target-exists-wins). The legacy directory is copied, never moved, so a
+    downgrade still finds it.
+
+    Returns:
+        The platform workspace's ``plugins`` directory. It is not created here:
+        :class:`~flinttrade_core.plugin_loader.PluginLoader` treats a missing
+        directory as "no plugins", which is the correct fresh-install answer.
+
+    Raises:
+        WorkspaceStateMigrationError: When a legacy plugin directory exists but
+            could not be preserved.
+    """
+    target = workspace_dir() / "plugins"
+    if not os.environ.get("FLINTTRADE_HOME") and not os.environ.get("FLINTTRADE_WORKSPACE_DIR"):
+        _copy_legacy_directory_once(
+            _legacy_plugins_dir(),
+            target,
+            lock_name=".plugins-directory-migration.lock",
+            label="user plugins",
+            # ``plugins`` sits directly under the workspace root, so the helper's
+            # default lock location (``target.parent.parent``) would drop a lock
+            # file OUTSIDE the workspace — in ``%APPDATA%`` or ``~/Library``.
+            lock_dir=target.parent,
+        )
+    return target
+
+
+def _legacy_plugins_dir() -> Path:
+    """Return the pre-platform-workspace user plugin directory."""
+    return Path.home() / ".flinttrade" / "plugins"
+
+
 def _legacy_fast_data_dir() -> Path:
     return Path.home() / ".flinttrade" / "data"
 
@@ -322,8 +366,23 @@ def _copy_legacy_directory_once(
     excluded_names: frozenset[str] = frozenset(),
     source_lock_name: str | None = None,
     conflict_is_error: bool = False,
+    lock_dir: Path | None = None,
 ) -> None:
-    """Copy one legacy directory under migration and optional source locks."""
+    """Copy one legacy directory under migration and optional source locks.
+
+    Args:
+        legacy: Source directory from the pre-platform-workspace layout.
+        target: Destination directory inside the platform workspace.
+        lock_name: File name of the migration lock.
+        label: Human-readable name used in log and error messages.
+        excluded_names: Entry names ignored when comparing and copying.
+        source_lock_name: Lock inside *legacy* held for the duration of the copy.
+        conflict_is_error: Raise instead of returning when both sides hold state.
+        lock_dir: Directory the migration lock lives in. Defaults to
+            ``target.parent.parent``, which is inside the workspace for the
+            nested ``data/*`` and ``archive/*`` targets; a target that sits
+            directly under the workspace root must pass its own.
+    """
     if not legacy.is_dir() or legacy.resolve() == target.resolve():
         return
     legacy_entries = _meaningful_directory_entries(legacy, excluded_names)
@@ -339,7 +398,7 @@ def _copy_legacy_directory_once(
     candidate = target.with_name(f".{target.name}.migrating")
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        migration_lock = FileLock(target.parent.parent / lock_name, timeout=10, mode=0o600)
+        migration_lock = FileLock((lock_dir or target.parent.parent) / lock_name, timeout=10, mode=0o600)
         with ExitStack() as stack:
             stack.enter_context(migration_lock.acquire())
             if source_lock_name is not None:

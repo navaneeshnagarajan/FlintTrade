@@ -24,8 +24,11 @@ irm https://flinttrade.vercel.app/web-install.ps1 | iex
 
 It downloads a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node and
 pnpm) into `~\.flinttrade\tools`, builds FlintTrade from a managed source
-checkout at `~\.flinttrade\src\FlintTrade`, and installs a launcher at
-`%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut.
+checkout at `~\.flinttrade\web-src\FlintTrade`, and installs a launcher at
+`%LOCALAPPDATA%\Programs\FlintTradeWeb\flinttrade-web.cmd` plus a **FlintTrade
+Web** Start Menu shortcut. The Electron desktop shell owns
+`%LOCALAPPDATA%\Programs\FlintTrade` and its own Start Menu entry, so the two
+installs never collide and can be run in either order.
 The install is per-user — **no admin rights needed**.
 
 Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo

@@ -279,6 +279,165 @@ class TestWorkspaceResolution:
         assert not (target_home / "data" / "flint.duckdb").exists()
 
 
+class TestLegacyPluginDirectoryMigration:
+    """The plugin directory follows the same copy-once contract as the databases.
+
+    The default workspace moved off ``~/.flinttrade`` on macOS and Windows.
+    Without a migration an upgrade silently stops discovering every plugin the
+    operator installed, because an absent plugin directory is not an error.
+    """
+
+    @pytest.mark.unit
+    def test_fresh_install_has_no_legacy_directory_to_copy(self, tmp_path, monkeypatch):
+        """With nothing at the legacy path the workspace plugin dir stays untouched."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: tmp_path / "legacy" / "plugins")
+
+        target = workspace.plugins_dir()
+
+        assert target == target_home / "plugins"
+        assert not target.exists()
+
+    @pytest.mark.unit
+    def test_legacy_plugins_are_copied_into_the_platform_workspace(self, tmp_path, monkeypatch):
+        """A legacy-only install keeps discovering its plugins after the upgrade."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "my_plugin.py").write_text("# operator plugin\n", encoding="utf-8")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+
+        target = workspace.plugins_dir()
+
+        assert (target / "my_plugin.py").read_text(encoding="utf-8") == "# operator plugin\n"
+        # Copy, never move: a downgrade must still find the original.
+        assert (legacy / "my_plugin.py").exists()
+
+    @pytest.mark.unit
+    def test_the_migration_lock_stays_inside_the_workspace(self, tmp_path, monkeypatch):
+        """``plugins`` sits at the workspace root, so the default lock location is wrong.
+
+        ``target.parent.parent`` would put the lock in ``%APPDATA%`` or
+        ``~/Library`` — outside anything FlintTrade owns or uninstalls.
+        """
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "my_plugin.py").write_text("# operator plugin\n", encoding="utf-8")
+        target_home = tmp_path / "platform" / "workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+
+        # filelock removes its lock file on release, so the path is captured at
+        # construction rather than looked for on disk afterwards.
+        locks: list[Path] = []
+        real_file_lock = workspace.FileLock
+
+        def recording_file_lock(path, *args, **kwargs):
+            locks.append(Path(path))
+            return real_file_lock(path, *args, **kwargs)
+
+        monkeypatch.setattr(workspace, "FileLock", recording_file_lock)
+
+        workspace.plugins_dir()
+
+        assert locks == [target_home / ".plugins-directory-migration.lock"]
+        assert not (target_home.parent / ".plugins-directory-migration.lock").exists()
+
+    @pytest.mark.unit
+    def test_existing_workspace_plugins_win_over_the_legacy_directory(self, tmp_path, monkeypatch):
+        """Target-exists-wins: a populated workspace directory is never overwritten."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "shared.py").write_text("# stale legacy copy\n", encoding="utf-8")
+        target_home = tmp_path / "platform-workspace"
+        current = target_home / "plugins"
+        current.mkdir(parents=True)
+        (current / "shared.py").write_text("# current copy\n", encoding="utf-8")
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+
+        target = workspace.plugins_dir()
+
+        assert (target / "shared.py").read_text(encoding="utf-8") == "# current copy\n"
+        assert (legacy / "shared.py").read_text(encoding="utf-8") == "# stale legacy copy\n"
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("override", ["FLINTTRADE_HOME", "FLINTTRADE_WORKSPACE_DIR"])
+    def test_an_explicit_workspace_override_is_never_seeded(self, tmp_path, monkeypatch, override):
+        """A deliberately chosen workspace must not inherit someone else's plugins."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "my_plugin.py").write_text("# operator plugin\n", encoding="utf-8")
+        chosen = tmp_path / "chosen-workspace"
+        chosen.mkdir()
+        monkeypatch.setenv(override, str(chosen))
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+
+        target = workspace.plugins_dir()
+
+        assert target == chosen.resolve() / "plugins"
+        assert not target.exists()
+
+    @pytest.mark.unit
+    def test_the_loader_defaults_to_the_migrated_directory(self, tmp_path, monkeypatch):
+        """PluginLoader() with no argument must go through the migrating resolver."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import plugin_loader, workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "my_plugin.py").write_text("# operator plugin\n", encoding="utf-8")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+
+        loader = plugin_loader.PluginLoader()
+
+        assert loader.plugin_dir == target_home / "plugins"
+        assert (loader.plugin_dir / "my_plugin.py").exists()
+
+    @pytest.mark.unit
+    def test_a_failed_migration_never_takes_the_loader_down(self, tmp_path, monkeypatch):
+        """A copy that cannot complete is logged; the backend still starts."""
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core import plugin_loader, workspace
+
+        legacy = tmp_path / "legacy" / "plugins"
+        legacy.mkdir(parents=True)
+        (legacy / "my_plugin.py").write_text("# operator plugin\n", encoding="utf-8")
+        target_home = tmp_path / "platform-workspace"
+        monkeypatch.setattr(workspace, "_default_home", lambda: target_home)
+        monkeypatch.setattr(workspace, "_legacy_plugins_dir", lambda: legacy)
+        monkeypatch.setattr(
+            workspace.shutil,
+            "copytree",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        loader = plugin_loader.PluginLoader()
+
+        assert loader.plugin_dir == target_home / "plugins"
+        assert loader.discover() == []
+        assert (legacy / "my_plugin.py").exists()
+
+
 class TestWorkspaceInit:
     """Test workspace initialization and directory creation."""
 

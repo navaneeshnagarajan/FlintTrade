@@ -12,23 +12,35 @@
 #       expires: "2026-08-23"
 allowlist:
   # ---------------------------------------------------------------------------
-  # Both entries below are UNFIXABLE BY UPGRADE as of 2026-07-26, not deferred
-  # convenience. Everything that had a real patched version was fixed instead,
-  # via the pnpm overrides block in the root package.json (js-yaml 4.3.0,
-  # postcss 8.5.23, fast-uri 4.1.1, sharp 0.35.3, brace-expansion 2.1.2) and
-  # direct bumps of next (16.2.12) and react-router-dom (7.18.1).
+  # Both entries below survive only because the advisory metadata is broader
+  # than the fix that actually shipped — not deferred convenience. Everything
+  # that had a real patched version was fixed instead, via the pnpm overrides
+  # block in the root package.json (js-yaml 4.3.0, postcss 8.5.23,
+  # fast-uri 4.1.1, sharp 0.35.3, brace-expansion 2.1.3) and direct bumps of
+  # next (16.2.12) and react-router-dom (7.18.1).
   # ---------------------------------------------------------------------------
 
   - advisory: "GHSA-mh99-v99m-4gvg"
     package: "brace-expansion"
     reason: >-
-      The advisory declares patched >=5.0.8, but brace-expansion has never
-      published a 5.x — its latest release is 2.1.2, which the root overrides
-      already pin repo-wide. The range is unsatisfiable, so no upgrade can
-      clear it. Reachability is also low: the remaining paths are
-      build/publish tooling (sigstore, tuf-js, cacache under @flinttrade/desktop),
-      not runtime, and the DoS needs attacker-controlled brace patterns which
-      that tooling never takes from user input.
+      The code IS patched; only the advisory range is stale. brace-expansion
+      2.1.3 (dist-tag maintenance-v2, published 2026-07-28, five days after
+      5.0.8) carries the backported EXPANSION_MAX_LENGTH bound, verified
+      locally: the advisory PoC ('{a,b}'.repeat(1500)) OOM-crashes 1.1.16 and
+      2.1.2 under a 512 MB heap but returns a bounded result in ~0.35 s on
+      2.1.3. The root overrides now force every 1.x and 2.x copy onto 2.1.3,
+      so the tree holds only 2.1.3 and 5.0.8. pnpm audit still reports it
+      because GHSA-mh99-v99m-4gvg states one flat range ("<=5.0.7") that
+      matches 2.1.3 numerically; GitHub has not added the per-major patched
+      ranges for the backports published after the advisory (2.1.3, 3.0.5).
+      Moving these paths to 5.0.8 is NOT an option: 5.x replaced the callable
+      default export with a named `expand` export, while minimatch 3.x/5.x/9.x
+      call `require('brace-expansion')(pattern)`, so forcing 5.0.8 breaks them
+      at runtime. Reachability is low regardless — every path is build-time
+      tooling (electron-builder's packaging chain, and the linaria toolchain
+      under @glideapps/glide-data-grid), never shipped browser code, and the
+      brace patterns come from repo config rather than user input.
+      Drop this entry once the advisory lists 2.1.3 as patched.
     accepted_by: "navaneesh"
     expires: "2026-10-26"
 

@@ -42,17 +42,119 @@ check_command() {
 check_command docker "https://docs.docker.com/engine/install/"
 check_command curl "sudo apt-get install curl"
 
-# Check Docker Compose. v2.24+ is required: docker-compose.yml uses the
-# env_file long form (path/required) that Compose v1 cannot parse at all, so
-# the old v1 fallback would fail at config load for every command.
+# Minimum Docker Compose version. docker-compose.yml uses the env_file long
+# form (path/required), which only Compose v2.24.0 and newer understand:
+# v1 cannot parse it at all, and v2.0-v2.23 reject it at config load, so every
+# subsequent command would fail. Gate on the reported version here rather than
+# on the mere presence of a `docker compose` binary.
+COMPOSE_MIN_VERSION="2.24.0"
+
+# Compare a reported Compose version against COMPOSE_MIN_VERSION.
+#
+# Accepts the optional `v` prefix (`v2.24.1`) and ignores pre-release/build
+# metadata when the numeric core already clears the minimum (`2.30.3-desktop.1`).
+# A pre-release of the minimum itself (`2.24.0-rc.1`) sorts below the release it
+# precedes, so it is rejected.
+#
+# Args:
+#   $1: Version string as reported by `docker compose version`.
+#
+# Returns:
+#   0 if the version is at least COMPOSE_MIN_VERSION, 1 if it is older,
+#   2 if the string could not be parsed.
+compose_version_ok() {
+    local raw core pre
+    raw="${1#v}"
+    core="${raw%%[-+]*}"
+    pre="${raw#"$core"}"
+
+    local have_major have_minor have_patch want_major want_minor want_patch
+    IFS=. read -r have_major have_minor have_patch _ <<<"$core"
+    IFS=. read -r want_major want_minor want_patch _ <<<"$COMPOSE_MIN_VERSION"
+
+    have_major="${have_major:-}"
+    have_minor="${have_minor:-0}"
+    have_patch="${have_patch:-0}"
+
+    local part
+    for part in "$have_major" "$have_minor" "$have_patch"; do
+        case "$part" in
+            ''|*[!0-9]*) return 2 ;;
+        esac
+    done
+
+    local index have want
+    for index in 1 2 3; do
+        case "$index" in
+            1) have="$have_major"; want="$want_major" ;;
+            2) have="$have_minor"; want="$want_minor" ;;
+            3) have="$have_patch"; want="$want_patch" ;;
+        esac
+        # Force base 10 so a zero-padded component is not read as octal.
+        if [ "$((10#$have))" -gt "$((10#${want:-0}))" ]; then
+            return 0
+        fi
+        if [ "$((10#$have))" -lt "$((10#${want:-0}))" ]; then
+            return 1
+        fi
+    done
+
+    # Numeric cores are equal, so a pre-release tag means this build precedes
+    # the minimum release. Build metadata (`+build.7`) does not affect
+    # precedence, so it stays accepted.
+    case "$pre" in
+        -*) return 1 ;;
+    esac
+    return 0
+}
+
+# Pick whichever Compose front-end exists. The executable NAME says nothing about
+# the version: Docker publishes a standalone Compose v2 binary called
+# `docker-compose` (it reports "Docker Compose version v2.x.y") alongside the
+# `docker compose` plugin, and the abandoned Python v1 tool used that same name.
+# So both paths fall through to the single version gate below rather than one of
+# them being rejected on sight.
 if docker compose version >/dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
-    ok "docker compose (v2) found"
 elif command -v docker-compose >/dev/null 2>&1; then
-    die "Only legacy docker-compose (v1) was found. FlintTrade's compose file needs Compose v2.24+ — install the docker compose plugin from https://docs.docker.com/compose/install/"
+    COMPOSE_CMD="docker-compose"
 else
-    die "Docker Compose is not installed. Install from https://docs.docker.com/compose/install/"
+    die "Docker Compose is not installed. FlintTrade needs Compose v$COMPOSE_MIN_VERSION or newer. Install from https://docs.docker.com/compose/install/"
 fi
+
+# shellcheck disable=SC2086 # COMPOSE_CMD is two words for the plugin form.
+COMPOSE_VERSION_RAW="$($COMPOSE_CMD version --short 2>/dev/null || true)"
+if [ -z "$COMPOSE_VERSION_RAW" ]; then
+    # Builds without `--short`: pull the number out of the long form, e.g.
+    # "Docker Compose version v2.24.5" or "docker-compose version 1.29.2, build 8".
+    COMPOSE_VERSION_RAW="$($COMPOSE_CMD version 2>/dev/null \
+        | sed -n 's/.*[Vv]ersion[[:space:]]*v\{0,1\}\([0-9][0-9A-Za-z.+-]*\).*/\1/p' \
+        | head -n 1)"
+fi
+
+COMPOSE_MAJOR="${COMPOSE_VERSION_RAW#v}"
+COMPOSE_MAJOR="${COMPOSE_MAJOR%%.*}"
+
+COMPOSE_VERSION_STATUS=0
+compose_version_ok "$COMPOSE_VERSION_RAW" || COMPOSE_VERSION_STATUS=$?
+case "$COMPOSE_VERSION_STATUS" in
+    0)
+        ok "$COMPOSE_CMD v${COMPOSE_VERSION_RAW#v} found (minimum v$COMPOSE_MIN_VERSION)"
+        ;;
+    1)
+        case "$COMPOSE_MAJOR" in
+            0|1)
+                die "Only legacy Compose v${COMPOSE_VERSION_RAW#v} ($COMPOSE_CMD) was found. FlintTrade's compose file needs Compose v$COMPOSE_MIN_VERSION or newer — install the docker compose plugin from https://docs.docker.com/compose/install/"
+                ;;
+            *)
+                die "Docker Compose v${COMPOSE_VERSION_RAW#v} ($COMPOSE_CMD) is too old. FlintTrade's docker-compose.yml uses the env_file long form (path/required), which needs Compose v$COMPOSE_MIN_VERSION or newer. Upgrade it: https://docs.docker.com/compose/install/"
+                ;;
+        esac
+        ;;
+    *)
+        die "Could not determine the Docker Compose version (got '${COMPOSE_VERSION_RAW}'). FlintTrade needs Compose v$COMPOSE_MIN_VERSION or newer — check '$COMPOSE_CMD version' and upgrade from https://docs.docker.com/compose/install/"
+        ;;
+esac
 
 # Check Docker daemon is running
 if ! docker info >/dev/null 2>&1; then
@@ -131,6 +233,22 @@ log "Building and starting containers (this may take a few minutes)..."
 log "Using multi-stage build with uv for fast dependency installation..."
 
 cd "$INSTALL_DIR"
+
+# Load the compose file once before the long build so it fails in seconds rather
+# than after a multi-minute image build. This line is only reached once the
+# version gate above has passed, so the Compose version is NOT a possible cause
+# here — report the causes that actually remain, plus what Compose itself said.
+COMPOSE_CONFIG_ERROR=""
+if ! COMPOSE_CONFIG_ERROR="$($COMPOSE_CMD config -q 2>&1)"; then
+    err "docker-compose.yml failed to load. Compose reported:"
+    printf '%s\n' "$COMPOSE_CONFIG_ERROR" >&2
+    err ""
+    err "Likely causes:"
+    err "  - a malformed $INSTALL_DIR/.env (stray quote, missing '=', or a value spanning lines)"
+    err "  - an interpolated variable that is unset or empty (\${VAR} with no value)"
+    err "  - a compose field this build does not support, or an edited docker-compose.yml"
+    die "Fix the reported problem and re-run this installer."
+fi
 
 # Ensure start.sh is executable (git may strip permissions)
 chmod +x "$INSTALL_DIR/infra/docker/start.sh"
