@@ -120,4 +120,34 @@ describe("bootstrap tool manifest", () => {
       rmSync(scratch, { force: true, recursive: true });
     }
   });
+
+  it("records each tool's real in-archive layout, which differs between uv and Node", () => {
+    // A wrong `executable` path is invisible to every other gate: the download
+    // still matches its pinned SHA-256, and the failure only appears after
+    // extraction, on the user's machine. That is exactly how a Windows
+    // bootstrap shipped failing with "The verified uv archive did not contain
+    // its expected executable".
+    //
+    // Node nests on every platform (`node-v<ver>-<target>/...`). uv nests in
+    // its Unix tarballs but ships a FLAT Windows zip: uv.exe, uvw.exe and
+    // uvx.exe sit at the archive root. Verified against the published
+    // artefacts for the pinned versions.
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ToolManifest;
+
+    for (const [target, asset] of Object.entries(manifest.node.assets)) {
+      expect(asset.executable, `node/${target} must nest under the archive basename`).toMatch(
+        /^node-v[\d.]+-[a-z0-9-]+\//,
+      );
+    }
+
+    for (const [target, asset] of Object.entries(manifest.uv.assets)) {
+      if (target.startsWith("win32-")) {
+        expect(asset.executable, `uv/${target} zip is flat — no directory prefix`).toBe("uv.exe");
+      } else {
+        expect(asset.executable, `uv/${target} tarball nests under the archive basename`).toMatch(
+          /^uv-[a-z0-9_]+-[a-z0-9-]+\/uv$/,
+        );
+      }
+    }
+  });
 });

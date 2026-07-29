@@ -117,7 +117,11 @@ const manifest: BootstrapToolManifest = {
       },
       "win32-x64": {
         archive: "zip",
-        executable: "uv-x86_64-pc-windows-msvc/uv.exe",
+        // Flat on purpose: uv's Windows zip has uv.exe at the archive root,
+        // unlike its Unix tarballs (and unlike Node, which nests on every
+        // platform). This fixture previously mirrored the manifest's incorrect
+        // nested path, so it agreed with the bug instead of catching it.
+        executable: "uv.exe",
         sha256: sha256(uvBytes),
         url: "https://github.com/astral-sh/uv/releases/download/0.11.16/uv-x86_64-pc-windows-msvc.zip",
       },
