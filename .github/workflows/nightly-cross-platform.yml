@@ -51,7 +51,16 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     # Runaway guard on the Windows runner (bills 2× Linux).
-    timeout-minutes: 45
+    #
+    # Raised from 45 after the secure_file DACL and ollama_runtime
+    # FileNotFoundError fixes: roughly 450 tests that previously aborted in
+    # milliseconds now execute their real logic (process supervision, lock
+    # waits, filesystem probes), so the job legitimately does far more work
+    # than when it "finished" in 28 minutes with 501 failures. The run that
+    # hit the old limit was at 92% and still passing, not hung, and the
+    # inheritable-ACE change measures ~10% over the previous DACL install
+    # (60.7 ms vs 55.7 ms across 620 children) — nowhere near the gap.
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
