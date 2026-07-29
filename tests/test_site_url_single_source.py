@@ -225,3 +225,33 @@ def test_rewrite_target_list_covers_every_documented_surface(checker: ModuleType
         assert required in listed, f"{required} must stay in the scripted rewrite"
     for rel in checker.SITE_URL_FILES:
         assert (ROOT / rel).is_file(), f"{rel} is listed but missing"
+
+
+@pytest.mark.unit
+def test_self_referential_exemption_is_narrow(checker: ModuleType) -> None:
+    """The guard exempts only its own two files, and only from the host scan.
+
+    This checker's docstring shows what a stale URL looks like, and this test
+    file asserts on one, so both necessarily spell example foreign install
+    routes. Exempting them is correct — exempting anything else, or exempting
+    them from the "must not spell the canonical URL" rule, would blind the
+    guard to the exact drift it exists to catch.
+    """
+    assert checker.SELF_REFERENTIAL_FILES == frozenset(
+        {
+            "scripts/check-site-url-consistency.py",
+            "tests/test_site_url_single_source.py",
+        }
+    ), "widening this exemption weakens the guard — justify it here first"
+
+    # The exemption must not overlap the curated rewrite list: a listed file is
+    # rewritten by apply-site-url.py and must always name the canonical URL.
+    assert not (checker.SELF_REFERENTIAL_FILES & set(checker.SITE_URL_FILES))
+
+    # Neither exempt file may spell the canonical URL — that rule still applies.
+    site_url = checker.read_site_url(ROOT)
+    for rel in checker.SELF_REFERENTIAL_FILES:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert site_url not in text, (
+            f"{rel} is exempt from the host scan only; it must not hardcode the site URL"
+        )

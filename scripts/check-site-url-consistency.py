@@ -70,6 +70,17 @@ SITE_URL_FILES = [
 # flint.toml holds the canonical value itself, so it is never a "mention".
 SITE_URL_AUTHORITY = "flint.toml"
 
+# This guard and its test necessarily spell example stale URLs — a docstring
+# showing what a failure looks like, and fixtures proving the detector fires.
+# They are exempt from the foreign-host scan only; every other rule still
+# applies to them, so neither may quietly start naming the canonical URL.
+SELF_REFERENTIAL_FILES = frozenset(
+    {
+        "scripts/check-site-url-consistency.py",
+        "tests/test_site_url_single_source.py",
+    }
+)
+
 # Paths the public site serves as the one-command bootstrap contract. A URL with
 # one of these exact paths is a FlintTrade site URL whatever host precedes it,
 # which is how a stale domain is recognised without knowing what it used to be.
@@ -300,6 +311,8 @@ def collect_failures(root: Path = ROOT) -> list[str]:
                 f"{rel}:{line}: spells the site URL but is absent from SITE_URL_FILES "
                 "(add it, or the scripted rewrite will skip this file)"
             )
+        if rel in SELF_REFERENTIAL_FILES:
+            continue
         for line, url in foreign_site_urls(text, canonical_host):
             failures.append(f"{rel}:{line}: serves a canonical install route from {url} (expected {site_url})")
 
