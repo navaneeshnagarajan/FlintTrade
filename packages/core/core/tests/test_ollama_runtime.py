@@ -34,6 +34,13 @@ from flinttrade_core.ollama_runtime import (
 _PRODUCTION_LISTENER_OWNER = OllamaRuntime._listener_owned_by_process
 _PRODUCTION_PORT_DISCOVERER = OllamaRuntime._discover_owned_loopback_port
 
+_PRODUCTION_SYNC_LIFECYCLE_WAIT = ollama_runtime._SYNC_LIFECYCLE_WAIT_SECONDS
+"""The shipped lifecycle wait, captured before any test patches the module.
+
+Read at import time so a test that restores "the production value" restores the
+value production actually ships, not whichever ceiling happened to be nearby.
+"""
+
 _READINESS_CEILING_SECONDS = 30.0
 """Deadlock ceiling for a helper subprocess reaching its readiness signal.
 
@@ -54,18 +61,18 @@ exists to turn a genuine deadlock into a legible failure instead of a hung suite
 Tightening it *as a way to make an assertion pass* would reintroduce exactly the
 wager on runner load that this module removed.
 
-These handshakes are all signalled — an ``Event`` set by a thread already
-running, or a helper polling a marker file every 10ms — so once the signal
-happens they complete immediately. They need no allowance for interpreter
-startup, which is why they are bounded far more tightly than
-:data:`_READINESS_CEILING_SECONDS`.
+This bounds only *in-process* handshakes and the reaping of a helper that has
+already been told to exit — an ``Event`` set by a running thread, or a child
+polling a release marker every 10ms. Nothing here waits on an interpreter
+starting, so it needs no allowance for one.
 
-The split exists because CI bounds the total. ``test.yml`` runs pytest with
-``--timeout=60 --timeout-method=thread``, and the longest path here chains one
-readiness wait with three handoffs — lease contention, thread join, then the
-holder reap in ``finally``. A single shared 30s ceiling makes that worst case
-120s, so pytest-timeout fires first and destroys the legible AssertionError
-these constants exist to produce. 30 + 5 + 5 + 5 leaves a clear margin.
+Any wait that spans a process boundary uses :data:`_READINESS_CEILING_SECONDS`
+instead. That distinction is the point: a ceiling short enough to be crossed by
+runner load is not a deadlock guard, it is a flake. ``test.yml`` runs pytest with
+``--timeout=60``, so a genuine deadlock in a cross-process wait will be reported
+by pytest-timeout rather than by the AssertionError here — a worse diagnostic,
+accepted deliberately, because the alternative is failing runs that were only
+slow.
 """
 
 
@@ -1769,9 +1776,17 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
         # It timed out on the cross-process lease, not on some earlier in-process lock.
         assert contended_leases == [str(lock_path)]
 
-        # A patient mutation blocks on the same lease instead of giving up. Restoring the
-        # production wait keeps the release handshake below from being a race.
-        monkeypatch.setattr(ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", _HANDOFF_CEILING_SECONDS)
+        # A patient mutation blocks on the same lease instead of giving up. repair()
+        # starts its lifecycle deadline the moment the thread runs — before the
+        # contention event below — and that one deadline has to cover the whole
+        # handover: the holder being scheduled, noticing its release marker, dropping
+        # the lock, and repair reacquiring it across a process boundary. Anything
+        # shorter than the production wait makes the asserted error depend on runner
+        # load, which is the defect this test was rewritten to remove. So restore the
+        # real production value rather than a test ceiling.
+        monkeypatch.setattr(
+            ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", _PRODUCTION_SYNC_LIFECYCLE_WAIT
+        )
         lease_contended.clear()
         repair_errors: list[BaseException] = []
 
@@ -1784,12 +1799,12 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
         repair_thread = threading.Thread(target=repair)
         repair_thread.start()
 
-        assert lease_contended.wait(timeout=_HANDOFF_CEILING_SECONDS)
+        assert lease_contended.wait(timeout=_READINESS_CEILING_SECONDS)
         assert contended_leases[-1] == str(lock_path)
         assert repair_thread.is_alive()
 
         release_path.write_text("release", encoding="ascii")
-        repair_thread.join(timeout=_HANDOFF_CEILING_SECONDS)
+        repair_thread.join(timeout=_READINESS_CEILING_SECONDS)
 
         assert repair_thread.is_alive() is False
         assert len(repair_errors) == 1
