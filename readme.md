@@ -98,6 +98,37 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
+#### If the site is unreachable (repo-direct fallback)
+
+Use this whenever a `flinttrade.vercel.app` command fails: those URLs are only a
+redirect to the scripts in this repository, and a site outage or a deployment
+without an immutable source commit answers `503`, which `curl … | bash` would
+otherwise pipe into your shell as an error page. The commands below fetch the
+same two scripts straight from GitHub and depend on no deployment:
+
+```bash
+# macOS / Linux — install
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash
+```
+
+```powershell
+# Windows 10/11 — install
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex
+```
+
+Replace `flinttrade-web-install` with `flinttrade-uninstall` to remove
+FlintTrade the same way. The uninstaller is the script that takes `--purge` /
+`-Purge`; the installer does not (its flags are `--ref`, `--yes`, `--no-launch`
+and `--dry-run`). To read the script before running it — the right instinct for
+anything piped to a shell — clone the repository and run it from the checkout
+instead:
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+bash scripts/install/flinttrade-web-install.sh
+```
+
 ### Desktop app
 
 The desktop app is a small Electron wrapper around the same backend, not a
@@ -143,7 +174,10 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash
 irm https://flinttrade.vercel.app/uninstall.ps1 | iex
 ```
 
-The same `--purge` / `-Purge` flag applies. To build and verify the shell
+The same `--purge` / `-Purge` flag applies. If the site is unreachable, run the
+desktop installer and uninstaller repo-direct exactly as described in
+[If the site is unreachable](#if-the-site-is-unreachable-repo-direct-fallback)
+above, substituting `flinttrade-install` for the install script. To build and verify the shell
 locally (these lines run unchanged in bash, zsh and Windows PowerShell):
 
 ```bash

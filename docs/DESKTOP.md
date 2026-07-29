@@ -159,6 +159,43 @@ Updates and ordinary uninstalls refuse unknown same-name applications, links,
 reparse aliases, changed executables or integration files that are not proved
 by that receipt.
 
+### If the download site returns an error
+
+Use this whenever an install command above fails. The hosted URLs are only a
+convenience redirect to the scripts in this repository, and a deployment
+without an immutable source commit answers `503` for all four routes rather
+than redirecting. Fetch the same installer straight from GitHub:
+
+```bash
+# macOS or Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.sh | bash
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.ps1 | iex
+```
+
+Or run the same file from a clone — see [`scripts/install/`](../scripts/install/):
+
+```bash
+# macOS or Linux
+bash scripts/install/flinttrade-install.sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-install.ps1
+```
+
+Every flag documented above (`--ref`, `--no-launch`, `--build-from-source`, and
+their PowerShell spellings) works identically on this path — but note that
+`curl … | bash` and `irm … | iex` give the script no argument vector. To pass a
+flag, use `bash -s --` (for example
+`curl -fsSL <url> | bash -s -- --ref v1.2.3`), the scriptblock form on Windows
+(`& ([scriptblock]::Create((irm <url>))) -Ref v1.2.3`), or run the file from a
+clone as shown above.
+
 ### macOS boundary
 
 Local `make desktop-package` and `pack:mac` builds always force an **ad-hoc
@@ -280,9 +317,21 @@ curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 
 The hosted URLs are only a convenience redirect to the scripts in this
 repository. If `https://flinttrade.vercel.app/uninstall.sh` or
-`https://flinttrade.vercel.app/uninstall.ps1` returns an error, run the same
-uninstaller directly from a clone (or from the managed source checkout at
-`~/.flinttrade/src/FlintTrade`):
+`https://flinttrade.vercel.app/uninstall.ps1` returns an error, fetch the same
+uninstaller straight from GitHub:
+
+```bash
+# macOS or Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.sh | bash
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.ps1 | iex
+```
+
+Or run the same uninstaller directly from a clone (or from the managed source
+checkout at `~/.flinttrade/src/FlintTrade`):
 
 ```bash
 # macOS or Linux

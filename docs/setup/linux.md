@@ -22,6 +22,26 @@ configuration is handled in the UI; no `.env` file is required. Your workspace
 lives at `~/.flinttrade/` (override with `FLINTTRADE_WORKSPACE_DIR`, or
 `FLINTTRADE_HOME`).
 
+### If the site is unreachable (repo-direct fallback)
+
+Use this whenever the command above fails: the hosted URL is only a redirect to
+the script in this repository, and a site outage or a deployment without an
+immutable source commit answers `503`, which `curl … | bash` would pipe into
+your shell as an error page. This form fetches the same script straight from
+GitHub and depends on no deployment:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash
+```
+
+To read the script before running it, clone the repository and run the file:
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+bash scripts/install/flinttrade-web-install.sh
+```
+
 ## Uninstall
 
 The plain uninstall removes the application and its launcher integration and
@@ -38,8 +58,15 @@ source and tools). Purge is irreversible and asks for typed confirmation:
 curl -fsSL https://flinttrade.vercel.app/uninstall.sh | bash -s -- --purge
 ```
 
-If the site is unreachable, run the same script from a clone or from the
-managed source checkout (`~/.flinttrade/web-src/FlintTrade` for the web app,
+If the site is unreachable, fetch the same uninstaller straight from GitHub —
+the hosted URL is only a redirect to it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.sh | bash
+```
+
+Or run the same script from a clone or from the managed source checkout
+(`~/.flinttrade/web-src/FlintTrade` for the web app,
 `~/.flinttrade/src/FlintTrade` for the desktop shell):
 
 ```bash
@@ -69,7 +96,9 @@ fallback because modern distros no longer ship `libfuse2`. It installs an app ic
 survives launch — the launch log is at
 `~/.local/state/flinttrade/desktop-launch.log`. The script lives at
 [`scripts/install/`](../../scripts/install/) — read it before piping to a
-shell if that is your policy (it should be).
+shell if that is your policy (it should be). If the site is unreachable, run it
+repo-direct with
+`curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.sh | bash`.
 
 Complete Setup in the app. Broker/OpenAlgo configuration is handled in the
 UI; no `.env` file is required.

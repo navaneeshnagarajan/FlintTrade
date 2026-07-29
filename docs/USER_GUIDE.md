@@ -52,6 +52,36 @@ collide and can be run in either order. Open http://127.0.0.1:5100 and follow th
 
 Removing it again is covered in [Uninstall](#13-uninstall).
 
+#### If the site is unreachable (repo-direct fallback)
+
+Use this whenever the command above fails. The hosted URLs are only a redirect
+to the scripts in this repository, so a site outage or a deployment without an
+immutable source commit answers `503` — and piping that error page into a shell
+does nothing useful. These commands fetch the same script straight from GitHub
+and depend on no deployment:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex
+```
+
+To read the script before running it, clone the repository and run it from the
+checkout instead:
+
+```bash
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+bash scripts/install/flinttrade-web-install.sh
+```
+
+On Windows, run the checkout copy with
+`powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-web-install.ps1`.
+
 ### Run from source (contributors)
 
 Use this when you are developing FlintTrade itself. It expects you to supply
@@ -105,6 +135,10 @@ curl -fsSL https://flinttrade.vercel.app/install.sh | bash
 # Windows 10/11
 irm https://flinttrade.vercel.app/install.ps1 | iex
 ```
+
+If the site is unreachable, the same desktop installer runs repo-direct — swap
+`flinttrade-web-install` for `flinttrade-install` in the fallback commands under
+[If the site is unreachable](#if-the-site-is-unreachable-repo-direct-fallback).
 
 The installed shell builds the hash-verified, integrity-locked source on first
 launch (progress on the splash; needs internet), creates the OS workspace, and
@@ -719,8 +753,22 @@ Take a backup first if you want your workspace and settings back later — see
 
 ### If the site is unreachable
 
-The same scripts live in the repository. From a clone or from the managed
-source checkout (`~/.flinttrade/web-src/FlintTrade` for the web app,
+Use this whenever an uninstall command above fails: the hosted URLs are only a
+redirect to the scripts in this repository, and a site outage answers `503`
+rather than the script. Fetch the same uninstaller straight from GitHub:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.ps1 | iex
+```
+
+Or, from a clone or from the managed source checkout
+(`~/.flinttrade/web-src/FlintTrade` for the web app,
 `~/.flinttrade/src/FlintTrade` for the desktop shell), run them directly:
 
 ```bash
