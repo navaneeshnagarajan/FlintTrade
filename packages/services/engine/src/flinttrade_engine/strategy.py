@@ -5,7 +5,7 @@ discovery, enabling/disabling, and lifecycle.
 
 State persistence (adapted from trading-strategies-openalgo pattern):
     Each strategy can persist its state to
-    ``~/.flinttrade/strategies/<strategy_id>/state.json`` so it can resume
+    ``<workspace_dir>/strategies/<strategy_id>/state.json`` so it can resume
     after a crash without losing position tracking.  Call ``save_state()``
     after each tick/bar and ``load_state()`` at startup.
 """
@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import platform
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from pathlib import Path
@@ -29,30 +27,33 @@ logger = logging.getLogger("flinttrade.engine.strategy")
 
 
 # ---------------------------------------------------------------------------
-# Platform-aware workspace root helper
+# Strategy state root helper
 # ---------------------------------------------------------------------------
 
 
-def _flinttrade_root() -> Path:
-    """Return the platform-appropriate FlintTrade workspace root.
+def _default_state_root() -> Path:
+    """Resolve the directory holding one state directory per strategy.
 
-    - Linux / WSL: ``~/.flinttrade``
-    - macOS: ``~/Library/Application Support/flinttrade``
-    - Windows: ``%APPDATA%/flinttrade``
+    Resolution happens on every call (never at import time, and never during
+    strategy construction) so a workspace override applied mid-process — as
+    pytest and Gunicorn preload+fork both do — is honoured. Because
+    :func:`~flinttrade_core.workspace.workspace_dir` creates and hardens the
+    workspace root, callers must reach this only when they are about to touch
+    state on disk.
+
+    There is deliberately no legacy-state migration here. Before this module
+    used :func:`~flinttrade_core.workspace.workspace_dir`, it already resolved
+    the same platform-specific root, so a default install has nothing to
+    migrate; divergence exists only for installs that set
+    ``FLINTTRADE_HOME``/``FLINTTRADE_WORKSPACE_DIR``, and a probe that fired
+    under an override would copy real state into every throwaway workspace.
 
     Returns:
-        Path to the workspace root directory (not guaranteed to exist).
+        The ``strategies`` directory inside the active workspace directory.
     """
-    system = platform.system()
-    if system == "Darwin":
-        return Path.home() / "Library" / "Application Support" / "flinttrade"
-    if system == "Windows":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "flinttrade"
-        return Path.home() / "AppData" / "Roaming" / "flinttrade"
-    # Linux, WSL, and everything else
-    return Path.home() / ".flinttrade"
+    from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+    return workspace_dir() / "strategies"
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +84,21 @@ class BaseStrategy(ABC):
 
     Lifecycle: STOPPED → ACTIVE ↔ PAUSED → STOPPED
                                   ↘ ERROR
+
+    Args:
+        name: Human-readable strategy name.
+        exchange: Default exchange for generated orders.
+        product: Default product type for generated orders.
+        strategy_id: Stable identifier used as the state directory name.
+            Falls back to a slugified ``name``.
+        execution_contract: Optional execution contract governing how orders
+            reach the broker.
+        state_root: Directory holding one state directory per strategy.
+            Defaults to ``strategies/`` under the active FlintTrade workspace,
+            resolved on first state access — never at import time and never
+            during construction, so building a strategy (in a test, a registry
+            scan, a dry run) writes nothing to disk. Injecting a root is the
+            supported way for tests to keep state off the real workspace.
     """
 
     supported_execution_modes: ClassVar[frozenset[StrategyExecutionMode]] = frozenset()
@@ -95,6 +111,7 @@ class BaseStrategy(ABC):
         product: str = "MIS",
         strategy_id: str | None = None,
         execution_contract: StrategyExecutionContract | None = None,
+        state_root: Path | str | None = None,
     ) -> None:
         self.name = name
         self.exchange = exchange
@@ -105,11 +122,23 @@ class BaseStrategy(ABC):
         # State persistence: use strategy_id as the directory name (falls back
         # to slugified name when not provided).
         self._strategy_id: str = strategy_id or name.lower().replace(" ", "_")
-        self._state_dir: Path = (
-            _flinttrade_root() / "strategies" / self._strategy_id
-        )
+        # Only the injected root is bound here. The workspace default is
+        # resolved on access instead, because resolving it creates and hardens
+        # the workspace root — construction must stay free of disk writes.
+        self._injected_state_root: Path | None = Path(state_root) if state_root is not None else None
 
     # -- State properties --
+
+    @property
+    def _state_root(self) -> Path:
+        """Directory holding one state directory per strategy, resolved per access."""
+        injected = self._injected_state_root
+        return injected if injected is not None else _default_state_root()
+
+    @property
+    def _state_dir(self) -> Path:
+        """This strategy's own state directory, resolved per access."""
+        return self._state_root / self._strategy_id
 
     @property
     def state(self) -> StrategyState:
@@ -176,7 +205,7 @@ class BaseStrategy(ABC):
 
         Returns:
             Path object pointing to
-            ``~/.flinttrade/strategies/<strategy_id>/state.json``.
+            ``<state root>/<strategy_id>/state.json``.
         """
         return self._state_dir / "state.json"
 

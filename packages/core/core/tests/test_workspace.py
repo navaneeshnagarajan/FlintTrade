@@ -437,6 +437,321 @@ class TestLegacyPluginDirectoryMigration:
         assert loader.discover() == []
         assert (legacy / "my_plugin.py").exists()
 
+class TestWorkspaceCopyMachinery:
+    """Unit tests for the public copy-once machinery and its Wave-0 additions."""
+
+    @staticmethod
+    def _record_filelock_calls(monkeypatch, captured: list[tuple[Path, float]]):
+        """Wrap workspace.FileLock so each construction records (path, timeout)."""
+        from flinttrade_core import workspace
+
+        real_filelock = workspace.FileLock
+
+        def recording(path, timeout=10, mode=0o600):  # type: ignore[no-untyped-def]
+            captured.append((Path(path), float(timeout)))
+            return real_filelock(path, timeout=timeout, mode=mode)
+
+        monkeypatch.setattr(workspace, "FileLock", recording)
+
+    @pytest.mark.unit
+    def test_legacy_dotdir_is_the_literal_dot_directory(self):
+        from flinttrade_core.workspace import legacy_dotdir
+
+        assert legacy_dotdir() == Path.home() / ".flinttrade"
+
+    @pytest.mark.unit
+    def test_default_workspace_active_true_without_overrides(self, monkeypatch):
+        _clear_storage_overrides(monkeypatch)
+        from flinttrade_core.workspace import default_workspace_active
+
+        assert default_workspace_active() is True
+
+    @pytest.mark.unit
+    def test_default_workspace_active_false_under_workspace_dir_override(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path / "workspace"))
+        from flinttrade_core.workspace import default_workspace_active
+
+        assert default_workspace_active() is False
+
+    @pytest.mark.unit
+    def test_default_workspace_active_false_under_home_override(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.setenv("FLINTTRADE_HOME", str(tmp_path / "home"))
+        from flinttrade_core.workspace import default_workspace_active
+
+        assert default_workspace_active() is False
+
+    @pytest.mark.unit
+    def test_database_copy_lock_dir_keeps_lock_inside_workspace(self, tmp_path, monkeypatch):
+        """A root-level target with lock_dir=target.parent locks inside the workspace, not above it."""
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "shortcuts.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-db")
+        workspace_root = tmp_path / "workspace"
+        workspace_root.mkdir()
+        target = workspace_root / "shortcuts.duckdb"
+        captured: list[tuple[Path, float]] = []
+        self._record_filelock_calls(monkeypatch, captured)
+
+        workspace.copy_legacy_database_once(
+            legacy,
+            target,
+            sidecar_suffixes=(".wal",),
+            lock_name=".shortcuts-migration.lock",
+            label="keyboard shortcuts store",
+            lock_dir=target.parent,
+            timeout=60.0,
+        )
+
+        assert target.read_bytes() == b"legacy-db"
+        assert legacy.read_bytes() == b"legacy-db"
+        assert captured == [(workspace_root / ".shortcuts-migration.lock", 60.0)]
+
+    @pytest.mark.unit
+    def test_database_copy_default_lock_placement_and_timeout_unchanged(self, tmp_path, monkeypatch):
+        """Without lock_dir the six existing callers keep the historical grandparent placement."""
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "data" / "flint.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-db")
+        workspace_root = tmp_path / "workspace"
+        target = workspace_root / "data" / "flint.duckdb"
+        captured: list[tuple[Path, float]] = []
+        self._record_filelock_calls(monkeypatch, captured)
+
+        workspace.copy_legacy_database_once(
+            legacy,
+            target,
+            sidecar_suffixes=(".wal",),
+            lock_name=".duckdb-migration.lock",
+            label="shared DuckDB",
+        )
+
+        assert target.read_bytes() == b"legacy-db"
+        assert captured == [(workspace_root / ".duckdb-migration.lock", 10.0)]
+
+    @pytest.mark.unit
+    def test_directory_copy_lock_dir_keeps_lock_inside_workspace(self, tmp_path, monkeypatch):
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "flows"
+        legacy.mkdir(parents=True)
+        (legacy / "flow.json").write_text("{}", encoding="utf-8")
+        workspace_root = tmp_path / "workspace"
+        workspace_root.mkdir()
+        target = workspace_root / "flows"
+        captured: list[tuple[Path, float]] = []
+        self._record_filelock_calls(monkeypatch, captured)
+
+        workspace.copy_legacy_directory_once(
+            legacy,
+            target,
+            lock_name=".flows-directory-migration.lock",
+            label="flow store",
+            lock_dir=target.parent,
+            timeout=60.0,
+        )
+
+        assert (target / "flow.json").read_text(encoding="utf-8") == "{}"
+        assert (legacy / "flow.json").exists()
+        assert captured == [(workspace_root / ".flows-directory-migration.lock", 60.0)]
+
+    @pytest.mark.unit
+    def test_directory_migration_target_appearing_under_lock_is_sibling_completion(self, tmp_path, monkeypatch):
+        """Regression: N-1 herd workers must not raise when the winner migrates first.
+
+        The pre-lock check sees an empty target, a sibling wins the migration
+        lock and completes the copy, and this worker then acquires the lock to
+        find the target populated. Even with ``conflict_is_error=True`` that is
+        completion by a sibling, not a conflict.
+        """
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "audit"
+        legacy.mkdir(parents=True)
+        (legacy / "audit_2026-07-15.jsonl").write_text("chain-record\n", encoding="utf-8")
+        workspace_root = tmp_path / "workspace"
+        target = workspace_root / "archive" / "audit"
+        real_filelock = workspace.FileLock
+
+        class SiblingWinsLock:
+            """Populate the target while this worker is queued on the lock."""
+
+            def __init__(self, path, timeout=10, mode=0o600):  # type: ignore[no-untyped-def]
+                self._inner = real_filelock(path, timeout=timeout, mode=mode)
+
+            def acquire(self):  # type: ignore[no-untyped-def]
+                if not target.exists():
+                    target.mkdir(parents=True)
+                    (target / "audit_2026-07-15.jsonl").write_text("sibling-chain\n", encoding="utf-8")
+                return self._inner.acquire()
+
+        monkeypatch.setattr(workspace, "FileLock", SiblingWinsLock)
+
+        workspace.copy_legacy_directory_once(
+            legacy,
+            target,
+            lock_name=".audit-directory-migration.lock",
+            label="audit chain",
+            conflict_is_error=True,
+        )
+
+        assert (target / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "sibling-chain\n"
+        assert (legacy / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "chain-record\n"
+
+    @pytest.mark.unit
+    def test_directory_migration_pre_existing_conflict_still_raises(self, tmp_path):
+        """conflict_is_error keeps guarding genuinely divergent pre-existing state."""
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "audit"
+        legacy.mkdir(parents=True)
+        (legacy / "audit_2026-07-15.jsonl").write_text("legacy-chain\n", encoding="utf-8")
+        target = tmp_path / "workspace" / "archive" / "audit"
+        target.mkdir(parents=True)
+        (target / "audit_2026-07-16.jsonl").write_text("workspace-chain\n", encoding="utf-8")
+
+        with pytest.raises(workspace.WorkspaceStateMigrationError, match="both were preserved"):
+            workspace.copy_legacy_directory_once(
+                legacy,
+                target,
+                lock_name=".audit-directory-migration.lock",
+                label="audit chain",
+                conflict_is_error=True,
+            )
+
+        assert (target / "audit_2026-07-16.jsonl").read_text(encoding="utf-8") == "workspace-chain\n"
+        assert (legacy / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "legacy-chain\n"
+
+    @pytest.mark.unit
+    def test_directory_migration_boot_herd_copies_once_and_nobody_raises(self, tmp_path, monkeypatch):
+        """Real concurrency: a herd of workers against one legacy tree, under conflict_is_error.
+
+        This is the branch the Gunicorn herd actually hits. The workers do not
+        arrive in lockstep — the winner finishes its copy while later workers
+        are still evaluating the *pre-lock* probe — so a pre-lock check that
+        treated any populated target as a conflict failed every worker but the
+        first, and then failed every worker on every subsequent boot as well.
+
+        Eight threads are released together and four more are run afterwards as
+        deliberate late arrivals. Exactly one copy must happen and no caller
+        may raise.
+        """
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "archive" / "audit"
+        legacy.mkdir(parents=True)
+        (legacy / "audit_2026-07-15.jsonl").write_text("chain-record\n", encoding="utf-8")
+        (legacy / "audit_2026-07-16.jsonl").write_text("later-record\n", encoding="utf-8")
+        (legacy / ".audit-chain.lock").write_text("", encoding="utf-8")
+        target = tmp_path / "workspace" / "archive" / "audit"
+
+        copies = 0
+        copies_lock = threading.Lock()
+        real_copytree = workspace.shutil.copytree
+
+        def counting_copytree(*args, **kwargs):  # type: ignore[no-untyped-def]
+            nonlocal copies
+            with copies_lock:
+                copies += 1
+            return real_copytree(*args, **kwargs)
+
+        monkeypatch.setattr(workspace.shutil, "copytree", counting_copytree)
+
+        workers = 8
+        start = threading.Barrier(workers)
+
+        def migrate(concurrent: bool) -> BaseException | None:
+            if concurrent:
+                start.wait()
+            try:
+                workspace.copy_legacy_directory_once(
+                    legacy,
+                    target,
+                    lock_name=".audit-directory-migration.lock",
+                    label="audit chain",
+                    excluded_names=frozenset({".audit-chain.lock"}),
+                    source_lock_name=".audit-chain.lock",
+                    conflict_is_error=True,
+                    timeout=60.0,
+                )
+            except BaseException as exc:  # noqa: BLE001 - the assertion is that none escapes
+                return exc
+            return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            failures = [outcome for outcome in executor.map(migrate, [True] * workers) if outcome is not None]
+        # Late arrivals: the target is already populated before they even probe.
+        failures += [outcome for outcome in (migrate(False) for _ in range(4)) if outcome is not None]
+
+        assert not failures, f"herd workers raised: {failures}"
+        assert copies == 1, f"expected exactly one copy, got {copies}"
+        assert (target / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "chain-record\n"
+        assert (target / "audit_2026-07-16.jsonl").read_text(encoding="utf-8") == "later-record\n"
+        assert not (target / ".audit-chain.lock").exists()
+        assert (legacy / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "chain-record\n"
+
+    @pytest.mark.unit
+    def test_directory_migration_is_silent_on_every_boot_after_the_first(self, tmp_path):
+        """A migrated, since-appended-to audit chain is completion, not divergence.
+
+        The copy retains its source, so from the second boot onwards the legacy
+        tree and the target are both populated for ever. The target is still the
+        migration's own output — its files are the legacy files plus records the
+        running app appended — so ``conflict_is_error`` must stay quiet.
+        """
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "archive" / "audit"
+        legacy.mkdir(parents=True)
+        (legacy / "audit_2026-07-15.jsonl").write_text("chain-record\n", encoding="utf-8")
+        target = tmp_path / "workspace" / "archive" / "audit"
+
+        for _boot in range(3):
+            workspace.copy_legacy_directory_once(
+                legacy,
+                target,
+                lock_name=".audit-directory-migration.lock",
+                label="audit chain",
+                conflict_is_error=True,
+            )
+            # The live chain grows between boots; the migrated file is extended
+            # and a new day's file appears alongside it.
+            with (target / "audit_2026-07-15.jsonl").open("a", encoding="utf-8") as chain:
+                chain.write("appended-after-migration\n")
+            (target / "audit_2026-07-17.jsonl").write_text("new-day\n", encoding="utf-8")
+
+        assert (target / "audit_2026-07-15.jsonl").read_text(encoding="utf-8").startswith("chain-record\n")
+        assert (legacy / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "chain-record\n"
+
+    @pytest.mark.unit
+    def test_directory_migration_raises_when_a_target_file_diverged(self, tmp_path):
+        """A same-named target file that rewrote rather than extended the legacy one is divergent."""
+        from flinttrade_core import workspace
+
+        legacy = tmp_path / "legacy" / "archive" / "audit"
+        legacy.mkdir(parents=True)
+        (legacy / "audit_2026-07-15.jsonl").write_text("legacy-chain\n", encoding="utf-8")
+        target = tmp_path / "workspace" / "archive" / "audit"
+        target.mkdir(parents=True)
+        (target / "audit_2026-07-15.jsonl").write_text("unrelated-chain\n", encoding="utf-8")
+
+        with pytest.raises(workspace.WorkspaceStateMigrationError, match="both were preserved"):
+            workspace.copy_legacy_directory_once(
+                legacy,
+                target,
+                lock_name=".audit-directory-migration.lock",
+                label="audit chain",
+                conflict_is_error=True,
+            )
+
+        assert (target / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "unrelated-chain\n"
+        assert (legacy / "audit_2026-07-15.jsonl").read_text(encoding="utf-8") == "legacy-chain\n"
+
 
 class TestWorkspaceInit:
     """Test workspace initialization and directory creation."""
@@ -753,9 +1068,12 @@ class TestWorkspaceLoadSave:
         before = workspace.config_path.read_text(encoding="utf-8")
         workspace._config["ui"]["theme"] = "light"
 
+        # The atomic write goes through workspace_migrations.durable_replace (an
+        # fsync-then-rename helper), not a bare os.replace, so that is the call
+        # this test has to break.
         monkeypatch.setattr(
-            workspace_migrations.os,
-            "replace",
+            workspace_migrations,
+            "durable_replace",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("rename failed")),
         )
 

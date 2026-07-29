@@ -208,3 +208,96 @@ class TestLatencyTracker:
         assert recent[0]["symbol"] == "HDFC"
         assert recent[0]["latency_ms"] == pytest.approx(55.0)
         assert "timestamp" in recent[0]
+
+
+# ---------------------------------------------------------------------------
+# Default disk-probe directory (workspace path unification, wave 1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultDataDir:
+    """HealthAggregator's disk probe tracks the active workspace.
+
+    Read-only probe: no legacy state is migrated, so these tests only pin
+    *where* it looks. Every test sets ``FLINTTRADE_WORKSPACE_DIR`` explicitly
+    so the resolver can never reach the developer's real home directory.
+    """
+
+    @staticmethod
+    def _use_workspace(monkeypatch, root):
+        """Point the workspace resolver at *root* and return its resolved form.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            root: Directory to expose as the active workspace.
+
+        Returns:
+            The resolved workspace path the resolver will return.
+        """
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(root))
+        return root.resolve()
+
+    @pytest.mark.unit
+    def test_resolves_to_the_workspace_data_dir(self, tmp_path, monkeypatch):
+        """_default_data_dir() returns ``data`` inside the overridden workspace."""
+        from flinttrade_core.monitoring import _default_data_dir
+
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws")
+        assert _default_data_dir() == expected / "data"
+
+    @pytest.mark.unit
+    def test_check_disk_space_probes_the_workspace_data_dir(self, tmp_path, monkeypatch):
+        """A no-argument check_disk_space() measures the workspace data directory."""
+        from flinttrade_core import monitoring as monitoring_mod
+
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws") / "data"
+        expected.mkdir(parents=True)
+
+        probed: list[str] = []
+        real_disk_usage = monitoring_mod.shutil.disk_usage
+
+        def _record(path):
+            probed.append(path)
+            return real_disk_usage(path)
+
+        monkeypatch.setattr(monitoring_mod.shutil, "disk_usage", _record)
+
+        result = monitoring_mod.HealthAggregator().check_disk_space()
+
+        assert result["status"] in ("ok", "degraded", "error")
+        assert probed == [str(expected)]
+
+    @pytest.mark.unit
+    def test_explicit_data_dir_bypasses_the_default(self, tmp_path, monkeypatch):
+        """An explicit data_dir argument wins over the workspace default."""
+        from flinttrade_core import monitoring as monitoring_mod
+
+        self._use_workspace(monkeypatch, tmp_path / "ws")
+        explicit = tmp_path / "elsewhere"
+        explicit.mkdir()
+
+        probed: list[str] = []
+        real_disk_usage = monitoring_mod.shutil.disk_usage
+
+        def _record(path):
+            probed.append(path)
+            return real_disk_usage(path)
+
+        monkeypatch.setattr(monitoring_mod.shutil, "disk_usage", _record)
+
+        monitoring_mod.HealthAggregator().check_disk_space(explicit)
+
+        assert probed == [str(explicit)]
+
+    @pytest.mark.unit
+    def test_resolution_happens_per_call_not_at_import(self, tmp_path, monkeypatch):
+        """Changing the override between calls changes the resolved directory."""
+        from flinttrade_core.monitoring import _default_data_dir
+
+        first = self._use_workspace(monkeypatch, tmp_path / "one")
+        assert _default_data_dir() == first / "data"
+
+        second = self._use_workspace(monkeypatch, tmp_path / "two")
+        assert _default_data_dir() == second / "data"
+        assert first != second

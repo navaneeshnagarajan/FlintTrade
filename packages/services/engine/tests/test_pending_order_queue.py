@@ -483,3 +483,131 @@ class TestInterruptedDispatchRecovery:
         # A second reopen with nothing in flight reconciles zero rows.
         q3 = PendingOrderQueue(db_path=db)
         assert q3._reconcile_interrupted_dispatches() == 0  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Workspace path resolution + one-shot legacy migration
+# ---------------------------------------------------------------------------
+
+
+def _redirect_workspace(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
+    """Point the resolver at tmp_path for both the workspace and the legacy root.
+
+    Clears both workspace environment overrides so the default-workspace probe
+    is live, then redirects ``workspace._default_home`` and the module's
+    ``_legacy_db_path`` seam so nothing can reach the real home directory.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        Tuple of ``(workspace_dir, legacy_dir)``, neither created yet.
+    """
+    from flinttrade_core import workspace as ws  # noqa: PLC0415
+    from flinttrade_engine import action_center as ac  # noqa: PLC0415
+
+    monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+    workspace = tmp_path / "workspace"
+    legacy = tmp_path / "legacy"
+    monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+    monkeypatch.setattr(ac, "_legacy_db_path", lambda: legacy / "action_center.duckdb")
+    return workspace, legacy
+
+
+def _seed_legacy_queue(legacy: Path, request_id: str) -> None:
+    """Create a legacy database holding exactly one pending approval row.
+
+    Args:
+        legacy: Directory that plays the part of the pre-workspace root.
+        request_id: Identifier of the single seeded approval request.
+    """
+    PendingOrderQueue, *_ = _queue_module()
+    legacy.mkdir(parents=True, exist_ok=True)
+    q = PendingOrderQueue(db_path=legacy / "action_center.duckdb")
+    q.enqueue(_make_order("LEGACY"), reason="seeded", request_id=request_id)
+    q.close()
+
+
+class TestWorkspacePathResolution:
+    """The queue database resolves under the workspace and migrates once."""
+
+    @pytest.mark.unit
+    def test_fresh_install_resolves_under_workspace_without_copying(self, tmp_path: Path, monkeypatch):
+        from flinttrade_engine import action_center as ac  # noqa: PLC0415
+
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+
+        resolved = ac._default_db_path()  # noqa: SLF001
+
+        assert resolved == workspace / "action_center.duckdb"
+        assert not resolved.exists()
+        assert not legacy.exists()
+
+    @pytest.mark.unit
+    def test_legacy_only_is_copied_and_legacy_retained(self, tmp_path: Path, monkeypatch):
+        PendingOrderQueue, *_ = _queue_module()
+        from flinttrade_engine import action_center as ac  # noqa: PLC0415
+
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        _seed_legacy_queue(legacy, "legacy-row")
+
+        resolved = ac._default_db_path()  # noqa: SLF001
+
+        assert resolved == workspace / "action_center.duckdb"
+        assert resolved.exists()
+        assert (legacy / "action_center.duckdb").exists(), "legacy database must be retained"
+        migrated = PendingOrderQueue(db_path=resolved)
+        try:
+            ids = [r.id for r in migrated.list_all()]
+        finally:
+            migrated.close()
+        assert ids == ["legacy-row"], "rows must exist exactly once after migration"
+
+    @pytest.mark.unit
+    def test_both_exist_keeps_workspace_database_and_never_merges(self, tmp_path: Path, monkeypatch):
+        PendingOrderQueue, *_ = _queue_module()
+        from flinttrade_engine import action_center as ac  # noqa: PLC0415
+
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        _seed_legacy_queue(legacy, "legacy-row")
+        workspace.mkdir(parents=True, exist_ok=True)
+        existing = PendingOrderQueue(db_path=workspace / "action_center.duckdb")
+        existing.enqueue(_make_order("WORKSPACE"), reason="already here", request_id="workspace-row")
+        existing.close()
+
+        resolved = ac._default_db_path()  # noqa: SLF001
+
+        reopened = PendingOrderQueue(db_path=resolved)
+        try:
+            ids = sorted(r.id for r in reopened.list_all())
+        finally:
+            reopened.close()
+        assert ids == ["workspace-row"], "workspace rows win; contents are never merged"
+        assert (legacy / "action_center.duckdb").exists()
+
+    @pytest.mark.unit
+    def test_workspace_override_makes_the_probe_inert(self, tmp_path: Path, monkeypatch):
+        from flinttrade_engine import action_center as ac  # noqa: PLC0415
+
+        _workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        _seed_legacy_queue(legacy, "legacy-row")
+        override = tmp_path / "override"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+
+        resolved = ac._default_db_path()  # noqa: SLF001
+
+        assert resolved == override.resolve() / "action_center.duckdb"
+        assert not resolved.exists(), "no migration may run while an override is set"
+
+    @pytest.mark.unit
+    def test_no_argument_construction_lands_in_the_workspace(self, tmp_path: Path, monkeypatch):
+        PendingOrderQueue, *_ = _queue_module()
+        workspace, _legacy = _redirect_workspace(monkeypatch, tmp_path)
+
+        q = PendingOrderQueue()
+        try:
+            assert q._db_path == workspace / "action_center.duckdb"  # noqa: SLF001
+        finally:
+            q.close()

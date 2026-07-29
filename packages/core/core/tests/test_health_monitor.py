@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import socket
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 from flinttrade_core.health_monitor import (
@@ -381,3 +384,75 @@ class TestCheckAll:
         d = report.to_dict()
         # Should not raise
         json.dumps(d)
+
+
+# ---------------------------------------------------------------------------
+# Default disk-probe directory (workspace path unification, wave 1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultDataDir:
+    """The default disk-probe directory tracks the active workspace.
+
+    ``HealthMonitor`` is a read-only probe: no legacy state is migrated, so
+    these tests only pin *where* it looks. Every test sets
+    ``FLINTTRADE_WORKSPACE_DIR`` explicitly so the resolver can never reach
+    the developer's real home directory.
+    """
+
+    @staticmethod
+    def _use_workspace(monkeypatch, root: Path) -> Path:
+        """Point the workspace resolver at *root* and return its resolved form.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            root: Directory to expose as the active workspace.
+
+        Returns:
+            The resolved workspace path the resolver will return.
+        """
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(root))
+        return root.resolve()
+
+    @pytest.mark.unit
+    def test_resolves_to_the_workspace_root(self, tmp_path, monkeypatch):
+        """_default_data_dir() returns the overridden workspace directory."""
+        from flinttrade_core.health_monitor import _default_data_dir
+
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws")
+        assert _default_data_dir() == expected
+
+    @pytest.mark.unit
+    def test_monitor_probes_the_workspace_by_default(self, tmp_path, monkeypatch):
+        """A no-argument HealthMonitor reports disk stats for the workspace."""
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws")
+
+        check = HealthMonitor().check_disk()
+
+        probed = [d["path"] for d in check.metrics["directories"]]
+        assert probed == [str(expected)]
+
+    @pytest.mark.unit
+    def test_explicit_data_dirs_bypass_the_default(self, tmp_path, monkeypatch):
+        """An explicit data_dirs argument wins over the workspace default."""
+        self._use_workspace(monkeypatch, tmp_path / "ws")
+        explicit = tmp_path / "elsewhere"
+        explicit.mkdir()
+
+        check = HealthMonitor(data_dirs=[explicit]).check_disk()
+
+        probed = [d["path"] for d in check.metrics["directories"]]
+        assert probed == [str(explicit)]
+
+    @pytest.mark.unit
+    def test_resolution_happens_per_call_not_at_import(self, tmp_path, monkeypatch):
+        """Changing the override between calls changes the resolved directory."""
+        from flinttrade_core.health_monitor import _default_data_dir
+
+        first = self._use_workspace(monkeypatch, tmp_path / "one")
+        assert _default_data_dir() == first
+
+        second = self._use_workspace(monkeypatch, tmp_path / "two")
+        assert _default_data_dir() == second
+        assert first != second

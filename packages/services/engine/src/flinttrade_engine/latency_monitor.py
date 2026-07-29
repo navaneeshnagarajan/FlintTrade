@@ -57,6 +57,28 @@ _INDEX_SQL: list[str] = [
 ]
 
 
+def _default_db_path() -> Path:
+    """Resolve the latency-log database path under the active workspace.
+
+    No legacy migration is attempted: the latency log is disposable
+    observability data and production never relies on this default
+    (``create_flask_app`` and the infra routes both pass an explicit
+    workspace-resolved path). Resolved at call time so environment
+    overrides set after import — pytest workers, Gunicorn preload+fork —
+    are honoured.
+
+    The workspace import is deliberately function-local: ``flinttrade_core``
+    imports ``app.py``, which imports ``flinttrade_engine`` modules, so a
+    module-scope import would re-enter that circular chain.
+
+    Returns:
+        Absolute path of ``latency_log.duckdb`` inside the workspace directory.
+    """
+    from flinttrade_core.workspace import workspace_dir
+
+    return workspace_dir() / "latency_log.duckdb"
+
+
 class LatencyMonitor:
     """Persistent order round-trip latency tracker backed by DuckDB.
 
@@ -68,8 +90,11 @@ class LatencyMonitor:
 
     Args:
         db_path: Path to the DuckDB file.  Defaults to
-            ``~/.flinttrade/latency_log.duckdb``.  Pass ``":memory:"`` for
-            ephemeral in-process storage (useful in tests).
+            ``latency_log.duckdb`` inside the active workspace directory
+            (resolved at construction via
+            :func:`flinttrade_core.workspace.workspace_dir`).  Pass
+            ``":memory:"`` for ephemeral in-process storage (useful in
+            tests).
 
     Example::
 
@@ -83,7 +108,7 @@ class LatencyMonitor:
         import duckdb  # lazy import
 
         if db_path is None:
-            db_path = Path.home() / ".flinttrade" / "latency_log.duckdb"
+            db_path = _default_db_path()
 
         if isinstance(db_path, str) and db_path != ":memory:":
             db_path = Path(db_path)

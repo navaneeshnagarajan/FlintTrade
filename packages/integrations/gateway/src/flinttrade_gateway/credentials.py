@@ -1,6 +1,7 @@
 """Fernet-encrypted credential storage in SQLite.
 
-Location: ``~/.flinttrade/credentials.db``
+Location: ``workspace_dir() / "credentials.db"`` — the active workspace
+directory, resolved by :func:`flinttrade_core.workspace.workspace_dir`.
 
 Schema::
 
@@ -218,7 +219,9 @@ class CredentialStore:
 
     Example::
 
-        store = CredentialStore(Path.home() / ".flinttrade/credentials.db", "<MASTER_PASSWORD>")
+        from flinttrade_core.workspace import workspace_dir
+
+        store = CredentialStore(workspace_dir() / "credentials.db", "<MASTER_PASSWORD>")
         store.store("acc1", "broker_name", "Primary", {"api_key": "<YOUR_KEY>", "api_secret": "<YOUR_SECRET>"})
         creds = store.retrieve("acc1")
     """

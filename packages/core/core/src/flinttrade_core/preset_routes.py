@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -283,36 +281,60 @@ _BUILTIN_BY_ID: dict[str, WorkspacePreset] = {p.id: p for p in _BUILTIN_PRESETS}
 # ---------------------------------------------------------------------------
 
 
-def _flinttrade_home() -> Path:
-    """Resolve the platform-appropriate FlintTrade workspace directory.
+def _legacy_presets_path() -> Path:
+    """Return the pre-``workspace_dir()`` custom-preset file location.
 
-    Respects the ``FLINTTRADE_HOME`` environment variable for test isolation
-    and cross-platform CI.
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
 
     Returns:
-        Resolved absolute path to the ``~/.flinttrade`` (or equivalent) directory.
+        ``<legacy dot-directory>/presets.json`` — the fixed ``~/.flinttrade``
+        root every pre-workspace install used, on every OS.
     """
-    env = os.environ.get("FLINTTRADE_HOME")
-    if env:
-        return Path(env).expanduser().resolve()
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
 
-    # Use sys.platform rather than platform.system() — the latter performs a
-    # WMI query on Python 3.14/Windows which can hang in restricted
-    # environments (no WMI service).
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "flinttrade"
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA", "")
-        if appdata:
-            return Path(appdata) / "flinttrade"
-        return Path.home() / "AppData" / "Roaming" / "flinttrade"
-    # Linux and everything else
-    return Path.home() / ".flinttrade"
+    return legacy_dotdir() / "presets.json"
 
 
 def _presets_path() -> Path:
-    """Return the path to presets.json inside the FlintTrade home directory."""
-    return _flinttrade_home() / "presets.json"
+    """Resolve ``presets.json`` under the active workspace, migrating once.
+
+    Supersedes this module's former private home resolver:
+    :func:`flinttrade_core.workspace.workspace_dir` is the single authority, so
+    the preset store now honours ``FLINTTRADE_WORKSPACE_DIR`` as well as
+    ``FLINTTRADE_HOME`` and the platform-specific workspace root. When no
+    environment override is in force, a pre-workspace
+    ``~/.flinttrade/presets.json`` is copied into the workspace once — copy,
+    never move, so the legacy file survives as a backup — and an existing
+    workspace copy always wins.
+
+    Resolution happens on every call, never at import time, so a mid-run
+    change to the environment is honoured.
+
+    Returns:
+        Absolute path of ``presets.json`` inside the workspace directory.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy file is retained.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_database_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "presets.json"
+    if default_workspace_active():
+        copy_legacy_database_once(
+            _legacy_presets_path(),
+            target,
+            sidecar_suffixes=(),
+            lock_name=".presets-migration.lock",
+            lock_dir=target.parent,
+            label="workspace presets",
+        )
+    return target
 
 
 def _load_custom() -> dict[str, WorkspacePreset]:

@@ -341,3 +341,229 @@ class TestWatch:
     def test_stop_watching_when_not_watching_is_noop(self, tmp_path: Path) -> None:
         r = StrategyHotReloader(strategies_dir=tmp_path)
         r.stop_watching()  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Default strategies directory resolution + one-shot legacy migration
+# ---------------------------------------------------------------------------
+
+
+def _redirect_workspace(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
+    """Point the resolver at tmp_path for both the workspace and the legacy root.
+
+    Clears both workspace environment overrides so the default-workspace probe
+    is live, then redirects ``workspace._default_home`` and the module's
+    ``_legacy_strategies_dir`` seam so nothing can reach the real home
+    directory.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        tmp_path: pytest temporary directory.
+
+    Returns:
+        Tuple of ``(workspace_dir, legacy_strategies_dir)``, neither created yet.
+    """
+    from flinttrade_core import workspace as ws
+
+    monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+    workspace = tmp_path / "workspace"
+    legacy = tmp_path / "legacy" / "strategies"
+    monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+    monkeypatch.setattr(mod, "_legacy_strategies_dir", lambda: legacy)
+    return workspace, legacy
+
+
+class TestDefaultStrategiesDir:
+    """The watched directory defaults to the workspace strategies directory."""
+
+    @pytest.mark.unit
+    def test_fresh_install_resolves_under_workspace_without_copying(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+
+        resolved = mod.default_strategies_dir()
+
+        assert resolved == workspace / "strategies"
+        assert not legacy.exists()
+
+    @pytest.mark.unit
+    def test_no_argument_construction_uses_the_workspace_directory(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The default must match the directory ``UserStrategyRunner`` is wired to."""
+        from flinttrade_core.workspace import workspace_dir
+
+        workspace, _legacy = _redirect_workspace(monkeypatch, tmp_path)
+
+        r = StrategyHotReloader()
+
+        assert r._dir == workspace / "strategies"
+        assert r._dir == workspace_dir() / "strategies"
+        assert r._dir.is_dir(), "the watched directory is created on construction"
+
+    @pytest.mark.unit
+    def test_legacy_only_tree_is_copied_and_legacy_retained(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+
+        resolved = mod.default_strategies_dir()
+
+        assert (resolved / "ema.py").read_text(encoding="utf-8") == _VALID_STRATEGY
+        assert (legacy / "ema.py").exists(), "legacy tree must be retained"
+        assert StrategyHotReloader().discover() == ["ema"]
+
+    @pytest.mark.unit
+    def test_both_populated_keeps_workspace_files_untouched(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "legacy_only.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        target = workspace / "strategies"
+        target.mkdir(parents=True)
+        (target / "mine.py").write_text(_SAFE_CODE, encoding="utf-8")
+
+        resolved = mod.default_strategies_dir()
+
+        assert sorted(p.name for p in resolved.glob("*.py")) == ["mine.py"]
+        assert (target / "mine.py").read_text(encoding="utf-8") == _SAFE_CODE
+        assert (legacy / "legacy_only.py").exists()
+
+    @pytest.mark.unit
+    def test_workspace_override_makes_the_probe_inert(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        _workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        override = tmp_path / "override"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+
+        resolved = mod.default_strategies_dir()
+
+        assert resolved == override.resolve() / "strategies"
+        assert not resolved.exists(), "no migration may run while an override is set"
+
+    @pytest.mark.unit
+    def test_explicit_directory_skips_the_migration_probe(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        _workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        explicit = tmp_path / "explicit"
+
+        r = StrategyHotReloader(strategies_dir=explicit)
+
+        assert r._dir == explicit
+        assert r.discover() == []
+
+
+class TestRuntimeArtefactsDoNotBlockTheMigration:
+    """Directories the backend itself creates must not count as operator state.
+
+    ``UserStrategyRunner.__init__`` makes ``logs/`` and
+    ``BaseStrategy.save_state()`` makes one directory per strategy id, both
+    inside the workspace strategies directory. Every boot after the first
+    therefore finds a non-empty target — if that counted as "the operator
+    already has strategies here" the one-time copy could never fire.
+    """
+
+    @pytest.mark.unit
+    def test_runner_log_directory_does_not_block_the_copy(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        # The runner created its log directory on an earlier boot.
+        logs = workspace / "strategies" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "ema.log").write_text("previous run\n", encoding="utf-8")
+
+        resolved = mod.default_strategies_dir()
+
+        assert (resolved / "ema.py").read_text(encoding="utf-8") == _VALID_STRATEGY
+        assert (logs / "ema.log").read_text(encoding="utf-8") == "previous run\n"
+        assert (legacy / "ema.py").exists(), "legacy tree must be retained"
+
+    @pytest.mark.unit
+    def test_strategy_state_directory_does_not_block_the_copy(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        # BaseStrategy.save_state() wrote state for a built-in strategy.
+        state_dir = workspace / "strategies" / "orb_breakout"
+        state_dir.mkdir(parents=True)
+        (state_dir / "state.json").write_text('{"tick_count": 3}', encoding="utf-8")
+
+        resolved = mod.default_strategies_dir()
+
+        assert (resolved / "ema.py").read_text(encoding="utf-8") == _VALID_STRATEGY
+        assert (state_dir / "state.json").read_text(encoding="utf-8") == '{"tick_count": 3}'
+
+    @pytest.mark.unit
+    def test_uploaded_strategy_still_blocks_the_copy(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A single user-authored file wins silently, runtime artefacts or not."""
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "legacy_only.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        target = workspace / "strategies"
+        (target / "logs").mkdir(parents=True)
+        (target / "mine.py").write_text(_SAFE_CODE, encoding="utf-8")
+
+        resolved = mod.default_strategies_dir()
+
+        assert sorted(p.name for p in resolved.glob("*.py")) == ["mine.py"]
+        assert (target / "mine.py").read_text(encoding="utf-8") == _SAFE_CODE
+        assert (legacy / "legacy_only.py").exists()
+
+    @pytest.mark.unit
+    def test_migration_never_overwrites_a_same_named_workspace_file(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Even a target holding only runtime artefacts keeps its own entries."""
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+        (legacy / "logs").mkdir()
+        (legacy / "logs" / "ema.log").write_text("legacy run\n", encoding="utf-8")
+        logs = workspace / "strategies" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "ema.log").write_text("workspace run\n", encoding="utf-8")
+
+        mod.default_strategies_dir()
+
+        assert (logs / "ema.log").read_text(encoding="utf-8") == "workspace run\n"
+
+    @pytest.mark.unit
+    def test_runner_wiring_is_unblocked_end_to_end(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The runner's own boot sequence must not lock itself out.
+
+        First boot creates ``logs/``; the second boot is the one that would
+        have been blocked, so migrate on a legacy tree planted in between.
+        """
+        from flinttrade_engine.strategy_runner import UserStrategyRunner
+
+        workspace, legacy = _redirect_workspace(monkeypatch, tmp_path)
+
+        UserStrategyRunner(mod.default_strategies_dir())
+        assert (workspace / "strategies" / "logs").is_dir()
+
+        legacy.mkdir(parents=True)
+        (legacy / "ema.py").write_text(_VALID_STRATEGY, encoding="utf-8")
+
+        runner = UserStrategyRunner(mod.default_strategies_dir())
+
+        assert (runner._strategies_dir / "ema.py").exists()

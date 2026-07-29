@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from flinttrade_engine import qty_freeze
 from flinttrade_engine.qty_freeze import QuantityFreezeManager
 
 
@@ -266,3 +267,170 @@ def test_all_limits_returns_list(mgr: QuantityFreezeManager) -> None:
     symbols = [limit["symbol"] for limit in limits]
     assert "A" in symbols
     assert "B" in symbols
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution + one-shot legacy copy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestWorkspaceResolution:
+    """``qty_freeze.duckdb`` resolves under ``workspace_dir()``.
+
+    The copy is a safety requirement, not a convenience: an upgraded install
+    that found no store would reseed the well-known NSE defaults over the
+    operator's tuned limits, quietly widening the quantity a single order may
+    carry.
+    """
+
+    @staticmethod
+    def _default_workspace(monkeypatch, tmp_path: Path) -> Path:
+        """Make ``workspace_dir()`` resolve to a tmp dir with no env override.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+            tmp_path: Per-test temporary directory.
+
+        Returns:
+            The directory ``workspace_dir()`` will now return.
+        """
+        import flinttrade_core.workspace as ws
+
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        workspace = tmp_path / "workspace"
+        monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+        return workspace
+
+    @staticmethod
+    def _point_legacy_at(monkeypatch, legacy: Path) -> None:
+        """Redirect the legacy probe so it can never reach the real home dir."""
+        monkeypatch.setattr(qty_freeze, "_legacy_db_path", lambda: legacy)
+
+    def test_import_time_constant_is_gone(self) -> None:
+        """``_DEFAULT_DB_PATH`` froze the location before pytest could redirect it."""
+        assert not hasattr(qty_freeze, "_DEFAULT_DB_PATH")
+
+    def test_import_creates_no_directories(self, monkeypatch, tmp_path: Path) -> None:
+        """Re-importing the module must resolve nothing and touch no disk."""
+        import importlib
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        importlib.reload(qty_freeze)
+
+        assert not workspace.exists()
+
+    def test_fresh_install_resolves_under_workspace(self, monkeypatch, tmp_path: Path) -> None:
+        """No legacy store: the path is the workspace one and nothing is copied."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = qty_freeze._default_db_path()
+
+        assert resolved == workspace / "qty_freeze.duckdb"
+        assert not resolved.exists()
+
+    def test_legacy_only_is_copied_with_sidecar_and_retained(self, monkeypatch, tmp_path: Path) -> None:
+        """Legacy store present: it and its ``.wal`` sidecar travel across."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-limits")
+        legacy.with_name("qty_freeze.duckdb.wal").write_bytes(b"legacy-wal")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = qty_freeze._default_db_path()
+
+        assert resolved == workspace / "qty_freeze.duckdb"
+        assert resolved.read_bytes() == b"legacy-limits"
+        assert (workspace / "qty_freeze.duckdb.wal").read_bytes() == b"legacy-wal"
+        # Copy, not move — the legacy family stays behind as a backup.
+        assert legacy.exists()
+
+    def test_operator_tuned_limits_survive_the_upgrade(self, monkeypatch, tmp_path: Path) -> None:
+        """The whole point: a tuned limit must not be reseeded to the NSE default."""
+        self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        self._point_legacy_at(monkeypatch, legacy)
+
+        seeder = QuantityFreezeManager(db_path=legacy)
+        seeder.set_limit("NIFTY", "NFO", 600)
+        seeder.close()
+
+        migrated = QuantityFreezeManager()
+        try:
+            assert migrated.get_limit("NIFTY", "NFO") == 600
+        finally:
+            migrated.close()
+
+    def test_existing_workspace_store_is_never_clobbered(self, monkeypatch, tmp_path: Path) -> None:
+        """Both present: the workspace store wins and is left byte-identical."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-limits")
+        self._point_legacy_at(monkeypatch, legacy)
+        workspace.mkdir(parents=True)
+        (workspace / "qty_freeze.duckdb").write_bytes(b"already-here")
+
+        resolved = qty_freeze._default_db_path()
+
+        assert resolved.read_bytes() == b"already-here"
+        assert legacy.exists()
+
+    def test_migration_lock_lands_inside_the_workspace(self, monkeypatch, tmp_path: Path) -> None:
+        """A root-level target must not drop its lock in the parent of the workspace."""
+        import flinttrade_core.workspace as ws
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-limits")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        seen: list[Path] = []
+        real_lock = ws.FileLock
+
+        def _recording_lock(path, *args, **kwargs):  # noqa: ANN001, ANN202
+            seen.append(Path(path))
+            return real_lock(path, *args, **kwargs)
+
+        monkeypatch.setattr(ws, "FileLock", _recording_lock)
+        qty_freeze._default_db_path()
+
+        assert seen == [workspace / ".qty-freeze-migration.lock"]
+
+    def test_environment_override_keeps_the_probe_inert(self, monkeypatch, tmp_path: Path) -> None:
+        """``FLINTTRADE_WORKSPACE_DIR`` set: no copy, and the path follows the override."""
+        override = tmp_path / "override"
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-limits")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = qty_freeze._default_db_path()
+
+        assert resolved == override.resolve() / "qty_freeze.duckdb"
+        assert not resolved.exists()
+
+    def test_explicit_db_path_skips_the_probe(self, monkeypatch, tmp_path: Path) -> None:
+        """An explicit ``db_path`` opens exactly that file and never migrates."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "qty_freeze.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-limits")
+        self._point_legacy_at(monkeypatch, legacy)
+        explicit = tmp_path / "explicit" / "freeze.duckdb"
+
+        instance = QuantityFreezeManager(db_path=explicit)
+        try:
+            assert instance._db_path == explicit
+            assert explicit.exists()
+        finally:
+            instance.close()
+        assert not (workspace / "qty_freeze.duckdb").exists()

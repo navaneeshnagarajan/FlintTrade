@@ -3553,9 +3553,10 @@ def create_flask_app(
         dispatch_action_center_approval,
     )
 
-    pending_order_queue = PendingOrderQueue(
-        _workspace_dir() / "action_center.duckdb"
-    )
+    # No explicit path: the queue's own resolver lands on the same workspace
+    # file and additionally runs the one-shot legacy-database migration, which
+    # an explicit path deliberately skips.
+    pending_order_queue = PendingOrderQueue()
     app.config["PENDING_ORDER_QUEUE"] = pending_order_queue
     app.config["ACTION_CENTER_AUTHORISER"] = authorise_action_center_request
     app.config["ACTION_CENTER_APPROVAL_DISPATCHER"] = dispatch_action_center_approval
@@ -3633,12 +3634,17 @@ def create_flask_app(
     # is registered outside the try so a failed store construction genuinely
     # yields the routes' 503 branch (never 404s); construction stays
     # best-effort — a storage failure never blocks boot.
+    #
+    # Construct with NO base_dir on purpose: the store's own resolver is what
+    # runs the copy-once ``~/.flinttrade/flows`` migration, and passing an
+    # explicit directory (as this call used to) skipped it, leaving the
+    # migration dead in the only production construction there is.
     from flinttrade_webhooks.flow_routes import flows_bp, init_flow_routes  # noqa: PLC0415
 
     try:
         from flinttrade_webhooks.flow_store import FlowFileStore  # noqa: PLC0415
 
-        _flow_store = FlowFileStore(_workspace_dir() / "flows")
+        _flow_store = FlowFileStore()
         app.config["FLOW_STORE"] = _flow_store
         init_flow_routes(_flow_store)
     except Exception:  # defensive: never let the flow store break boot
@@ -3719,11 +3725,18 @@ def create_flask_app(
     # configured" (feature audit H1/M13). Construction is side-effect-light: the
     # runner only creates its own dirs, and CronStrategyScheduler does not start
     # APScheduler until .start() is called.
+    # The directory comes from ``default_strategies_dir()`` rather than being
+    # rebuilt here: that resolver is where the copy-once
+    # ``~/.flinttrade/strategies`` migration lives, and this is the only place
+    # a running backend resolves the strategies directory, so open-coding
+    # ``_workspace_dir() / "strategies"`` (as this call used to) left the
+    # migration unreachable in production.
     if "STRATEGY_RUNNER" not in app.config:
         try:
+            from flinttrade_engine.strategy_hot_reload import default_strategies_dir  # noqa: PLC0415
             from flinttrade_engine.strategy_runner import UserStrategyRunner  # noqa: PLC0415
 
-            app.config["STRATEGY_RUNNER"] = UserStrategyRunner(_workspace_dir() / "strategies")
+            app.config["STRATEGY_RUNNER"] = UserStrategyRunner(default_strategies_dir())
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
                 "Strategy runner wiring failed (%s); /strategies writes will 503",

@@ -28,27 +28,81 @@ shortcuts_bp = Blueprint("shortcuts", __name__, url_prefix="/v1/shortcuts")
 # DuckDB storage
 # ---------------------------------------------------------------------------
 
-_DB_PATH = Path.home() / ".flinttrade" / "shortcuts.duckdb"
-
 # Module-level connection — created lazily so tests can override the path.
 _conn: Any = None
 
 
-def _get_conn(db_path: Path | None = None) -> Any:
+def _legacy_db_path() -> Path:
+    """Return the pre-``workspace_dir()`` shortcut store location.
+
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
+
+    Returns:
+        ``<legacy dot-directory>/shortcuts.duckdb`` — the fixed
+        ``~/.flinttrade`` root every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "shortcuts.duckdb"
+
+
+def _default_db_path() -> Path:
+    """Resolve the shortcut store under the active workspace, migrating once.
+
+    Replaces the former import-time ``_DB_PATH`` constant, which froze the
+    location before pytest or a Gunicorn preload+fork could set
+    ``FLINTTRADE_WORKSPACE_DIR``. When no environment override is in force, a
+    pre-workspace ``~/.flinttrade/shortcuts.duckdb`` is copied into the
+    workspace once — together with its DuckDB ``.wal`` sidecar — so upgraded
+    macOS and Windows installs keep their customised keybindings instead of
+    silently reverting to defaults. Copy, never move: the legacy family is
+    retained as a backup and an existing workspace copy always wins.
+
+    Returns:
+        Absolute path of ``shortcuts.duckdb`` inside the workspace directory.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy store is retained.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_database_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "shortcuts.duckdb"
+    if default_workspace_active():
+        copy_legacy_database_once(
+            _legacy_db_path(),
+            target,
+            sidecar_suffixes=(".wal",),
+            lock_name=".shortcuts-migration.lock",
+            lock_dir=target.parent,
+            label="keyboard shortcuts store",
+        )
+    return target
+
+
+def _get_conn(db_path: Path | str | None = None) -> Any:
     """Return (and lazily initialise) the DuckDB connection.
 
     Args:
-        db_path: Override the default DB path. Used in tests.
+        db_path: Override the store location. Used in tests. When ``None`` the
+            workspace-scoped default is resolved at call time, which may
+            perform the one-shot legacy copy.
 
     Returns:
-        A live DuckDB connection with the ``shortcuts`` table created.
+        A live DuckDB connection with the ``shortcuts`` table created, or
+        ``None`` when DuckDB is not installed.
     """
     global _conn  # noqa: PLW0603
-    path = db_path or _DB_PATH
     if _conn is None:
         try:
             import duckdb  # noqa: PLC0415
 
+            path = Path(db_path) if db_path is not None else _default_db_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             _conn = duckdb.connect(str(path))
             _conn.execute(

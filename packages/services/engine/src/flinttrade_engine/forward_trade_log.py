@@ -5,7 +5,9 @@ Simple, append-only, easy to inspect and debug.
 
 Usage::
 
-    log = ForwardTradeLog(log_dir=Path("~/.flinttrade/forward_trades"))
+    from flinttrade_core.workspace import workspace_dir
+
+    log = ForwardTradeLog(log_dir=workspace_dir() / "forward_trades")
     log.log_trade("abc-123", {
         "symbol": "RELIANCE",
         "exchange": "NSE",

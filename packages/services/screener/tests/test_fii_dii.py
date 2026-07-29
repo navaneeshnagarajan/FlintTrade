@@ -5,7 +5,11 @@ All tests use synthetic data or in-memory DuckDB — no NSE API calls.
 
 from __future__ import annotations
 
+from pathlib import Path
 
+import pytest
+
+from flinttrade_screener import fii_dii
 from flinttrade_screener.fii_dii import (
     FiiDiiSnapshot,
     FiiDiiTracker,
@@ -345,3 +349,127 @@ class TestFiiLongShort:
 
         payload = compute_fii_long_short(make_sample_fii_dii()).to_dict()
         assert json.loads(json.dumps(payload))["segments"][0]["segment"] == "index_futures"
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution + one-shot legacy copy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestWorkspaceResolution:
+    """``fii_dii.duckdb`` resolves under ``workspace_dir()/data``.
+
+    This was the one genuinely unmigrated live default: the constructor built
+    a hardcoded ``~/.flinttrade/data`` path, so every upgraded macOS/Windows
+    install silently started from an empty flow cache. Mirrors the sibling
+    migration in ``flinttrade_historical.expiry_tracker``.
+    """
+
+    @staticmethod
+    def _default_workspace(monkeypatch, tmp_path: Path) -> Path:
+        """Make ``workspace_dir()`` resolve to a tmp dir with no env override.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+            tmp_path: Per-test temporary directory.
+
+        Returns:
+            The directory ``workspace_dir()`` will now return.
+        """
+        import flinttrade_core.workspace as ws
+
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        workspace = tmp_path / "workspace"
+        monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+        return workspace
+
+    @staticmethod
+    def _point_legacy_at(monkeypatch, legacy: Path) -> None:
+        """Redirect the legacy probe so it can never reach the real home dir."""
+        monkeypatch.setattr(fii_dii, "_legacy_db_path", lambda: legacy)
+
+    def test_fresh_install_resolves_under_workspace(self, monkeypatch, tmp_path):
+        """No legacy cache: the path is the workspace one and nothing is copied."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = fii_dii._default_db_path()
+
+        assert resolved == workspace / "data" / "fii_dii.duckdb"
+        assert not resolved.exists()
+
+    def test_legacy_only_is_copied_with_sidecar_and_retained(self, monkeypatch, tmp_path):
+        """Legacy cache present: it and its ``.wal`` sidecar travel across."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-flows")
+        legacy.with_name("fii_dii.duckdb.wal").write_bytes(b"legacy-wal")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = fii_dii._default_db_path()
+
+        assert resolved == workspace / "data" / "fii_dii.duckdb"
+        assert resolved.read_bytes() == b"legacy-flows"
+        assert (workspace / "data" / "fii_dii.duckdb.wal").read_bytes() == b"legacy-wal"
+        # Copy, not move — the legacy family stays behind as a backup.
+        assert legacy.exists()
+
+    def test_existing_workspace_cache_is_never_clobbered(self, monkeypatch, tmp_path):
+        """Both present: the workspace cache wins and is left byte-identical."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-flows")
+        self._point_legacy_at(monkeypatch, legacy)
+        (workspace / "data").mkdir(parents=True)
+        (workspace / "data" / "fii_dii.duckdb").write_bytes(b"already-here")
+
+        resolved = fii_dii._default_db_path()
+
+        assert resolved.read_bytes() == b"already-here"
+        assert legacy.exists()
+
+    def test_environment_override_keeps_the_probe_inert(self, monkeypatch, tmp_path):
+        """``FLINTTRADE_WORKSPACE_DIR`` set: no copy, and the path follows the override."""
+        override = tmp_path / "override"
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-flows")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        resolved = fii_dii._default_db_path()
+
+        assert resolved == override.resolve() / "data" / "fii_dii.duckdb"
+        assert not resolved.exists()
+
+    def test_no_argument_constructor_uses_the_workspace_path(self, monkeypatch, tmp_path):
+        """``FiiDiiTracker()`` resolves at call time, not at import time."""
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        self._point_legacy_at(monkeypatch, legacy)
+
+        tracker = FiiDiiTracker()
+        try:
+            assert tracker._db_path == str(workspace / "data" / "fii_dii.duckdb")
+        finally:
+            tracker.close()
+
+    def test_explicit_db_path_skips_the_probe(self, monkeypatch, tmp_path):
+        """An explicit ``db_path`` is used verbatim and never migrates."""
+        self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "data" / "fii_dii.duckdb"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-flows")
+        self._point_legacy_at(monkeypatch, legacy)
+
+        tracker = FiiDiiTracker(db_path=":memory:")
+        try:
+            assert tracker._db_path == ":memory:"
+        finally:
+            tracker.close()

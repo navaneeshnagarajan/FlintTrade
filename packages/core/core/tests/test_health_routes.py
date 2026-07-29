@@ -100,7 +100,7 @@ class TestHealthSimple:
         import flinttrade_core.health_routes as _mod
 
         report = _make_report("healthy")
-        with patch.object(_mod._monitor, "check_all", return_value=report):
+        with patch.object(_mod.get_health_monitor(), "check_all", return_value=report):
             resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -116,7 +116,7 @@ class TestHealthSimple:
         import flinttrade_core.health_routes as _mod
 
         report = _make_report("degraded")
-        with patch.object(_mod._monitor, "check_all", return_value=report):
+        with patch.object(_mod.get_health_monitor(), "check_all", return_value=report):
             resp = client.get("/health")
         assert resp.status_code == 503
         assert resp.get_json()["status"] == "degraded"
@@ -137,7 +137,7 @@ class TestHealthDetail:
         import flinttrade_core.health_routes as _mod
 
         report = _make_report("healthy")
-        with patch.object(_mod._monitor, "check_all", return_value=report):
+        with patch.object(_mod.get_health_monitor(), "check_all", return_value=report):
             resp = client.get("/health/detail")
         assert resp.status_code == 200
         data = resp.get_json()
@@ -152,7 +152,7 @@ class TestHealthDetail:
         import flinttrade_core.health_routes as _mod
 
         report = _make_report("unhealthy")
-        with patch.object(_mod._monitor, "check_all", return_value=report):
+        with patch.object(_mod.get_health_monitor(), "check_all", return_value=report):
             resp = client.get("/health/detail")
         assert resp.status_code == 503
 
@@ -191,8 +191,8 @@ class TestReadyz:
         mem = _make_check("healthy", "memory")
         disk = _make_check("healthy", "disk")
         with (
-            patch.object(_mod._monitor, "check_memory", return_value=mem),
-            patch.object(_mod._monitor, "check_disk", return_value=disk),
+            patch.object(_mod.get_health_monitor(), "check_memory", return_value=mem),
+            patch.object(_mod.get_health_monitor(), "check_disk", return_value=disk),
         ):
             resp = client.get("/readyz")
         assert resp.status_code == 200
@@ -209,8 +209,8 @@ class TestReadyz:
         mem = _make_check("unhealthy", "memory")
         disk = _make_check("healthy", "disk")
         with (
-            patch.object(_mod._monitor, "check_memory", return_value=mem),
-            patch.object(_mod._monitor, "check_disk", return_value=disk),
+            patch.object(_mod.get_health_monitor(), "check_memory", return_value=mem),
+            patch.object(_mod.get_health_monitor(), "check_disk", return_value=disk),
         ):
             resp = client.get("/readyz")
         assert resp.status_code == 503
@@ -266,3 +266,82 @@ class TestHealthAggregated:
         assert "broker" in data
         assert "disk" in data
         assert "memory" in data
+
+
+# ---------------------------------------------------------------------------
+# Lazy singletons (workspace path unification, wave 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def fresh_singletons():
+    """Drop the module singletons before and after the test.
+
+    The monitor caches its disk-probe directory for its lifetime, so a test
+    that changes ``FLINTTRADE_WORKSPACE_DIR`` must start from a clean slate
+    and must not leave an instance pinned to a deleted ``tmp_path`` behind
+    for whichever test the randomised order runs next.
+
+    Yields:
+        The imported ``flinttrade_core.health_routes`` module.
+    """
+    import flinttrade_core.health_routes as _mod
+
+    _mod.reset_health_singletons_for_tests()
+    try:
+        yield _mod
+    finally:
+        _mod.reset_health_singletons_for_tests()
+
+
+class TestLazySingletons:
+    @pytest.mark.unit
+    def test_singletons_are_not_built_until_first_use(self, fresh_singletons):
+        """Nothing is constructed until a getter is called."""
+        assert fresh_singletons._monitor is None
+        assert fresh_singletons._health_agg is None
+
+        fresh_singletons.get_health_monitor()
+        fresh_singletons.get_health_aggregator()
+
+        assert fresh_singletons._monitor is not None
+        assert fresh_singletons._health_agg is not None
+
+    @pytest.mark.unit
+    def test_getters_return_the_same_instance(self, fresh_singletons):
+        """Repeated getter calls hand back one shared instance."""
+        assert fresh_singletons.get_health_monitor() is fresh_singletons.get_health_monitor()
+        assert fresh_singletons.get_health_aggregator() is fresh_singletons.get_health_aggregator()
+
+    @pytest.mark.unit
+    def test_monitor_honours_a_workspace_override_set_after_import(
+        self, tmp_path, monkeypatch, fresh_singletons
+    ):
+        """The monitor probes the workspace active at first use, not at import.
+
+        This is the regression test for the import-time
+        ``_monitor = HealthMonitor()`` singleton: it froze the workspace that
+        happened to be active while the blueprint module was being imported.
+        """
+        workspace = tmp_path / "ws"
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+
+        check = fresh_singletons.get_health_monitor().check_disk()
+
+        probed = [d["path"] for d in check.metrics["directories"]]
+        assert probed == [str(workspace.resolve())]
+
+    @pytest.mark.unit
+    def test_init_health_monitor_replaces_the_lazy_singleton(self, fresh_singletons):
+        """Injected instances still win over the lazily built one."""
+        injected = MagicMock()
+        fresh_singletons.init_health_monitor(injected)
+        assert fresh_singletons.get_health_monitor() is injected
+
+    @pytest.mark.unit
+    def test_init_health_aggregator_replaces_the_lazy_singleton(self, fresh_singletons):
+        """Injected aggregators still win over the lazily built one."""
+        injected = MagicMock()
+        fresh_singletons.init_health_aggregator(injected)
+        assert fresh_singletons.get_health_aggregator() is injected

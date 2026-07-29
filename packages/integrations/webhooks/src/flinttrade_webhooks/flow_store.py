@@ -38,14 +38,55 @@ class FlowStoreError(ValueError):
     """Raised when a flow id or payload is rejected by the store."""
 
 
-def _default_flows_dir() -> Path:
-    """Resolve the flows directory: workspace dir > home fallback."""
-    try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
+def _legacy_flows_dir() -> Path:
+    """Return the pre-``workspace_dir()`` flows directory.
 
-        return Workspace().workspace_dir / "flows"
-    except Exception:  # noqa: BLE001 — fall back to the conventional home path
-        return Path.home() / ".flinttrade" / "flows"
+    Module-level so tests can monkeypatch the probe away from the real home
+    directory.
+
+    Returns:
+        ``<legacy dot-directory>/flows`` — the fixed ``~/.flinttrade`` root
+        every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "flows"
+
+
+def _default_flows_dir() -> Path:
+    """Resolve the flows directory under the active workspace.
+
+    Copies a pre-workspace ``~/.flinttrade/flows`` tree into the workspace
+    once, only when no environment override is in force and the workspace
+    holds no flows of its own. The legacy tree is retained; user-authored
+    flows are never merged or overwritten, so an install that already has
+    workspace flows silently keeps them.
+
+    There is deliberately no home-directory fallback: a ``flinttrade_core``
+    that cannot be imported is a broken install, and swallowing that would
+    write the operator's flows to a second, invisible directory the
+    uninstaller cannot purge. ``create_flask_app`` already degrades a failed
+    store construction to the routes' 503 branch.
+
+    Returns:
+        The ``flows`` directory inside the active workspace directory.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_directory_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "flows"
+    if default_workspace_active():
+        copy_legacy_directory_once(
+            _legacy_flows_dir(),
+            target,
+            lock_name=".flows-directory-migration.lock",
+            label="FlowBuilder flows",
+            lock_dir=target.parent,
+        )
+    return target
 
 
 class FlowFileStore:
@@ -53,11 +94,12 @@ class FlowFileStore:
 
     Args:
         base_dir: Directory holding the ``<id>.json`` files. Defaults to
-            ``flows/`` under the FlintTrade workspace.
+            ``flows/`` under the FlintTrade workspace, resolved at
+            construction time (never at import time).
 
     Example::
 
-        store = FlowFileStore(Path("~/.flinttrade/flows").expanduser())
+        store = FlowFileStore()  # <workspace_dir>/flows
         saved = store.save_flow("flow_1", {"id": "flow_1", "name": "My flow",
                                            "nodes": [], "edges": [],
                                            "updatedAt": "2026-07-20T09:00:00Z"})
@@ -65,6 +107,12 @@ class FlowFileStore:
     """
 
     def __init__(self, base_dir: str | Path | None = None) -> None:
+        """Bind the store to a flows directory, resolving the default lazily.
+
+        Args:
+            base_dir: Explicit directory to use. When given, the workspace
+                resolver and its legacy-migration probe are both skipped.
+        """
         self._base_dir = Path(base_dir) if base_dir is not None else _default_flows_dir()
 
     @property

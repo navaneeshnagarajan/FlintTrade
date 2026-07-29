@@ -511,13 +511,52 @@ def _iso_to_ts(iso: str) -> float:
     return datetime.fromisoformat(iso).timestamp()
 
 
-def _default_db_path() -> Path:
-    """Return the default DuckDB path under ``~/.flinttrade/``.
+def _legacy_db_path() -> Path:
+    """Return the pre-workspace location of the approval queue database.
+
+    Module-level so tests can monkeypatch the probe away from the real home
+    directory.
 
     Returns:
-        Absolute :class:`~pathlib.Path` to ``action_center.duckdb``.
+        ``<legacy dot-directory>/action_center.duckdb`` — the fixed
+        pre-workspace root every install used, on every OS.
     """
-    return Path.home() / ".flinttrade" / "action_center.duckdb"
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "action_center.duckdb"
+
+
+def _default_db_path() -> Path:
+    """Resolve the approval queue database under the active workspace.
+
+    Copies a pre-workspace database into the workspace once, only when no
+    environment override is in force and the workspace has no database of its
+    own. The legacy file is retained. Contents are never merged: an approval
+    row that existed twice would be dispatched twice, so a workspace database
+    that already exists always wins silently and the legacy copy is left
+    alone.
+
+    Returns:
+        Absolute :class:`~pathlib.Path` to ``action_center.duckdb`` inside the
+        active workspace directory.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_database_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "action_center.duckdb"
+    if default_workspace_active():
+        copy_legacy_database_once(
+            _legacy_db_path(),
+            target,
+            sidecar_suffixes=(".wal",),
+            lock_name=".action-center-migration.lock",
+            label="pending order approval queue",
+            lock_dir=target.parent,
+        )
+    return target
 
 
 class PendingOrderQueue:
@@ -529,7 +568,9 @@ class PendingOrderQueue:
 
     Args:
         db_path: Path to the DuckDB database file.  Defaults to
-            ``~/.flinttrade/action_center.duckdb``.
+            ``action_center.duckdb`` under the active FlintTrade workspace
+            directory, resolved at construction time (never at import time).
+            Passing an explicit path skips the legacy-migration probe.
 
     Example:
         >>> queue = PendingOrderQueue()
@@ -596,7 +637,7 @@ class PendingOrderQueue:
     )
 
     def __init__(self, db_path: Path | str | None = None) -> None:
-        self._db_path = Path(db_path) if db_path else _default_db_path()
+        self._db_path = Path(db_path) if db_path is not None else _default_db_path()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = self._connect()

@@ -47,6 +47,21 @@ _FD_WARN_FRACTION: float = 0.80
 _THREAD_GROWTH_WARN: int = 50
 
 
+def _default_data_dir() -> Path:
+    """Resolve the default disk-probe directory under the active workspace.
+
+    Read-only probe target — no legacy migration is attempted, and the
+    path is resolved at call time so environment overrides set after
+    import (pytest workers, Gunicorn preload+fork) are honoured.
+
+    Returns:
+        The active workspace directory.
+    """
+    from flinttrade_core.workspace import workspace_dir
+
+    return workspace_dir()
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -145,7 +160,9 @@ class HealthMonitor:
         ws_host: WebSocket host to probe (default ``"127.0.0.1"``).
         ws_port: WebSocket port to probe (default ``8765``).
         data_dirs: Directories to check for free disk space.  Defaults to
-            ``~/.flinttrade``.  Pass additional log/data dirs as needed.
+            the active workspace directory (resolved at construction via
+            :func:`flinttrade_core.workspace.workspace_dir`).  Pass
+            additional log/data dirs as needed.
         duckdb_paths: List of DuckDB file paths to verify readability.
         cache: Optional dict-like cache instance that exposes ``keys()``.
 
@@ -170,7 +187,7 @@ class HealthMonitor:
         self._data_dirs: list[Path] = (
             [Path(d) for d in data_dirs]
             if data_dirs
-            else [Path.home() / ".flinttrade"]
+            else [_default_data_dir()]
         )
         self._duckdb_paths: list[Path] = (
             [Path(p) for p in duckdb_paths] if duckdb_paths else []

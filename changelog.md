@@ -15,6 +15,51 @@ release-please regenerates the sections below from Conventional Commits, so the
 changelog rebuilds itself from the first release cut after this baseline.
 -->
 
+## [Unreleased]
+
+### Fixed
+
+- **Workspace path unification.** Nineteen modules resolved their own storage as
+  the literal `~/.flinttrade` instead of asking `flinttrade_core.workspace`. On
+  Linux that happens to be the workspace, so it never failed in CI; on macOS
+  (`~/Library/Application Support/flinttrade`) and Windows (`%APPDATA%\flinttrade`)
+  every one of them wrote to a second, invisible directory that the rest of the
+  app did not read and the uninstaller could not find. Affected state included
+  the TOTP secret store and its install key, the trade journal and its
+  screenshots, saved presets, keyboard shortcuts, quantity-freeze limits, the
+  pending-order approval queue, the watchlist, expiry and FII/DII stores, and the
+  operator's own FlowBuilder flows, trained signal models and strategy files.
+
+  Every module now resolves its path inside a function body at call time, so
+  `FLINTTRADE_WORKSPACE_DIR` and `FLINTTRADE_HOME` are honoured on every
+  construction rather than frozen at import. On a default install each artefact
+  is **copied** into the platform workspace once, under a cross-process lock; the
+  pre-workspace original is left untouched, so the upgrade is reversible. Where a
+  workspace copy already exists it wins and no merge is attempted — an
+  approval-queue merge could dispatch the same order twice. The TOTP store and
+  its install key move as one unit, verified by a decrypt round-trip before the
+  legacy pair is trusted, and the trade journal moves with its screenshot
+  directory or not at all. Migration probes are skipped entirely when a workspace
+  environment override is in force.
+
+- Both uninstallers now enumerate every pre-workspace dropping written directly
+  at `~/.flinttrade/<name>` — flows, models, strategies, journal screenshots,
+  presets, the TOTP pair and the remaining stores — as named `--purge`/`-Purge`
+  candidates. They were deleted before, but only as part of the managed root, so
+  the confirmation list never mentioned the operator's own strategy code.
+
+- `FlowBuilder` and the trade journal no longer fall back to a home-directory
+  path when `flinttrade_core` cannot be imported. A broken install now fails
+  loudly and the affected routes degrade to 503, instead of silently opening an
+  empty shadow store.
+
+### Changed
+
+- The traffic and latency observability logs (`traffic_log.duckdb`,
+  `latency_log.duckdb`) are not migrated: they are disposable, and both were
+  already workspace-routed in production. On macOS and Windows their history
+  restarts from empty.
+
 ## [0.0.1] — 2026-07-23
 
 Clean-slate baseline. Pre-1.0, pre-usable, and marked as a pre-release: anything

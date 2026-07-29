@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 class ModernOptionChainClient:
     def __init__(self, response):
@@ -639,3 +641,36 @@ class TestDefaultDbPathMigration:
             assert tracker.list_expiries("NIFTY") == ["2026-03-26"]
         finally:
             tracker.close()
+
+    @pytest.mark.unit
+    def test_default_path_migrates_the_duckdb_wal_sidecar(self, monkeypatch, tmp_path):
+        """The DuckDB ``.wal`` sidecar travels with the DB.
+
+        The previous private ``shutil.copy2`` migration copied the DB file
+        alone, so any uncheckpointed writes still sitting in the write-ahead
+        log were silently dropped on first macOS/Windows boot. Resolution now
+        goes through the shared workspace copy machinery, which moves the
+        whole family.
+        """
+        import flinttrade_historical.expiry_tracker as et
+
+        legacy_home = tmp_path / "legacy-home" / ".flinttrade" / "data"
+        workspace = tmp_path / "workspace"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+        monkeypatch.setattr(
+            et, "_legacy_db_path", lambda: legacy_home / "expiry_tracker.duckdb"
+        )
+
+        legacy_home.mkdir(parents=True)
+        self._seed(legacy_home / "expiry_tracker.duckdb", "260326")
+        (legacy_home / "expiry_tracker.duckdb.wal").write_bytes(b"legacy-wal-bytes")
+
+        # Resolve without opening: a synthetic WAL is not replayable by DuckDB.
+        resolved = et._default_db_path()
+
+        assert resolved == workspace / "data" / "expiry_tracker.duckdb"
+        assert resolved.exists()
+        assert (workspace / "data" / "expiry_tracker.duckdb.wal").read_bytes() == b"legacy-wal-bytes"
+        # Copy, not move — the whole legacy family stays behind as a backup.
+        assert (legacy_home / "expiry_tracker.duckdb").exists()
+        assert (legacy_home / "expiry_tracker.duckdb.wal").exists()

@@ -46,6 +46,31 @@ $LegacyDataDir = Join-Path $ManagedRoot "data"
 $LegacyArchiveDir = Join-Path $ManagedRoot "archive"
 $LegacySandboxDir = Join-Path $ManagedRoot "sandbox"
 $LegacyDittoVault = Join-Path $LegacyDataDir "ditto_credentials.db"
+# Pre-workspace droppings written DIRECTLY at .flinttrade\<name> by the modules the
+# workspace path-unification wave re-pointed at the resolver. Windows is the worst
+# case: the real workspace is %APPDATA%\flinttrade, so everything here is a full
+# second copy of state the backend now reads from somewhere else - the TOTP secret
+# store and its install key, the trade journal and its screenshots, and the
+# operator's own flows, models and strategy files.
+#
+# $ManagedRoot below would delete them all transitively, but only by never naming
+# them. Enumerating each one is what makes the confirmation list honest: nobody
+# should confirm an irreversible purge of their own strategy code from a list that
+# does not mention it.
+$LegacyFlowsDir = Join-Path $ManagedRoot "flows"
+$LegacyModelsDir = Join-Path $ManagedRoot "models"
+$LegacyStrategiesDir = Join-Path $ManagedRoot "strategies"
+$LegacyScreenshotsDir = Join-Path $ManagedRoot "journal_screenshots"
+$LegacyTotpDb = Join-Path $ManagedRoot "totp_auth.duckdb"
+$LegacyTotpInstallKey = Join-Path $ManagedRoot "totp_install_key"
+$LegacyJournalDb = Join-Path $ManagedRoot "journal.sqlite"
+$LegacyShortcutsDb = Join-Path $ManagedRoot "shortcuts.duckdb"
+$LegacyQtyFreezeDb = Join-Path $ManagedRoot "qty_freeze.duckdb"
+$LegacyActionCenterDb = Join-Path $ManagedRoot "action_center.duckdb"
+$LegacyWatchlistDb = Join-Path $ManagedRoot "watchlist.db"
+$LegacyPresetsFile = Join-Path $ManagedRoot "presets.json"
+$LegacyLatencyDb = Join-Path $ManagedRoot "latency_log.duckdb"
+$LegacyTrafficDb = Join-Path $ManagedRoot "traffic_log.duckdb"
 # The one-line web installer records everything it writes outside the managed
 # root here (flinttrade-web-install.ps1). Without it the launcher shim and its
 # Start Menu shortcut were orphaned residue. The web launcher now lives in its
@@ -860,13 +885,28 @@ function Get-DataTargets {
         $LegacyArchiveDir,
         $LegacySandboxDir,
         $LegacyDittoVault,
-        # The managed root itself, after the specific subtrees above so the
-        # printed list still names them explicitly. Around nineteen modules
-        # write DIRECTLY at .flinttrade\<name> on Windows - totp_auth.duckdb,
-        # totp_install_key, shortcuts.duckdb, journal.sqlite, qty_freeze.duckdb,
-        # action_center.duckdb, watchlist.db, flows\ and strategies\ among them -
-        # so enumerating only the subdirectories left TOTP secrets and realised
-        # P&L state behind while claiming everything had been purged.
+        # Every root-level dropping, named individually. Each is retained by the
+        # copy-once workspace migration, so on an upgraded install it is a live
+        # second copy of real trading state, not residue.
+        $LegacyFlowsDir,
+        $LegacyModelsDir,
+        $LegacyStrategiesDir,
+        $LegacyScreenshotsDir,
+        $LegacyTotpDb,
+        $LegacyTotpInstallKey,
+        $LegacyJournalDb,
+        $LegacyShortcutsDb,
+        $LegacyQtyFreezeDb,
+        $LegacyActionCenterDb,
+        $LegacyWatchlistDb,
+        $LegacyPresetsFile,
+        $LegacyLatencyDb,
+        $LegacyTrafficDb,
+        # The managed root itself, after the specific paths above so the printed
+        # list still names them explicitly. Around nineteen modules wrote
+        # DIRECTLY at .flinttrade\<name> on Windows, so enumerating only the
+        # subdirectories left TOTP secrets and realised P&L state behind while
+        # claiming everything had been purged.
         $ManagedRoot,
         (Join-Path $RoamingAppDataRoot $LegacyBundleId),
         (Join-Path $LocalAppDataRoot $LegacyBundleId)
@@ -959,9 +999,10 @@ if ($Purge) {
         Say "and legacy desktop data listed below:"
         $purgeTargets | ForEach-Object { Say "  $_" }
         Say ".flinttrade itself also holds files written directly at its top level - the TOTP"
-        Say "secret store and install key, shortcuts, the trade journal, quantity-freeze and"
-        Say "action-centre stores, the watchlist, flows\ and strategies\ - so purging it is real"
-        Say "trading state, not just the subdirectories named above."
+        Say "secret store and install key, shortcuts, the trade journal and its screenshots,"
+        Say "quantity-freeze and action-centre stores, the watchlist, saved presets, and your own"
+        Say "flows\, models\ and strategies\ - so purging it is real trading state, not just the"
+        Say "subdirectories named above."
         Say "Any .flinttrade\data, .flinttrade\archive or .flinttrade\sandbox path above is"
         Say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
         Say "audit chain and the encrypted broker-credential vault live there."
@@ -991,10 +1032,11 @@ if ($Purge) {
     Say "The following FlintTrade data was kept:"
     $dataTargets | ForEach-Object { Say "  $_" }
     Say "This includes the workspace, Electron profile, managed source/tools, the source-build"
-    Say "checkout, the whole .flinttrade managed root (its top-level TOTP, journal, shortcuts,"
-    Say "quantity-freeze, action-centre, watchlist, flows and strategies state included), any"
-    Say "pre-workspace .flinttrade data/archive/sandbox storage (including the encrypted"
-    Say "broker-credential vault) and any legacy desktop storage."
+    Say "checkout, the whole .flinttrade managed root (its top-level TOTP, journal and"
+    Say "screenshots, shortcuts, quantity-freeze, action-centre, watchlist, presets, flows,"
+    Say "models and strategies state included), any pre-workspace .flinttrade"
+    Say "data/archive/sandbox storage (including the encrypted broker-credential vault) and any"
+    Say "legacy desktop storage."
     Say "To delete it too, re-run with -Purge and confirm explicitly."
 }
 

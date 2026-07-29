@@ -227,8 +227,18 @@ def _normalise_scheduled_instruments(
 
 
 def _legacy_state_dir() -> Path:
-    """Pre-workspace_dir() state directory (a fixed ``~/.flinttrade`` on every OS)."""
-    return Path.home() / ".flinttrade"
+    """Return the pre-``workspace_dir()`` state directory.
+
+    Module-level so tests can monkeypatch the probe away from the real home
+    directory.
+
+    Returns:
+        The fixed ``~/.flinttrade`` root every pre-workspace install used, on
+        every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir()
 
 
 def _migrate_legacy_model_file(legacy: Path, new: Path) -> None:

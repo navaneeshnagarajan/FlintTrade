@@ -54,6 +54,24 @@ DEFAULT_MAX_ROWS = 200_000
 _PRUNE_EVERY_WRITES = 512
 
 
+def _default_db_path() -> Path:
+    """Resolve the traffic-log database path under the active workspace.
+
+    No legacy migration is attempted: the traffic log is disposable
+    observability data and production never relies on this default
+    (``create_flask_app`` and the infra routes both pass an explicit
+    workspace-resolved path). Resolved at call time so environment
+    overrides set after import — pytest workers, Gunicorn preload+fork —
+    are honoured.
+
+    Returns:
+        Absolute path of ``traffic_log.duckdb`` inside the workspace directory.
+    """
+    from flinttrade_core.workspace import workspace_dir
+
+    return workspace_dir() / "traffic_log.duckdb"
+
+
 def _workspace_retention_overrides() -> dict[str, int]:
     """Read traffic-log retention overrides from ``workspace.json`` (best effort).
 
@@ -134,8 +152,11 @@ class TrafficLogger:
 
     Args:
         db_path: Path to the DuckDB file.  Defaults to
-            ``~/.flinttrade/traffic_log.duckdb``.  Pass ``":memory:"``
-            for ephemeral in-process storage (useful in tests).
+            ``traffic_log.duckdb`` inside the active workspace directory
+            (resolved at construction via
+            :func:`flinttrade_core.workspace.workspace_dir`).  Pass
+            ``":memory:"`` for ephemeral in-process storage (useful in
+            tests).
         retention_days: Delete rows older than this many days (``0`` keeps
             forever). ``None`` uses the workspace override or the default.
         max_rows: Keep at most this many newest rows (``0`` keeps all).
@@ -158,7 +179,7 @@ class TrafficLogger:
         import duckdb  # lazy — avoids penalising startup if unused
 
         if db_path is None:
-            db_path = Path.home() / ".flinttrade" / "traffic_log.duckdb"
+            db_path = _default_db_path()
 
         if isinstance(db_path, str) and db_path != ":memory:":
             db_path = Path(db_path)
