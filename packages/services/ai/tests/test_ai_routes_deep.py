@@ -12,14 +12,26 @@ happy path runs end-to-end under deterministic mocks.
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault("MASTER_PASSWORD", "test-master")
-os.environ.setdefault("OPENALGO_API_KEY", "test")
-os.environ.setdefault("FLINTTRADE_TOTP_KEY", "test-key")
+# These are set per-test rather than at import time. A module-level
+# os.environ.setdefault leaks into every other test sharing the xdist worker
+# process, and FLINTTRADE_TOTP_KEY in particular suppresses the install-key
+# file entirely — which silently broke a totp_auth test that happened to land
+# on the same worker. pytest-randomly means the ordering is not reproducible,
+# so the failure looks like a platform bug rather than an env leak.
+@pytest.fixture(autouse=True)
+def _ai_route_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide the ambient credentials these routes expect, scoped to one test.
+
+    Args:
+        monkeypatch: Fixture used to set and automatically restore the variables.
+    """
+    monkeypatch.setenv("MASTER_PASSWORD", "test-master")
+    monkeypatch.setenv("OPENALGO_API_KEY", "test")
+    monkeypatch.setenv("FLINTTRADE_TOTP_KEY", "test-key")
 
 
 @pytest.fixture

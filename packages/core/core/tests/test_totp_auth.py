@@ -405,13 +405,19 @@ class TestWorkspaceResolution:
         assert (workspace / "totp_auth.duckdb").exists()
         assert (workspace / "totp_install_key").exists()
 
-    def test_explicit_store_keeps_its_key_beside_itself(self, tmp_path: Path) -> None:
+    def test_explicit_store_keeps_its_key_beside_itself(self, monkeypatch, tmp_path: Path) -> None:
         """A caller-supplied store enrols against a key in its own directory.
 
         The store and its key are one cryptographic unit, so the pair must not
         be split across two directories — and resolving the key beside the
         store is what keeps the legacy probe out of an explicit path.
+
+        ``FLINTTRADE_TOTP_KEY`` is cleared explicitly: it supersedes the install
+        key entirely, so with it set no key file is ever written and this
+        assertion would depend on which other modules an xdist worker happened
+        to import first.
         """
+        monkeypatch.delenv("FLINTTRADE_TOTP_KEY", raising=False)
         instance = TOTPAuth(db_path=tmp_path / "totp.duckdb")
         try:
             instance.generate_secret("key_user")
