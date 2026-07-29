@@ -83,7 +83,7 @@ OPENALGO_PORT ?= 5000
 FLINTTRADE_BACKEND_PORT ?= 5100
 FLINTTRADE_BACKEND_HOST ?= 127.0.0.1
 
-.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
+.PHONY: setup check-python start start-gateway start-openalgo start-legacy stop restart status test test-fast ticks-test lint clean update dev docker-up docker-up-monitoring docker-down docker-build version version-check site-url-check health help audit sync-check broker-sdk-sync broker-reference-check full-check install-docker install-native install-server-native backup restore logs-clear desktop-icons desktop-test desktop-build desktop-package desktop-dev
 
 # ======================================================================
 # Setup
@@ -228,6 +228,8 @@ full-check: ## Run full health check (tests + lint + typecheck)
 	@echo -e "$(CYAN)=== FlintTrade Health Check ===$(RESET)"
 	@echo -e "$(YELLOW)--- Version Consistency ---$(RESET)"
 	@"$(PYTHON)" scripts/check-version-consistency.py
+	@echo -e "$(YELLOW)--- Site URL Consistency ---$(RESET)"
+	@"$(PYTHON)" scripts/check-site-url-consistency.py
 	@echo -e "$(YELLOW)--- Python Tests ---$(RESET)"
 	@set -o pipefail; "$(PYTHON)" -m pytest packages/integrations/gateway/tests/ packages/core/core/tests/ packages/services/screener/tests/ packages/services/engine/tests/ -q --no-header --import-mode=importlib 2>&1 | tail -3
 	@echo -e "$(YELLOW)--- Ruff Lint ---$(RESET)"
@@ -245,6 +247,9 @@ audit: ## Check repo absorption status
 
 version-check: ## Verify all release-version metadata is aligned
 	@"$(PYTHON)" scripts/check-version-consistency.py
+
+site-url-check: ## Verify every tracked mention of the public site URL matches flint.toml
+	@"$(PYTHON)" scripts/check-site-url-consistency.py
 
 sync-check: ## Check upstream drift on external test-deps under .local/external/
 	@echo -e "$(CYAN)=== External Test-Deps Sync Check ===$(RESET)"

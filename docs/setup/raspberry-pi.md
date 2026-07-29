@@ -13,6 +13,14 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
+If the site is unreachable those URLs answer `503` rather than the script, so
+fetch it straight from GitHub instead:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash
+```
+
 ## Requirements
 - Raspberry Pi 4 or 5 (4GB RAM minimum, 8GB recommended)
 - Raspberry Pi OS 64-bit (Bookworm)

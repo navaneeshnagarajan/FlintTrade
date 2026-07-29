@@ -8,6 +8,13 @@ version = "v0.0.1"
 description = "Open-source self-hosted trading software with native backend and optional OpenAlgo-compatible integration"
 license = "AGPL-3.0"
 repository = "https://github.com/navaneeshnagarajan/FlintTrade"
+# Canonical public site origin — the single source of truth for the domain that
+# serves the one-line install and uninstall routes. Never edit a literal domain
+# in a doc, script or test by hand: change this line, then run
+# `python scripts/apply-site-url.py <new-url>` to rewrite every tracked mention.
+# `python scripts/check-site-url-consistency.py` (and
+# tests/test_site_url_single_source.py in CI) fail on any surface that disagrees.
+site_url = "https://flinttrade.vercel.app"
 python_requires = ">=3.12"
 node_requires = ">=22.0.0"
 

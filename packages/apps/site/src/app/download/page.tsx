@@ -42,6 +42,25 @@ const webInstallCommands = [
   },
 ] as const;
 
+// The hosted one-liners are a redirect to these same scripts, so every route on
+// this site answers 503 when a deployment has no immutable source commit. These
+// repo-direct commands depend on no deployment at all and must stay visible in
+// every state — a reader who hits the 503 is exactly the reader who needs them.
+const repoDirectCommands = [
+  {
+    platform: 'macOS / Linux',
+    command:
+      'curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash',
+    needs: 'Same script, fetched from the repository instead of this site. Swap flinttrade-web-install for flinttrade-uninstall to remove FlintTrade.',
+  },
+  {
+    platform: 'Windows 10/11',
+    command:
+      'irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex',
+    needs: 'Same script in PowerShell. Swap flinttrade-web-install for flinttrade-uninstall to remove FlintTrade.',
+  },
+] as const;
+
 const uninstallCommands = [
   {
     platform: 'macOS / Linux',
@@ -282,6 +301,39 @@ export default async function DownloadPage() {
               site is redeployed from a known commit.
             </p>
           ) : null}
+        </section>
+
+        <section aria-labelledby="repo-direct-fallback">
+          <h2 id="repo-direct-fallback">If this site is unreachable</h2>
+          <p>
+            Use these whenever a command above fails: every install and uninstall URL here is
+            only a redirect to a script in the repository, so an outage — or a deployment
+            without an immutable source commit — answers 503, and piping that response into a
+            shell does nothing useful. The commands below fetch the same scripts from the
+            repository and depend on no deployment.
+          </p>
+          <div className="stack">
+            {repoDirectCommands.map((entry) => (
+              <div className="code-panel" key={entry.platform}>
+                <header>
+                  <span>{entry.platform}</span>
+                  <span>terminal</span>
+                </header>
+                <pre>
+                  <code>{entry.command}</code>
+                </pre>
+                <p className="code-panel-note">{entry.needs}</p>
+              </div>
+            ))}
+          </div>
+          <p>
+            These follow the repository default branch rather than a pinned commit, so read the
+            script first if that is your policy. To do that, clone the repository and run{' '}
+            <span className="font-mono">scripts/install/flinttrade-web-install.sh</span> (or{' '}
+            <span className="font-mono">flinttrade-web-install.ps1</span>) from the checkout.
+            The desktop shell installer and uninstaller live beside them in{' '}
+            <span className="font-mono">scripts/install/</span> and run the same way.
+          </p>
         </section>
 
         {installerReleaseAvailable ? (

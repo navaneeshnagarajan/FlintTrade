@@ -36,6 +36,25 @@ configuration is handled in the app; no `.env` file is required. Your workspace
 lives at `%APPDATA%\flinttrade\` (override with `FLINTTRADE_WORKSPACE_DIR`, or
 `FLINTTRADE_HOME`).
 
+### If the site is unreachable (repo-direct fallback)
+
+Use this whenever the command above fails: the hosted URL is only a redirect to
+the script in this repository, and a site outage or a deployment without an
+immutable source commit answers `503` instead of the installer. This form
+fetches the same script straight from GitHub and depends on no deployment:
+
+```powershell
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex
+```
+
+To read the script before running it, clone the repository and run the file:
+
+```powershell
+git clone https://github.com/navaneeshnagarajan/FlintTrade.git
+cd FlintTrade
+powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-web-install.ps1
+```
+
 ## Uninstall
 
 The plain uninstall removes the application and its launcher integration and
@@ -52,8 +71,15 @@ source and tools). Purge is irreversible and asks for explicit confirmation:
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
-If the site is unreachable, run the same script from a clone or from the
-managed source checkout at `~\.flinttrade\src\FlintTrade`:
+If the site is unreachable, fetch the same uninstaller straight from GitHub —
+the hosted URL is only a redirect to it:
+
+```powershell
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-uninstall.ps1 | iex
+```
+
+Or run the same script from a clone or from the managed source checkout at
+`~\.flinttrade\src\FlintTrade`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install\flinttrade-uninstall.ps1
@@ -79,7 +105,9 @@ The script requires the canonical Windows asset and `SHA256SUMS.txt` from the
 same official release and verifies SHA-256 before running the installer. The
 install is per-user — **no admin rights needed**.
 The script lives at [`scripts/install/`](../../scripts/install/) — read it
-before piping to a shell if that is your policy (it should be).
+before piping to a shell if that is your policy (it should be). If the site is
+unreachable, run it repo-direct with
+`irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-install.ps1 | iex`.
 
 Launch the app and complete Setup. Broker/OpenAlgo configuration is handled
 in the app; no `.env` file is required.

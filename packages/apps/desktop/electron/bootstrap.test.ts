@@ -631,14 +631,57 @@ async function fixture(options: FixtureOptions = {}) {
             stdout: buildMutated ? "1 .M N... 100644 100644 100644 fixture fixture uv.lock\0" : "",
           };
         }
-        if (invocation.args[0] === "--version" && invocation.command.includes("uv")) {
-          return { contained: true, exitCode: 0, stderr: "", stdout: "uv 0.11.16 (135a36367 2026-05-21 aarch64-apple-darwin)\n" };
+        // Tool probes are matched on the executable's basename, never on a
+        // substring of its absolute path. Every fixture root is an mkdtemp
+        // directory, so a random six-character suffix containing "uv" used to
+        // make an unanchored `command.includes("uv")` matcher claim the Node
+        // probe and answer it with uv's version string. That is ~1 in 700
+        // fixtures (measured over 20,000 mkdtemp samples), so roughly 1 in 10
+        // full-suite runs went red on a different — and always innocent —
+        // test, reported as "The verified Node executable reported an
+        // unexpected version" on commits touching no desktop code at all.
+        // Every matcher is evaluated rather than short-circuited so that a
+        // future overlap fails loudly here instead of letting source order
+        // silently decide which tool's version string a probe receives.
+        const toolName = path.basename(invocation.command).replace(/\.exe$/i, "");
+        const versionProbe = invocation.args.at(-1) === "--version";
+        const toolProbes = [
+          {
+            name: "uv --version",
+            matches: toolName === "uv" && versionProbe && invocation.args.length === 1,
+            stdout: "uv 0.11.16 (135a36367 2026-05-21 aarch64-apple-darwin)\n",
+          },
+          {
+            name: "node --version",
+            matches: toolName === "node" && versionProbe && invocation.args.length === 1,
+            stdout: "v22.23.1\n",
+          },
+          {
+            name: "node <corepack.js> --version",
+            matches: toolName === "node" && versionProbe && invocation.args.length > 1,
+            stdout: "0.34.6\n",
+          },
+        ].filter((probe) => probe.matches);
+        // The production code turns any rejected command into a generic
+        // containment message, so the reason is echoed to the console too —
+        // otherwise a stub defect reads as an unrelated bootstrap failure.
+        const failStub = (message: string): never => {
+          console.error(`bootstrap.test.ts fixture stub: ${message}`);
+          throw new Error(message);
+        };
+        if (toolProbes.length > 1) {
+          failStub(
+            `Overlapping fixture stubs ${toolProbes.map((probe) => probe.name).join(" and ")} both claim ` +
+              `${invocation.command} ${invocation.args.join(" ")}; make them mutually exclusive.`,
+          );
         }
-        if (invocation.args[0] === "--version" && /(?:node|node\.exe)$/.test(invocation.command)) {
-          return { contained: true, exitCode: 0, stderr: "", stdout: "v22.23.1\n" };
-        }
-        if (/(?:node|node\.exe)$/.test(invocation.command) && invocation.args.at(-1) === "--version") {
-          return { contained: true, exitCode: 0, stderr: "", stdout: "0.34.6\n" };
+        if (toolProbes[0]) {
+          if (toolProbes[0].name.includes("corepack") && !/(?:^|[\\/])corepack\.js$/.test(invocation.args[0] ?? "")) {
+            failStub(
+              `The Corepack probe stub was handed ${invocation.args[0]}, which is not the confined corepack.js path.`,
+            );
+          }
+          return { contained: true, exitCode: 0, stderr: "", stdout: toolProbes[0].stdout };
         }
         if (/^pytest(?:\.exe)?$/.test(path.basename(invocation.command))) {
           const environmentRoot = path.dirname(path.dirname(invocation.command));

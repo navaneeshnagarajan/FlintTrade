@@ -43,9 +43,26 @@ irm https://flinttrade.vercel.app/uninstall.ps1 | iex
 & ([scriptblock]::Create((irm https://flinttrade.vercel.app/uninstall.ps1))) -Purge
 ```
 
-If the site is unreachable, run `scripts/install/flinttrade-uninstall.sh`
-(macOS/Linux) or `scripts/install/flinttrade-uninstall.ps1` (Windows) from a
-clone instead.
+### If the site is unreachable (repo-direct fallback)
+
+Use this whenever any command above fails: the hosted URLs are only a redirect
+to the scripts in this repository, so a site outage answers `503` rather than
+the script. Fetch the same files straight from GitHub — swap
+`flinttrade-web-install` for `flinttrade-uninstall` to remove FlintTrade:
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.sh | bash
+```
+
+```powershell
+# Windows 10/11
+irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex
+```
+
+Or run `scripts/install/flinttrade-web-install.sh` /
+`scripts/install/flinttrade-uninstall.sh` (macOS/Linux), or the matching `.ps1`
+files (Windows), from a clone instead.
 
 ### Electron desktop shell
 
