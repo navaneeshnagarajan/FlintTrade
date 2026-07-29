@@ -223,8 +223,38 @@ def resolve_python() -> str:
     raise SystemExit(1)
 
 
+def python_package_src_dirs() -> list[Path]:
+    """Return every workspace Python package source root, core first.
+
+    The repository is a uv workspace of thirteen ``flinttrade_*`` distributions
+    nested at ``packages/<group>/<pkg>/src``. Only the directories that really
+    hold an importable ``flinttrade_*`` package are returned, so the JavaScript
+    packages (``packages/apps/terminal/src`` and friends) and the Rust crate are
+    skipped. ``flinttrade_core`` is listed first because every other package
+    imports it.
+
+    Returns:
+        Existing source roots, ``packages/core/core/src`` first and the rest
+        sorted for a stable, reproducible ``PYTHONPATH``.
+    """
+    roots = {
+        init.parent.parent
+        for init in REPO_ROOT.glob("packages/*/*/src/flinttrade_*/__init__.py")
+    }
+    ordered = sorted(roots - {CORE_SRC})
+    if CORE_SRC.is_dir():
+        return [CORE_SRC, *ordered]
+    return ordered
+
+
 def python_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Build the child-process environment for FlintTrade Python commands.
+
+    Every workspace package source root is exposed, not just the core tree:
+    ``flinttrade_core.app`` eagerly imports ``flinttrade_data`` and the other
+    sibling distributions, so a ``PYTHONPATH`` carrying core alone dies with
+    ``ModuleNotFoundError`` on any environment where the workspace was not
+    installed (the no-uv ``setup`` fallback, notably).
 
     ``PYTHONPATH`` is joined with :data:`os.pathsep` so it is ``;`` on Windows
     and ``:`` on POSIX - hardcoding ``:`` silently breaks every import on
@@ -237,7 +267,7 @@ def python_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         A complete environment mapping for :mod:`subprocess`.
     """
     env = os.environ.copy()
-    parts = [str(CORE_SRC)]
+    parts = [str(path) for path in python_package_src_dirs()]
     existing = env.get("PYTHONPATH", "")
     if existing:
         parts.append(existing)
@@ -292,11 +322,18 @@ def run(
     return proc.returncode
 
 
-def capture(argv: Sequence[str], *, cwd: Path | None = None, timeout: float = 30.0) -> str | None:
+def capture(
+    argv: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: float = 30.0,
+) -> str | None:
     """Run a command and return its stripped stdout.
 
     Args:
         argv: The command and its arguments.
+        env: Environment for the child process; inherited when omitted.
         cwd: Working directory; the repository root when omitted.
         timeout: Seconds to wait before giving up.
 
@@ -306,6 +343,7 @@ def capture(argv: Sequence[str], *, cwd: Path | None = None, timeout: float = 30
     try:
         proc = subprocess.run(
             [str(part) for part in argv],
+            env=env,
             cwd=str(cwd or REPO_ROOT),
             capture_output=True,
             text=True,
@@ -806,6 +844,96 @@ def cmd_dev(_args: list[str]) -> int:
             handle.close()
 
 
+_IMPORT_FAILURE_MARKER = "FT-IMPORT-FAILURE "
+"""Prefix the probe stamps on each failure line.
+
+Importing thirteen packages can print anything at all, so the report is picked
+out by marker rather than by assuming the child's stdout holds only the answer.
+"""
+
+_IMPORT_PROBE = """\
+import io
+import sys
+
+marker = sys.argv[1]
+failures = []
+real_stdout = sys.stdout
+sys.stdout = io.StringIO()
+try:
+    for name in sys.argv[2:]:
+        try:
+            __import__(name)
+        except BaseException as exc:
+            lines = str(exc).strip().splitlines()
+            summary = lines[0] if lines else ""
+            failures.append("%s%s: %s: %s" % (marker, name, type(exc).__name__, summary))
+finally:
+    sys.stdout = real_stdout
+for line in failures:
+    print(line)
+"""
+"""Really import each named workspace package and report what blew up.
+
+This deliberately EXECUTES the packages instead of merely locating them.
+``importlib.util.find_spec`` would answer a question nobody is asking: the names
+come from :func:`workspace_module_names`, which discovers them by globbing the
+very source roots :func:`python_env` puts on ``PYTHONPATH``, so a spec lookup can
+only ever succeed - a tautology dressed up as a check. A real import is what
+``start`` does, and it fails exactly where ``start`` would: on a third-party
+dependency the install step did not deliver (``No module named 'dotenv'`` after a
+partial ``pip install``), a broken native extension, or a package that raises on
+import.
+"""
+
+
+def workspace_module_names() -> list[str]:
+    """Return the importable ``flinttrade_*`` package names in this checkout.
+
+    Returns:
+        Sorted top-level module names, one per workspace Python distribution.
+    """
+    return sorted(
+        {
+            package.name
+            for root in python_package_src_dirs()
+            for package in root.glob("flinttrade_*")
+            if (package / "__init__.py").is_file()
+        }
+    )
+
+
+def missing_workspace_modules(python: str, env: dict[str, str]) -> list[str] | None:
+    """Return one diagnostic per workspace package the prepared environment cannot import.
+
+    The probe runs against the interpreter and environment a real ``start``
+    uses - :func:`resolve_python` and :func:`python_env`, the same two the
+    backend is launched with - and imports each package for real, so a genuinely
+    broken environment fails here instead of at the user's next command.
+
+    Args:
+        python: The interpreter resolved by :func:`resolve_python`.
+        env: The child environment from :func:`python_env`.
+
+    Returns:
+        ``[]`` when every package imports, a ``module: ErrorType: message`` line
+        per failure otherwise, or None when the probe itself could not be run
+        (interpreter unusable, or the imports outran the timeout) - an
+        unverifiable environment is not the same as a broken one.
+    """
+    modules = workspace_module_names()
+    if not modules:
+        return []
+    argv = [python, "-c", _IMPORT_PROBE, _IMPORT_FAILURE_MARKER, *modules]
+    output = capture(argv, env=env, timeout=180.0)
+    if output is None:
+        return None
+    return [
+        line[len(_IMPORT_FAILURE_MARKER) :].strip()
+        for line in output.splitlines()
+        if line.startswith(_IMPORT_FAILURE_MARKER)
+    ]
+
+
 def cmd_setup(_args: list[str]) -> int:
     """Install Python and Node dependencies and initialise the workspace.
 
@@ -839,7 +967,17 @@ def cmd_setup(_args: list[str]) -> int:
             fail("requirements.lock is missing; install uv from https://docs.astral.sh/uv/ and re-run.")
             return 1
         run([python, "-m", "pip", "install", "--require-hashes", "-r", str(lock)])
-        info("OK Root requirements installed")
+        info("OK Third-party requirements installed")
+        # requirements.lock is exported with `--no-emit-workspace`, so it carries
+        # ONLY third-party dependencies: none of the thirteen flinttrade_* packages
+        # is installed by that command. They are reached through the PYTHONPATH
+        # that python_env() builds from every workspace source root, which is what
+        # keeps `start` from dying on `import flinttrade_data`. The one thing this
+        # path cannot supply is the git-pinned Kotak Neo SDK, which uv.lock pins and
+        # requirements.lock deliberately excludes.
+        info(f"OK Workspace packages linked on PYTHONPATH ({len(workspace_module_names())} packages)")
+        warn("Without uv the git-pinned Kotak Neo broker SDK is unavailable; that broker stays disabled.")
+        warn("Install uv from https://docs.astral.sh/uv/ and re-run setup for the complete environment.")
 
     pnpm = pnpm_argv()
     if pnpm is None:
@@ -850,8 +988,28 @@ def cmd_setup(_args: list[str]) -> int:
         run([*pnpm, "install", "--frozen-lockfile"], env=ci_env())
         info("OK workspace node_modules (pnpm --frozen-lockfile)")
 
+    # Verify before claiming success. A setup that reports OK and leaves an
+    # environment whose very next step (`start`) dies on ModuleNotFoundError is
+    # worse than a setup that fails: the user trusts the wrong thing. `python`
+    # and `env` here are the exact pair `cmd_start` hands to the backend, and
+    # the probe imports for real, so whatever would break `start` breaks this.
+    env = python_env()
+    failures = missing_workspace_modules(python, env)
+    if failures is None:
+        warn("Could not run the import check, so this setup is UNVERIFIED.")
+        warn(f'Confirm it by hand before relying on it:  {python} -c "import flinttrade_core"')
+    elif failures:
+        fail("Setup did NOT produce a runnable environment; these packages fail to import:")
+        for line in failures:
+            fail(f"  {line}")
+        fail("Install uv from https://docs.astral.sh/uv/ and re-run:")
+        fail("  uv sync --frozen --all-packages")
+        return 1
+    else:
+        info(f"OK Every workspace package imports cleanly ({len(workspace_module_names())} packages)")
+
     info("Initialising the workspace...")
-    provision_workspace(python, python_env())
+    provision_workspace(python, env)
     info(f"OK Workspace initialised: {workspace_dir()}")
 
     info("")

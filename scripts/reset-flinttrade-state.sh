@@ -9,6 +9,8 @@
 #   macOS   ~/Library/Application Support/flinttrade
 #   Windows %APPDATA%\flinttrade
 # Overrides, in precedence order: FLINTTRADE_WORKSPACE_DIR > FLINTTRADE_HOME.
+# Either may be written with a leading '~' or relative; both are expanded and
+# made absolute exactly as flinttrade_core.workspace resolves them.
 #
 # Archives everything first to .local/archive/flinttrade-state-<ts>/
 # per the project's never-delete rule. Nothing is lost, just moved.
@@ -34,7 +36,45 @@ default_workspace() {
         *)                    printf '%s' "$HOME/.flinttrade" ;;
     esac
 }
-STATE_DIR="${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}"
+
+# Canonicalise the resolved workspace the way flinttrade_core.workspace does
+# (Path(value).expanduser().resolve()) BEFORE anything destructive touches it.
+# An override arriving literally as '~/custom-workspace' — which is how env
+# files and service units routinely spell it, since neither expands '~' — was
+# taken as a directory named '~' below the repository root, so the reset wiped
+# and re-created that while the real workspace survived untouched and the run
+# still reported success.
+canonical_workspace_path() {
+    local value="$1" resolved
+    case "$value" in
+        "~")   value="$HOME" ;;
+        "~/"*) value="$HOME/${value#\~/}" ;;
+        # This runs in a command substitution, so the exit ends the subshell and
+        # leaves STATE_DIR empty; the refusal guard below then stops the run.
+        "~"*)  echo "! Named-user home overrides are not supported: $value" >&2; exit 1 ;;
+    esac
+    case "$value" in
+        # POSIX absolute, or an absolute Windows path under MSYS/Git Bash.
+        /*|[A-Za-z]:[/\\]*) ;;
+        *) value="$(pwd -P)/$value" ;;
+    esac
+    if [ -d "$value" ]; then
+        resolved="$(cd -P "$value" 2>/dev/null && pwd -P)" || resolved=""
+        if [ -n "$resolved" ]; then value="$resolved"; fi
+    fi
+    printf '%s' "$value"
+}
+STATE_DIR="$(canonical_workspace_path "${FLINTTRADE_WORKSPACE_DIR:-${FLINTTRADE_HOME:-$(default_workspace)}}")"
+
+# The archive-then-wipe below is 'rm -rf "$STATE_DIR"', so refuse the paths that
+# would take the whole home (or the filesystem root) with them.
+HOME_CANONICAL="$(cd -P "$HOME" 2>/dev/null && pwd -P)" || HOME_CANONICAL="$HOME"
+case "$STATE_DIR" in
+    ""|"/"|"$HOME"|"${HOME%/}"|"$HOME_CANONICAL"|"${HOME_CANONICAL%/}")
+        echo "! Refusing to reset '$STATE_DIR' — that is not a FlintTrade workspace directory." >&2
+        exit 1
+        ;;
+esac
 PYTHON_BIN="${PYTHON:-python}"
 FLINTTRADE_PYTHONPATH="$REPO_ROOT/packages/core/core/src"
 
@@ -49,10 +89,14 @@ done
 # 1. Kill FlintTrade backend (port 5100) if running. Leave OpenAlgo (5000) alone.
 # ---------------------------------------------------------------------------
 BACKEND_PID=""
+# 'set -euo pipefail' is in force: lsof exits 1 when nothing is listening, which
+# under pipefail failed the assignment and aborted the whole reset silently on
+# every machine whose backend was already stopped. Finding no backend is the
+# normal case, not an error.
 if command -v lsof >/dev/null 2>&1; then
-    BACKEND_PID="$(lsof -tiTCP:5100 -sTCP:LISTEN 2>/dev/null | head -1)"
+    BACKEND_PID="$(lsof -tiTCP:5100 -sTCP:LISTEN 2>/dev/null | head -1 || true)"
 elif netstat -ano 2>/dev/null | grep -qE "127\.0\.0\.1:5100\s+.*LISTENING"; then
-    BACKEND_PID="$(netstat -ano | grep LISTENING | grep -E '127\.0\.0\.1:5100\s' | awk '{print $NF}' | head -1)"
+    BACKEND_PID="$(netstat -ano | grep LISTENING | grep -E '127\.0\.0\.1:5100\s' | awk '{print $NF}' | head -1 || true)"
 fi
 
 if [ -n "${BACKEND_PID:-}" ]; then

@@ -400,19 +400,61 @@ def test_python_env_joins_pythonpath_with_os_pathsep(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("PYTHONPATH", "already-on-the-path")
     env = ft.python_env()
 
-    assert env["PYTHONPATH"] == os.pathsep.join([str(ft.CORE_SRC), "already-on-the-path"])
+    expected = [str(path) for path in ft.python_package_src_dirs()] + ["already-on-the-path"]
+    assert env["PYTHONPATH"] == os.pathsep.join(expected)
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(ft.CORE_SRC)
 
 
 @pytest.mark.unit
 def test_python_env_without_an_existing_pythonpath(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no inherited ``PYTHONPATH`` the core source tree is the only entry."""
+    """With no inherited ``PYTHONPATH`` the workspace source roots are the only entries."""
     monkeypatch.delenv("PYTHONPATH", raising=False)
     env = ft.python_env({"FLINTTRADE_EXTRA": "1"})
 
-    assert env["PYTHONPATH"] == str(ft.CORE_SRC)
+    assert env["PYTHONPATH"] == os.pathsep.join(str(path) for path in ft.python_package_src_dirs())
     assert env["FLINTTRADE_EXTRA"] == "1"
     assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+@pytest.mark.unit
+def test_python_env_exposes_every_workspace_package() -> None:
+    """``flinttrade_core.app`` eagerly imports its siblings, so core alone is not enough.
+
+    The no-uv ``setup`` fallback installs ``requirements.lock``, which is exported
+    with ``--no-emit-workspace`` and therefore contains no ``flinttrade_*``
+    distribution at all. If the child ``PYTHONPATH`` carried only the core source
+    tree, ``start`` would die on ``import flinttrade_data`` right after ``setup``
+    reported success.
+    """
+    entries = ft.python_env()["PYTHONPATH"].split(os.pathsep)
+    declared = {
+        init.parent.parent
+        for init in ft.REPO_ROOT.glob("packages/*/*/src/flinttrade_*/__init__.py")
+    }
+
+    assert declared, "no workspace Python packages were discovered"
+    assert {str(path) for path in declared} <= set(entries)
+    assert "flinttrade_data" in ft.workspace_module_names()
+    assert entries[0] == str(ft.CORE_SRC), "flinttrade_core must resolve first"
+
+
+@pytest.mark.unit
+def test_setup_refuses_to_report_success_for_an_unrunnable_environment() -> None:
+    """``cmd_setup`` must verify importability before printing 'Next steps'.
+
+    A setup that reports OK and leaves an environment whose very next command
+    dies with ``ModuleNotFoundError`` is worse than one that fails outright.
+    """
+    source = _FT_PATH.read_text(encoding="utf-8")
+    body = re.search(r"^def cmd_setup\(.*?^def ", source, flags=re.MULTILINE | re.DOTALL)
+    assert body is not None, "scripts/ft.py no longer defines cmd_setup()"
+
+    gate = body.group(0).find("missing_workspace_modules(")
+    next_steps = body.group(0).find("Next steps:")
+    assert gate != -1, "cmd_setup must probe the workspace packages before claiming success"
+    assert next_steps != -1
+    assert gate < next_steps, "the importability gate must run before setup advertises success"
+    assert "return 1" in body.group(0)
 
 
 @pytest.mark.unit

@@ -42,10 +42,12 @@ irm https://flinttrade.vercel.app/web-install.ps1 | iex
 
 It provisions a pinned, checksum-verified toolchain (`uv`, Python 3.12, Node
 and pnpm) under `~/.flinttrade/tools`, builds FlintTrade from a managed source
-checkout at `~/.flinttrade/src/FlintTrade`, and installs a `flinttrade`
-launcher — `~/.local/bin/flinttrade` on macOS and Linux,
-`%LOCALAPPDATA%\Programs\FlintTrade\flinttrade.cmd` plus a Start Menu shortcut
-on Windows. Open http://127.0.0.1:5100 and follow the first-time Setup flow
+checkout at `~/.flinttrade/web-src/FlintTrade`, and installs a `flinttrade-web`
+launcher — `~/.local/bin/flinttrade-web` on macOS and Linux,
+`%LOCALAPPDATA%\Programs\FlintTradeWeb\flinttrade-web.cmd` plus a **FlintTrade
+Web** Start Menu shortcut on Windows. The Electron desktop shell keeps its own
+launcher, Start Menu entry and source checkout, so the two installs never
+collide and can be run in either order. Open http://127.0.0.1:5100 and follow the first-time Setup flow
 — no `.env` file is required.
 
 Removing it again is covered in [Uninstall](#13-uninstall).
@@ -718,7 +720,8 @@ Take a backup first if you want your workspace and settings back later — see
 ### If the site is unreachable
 
 The same scripts live in the repository. From a clone or from the managed
-source checkout at `~/.flinttrade/src/FlintTrade`, run them directly:
+source checkout (`~/.flinttrade/web-src/FlintTrade` for the web app,
+`~/.flinttrade/src/FlintTrade` for the desktop shell), run them directly:
 
 ```bash
 # macOS / Linux

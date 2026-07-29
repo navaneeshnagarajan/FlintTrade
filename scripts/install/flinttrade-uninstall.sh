@@ -37,6 +37,7 @@ WEB_RECEIPT_DIR="$HOME/.local/state/flinttrade-web"
 WEB_RECEIPT_PATH="$WEB_RECEIPT_DIR/web-install.receipt"
 WEB_RECEIPT_VALID=0
 WEB_SHIM_PROVEN=0
+WEB_RECEIPT_RETAINED=0
 WEB_RECEIPT_SHIM=""
 WEB_RECEIPT_SHIM_SHA256=""
 WEB_RECEIPT_SHORTCUT=""
@@ -197,7 +198,7 @@ lower_hex() {
 # ---------------------------------------------------------------------------
 
 read_web_receipt() {
-  local line1 line2 line3 line4 line5 line6 line7 extra mode default_shim
+  local line1 line2 line3 line4 line5 line6 line7 extra mode default_shim owned shim_owned
   [ -e "$WEB_RECEIPT_PATH" ] || [ -L "$WEB_RECEIPT_PATH" ] || return 1
   if [ ! -d "$WEB_RECEIPT_DIR" ] || [ -L "$WEB_RECEIPT_DIR" ] || [ ! -O "$WEB_RECEIPT_DIR" ]; then
     say "Leaving $WEB_RECEIPT_PATH — its receipt directory is not owner-local."
@@ -248,12 +249,22 @@ read_web_receipt() {
     say "Leaving $WEB_RECEIPT_PATH — the receipt records a shortcut this platform never installs."
     return 2
   fi
-  # The receipt may only ever aim the remover at the one location the web
-  # installer writes a launcher to; it is not a general deletion instruction.
-  default_shim="$(canonical_existing_path "$HOME/.local/bin/flinttrade" 2>/dev/null)" \
-    || default_shim="$HOME/.local/bin/flinttrade"
-  if [ "$WEB_RECEIPT_SHIM" != "$default_shim" ] \
-      && [ "$WEB_RECEIPT_SHIM" != "$HOME/.local/bin/flinttrade" ]; then
+  # The receipt may only ever aim the remover at a location the web installer
+  # writes a launcher to; it is not a general deletion instruction. Both the
+  # current name and the pre-collision one are accepted: revisions before
+  # ~/.local/bin/flinttrade-web wrote ~/.local/bin/flinttrade, which the Electron
+  # desktop installer also owns, and those machines still deserve a clean
+  # uninstall. Identity is not assumed from the path either way — the launcher is
+  # removed only when its SHA-256 still matches the receipt.
+  shim_owned=0
+  for owned in "$HOME/.local/bin/flinttrade-web" "$HOME/.local/bin/flinttrade"; do
+    default_shim="$(canonical_existing_path "$owned" 2>/dev/null)" || default_shim="$owned"
+    if [ "$WEB_RECEIPT_SHIM" = "$default_shim" ] || [ "$WEB_RECEIPT_SHIM" = "$owned" ]; then
+      shim_owned=1
+      break
+    fi
+  done
+  if [ "$shim_owned" != "1" ]; then
     say "Leaving $WEB_RECEIPT_PATH — the recorded launcher is not the installer-owned location."
     return 2
   fi
@@ -300,8 +311,50 @@ remove_web_install() {
       WEB_REMOVED_ANY=1
     fi
   fi
+  # An ordinary uninstall deliberately RETAINS the managed source and tools the
+  # receipt records — and for a custom --src outside ~/.flinttrade that receipt
+  # is the only thing that names them. Deleting it here left a later --purge
+  # with no proof and no path, so the custom checkout was omitted permanently.
+  # Keep the receipt for exactly as long as it still proves retained data.
+  if web_install_data_still_present; then
+    WEB_RECEIPT_RETAINED=1
+    say "Keeping $WEB_RECEIPT_PATH — it is the only proof of the retained web-install data below,"
+    say "so a later --purge can still find and authorise it:"
+    [ -z "$WEB_RECEIPT_SOURCE" ] || say "  $WEB_RECEIPT_SOURCE"
+    [ -z "$WEB_RECEIPT_TOOLS" ] || say "  $WEB_RECEIPT_TOOLS"
+    return 0
+  fi
   remove_path "$WEB_RECEIPT_PATH"
   if [ "$DRY_RUN" != "1" ] && [ -d "$WEB_RECEIPT_DIR" ]; then
+    if rmdir "$WEB_RECEIPT_DIR" 2>/dev/null; then
+      say "Removed $WEB_RECEIPT_DIR"
+      REMOVED_ANY=1
+    fi
+  fi
+}
+
+# Whether anything the web-install receipt records as retained data is still on
+# disk. The launcher is not retained data — it is removed by the ordinary
+# uninstall — so only the managed source and tools count here.
+web_install_data_still_present() {
+  local candidate
+  [ "$WEB_RECEIPT_VALID" = "1" ] || return 1
+  for candidate in "$WEB_RECEIPT_SOURCE" "$WEB_RECEIPT_TOOLS"; do
+    [ -n "$candidate" ] || continue
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then return 0; fi
+  done
+  return 1
+}
+
+# The retained receipt is retired once it no longer proves anything: a --purge
+# in this same run has just removed the recorded source and tools, so the
+# receipt is removed exactly as an ordinary uninstall would have removed it.
+remove_retained_web_receipt() {
+  [ "$WEB_RECEIPT_RETAINED" = "1" ] || return 0
+  [ "$DRY_RUN" != "1" ] || return 0
+  if web_install_data_still_present; then return 0; fi
+  remove_path "$WEB_RECEIPT_PATH"
+  if [ -d "$WEB_RECEIPT_DIR" ]; then
     if rmdir "$WEB_RECEIPT_DIR" 2>/dev/null; then
       say "Removed $WEB_RECEIPT_DIR"
       REMOVED_ANY=1
@@ -985,18 +1038,24 @@ validate_linux_receipt() {
 report_unreceipted_shell_paths() {
   local candidate found=0 candidates=()
   if [ "$OS" = "Darwin" ]; then
-    # The web installer's launcher shim lands at the same path on macOS as on
-    # Linux; leaving it out meant a macOS uninstall silently kept a launcher
-    # pointing at a source tree it had just deleted.
+    # ~/.local/bin holds two different launchers, and both land at the same path
+    # on macOS as on Linux: the desktop shell's own flinttrade wrapper, and the
+    # web installer's flinttrade-web launcher (which earlier revisions wrote as
+    # flinttrade). Leaving either out meant an uninstall silently kept a launcher
+    # pointing at a source tree it had just deleted. A launcher its own receipt
+    # proves is already gone by the time this report runs — remove_web_install
+    # is called first — so anything still here is orphaned residue.
     candidates=(
       "/Applications/FlintTrade.app"
       "$HOME/Applications/FlintTrade.app"
       "$HOME/.local/bin/flinttrade"
+      "$HOME/.local/bin/flinttrade-web"
       "$SHELL_RECEIPT_DIR"
     )
   else
     candidates=(
       "$HOME/.local/bin/flinttrade"
+      "$HOME/.local/bin/flinttrade-web"
       "$HOME/.local/bin/flinttrade.AppImage"
       "$HOME/.local/opt/flinttrade"
       "$HOME/.local/share/applications/flinttrade.desktop"
@@ -1086,6 +1145,7 @@ uninstall_macos() {
     "$HOME/Library/WebKit/$LEGACY_BUNDLE_ID"
   )
   if [ "$PURGE" = "1" ]; then purge_all_data "${legacy[@]}"; else keep_notice "${legacy[@]}"; fi
+  remove_retained_web_receipt
 }
 
 uninstall_linux() {
@@ -1104,6 +1164,7 @@ uninstall_linux() {
     "$HOME/.local/share/$LEGACY_BUNDLE_ID"
   )
   if [ "$PURGE" = "1" ]; then purge_all_data "${legacy[@]}"; else keep_notice "${legacy[@]}"; fi
+  remove_retained_web_receipt
 }
 
 case "$OS" in Darwin) uninstall_macos ;; Linux) uninstall_linux ;; esac

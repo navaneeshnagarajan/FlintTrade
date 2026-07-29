@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,27 @@ NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this ru
 # (PowerShell) siblings already do.
 NO_MACOS_REASON = "requires macOS bundle tooling (plutil/defaults)"
 LEGACY_BUNDLE_ID = "com.flinttrade.app"
+
+
+def _posix_modes_honoured() -> bool:
+    """Whether the temp filesystem stores POSIX permission bits.
+
+    The receipt guards refuse anything that is not 0700/0600, which a Windows
+    filesystem can never report, so tests that plant a receipt would fail for a
+    reason that has nothing to do with the uninstaller.
+
+    Returns:
+        ``True`` when a directory chmod-ed to 0700 reads back as 0700.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        probe = Path(raw) / "probe"
+        probe.mkdir()
+        probe.chmod(0o700)
+        return (probe.stat().st_mode & 0o777) == 0o700
+
+
+POSIX_MODES = _posix_modes_honoured()
+NO_POSIX_MODES_REASON = "the install receipts require a filesystem that honours POSIX modes"
 
 
 def _fake_bin(tmp_path: Path, os_name: str) -> str:
@@ -785,6 +807,283 @@ def test_uninstall_reports_no_shell_without_destroying_retained_data(tmp_path: P
     assert profile.exists()
     assert "No FlintTrade shell was removed" in result.stdout
     assert "retained data remains available for reinstall" in result.stdout
+
+
+def _write_web_receipt(home: Path, *, source: Path, tools: Path, shim: Path | None = None) -> Path:
+    """Plant the owner-private receipt the one-line web installer writes.
+
+    Args:
+        home: Fake ``$HOME`` for the uninstaller run.
+        source: Managed web source checkout the receipt records.
+        tools: Verified-tools root the receipt records.
+        shim: Launcher the receipt records; defaults to the installer-owned path.
+
+    Returns:
+        The receipt file that was written.
+    """
+    launcher = shim if shim is not None else home / ".local" / "bin" / "flinttrade"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    if not launcher.exists():
+        launcher.write_text("#!/bin/sh\nexec true\n", encoding="utf-8")
+        launcher.chmod(0o755)
+    state = home / ".local" / "state" / "flinttrade-web"
+    state.mkdir(parents=True, exist_ok=True)
+    state.chmod(0o700)
+    receipt = state / "web-install.receipt"
+    receipt.write_text(
+        "\n".join(
+            (
+                "format=flinttrade-web-install-v1",
+                "platform=Linux",
+                # as_posix() is str() on any POSIX runner and keeps the receipt
+                # readable when the suite is exercised through Git Bash.
+                f"shim={launcher.as_posix()}",
+                f"shim_sha256={_sha256(launcher)}",
+                "shortcut=",
+                f"source={source.as_posix()}",
+                f"tools={tools.as_posix()}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    receipt.chmod(0o600)
+    return receipt
+
+
+def _web_install_footprint(home: Path) -> dict[str, Path]:
+    """Plant a web install whose managed source sits outside ``~/.flinttrade``."""
+    source = home / "custom-src"
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "package.json").write_text("{}", encoding="utf-8")
+    tools = home / ".flinttrade" / "tools"
+    (tools / "node").mkdir(parents=True, exist_ok=True)
+    (tools / "node" / "node").write_text("x", encoding="utf-8")
+    receipt = _write_web_receipt(home, source=source, tools=tools)
+    return {
+        "source": source,
+        "tools": tools,
+        "receipt": receipt,
+        "shim": home / ".local" / "bin" / "flinttrade",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_linux_ordinary_uninstall_retains_the_web_receipt_that_proves_retained_data(tmp_path: Path) -> None:
+    """The receipt is the only name a custom --src checkout has; keep it while it exists."""
+    paths = _web_install_footprint(tmp_path)
+    result = _run(tmp_path, os_name="Linux")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not paths["shim"].exists(), "the proved web launcher survived an ordinary uninstall"
+    assert paths["source"].exists(), "an ordinary uninstall deleted the retained custom source"
+    assert paths["receipt"].exists(), (
+        "the receipt was deleted while the source and tools it names were retained, so a later "
+        "--purge has no proof and no path for that checkout"
+    )
+    assert "Keeping" in result.stdout and str(paths["receipt"]) in result.stdout
+    assert str(paths["source"]) in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_linux_later_purge_still_removes_the_custom_web_source_and_retires_the_receipt(tmp_path: Path) -> None:
+    """An ordinary uninstall first, a --purge later: the custom checkout must still be reachable."""
+    paths = _web_install_footprint(tmp_path)
+    first = _run(tmp_path, os_name="Linux")
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert paths["source"].exists()
+
+    second = _run(tmp_path, "--purge", "--yes", os_name="Linux")
+
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert str(paths["source"]) in second.stdout, "the custom web source was never offered to --purge"
+    assert not paths["source"].exists(), "the custom web source survived a confirmed purge forever"
+    assert not paths["tools"].exists()
+    assert not paths["receipt"].exists(), "the receipt outlived the data it was retained to prove"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
+def test_linux_uninstall_removes_the_web_receipt_once_nothing_it_names_remains(tmp_path: Path) -> None:
+    """With no retained source or tools left there is nothing to prove, so the receipt goes."""
+    source = tmp_path / "custom-src"
+    tools = tmp_path / ".flinttrade" / "tools"
+    receipt = _write_web_receipt(tmp_path, source=source, tools=tools)
+    result = _run(tmp_path, os_name="Linux")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not receipt.exists(), "the receipt was retained although it named nothing that still exists"
+
+
+@pytest.mark.unit
+def test_linux_uninstall_reports_an_orphaned_web_launcher(tmp_path: Path) -> None:
+    """The web launcher was renamed, so the unreceipted-path report must follow it."""
+    launcher = tmp_path / ".local" / "bin" / "flinttrade-web"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\nexec true\n", encoding="utf-8")
+    launcher.chmod(0o755)
+
+    result = _run(tmp_path, os_name="Linux")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    # The script prints the path as its own shell spells it, which is not
+    # str(Path) when the suite runs through Git Bash on Windows.
+    assert ".local/bin/flinttrade-web" in result.stdout, (
+        "an orphaned web launcher — one no web-install receipt proves — was invisible to the "
+        "unreceipted-path report, so an uninstall reported success and left it behind"
+    )
+    assert "no valid owner-local shell install receipt proves this path" in result.stdout
+    assert launcher.exists(), "an unproven path must be reported, never removed"
+
+
+def _windows_web_install(home: Path) -> dict[str, Path]:
+    """Plant a Windows web install whose managed source sits outside the managed root.
+
+    The uninstaller resolves its profile folders from the environment, so the
+    throwaway home has to look like a real one.
+
+    Args:
+        home: Directory to use as the profile root.
+
+    Returns:
+        The planted paths, keyed by role.
+    """
+    local = home / "AppData" / "Local"
+    roaming = home / "AppData" / "Roaming"
+    shim_dir = local / "Programs" / "FlintTradeWeb"
+    receipt_dir = local / "flinttrade-web"
+    source = home / "custom-src"
+    tools = home / ".flinttrade" / "tools"
+    for directory in (roaming, shim_dir, receipt_dir, source, tools):
+        directory.mkdir(parents=True, exist_ok=True)
+    shim = shim_dir / "flinttrade-web.cmd"
+    shim.write_text("@echo off\r\n", encoding="ascii", newline="")
+    (source / "package.json").write_text("{}", encoding="utf-8")
+    receipt = receipt_dir / "web-install.receipt"
+    receipt.write_text(
+        "\r\n".join(
+            (
+                "format=flinttrade-web-install-v1",
+                "platform=Windows",
+                f"shim={shim}",
+                f"shim_sha256={_sha256(shim)}",
+                "shortcut=",
+                f"source={source}",
+                f"tools={tools}",
+            )
+        )
+        + "\r\n",
+        encoding="utf-8",
+        newline="",
+    )
+    return {"shim": shim, "receipt": receipt, "source": source, "tools": tools}
+
+
+def _windows_home_env(home: Path) -> dict[str, str]:
+    """Return an environment whose profile folders resolve inside ``home``.
+
+    Args:
+        home: Directory to use as the profile root.
+
+    Returns:
+        The current environment with the home-related variables replaced.
+    """
+    drive, _, rest = str(home).partition("\\")
+    return {
+        **os.environ,
+        "USERPROFILE": str(home),
+        "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        "APPDATA": str(home / "AppData" / "Roaming"),
+        "HOMEDRIVE": drive,
+        "HOMEPATH": f"\\{rest}",
+        "HOME": str(home),
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL or sys.platform != "win32", reason=NO_POWERSHELL_REASON)
+def test_windows_ordinary_uninstall_retains_the_web_receipt_that_proves_retained_data(
+    tmp_path: Path,
+) -> None:
+    """Parity with Linux: the receipt is the only name a custom source has."""
+    paths = _windows_web_install(tmp_path)
+    env = _windows_home_env(tmp_path)
+
+    ordinary = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    # Also proves the throwaway profile really is the one the script resolved.
+    assert f"Keeping {paths['receipt']}" in ordinary.stdout, ordinary.stdout + ordinary.stderr
+    assert not paths["shim"].exists(), "the proved web launcher survived an ordinary uninstall"
+    assert paths["source"].exists(), "an ordinary uninstall deleted the retained custom source"
+    assert paths["receipt"].exists(), (
+        "the receipt was deleted while the source and tools it names were retained, so a later "
+        "-Purge has no proof and no path for that checkout"
+    )
+
+    # A dry-run purge deletes nothing, and still has to be able to FIND the
+    # custom source — which it can only do through the retained receipt.
+    later = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-Purge", "-Yes", "-DryRun"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert later.returncode == 0, later.stdout + later.stderr
+    assert f"would DELETE FlintTrade data at {paths['source']}" in later.stdout, (
+        "the custom web source was never offered to a later -Purge"
+    )
+    assert paths["source"].exists(), "a dry-run purge must delete nothing"
+
+
+@pytest.mark.unit
+def test_windows_ordinary_uninstall_keeps_the_receipt_that_proves_retained_web_data() -> None:
+    """Parity with the POSIX fix: the receipt is the only name a custom source has.
+
+    Deleting it during an ordinary uninstall left a later ``-Purge`` with no
+    proof and no path, so a custom web source outside the managed root could
+    never be purged again.
+    """
+    text = PS1.read_text(encoding="utf-8")
+    removal_start = text.index("function Remove-ProvenWebInstall")
+    removal = text[removal_start : text.index("\n}\n", removal_start)]
+    assert "Test-WebInstallDataStillPresent" in removal, (
+        "Remove-ProvenWebInstall still deletes the web-install receipt unconditionally"
+    )
+    assert removal.index("Test-WebInstallDataStillPresent") < removal.index(
+        "Remove-IfExists $WebReceiptPath"
+    ), "the retained-data check must gate the receipt removal, not follow it"
+    assert "it is the only proof of the retained web-install data below" in removal
+
+    assert "function Test-WebInstallDataStillPresent" in text
+    assert "function Remove-RetainedWebReceipt" in text
+    # The retained receipt is retired only once a purge in the same run has
+    # removed everything it named, exactly as the POSIX uninstaller does.
+    retire = text[text.index("function Remove-RetainedWebReceipt") :]
+    retire = retire[: retire.index("\n}\n")]
+    assert "if (Test-WebInstallDataStillPresent) { return }" in retire
+    assert "Remove-IfExists $WebReceiptPath" in retire
+    ordinary_start = text.index("} elseif ($dataTargets)")
+    assert "Remove-RetainedWebReceipt" in text[ordinary_start:], (
+        "the retained receipt must be retired after the purge/keep decision, so a confirmed "
+        "purge in the same run still retires it"
+    )
+    assert text.index("Remove-RetainedWebReceipt", ordinary_start) < text.index(
+        "if ($DryRun) {\n    Say \"Dry run complete", ordinary_start
+    )
 
 
 @pytest.mark.unit
