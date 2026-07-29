@@ -23,6 +23,21 @@ from typing import Any
 logger = logging.getLogger("flinttrade.monitoring")
 
 
+def _default_data_dir() -> Path:
+    """Resolve the default disk-probe directory under the active workspace.
+
+    Read-only probe target — no legacy migration is attempted, and the
+    path is resolved at call time so environment overrides set after
+    import are honoured.
+
+    Returns:
+        The ``data`` directory inside the active workspace.
+    """
+    from flinttrade_core.workspace import workspace_dir
+
+    return workspace_dir() / "data"
+
+
 # ---------------------------------------------------------------------------
 # HealthAggregator
 # ---------------------------------------------------------------------------
@@ -120,15 +135,16 @@ class HealthAggregator:
         """Check free disk space on the data directory.
 
         Args:
-            data_dir: Directory to check.  Defaults to
-                ``~/.flinttrade/data``.
+            data_dir: Directory to check.  Defaults to the ``data``
+                directory inside the active workspace (resolved at call
+                time via :func:`flinttrade_core.workspace.workspace_dir`).
 
         Returns:
             Dict with ``status``, ``total_gb``, ``used_gb``,
             ``free_gb``, ``percent_used``.
         """
         if data_dir is None:
-            data_dir = Path.home() / ".flinttrade" / "data"
+            data_dir = _default_data_dir()
         data_dir = Path(data_dir)
 
         try:

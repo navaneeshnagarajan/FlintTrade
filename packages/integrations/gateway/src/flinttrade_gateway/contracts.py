@@ -137,7 +137,9 @@ class ContractManager:
 
     Example::
 
-        mgr = ContractManager(Path("~/.flinttrade/contracts").expanduser())
+        from flinttrade_core.workspace import workspace_dir
+
+        mgr = ContractManager(workspace_dir() / "contracts")
         count = mgr.insert_contracts("zerodha", rows)
         token = mgr.get_token("NIFTY", "NSE_INDEX", "zerodha")
     """
