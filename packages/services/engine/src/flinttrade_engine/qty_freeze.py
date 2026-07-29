@@ -48,7 +48,60 @@ import duckdb
 
 logger = logging.getLogger("flinttrade.engine.qty_freeze")
 
-_DEFAULT_DB_PATH = Path.home() / ".flinttrade" / "qty_freeze.duckdb"
+
+def _legacy_db_path() -> Path:
+    """Return the pre-``workspace_dir()`` freeze-limit store location.
+
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
+
+    Returns:
+        ``<legacy dot-directory>/qty_freeze.duckdb`` — the fixed
+        ``~/.flinttrade`` root every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "qty_freeze.duckdb"
+
+
+def _default_db_path() -> Path:
+    """Resolve the freeze-limit store under the active workspace, migrating once.
+
+    Replaces the former import-time ``_DEFAULT_DB_PATH`` constant, which froze
+    the location before pytest or a Gunicorn preload+fork could set
+    ``FLINTTRADE_WORKSPACE_DIR``. When no environment override is in force, a
+    pre-workspace ``~/.flinttrade/qty_freeze.duckdb`` is copied into the
+    workspace once, together with its DuckDB ``.wal`` sidecar. The copy is not
+    a convenience: an upgraded install that found no store would reseed the
+    well-known NSE defaults over the operator's tuned limits, quietly widening
+    the quantity a single order may carry. Copy, never move — the legacy
+    family is retained as a backup and an existing workspace copy always wins.
+
+    Returns:
+        Absolute path of ``qty_freeze.duckdb`` inside the workspace directory.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy store is retained.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_database_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "qty_freeze.duckdb"
+    if default_workspace_active():
+        copy_legacy_database_once(
+            _legacy_db_path(),
+            target,
+            sidecar_suffixes=(".wal",),
+            lock_name=".qty-freeze-migration.lock",
+            lock_dir=target.parent,
+            label="quantity freeze limits store",
+        )
+    return target
+
 
 # Well-known NSE freeze defaults — used when no CSV is loaded.
 # Source: NSE circular on F&O quantity limits (updated periodically).
@@ -121,17 +174,23 @@ class QuantityFreezeManager:
 
     _MAX_BLOCKS_MEMORY: int = 1000
 
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(self, db_path: Path | str | None = None) -> None:
         """Initialise the freeze manager.
 
         Loads existing limits from DuckDB into memory and seeds well-known
         NSE defaults if the table is empty.
 
         Args:
-            db_path: Optional path to the DuckDB file.  Defaults to
-                ``~/.flinttrade/qty_freeze.duckdb``.
+            db_path: Optional path to the DuckDB file. ``None`` (the default)
+                resolves ``workspace_dir()/qty_freeze.duckdb`` at call time and
+                runs the one-shot legacy copy; an explicit path skips the
+                probe.
+
+        Raises:
+            flinttrade_core.workspace.WorkspaceStateMigrationError: A legacy
+                store could not be copied; the legacy DB is retained.
         """
-        self._db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
+        self._db_path = Path(db_path) if db_path is not None else _default_db_path()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._limits: dict[tuple[str, str], int] = {}
         self._blocked: list[BlockedOrder] = []

@@ -11,6 +11,7 @@ Run with::
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -818,3 +819,309 @@ class TestScreenshots:
             assert (tmp_path / "journal_screenshots" / f"{row['id']}.png").exists()
         finally:
             journal.close()
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution + the paired legacy migration (DB + screenshots)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _never_probe_the_real_home(monkeypatch, tmp_path):
+    """Point both legacy probes at a temp directory for every test in the file.
+
+    Guarantees that no test — however pytest-randomly reorders it, and whatever
+    it does to the environment — can probe the developer's real home directory.
+    """
+    from flinttrade_journal import trade_journal
+
+    legacy = tmp_path / "legacy-home" / ".flinttrade"
+    monkeypatch.setattr(trade_journal, "_legacy_journal_path", lambda: legacy / "journal.sqlite")
+    monkeypatch.setattr(trade_journal, "_legacy_screenshots_dir", lambda: legacy / "journal_screenshots")
+
+
+@pytest.mark.unit
+class TestWorkspaceResolution:
+    """``journal.sqlite`` and ``journal_screenshots/`` resolve under the workspace.
+
+    The database and the image directory are one unit: every screenshot row
+    references a file by id, so a database migrated without its images leaves
+    the operator with a journal whose every screenshot is missing.
+    """
+
+    @staticmethod
+    def _default_workspace(monkeypatch, tmp_path):
+        """Make ``workspace_dir()`` resolve to a tmp dir with no env override.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+            tmp_path: Per-test temporary directory.
+
+        Returns:
+            The directory ``workspace_dir()`` will now return.
+        """
+        import flinttrade_core.workspace as ws
+
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.delenv("FLINTTRADE_JOURNAL_DB", raising=False)
+        workspace = tmp_path / "workspace"
+        monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+        return workspace
+
+    @staticmethod
+    def _legacy_unit(monkeypatch, tmp_path):
+        """Redirect both legacy probes into tmp_path and return their paths."""
+        from flinttrade_journal import trade_journal
+
+        legacy_dir = tmp_path / "legacy" / ".flinttrade"
+        legacy_db = legacy_dir / "journal.sqlite"
+        legacy_shots = legacy_dir / "journal_screenshots"
+        monkeypatch.setattr(trade_journal, "_legacy_journal_path", lambda: legacy_db)
+        monkeypatch.setattr(trade_journal, "_legacy_screenshots_dir", lambda: legacy_shots)
+        return legacy_db, legacy_shots
+
+    @staticmethod
+    def _seed_legacy_unit(legacy_db, legacy_shots):
+        """Write a legacy journal, its SQLite sidecars, and one screenshot file."""
+        legacy_db.parent.mkdir(parents=True, exist_ok=True)
+        legacy_db.write_bytes(b"legacy-journal")
+        legacy_db.with_name("journal.sqlite-wal").write_bytes(b"legacy-wal")
+        legacy_db.with_name("journal.sqlite-journal").write_bytes(b"legacy-rollback")
+        legacy_shots.mkdir(parents=True, exist_ok=True)
+        (legacy_shots / "shot-1.png").write_bytes(b"png-bytes")
+
+    def test_fresh_install_resolves_under_workspace(self, monkeypatch, tmp_path):
+        """No legacy journal: the path is the workspace one and nothing is copied."""
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        self._legacy_unit(monkeypatch, tmp_path)
+
+        resolved = trade_journal._default_journal_path()
+
+        assert resolved == workspace / "journal.sqlite"
+        assert not resolved.exists()
+        assert not (workspace / "journal_screenshots").exists()
+
+    def test_database_and_screenshots_travel_together(self, monkeypatch, tmp_path):
+        """The unit migrates whole: DB, both SQLite sidecars, and every image."""
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        resolved = trade_journal._default_journal_path()
+
+        assert resolved == workspace / "journal.sqlite"
+        assert resolved.read_bytes() == b"legacy-journal"
+        assert (workspace / "journal.sqlite-wal").read_bytes() == b"legacy-wal"
+        assert (workspace / "journal.sqlite-journal").read_bytes() == b"legacy-rollback"
+        assert (workspace / "journal_screenshots" / "shot-1.png").read_bytes() == b"png-bytes"
+        # Copy, not move — the legacy unit stays behind as a backup.
+        assert legacy_db.exists()
+        assert (legacy_shots / "shot-1.png").exists()
+
+    def test_existing_workspace_database_skips_the_whole_unit(self, monkeypatch, tmp_path):
+        """DB-target-exists must skip the images too, never migrate them alone.
+
+        Copying the images into a workspace whose journal was never migrated
+        would attach an old image set to a different journal's row ids.
+        """
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "journal.sqlite").write_bytes(b"already-here")
+
+        resolved = trade_journal._default_journal_path()
+
+        assert resolved.read_bytes() == b"already-here"
+        assert not (workspace / "journal_screenshots").exists()
+        assert legacy_db.exists()
+
+    def test_screenshots_are_never_stranded_without_their_database(self, monkeypatch, tmp_path):
+        """The database is the completion marker, so images are copied first."""
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        trade_journal._default_journal_path()
+
+        # A workspace database implies the images arrived with it.
+        assert (workspace / "journal.sqlite").exists()
+        assert (workspace / "journal_screenshots" / "shot-1.png").exists()
+
+    def test_migration_locks_land_inside_the_workspace(self, monkeypatch, tmp_path):
+        """Root-level targets must not drop locks in the parent of the workspace."""
+        import flinttrade_core.workspace as ws
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        seen = []
+        real_lock = ws.FileLock
+
+        def _recording_lock(path, *args, **kwargs):
+            seen.append(Path(path))
+            return real_lock(path, *args, **kwargs)
+
+        monkeypatch.setattr(ws, "FileLock", _recording_lock)
+        trade_journal._default_journal_path()
+
+        assert seen == [
+            workspace / ".journal-migration.lock",
+            workspace / ".journal-screenshots-migration.lock",
+            workspace / ".journal-db-migration.lock",
+        ]
+
+    def test_environment_override_keeps_the_probe_inert(self, monkeypatch, tmp_path):
+        """``FLINTTRADE_WORKSPACE_DIR`` set: no copy, and the path follows the override."""
+        from flinttrade_journal import trade_journal
+
+        override = tmp_path / "override"
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.delenv("FLINTTRADE_JOURNAL_DB", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        resolved = trade_journal._default_journal_path()
+
+        assert resolved == override.resolve() / "journal.sqlite"
+        assert not resolved.exists()
+        assert not (override.resolve() / "journal_screenshots").exists()
+
+    def test_journal_db_override_skips_the_probe(self, monkeypatch, tmp_path):
+        """``FLINTTRADE_JOURNAL_DB`` is an explicit path and never migrates."""
+        from flinttrade_journal import trade_journal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+        explicit = tmp_path / "explicit" / "journal.sqlite"
+        monkeypatch.setenv("FLINTTRADE_JOURNAL_DB", str(explicit))
+
+        resolved = trade_journal._default_journal_path()
+
+        assert resolved == explicit
+        assert not (workspace / "journal.sqlite").exists()
+
+    def test_screenshots_dir_follows_the_migrated_database(self, monkeypatch, tmp_path):
+        """A default-constructed journal points at the workspace image directory."""
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        self._legacy_unit(monkeypatch, tmp_path)
+
+        journal = TradeJournal()
+        try:
+            journal.initialise()
+            assert journal.screenshots_dir == workspace / "journal_screenshots"
+        finally:
+            journal.close()
+
+    def test_explicit_db_path_skips_the_screenshots_probe(self, monkeypatch, tmp_path):
+        """Construction form 1 of 3: an explicit ``db_path`` never probes.
+
+        The screenshot fallback used to defeat the documented probe-skip for
+        two of the three explicit forms, so a caller who supplied their own
+        journal still had the installer migrate their legacy screenshots.
+        """
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+        explicit = tmp_path / "explicit" / "journal.sqlite"
+        explicit.parent.mkdir(parents=True, exist_ok=True)
+
+        journal = TradeJournal(explicit)
+        try:
+            journal.initialise()
+            assert journal.screenshots_dir == explicit.parent / "journal_screenshots"
+        finally:
+            journal.close()
+
+        # Nothing under the workspace was resolved, so nothing was migrated.
+        assert not workspace.exists()
+        assert (legacy_shots / "shot-1.png").exists()
+
+    def test_in_memory_journal_touches_no_filesystem(self, monkeypatch, tmp_path):
+        """Construction form 2 of 3: ``:memory:`` must stay entirely off disk.
+
+        ``str(resolved_db_path) != ":memory:"`` sent this form to the default
+        resolver, so an in-memory journal — the whole test suite's default —
+        both created the workspace and could trigger the legacy screenshots
+        migration.
+        """
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        journal = TradeJournal(":memory:")
+        try:
+            journal.initialise()
+            assert not workspace.exists()
+            # Only now, on first access, is the workspace looked up — and by
+            # ``workspace_dir()`` alone, never the migration probe.
+            assert journal.screenshots_dir == workspace / "journal_screenshots"
+        finally:
+            journal.close()
+
+        assert not (workspace / "journal.sqlite").exists()
+        assert not (workspace / "journal_screenshots").exists()
+        assert (legacy_shots / "shot-1.png").exists()
+
+    def test_injected_connection_skips_the_screenshots_probe(self, monkeypatch, tmp_path):
+        """Construction form 3 of 3: a caller-supplied connection never probes."""
+        import sqlite3
+
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy_db, legacy_shots = self._legacy_unit(monkeypatch, tmp_path)
+        self._seed_legacy_unit(legacy_db, legacy_shots)
+
+        journal = TradeJournal(connection=sqlite3.connect(":memory:", check_same_thread=False))
+        try:
+            journal.initialise()
+            assert not workspace.exists()
+            assert journal.screenshots_dir == workspace / "journal_screenshots"
+        finally:
+            journal.close()
+
+        assert not (workspace / "journal.sqlite").exists()
+        assert not (workspace / "journal_screenshots").exists()
+        assert (legacy_shots / "shot-1.png").exists()
+
+    def test_broken_core_install_raises_instead_of_shadowing(self, monkeypatch, tmp_path):
+        """The deleted fallback used to open an empty journal at a home literal.
+
+        A resolver that answers a broken installation with a different, empty
+        database presents to the operator as a journal that has lost every
+        trade. ``app.py`` already degrades the journal routes to 503 on a
+        raising construction, so failing loudly costs nothing at boot.
+        """
+        import sys
+
+        from flinttrade_journal import trade_journal
+        from flinttrade_journal.trade_journal import TradeJournal
+
+        self._default_workspace(monkeypatch, tmp_path)
+        monkeypatch.setitem(sys.modules, "flinttrade_core.workspace", None)
+
+        with pytest.raises(ImportError):
+            trade_journal._default_journal_path()
+        # The fault must reach the caller, not be absorbed into a shadow store.
+        with pytest.raises(ImportError):
+            TradeJournal()

@@ -232,3 +232,78 @@ def test_context_manager() -> None:
     with LatencyMonitor(":memory:") as m:
         m.record("ZERODHA", "PLACE", 42.0)
         assert m.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Default database location (workspace path unification, wave 1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultDbPath:
+    """The default latency-log database lives inside the active workspace.
+
+    The latency log is disposable observability data, so there is no legacy
+    migration to test — only the routing. Every test sets
+    ``FLINTTRADE_WORKSPACE_DIR`` explicitly so the resolver can never reach
+    the developer's real home directory.
+    """
+
+    @staticmethod
+    def _use_workspace(monkeypatch, root):
+        """Point the workspace resolver at *root* and return its resolved form.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            root: Directory to expose as the active workspace.
+
+        Returns:
+            The resolved workspace path the resolver will return.
+        """
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(root))
+        return root.resolve()
+
+    @pytest.mark.unit
+    def test_resolves_under_the_workspace(self, tmp_path, monkeypatch):
+        """_default_db_path() names latency_log.duckdb inside the workspace."""
+        from flinttrade_engine.latency_monitor import _default_db_path
+
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws")
+        assert _default_db_path() == expected / "latency_log.duckdb"
+
+    @pytest.mark.unit
+    def test_no_argument_monitor_opens_the_workspace_database(self, tmp_path, monkeypatch):
+        """LatencyMonitor() with no db_path writes into the active workspace."""
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws") / "latency_log.duckdb"
+
+        mon = LatencyMonitor()
+        try:
+            assert mon._db_path == str(expected)
+            assert expected.exists()
+        finally:
+            mon.close()
+
+    @pytest.mark.unit
+    def test_explicit_db_path_bypasses_the_default(self, tmp_path, monkeypatch):
+        """An explicit db_path wins over the workspace default."""
+        self._use_workspace(monkeypatch, tmp_path / "ws")
+        explicit = tmp_path / "elsewhere" / "custom.duckdb"
+
+        mon = LatencyMonitor(explicit)
+        try:
+            assert mon._db_path == str(explicit)
+            assert not (tmp_path / "ws" / "latency_log.duckdb").exists()
+        finally:
+            mon.close()
+
+    @pytest.mark.unit
+    def test_resolution_happens_per_call_not_at_import(self, tmp_path, monkeypatch):
+        """Changing the override between calls changes the resolved path."""
+        from flinttrade_engine.latency_monitor import _default_db_path
+
+        first = self._use_workspace(monkeypatch, tmp_path / "one")
+        assert _default_db_path() == first / "latency_log.duckdb"
+
+        second = self._use_workspace(monkeypatch, tmp_path / "two")
+        assert _default_db_path() == second / "latency_log.duckdb"
+        assert first != second

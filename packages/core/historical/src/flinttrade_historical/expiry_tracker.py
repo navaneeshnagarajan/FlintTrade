@@ -24,7 +24,6 @@ from __future__ import annotations
 import logging
 import asyncio
 import inspect
-import shutil
 import threading
 import time
 import uuid
@@ -40,33 +39,51 @@ logger = logging.getLogger("flinttrade.historical.expiry_tracker")
 
 
 def _legacy_db_path() -> Path:
-    """Pre-``workspace_dir()`` location (a fixed ``~/.flinttrade`` on every OS)."""
-    return Path.home() / ".flinttrade" / "data" / "expiry_tracker.duckdb"
+    """Return the pre-``workspace_dir()`` tracker DB location.
+
+    Module-level so tests can monkeypatch the probe away from the real home
+    directory.
+
+    Returns:
+        ``<legacy dot-directory>/data/expiry_tracker.duckdb`` — the fixed
+        ``~/.flinttrade`` root every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "data" / "expiry_tracker.duckdb"
 
 
 def _migrate_legacy_expiry_db(legacy: Path, new: Path) -> None:
-    """One-shot copy of a pre-``workspace_dir()`` tracker DB into the workspace.
+    """Copy a pre-``workspace_dir()`` tracker DB into the workspace once.
 
-    The default DB path moves from the hardcoded
+    The default DB path moved from the hardcoded
     ``~/.flinttrade/data/expiry_tracker.duckdb`` to
     ``workspace_dir()/data/expiry_tracker.duckdb`` (macOS: ``~/Library/
     Application Support/flinttrade``; Windows: ``%APPDATA%/flinttrade``).
-    Copy — never move; the legacy file stays behind as a backup — when the new
-    path is absent and the legacy one exists. No-op on Linux where the two
-    paths coincide. Best-effort: a failed copy degrades to an empty tracker,
-    never an exception. (Sibling migration:
+    Delegates to the shared workspace copy machinery, which copies — never
+    moves — the DB together with its DuckDB ``.wal`` sidecar, retains the
+    legacy family as a backup, serialises concurrent callers on a migration
+    lock, and treats an existing workspace copy as the winner. No-op on Linux
+    where the two paths coincide. (Sibling migration:
     ``flinttrade_historical.watchlist_routes._migrate_legacy_watchlist_db``.)
+
+    Args:
+        legacy: Pre-workspace tracker DB to copy from.
+        new: Destination inside the active workspace.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy DB is retained.
     """
-    try:
-        if new.exists() or not legacy.exists():
-            return
-        if legacy.resolve() == new.resolve():
-            return
-        new.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(legacy, new)
-        logger.info("Migrated legacy expiry tracker DB from %s to %s", legacy, new)
-    except OSError as exc:
-        logger.warning("Could not migrate legacy expiry tracker DB %s -> %s: %s", legacy, new, exc)
+    from flinttrade_core.workspace import copy_legacy_database_once  # noqa: PLC0415
+
+    copy_legacy_database_once(
+        legacy,
+        new,
+        sidecar_suffixes=(".wal",),
+        lock_name=".expiry-tracker-migration.lock",
+        label="expiry tracker DB",
+    )
 
 
 def _default_db_path() -> Path:
@@ -75,6 +92,10 @@ def _default_db_path() -> Path:
     Uses :func:`flinttrade_core.workspace.workspace_dir` so the tracker honours
     ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` and the platform-specific
     workspace root instead of the old hardcoded ``~/.flinttrade``.
+
+    Returns:
+        Absolute path of ``expiry_tracker.duckdb`` under the workspace's
+        ``data`` directory.
     """
     from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
 

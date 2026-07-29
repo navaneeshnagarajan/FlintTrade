@@ -50,7 +50,9 @@ class DownloadWatchlist:
 
     Example::
 
-        wl = DownloadWatchlist(Path.home() / ".flinttrade" / "watchlist.db")
+        from flinttrade_core.workspace import workspace_dir
+
+        wl = DownloadWatchlist(workspace_dir() / "watchlist.db")
         wl.add("NIFTY", "NSE_INDEX", "1d")
         wl.add("RELIANCE", "NSE", "15m")
         enabled = wl.get_enabled()

@@ -17,7 +17,7 @@ Usage::
 
     from flinttrade_journal.trade_journal import TradeJournal, JournalEntry
 
-    journal = TradeJournal("~/.flinttrade/journal.sqlite")
+    journal = TradeJournal()  # journal.sqlite under the workspace directory
     journal.initialise()
 
     entry_id = journal.add_entry(JournalEntry(
@@ -516,16 +516,155 @@ def _entry_to_row(entry: JournalEntry) -> dict[str, Any]:
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
+_DB_NAME = "journal.sqlite"
+_SCREENSHOTS_DIR_NAME = "journal_screenshots"
+_MEMORY_DB = ":memory:"
+
+# One lock name for the whole journal unit, plus a per-artefact lock for each
+# half. The unit lock is what keeps the database and its images together; the
+# per-artefact locks exist only because the shared copy helpers take a name,
+# and they are uncontended by construction (the unit lock already serialises
+# every caller). They must be DISTINCT paths — two ``FileLock`` instances on
+# one path inside a single process block against each other.
+_UNIT_LOCK_NAME = ".journal-migration.lock"
+_DB_LOCK_NAME = ".journal-db-migration.lock"
+_SCREENSHOTS_LOCK_NAME = ".journal-screenshots-migration.lock"
+
+# A journal with years of screenshots is a multi-gigabyte copy; a Gunicorn boot
+# herd must not fail-closed on the 10s default while one worker performs it.
+_MIGRATION_TIMEOUT_SECONDS: float = 60.0
+
+
+def _legacy_journal_path() -> Path:
+    """Return the pre-``workspace_dir()`` journal database location.
+
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
+
+    Returns:
+        ``<legacy dot-directory>/journal.sqlite`` — the fixed ``~/.flinttrade``
+        root every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / _DB_NAME
+
+
+def _legacy_screenshots_dir() -> Path:
+    """Return the pre-``workspace_dir()`` journal screenshot directory.
+
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
+
+    Returns:
+        ``<legacy dot-directory>/journal_screenshots``.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / _SCREENSHOTS_DIR_NAME
+
+
 def _default_journal_path() -> Path:
-    """Resolve the journal SQLite path: env override > workspace > home fallback."""
+    """Resolve the journal database under the active workspace, migrating once.
+
+    ``FLINTTRADE_JOURNAL_DB`` remains an explicit override and skips the
+    migration probe entirely. Otherwise the journal resolves to
+    ``journal.sqlite`` inside the workspace directory, and a pre-workspace
+    journal is copied across once together with its screenshot directory.
+
+    There is deliberately no fallback for a broken ``flinttrade_core`` import:
+    the previous one silently opened an empty journal at a hardcoded home path,
+    so an installation fault presented to the operator as a journal that had
+    lost every trade. Raising instead surfaces the fault (``app.py`` degrades
+    the journal routes to 503 without blocking boot).
+
+    Returns:
+        Absolute path of the journal SQLite database.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: A legacy
+            journal could not be preserved in the workspace.
+    """
     env = os.getenv("FLINTTRADE_JOURNAL_DB")
     if env:
         return Path(env).expanduser()
+
+    from flinttrade_core.workspace import default_workspace_active, workspace_dir  # noqa: PLC0415
+
+    target = workspace_dir() / _DB_NAME
+    if default_workspace_active():
+        _migrate_legacy_journal_unit(target, target.parent / _SCREENSHOTS_DIR_NAME)
+    return target
+
+
+def _migrate_legacy_journal_unit(target_db: Path, target_screenshots: Path) -> None:
+    """Copy the legacy journal database and its screenshot directory as one unit.
+
+    Copy, never move: the legacy journal is retained as a backup. The database
+    is the unit's completion marker, so an existing workspace database skips the
+    whole unit — never just the database — because a journal migrated without
+    its image directory silently loses every screenshot behind rows that still
+    reference them. For the same reason the images are copied *first*: the
+    marker only appears once the unit is whole, and an interrupted copy is
+    retried on the next boot.
+
+    Args:
+        target_db: Workspace location of the journal SQLite database.
+        target_screenshots: Workspace location of the screenshot directory.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy journal is retained.
+    """
+    # ``FileLock`` is re-used from ``flinttrade_core.workspace`` rather than
+    # imported from ``filelock`` directly: this package declares
+    # ``flinttrade-core`` but not ``filelock``, and borrowing the resolver's own
+    # object adds no dependency edge.
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        FileLock,
+        FileLockTimeout,
+        WorkspaceStateMigrationError,
+        copy_legacy_database_once,
+        copy_legacy_directory_once,
+    )
+
+    if target_db.exists():
+        return
+    legacy_db = _legacy_journal_path()
+    if not legacy_db.exists():
+        return
+
     try:
-        from flinttrade_core.workspace import Workspace  # noqa: PLC0415
-        return Workspace().workspace_dir / "journal.sqlite"
-    except Exception:  # noqa: BLE001 — fall back to the conventional home path
-        return Path.home() / ".flinttrade" / "journal.sqlite"
+        unit_lock = FileLock(target_db.parent / _UNIT_LOCK_NAME, timeout=_MIGRATION_TIMEOUT_SECONDS, mode=0o600)
+        with unit_lock.acquire():
+            if target_db.exists():
+                # A sibling worker won the unit lock and migrated the journal.
+                logger.info("Legacy trade journal already migrated by a concurrent process")
+                return
+            copy_legacy_directory_once(
+                _legacy_screenshots_dir(),
+                target_screenshots,
+                lock_name=_SCREENSHOTS_LOCK_NAME,
+                lock_dir=target_screenshots.parent,
+                label="trade journal screenshots",
+                timeout=_MIGRATION_TIMEOUT_SECONDS,
+            )
+            copy_legacy_database_once(
+                legacy_db,
+                target_db,
+                sidecar_suffixes=("-wal", "-journal"),
+                lock_name=_DB_LOCK_NAME,
+                lock_dir=target_db.parent,
+                label="trade journal database",
+                timeout=_MIGRATION_TIMEOUT_SECONDS,
+            )
+    except WorkspaceStateMigrationError:
+        raise
+    except (FileLockTimeout, OSError) as exc:
+        logger.error("Could not migrate the legacy trade journal into %s: %s", target_db.parent, exc)
+        raise WorkspaceStateMigrationError(
+            f"Could not preserve the legacy trade journal; source retained at {legacy_db}"
+        ) from exc
 
 
 class TradeJournal:
@@ -539,17 +678,23 @@ class TradeJournal:
 
     Args:
         db_path: Path to the journal SQLite file. Defaults to
-            ``journal.sqlite`` under the FlintTrade workspace. Ignored when
+            ``journal.sqlite`` under the FlintTrade workspace, resolved at call
+            time so an environment override set after import is honoured. An
+            explicit path skips the legacy-migration probe. Ignored when
             ``connection`` is supplied.
         connection: An open :class:`sqlite3.Connection` to use directly
             (chiefly for tests / an injected in-memory DB).
         screenshots_dir: Directory for trade-log screenshot files. Defaults to
             ``journal_screenshots/`` next to the journal SQLite file (i.e.
             inside the FlintTrade workspace). Created lazily on first write.
+            The ``:memory:`` and injected-``connection`` forms have no journal
+            file to sit beside, so they fall back to the active workspace
+            directory — resolved on first use, and never through the
+            legacy-migration probe.
 
     Example::
 
-        journal = TradeJournal("~/.flinttrade/journal.sqlite")
+        journal = TradeJournal()  # journal.sqlite under the workspace directory
         journal.initialise()
         eid = journal.add_entry(JournalEntry(
             symbol="BANKNIFTY", exchange="NFO", side="BUY",
@@ -576,17 +721,41 @@ class TradeJournal:
         # Serialises the shared connection across Flask request threads (see _locked).
         self._lock = threading.RLock()
         # Screenshot bytes live on disk next to the SQLite file (workspace dir)
-        # unless a directory is injected. Resolved eagerly, created lazily.
+        # unless a directory is injected. Created lazily on first write.
+        #
+        # Every explicit construction form — an injected directory, an explicit
+        # ``db_path`` (``:memory:`` included), an injected connection — must
+        # resolve WITHOUT calling ``_default_journal_path()``, because that is
+        # the legacy-migration probe: an in-memory or caller-supplied journal
+        # that reached it would migrate the operator's legacy screenshots on
+        # their behalf, and the ``:memory:`` form would touch the filesystem it
+        # exists to avoid.
+        self._screenshots_dir: Path | None
         if screenshots_dir is not None:
             self._screenshots_dir = Path(screenshots_dir).expanduser()
-        elif resolved_db_path is not None and str(resolved_db_path) != ":memory:":
-            self._screenshots_dir = resolved_db_path.parent / "journal_screenshots"
+        elif resolved_db_path is not None and str(resolved_db_path) != _MEMORY_DB:
+            self._screenshots_dir = resolved_db_path.parent / _SCREENSHOTS_DIR_NAME
         else:
-            self._screenshots_dir = _default_journal_path().parent / "journal_screenshots"
+            # No journal file to sit beside: deferred to the workspace lookup
+            # in :attr:`screenshots_dir`, so construction touches no disk.
+            self._screenshots_dir = None
 
     @property
     def screenshots_dir(self) -> Path:
-        """Directory holding the trade-log screenshot files."""
+        """Directory holding the trade-log screenshot files.
+
+        Resolved on first access for the ``:memory:`` and injected-connection
+        forms, which have no journal file to sit beside: they fall back to the
+        active workspace directory via a plain :func:`workspace_dir` lookup,
+        never the legacy-migration probe.
+
+        Returns:
+            The directory screenshot bytes are read from and written to.
+        """
+        if self._screenshots_dir is None:
+            from flinttrade_core.workspace import workspace_dir  # noqa: PLC0415
+
+            self._screenshots_dir = workspace_dir() / _SCREENSHOTS_DIR_NAME
         return self._screenshots_dir
 
     def close(self) -> None:
@@ -1126,7 +1295,7 @@ class TradeJournal:
     def _screenshot_path(self, screenshot_id: str, content_type: str) -> Path:
         """Resolve the on-disk file path for a screenshot row."""
         ext = _SCREENSHOT_CONTENT_TYPES.get(content_type, "bin")
-        return self._screenshots_dir / f"{screenshot_id}.{ext}"
+        return self.screenshots_dir / f"{screenshot_id}.{ext}"
 
     @staticmethod
     def _screenshot_meta_row(record: dict[str, Any]) -> dict[str, Any]:

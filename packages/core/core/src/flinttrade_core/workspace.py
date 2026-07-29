@@ -425,10 +425,11 @@ def copy_legacy_directory_once(
     """Copy one legacy directory under migration and optional source locks.
 
     Idempotent: a target that already contains meaningful entries wins, and
-    the legacy tree is retained. A target that becomes populated while this
-    caller waits on the migration lock is always treated as a sibling process
-    having completed the same migration — never as a conflict — so a herd of
-    workers probing at boot cannot fail each other.
+    the legacy tree is retained. Because the copy retains its source, a target
+    that already holds every legacy entry is a *completed* migration — this
+    call's own, a sibling worker's, or an earlier boot's — and is never a
+    conflict, whichever side of the migration lock it is observed from. Only a
+    target that has *lost* legacy state is divergent.
 
     Args:
         legacy: Pre-workspace directory to copy from.
@@ -439,8 +440,8 @@ def copy_legacy_directory_once(
             whether a directory contains meaningful state.
         source_lock_name: Optional lock file inside ``legacy`` to hold during
             the copy, serialising against live writers of the source.
-        conflict_is_error: When True, a target already populated before the
-            migration lock is sought raises instead of silently skipping.
+        conflict_is_error: When True, a populated target that does not already
+            hold the legacy state raises instead of silently skipping.
         lock_dir: Directory the migration lock is created in. ``None`` keeps
             the historical placement (``target.parent.parent``). Pass
             ``target.parent`` for targets directly under the workspace root so
@@ -449,8 +450,8 @@ def copy_legacy_directory_once(
 
     Raises:
         WorkspaceStateMigrationError: The copy could not be completed, or a
-            pre-existing conflict was found with ``conflict_is_error=True``;
-            the legacy source is retained in both cases.
+            divergent target was found with ``conflict_is_error=True``; the
+            legacy source is retained in both cases.
     """
     if not legacy.is_dir() or legacy.resolve() == target.resolve():
         return
@@ -458,6 +459,25 @@ def copy_legacy_directory_once(
     if not legacy_entries:
         return
     if target.exists() and _meaningful_directory_entries(target, excluded_names):
+        # How the two cases are told apart WITHOUT depending on arrival order —
+        # a late worker cannot observe whether the target predates this boot:
+        #
+        #   Already migrated. The copy never moves, so a target produced from
+        #   this legacy tree still holds every legacy entry, each target file
+        #   being its legacy counterpart plus whatever the running app appended
+        #   afterwards (the audit chain is append-only). Copying again would
+        #   preserve nothing. This covers the winner's N-1 Gunicorn siblings
+        #   that reach the pre-lock probe *after* the winner has finished, and
+        #   equally every boot after the first.
+        #
+        #   Divergent. A legacy entry is absent from the target, or a target
+        #   file has diverged from its legacy counterpart instead of extending
+        #   it — so the target was not produced from this legacy tree and
+        #   copying over it would destroy operator state. Under
+        #   ``conflict_is_error`` that still raises, and both trees are kept.
+        if _legacy_state_survives_in(legacy, target, excluded_names):
+            logger.info("Legacy %s already present at %s; keeping the workspace copy", label, target)
+            return
         if conflict_is_error:
             raise WorkspaceStateMigrationError(
                 f"Legacy and workspace {label} directories both contain state; both were preserved"
@@ -491,8 +511,9 @@ def copy_legacy_directory_once(
             )
             candidate.chmod(0o700)
             if target.exists():
-                target.rmdir()
-            candidate.replace(target)
+                _drain_into_existing_target(candidate, target)
+            else:
+                candidate.replace(target)
             logger.info("Migrated legacy %s from %s to %s", label, legacy, target)
     except WorkspaceStateMigrationError:
         raise
@@ -503,6 +524,91 @@ def copy_legacy_directory_once(
         ) from exc
     finally:
         shutil.rmtree(candidate, ignore_errors=True)
+
+
+def _drain_into_existing_target(candidate: Path, target: Path) -> None:
+    """Move the staged tree into a target directory that already exists.
+
+    ``Path.replace`` cannot swap a directory in over a non-empty one, yet a
+    target holding nothing but excluded entries — a runtime log directory, a
+    source lock file, a strategy state directory — has already been judged
+    empty of meaningful state and must still receive the migration. Entries
+    are moved one at a time and an entry whose name is already present is left
+    behind, so nothing in the target is ever overwritten.
+
+    Args:
+        candidate: The staged copy of the legacy tree, a sibling of ``target``.
+        target: The existing destination directory.
+    """
+    for entry in candidate.iterdir():
+        destination = target / entry.name
+        if destination.exists():
+            continue
+        entry.replace(destination)
+    try:
+        target.chmod(0o700)
+    except OSError:  # pragma: no cover - read-only filesystems, Windows ACLs
+        logger.warning("Could not restrict permissions on migrated directory %s", target)
+
+
+def _legacy_state_survives_in(legacy: Path, target: Path, excluded_names: frozenset[str]) -> bool:
+    """Report whether every legacy entry is still readable inside the target.
+
+    This is the copy-once idempotence test, not an equality test. Migration
+    copies rather than moves, so a target derived from ``legacy`` keeps all of
+    its entries for good; the running application only ever appends to them
+    (the audit chain is append-only JSONL), which is why a target file counts
+    as holding its legacy counterpart when it merely *starts with* it. A
+    target that fails this test was not produced from ``legacy``, so copying
+    over it would discard state the operator can still see.
+
+    Args:
+        legacy: Pre-workspace directory being migrated from.
+        target: Destination directory inside the active workspace.
+        excluded_names: Entry names ignored on both sides, matching the names
+            the copy itself skips.
+
+    Returns:
+        True when nothing in ``legacy`` would be lost by leaving ``target``
+        exactly as it is.
+    """
+    for entry in _meaningful_directory_entries(legacy, excluded_names):
+        counterpart = target / entry.name
+        if entry.is_dir():
+            if not counterpart.is_dir() or not _legacy_state_survives_in(entry, counterpart, excluded_names):
+                return False
+        elif not counterpart.is_file() or not _file_starts_with(counterpart, entry):
+            return False
+    return True
+
+
+def _file_starts_with(candidate: Path, prefix: Path, chunk_size: int = 1 << 16) -> bool:
+    """Report whether ``candidate`` begins with the whole of ``prefix``.
+
+    Streamed in chunks so a multi-gigabyte audit chain is never read into
+    memory. An unreadable file is reported as *not* a continuation, keeping
+    the caller on the conservative branch.
+
+    Args:
+        candidate: File that may extend ``prefix``.
+        prefix: File whose bytes must appear at the start of ``candidate``.
+        chunk_size: Bytes compared per read.
+
+    Returns:
+        True when ``candidate`` is ``prefix`` or an append-only extension.
+    """
+    try:
+        if prefix.stat().st_size > candidate.stat().st_size:
+            return False
+        with prefix.open("rb") as prefix_stream, candidate.open("rb") as candidate_stream:
+            while True:
+                expected = prefix_stream.read(chunk_size)
+                if not expected:
+                    return True
+                if candidate_stream.read(len(expected)) != expected:
+                    return False
+    except OSError:
+        return False
 
 
 def _meaningful_directory_entries(path: Path, excluded_names: frozenset[str]) -> list[Path]:

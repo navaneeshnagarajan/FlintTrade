@@ -20,6 +20,7 @@ Register in ``create_flask_app()``::
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -35,16 +36,36 @@ health_bp = Blueprint("health_detail", __name__)
 # IST timezone offset
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-# Module-level singletons — shared across all requests
-_monitor = HealthMonitor()
-_health_agg = HealthAggregator()
+# Module-level singletons — shared across all requests, built on first use.
+#
+# These are deliberately NOT constructed at import time. `HealthMonitor()`
+# resolves its disk-probe directory through
+# `flinttrade_core.workspace.workspace_dir()` in its constructor, and this
+# module is imported while `create_flask_app()` is still wiring itself up.
+# Constructing at import time would freeze whatever workspace was active
+# then — the wrong directory under Gunicorn preload+fork, and the wrong
+# directory for any test that sets `FLINTTRADE_WORKSPACE_DIR` after import.
+_monitor: HealthMonitor | None = None
+_health_agg: HealthAggregator | None = None
+
+# Guards first construction: eight Flask worker threads can race the first
+# request, and building two monitors would waste the psutil baseline.
+_singleton_lock = threading.Lock()
 
 
 def get_health_monitor() -> HealthMonitor:
-    """Return the module-level :class:`HealthMonitor` singleton.
+    """Return the module-level :class:`HealthMonitor`, building it on first use.
 
     Tests may call this to inject mocks or verify call counts.
+
+    Returns:
+        The shared :class:`HealthMonitor` instance.
     """
+    global _monitor  # noqa: PLW0603
+    if _monitor is None:
+        with _singleton_lock:
+            if _monitor is None:
+                _monitor = HealthMonitor()
     return _monitor
 
 
@@ -55,14 +76,23 @@ def init_health_monitor(monitor: HealthMonitor) -> None:
         monitor: Replacement :class:`HealthMonitor` instance.
     """
     global _monitor  # noqa: PLW0603
-    _monitor = monitor
+    with _singleton_lock:
+        _monitor = monitor
 
 
 def get_health_aggregator() -> HealthAggregator:
-    """Return the module-level :class:`HealthAggregator` singleton.
+    """Return the module-level :class:`HealthAggregator`, building it on first use.
 
     Tests may call this to inject mocks or verify call counts.
+
+    Returns:
+        The shared :class:`HealthAggregator` instance.
     """
+    global _health_agg  # noqa: PLW0603
+    if _health_agg is None:
+        with _singleton_lock:
+            if _health_agg is None:
+                _health_agg = HealthAggregator()
     return _health_agg
 
 
@@ -73,7 +103,21 @@ def init_health_aggregator(health_agg: HealthAggregator) -> None:
         health_agg: Replacement :class:`HealthAggregator` instance.
     """
     global _health_agg  # noqa: PLW0603
-    _health_agg = health_agg
+    with _singleton_lock:
+        _health_agg = health_agg
+
+
+def reset_health_singletons_for_tests() -> None:
+    """Drop both cached singletons so the next call rebuilds them.
+
+    Tests that change ``FLINTTRADE_WORKSPACE_DIR`` need this: the monitor
+    caches its disk-probe directory for its lifetime, so a stale instance
+    would keep probing the previous workspace.
+    """
+    global _monitor, _health_agg  # noqa: PLW0603
+    with _singleton_lock:
+        _monitor = None
+        _health_agg = None
 
 
 @health_bp.route("/health", methods=["GET"])
@@ -87,7 +131,7 @@ def health_simple() -> tuple[Any, int]:
         JSON ``{"status": "healthy"|"degraded"|"unhealthy",
         "timestamp": "<ISO8601>"}``.
     """
-    report = _monitor.check_all()
+    report = get_health_monitor().check_all()
     http_status = 200 if report.overall_status == "healthy" else 503
     return (
         jsonify(
@@ -111,7 +155,7 @@ def health_detail() -> tuple[Any, int]:
         JSON with ``overall_status``, ``timestamp``, and ``checks``
         list — see :meth:`HealthReport.to_dict`.
     """
-    report = _monitor.check_all()
+    report = get_health_monitor().check_all()
     http_status = 200 if report.overall_status == "healthy" else 503
     return jsonify(report.to_dict()), http_status
 
@@ -141,8 +185,9 @@ def readyz() -> tuple[Any, int]:
     Returns:
         JSON ``{"status": "ready"|"not_ready"}``.
     """
-    mem_check = _monitor.check_memory()
-    disk_check = _monitor.check_disk()
+    monitor = get_health_monitor()
+    mem_check = monitor.check_memory()
+    disk_check = monitor.check_disk()
 
     if mem_check.status == "unhealthy" or disk_check.status == "unhealthy":
         return jsonify({"status": "not_ready"}), 503
@@ -185,6 +230,6 @@ def health_aggregated() -> tuple[Any, int]:
     from flask import current_app  # noqa: PLC0415
 
     registry = current_app.config.get("REGISTRY")
-    result = _health_agg.get_health(registry=registry)
+    result = get_health_aggregator().get_health(registry=registry)
     http_status = 200 if result["status"] == "ok" else 503
     return jsonify(result), http_status

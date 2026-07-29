@@ -136,6 +136,31 @@ LEGACY_DATA_DIR="$MANAGED_ROOT/data"
 LEGACY_ARCHIVE_DIR="$MANAGED_ROOT/archive"
 LEGACY_SANDBOX_DIR="$MANAGED_ROOT/sandbox"
 LEGACY_DITTO_VAULT="$LEGACY_DATA_DIR/ditto_credentials.db"
+# Pre-workspace droppings written DIRECTLY at ~/.flinttrade/<name> by the modules
+# the workspace path-unification wave re-pointed at the resolver. Those modules now
+# copy each artefact into the platform workspace on first use and RETAIN the
+# original, so on every upgraded install a full second copy of this state lives
+# here — including the TOTP secret store and its install key, the trade journal
+# and its screenshots, and the operator's own flows, models and strategy files.
+#
+# $MANAGED_ROOT below would delete them all transitively, but only by never naming
+# them. Enumerating each one is what makes the confirmation list honest: nobody
+# should confirm an irreversible purge of their own strategy code from a list that
+# does not mention it.
+LEGACY_FLOWS_DIR="$MANAGED_ROOT/flows"
+LEGACY_MODELS_DIR="$MANAGED_ROOT/models"
+LEGACY_STRATEGIES_DIR="$MANAGED_ROOT/strategies"
+LEGACY_SCREENSHOTS_DIR="$MANAGED_ROOT/journal_screenshots"
+LEGACY_TOTP_DB="$MANAGED_ROOT/totp_auth.duckdb"
+LEGACY_TOTP_INSTALL_KEY="$MANAGED_ROOT/totp_install_key"
+LEGACY_JOURNAL_DB="$MANAGED_ROOT/journal.sqlite"
+LEGACY_SHORTCUTS_DB="$MANAGED_ROOT/shortcuts.duckdb"
+LEGACY_QTY_FREEZE_DB="$MANAGED_ROOT/qty_freeze.duckdb"
+LEGACY_ACTION_CENTER_DB="$MANAGED_ROOT/action_center.duckdb"
+LEGACY_WATCHLIST_DB="$MANAGED_ROOT/watchlist.db"
+LEGACY_PRESETS_FILE="$MANAGED_ROOT/presets.json"
+LEGACY_LATENCY_DB="$MANAGED_ROOT/latency_log.duckdb"
+LEGACY_TRAFFIC_DB="$MANAGED_ROOT/traffic_log.duckdb"
 ELECTRON_PROFILE=""
 
 remove_path() {
@@ -622,13 +647,28 @@ collect_data_targets() {
   add_data_target "$LEGACY_ARCHIVE_DIR"
   add_data_target "$LEGACY_SANDBOX_DIR"
   add_data_target "$LEGACY_DITTO_VAULT"
-  # The managed root itself, after the specific subtrees above so the printed
-  # list still names them explicitly. On macOS and Windows around nineteen
-  # modules write DIRECTLY at ~/.flinttrade/<name> — totp_auth.duckdb,
-  # totp_install_key, shortcuts.duckdb, journal.sqlite, qty_freeze.duckdb,
-  # action_center.duckdb, watchlist.db, flows/ and strategies/ among them — so
-  # enumerating only the subdirectories left TOTP secrets and realised-P&L
-  # state behind while claiming everything had been purged.
+  # Every root-level dropping, named individually. Each is retained by the
+  # copy-once workspace migration, so on an upgraded install it is a live second
+  # copy of real trading state, not residue.
+  add_data_target "$LEGACY_FLOWS_DIR"
+  add_data_target "$LEGACY_MODELS_DIR"
+  add_data_target "$LEGACY_STRATEGIES_DIR"
+  add_data_target "$LEGACY_SCREENSHOTS_DIR"
+  add_data_target "$LEGACY_TOTP_DB"
+  add_data_target "$LEGACY_TOTP_INSTALL_KEY"
+  add_data_target "$LEGACY_JOURNAL_DB"
+  add_data_target "$LEGACY_SHORTCUTS_DB"
+  add_data_target "$LEGACY_QTY_FREEZE_DB"
+  add_data_target "$LEGACY_ACTION_CENTER_DB"
+  add_data_target "$LEGACY_WATCHLIST_DB"
+  add_data_target "$LEGACY_PRESETS_FILE"
+  add_data_target "$LEGACY_LATENCY_DB"
+  add_data_target "$LEGACY_TRAFFIC_DB"
+  # The managed root itself, after the specific paths above so the printed list
+  # still names them explicitly. On macOS and Windows around nineteen modules
+  # wrote DIRECTLY at ~/.flinttrade/<name>, so enumerating only the
+  # subdirectories left TOTP secrets and realised-P&L state behind while
+  # claiming everything had been purged.
   add_data_target "$MANAGED_ROOT"
   local candidate
   for candidate in "$@"; do add_data_target "$candidate"; done
@@ -810,9 +850,10 @@ announce_purge_targets() {
   say "and legacy desktop data listed below:"
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
   say "~/.flinttrade itself also holds files written directly at its top level — the TOTP"
-  say "secret store and install key, shortcuts, the trade journal, quantity-freeze and"
-  say "action-centre stores, the watchlist, flows/ and strategies/ — so purging it is real"
-  say "trading state, not just the subdirectories named above."
+  say "secret store and install key, shortcuts, the trade journal and its screenshots,"
+  say "quantity-freeze and action-centre stores, the watchlist, saved presets, and your own"
+  say "flows/, models/ and strategies/ — so purging it is real trading state, not just the"
+  say "subdirectories named above."
   say "Any ~/.flinttrade/data, ~/.flinttrade/archive or ~/.flinttrade/sandbox path above is"
   say "pre-workspace storage that the backend still reads: the DuckDB store, the append-only"
   say "audit chain and the encrypted broker-credential vault live there, so an upgraded"
@@ -827,10 +868,11 @@ keep_notice() {
   local target
   for target in "${DATA_TARGETS[@]}"; do say "  $target"; done
   say "This includes the workspace, Electron profile, managed source/tools, the source-build"
-  say "checkout, the whole ~/.flinttrade managed root (its top-level TOTP, journal, shortcuts,"
-  say "quantity-freeze, action-centre, watchlist, flows and strategies state included), any"
-  say "pre-workspace ~/.flinttrade data/archive/sandbox storage (including the encrypted"
-  say "broker-credential vault) and any legacy desktop storage."
+  say "checkout, the whole ~/.flinttrade managed root (its top-level TOTP, journal and"
+  say "screenshots, shortcuts, quantity-freeze, action-centre, watchlist, presets, flows,"
+  say "models and strategies state included), any pre-workspace ~/.flinttrade"
+  say "data/archive/sandbox storage (including the encrypted broker-credential vault) and any"
+  say "legacy desktop storage."
   say "To delete it too, re-run with --purge and confirm explicitly."
 }
 

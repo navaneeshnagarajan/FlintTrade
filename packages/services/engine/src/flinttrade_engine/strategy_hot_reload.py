@@ -1,4 +1,4 @@
-"""Strategy Hot-Reload: watch ~/.flinttrade/strategies/ and live-reload on change.
+"""Strategy Hot-Reload: watch the workspace strategies directory and live-reload on change.
 
 User strategy files are Python modules that expose a ``Strategy`` class.
 The hot-reloader:
@@ -14,7 +14,7 @@ The hot-reloader:
 
 Usage::
 
-    reloader = StrategyHotReloader()
+    reloader = StrategyHotReloader()  # <workspace_dir> / "strategies"
     names = reloader.discover()
 
     cls = reloader.load("my_strategy")
@@ -167,6 +167,113 @@ class _StrategyFileHandler(FileSystemEventHandler):  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
+# Directory resolution
+# ---------------------------------------------------------------------------
+
+
+def _legacy_strategies_dir() -> Path:
+    """Return the pre-workspace strategies directory.
+
+    Module-level so tests can monkeypatch the probe away from the real home
+    directory.
+
+    Returns:
+        ``<legacy dot-directory>/strategies`` — the fixed pre-workspace root
+        every install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "strategies"
+
+
+#: Directory name :class:`~flinttrade_engine.strategy_runner.UserStrategyRunner`
+#: creates inside the strategies directory in its own constructor.
+_RUNNER_LOG_DIR_NAME = "logs"
+
+#: File names :meth:`~flinttrade_engine.strategy.BaseStrategy.save_state` writes
+#: inside a per-strategy state directory (the ``.tmp`` sibling is the atomic
+#: staging file). A directory holding only these is runtime state, not an
+#: operator-authored strategy.
+_RUNTIME_STATE_FILE_NAMES: frozenset[str] = frozenset({"state.json", "state.tmp"})
+
+
+def _runtime_created_names(target: Path) -> frozenset[str]:
+    """Return entry names in *target* that the backend creates, not the operator.
+
+    The one-time legacy copy is skipped whenever the workspace strategies
+    directory already holds state of its own. A running backend populates that
+    directory before any migration can fire — ``UserStrategyRunner.__init__``
+    makes ``logs/`` and ``BaseStrategy.save_state()`` makes one directory per
+    strategy id — so without this exclusion set the migration is blocked for
+    ever on any install that has booted even once.
+
+    Only runtime artefacts are excluded: any ``.py`` (or ``.meta``) upload, and
+    any directory that holds anything other than a strategy state file, still
+    counts as operator-authored state and still wins silently.
+
+    Args:
+        target: The workspace ``strategies`` directory (need not exist).
+
+    Returns:
+        Names ignored both when copying and when judging whether either
+        directory holds meaningful state.
+    """
+    names = {_RUNNER_LOG_DIR_NAME}
+    try:
+        entries = list(target.iterdir()) if target.is_dir() else []
+    except OSError:  # pragma: no cover - unreadable workspace
+        return frozenset(names)
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        try:
+            children = list(entry.iterdir())
+        except OSError:  # pragma: no cover - unreadable state directory
+            continue
+        if all(child.name in _RUNTIME_STATE_FILE_NAMES for child in children):
+            names.add(entry.name)
+    return frozenset(names)
+
+
+def default_strategies_dir() -> Path:
+    """Resolve the strategies directory under the active workspace.
+
+    Copies a pre-workspace ``strategies`` tree into the workspace once, only
+    when no environment override is in force and the workspace holds no
+    strategies of its own. The legacy tree is retained; user-authored files
+    are never merged or overwritten, so an install that already has workspace
+    strategies silently keeps them. Directories the backend itself creates
+    (see :func:`_runtime_created_names`) never count as "already populated".
+
+    This is the single resolver for the strategies directory: ``create_flask_app``
+    calls it when wiring :class:`~flinttrade_engine.strategy_runner.UserStrategyRunner`,
+    and :class:`StrategyHotReloader` defaults to it, so the runner and the
+    watcher never diverge and the migration runs exactly where production
+    reaches it.
+
+    Returns:
+        The ``strategies`` directory inside the active workspace directory.
+    """
+    from flinttrade_core.workspace import (  # noqa: PLC0415
+        copy_legacy_directory_once,
+        default_workspace_active,
+        workspace_dir,
+    )
+
+    target = workspace_dir() / "strategies"
+    if default_workspace_active():
+        copy_legacy_directory_once(
+            _legacy_strategies_dir(),
+            target,
+            lock_name=".strategies-directory-migration.lock",
+            label="user strategy files",
+            excluded_names=_runtime_created_names(target),
+            lock_dir=target.parent,
+        )
+    return target
+
+
+# ---------------------------------------------------------------------------
 # StrategyHotReloader
 # ---------------------------------------------------------------------------
 
@@ -184,7 +291,11 @@ class StrategyHotReloader:
 
     Args:
         strategies_dir: Directory to watch and load strategies from.
-            Created automatically if it does not exist.
+            Created automatically if it does not exist. Defaults to
+            ``strategies/`` under the active FlintTrade workspace — the same
+            directory the uploaded-strategy runner uses — resolved at
+            construction time (never at import time). Passing an explicit
+            directory skips the legacy-migration probe.
         stop_callback: Optional callable invoked as
             ``stop_callback(name)`` before a strategy is reloaded, giving
             the caller a chance to stop a running instance.
@@ -192,10 +303,10 @@ class StrategyHotReloader:
 
     def __init__(
         self,
-        strategies_dir: Path = Path.home() / ".flinttrade" / "strategies",
+        strategies_dir: Path | str | None = None,
         stop_callback: Callable[[str], None] | None = None,
     ) -> None:
-        self._dir = Path(strategies_dir)
+        self._dir = Path(strategies_dir) if strategies_dir is not None else default_strategies_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._stop_callback = stop_callback
 

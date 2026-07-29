@@ -292,3 +292,117 @@ def test_list_skips_unreadable_files(store):
 
 def test_list_on_missing_directory_is_empty(tmp_path):
     assert FlowFileStore(tmp_path / "never-created").list_flows() == []
+
+
+# ---------------------------------------------------------------------------
+# Default flows-directory resolution + the one-shot legacy migration
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultFlowsDirMigration:
+    """``flows/`` resolves under the workspace and migrates a pre-workspace tree once.
+
+    The store used to fall back to a hardcoded ``~/.flinttrade/flows`` whenever
+    importing the workspace resolver raised, which on macOS/Windows wrote the
+    operator's saved workflows into a second, invisible directory the
+    uninstaller could not purge. The fallback is gone; ``create_flask_app``
+    already degrades a failed store construction to the routes' 503 branch.
+    """
+
+    @staticmethod
+    def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> tuple[Any, Any]:
+        """Redirect both the resolver and the legacy probe into ``tmp_path``.
+
+        Clears the workspace environment overrides so the migration probe is
+        live, then points the platform-default resolver and the module's
+        ``_legacy_flows_dir`` seam at temporary directories — the real home
+        directory is never touched.
+
+        Returns:
+            The ``(workspace, legacy_flows)`` directories the run will use.
+        """
+        import flinttrade_core.workspace as workspace_mod
+
+        import flinttrade_webhooks.flow_store as flow_store_mod
+
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        workspace = tmp_path / "workspace"
+        legacy = tmp_path / "legacy-home" / ".flinttrade" / "flows"
+        monkeypatch.setattr(workspace_mod, "_default_home", lambda: workspace)
+        monkeypatch.setattr(flow_store_mod, "_legacy_flows_dir", lambda: legacy)
+        return workspace, legacy
+
+    def test_fresh_install_resolves_under_workspace_without_copying(self, monkeypatch, tmp_path):
+        """No legacy tree: the default lands in the workspace, nothing is created."""
+        workspace, legacy = self._isolate(monkeypatch, tmp_path)
+
+        store = FlowFileStore()
+
+        assert store.base_dir == workspace / "flows"
+        assert not legacy.exists()
+        assert not (workspace / "flows").exists()
+
+    def test_legacy_flows_are_copied_into_the_workspace(self, monkeypatch, tmp_path):
+        """Legacy-only: the whole tree travels and the original is retained."""
+        workspace, legacy = self._isolate(monkeypatch, tmp_path)
+
+        legacy.mkdir(parents=True)
+        legacy.joinpath("flow_1.json").write_text('{"id": "flow_1"}', encoding="utf-8")
+
+        store = FlowFileStore()
+
+        assert store.base_dir == workspace / "flows"
+        assert (workspace / "flows" / "flow_1.json").read_text(encoding="utf-8") == '{"id": "flow_1"}'
+        # Copy, not move — the legacy tree stays behind as a backup.
+        assert legacy.joinpath("flow_1.json").exists()
+
+    def test_existing_workspace_flows_are_never_overwritten(self, monkeypatch, tmp_path):
+        """Both populated: the workspace wins silently and nothing is merged."""
+        workspace, legacy = self._isolate(monkeypatch, tmp_path)
+
+        legacy.mkdir(parents=True)
+        legacy.joinpath("flow_legacy.json").write_text('{"id": "flow_legacy"}', encoding="utf-8")
+        (workspace / "flows").mkdir(parents=True)
+        (workspace / "flows" / "flow_current.json").write_text('{"id": "flow_current"}', encoding="utf-8")
+
+        store = FlowFileStore()
+
+        assert sorted(p.name for p in store.base_dir.iterdir()) == ["flow_current.json"]
+        assert legacy.joinpath("flow_legacy.json").exists()
+
+    def test_workspace_override_makes_the_probe_inert(self, monkeypatch, tmp_path):
+        """An explicit override wins and suppresses the legacy probe entirely."""
+        _workspace, legacy = self._isolate(monkeypatch, tmp_path)
+
+        override = tmp_path / "override"
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+        legacy.mkdir(parents=True)
+        legacy.joinpath("flow_1.json").write_text('{"id": "flow_1"}', encoding="utf-8")
+
+        store = FlowFileStore()
+
+        assert store.base_dir == override / "flows"
+        assert not (override / "flows").exists()
+
+    def test_explicit_base_dir_skips_the_probe(self, monkeypatch, tmp_path):
+        """A caller-supplied directory bypasses both the resolver and the probe."""
+        _workspace, legacy = self._isolate(monkeypatch, tmp_path)
+
+        legacy.mkdir(parents=True)
+        legacy.joinpath("flow_1.json").write_text('{"id": "flow_1"}', encoding="utf-8")
+
+        store = FlowFileStore(tmp_path / "explicit")
+
+        assert store.base_dir == tmp_path / "explicit"
+        assert not (tmp_path / "explicit").exists()
+
+    def test_unimportable_workspace_raises_instead_of_shadow_writing(self, monkeypatch, tmp_path):
+        """A broken install must fail loudly, never silently write to ``~/.flinttrade``."""
+        import sys
+
+        self._isolate(monkeypatch, tmp_path)
+        monkeypatch.setitem(sys.modules, "flinttrade_core.workspace", None)
+
+        with pytest.raises(ImportError):
+            FlowFileStore()

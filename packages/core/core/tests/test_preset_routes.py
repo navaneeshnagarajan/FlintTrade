@@ -30,36 +30,58 @@ def monkeypatch_module():
 
 
 @pytest.fixture(scope="module")
-def tmp_flinttrade_home(monkeypatch_module, tmp_path_factory) -> Path:
-    """Isolated ~/.flinttrade directory for the whole test module."""
-    home = tmp_path_factory.mktemp("flinttrade_home_presets")
-    monkeypatch_module.setenv("FLINTTRADE_HOME", str(home))
-    return home
+def tmp_workspace_dir(monkeypatch_module, tmp_path_factory) -> Path:
+    """Isolated workspace directory for the whole test module.
+
+    Pins ``FLINTTRADE_WORKSPACE_DIR`` rather than ``FLINTTRADE_HOME``: the
+    preset store now resolves through
+    :func:`flinttrade_core.workspace.workspace_dir`, for which
+    ``FLINTTRADE_WORKSPACE_DIR`` is the highest-priority authority. Setting it
+    also keeps the legacy-copy probe inert, so this module can never touch the
+    developer's real home directory.
+    """
+    workspace = tmp_path_factory.mktemp("flinttrade_workspace_presets")
+    monkeypatch_module.setenv("FLINTTRADE_WORKSPACE_DIR", str(workspace))
+    return workspace
 
 
-@pytest.fixture(scope="module")
-def flask_app(monkeypatch_module, tmp_flinttrade_home):
-    """Minimal Flask app with only the preset blueprint registered.
+def _load_preset_routes():
+    """Load ``preset_routes`` from source under a private module name.
 
-    Uses importlib to load ``preset_routes`` directly from its source file,
-    bypassing ``packages/core/core/src/__init__.py`` which imports ``httpx`` (and
+    Uses importlib to load the module directly from its source file, bypassing
+    ``packages/core/core/src/__init__.py`` which imports ``httpx`` (and
     transitively ``rich``).  On Python 3.14 / Windows, ``rich`` calls
     ``platform.system()`` via a WMI query that can hang indefinitely in
     restricted environments — this direct load avoids that chain entirely.
+
+    Returns:
+        The loaded module object, cached in ``sys.modules`` after first use so
+        every caller in this file shares one instance.
     """
     import importlib.util
     import sys
     from pathlib import Path
-    from flask import Flask
+
+    cached = sys.modules.get("preset_routes_isolated")
+    if cached is not None:
+        return cached
 
     _src = Path(__file__).resolve().parents[2] / "core" / "src" / "flinttrade_core" / "preset_routes.py"
     spec = importlib.util.spec_from_file_location("preset_routes_isolated", _src)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     # Register under a unique name so it does not collide with the real package
-    sys.modules.setdefault("preset_routes_isolated", module)
+    sys.modules["preset_routes_isolated"] = module
     spec.loader.exec_module(module)  # type: ignore[union-attr]
+    return module
 
+
+@pytest.fixture(scope="module")
+def flask_app(monkeypatch_module, tmp_workspace_dir):
+    """Minimal Flask app with only the preset blueprint registered."""
+    from flask import Flask
+
+    module = _load_preset_routes()
     preset_bp = module.preset_bp  # type: ignore[attr-defined]
 
     app = Flask(__name__)
@@ -76,9 +98,9 @@ def client(flask_app):
 
 
 @pytest.fixture(autouse=True)
-def clean_presets(tmp_flinttrade_home):
+def clean_presets(tmp_workspace_dir):
     """Remove presets.json before each test to ensure isolation."""
-    presets_file = tmp_flinttrade_home / "presets.json"
+    presets_file = tmp_workspace_dir / "presets.json"
     if presets_file.exists():
         presets_file.unlink()
     yield
@@ -493,3 +515,108 @@ class TestPersistence:
         data = client.get("/api/v1/presets/", headers=_auth()).get_json()["data"]
         names = [p["name"] for p in data["presets"]]
         assert all(n in names for n in ("P1", "P2", "P3"))
+
+
+# ---------------------------------------------------------------------------
+# Workspace resolution + one-shot legacy copy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestWorkspaceResolution:
+    """``presets.json`` resolves under ``workspace_dir()``.
+
+    The module's own platform resolver is gone; ``workspace_dir()`` is the
+    single authority, and a pre-workspace ``~/.flinttrade/presets.json`` is
+    copied in once (copy — never move, and never over an existing file).
+    """
+
+    @staticmethod
+    def _default_workspace(monkeypatch, tmp_path: Path) -> Path:
+        """Make ``workspace_dir()`` resolve to a tmp dir with no env override.
+
+        Args:
+            monkeypatch: Pytest monkeypatch fixture.
+            tmp_path: Per-test temporary directory.
+
+        Returns:
+            The directory ``workspace_dir()`` will now return.
+        """
+        import flinttrade_core.workspace as ws
+
+        monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        workspace = tmp_path / "workspace"
+        monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+        return workspace
+
+    @staticmethod
+    def _point_legacy_at(monkeypatch, module, legacy: Path) -> None:
+        """Redirect the legacy probe so it can never reach the real home dir."""
+        monkeypatch.setattr(module, "_legacy_presets_path", lambda: legacy)
+
+    def test_fresh_install_resolves_under_workspace(self, monkeypatch, tmp_path):
+        """No legacy file: the path is the workspace one and nothing is copied."""
+        module = _load_preset_routes()
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "presets.json"
+        self._point_legacy_at(monkeypatch, module, legacy)
+
+        resolved = module._presets_path()
+
+        assert resolved == workspace / "presets.json"
+        assert not resolved.exists()
+
+    def test_legacy_only_is_copied_and_retained(self, monkeypatch, tmp_path):
+        """Legacy file present, workspace empty: copy across, keep the original."""
+        module = _load_preset_routes()
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "presets.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('[{"id": "from-legacy"}]', encoding="utf-8")
+        self._point_legacy_at(monkeypatch, module, legacy)
+
+        resolved = module._presets_path()
+
+        assert resolved == workspace / "presets.json"
+        assert resolved.read_text(encoding="utf-8") == '[{"id": "from-legacy"}]'
+        # Copy, not move — the legacy file stays behind as a backup.
+        assert legacy.exists()
+
+    def test_existing_workspace_file_is_never_clobbered(self, monkeypatch, tmp_path):
+        """Both present: the workspace copy wins and is left byte-identical."""
+        module = _load_preset_routes()
+        workspace = self._default_workspace(monkeypatch, tmp_path)
+        legacy = tmp_path / "legacy" / ".flinttrade" / "presets.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('[{"id": "from-legacy"}]', encoding="utf-8")
+        self._point_legacy_at(monkeypatch, module, legacy)
+        workspace.mkdir(parents=True)
+        (workspace / "presets.json").write_text('[{"id": "already-here"}]', encoding="utf-8")
+
+        resolved = module._presets_path()
+
+        assert resolved.read_text(encoding="utf-8") == '[{"id": "already-here"}]'
+        assert legacy.exists()
+
+    def test_environment_override_keeps_the_probe_inert(self, monkeypatch, tmp_path):
+        """``FLINTTRADE_WORKSPACE_DIR`` set: no copy, and the path follows the override."""
+        module = _load_preset_routes()
+        override = tmp_path / "override"
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(override))
+        legacy = tmp_path / "legacy" / ".flinttrade" / "presets.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text('[{"id": "from-legacy"}]', encoding="utf-8")
+        self._point_legacy_at(monkeypatch, module, legacy)
+
+        resolved = module._presets_path()
+
+        assert resolved == override.resolve() / "presets.json"
+        assert not resolved.exists()
+
+    def test_private_home_resolver_is_gone(self):
+        """``workspace_dir()`` supersedes the module's own platform resolver."""
+        module = _load_preset_routes()
+
+        assert not hasattr(module, "_flinttrade_home")

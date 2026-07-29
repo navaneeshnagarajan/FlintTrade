@@ -37,6 +37,79 @@ logger = logging.getLogger("flinttrade.screener.fii_dii")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+
+def _legacy_db_path() -> Path:
+    """Return the pre-``workspace_dir()`` FII/DII cache location.
+
+    Module-level so tests can monkeypatch the probe away from the developer's
+    real home directory.
+
+    Returns:
+        ``<legacy dot-directory>/data/fii_dii.duckdb`` — the fixed
+        ``~/.flinttrade`` root every pre-workspace install used, on every OS.
+    """
+    from flinttrade_core.workspace import legacy_dotdir  # noqa: PLC0415
+
+    return legacy_dotdir() / "data" / "fii_dii.duckdb"
+
+
+def _migrate_legacy_fii_dii_db(legacy: Path, new: Path) -> None:
+    """Copy a pre-``workspace_dir()`` FII/DII cache into the workspace once.
+
+    The default DB path moved from the hardcoded
+    ``~/.flinttrade/data/fii_dii.duckdb`` to
+    ``workspace_dir()/data/fii_dii.duckdb`` (macOS: ``~/Library/Application
+    Support/flinttrade``; Windows: ``%APPDATA%/flinttrade``). Delegates to the
+    shared workspace copy machinery, which copies — never moves — the DB
+    together with its DuckDB ``.wal`` sidecar, retains the legacy family as a
+    backup, serialises concurrent callers on a migration lock, and treats an
+    existing workspace copy as the winner. No-op on Linux where the two paths
+    coincide. (Sibling migration:
+    ``flinttrade_historical.expiry_tracker._migrate_legacy_expiry_db``.)
+
+    Args:
+        legacy: Pre-workspace FII/DII cache to copy from.
+        new: Destination inside the active workspace.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy DB is retained.
+    """
+    from flinttrade_core.workspace import copy_legacy_database_once  # noqa: PLC0415
+
+    copy_legacy_database_once(
+        legacy,
+        new,
+        sidecar_suffixes=(".wal",),
+        lock_name=".fii-dii-migration.lock",
+        label="FII/DII flow cache",
+    )
+
+
+def _default_db_path() -> Path:
+    """Resolve the workspace-scoped default DB path, migrating any legacy file.
+
+    Uses :func:`flinttrade_core.workspace.workspace_dir` so the tracker honours
+    ``FLINTTRADE_WORKSPACE_DIR``/``FLINTTRADE_HOME`` and the platform-specific
+    workspace root instead of the old hardcoded ``~/.flinttrade``. The legacy
+    probe fires only when no environment override is in force, so a pytest
+    worker never touches the developer's real home directory.
+
+    Returns:
+        Absolute path of ``fii_dii.duckdb`` under the workspace's ``data``
+        directory.
+
+    Raises:
+        flinttrade_core.workspace.WorkspaceStateMigrationError: The copy could
+            not be completed; the legacy DB is retained.
+    """
+    from flinttrade_core.workspace import default_workspace_active, workspace_dir  # noqa: PLC0415
+
+    new = workspace_dir() / "data" / "fii_dii.duckdb"
+    if default_workspace_active():
+        _migrate_legacy_fii_dii_db(_legacy_db_path(), new)
+    return new
+
 # ---------------------------------------------------------------------------
 # Constants (adapted from fii-dii-data's CONFIG)
 # ---------------------------------------------------------------------------
@@ -459,14 +532,24 @@ class FiiDiiTracker:
 
     Args:
         db_path: Path to DuckDB database.  Use ``":memory:"`` for tests.
+            Falsy (the default) resolves the workspace-scoped path at
+            construction time, migrating any pre-workspace cache once.
     """
 
-    def __init__(self, db_path: str = "") -> None:
-        if not db_path:
-            db_path = str(
-                Path.home() / ".flinttrade" / "data" / "fii_dii.duckdb"
-            )
-        self._db_path = db_path
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        """Initialise the tracker and ensure its DuckDB schema exists.
+
+        Args:
+            db_path: Path to the DuckDB database. ``":memory:"`` is honoured
+                for tests. Falsy (the default) resolves
+                ``workspace_dir()/data/fii_dii.duckdb`` at call time and runs
+                the one-shot legacy copy; an explicit path skips the probe.
+
+        Raises:
+            flinttrade_core.workspace.WorkspaceStateMigrationError: A legacy
+                cache could not be copied; the legacy DB is retained.
+        """
+        self._db_path = str(db_path) if db_path else str(_default_db_path())
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._ensure_schema()
 

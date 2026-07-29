@@ -236,3 +236,78 @@ def test_context_manager() -> None:
         tl.log("1.1.1.1", "GET", "/cm", 200, 1.0)
         assert tl.count() == 1
     # No exception means close() was called successfully.
+
+
+# ---------------------------------------------------------------------------
+# Default database location (workspace path unification, wave 1)
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultDbPath:
+    """The default traffic-log database lives inside the active workspace.
+
+    The traffic log is disposable observability data, so there is no legacy
+    migration to test — only the routing. Every test sets
+    ``FLINTTRADE_WORKSPACE_DIR`` explicitly so the resolver can never reach
+    the developer's real home directory.
+    """
+
+    @staticmethod
+    def _use_workspace(monkeypatch, root):
+        """Point the workspace resolver at *root* and return its resolved form.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+            root: Directory to expose as the active workspace.
+
+        Returns:
+            The resolved workspace path the resolver will return.
+        """
+        monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+        monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(root))
+        return root.resolve()
+
+    @pytest.mark.unit
+    def test_resolves_under_the_workspace(self, tmp_path, monkeypatch):
+        """_default_db_path() names traffic_log.duckdb inside the workspace."""
+        from flinttrade_core.traffic_logger import _default_db_path
+
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws")
+        assert _default_db_path() == expected / "traffic_log.duckdb"
+
+    @pytest.mark.unit
+    def test_no_argument_logger_opens_the_workspace_database(self, tmp_path, monkeypatch):
+        """TrafficLogger() with no db_path writes into the active workspace."""
+        expected = self._use_workspace(monkeypatch, tmp_path / "ws") / "traffic_log.duckdb"
+
+        log = TrafficLogger()
+        try:
+            assert log._db_path == str(expected)
+            assert expected.exists()
+        finally:
+            log.close()
+
+    @pytest.mark.unit
+    def test_explicit_db_path_bypasses_the_default(self, tmp_path, monkeypatch):
+        """An explicit db_path wins over the workspace default."""
+        self._use_workspace(monkeypatch, tmp_path / "ws")
+        explicit = tmp_path / "elsewhere" / "custom.duckdb"
+
+        log = TrafficLogger(explicit)
+        try:
+            assert log._db_path == str(explicit)
+            assert not (tmp_path / "ws" / "traffic_log.duckdb").exists()
+        finally:
+            log.close()
+
+    @pytest.mark.unit
+    def test_resolution_happens_per_call_not_at_import(self, tmp_path, monkeypatch):
+        """Changing the override between calls changes the resolved path."""
+        from flinttrade_core.traffic_logger import _default_db_path
+
+        first = self._use_workspace(monkeypatch, tmp_path / "one")
+        assert _default_db_path() == first / "traffic_log.duckdb"
+
+        second = self._use_workspace(monkeypatch, tmp_path / "two")
+        assert _default_db_path() == second / "traffic_log.duckdb"
+        assert first != second

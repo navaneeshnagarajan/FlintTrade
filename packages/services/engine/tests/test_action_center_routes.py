@@ -223,3 +223,37 @@ def test_admin_history_uses_the_same_queue(client, queue):
 
     assert response.status_code == 200
     assert response.get_json()["data"]["requests"][0]["broker_order_id"] == "BROKER-1"
+
+
+@pytest.mark.unit
+def test_fallback_singleton_resolves_under_the_workspace(tmp_path: Path, monkeypatch):
+    """The no-arg fallback queue must land in the workspace, not the legacy root.
+
+    ``_get_queue`` builds its own :class:`PendingOrderQueue` whenever no queue
+    was injected via ``app.config``. That construction takes the module
+    resolver, so the fallback shares the workspace database rather than
+    opening a second, invisible one under the pre-workspace root.
+    """
+    from flinttrade_core import workspace as ws
+    from flinttrade_engine import action_center as ac
+    from flinttrade_engine import action_center_routes as acr
+
+    monkeypatch.delenv("FLINTTRADE_WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("FLINTTRADE_HOME", raising=False)
+    workspace = tmp_path / "workspace"
+    monkeypatch.setattr(ws, "_default_home", lambda: workspace)
+    monkeypatch.setattr(ac, "_legacy_db_path", lambda: tmp_path / "legacy" / "action_center.duckdb")
+    monkeypatch.setattr(acr, "_default_queue", None)
+
+    bare_app = Flask(__name__)
+    bare_app.config.update(TESTING=True)
+    with bare_app.app_context():
+        fallback = acr._get_queue()  # noqa: SLF001
+    try:
+        assert fallback._db_path == workspace / "action_center.duckdb"  # noqa: SLF001
+        with bare_app.app_context():
+            assert acr._get_queue() is fallback, "the fallback is memoised"  # noqa: SLF001
+    finally:
+        # monkeypatch restores ``_default_queue`` to None on teardown, so the
+        # memoised instance never leaks into another test.
+        fallback.close()
