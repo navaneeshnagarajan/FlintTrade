@@ -361,6 +361,11 @@ def test_web_installers_only_reach_expected_hosts_over_https(script: Path) -> No
 
 _REPO_SLUG = "navaneeshnagarajan/FlintTrade"
 NOT_POSIX_REASON = "the POSIX installer requires POSIX absolute paths for its --src guard"
+# Linux runners ship pwsh, so a PowerShell-available check is not enough on its own:
+# these cases drive -SrcDir with a Windows absolute path and rely on
+# [Environment]::GetFolderPath resolving AppData under a redirected USERPROFILE,
+# neither of which holds when pwsh runs on Linux.
+NOT_WINDOWS_REASON = "the Windows installer's path guards need Windows path semantics"
 
 
 def _posix_modes_honoured() -> bool:
@@ -1069,6 +1074,7 @@ def test_posix_web_installer_accepts_a_source_outside_the_desktop_tree(tmp_path:
 
 @pytest.mark.unit
 @pytest.mark.skipif(not POWERSHELL, reason=NO_POWERSHELL_REASON)
+@pytest.mark.skipif(os.name != "nt", reason=NOT_WINDOWS_REASON)
 def test_windows_web_installer_refuses_the_desktop_active_source(tmp_path: Path) -> None:
     """-SrcDir inside the desktop source root is refused before anything is probed."""
     shared = tmp_path / ".flinttrade" / "src" / "FlintTrade"
