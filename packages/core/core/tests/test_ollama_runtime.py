@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 import zstandard
+from filelock import Timeout as FileLockTimeout
 
 import flinttrade_core.ollama_runtime as ollama_runtime
 from flinttrade_core.ollama_runtime import (
@@ -32,6 +33,221 @@ from flinttrade_core.ollama_runtime import (
 
 _PRODUCTION_LISTENER_OWNER = OllamaRuntime._listener_owned_by_process
 _PRODUCTION_PORT_DISCOVERER = OllamaRuntime._discover_owned_loopback_port
+
+_READINESS_CEILING_SECONDS = 30.0
+"""Deadlock ceiling for a helper subprocess reaching its readiness signal.
+
+Separate from :data:`_HANDOFF_CEILING_SECONDS` because it covers a different
+failure mode: a real interpreter starting and importing a large module, which on
+a contended host is genuinely slow. Measured here at roughly 1-3s typically, but
+observed exceeding 10s while the machine was loaded — so this ceiling is
+deliberately generous. It is not a budget; nothing asserts how much is used.
+"""
+
+_HANDOFF_CEILING_SECONDS = 5.0
+"""Deadlock ceiling for every inter-thread and inter-process handshake below.
+
+This is deliberately *not* a budget: nothing is asserted about how much of it is
+consumed, and consuming more of it never changes an outcome. Each handshake is
+signalled by an explicit ``threading.Event`` or marker file, so the ceiling only
+exists to turn a genuine deadlock into a legible failure instead of a hung suite.
+Tightening it *as a way to make an assertion pass* would reintroduce exactly the
+wager on runner load that this module removed.
+
+These handshakes are all signalled — an ``Event`` set by a thread already
+running, or a helper polling a marker file every 10ms — so once the signal
+happens they complete immediately. They need no allowance for interpreter
+startup, which is why they are bounded far more tightly than
+:data:`_READINESS_CEILING_SECONDS`.
+
+The split exists because CI bounds the total. ``test.yml`` runs pytest with
+``--timeout=60 --timeout-method=thread``, and the longest path here chains one
+readiness wait with three handoffs — lease contention, thread join, then the
+holder reap in ``finally``. A single shared 30s ceiling makes that worst case
+120s, so pytest-timeout fires first and destroys the legible AssertionError
+these constants exist to produce. 30 + 5 + 5 + 5 leaves a clear margin.
+"""
+
+
+class _DrivenClock:
+    """A monotonic clock advanced explicitly by the test rather than by the host.
+
+    The deadline-bounded paths in :mod:`flinttrade_core.ollama_runtime` read
+    ``time.monotonic`` dozens of times per public call and bound several
+    independent operations on one budget. ``OllamaRuntime.shutdown`` bounds an
+    operation-control acquisition, a state-lock acquisition, a process teardown, a
+    status snapshot and a worker wait on the single deadline derived from its
+    ``timeout``, so asserting ``shutdown(timeout=0.05) is True`` against real time
+    is a wager that a loaded runner finishes all of that inside 50 ms. It does not
+    on a busy Windows agent, which is why the assertion failed in CI on commits
+    that touched no file in this package.
+
+    Freezing the clock and advancing it only where the production code genuinely
+    waits pins the *logic*: the deadline crosses at the step under test and nowhere
+    else, and neither the outcome nor the runtime of the test depends on wall time.
+
+    The ``clock = iter((0.0, 2.0))`` idiom used by the integrity-hashing test is not
+    usable on these paths — ``shutdown`` alone makes 25 ``time.monotonic`` calls and
+    would exhaust a two-element iterator on the third.
+    """
+
+    def __init__(self, start: float = 0.0, *, max_driven_waits: int = 64) -> None:
+        """Freeze a new clock.
+
+        Args:
+            start: Initial reading. ``time.monotonic``'s epoch is undefined, so any
+                value is a legal stand-in; ``0.0`` keeps float noise smallest.
+            max_driven_waits: Guard on :meth:`expire_wait`. A production wait loop
+                that never converges fails loudly here instead of spinning.
+        """
+        self._start = float(start)
+        self._now = float(start)
+        self._max_driven_waits = max_driven_waits
+        self.waits: list[float] = []
+
+    @property
+    def elapsed(self) -> float:
+        """Return how much clock time the test has allowed to pass since ``start``."""
+        return self._now - self._start
+
+    def monotonic(self) -> float:
+        """Return the current frozen reading, standing in for ``time.monotonic``."""
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        """Move the clock forward.
+
+        Args:
+            seconds: Non-negative number of seconds to add to the reading.
+
+        Raises:
+            ValueError: If ``seconds`` is negative.
+        """
+        if seconds < 0:
+            raise ValueError("a monotonic clock cannot move backwards")
+        self._now += float(seconds)
+
+    def expire_wait(self, timeout: float | None = None) -> bool:
+        """Stand in for ``threading.Condition.wait``, reporting the wait as expired.
+
+        The clock advances by exactly the requested timeout, so the caller's next
+        ``deadline - time.monotonic()`` is non-positive and its loop takes the
+        expiry branch — the behaviour a real wait would produce, minus the waiting.
+
+        Args:
+            timeout: Bounded wait requested by the production code.
+
+        Returns:
+            ``False``, matching ``Condition.wait`` on timeout expiry.
+
+        Raises:
+            AssertionError: If the wait is unbounded, or if the calling loop has not
+                converged within ``max_driven_waits`` iterations.
+        """
+        if timeout is None:
+            raise AssertionError("an unbounded condition wait cannot be driven by _DrivenClock")
+        self.waits.append(float(timeout))
+        if len(self.waits) > self._max_driven_waits:
+            raise AssertionError(f"a driven wait loop did not converge within {self._max_driven_waits} waits")
+        self.advance(timeout)
+        return False
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Route the runtime module's ``time.monotonic`` through this clock."""
+        monkeypatch.setattr(ollama_runtime.time, "monotonic", self.monotonic)
+
+    def drive_condition(self, monkeypatch: pytest.MonkeyPatch, condition: threading.Condition) -> None:
+        """Make every *bounded* wait on ``condition`` expire in clock time, not wall time.
+
+        ``threading.Condition`` binds ``acquire``/``release`` as instance attributes
+        and ``with condition:`` goes through the underlying lock, so patching ``wait``
+        leaves ownership semantics untouched.
+
+        Args:
+            monkeypatch: Fixture used so the patch is undone at test teardown.
+            condition: The runtime condition whose bounded waits should be driven.
+        """
+        monkeypatch.setattr(condition, "wait", self.expire_wait)
+
+
+def _record_bounded_acquisitions(
+    monkeypatch: pytest.MonkeyPatch,
+    condition: threading.Condition,
+) -> list[float]:
+    """Record the timeout every deadline-bounded acquisition of ``condition`` asks for.
+
+    ``OllamaRuntime._deadline_lock`` translates a remaining budget into
+    ``lock.acquire(timeout=max(0.0, deadline - now))``. Capturing those arguments lets
+    a test assert that an expired deadline became a non-blocking attempt, which is what
+    "deadline bounded" actually means — a far stronger and more stable claim than
+    measuring how many milliseconds the call took on the host.
+
+    Args:
+        monkeypatch: Fixture used so the patch is undone at test teardown.
+        condition: The runtime condition to observe.
+
+    Returns:
+        A list that grows with each requested acquisition timeout, in call order.
+    """
+    requested: list[float] = []
+    inner_acquire = condition.acquire
+
+    def recording_acquire(blocking: bool = True, timeout: float = -1) -> bool:
+        requested.append(timeout)
+        return bool(inner_acquire(blocking, timeout))
+
+    monkeypatch.setattr(condition, "acquire", recording_acquire)
+    return requested
+
+
+def _await_holder_readiness(holder: subprocess.Popen[str], ready_path: Path) -> None:
+    """Block until a helper subprocess signals readiness, failing fast if it dies.
+
+    The original form of this wait gave the helper a 2.0 second budget for
+    interpreter startup plus importing ``filelock``, then asserted the marker file
+    existed. A loaded runner exceeds that, and the resulting failure — a bare
+    ``assert ready_path.exists()`` — said nothing about why. This is genuine
+    cross-process scheduling nondeterminism that no injected clock can remove: a real
+    interpreter has to really start. So the wait is made explicit instead of timed —
+    it ends the moment the helper signals, ends immediately with the helper's exit
+    code and stderr if the helper dies, and only falls back on a deadlock ceiling.
+
+    The helper's stderr is drained on a daemon thread rather than read here. A
+    pipe that nothing reads fills its OS buffer, and a child blocked writing to it
+    never reaches the line that creates the marker — so the readiness wait would
+    burn its whole ceiling and report "never signalled" for what is really a
+    deadlock on the pipe. Draining concurrently keeps the diagnostic honest.
+
+    Args:
+        holder: The live helper process that will create ``ready_path``.
+        ready_path: Marker file the helper writes once it holds its resource.
+
+    Raises:
+        AssertionError: If the helper exits before signalling, or never signals.
+    """
+    captured: list[str] = []
+    if holder.stderr is not None:
+        drain = threading.Thread(
+            target=lambda stream: captured.append(stream.read()),
+            args=(holder.stderr,),
+            daemon=True,
+        )
+        drain.start()
+
+    def _stderr() -> str:
+        """Return whatever the helper wrote to stderr, without blocking."""
+        return "".join(captured).strip() or "<no output>"
+
+    deadline = time.monotonic() + _READINESS_CEILING_SECONDS
+    while not ready_path.exists():
+        exit_code = holder.poll()
+        if exit_code is not None:
+            raise AssertionError(
+                f"lease holder exited with code {exit_code} before signalling readiness: {_stderr()}"
+            )
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"lease holder never signalled readiness within {_READINESS_CEILING_SECONDS}s")
+        time.sleep(0.01)
 
 
 def test_asset_manifest_selects_the_pinned_official_release() -> None:
@@ -1454,22 +1670,83 @@ def test_concurrent_runtime_instances_cannot_split_process_ownership(
     assert owner["child_pid"] in {5001, 5002}
 
 
+@pytest.mark.integration
 def test_destructive_mutations_hold_a_cross_process_workspace_lease(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """A lease held by another OS process blocks destructive mutations until it is released.
+
+    Two behaviours are pinned. A bounded destructive mutation (``uninstall``) fails with
+    ``lifecycle transition timed out`` while a *different process* holds the workspace
+    lifecycle lease -- and specifically because of that lease, not because some earlier
+    in-process lock ran out of budget. A patient mutation (``repair``) instead blocks on
+    the same lease and only proceeds once the holder releases it, at which point it fails
+    for its own reason, that nothing is installed.
+
+    This test is honestly ``integration``: it spawns a real interpreter and takes a real
+    OS-level file lock across a process boundary. That is scheduling nondeterminism no
+    injected clock can remove, so every handshake here is explicit rather than timed --
+    readiness is a marker file polled alongside ``holder.poll()`` so a dead helper fails
+    at once, and "``repair`` is blocked" is observed from the lease contention itself
+    rather than inferred from surviving a 50 ms sleep. The previous form additionally
+    required the helper to notice its release file, drop the lock, and ``repair`` to
+    reacquire it, all inside the 100 ms budget left over from the ``uninstall`` phase --
+    a cross-process race in roughly a tenth of a second.
+    """
     workspace = tmp_path / "workspace"
     runtime = OllamaRuntime(workspace, probe=lambda: None)
     lock_path = workspace / ollama_runtime._LIFECYCLE_LOCK_NAME
     ready_path = tmp_path / "lease-ready"
     release_path = tmp_path / "lease-release"
+
+    contended_leases: list[str] = []
+    lease_contended = threading.Event()
+    production_lock = ollama_runtime._RuntimeFileLock
+
+    class _ObservedRuntimeFileLock(production_lock):  # type: ignore[misc, valid-type]
+        """Report every lease acquisition that loses to a competing holder."""
+
+        def acquire(self, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return super().acquire(*args, **kwargs)
+            except FileLockTimeout:
+                contended_leases.append(str(self.lock_file))
+                lease_contended.set()
+                raise
+
+    monkeypatch.setattr(ollama_runtime, "_RuntimeFileLock", _ObservedRuntimeFileLock)
+
+    # filelock's Windows backend unlinks the lock file as the last step of
+    # releasing it. OwnerSafeFileLock, acquiring concurrently from this process,
+    # correctly refuses a path that vanishes underneath it and reports "lease
+    # path is unsafe" — so a handover landing inside that unlink window fails the
+    # test on an error unrelated to its subject. That race is scaffolding, not
+    # product behaviour: a real lease holder is a FlintTrade process using
+    # OwnerSafeFileLock, which does not unlink. Suppressing the unlink in the
+    # holder keeps the handover the test is actually about.
     holder_code = "\n".join(
         (
             "import sys, time",
             "from pathlib import Path",
             "from filelock import FileLock",
+            "import filelock._windows, filelock._unix",
+            "for _module in (filelock._windows, filelock._unix):",
+            "    for _name in ('WindowsFileLock', 'UnixFileLock'):",
+            "        _cls = getattr(_module, _name, None)",
+            "        if _cls is None:",
+            "            continue",
+            "        _inner = _cls._release",
+            "        def _keep_lock_file(self, _inner=_inner):",
+            "            _unlink = Path.unlink",
+            "            Path.unlink = lambda *a, **k: None",
+            "            try:",
+            "                _inner(self)",
+            "            finally:",
+            "                Path.unlink = _unlink",
+            "        _cls._release = _keep_lock_file",
             "lock_path, ready_path, release_path = map(Path, sys.argv[1:4])",
-            "with FileLock(lock_path, timeout=2, mode=0o600):",
+            f"with FileLock(lock_path, timeout={_READINESS_CEILING_SECONDS}, mode=0o600):",
             "    ready_path.write_text('ready', encoding='ascii')",
             "    while not release_path.exists():",
             "        time.sleep(0.01)",
@@ -1479,18 +1756,23 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
         [sys.executable, "-c", holder_code, str(lock_path), str(ready_path), str(release_path)],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
-        deadline = time.monotonic() + 2.0
-        while not ready_path.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert ready_path.exists()
-        monkeypatch.setattr(ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", 0.1)
+        _await_holder_readiness(holder, ready_path)
 
+        # A bounded mutation must give up rather than block behind the foreign lease.
+        monkeypatch.setattr(ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", 0.1)
         with pytest.raises(OllamaRuntimeError, match="lifecycle transition timed out"):
             runtime.uninstall()
+        # It timed out on the cross-process lease, not on some earlier in-process lock.
+        assert contended_leases == [str(lock_path)]
 
+        # A patient mutation blocks on the same lease instead of giving up. Restoring the
+        # production wait keeps the release handshake below from being a race.
+        monkeypatch.setattr(ollama_runtime, "_SYNC_LIFECYCLE_WAIT_SECONDS", _HANDOFF_CEILING_SECONDS)
+        lease_contended.clear()
         repair_errors: list[BaseException] = []
 
         def repair() -> None:
@@ -1501,10 +1783,13 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
 
         repair_thread = threading.Thread(target=repair)
         repair_thread.start()
-        time.sleep(0.05)
+
+        assert lease_contended.wait(timeout=_HANDOFF_CEILING_SECONDS)
+        assert contended_leases[-1] == str(lock_path)
         assert repair_thread.is_alive()
+
         release_path.write_text("release", encoding="ascii")
-        repair_thread.join(timeout=2.0)
+        repair_thread.join(timeout=_HANDOFF_CEILING_SECONDS)
 
         assert repair_thread.is_alive() is False
         assert len(repair_errors) == 1
@@ -1513,10 +1798,12 @@ def test_destructive_mutations_hold_a_cross_process_workspace_lease(
     finally:
         release_path.touch()
         try:
-            holder.wait(timeout=2.0)
+            holder.wait(timeout=_HANDOFF_CEILING_SECONDS)
         except subprocess.TimeoutExpired:
-            holder.terminate()
-            holder.wait(timeout=2.0)
+            holder.kill()
+            holder.wait(timeout=_HANDOFF_CEILING_SECONDS)
+        if holder.stderr is not None:
+            holder.stderr.close()
 
 
 def test_runtime_tree_cleanup_fails_before_crossing_its_entry_bound(
@@ -2579,10 +2866,25 @@ def test_shutdown_uses_one_deadline_and_retains_unproved_ownership(
     assert runtime.status()["state"] == "failed"
 
 
+@pytest.mark.unit
 def test_shutdown_reserves_deadline_for_forcing_an_owned_child(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Shutdown spends only the inference grace waiting, then forces the child with the rest.
+
+    ``shutdown`` derives one deadline from its timeout and bounds the operation
+    control, the state lock, the inference drain, the teardown and the worker wait on
+    it. The behaviour pinned here is the split: an inference that never finishes may
+    consume the *grace* half of the budget, after which the child is forced and the
+    teardown is reported as ``forced`` — with the remainder of the deadline still
+    unspent, which is what "reserves deadline for forcing" names.
+
+    The clock is driven so that only the grace expires. Against real time the same
+    assertion additionally requires a loaded runner to complete two lock acquisitions,
+    a process teardown, a status snapshot and a worker wait inside the leftover 25 ms.
+    """
+    clock = _DrivenClock()
     process = _FakeProcess()
     runtime = OllamaRuntime(tmp_path, probe=lambda: None)
     runtime._process = process
@@ -2592,10 +2894,17 @@ def test_shutdown_reserves_deadline_for_forcing_an_owned_child(
         "_terminate_process_tree",
         lambda owned_process, **_kwargs: setattr(owned_process, "returncode", -9),
     )
+    clock.install(monkeypatch)
+    clock.drive_condition(monkeypatch, runtime._lifecycle_condition)
 
     assert runtime.shutdown(timeout=0.05) is True
     assert process.poll() is not None
     assert runtime.status()["teardown"]["mode"] == "forced"
+
+    # The drain waited for the inference grace (half the 50 ms budget) and nothing
+    # else touched the clock, so half the deadline was still reserved for forcing.
+    assert clock.waits == [pytest.approx(0.025)]
+    assert clock.elapsed == pytest.approx(0.025)
 
     runtime._active_inferences = 0
 
@@ -4413,7 +4722,16 @@ def test_journal_removal_during_a_running_operation_blocks_provider_and_fresh_ad
     assert mutation_ran.is_set() is False
 
 
+@pytest.mark.integration
 def test_terminal_receipt_failure_is_indeterminate_while_foreign_owner_process_is_alive(tmp_path: Path) -> None:
+    """A live foreign owner leaves its unpersisted terminal receipt indeterminate, and unreplayable.
+
+    The readiness handshake uses the same explicit wait as the cross-process lease test.
+    Its previous 5.0 second budget had to cover interpreter startup *plus* importing
+    ``flinttrade_core.ollama_runtime`` in a child, which a loaded runner exceeds -- it
+    failed twice in eight ``-n 4`` runs on the maintainer's host, reporting only a bare
+    ``assert ready.exists()`` that said nothing about the child.
+    """
     workspace = tmp_path / "workspace"
     ready = tmp_path / "child-ready"
     release = tmp_path / "child-release"
@@ -4448,12 +4766,12 @@ while not release.exists():
 """
     child = subprocess.Popen(
         [sys.executable, "-c", child_code, str(workspace), str(ready), str(release), admission_id],
+        stdin=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
-        deadline = time.monotonic() + 5.0
-        while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert ready.exists()
+        _await_holder_readiness(child, ready)
         assert child.poll() is None
 
         restored = OllamaRuntime(workspace, probe=lambda: None)
@@ -4468,7 +4786,13 @@ while not release.exists():
             )
     finally:
         release.touch()
-        child.wait(timeout=5.0)
+        try:
+            child.wait(timeout=_HANDOFF_CEILING_SECONDS)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=_HANDOFF_CEILING_SECONDS)
+        if child.stderr is not None:
+            child.stderr.close()
 
 
 def test_prune_receipt_accepts_the_full_bounded_model_inventory(tmp_path: Path) -> None:
@@ -5164,32 +5488,71 @@ def test_exclusive_lifecycle_deadline_includes_model_trust_lock_admission(tmp_pa
     assert holder.is_alive() is False
 
 
-def test_exclusive_lifecycle_cleanup_condition_admission_is_deadline_bounded(tmp_path: Path) -> None:
+@pytest.mark.unit
+def test_exclusive_lifecycle_cleanup_condition_admission_is_deadline_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cleanup that cannot retake the lifecycle condition fails on the deadline, not on the holder.
+
+    Three behaviours are pinned: an expired deadline turns the cleanup re-acquisition
+    into a non-blocking attempt rather than a wait on whoever holds the condition; that
+    attempt reports ``lifecycle transition timed out``; and the transition flag is still
+    cleared afterwards by the recovery thread, leaving the runtime reusable.
+
+    Previously the deadline was ``time.monotonic() + 0.05`` and "did not block" was
+    inferred from ``time.monotonic() - started < 0.5``. Both are host-speed wagers: a
+    loaded runner can burn the 50 ms inside the workspace lease before the body ever
+    runs (leaving ``holder`` unset), and 0.5 s of wall clock is not a property of the
+    code. The deadline is now expired deliberately, and the bound is asserted directly
+    from the timeout the production code passes to ``acquire``.
+    """
+    clock = _DrivenClock()
     runtime = OllamaRuntime(tmp_path, probe=lambda: None)
+    clock.install(monkeypatch)
+    requested_acquisitions = _record_bounded_acquisitions(monkeypatch, runtime._lifecycle_condition)
+
+    transition_cleared = threading.Event()
+    recover_transition = runtime._clear_lifecycle_transition_when_available
+
+    def recover_and_signal() -> None:
+        recover_transition()
+        transition_cleared.set()
+
+    monkeypatch.setattr(runtime, "_clear_lifecycle_transition_when_available", recover_and_signal)
+
     lock_held = threading.Event()
     release_lock = threading.Event()
     holder: threading.Thread | None = None
-    started = time.monotonic()
     try:
         with pytest.raises(OllamaRuntimeError, match="lifecycle transition timed out"):
-            with runtime._exclusive_lifecycle(deadline=time.monotonic() + 0.05):
+            with runtime._exclusive_lifecycle(deadline=clock.monotonic() + 0.05):
 
                 def hold_lifecycle_lock() -> None:
                     with runtime._lifecycle_condition:
                         lock_held.set()
-                        assert release_lock.wait(timeout=2.0)
+                        assert release_lock.wait(timeout=_HANDOFF_CEILING_SECONDS)
 
                 holder = threading.Thread(target=hold_lifecycle_lock)
                 holder.start()
-                assert lock_held.wait(timeout=2.0)
+                assert lock_held.wait(timeout=_HANDOFF_CEILING_SECONDS)
+                # The condition is now demonstrably held by another thread; expire the
+                # deadline so cleanup must choose between blocking and reporting.
+                clock.advance(1.0)
     finally:
         release_lock.set()
         if holder is not None:
-            holder.join(timeout=2.0)
+            holder.join(timeout=_HANDOFF_CEILING_SECONDS)
 
-    assert time.monotonic() - started < 0.5
     assert holder is not None and holder.is_alive() is False
-    with runtime._exclusive_lifecycle(deadline=time.monotonic() + 1.0):
+    # Entry asked for the whole budget; cleanup, past the deadline, asked for none --
+    # a single non-blocking attempt, which is why it could not wait on the holder.
+    assert requested_acquisitions[0] == pytest.approx(0.05)
+    assert requested_acquisitions[-1] == 0.0
+
+    assert transition_cleared.wait(timeout=_HANDOFF_CEILING_SECONDS)
+    assert runtime._lifecycle_transition is False
+    with runtime._exclusive_lifecycle(deadline=clock.monotonic() + 1.0):
         assert runtime._lifecycle_transition is True
     assert runtime._lifecycle_transition is False
 
