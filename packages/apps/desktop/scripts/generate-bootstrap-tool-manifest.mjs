@@ -153,7 +153,14 @@ export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, n
     };
     uvAssets[target] = {
       archive: archiveKind(files.uv),
-      executable: `${withoutArchiveSuffix(files.uv)}/${windows ? "uv.exe" : "uv"}`,
+      // uv packages its two archive kinds differently, unlike Node which always
+      // nests. The Unix tarballs contain `<archive-basename>/uv`, but the
+      // Windows zip is FLAT — `uv.exe`, `uvw.exe` and `uvx.exe` sit at the
+      // archive root with no directory prefix. Prefixing the basename on
+      // Windows produced a path no extracted tree ever contained, so every
+      // Windows bootstrap failed after passing SHA-256 verification with
+      // "The verified uv archive did not contain its expected executable".
+      executable: windows ? "uv.exe" : `${withoutArchiveSuffix(files.uv)}/uv`,
       sha256: requiredDigest(uvChecksums, files.uv, "uv"),
       url: `https://github.com/astral-sh/uv/releases/download/${uvVersion}/${files.uv}`,
     };
