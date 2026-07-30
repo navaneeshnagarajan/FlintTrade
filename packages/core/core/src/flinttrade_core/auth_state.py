@@ -35,6 +35,22 @@ def _default_db_path() -> Path:
 
     return workspace_dir() / "auth_state.duckdb"
 
+
+# DuckDB sizes a per-database task scheduler from the host core count and starts
+# that many background OS threads eagerly, even for a store this small. Destroying
+# the database — which is what ``close()`` does once the last connection goes —
+# joins every one of those threads, and on Windows that join has been observed to
+# block forever under heavy parallel load (measured: the process wedged inside
+# ``duckdb::DatabaseInstance::~DatabaseInstance`` → ``WaitForSingleObject``).
+#
+# This store only ever runs single-row point queries against three tiny tables,
+# and every entry point already serialises on ``self._lock``, so a parallel
+# execution pool buys nothing. Pinning it to one thread means no background
+# threads are started at all (measured: 3 per database by default on a 4-core
+# host, 0 with this config), which removes the join — and with it the hang — from
+# the shutdown path entirely.
+_SINGLE_THREADED_CONFIG = {"threads": 1}
+
 _CREATE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS revoked_jtis (
     jti        VARCHAR PRIMARY KEY,
@@ -65,7 +81,7 @@ class AuthState:
             db_path = _default_db_path()
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = duckdb.connect(str(self._db_path))
+        self._conn = duckdb.connect(str(self._db_path), config=_SINGLE_THREADED_CONFIG)
         self._lock = threading.Lock()
         for stmt in _CREATE_SCHEMA_SQL.strip().split(";"):
             stmt = stmt.strip()
