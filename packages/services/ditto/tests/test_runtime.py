@@ -1133,6 +1133,42 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     clock = [100.0]
     monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", lambda: clock[0])
 
+    # This test is about the DEADLINE ARITHMETIC: one shared deadline, the
+    # remaining budget handed to each client, and an unclosed client being
+    # retained rather than dropped. Nothing here is about threading.
+    #
+    # But `_close_clients` runs each close on a real thread and joins it with
+    # `deadline - time.monotonic()`. With the clock driven, that budget is
+    # deterministic while the join stays a REAL wall-clock wait, so under a
+    # loaded run (-n 4) the worker was not always scheduled inside the 0.75s
+    # window; `is_alive()` was then true and the owner correctly returned False,
+    # failing assertions that expect the client removed. The product was right
+    # every time - refusing to drop a client whose close has not finished is the
+    # fail-closed behaviour we want - so the flake was this test asserting
+    # arithmetic while depending on OS scheduling.
+    #
+    # Running the close inline removes the scheduling variable and changes no
+    # assertion. The real-thread path keeps its own coverage in
+    # test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs,
+    # which uses a genuine clock and a client that genuinely blocks.
+    class _InlineThread:
+        def __init__(self, *, target: Any, name: str = "", daemon: bool = False) -> None:
+            del name, daemon
+            self._target = target
+            self._ran = False
+
+        def start(self) -> None:
+            self._target()
+            self._ran = True
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+        def is_alive(self) -> bool:
+            return not self._ran
+
+    monkeypatch.setattr("flinttrade_ditto.runtime.threading.Thread", _InlineThread)
+
     class _Router:
         def __init__(self) -> None:
             self.timeouts: list[float] = []
