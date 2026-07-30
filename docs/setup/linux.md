@@ -132,8 +132,14 @@ same two targets. Generated packages live under
 
 ## Source development
 
-Requires Python 3.12, Node.js 22+, `uv`, `pnpm`, Git, and optionally Rust for
-`core/ticks`.
+Requires Python `>=3.12`, Node.js `>=22.22.0`, `uv`, pnpm 10.34.5, Git, and
+optionally Rust for `core/ticks`. Those floors come from `[requirements]` in
+`flint.toml`, which is the single source of truth for them.
+
+pnpm is pinned in the root `package.json` `packageManager` field, so install it
+directly (`npm install -g pnpm@10.34.5`) — Corepack still works if your Node
+bundles it, but Node dropped Corepack in 25.0.0, so it is an optional
+accelerator rather than a prerequisite.
 
 To run the built web app from source:
 

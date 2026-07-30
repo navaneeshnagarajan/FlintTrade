@@ -118,16 +118,27 @@ these may be chained with it.
      `pnpm --filter @flinttrade/terminal test` if you touched the widget
      surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
-   - `python scripts/ft.py lint` — runs `ruff check packages/ tests/`
-     (the same scope as `make lint`), shell-independent on every platform.
+   - `python scripts/ft.py lint` — runs `ruff check packages/ tests/` and then
+     the terminal's `eslint src --max-warnings=0` hooks gate
+     (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`), the same
+     command `node-core-tests` runs. Same scope as `make lint`,
+     shell-independent on every platform. Both halves always run and the first
+     non-zero exit code wins; a missing ruff or a missing
+     `packages/apps/terminal/node_modules` skips that half with a hint rather
+     than failing.
 2. **Before you push:**
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.
    - `python scripts/ft.py test` (POSIX alias: `make test`) if anything inside
      `packages/*/src/` changed.
-3. **Doc-only commits** (paths listed above) skip the `test.yml` matrix by
-   design, but changes under `docs/**` still run the site typecheck, tests and
-   build through `site.yml`.
+3. **Doc-only commits** no longer skip `test.yml`. `python-tests`,
+   `node-core-tests` and `secrets-check` always run — the first carries
+   `tests/test_windows_command_docs.py`, the guard that stops a Windows page
+   prescribing `make` or a fence chained with `&&`, so ignoring docs used to
+   skip precisely the job that polices docs. Only the expensive lanes (the four
+   widget shards, `rust-ticks-tests`, `electron-desktop-tests`) gate on the
+   `changed-surfaces` classifier. Changes under `docs/**` additionally run the
+   site typecheck, tests and build through `site.yml`.
 4. **Draft PRs are free.** Open as draft, iterate, mark "ready for
    review" when you want CI to run.
 

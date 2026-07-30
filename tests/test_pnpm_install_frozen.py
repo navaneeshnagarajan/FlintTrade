@@ -11,6 +11,9 @@ dependency installs and asserts:
 Also asserts the workspace lockfile + config landed: pnpm-lock.yaml, pnpm-workspace.yaml
 (strictPeerDependencies, since pnpm 10 no longer reads settings from .npmrc), and a
 sha512-pinned packageManager field.
+
+Finally it polices what may live in a ``.npmrc``: the settings that decide what ends
+up in ``node_modules`` — or which pnpm runs — belong in ``pnpm-workspace.yaml`` alone.
 """
 
 from __future__ import annotations
@@ -146,6 +149,136 @@ def test_strict_peer_deps_declared_where_pnpm_will_read_it() -> None:
     workspace = (_REPO_ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8")
     assert "strictPeerDependencies: true" in workspace, (
         "pnpm-workspace.yaml lost strictPeerDependencies (pnpm 10+ reads this)"
+    )
+    # The other half of the same policy. Asserting only the strict flag would let the
+    # opposite behaviour return through autoInstallPeers, which silently materialises
+    # missing peers instead of failing the install.
+    assert "autoInstallPeers: false" in workspace, (
+        "pnpm-workspace.yaml lost autoInstallPeers: false (peers must be declared, not conjured)"
+    )
+
+
+# Settings that decide what ends up in ``node_modules``, or which pnpm runs. Every one
+# of these is owned by ``pnpm-workspace.yaml``; pnpm 10 does not take any of them from
+# a ``.npmrc``, so one parked there is either inert or — worse — a contradiction that
+# reads as policy. Written in npm's kebab spelling; the camelCase spelling that
+# pnpm-workspace.yaml uses is normalised onto it before the comparison.
+#
+# Deliberately NOT listed: `audit`, `fund`, `loglevel` and friends. npm genuinely still
+# reads those from a project .npmrc, they only affect console output, and they cannot
+# alter a resolved tree. packages/apps/site/.npmrc keeps three of them for that reason.
+_RESOLUTION_SETTINGS = frozenset(
+    {
+        # Peer resolution. `legacy-peer-deps` is the one that bit us: it is npm-only —
+        # pnpm has no such setting at any version — and it means "ignore
+        # peerDependencies entirely", the exact inverse of strictPeerDependencies: true.
+        # It sat in packages/apps/terminal/.npmrc reading like enforced policy while
+        # pnpm, the only installer this repo uses, had never once honoured it.
+        "legacy-peer-deps",
+        "strict-peer-dependencies",
+        "auto-install-peers",
+        "dedupe-peer-dependents",
+        "resolve-peers-from-workspace-root",
+        # Layout and store.
+        "node-linker",
+        "shamefully-hoist",
+        "hoist",
+        "hoist-pattern",
+        "public-hoist-pattern",
+        "package-import-method",
+        "verify-store-integrity",
+        # Version selection and the lockfile.
+        "save-exact",
+        "resolution-mode",
+        "frozen-lockfile",
+        "prefer-frozen-lockfile",
+        "shared-workspace-lockfile",
+        "link-workspace-packages",
+        "prefer-workspace-packages",
+        "overrides",
+        "audit-level",
+        # Which pnpm runs, and what it is allowed to execute.
+        "manage-package-manager-versions",
+        "package-manager-strict-version",
+        "only-built-dependencies",
+        "ignore-dep-scripts",
+        "enable-pre-post-scripts",
+    }
+)
+
+_PRUNED_DIRS = {"node_modules", ".git", ".local", "dist", "build", ".venv", "target"}
+
+
+def _iter_npmrc_files():
+    """Yield every ``.npmrc`` in the working tree, skipping vendored trees."""
+    stack = [_REPO_ROOT]
+    while stack:
+        current = stack.pop()
+        for entry in current.iterdir():
+            if entry.is_dir():
+                if entry.name not in _PRUNED_DIRS:
+                    stack.append(entry)
+            elif entry.name == ".npmrc":
+                yield entry
+
+
+def _declared_keys(text: str) -> list[str]:
+    """Return the setting keys an ``.npmrc`` body declares, in npm's kebab spelling.
+
+    Args:
+        text: The file contents.
+
+    Returns:
+        Lower-cased, kebab-spelled keys; comments, blank lines and ``[section]``
+        headers are skipped.
+    """
+    keys: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith((";", "#", "[")) or "=" not in stripped:
+            continue
+        raw = stripped.split("=", 1)[0].strip()
+        # `camelCase` -> `kebab-case`, so `autoInstallPeers` and `auto-install-peers`
+        # are the same key to this check.
+        keys.append(re.sub(r"(?<=[a-z0-9])([A-Z])", r"-\1", raw).lower())
+    return keys
+
+
+@pytest.mark.unit
+def test_no_npmrc_declares_a_setting_pnpm_takes_from_the_workspace_yaml() -> None:
+    """A resolution setting in ``.npmrc`` is inert at best and a lie at worst.
+
+    pnpm 10 has no ``legacy-peer-deps`` at all, and takes its resolution, store and
+    self-management settings from ``pnpm-workspace.yaml``. npm reads ``.npmrc``, but
+    this repo never installs workspace dependencies with npm — ``pnpm install
+    --frozen-lockfile`` is the only blessed form, and the test above enforces it.
+    """
+    violations: list[str] = []
+    for path in _iter_npmrc_files():
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        for key in _declared_keys(path.read_text(encoding="utf-8")):
+            if key in _RESOLUTION_SETTINGS:
+                violations.append(f"{rel}: {key}")
+    assert not violations, (
+        "These .npmrc settings govern dependency resolution, the store or the pnpm pin. "
+        "pnpm 10 reads them from pnpm-workspace.yaml, not .npmrc, so they do nothing "
+        "where they are — move them:\n" + "\n".join(violations)
+    )
+
+
+@pytest.mark.unit
+def test_the_terminal_npmrc_stays_deleted() -> None:
+    """``packages/apps/terminal/.npmrc`` held exactly one line: ``legacy-peer-deps=true``.
+
+    Nothing read it. pnpm never had the setting; npm has it but never installs this
+    workspace. What it did do was contradict ``strictPeerDependencies: true`` in
+    ``pnpm-workspace.yaml`` for anyone who opened the file, so it was deleted rather
+    than migrated.
+    """
+    assert not (_REPO_ROOT / "packages/apps/terminal/.npmrc").exists(), (
+        "packages/apps/terminal/.npmrc is back. pnpm 10 does not read package-level "
+        "settings from it, and its only setting (legacy-peer-deps) is npm-only and "
+        "contradicts pnpm-workspace.yaml's strictPeerDependencies: true."
     )
 
 
