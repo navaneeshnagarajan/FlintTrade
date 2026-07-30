@@ -166,18 +166,6 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
   const store = useStore();
   const [status, setStatus] = useState<TickerFallbackStatus>(INITIAL_STATUS);
 
-  // Publish every status change to both the local state (hook return) and the
-  // shared atom (any-widget consumption). Declared before its first consumer so
-  // that consumer can name it as a dependency without a temporal-dead-zone
-  // reference in the dependency array.
-  const publish = useCallback(
-    (next: TickerFallbackStatus) => {
-      setStatus(next);
-      store.set(tickerFallbackStatusAtom, next);
-    },
-    [store],
-  );
-
   // Stable ref so the interval callback always has the latest connected flag
   // without needing to be re-created on every render.
   const wsConnectedRef = useRef(wsConnected);
@@ -188,14 +176,21 @@ export function useTickerFallback(enabled = true): TickerFallbackStatus {
     }
 
     wsConnectedRef.current = wsConnected;
-    // `enabled` was missing here: flipping the hook off without the connection
-    // also changing left the reset above unpublished, so consumers kept reading
-    // the last fallback status of a hook that was no longer running.
-  }, [wsConnected, enabled, publish]);
+  }, [wsConnected]);
 
   // Survives WS outages within the hook's lifetime so staleness is measured
   // from the last real data write, not from when the current outage began.
   const lastUpdatedAtRef = useRef<number | null>(null);
+
+  // Publish every status change to both the local state (hook return) and the
+  // shared atom (any-widget consumption).
+  const publish = useCallback(
+    (next: TickerFallbackStatus) => {
+      setStatus(next);
+      store.set(tickerFallbackStatusAtom, next);
+    },
+    [store],
+  );
 
   useEffect(() => {
     // WS is connected — fallback inactive; live staleness is the WS service's

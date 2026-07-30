@@ -7,13 +7,13 @@ and tracks connection lifecycle.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from .adapter import BrokerAdapter, load_broker_adapter
-from .exceptions import AuthFlowError, SessionError
+from .adapter import load_broker_adapter, BrokerAdapter
+from .models import BrokerAccountInfo, AccountStatus
+from .exceptions import SessionError, AuthFlowError
 from .log_safety import account_ref
-from .models import AccountStatus, BrokerAccountInfo
 
 logger = logging.getLogger("flinttrade.gateway.session")
 
@@ -159,7 +159,7 @@ class BrokerSession:
         if token is not None and error is None:
             self._auth_token = token
             self._status = AccountStatus.connected
-            self._connected_at = datetime.now(tz=UTC)
+            self._connected_at = datetime.now(tz=timezone.utc)
             self._error_message = None
             logger.info(
                 "Account %s connected to %r at %s",

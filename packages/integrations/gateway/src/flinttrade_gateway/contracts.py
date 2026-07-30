@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flinttrade_core.db import open_sqlite
@@ -214,16 +214,16 @@ class ContractManager:
             logger.debug("Contract DB for %r not found — stale", broker)
             return True
 
-        mtime_utc = datetime.fromtimestamp(db_path.stat().st_mtime, tz=UTC)
+        mtime_utc = datetime.fromtimestamp(db_path.stat().st_mtime, tz=timezone.utc)
 
         # Convert UTC mtime to IST
         ist_offset_seconds = (_IST_OFFSET_HOURS * 60 + _IST_OFFSET_MINUTES) * 60
         # Use simple arithmetic: add offset seconds to the UTC timestamp
         mtime_ist_ts = mtime_utc.timestamp() + ist_offset_seconds
-        mtime_ist_dt = datetime.fromtimestamp(mtime_ist_ts, tz=UTC)
+        mtime_ist_dt = datetime.fromtimestamp(mtime_ist_ts, tz=timezone.utc)
 
-        now_ist_ts = datetime.now(tz=UTC).timestamp() + ist_offset_seconds
-        now_ist_dt = datetime.fromtimestamp(now_ist_ts, tz=UTC)
+        now_ist_ts = datetime.now(tz=timezone.utc).timestamp() + ist_offset_seconds
+        now_ist_dt = datetime.fromtimestamp(now_ist_ts, tz=timezone.utc)
 
         # Today's cutoff in IST: midnight of today + cutoff_hour hours
         today_ist_date = now_ist_dt.date()
@@ -235,7 +235,7 @@ class ContractManager:
                 cutoff_hour,
                 0,
                 0,
-                tzinfo=UTC,
+                tzinfo=timezone.utc,
             ).timestamp()
         )
 

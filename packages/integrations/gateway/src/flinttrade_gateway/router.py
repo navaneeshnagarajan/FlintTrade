@@ -25,7 +25,8 @@ from flinttrade_engine.safety import (
     SafetyContext,
 )
 
-from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN, BrokerAdapter, Session
+from .brokers._base import ROUTER_TOKEN as _ROUTER_TOKEN
+from .brokers._base import BrokerAdapter, Session
 from .routing_config import RoutingConfig, RoutingHint
 
 logger = logging.getLogger("flinttrade.gateway.router")

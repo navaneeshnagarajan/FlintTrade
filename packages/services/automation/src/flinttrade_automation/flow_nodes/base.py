@@ -30,7 +30,7 @@ class FlowContext:
     """
 
     variables: dict[str, Any] = field(default_factory=dict)
-    outputs: dict[str, FlowResult] = field(default_factory=dict)
+    outputs: dict[str, "FlowResult"] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def set(self, key: str, value: Any) -> None:
@@ -81,7 +81,7 @@ class FlowResult:
         output: Any = None,
         branch: str | None = None,
         **metadata: Any,
-    ) -> FlowResult:
+    ) -> "FlowResult":
         """Convenience factory for a successful result.
 
         Args:
@@ -95,7 +95,7 @@ class FlowResult:
         return cls(success=True, output=output, branch=branch, metadata=dict(metadata))
 
     @classmethod
-    def fail(cls, error: str, **metadata: Any) -> FlowResult:
+    def fail(cls, error: str, **metadata: Any) -> "FlowResult":
         """Convenience factory for a failed result.
 
         Args:

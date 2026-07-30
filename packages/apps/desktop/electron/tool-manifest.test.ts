@@ -13,7 +13,7 @@ const nodeChecksums = path.join(
   "resources",
   "bootstrap",
   "checksums",
-  "node-v22.23.2-SHASUMS256.txt",
+  "node-v22.23.1-SHASUMS256.txt",
 );
 const uvChecksums = path.join(
   desktopRoot,
@@ -51,22 +51,22 @@ describe("bootstrap tool manifest", () => {
     const targets = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"];
 
     expect(manifest.schemaVersion).toBe(1);
-    expect(manifest.node.version).toBe("22.23.2");
+    expect(manifest.node.version).toBe("22.23.1");
     expect(manifest.uv.version).toBe("0.11.16");
     expect(Object.keys(manifest.node.assets).sort()).toEqual(targets);
     expect(Object.keys(manifest.uv.assets).sort()).toEqual(targets);
     expect(manifest.pnpm).toEqual({
-      integrity: "sha512-a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-      packageManager: "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-      version: "10.34.5",
+      integrity: "sha512-76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+      packageManager: "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+      version: "9.15.0",
     });
     expect(manifest.generatedFrom).toMatchObject({
       node: {
-        sha256: "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39",
+        sha256: "158f2e2c580c610b9cef2853f3444c7369b84cc23e7ad764e3c40e9d60d82ea0",
         signature: {
-          fingerprint: "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
-          keySha256: "9c51e903b0da945fc21947fd6fce8fb4d72bc20ddf82e8f0aada694e9688447d",
-          sha256: "169f1452c14cd653247408352f1534b9f31e3d13f9c6399c3977368095e11eda",
+          fingerprint: "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4",
+          keySha256: "05a4080f671246086a2590bfad78965dcceaa823df1786f4ef52d58e5e3362b8",
+          sha256: "259516b9d4fe69474373c02ac684edfe20c7675e6070e26a55fb514016f138d9",
         },
       },
       uv: { sha256: "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a" },

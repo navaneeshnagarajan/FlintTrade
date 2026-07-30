@@ -1493,7 +1493,7 @@ function CalculatorWidget(props: WidgetProps) {
       setTab(resolved);
       props.api?.updateParameters({ tab: resolved });
     },
-    [props.api, tab],
+    [panelParams, props.api, tab],
   );
 
   // Behaviour tracking is a side effect, so it belongs in an effect rather than

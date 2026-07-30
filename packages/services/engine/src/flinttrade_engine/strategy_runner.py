@@ -31,8 +31,8 @@ import logging
 import math
 import os
 import platform
-import shutil
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,7 +40,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1113,7 +1113,7 @@ class UserStrategyRunner:
             f"# FlintTrade Strategy\n"
             f"# name: {name}\n"
             f"# strategy_id: {strategy_id}\n"
-            f"# uploaded_at: {datetime.now(UTC).isoformat()}\n\n"
+            f"# uploaded_at: {datetime.now(timezone.utc).isoformat()}\n\n"
         )
         strategy_path.write_text(header + code, encoding="utf-8")
 
@@ -1278,7 +1278,7 @@ class UserStrategyRunner:
                 name=name,
                 process=process,
                 tree=exc.process_tree,
-                started_at=datetime.now(UTC),
+                started_at=datetime.now(timezone.utc),
                 log_path=log_path,
                 memory_limit_mb=self._memory_limit_mb,
                 temp_dir=temp_dir,
@@ -1298,7 +1298,7 @@ class UserStrategyRunner:
                     name=name,
                     process=process,
                     tree=_PendingPosixProcessGroup(process),
-                    started_at=datetime.now(UTC),
+                    started_at=datetime.now(timezone.utc),
                     log_path=log_path,
                     memory_limit_mb=self._memory_limit_mb,
                     temp_dir=temp_dir,
@@ -1321,7 +1321,7 @@ class UserStrategyRunner:
             name=name,
             process=process,
             tree=tree,
-            started_at=datetime.now(UTC),
+            started_at=datetime.now(timezone.utc),
             log_path=log_path,
             memory_limit_mb=self._memory_limit_mb,
             temp_dir=temp_dir,
@@ -1536,7 +1536,7 @@ class UserStrategyRunner:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
 
-        uptime = (datetime.now(UTC) - entry.started_at).total_seconds()
+        uptime = (datetime.now(timezone.utc) - entry.started_at).total_seconds()
 
         return {
             "strategy_id": strategy_id,

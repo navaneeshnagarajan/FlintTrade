@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -42,7 +42,7 @@ class BacktestResultStore:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._dir = Path(base_dir).expanduser()
-        self._clock = clock or (lambda: datetime.now(tz=UTC))
+        self._clock = clock or (lambda: datetime.now(tz=timezone.utc))
 
     @staticmethod
     def _safe_name(strategy: str) -> str:

@@ -29,7 +29,7 @@ concurrency:
 jobs:
   validate:
     name: Validate release identity
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -118,11 +118,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The two Linux build legs stay on 22.04 on purpose: they compile the
-        # native addon that ships in the installer, so the runner's glibc is the
-        # floor every user inherits. Raising it here would raise the minimum glibc
-        # of the published binary. The validate and publish jobs compile nothing
-        # and track the supported-runner floor in flint.toml instead.
         include:
           - label: macos-universal
             runner: macos-14
@@ -332,7 +327,7 @@ jobs:
     name: Publish installers and provenance
     needs: [validate, build]
     if: github.event.inputs.tag != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
       contents: write

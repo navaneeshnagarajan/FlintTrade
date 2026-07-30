@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import gzip
 import json
 import os
 import platform
-from datetime import UTC, datetime
 from pathlib import Path
 
 

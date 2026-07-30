@@ -28,12 +28,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
-
 from flinttrade_gateway.log_safety import log_ref
 
 logger = logging.getLogger("flinttrade.core.chart_prefs")
@@ -138,7 +137,7 @@ class ChartPreferences:
             user_id: User identifier.
             theme: Dict of theme properties (colours, grid, etc.).
         """
-        now = datetime.now(tz=UTC).replace(tzinfo=None)
+        now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         self.connection.execute(
             """
             INSERT INTO chart_prefs_theme (user_id, theme_json, updated_at)
@@ -185,7 +184,7 @@ class ChartPreferences:
             name: Friendly name, e.g. ``"My Scalping Setup"``.
             indicators: List of indicator config dicts.
         """
-        now = datetime.now(tz=UTC).replace(tzinfo=None)
+        now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         self.connection.execute(
             """
             INSERT INTO chart_prefs_indicators (user_id, set_name, indicators_json, updated_at)
@@ -282,7 +281,7 @@ class ChartPreferences:
             layout_name: Layout identifier, e.g. ``"intraday"``.
             layout: Serialised layout dict (Dockview / panel state).
         """
-        now = datetime.now(tz=UTC).replace(tzinfo=None)
+        now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         self.connection.execute(
             """
             INSERT INTO chart_prefs_layout (user_id, layout_name, layout_json, updated_at)

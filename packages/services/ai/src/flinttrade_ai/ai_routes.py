@@ -82,12 +82,12 @@ def sentiment_analyze() -> tuple[Any, int]:
     analyze_text = text or f"{symbol} stock market performance"
 
     try:
-        from .llm_client import LLMClient  # noqa: PLC0415
         from .sentiment import (  # noqa: PLC0415
             NewsArticle,
             score_article_rule_based,
             score_article_with_llm,
         )
+        from .llm_client import LLMClient  # noqa: PLC0415
 
         article = NewsArticle(title=analyze_text, summary="")
         llm_client = None

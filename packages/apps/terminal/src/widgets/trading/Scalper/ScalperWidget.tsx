@@ -290,7 +290,7 @@ function ScalperWidget(_props: WidgetProps) {
     return () => {
       cancelled = true;
     };
-  }, [symbol, spotExch, spotLtp, step, isExplore]);
+  }, [symbol, spotExch, spotLtp, step]);
 
   const showStatus = useCallback((message: string, type: StatusType = "success", ms = 3000) => {
     setStatus({ message, type });
@@ -440,12 +440,7 @@ function ScalperWidget(_props: WidgetProps) {
         showStatus(err instanceof Error ? err.message : "Order failed", "error");
       }
     },
-    // `mode` is load-bearing: `checkOrderEntryMode(mode)` above is this widget's
-    // client-side mode refusal, and it was missing here. The derived `isExplore`
-    // that used to sit in this array is not read by the callback and did not
-    // cover it — a Live -> Practice downgrade leaves `isExplore` false, so the
-    // callback kept checking against the mode it was created under.
-    [mode, lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder],
+    [lots, lotSize, lotSizeVerified, refreshLotSize, orderType, limitPrice, slPoints, targetPoints, product, showStatus, announceOrder, isExplore],
   );
 
   const handleOrder = useCallback(

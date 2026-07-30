@@ -40,20 +40,6 @@ _STATE = {
     "identities": [],
 }
 
-# The atomic-publication seam differs by host: Windows publishes through a
-# ``MoveFileExW`` write-through move, POSIX through ``os.replace``. Fault
-# injection has to target whichever one the running host actually calls,
-# otherwise the injected failure is simply never reached.
-_REPLACE_SEAM: tuple[object, str] = (
-    (checkpoint_module, "_replace_windows_write_through")
-    if checkpoint_module._uses_windows_write_through()
-    else (checkpoint_module.os, "replace")
-)
-# Windows takes its durability barrier from the write-through move, so the
-# parent-directory fsync helper is only ever called on POSIX.
-DIRECTORY_FSYNC_IS_USED = not checkpoint_module._uses_windows_write_through()
-NO_DIRECTORY_FSYNC_REASON = "Windows publishes write-through; the parent-directory fsync path is POSIX-only"
-
 
 def test_checkpoint_round_trip_uses_the_canonical_filename_and_cursor(tmp_path) -> None:
     path = store_orderflow_checkpoint(tmp_path, _STATE, _CURSOR)
@@ -309,7 +295,7 @@ def test_replace_failure_preserves_the_previous_checkpoint(tmp_path, monkeypatch
     def replace_fails(_source, _target):  # noqa: ANN001
         raise PermissionError("simulated indexer lock")
 
-    monkeypatch.setattr(*_REPLACE_SEAM, replace_fails)
+    monkeypatch.setattr(checkpoint_module.os, "replace", replace_fails)
 
     with pytest.raises(OrderFlowCheckpointWriteError, match="could not be written"):
         store_orderflow_checkpoint(tmp_path, replacement_state, _CURSOR)
@@ -445,10 +431,7 @@ def test_explicit_lineage_handoff_records_bounded_private_evidence(tmp_path) -> 
     assert replacement.store_id.encode() not in evidence_raw
     assert b"PREVIOUS" not in evidence_raw
     assert b"REPLACEMENT" not in evidence_raw
-    if os.name != "nt":
-        # Windows cannot report POSIX mode bits; every other evidence
-        # assertion above stays meaningful on this host.
-        assert stat.S_IMODE(evidence_path.stat().st_mode) == stat.S_IRUSR | stat.S_IWUSR
+    assert stat.S_IMODE(evidence_path.stat().st_mode) == stat.S_IRUSR | stat.S_IWUSR
 
     with pytest.raises(OrderFlowCheckpointWriteError, match="lineage"):
         store_orderflow_checkpoint(
@@ -835,7 +818,6 @@ def test_corrupt_checkpoint_cannot_be_treated_as_absent_during_publication(
     assert path.read_bytes() == original
 
 
-@pytest.mark.skipif(not DIRECTORY_FSYNC_IS_USED, reason=NO_DIRECTORY_FSYNC_REASON)
 def test_post_rename_directory_fsync_failure_retries_idempotently(
     tmp_path,
     monkeypatch,
@@ -963,7 +945,7 @@ def test_file_fsync_failure_preserves_the_previous_checkpoint(tmp_path, monkeypa
 
 
 def test_replace_retries_transient_windows_style_locks(tmp_path, monkeypatch) -> None:
-    real_replace = getattr(*_REPLACE_SEAM)
+    real_replace = os.replace
     attempts = 0
     monkeypatch.setattr(checkpoint_module.time, "sleep", lambda _delay: None)
 
@@ -974,7 +956,7 @@ def test_replace_retries_transient_windows_style_locks(tmp_path, monkeypatch) ->
             raise PermissionError("simulated indexer lock")
         real_replace(source, target)
 
-    monkeypatch.setattr(*_REPLACE_SEAM, flaky_replace)
+    monkeypatch.setattr(checkpoint_module.os, "replace", flaky_replace)
 
     store_orderflow_checkpoint(tmp_path, _STATE, _CURSOR)
 
@@ -982,7 +964,6 @@ def test_replace_retries_transient_windows_style_locks(tmp_path, monkeypatch) ->
     assert load_orderflow_checkpoint(tmp_path).cursor == _CURSOR
 
 
-@pytest.mark.skipif(not DIRECTORY_FSYNC_IS_USED, reason=NO_DIRECTORY_FSYNC_REASON)
 def test_unsupported_parent_directory_fsync_fails_closed(tmp_path, monkeypatch) -> None:
     def unsupported_directory_fsync(_path: Path) -> None:
         raise NotImplementedError("directory fsync unsupported")
@@ -1036,7 +1017,6 @@ def test_windows_write_through_failure_does_not_publish_checkpoint(tmp_path, mon
     assert not orderflow_checkpoint_path(tmp_path).exists()
 
 
-@pytest.mark.skipif(not DIRECTORY_FSYNC_IS_USED, reason=NO_DIRECTORY_FSYNC_REASON)
 def test_parent_directory_io_failure_is_reported_as_failed_persistence(
     tmp_path,
     monkeypatch,

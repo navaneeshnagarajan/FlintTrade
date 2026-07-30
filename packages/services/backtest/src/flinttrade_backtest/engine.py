@@ -33,7 +33,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 from typing import Any, Callable
 
@@ -114,12 +114,12 @@ class EngineConfig:
 
     symbol: str = "UNKNOWN"
     exchange: str = "NSE"
-    initial_capital: Decimal = field(default_factory=lambda: Decimal(1000000))
-    slippage_bps: Decimal = field(default_factory=lambda: Decimal(2))
-    commission_per_order: Decimal = field(default_factory=lambda: Decimal(20))
-    commission_pct: Decimal = field(default_factory=lambda: Decimal(0))
-    margin_pct: Decimal = field(default_factory=lambda: Decimal(100))
-    position_size_pct: Decimal = field(default_factory=lambda: Decimal(10))
+    initial_capital: Decimal = field(default_factory=lambda: Decimal("1000000"))
+    slippage_bps: Decimal = field(default_factory=lambda: Decimal("2"))
+    commission_per_order: Decimal = field(default_factory=lambda: Decimal("20"))
+    commission_pct: Decimal = field(default_factory=lambda: Decimal("0"))
+    margin_pct: Decimal = field(default_factory=lambda: Decimal("100"))
+    position_size_pct: Decimal = field(default_factory=lambda: Decimal("10"))
     position_size_qty: int = 0
     fill_mode: FillMode = FillMode.NEXT_OPEN
     allow_short: bool = False
@@ -152,11 +152,11 @@ class EngineOrder:
     side: OrderSide = OrderSide.BUY
     order_type: OrderType = OrderType.MARKET
     quantity: int = 0
-    limit_price: Decimal = Decimal(0)
-    stop_price: Decimal = Decimal(0)
+    limit_price: Decimal = Decimal("0")
+    stop_price: Decimal = Decimal("0")
     status: OrderStatus = OrderStatus.PENDING
     filled_quantity: int = 0
-    avg_fill_price: Decimal = Decimal(0)
+    avg_fill_price: Decimal = Decimal("0")
     submitted_at: datetime | None = None
     filled_at: datetime | None = None
     stop_triggered: bool = False
@@ -189,7 +189,7 @@ class EnginePosition:
     side: OrderSide
     quantity: int
     avg_cost: Decimal
-    last_price: Decimal = Decimal(0)
+    last_price: Decimal = Decimal("0")
     opened_at: datetime | None = None
 
     @property
@@ -269,7 +269,7 @@ class EngineEquityPoint:
     equity: Decimal
     cash: Decimal
     positions_value: Decimal
-    drawdown_pct: Decimal = Decimal(0)
+    drawdown_pct: Decimal = Decimal("0")
 
 
 @dataclass
@@ -291,7 +291,7 @@ class EngineResult:
     trades: list[EngineTrade] = field(default_factory=list)
     equity_curve: list[EngineEquityPoint] = field(default_factory=list)
     orders: list[EngineOrder] = field(default_factory=list)
-    final_equity: Decimal = Decimal(0)
+    final_equity: Decimal = Decimal("0")
     total_bars: int = 0
     execution_seconds: float = 0.0
     error: str = ""
@@ -516,7 +516,7 @@ class BacktestEngine:
             dd_pct = (
                 (self._peak_equity - equity) / self._peak_equity * 100
                 if self._peak_equity > 0
-                else Decimal(0)
+                else Decimal("0")
             )
             self._equity_curve.append(EngineEquityPoint(
                 timestamp=ts,
@@ -913,7 +913,7 @@ class BacktestEngine:
         commission = self._calculate_commission(qty, exit_price)
 
         # Indian tax charges
-        tax_charges = Decimal(0)
+        tax_charges = Decimal("0")
         if self._tax_calculator is not None:
             entry_dt = pos.opened_at
             exit_dt = self._current_time
@@ -1006,7 +1006,7 @@ class BacktestEngine:
         Returns:
             Post-slippage price.
         """
-        slip = price * self.config.slippage_bps / Decimal(10000)
+        slip = price * self.config.slippage_bps / Decimal("10000")
         if side == OrderSide.BUY:
             return (price + slip).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
         return (price - slip).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
@@ -1021,7 +1021,7 @@ class BacktestEngine:
         Returns:
             Total commission in INR.
         """
-        pct_fee = price * quantity * self.config.commission_pct / Decimal(100)
+        pct_fee = price * quantity * self.config.commission_pct / Decimal("100")
         return (self.config.commission_per_order + pct_fee).quantize(
             _TWO_PLACES, rounding=ROUND_HALF_UP
         )
@@ -1052,7 +1052,7 @@ class BacktestEngine:
         pos = self._positions.get(symbol)
         if pos and pos.last_price > 0:
             return pos.last_price
-        return Decimal(0)
+        return Decimal("0")
 
     def _calc_position_size(self, price: Decimal) -> int:
         """Calculate default position size from config.
@@ -1067,8 +1067,8 @@ class BacktestEngine:
             return self.config.position_size_qty
         if price <= 0:
             return 1
-        capital_per_trade = self._cash * (self.config.position_size_pct / Decimal(100))
-        margin_adj = capital_per_trade / (self.config.margin_pct / Decimal(100))
+        capital_per_trade = self._cash * (self.config.position_size_pct / Decimal("100"))
+        margin_adj = capital_per_trade / (self.config.margin_pct / Decimal("100"))
         return max(1, int(margin_adj / price))
 
     # ------------------------------------------------------------------

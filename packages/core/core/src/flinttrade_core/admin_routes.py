@@ -185,7 +185,11 @@ def _introspect_packages() -> list[dict[str, object]]:
                 with open(tf, encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         stripped = line.strip()
-                        if stripped.startswith(("def test_", "it(", "test(")):
+                        if (
+                            stripped.startswith("def test_")
+                            or stripped.startswith("it(")
+                            or stripped.startswith("test(")
+                        ):
                             test_count += 1
             except OSError:
                 pass

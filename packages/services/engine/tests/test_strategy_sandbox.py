@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -177,10 +176,6 @@ class TestResourceLimits:
 class TestBwrapCommand:
     """Verify bwrap command is built correctly."""
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="bubblewrap is Linux-only and needs a POSIX <root>/bin/python interpreter layout",
-    )
     def test_command_structure(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
@@ -204,10 +199,6 @@ class TestBwrapCommand:
         assert str(start_gate.resolve()) in cmd
         assert str(strategy.resolve()) in cmd
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="bubblewrap is Linux-only and needs a POSIX <root>/bin/python interpreter layout",
-    )
     def test_command_ends_with_sandbox_paths_only(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
@@ -245,10 +236,6 @@ class TestBwrapCommand:
 class TestTempDirIsolation:
     """Verify each strategy run gets its own temp dir and it is cleaned up."""
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_start_creates_temp_dir(self, uploaded):
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
@@ -264,10 +251,6 @@ class TestTempDirIsolation:
         # Clean up
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_temp_dir_used_as_cwd(self, uploaded):
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
@@ -281,10 +264,6 @@ class TestTempDirIsolation:
 
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_stop_cleans_up_temp_dir(self, uploaded):
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
@@ -298,10 +277,6 @@ class TestTempDirIsolation:
         runner.stop(strategy_id)
         assert not temp_dir.exists()
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_delete_cleans_up_temp_dir(self, uploaded):
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
@@ -319,10 +294,6 @@ class TestTempDirIsolation:
         # delete should still work on a stopped strategy (removes .py/.meta files)
         runner.delete(strategy_id)
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_temp_dir_cleanup_on_popen_failure(self, uploaded):
         """If Popen raises, the temp dir should be cleaned up."""
         runner, strategy_id = uploaded
@@ -415,10 +386,6 @@ class TestRestrictedBuiltins:
 class TestFallback:
     """Verify sandboxing degrades gracefully when tools are unavailable."""
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_start_without_bwrap_uses_plain_subprocess(self, uploaded):
         """When bwrap is not installed, strategy still starts via plain Popen."""
         runner, strategy_id = uploaded
@@ -439,10 +406,6 @@ class TestFallback:
 
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_start_on_linux_with_bwrap_uses_bwrap(self, uploaded):
         """When bwrap is available on Linux, command starts with bwrap."""
         runner, strategy_id = uploaded
@@ -477,10 +440,6 @@ class TestFallback:
 
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
-    )
     def test_preexec_fn_passed_to_popen(self, uploaded):
         """The preexec_fn from _build_preexec_fn is passed to Popen."""
         runner, strategy_id = uploaded

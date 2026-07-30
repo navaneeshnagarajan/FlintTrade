@@ -98,7 +98,7 @@ class TickDispatcher:
         while self._running:
             try:
                 tick = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 continue
 
             symbol = tick.get("symbol", "")

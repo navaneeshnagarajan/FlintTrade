@@ -37,17 +37,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from collections.abc import Awaitable
 from typing import Any, Callable
 
 from flinttrade_core.db import open_sqlite
 from flinttrade_core.openalgo_client import OpenAlgoClient
-
 from .downloader import DownloadResult
-from .pipeline import INTERVAL_TABLES, DataPipeline
+from .pipeline import DataPipeline, INTERVAL_TABLES
 
 logger = logging.getLogger("flinttrade.historical.historify")
 
@@ -132,7 +131,7 @@ class _JobQueue:
         to_date: str,
     ) -> None:
         """Insert a job, ignoring duplicates."""
-        now = datetime.now(tz=UTC).isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
         self._conn.execute(
             """
             INSERT OR IGNORE INTO historify_queue
@@ -153,7 +152,7 @@ class _JobQueue:
         return [dict(row) for row in rows]
 
     def mark_done(self, job_id: int) -> None:
-        now = datetime.now(tz=UTC).isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
         self._conn.execute(
             "UPDATE historify_queue SET status = ?, updated_at = ? WHERE id = ?",
             [_STATUS_DONE, now, job_id],
@@ -161,7 +160,7 @@ class _JobQueue:
         self._conn.commit()
 
     def mark_error(self, job_id: int, error: str) -> None:
-        now = datetime.now(tz=UTC).isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
         self._conn.execute(
             "UPDATE historify_queue SET status = ?, error = ?, updated_at = ? WHERE id = ?",
             [_STATUS_ERROR, error, now, job_id],
@@ -482,18 +481,16 @@ class _AsyncDownloader:
         end_date: str,
     ) -> DownloadResult:
         """Async shim — delegates chunked download to async OpenAlgoClient."""
-        from datetime import date as _date  # noqa: PLC0415
-
-        from flinttrade_core.models import OHLCV  # noqa: PLC0415
-
         from .downloader import (  # noqa: PLC0415
-            _DEFAULT_CHUNK_DAYS_DAILY,
-            _DEFAULT_CHUNK_DAYS_INTRADAY,
             _INTERVAL_MAP,
             _INTRADAY_INTERVALS,
-            DownloadResult,
+            _DEFAULT_CHUNK_DAYS_INTRADAY,
+            _DEFAULT_CHUNK_DAYS_DAILY,
             compute_date_chunks,
+            DownloadResult,
         )
+        from flinttrade_core.models import OHLCV  # noqa: PLC0415
+        from datetime import date as _date  # noqa: PLC0415
 
         canonical = _INTERVAL_MAP.get(interval, interval)
         result = DownloadResult(

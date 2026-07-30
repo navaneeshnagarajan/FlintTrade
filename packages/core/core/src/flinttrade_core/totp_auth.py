@@ -42,7 +42,6 @@ import pyotp
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
 from flinttrade_gateway.log_safety import log_ref
 
 if TYPE_CHECKING:

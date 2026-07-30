@@ -22,7 +22,7 @@ import hashlib
 import logging
 import unicodedata
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import (
@@ -37,6 +37,7 @@ from flinttrade_core.exceptions import (
 )
 from flinttrade_core.models import ModifyOrder
 from flinttrade_engine.safety import EmergencyBrokerWrite, EmergencyReductionPlan, EmergencyWritePolicy
+
 from flinttrade_gateway.capabilities import (
     AuthModel,
     Capabilities,
@@ -46,11 +47,8 @@ from flinttrade_gateway.capabilities import (
     TickProtocol,
 )
 
-from ._base import (
-    ROUTER_TOKEN as _ROUTER_TOKEN,  # the shared per-process router token (§8.0c)
-    BrokerAdapter,
-    Session,
-)
+from ._base import ROUTER_TOKEN as _ROUTER_TOKEN  # the shared per-process router token (§8.0c)
+from ._base import BrokerAdapter, Session
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from flinttrade_core.models import Candles, OptionChain, Order, Position, Quote, Trade
@@ -154,10 +152,10 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     def __init__(
         self,
-        default_client: OpenAlgoClient | None = None,
+        default_client: "OpenAlgoClient | None" = None,
         *,
-        client_factory: Callable[[Session], OpenAlgoClient] | None = None,
-        local_state_provider: Callable[[Session], LocalStateSnapshot] | None = None,
+        client_factory: "Callable[[Session], OpenAlgoClient] | None" = None,
+        local_state_provider: "Callable[[Session], LocalStateSnapshot] | None" = None,
     ) -> None:
         self._default_client = default_client
         self._client_factory = client_factory
@@ -175,7 +173,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- client resolution ----------
 
-    def _client(self, session: Session) -> OpenAlgoClient:
+    def _client(self, session: Session) -> "OpenAlgoClient":
         if self._client_factory is not None:
             return self._client_factory(session)
         if self._default_client is not None:
@@ -210,7 +208,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- trading: writes (router-only) ----------
 
-    async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
+    async def place_order(self, session: Session, order: "Order", *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
         # Honesty guard (audit HIGH): this bridge forwards a plain order to
         # OpenAlgo's /placeorder, which fires IMMEDIATELY — it has no resting
@@ -504,15 +502,15 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- trading: reads ----------
 
-    async def order_book(self, session: Session) -> list[Order]:
+    async def order_book(self, session: Session) -> "list[Order]":
         with self._mapped("order_book"):
             return await self._client(session).orderbook()  # type: ignore[return-value]
 
-    async def trade_book(self, session: Session) -> list[Trade]:
+    async def trade_book(self, session: Session) -> "list[Trade]":
         with self._mapped("trade_book"):
             return await self._client(session).tradebook()
 
-    async def positions(self, session: Session) -> list[Position]:
+    async def positions(self, session: Session) -> "list[Position]":
         with self._mapped("positions"):
             return await self._client(session).positionbook()
 
@@ -527,16 +525,16 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- market data: rest ----------
 
-    async def quotes(self, session: Session, symbols: list[str]) -> list[Quote]:
+    async def quotes(self, session: Session, symbols: list[str]) -> "list[Quote]":
         payload = [self._split_symbol(s) for s in symbols]
         with self._mapped("quotes"):
             return await self._client(session).multi_quotes(payload)
 
-    async def historical(self, session: Session, req: dict) -> Candles:
+    async def historical(self, session: Session, req: dict) -> "Candles":
         with self._mapped("historical"):
             return await self._client(session).history(**req)  # type: ignore[return-value]
 
-    async def option_chain(self, session: Session, req: dict) -> OptionChain:
+    async def option_chain(self, session: Session, req: dict) -> "OptionChain":
         symbol = str(req.get("symbol", ""))
         exchange = str(req.get("exchange", "NFO"))
         expiry = str(req.get("expiry") or req.get("expiry_date") or "")
@@ -545,7 +543,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- market data: streaming (not exposed by the REST bridge) ----------
 
-    def stream(self, session: Session) -> AsyncIterator[TickEvent]:  # type: ignore[name-defined]  # noqa: F821
+    def stream(self, session: Session) -> AsyncIterator["TickEvent"]:  # type: ignore[name-defined]  # noqa: F821
         raise UnsupportedCapabilityError(
             "OpenAlgo bridge adapter does not expose tick streaming; route data.ticks to a native adapter"
         )
@@ -558,7 +556,7 @@ class OpenAlgoAdapter(BrokerAdapter):
 
     # ---------- reconciliation ----------
 
-    async def reconcile(self, session: Session) -> ReconciliationReport:
+    async def reconcile(self, session: Session) -> "ReconciliationReport":
         """Diff canonical OpenAlgo account reads against the local mirror."""
         from flinttrade_gateway.reconciliation import (  # noqa: PLC0415
             EMPTY_LOCAL_STATE,
@@ -567,7 +565,7 @@ class OpenAlgoAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=UTC)
+        generated_at = datetime.now(tz=timezone.utc)
         try:
             local_state = (
                 EMPTY_LOCAL_STATE
@@ -902,7 +900,7 @@ class OpenAlgoAdapter(BrokerAdapter):
         def __init__(self, what: str) -> None:
             self._what = what
 
-        def __enter__(self) -> OpenAlgoAdapter._MapBrokerErrors:
+        def __enter__(self) -> "OpenAlgoAdapter._MapBrokerErrors":
             return self
 
         def __exit__(self, exc_type, exc, tb) -> bool:
@@ -918,5 +916,5 @@ class OpenAlgoAdapter(BrokerAdapter):
                 raise BrokerError(f"OpenAlgo API error during {self._what}: {exc}") from exc
             return False  # unexpected — let it propagate
 
-    def _mapped(self, what: str) -> OpenAlgoAdapter._MapBrokerErrors:
+    def _mapped(self, what: str) -> "OpenAlgoAdapter._MapBrokerErrors":
         return self._MapBrokerErrors(what)

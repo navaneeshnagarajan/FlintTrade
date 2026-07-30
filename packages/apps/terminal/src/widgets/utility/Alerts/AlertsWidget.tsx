@@ -755,7 +755,7 @@ function AlertsWidget() {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
     // Re-schedule when the set of armed alerts changes (symbol added/removed)
-     
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armedAlerts.length]);
 
   // ---------------------------------------------------------------------------

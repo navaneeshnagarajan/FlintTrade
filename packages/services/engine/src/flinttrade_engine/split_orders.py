@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from flinttrade_core.models import (
@@ -329,7 +329,7 @@ class SplitOrderExecutor:
         Returns:
             :class:`SplitResult` describing the outcome of the split.
         """
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         try:
             _validate_split_params(

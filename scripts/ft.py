@@ -50,16 +50,7 @@ DEV_LOG_DIR = REPO_ROOT / ".local" / "dev-logs"
 DESKTOP_PKG = "packages/apps/desktop"
 TERMINAL_PKG = "packages/apps/terminal"
 
-PINNED_PNPM_VERSION = "10.34.5"
-
-PYTEST_TIMEOUT_SECONDS = 120
-"""Per-test wall-clock bound for local runs.
-
-Higher than CI's 60 because a developer machine is usually running a browser, an
-editor and often the app itself, so the honest ceiling is looser. The point is
-not the exact number - it is that an unbounded local run turns a flaky
-process-spawning test into an indefinite hang with no output at all.
-"""
+PINNED_PNPM_VERSION = "9.15.0"
 
 # Directories that `clean` and the workspace walk never descend into: the repo
 # virtualenv, the git object store, and the gitignored .local/ scratch tree
@@ -80,7 +71,7 @@ COMMANDS: dict[str, str] = {
     "setup": "First-time setup - install Python and Node dependencies",
     "test": "Run the full pytest suite (plus the Rust ticks crate when cargo is present)",
     "test-fast": "Run pytest and stop on the first failure",
-    "lint": "Run ruff over packages/ and tests/, then the terminal's react-hooks gate",
+    "lint": "Run ruff over packages/ and tests/",
     "clean": "Delete __pycache__, .pytest_cache and node_modules trees",
     "version": "Print the FlintTrade version",
     "help": "Show this command table",
@@ -642,17 +633,6 @@ def ci_env() -> dict[str, str]:
 INIT_ARGV: tuple[str, ...] = ("-m", "flinttrade_core.cli", "init", "--provision-master-password")
 """The first-run workspace/master-password provisioning step."""
 
-INIT_VERBOSE_ARGV: tuple[str, ...] = (*INIT_ARGV, "--verbose")
-"""The same step with the full traceback enabled, for the re-run hint."""
-
-EXIT_PROVISION_DEGRADED = 3
-"""Provisioning failed but left a usable vault secret; start anyway.
-
-Mirrors ``flinttrade_core.cli.EXIT_PROVISION_DEGRADED``. Refusing to launch when
-the secret the backend actually needs is present and hardened turns a transient
-hiccup into an outage, which is precisely the first-run failure this guards.
-"""
-
 
 def provision_workspace(python: str, env: dict[str, str]) -> None:
     """Run the first-run workspace provisioning step.
@@ -673,17 +653,9 @@ def provision_workspace(python: str, env: dict[str, str]) -> None:
     code = run([python, *INIT_ARGV], env=env, check=False, quiet=True)
     if code == 0:
         return
-    if code == EXIT_PROVISION_DEGRADED:
-        warn("Workspace provisioning did not complete, but the existing credential-vault")
-        warn("secret is present and hardened, so FlintTrade is starting anyway. The cause")
-        warn("is printed above; re-run the command below if it recurs.")
-        warn(f"  {python} " + " ".join(INIT_VERBOSE_ARGV))
-        return
     fail(f"Workspace initialisation failed (exit {code}); any error above came from that step.")
-    fail("The failure is often transient - a lock or a file still held by another")
-    fail("process - so re-running can simply succeed. Run it from this directory to")
-    fail("keep the same interpreter and module search path, and add the traceback:")
-    fail(f"  {python} " + " ".join(INIT_VERBOSE_ARGV))
+    fail("Re-run it on its own to see the full output:")
+    fail(f"  {python} " + " ".join(INIT_ARGV))
     raise SystemExit(code)
 
 
@@ -1082,28 +1054,7 @@ def _run_pytest(extra_flags: Sequence[str]) -> int:
     if not paths:
         fail("No test directories found.")
         return 1
-    argv = [
-        python,
-        "-m",
-        "pytest",
-        *paths,
-        *extra_flags,
-        "--tb=short",
-        "--import-mode=importlib",
-        # Match the CI invocation in .github/workflows/test.yml. Without these,
-        # a local run has NO time bound at all: a process-spawning test whose
-        # child never exits blocks the whole suite indefinitely, and because
-        # pytest prints its summary only at the end there is no output to say so
-        # - it looks identical to "still running". One such flake was measured
-        # holding a local run for 93 minutes, at 0.015s of CPU, before it was
-        # killed; the same suite finishes in 5 minutes once bounded.
-        #
-        # --timeout-method=thread uses a watchdog thread rather than SIGALRM,
-        # which cannot reliably interrupt CPython's thread.join(). That is the
-        # difference between a named test with a traceback and a silent hang.
-        f"--timeout={PYTEST_TIMEOUT_SECONDS}",
-        "--timeout-method=thread",
-    ]
+    argv = [python, "-m", "pytest", *paths, *extra_flags, "--tb=short", "--import-mode=importlib"]
     return run(argv, env=python_env(), check=False)
 
 
@@ -1143,46 +1094,23 @@ def cmd_test_fast(_args: list[str]) -> int:
 
 
 def cmd_lint(_args: list[str]) -> int:
-    """Run ruff over ``packages/`` and ``tests/``, then the terminal's hooks gate.
+    """Run ruff over ``packages/`` and ``tests/``.
 
-    The two halves mirror the two languages: ruff for Python, and the terminal's
-    ``lint`` script (``react-hooks/rules-of-hooks`` plus
-    ``react-hooks/exhaustive-deps``) for the React sources. The hooks gate is the
-    same command CI runs in ``node-core-tests``, so a contributor hits it before
-    pushing rather than after.
-
-    A missing toolchain is reported with install guidance and is not a failure -
-    the JavaScript workspace is optional for a Python-only change, exactly as
-    ruff is optional for a terminal-only one. A genuine lint violation from
-    either half is propagated, and both halves always run so one report does not
-    hide the other.
+    A missing ruff is reported with install guidance and is not a failure; a
+    genuine lint violation is propagated.
 
     Args:
         _args: Unused positional arguments.
 
     Returns:
-        The first non-zero exit code of the two lints, or 0 when both pass (or
-        are skipped for a missing toolchain).
+        ruff's exit code, or 0 when ruff is not installed.
     """
     python = resolve_python()
     env = python_env()
     if capture([python, "-m", "ruff", "--version"]) is None:
         info("ruff not installed. Install with: uv sync --frozen --all-packages (or: pip install ruff)")
-        ruff_code = 0
-    else:
-        ruff_code = run([python, "-m", "ruff", "check", "packages/", "tests/"], env=env, check=False)
-
-    pnpm = pnpm_argv()
-    if pnpm is None:
-        info("No Node toolchain found; skipped the terminal react-hooks lint.")
-        return ruff_code
-    if not (REPO_ROOT / TERMINAL_PKG / "node_modules").is_dir():
-        info("Terminal node_modules missing; run `pnpm install --frozen-lockfile` to include the hooks lint.")
-        return ruff_code
-
-    header("Linting the terminal (react-hooks)")
-    hooks_code = run([*pnpm, "--dir", TERMINAL_PKG, "run", "lint"], env=ci_env(), check=False)
-    return ruff_code or hooks_code
+        return 0
+    return run([python, "-m", "ruff", "check", "packages/", "tests/"], env=env, check=False)
 
 
 def _clean_targets() -> Iterator[Path]:

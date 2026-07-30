@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
+import hashlib
 import logging
 import os
 import time
 from contextlib import closing
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,15 +45,15 @@ def _epoch(value: Any, *, default: float | None = None) -> float:
         return time.time() if default is None else default
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=UTC)
+            value = value.replace(tzinfo=timezone.utc)
         return value.timestamp()
     if isinstance(value, date):
-        return datetime(value.year, value.month, value.day, tzinfo=UTC).timestamp()
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc).timestamp()
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
-    parsed = datetime.fromisoformat(str(value).strip())
+    parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.timestamp()
 
 

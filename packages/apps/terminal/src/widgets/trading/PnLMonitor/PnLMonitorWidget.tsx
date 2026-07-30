@@ -257,7 +257,7 @@ function PnLMonitorWidget(props: WidgetProps) {
       props.api.updateParameters({ view: resolved });
       return resolved;
     });
-  }, [props.api]);
+  }, [panelParams, props.api]);
 
   // Honest disclosure — in Explore (or Live without a broker) the P&L is
   // computed from labelled SAMPLE data; in Practice it is the local sandbox.

@@ -558,7 +558,7 @@ python scripts/ft.py stop       # stop FlintTrade backend
 python scripts/ft.py status     # show service and port status
 python scripts/ft.py test       # run all Python tests
 python scripts/ft.py test-fast  # stop on first failure
-python scripts/ft.py lint       # ruff + the terminal react-hooks ESLint gate
+python scripts/ft.py lint       # run ruff
 python scripts/ft.py dev        # start React dev server + FlintTrade backend
 python scripts/ft.py clean      # remove build artefacts
 ```

@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import StrEnum
+
 
 _PUBLIC_ANALYSIS_ERROR = "Analysis failed"
 
@@ -127,7 +128,7 @@ class AgentAnalysis:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
     @property
     def success(self) -> bool:
@@ -180,7 +181,7 @@ class TeamAnalysis:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
         if not isinstance(self.mode, TeamMode):
             self.mode = TeamMode(self.mode)
 
@@ -234,7 +235,7 @@ class TradeRecommendation:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
     def to_dict(self) -> dict[str, object]:
         """Serialise to a JSON-safe dictionary."""

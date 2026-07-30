@@ -16,9 +16,9 @@ const outputDirectory = path.join(packageRoot, "release", "electron");
 const FUSE_DISABLED = 48;
 const FUSE_ENABLED = 49;
 const SOURCE_BOOTSTRAP_FILES = [
-  "checksums/node-release-marco-ippolito.asc",
-  "checksums/node-v22.23.2-SHASUMS256.txt",
-  "checksums/node-v22.23.2-SHASUMS256.txt.sig",
+  "checksums/node-release-rafael-gonzaga.asc",
+  "checksums/node-v22.23.1-SHASUMS256.txt",
+  "checksums/node-v22.23.1-SHASUMS256.txt.sig",
   "checksums/uv-0.11.16-sha256.sum",
   "flinttrade-bootstrap.ps1",
   "flinttrade-bootstrap.sh",

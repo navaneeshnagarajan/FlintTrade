@@ -625,16 +625,11 @@ function GreeksHeatmapWidget(props: WidgetProps) {
 
   const isLive = isConnected && !isError && liveRows != null && liveRows.length > 0;
   const isSample = !isConnected;
-  // Memoised so the empty-state `[]` is not a fresh array every render, which
-  // would make the metric-range memo below recompute on each one.
-  const data: ExpiryRow[] = useMemo(
-    () => (isLive && liveRows
-      ? liveRows
-      : isSample
-        ? SAMPLE_GREEKS_HEATMAP_DATA
-        : []),
-    [isLive, liveRows, isSample],
-  );
+  const data: ExpiryRow[] = isLive && liveRows
+    ? liveRows
+    : isSample
+      ? SAMPLE_GREEKS_HEATMAP_DATA
+      : [];
 
   const { minVal, maxVal } = useMemo(() => metricRange(data, metric), [data, metric]);
 
@@ -645,13 +640,13 @@ function GreeksHeatmapWidget(props: WidgetProps) {
     if (next === projection) return;
     setProjection(next);
     props.api.updateParameters({ projection: next });
-  }, [projection, props.api]);
+  }, [panelParams, projection, props.api]);
 
   const handleMetricChange = useCallback((next: MetricKey) => {
     if (next === metric) return;
     setMetric(next);
     props.api.updateParameters({ metric: next });
-  }, [metric, props.api]);
+  }, [metric, panelParams, props.api]);
 
   const handleResetView = useCallback(() => {
     setRotX(DEFAULT_ROT_X);

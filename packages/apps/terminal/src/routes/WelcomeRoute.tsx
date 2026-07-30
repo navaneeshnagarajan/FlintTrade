@@ -280,10 +280,6 @@ export default function WelcomeRoute() {
       cssVar("--particle-secondary", "#86efac"),
       cssVar("--particle-tertiary", "#38bdf8"),
     ],
-    // `cssVar` reads the live computed style, so the active theme is a real
-    // dependency that no static analysis can see (same shape as
-    // PublicRouteShell).
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
     [theme],
   );
 

@@ -74,7 +74,7 @@ STALE_INSTALLER_PHRASES = [
     ".msi/.exe",
 ]
 
-def _stale_current_pattern(version_tag: str) -> re.Pattern[str] | None:
+def _stale_current_pattern(version_tag: str) -> "re.Pattern[str] | None":
     """Pattern flagging sibling pre-releases of the current tag (e.g. an older beta).
 
     Derived from VERSION so a release bump cannot leave this check pinned to a

@@ -51,8 +51,8 @@ verified end to end.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import BrokerError
@@ -604,9 +604,10 @@ class KotakNeoAdapter(BrokerAdapter):
             raw_generation = raw.get("ordGenTp")
             if raw_generation is None:
                 raise BrokerError("Kotak Neo order has no authoritative AMO discriminator")
-            if not isinstance(raw_generation, str) or raw_generation != raw_generation.strip():
+            elif not isinstance(raw_generation, str) or raw_generation != raw_generation.strip():
                 raise BrokerError("Kotak Neo emergency order generation type is malformed")
-            generation = raw_generation.upper()
+            else:
+                generation = raw_generation.upper()
             if generation not in {"", "NA", "--", "AMO"}:
                 raise BrokerError("Kotak Neo emergency order generation type is unsupported")
             amo = generation == "AMO"
@@ -822,7 +823,7 @@ class KotakNeoAdapter(BrokerAdapter):
         client = None if self._client_factory is not None else await self._call(KotakNeoClient, dict(credentials))
         return Session(
             access_token=str(credentials.get("ucc", "")),
-            expires_at=datetime.now(tz=UTC).timestamp() + 24 * 3600,
+            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
             account_id=str(credentials.get("ucc", "")),
             adapter_id="kotakneo",
             extra={"client": client},
@@ -856,7 +857,7 @@ class KotakNeoAdapter(BrokerAdapter):
         if callable(log_off):
             await self._call(log_off)
         session.extra.pop("client", None)
-        return
+        return None
 
     # ---------- trading: writes (router-only) ----------
 
@@ -1665,7 +1666,7 @@ class KotakNeoAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=UTC)
+        generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
             broker_orders = declare_unavailable_order_fields(

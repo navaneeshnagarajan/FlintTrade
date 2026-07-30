@@ -392,7 +392,7 @@ class SecurityTracker:
         """Close the underlying SQLite connection."""
         self._conn.close()
 
-    def __enter__(self) -> SecurityTracker:
+    def __enter__(self) -> "SecurityTracker":
         return self
 
     def __exit__(self, *args: Any) -> None:

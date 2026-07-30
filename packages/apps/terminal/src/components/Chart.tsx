@@ -58,10 +58,6 @@ export default function Chart({
       candleRef.current = null;
       volumeRef.current = null;
     };
-    // `chartTheme` is deliberately excluded: including it would tear the chart
-    // down and rebuild it on every theme change. The effect immediately below
-    // re-applies the theme to the live chart instead, which is why it exists.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   }, [height, symbol]);
 
   // Re-apply theme whenever it changes (without recreating the chart)

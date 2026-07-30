@@ -1711,7 +1711,7 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
         return {}
 
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Could not read workspace.json at %s: %s", path, exc)
@@ -6100,32 +6100,8 @@ class FlintTradeApp:
         finally:
             self._startup_rollback_in_progress = False
 
-    def _claim_start(self) -> None:
-        """Claim the process-wide start, rejecting a concurrent second caller.
-
-        Claimed *before* this call installs an owner ledger. A rejected caller
-        acquired nothing, so it must never reach the startup-rollback path: that
-        path releases the running runtime's owners and closes its OpenAlgo
-        client and audit logger, which would tear down a live backend because a
-        duplicate start was requested.
-
-        Raises:
-            RuntimeError: If another caller already claimed the start.
-        """
-        start_claim_lock = getattr(self, "_start_claim_lock", None)
-        if start_claim_lock is None:
-            start_claim_lock = threading.Lock()
-            self._start_claim_lock = start_claim_lock
-        with start_claim_lock:
-            if getattr(self, "_start_claimed", False):
-                raise RuntimeError("FlintTrade runtime already started")
-            self._start_claimed = True
-
     async def start(self) -> None:
         """Start transactionally and retain every unproved rollback owner."""
-        # Never before the claim: a rejected duplicate start must not replace
-        # the winning start's retained owner ledger with an empty one.
-        self._claim_start()
         ledger = _AcquiredOwnerLedger()
         self._startup_owner_ledger = ledger
         try:
@@ -6148,11 +6124,16 @@ class FlintTradeApp:
             raise
 
     async def _start_owned(self, startup_owners: _AcquiredOwnerLedger) -> None:
-        """Start all services and wait until stopped under an owner ledger.
+        """Start all services and wait until stopped under an owner ledger."""
+        start_claim_lock = getattr(self, "_start_claim_lock", None)
+        if start_claim_lock is None:
+            start_claim_lock = threading.Lock()
+            self._start_claim_lock = start_claim_lock
+        with start_claim_lock:
+            if getattr(self, "_start_claimed", False):
+                raise RuntimeError("FlintTrade runtime already started")
+            self._start_claimed = True
 
-        The process-wide start claim is taken by :meth:`start` before the owner
-        ledger exists, so this method always runs as the winning caller.
-        """
         if await self._wait_for_shutdown_if_started():
             return
 
@@ -7307,7 +7288,7 @@ class FlintTradeApp:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            backend_lease._recovery_owner = self
+            setattr(backend_lease, "_recovery_owner", self)
         retain_backend_instance_lease(backend_lease)
 
     def retry_recovery(self, *, timeout: float | None = None) -> None:
@@ -7453,7 +7434,7 @@ class _WSGIStartupRecovery:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            self._backend_lease._recovery_owner = self
+            setattr(self._backend_lease, "_recovery_owner", self)
         retain_backend_instance_lease(self._backend_lease)
         _WSGI_STARTUP_RECOVERY = self
 

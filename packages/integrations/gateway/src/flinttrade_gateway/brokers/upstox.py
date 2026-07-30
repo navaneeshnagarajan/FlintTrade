@@ -36,7 +36,7 @@ import hashlib
 import json
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import BrokerError
@@ -763,7 +763,7 @@ class UpstoxAdapter(BrokerAdapter):
         if not access_token:
             raise BrokerError("Upstox login requires an access_token (or an OAuth code + api_key/api_secret)")
         client = None if self._client_factory is not None else UpstoxClient(access_token)
-        expires_at = datetime.now(tz=UTC).timestamp() + 24 * 3600
+        expires_at = datetime.now(tz=timezone.utc).timestamp() + 24 * 3600
         read_only = _credential_truthy(credentials.get("read_only")) or str(credentials.get("token_scope") or "").lower() in {
             "analytics",
             "read_only",
@@ -809,7 +809,7 @@ class UpstoxAdapter(BrokerAdapter):
             except Exception:  # noqa: BLE001 - local teardown must not fail on broker errors
                 pass
         session.extra.pop("client", None)
-        return
+        return None
 
     # ---------- trading: writes (router-only) ----------
 
@@ -1922,7 +1922,7 @@ class UpstoxAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=UTC)
+        generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
             broker_orders = declare_unavailable_order_fields(

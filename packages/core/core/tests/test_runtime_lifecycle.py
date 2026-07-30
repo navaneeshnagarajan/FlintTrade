@@ -703,57 +703,6 @@ async def test_concurrent_start_is_rejected_before_a_second_flask_generation(
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_duplicate_start_never_rolls_back_the_running_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A duplicate start acquired nothing, so it must not tear the live runtime down.
-
-    The rejected caller used to install its own empty owner ledger before the
-    claim was tested, then run the startup-rollback path on the way out — which
-    released the winning start's owners, closed the live OpenAlgo client and
-    audit logger, and latched ``_stop_completed`` so the operator's later stop
-    became a no-op. A duplicate start request must be inert.
-    """
-    import flinttrade_core.app as app_module
-
-    runtime = _runtime_app()
-    holiday_started = asyncio.Event()
-    release_holiday = asyncio.Event()
-
-    async def load_holidays() -> set[str]:
-        holiday_started.set()
-        await release_holiday.wait()
-        return set()
-
-    runtime.cron.load_holidays = load_holidays
-    monkeypatch.setenv("FLINTTRADE_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setattr(app_module, "create_flask_app", lambda **_kwargs: Flask("duplicate-start"))
-    monkeypatch.setattr(app_module, "_run_flask_server", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(app_module, "_tick_capture_enabled", lambda: False)
-
-    first = asyncio.create_task(runtime.start())
-    await asyncio.wait_for(holiday_started.wait(), timeout=1.0)
-    winning_ledger = runtime._startup_owner_ledger
-    assert winning_ledger is not None, "the winning start must have retained an owner ledger"
-
-    try:
-        with pytest.raises(RuntimeError, match="already started"):
-            await runtime.start()
-
-        assert runtime._startup_owner_ledger is winning_ledger, "the rejected start replaced the live ledger"
-        assert runtime._startup_recovery_pending is False
-        assert runtime._stop_completed is False, "a rejected start marked the live runtime stopped"
-        assert runtime._stop_event.is_set() is False, "a rejected start signalled shutdown to the live start"
-        runtime.client.close.assert_not_awaited()
-        runtime.audit.close.assert_not_called()
-    finally:
-        await runtime.stop()
-        release_holiday.set()
-        await asyncio.wait_for(first, timeout=5.0)
-
-
-@pytest.mark.asyncio
 async def test_failed_tick_finalisation_retries_retained_buffer_before_closing() -> None:
     runtime = _runtime_app()
     events: list[str] = []

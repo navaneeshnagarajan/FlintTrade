@@ -134,7 +134,7 @@ export function useOptionChainData(
       }
     })();
     return () => { cancelled = true; };
-   
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identityKey, symDef.label, exchange]);
 
   const fetchData = useCallback(async () => {
@@ -172,7 +172,7 @@ export function useOptionChainData(
         setLastRefresh(new Date());
       }
     }
-   
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, requestKey, selectedExpiry, symDef.label, symDef.spotSymbol, symDef.spotExchange, exchange]);
 
   // Auto-refresh at market-aware intervals
@@ -182,7 +182,7 @@ export function useOptionChainData(
     const interval = isMarketHours() ? 3000 : 30000;
     const id = setInterval(() => void fetchData(), interval);
     return () => clearInterval(id);
-  }, [fetchData, selectedExpiry]);
+  }, [fetchData]);
 
   // Compute ordered strike list, ATM, max OI, PCR
   const { strikes, atmStrike, maxCallOI, maxPutOI, totalCallOI, totalPutOI, computedPCR } = useMemo(() => {

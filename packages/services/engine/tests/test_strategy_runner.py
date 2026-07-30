@@ -7,7 +7,6 @@ bubblewrap namespace when that runtime is installed.
 
 from __future__ import annotations
 
-import os
 import platform
 import shutil
 import subprocess
@@ -17,13 +16,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-POSIX_RESOURCE_LIMITS = os.name != "nt"
-NO_POSIX_RESOURCE_REASON = (
-    "the autouse fixture pins platform.system() to Linux, whose hard uploaded-strategy limits "
-    "require the POSIX resource module"
-)
 
 
 # ---------------------------------------------------------------------------
@@ -46,11 +38,8 @@ def _stable_mock_process_identity(monkeypatch):
 
     monkeypatch.setattr(_mod.platform, "system", lambda: "Linux")
     monkeypatch.setattr(_mod, "_read_process_identity", lambda pid: float(pid), raising=False)
-    # ``raising=False``: Windows has no ``os.getpgid``/``os.killpg``, and without
-    # it this autouse fixture erred during setup and took the whole module —
-    # including the AST-validation and Windows Job Object suites — with it.
-    monkeypatch.setattr(_mod.os, "getpgid", lambda pid: pid, raising=False)
-    monkeypatch.setattr(_mod.os, "killpg", lambda _pgid, _signal: None, raising=False)
+    monkeypatch.setattr(_mod.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(_mod.os, "killpg", lambda _pgid, _signal: None)
 
 
 SAFE_CODE = """\
@@ -272,10 +261,6 @@ class TestWindowsJobProcessTree:
 
         killpg.assert_not_called()
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="POSIX process-group signalling; signal.SIGKILL does not exist on Windows",
-    )
     def test_refuses_to_signal_unverifiable_group_after_leader_exit(self, monkeypatch):
         import flinttrade_engine.strategy_runner as mod
 
@@ -464,7 +449,6 @@ class TestStartStop:
         runner._running[strategy_id].tree = tree
         return tree
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -479,7 +463,6 @@ class TestStartStop:
         with pytest.raises(FileNotFoundError):
             runner.start("nonexistent-id")
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_already_running_raises(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -489,7 +472,6 @@ class TestStartStop:
             with pytest.raises(RuntimeError, match="already running"):
                 runner.start(strategy_id)
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_concurrent_tree_limit_fails_before_spawning_another_process(self, tmp_path):
         import flinttrade_engine.strategy_runner as mod
 
@@ -523,7 +505,6 @@ class TestStartStop:
 
         popen.assert_not_called()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_posix_identity_failure_retains_a_blocked_child_until_adoption(self, runner, monkeypatch):
         import flinttrade_engine.strategy_runner as mod
 
@@ -563,7 +544,6 @@ class TestStartStop:
         assert strategy_id not in runner._running
         assert retained_temp_dir is not None and not retained_temp_dir.exists()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_publishes_the_process_owner_before_releasing_uploaded_code(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
@@ -590,7 +570,6 @@ class TestStartStop:
         self._attach_tree(runner, strategy_id)
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_gate_release_failure_retains_the_published_owner_and_resources(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
@@ -617,7 +596,6 @@ class TestStartStop:
         self._attach_tree(runner, strategy_id)
         runner.stop(strategy_id)
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_refuses_replacement_while_descendant_tree_survives_leader(self, runner):
         strategy_id = runner.upload("surviving_tree", SAFE_CODE)
         first = self._make_mock_process(pid=505, returncode=0)
@@ -636,7 +614,6 @@ class TestStartStop:
         popen.assert_not_called()
         assert strategy_id in runner._running
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_concurrent_starts_spawn_exactly_one_owned_process(self, runner):
         strategy_id = runner.upload("concurrent_start", SAFE_CODE)
         first_process = self._make_mock_process(pid=101)
@@ -685,7 +662,6 @@ class TestStartStop:
         assert "already running" in str(errors[0])
         assert runner._running[strategy_id].process is first_process
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stop_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -700,7 +676,6 @@ class TestStartStop:
         tree.wait_gone.assert_called_once_with(5.0)
         tree.close.assert_called_once_with()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stop_serialises_with_inflight_start_and_terminates_published_child(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
@@ -748,7 +723,6 @@ class TestStartStop:
         assert strategy_id not in runner._running
         process_tree.terminate.assert_called_once_with()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stop_bounds_reap_after_forced_kill(self, runner):
         strategy_id = runner.upload("bounded_kill", SAFE_CODE)
         process = self._make_mock_process(pid=404)
@@ -781,7 +755,6 @@ class TestStartStop:
         with pytest.raises(FileNotFoundError, match="Strategy not found"):
             runner.stop("unknown-strategy")
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_detaches_stdin_and_owns_dedicated_posix_process_group(self, runner):
         strategy_id = runner.upload("contained", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -824,7 +797,6 @@ class TestStartStop:
         )
         assert runner._running[strategy_id].tree is tree
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stale_sys_frozen_still_uses_source_sandbox_wrapper(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
@@ -846,7 +818,6 @@ class TestStartStop:
         assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
         assert popen.call_args.kwargs["preexec_fn"] is not None
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_linux_bwrap_binds_only_the_runtime_wrapper_and_strategy(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
@@ -917,7 +888,6 @@ class TestStartStop:
             process_limit=1,
         )
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stop_all_owns_every_uploaded_process(self, runner):
         first_id = runner.upload("first", SAFE_CODE)
         second_id = runner.upload("second", SAFE_CODE)
@@ -937,7 +907,6 @@ class TestStartStop:
         first_tree.terminate.assert_called_once()
         second_tree.terminate.assert_called_once()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_stop_all_continues_after_one_process_fails(self, runner):
         first_id = runner.upload("first_failure", SAFE_CODE)
         second_id = runner.upload("second_stops", SAFE_CODE)
@@ -1049,7 +1018,6 @@ class TestDeleteStatusLogs:
         with pytest.raises(FileNotFoundError):
             runner.delete("nonexistent-id")
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_delete_retains_files_and_owner_when_process_will_not_stop(self, runner):
         strategy_id = runner.upload("delete_failure", SAFE_CODE)
         process = TestStartStop()._make_mock_process(pid=303)
@@ -1069,7 +1037,6 @@ class TestDeleteStatusLogs:
         assert strategy_path.exists()
         assert metadata_path.exists()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_status_retains_owner_when_leader_exits_but_tree_is_alive(self, runner):
         strategy_id = runner.upload("leader_exit", SAFE_CODE)
         process = TestStartStop()._make_mock_process(pid=707, returncode=0)
@@ -1084,7 +1051,6 @@ class TestDeleteStatusLogs:
         assert strategy_id in runner._running
         tree.close.assert_not_called()
 
-    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_status_retains_owner_when_tree_state_is_uncertain(self, runner):
         strategy_id = runner.upload("uncertain_tree", SAFE_CODE)
         process = TestStartStop()._make_mock_process(pid=808)

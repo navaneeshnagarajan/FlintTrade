@@ -263,7 +263,7 @@ class BacktestSimulator:
             config=self.config,
             trades=self._trades,
             equity_curve=self._equity_curve,
-            orders=self._filled_orders + list(self._pending_orders),
+            orders=self._filled_orders + [o for o in self._pending_orders],
             final_equity=final,
             total_bars=len(bars),
         )

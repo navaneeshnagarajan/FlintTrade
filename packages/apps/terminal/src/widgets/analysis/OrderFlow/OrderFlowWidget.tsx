@@ -826,7 +826,7 @@ function OrderFlowWidget(props: WidgetProps) {
       symbol: nextSymbol,
       exchange: nextExchange,
     });
-  }, [props.api]);
+  }, [panelParams, props.api]);
 
   // Persist the chosen view into the panel params so a saved layout reopens
   // in the same mode (this is also how the retired `footprint` id survives).
@@ -836,7 +836,7 @@ function OrderFlowWidget(props: WidgetProps) {
     props.api.updateParameters({
       view: nextView,
     });
-  }, [props.api, viewMode]);
+  }, [panelParams, props.api, viewMode]);
 
   const intervalMinutes = useMemo(
     () => INTERVALS.find((i) => i.label === intervalLabel)?.minutes ?? 5,

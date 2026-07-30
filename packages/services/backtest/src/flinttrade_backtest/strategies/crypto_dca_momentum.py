@@ -15,7 +15,7 @@ from typing import Any
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
 
-from ._indicators import ema, rsi
+from ._indicators import rsi, ema
 from ._mixin import _BacktestStrategyMixin
 
 logger = logging.getLogger("flinttrade.backtest.strategies.crypto_dca_momentum")

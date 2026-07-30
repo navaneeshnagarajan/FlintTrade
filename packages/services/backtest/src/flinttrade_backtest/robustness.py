@@ -234,23 +234,15 @@ class RobustnessReport:
         """Return a human-readable multi-line summary."""
         lines = [
             "=== Robustness Report ===",
-            (
-                f"MC Shuffle        : {'PASS' if self.mc_shuffle.passed else 'FAIL'}"
-                f"  (CV={self.mc_shuffle.cv_equity:.3f})"
-            ),
-            (
-                f"Noise Injection   : {'PASS' if self.noise_injection.passed else 'FAIL'}"
-                f"  (mean_sharpe={self.noise_injection.mean_sharpe:.3f},"
-                f" pct_positive={self.noise_injection.pct_positive:.1%})"
-            ),
-            (
-                f"Param Sensitivity : {'PASS' if self.param_sensitivity.passed else 'FAIL'}"
-                f"  (sharpe_cv={self.param_sensitivity.sharpe_cv:.3f})"
-            ),
-            (
-                f"Delay Test        : {'PASS' if self.delay_test.passed else 'FAIL'}"
-                f"  (max_drop={self.delay_test.max_drop_pct:.1f}%)"
-            ),
+            f"MC Shuffle        : {'PASS' if self.mc_shuffle.passed else 'FAIL'}"
+            f"  (CV={self.mc_shuffle.cv_equity:.3f})",
+            f"Noise Injection   : {'PASS' if self.noise_injection.passed else 'FAIL'}"
+            f"  (mean_sharpe={self.noise_injection.mean_sharpe:.3f},"
+            f" pct_positive={self.noise_injection.pct_positive:.1%})",
+            f"Param Sensitivity : {'PASS' if self.param_sensitivity.passed else 'FAIL'}"
+            f"  (sharpe_cv={self.param_sensitivity.sharpe_cv:.3f})",
+            f"Delay Test        : {'PASS' if self.delay_test.passed else 'FAIL'}"
+            f"  (max_drop={self.delay_test.max_drop_pct:.1f}%)",
         ]
         for cs in self.cross_symbol:
             lines.append(

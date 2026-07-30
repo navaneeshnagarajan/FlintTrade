@@ -18,7 +18,7 @@ import math
 import os
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import websockets
@@ -51,8 +51,8 @@ _RETRYABLE_HANDSHAKE_STATUSES = frozenset({500, 502, 503, 504})
 _BIGINT_MIN = -(2**63)
 _BIGINT_MAX = 2**63 - 1
 _MAX_FRAME_TIMESTAMP_TEXT_LENGTH = 64
-_MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=UTC).timestamp()
-_MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=UTC).timestamp()
+_MIN_FRAME_TIMESTAMP_EPOCH = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
+_MAX_FRAME_TIMESTAMP_EPOCH = datetime(2100, 1, 1, tzinfo=timezone.utc).timestamp()
 _MAX_FRAME_TIMESTAMP_AGE_SECONDS = 5 * 60
 MAX_WATCHLIST_INSTRUMENTS = 512
 _MISSING_TIMESTAMP = object()
@@ -156,7 +156,7 @@ def _normalise_epoch_timestamp(value: Any) -> datetime | None:
         epoch /= 1e3
     if not _MIN_FRAME_TIMESTAMP_EPOCH <= epoch <= _MAX_FRAME_TIMESTAMP_EPOCH:
         return None
-    return datetime.fromtimestamp(epoch, tz=UTC)
+    return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
 
 def _normalise_frame_timestamp(value: Any) -> datetime | None:
@@ -174,7 +174,7 @@ def _normalise_frame_timestamp(value: Any) -> datetime | None:
             return None
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             return None
-        parsed = parsed.astimezone(UTC)
+        parsed = parsed.astimezone(timezone.utc)
         if not _MIN_FRAME_TIMESTAMP_EPOCH <= parsed.timestamp() <= _MAX_FRAME_TIMESTAMP_EPOCH:
             return None
         return parsed
@@ -705,18 +705,18 @@ class TickRecorder:
 
     def _assert_current_revision(self, revision: int) -> None:
         if not self._is_current_revision(revision):
-            raise _ConnectionReconfigured
+            raise _ConnectionReconfigured()
 
     def _activate_socket(self, ws: Any, revision: int) -> None:
         with self._state_lock:
             if revision != self._connection_revision:
-                raise _ConnectionReconfigured
+                raise _ConnectionReconfigured()
             self._active_ws = ws
 
     def _mark_connected(self, revision: int) -> None:
         with self._state_lock:
             if revision != self._connection_revision:
-                raise _ConnectionReconfigured
+                raise _ConnectionReconfigured()
             self._connected = True
             self._transport_error = ""
 
@@ -847,7 +847,7 @@ class TickRecorder:
                 continue
 
             if self._process_tick(data):
-                raise _ReconnectRequired
+                raise _ReconnectRequired()
 
             if self.pending_tick_count >= self._batch_size:
                 self._flush()
@@ -891,7 +891,7 @@ class TickRecorder:
         symbol: str,
     ) -> bool:
         """Buffer and dispatch one canonical frame admitted by the allowlist."""
-        received_at = datetime.now(UTC)
+        received_at = datetime.now(timezone.utc)
         ts, timestamp_rejection = _frame_timestamp(data, payload, received_at)
         if ts is None:
             self._record_source_timestamp_rejection(

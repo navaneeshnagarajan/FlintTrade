@@ -56,11 +56,10 @@ function MutationCallbackProbe({
   onSuccess: (value: string) => void;
 }) {
   const mutation = useMutation({ mutationFn, onSuccess });
-  const { mutateAsync } = mutation;
 
   useEffect(() => {
-    onReady((options) => mutateAsync(undefined, options));
-  }, [mutateAsync, onReady]);
+    onReady((options) => mutation.mutateAsync(undefined, options));
+  }, [mutation.mutateAsync, onReady]);
 
   return <span data-testid="mutation-status">{mutation.status}</span>;
 }

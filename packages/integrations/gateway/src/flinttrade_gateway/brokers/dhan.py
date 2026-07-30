@@ -28,11 +28,11 @@ called through the SDK's own ``DhanHTTP`` transport with doc-grounded paths.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import math
 import threading
 import time
-from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from urllib.parse import urlencode
 
@@ -409,7 +409,7 @@ class DhanAdapter(BrokerAdapter):
         client = None if self._client_factory is not None else _build_dhan_client(client_id, access_token)
         return Session(
             access_token=access_token,
-            expires_at=datetime.now(tz=UTC).timestamp() + 24 * 3600,
+            expires_at=datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
             account_id=client_id,
             adapter_id="dhan",
             extra={"client": client, "client_id": client_id},
@@ -435,7 +435,7 @@ class DhanAdapter(BrokerAdapter):
 
     async def logout(self, session: Session) -> None:
         session.extra.pop("client", None)
-        return
+        return None
 
     # ---------- trading: writes (router-only) ----------
 
@@ -647,12 +647,12 @@ class DhanAdapter(BrokerAdapter):
         if not raw_triggered_at:
             return True
         try:
-            triggered_at = datetime.fromisoformat(raw_triggered_at)
+            triggered_at = datetime.fromisoformat(raw_triggered_at.replace("Z", "+00:00"))
         except ValueError:
             return True
         if triggered_at.tzinfo is None:
-            triggered_at = triggered_at.replace(tzinfo=UTC)
-        age_seconds = (datetime.now(UTC) - triggered_at.astimezone(UTC)).total_seconds()
+            triggered_at = triggered_at.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - triggered_at.astimezone(timezone.utc)).total_seconds()
         return age_seconds <= _EMERGENCY_TRIGGER_SETTLEMENT_SECONDS
 
     async def _settled_active_order_targets(
@@ -2211,7 +2211,7 @@ class DhanAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=UTC)
+        generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
             broker_orders = declare_unavailable_order_fields(

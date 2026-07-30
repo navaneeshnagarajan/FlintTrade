@@ -863,6 +863,7 @@ describe("WebSocketService — lifecycle", () => {
       svc.subscribe([inst], "ltp"); // refCount = 1 (set by subscribe)
       // Manually bump the ref count to simulate a second caller
       const key = "NSE_INDEX:NIFTY:ltp";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const info = (svc as unknown as Record<string, Map<string, { refCount: number }>>)["subscriptionMap"].get(key);
       if (info) info.refCount = 2;
 

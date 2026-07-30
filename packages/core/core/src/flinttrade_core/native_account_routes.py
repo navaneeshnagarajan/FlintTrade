@@ -55,7 +55,6 @@ from flinttrade_gateway.adapter import BROKER_CATALOG
 from flinttrade_gateway.capabilities_routes import _sdk_attestations_by_pin
 from flinttrade_gateway.log_safety import selector_ref
 from flinttrade_gateway.native_login import BROKER_LOGIN_RETRY_MESSAGE
-
 from .workspace import workspace_dir
 from .workspace_migrations import update_workspace_config
 
@@ -1288,7 +1287,7 @@ def _bind_primary_rollback_receipt(
     store: Any,
     receipt: _PrimaryRollbackReceipt,
 ) -> None:
-    snapshot = store.snapshot_primary_metadata
+    snapshot = getattr(store, "snapshot_primary_metadata")
     receipt.applied_metadata = dict(snapshot())
     if receipt.connection is not None:
         receipt.applied_version = int(
@@ -1388,11 +1387,11 @@ def _restore_primary_metadata(
         finally:
             _close_primary_rollback_receipt(receipt)
 
-    snapshot = store.snapshot_primary_metadata
+    snapshot = getattr(store, "snapshot_primary_metadata")
     if dict(snapshot()) != receipt.applied_metadata:
         logger.critical("Refused stale native primary-metadata rollback")
         return False
-    restore = store.restore_primary_metadata
+    restore = getattr(store, "restore_primary_metadata")
     restore(receipt.prior_metadata)
     return True
 
@@ -1612,12 +1611,11 @@ def _disable_broker_routing() -> bool:
     or revoke failure must leave the unsafe generation owned and unreachable,
     rather than let a later rebuild silently forget it.
     """
+    from .app import _broker_router_drain_timeout, retire_broker_router_generation  # noqa: PLC0415
     from flinttrade_engine.safety import (  # noqa: PLC0415
         GenerationLeaseUnavailableError,
         bounded_generation_lease,
     )
-
-    from .app import _broker_router_drain_timeout, retire_broker_router_generation  # noqa: PLC0415
 
     app = current_app._get_current_object()  # type: ignore[attr-defined]
     rebuild_lock = app.config.setdefault("BROKER_ROUTER_REBUILD_LOCK", threading.RLock())

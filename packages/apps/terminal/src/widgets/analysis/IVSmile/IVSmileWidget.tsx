@@ -379,7 +379,7 @@ function IVSmileWidget(props: WidgetProps) {
     if (next === view) return;
     setView(next);
     props.api.updateParameters({ view: next });
-  }, [props.api, view]);
+  }, [panelParams, props.api, view]);
 
   // ---- Skew view geometry -------------------------------------------------
   const overlays = useMemo(

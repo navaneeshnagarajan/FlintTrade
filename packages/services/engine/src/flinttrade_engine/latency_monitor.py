@@ -423,7 +423,7 @@ class LatencyMonitor:
         """Close the underlying DuckDB connection."""
         self._conn.close()
 
-    def __enter__(self) -> LatencyMonitor:
+    def __enter__(self) -> "LatencyMonitor":
         return self
 
     def __exit__(self, *args: Any) -> None:

@@ -38,10 +38,11 @@ from typing import Any
 
 import numpy as np
 
-from flinttrade_backtest.strategies import _BacktestStrategyMixin
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
 from flinttrade_screener.lot_sizes import FALLBACK_LOT_SIZES
+
+from ..strategies import _BacktestStrategyMixin
 
 logger = logging.getLogger("flinttrade.backtest.strategies.ema_supertrend_dema")
 

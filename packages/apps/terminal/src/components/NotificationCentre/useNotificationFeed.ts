@@ -85,10 +85,7 @@ export function useNotificationFeed(): void {
         action: { label: "Reconnect", href: "/settings#api" },
       });
     }
-    // `mode` gates the notification, so it belongs here. Re-running on a mode
-    // change is a no-op: the `prev === status` guard above returns immediately
-    // when the connection status itself has not moved.
-  }, [status, mode]);
+  }, [status]);
 
   // 2. Mode transitions ------------------------------------------------------
   useEffect(() => {

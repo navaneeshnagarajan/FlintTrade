@@ -175,13 +175,9 @@ function AuditTrailWidget() {
   // the explore (not-connected) branch, and is always paired with a visible
   // "Sample data" affordance.
   const showingSampleData = !isConnected;
-  const liveEntries = liveData?.entries;
-  // Memoised so the `?? []` fallback does not hand the filter memo below a new
-  // array on every render.
-  const rawEntries: ActivityEntry[] = useMemo(
-    () => (isConnected ? (liveEntries ?? []) : SAMPLE_AUDIT_ENTRIES),
-    [isConnected, liveEntries],
-  );
+  const rawEntries: ActivityEntry[] = isConnected
+    ? (liveData?.entries ?? [])
+    : SAMPLE_AUDIT_ENTRIES;
 
   const filtered = useMemo(() => {
     let entries = rawEntries;

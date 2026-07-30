@@ -18,8 +18,8 @@ import re
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
-from urllib.error import URLError
 from urllib.request import urlopen
+from urllib.error import URLError
 
 from flask import Blueprint, jsonify, request
 

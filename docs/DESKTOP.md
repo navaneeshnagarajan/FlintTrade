@@ -78,7 +78,7 @@ launch it:
 4. provisions checksum-verified pinned `uv` and Node 22 distributions into the
    managed tools directory regardless of system Node availability; `uv` then
    provisions Python 3.12 and Corepack activates the repository-pinned pnpm
-   10.34.5;
+   9.15.0;
 5. runs the frozen Python and JavaScript installs, then builds the terminal;
 6. promotes the completed candidate only after all build steps pass;
 7. starts `packaging/desktop_backend.py` from the managed virtual environment
@@ -350,7 +350,7 @@ site serves — see [`scripts/install/`](../scripts/install/).
 ## Build and verify locally
 
 Shell development requires Git and Node 22.12 or newer. Use the repository's
-pinned pnpm 10.34.5; Rust is needed only for the optional `core/ticks` package,
+pinned pnpm 9.15.0; Rust is needed only for the optional `core/ticks` package,
 not for Electron packaging.
 
 These lines run unchanged in bash, zsh and Windows PowerShell:
@@ -395,13 +395,6 @@ runs:
 - Windows x64 on `windows-latest`;
 - Linux x64 on `ubuntu-22.04`;
 - Linux ARM64 on `ubuntu-22.04-arm`.
-
-The two Linux legs stay on 22.04 deliberately, and are the one place in CI
-exempt from the supported-runner floor in `flint.toml`. They compile the
-native addon that ships inside the installer, so the runner's glibc becomes
-the minimum glibc of the published binary — raising the runner would raise
-the floor for every user. The jobs that compile nothing (`validate`,
-`publish`, `electron-desktop-tests`) track the supported floor instead.
 
 Each job installs the frozen JavaScript workspace, verifies the bootstrap tool
 manifest, bundles Electron, builds the installer and verifies the packaged

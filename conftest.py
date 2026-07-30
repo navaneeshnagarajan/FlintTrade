@@ -39,51 +39,7 @@ def pytest_configure(config) -> None:
     config._flinttrade_ci_env_at_start = dict(os.environ)
 
 
-def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
-    """Release the scratch workspaces this run created.
-
-    Without this the suite left one hardened ``flinttrade-pytest-*`` tree in the
-    system temp directory per invocation, each carrying an owner-only protected
-    DACL on Windows that ordinary recursive deletes stumble over.
-
-    ``sweep_stale`` then collects the marked workspaces that earlier runs could
-    not remove themselves, because an app-building test holds store handles open
-    for the whole process lifetime.
-    """
-    scratch = _scratch_workspace()
-    scratch.release_all()
-    scratch.sweep_stale()
-
-
 _REPO_ROOT = Path(__file__).resolve().parent
-_SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
-
-
-def _scratch_workspace():
-    """Return the shared scratch-workspace finaliser module.
-
-    Loaded by path under a private ``sys.modules`` name rather than imported as
-    ``tests.scratch_workspace``, because a per-package run binds ``tests`` to that
-    package's own tests directory. The private name keeps exactly one registry per
-    process, shared by this conftest and the per-package ones.
-
-    Returns:
-        The loaded ``tests/scratch_workspace.py`` module.
-    """
-    import importlib.util
-
-    module = sys.modules.get(_SCRATCH_MODULE_NAME)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            _SCRATCH_MODULE_NAME,
-            _REPO_ROOT / "tests" / "scratch_workspace.py",
-        )
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[_SCRATCH_MODULE_NAME] = module
-        spec.loader.exec_module(module)
-    return module
-
-
 _PY_PACKAGE_SRCS = [
     "packages/core/core/src",
     "packages/core/data/src",
@@ -153,18 +109,14 @@ def _isolate_workspace() -> None:
     # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
     # (gw0, gw1, …) and absent in the controller / serial runs. A user-supplied
     # FLINTTRADE_WORKSPACE_DIR (no xdist) is still respected.
-    register = _scratch_workspace().register
-
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        # register(): the directory this process created is this process's to
-        # remove at session end. An operator-supplied `existing` never is.
-        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
+        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         base = Path(existing)
     else:
-        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # The operator's machine-local .env may pin DUCKDB_PATH at one real,

@@ -391,7 +391,7 @@ async def _prepare_adapter_for_probe(broker: str, adapter: Any, reads: list[str]
     except Exception as exc:  # noqa: BLE001 - market reads will report the actual resolver miss
         print(f"resolver: failed {type(exc).__name__}: {redact(exc)}")
         return
-    adapter._security_resolver = build_security_resolver(rows)
+    setattr(adapter, "_security_resolver", build_security_resolver(rows))
     print(f"resolver: ok dhan scrip_master rows={len(rows)}")
 
 

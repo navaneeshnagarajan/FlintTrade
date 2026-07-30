@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from inspect import Parameter, signature
 from typing import Any, Callable
 
@@ -469,7 +469,7 @@ class DebateResult:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(UTC).isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
 
 _AGGRESSIVE_SYSTEM = (

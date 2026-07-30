@@ -587,12 +587,9 @@ function OIChartWidget(props: WidgetProps) {
   // ---- Max pain curve (the "pain" view) ------------------------------------
   // The sample curve rides the sample chain, exactly as the sample max-pain
   // rule does, so the two can never disagree about the sample.
-  // Memoised so the `?? []` fallback keeps a stable identity; without it the
-  // two memos below recomputed on every render of a chain without pain rows.
-  const painRows: MaxPainData["strikes"] = useMemo(
-    () => (usingSampleCells ? SAMPLE_PAIN_ROWS : maxPainRows ?? []),
-    [usingSampleCells, maxPainRows],
-  );
+  const painRows: MaxPainData["strikes"] = usingSampleCells
+    ? SAMPLE_PAIN_ROWS
+    : maxPainRows ?? [];
   const painMax = useMemo(
     () => painRows.reduce((max, row) => Math.max(max, row.total_pain), 0),
     [painRows],
@@ -634,7 +631,7 @@ function OIChartWidget(props: WidgetProps) {
     if (next === view) return;
     setView(next);
     props.api.updateParameters({ view: next });
-  }, [props.api, view]);
+  }, [panelParams, props.api, view]);
 
   const handlePriceToggle = useCallback(() => {
     setShowPrice((current) => {
@@ -642,7 +639,7 @@ function OIChartWidget(props: WidgetProps) {
       props.api.updateParameters({ price: next });
       return next;
     });
-  }, [props.api]);
+  }, [panelParams, props.api]);
 
   const handleRefresh = useCallback(() => {
     void fetchData();

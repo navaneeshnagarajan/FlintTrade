@@ -147,10 +147,6 @@ function useExploreModeData<T>(key: ModeDataKey): ModeDataResult<T> {
   // useState to allow refetch to trigger a re-render with fresh mock data
   const [revision, setRevision] = useState(0);
 
-  // `revision` is the refetch trigger, not an input: `getMockData` regenerates
-  // its rows on every call, so bumping the counter is exactly how a refetch
-  // produces fresh explore-mode data.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   const data = useMemo(() => getMockData(key) as T, [key, revision]);
 
   const refetch = useCallback(() => {

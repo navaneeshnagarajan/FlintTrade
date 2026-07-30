@@ -2084,10 +2084,6 @@ def test_start_uses_atomic_ephemeral_binding_and_discovers_the_owned_listener(
     assert runtime._read_process_owner_record()["port"] == 43127
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="POSIX fallback for a kernel without O_NOFOLLOW; Windows opens through the native handle path",
-)
 def test_process_owner_read_cannot_follow_a_file_swapped_before_open(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2124,10 +2120,6 @@ def test_process_owner_read_cannot_follow_a_file_swapped_before_open(
         runtime._read_process_owner_record()
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="POSIX fallback for a kernel without O_NOFOLLOW; Windows opens through the native handle path",
-)
 def test_install_marker_read_cannot_follow_a_file_swapped_without_nofollow(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2237,9 +2229,7 @@ def test_windows_native_state_open_rejects_a_reparse_handle(
     monkeypatch.setattr(
         ollama_runtime,
         "_normalise_windows_expected_path",
-        # The fake handle reports "/managed"; the expectation has to survive the
-        # same normalisation the runtime applies, or it never matches on Windows.
-        lambda _path: ollama_runtime._normalise_windows_final_path("/managed"),
+        lambda _path: "/managed",
     )
     managed_root = tmp_path / "workspace"
 
@@ -2301,9 +2291,7 @@ def test_windows_native_state_open_rejects_changed_file_identity(
     monkeypatch.setattr(
         ollama_runtime,
         "_normalise_windows_expected_path",
-        # The fake handle reports "/managed"; the expectation has to survive the
-        # same normalisation the runtime applies, or it never matches on Windows.
-        lambda _path: ollama_runtime._normalise_windows_final_path("/managed"),
+        lambda _path: "/managed",
     )
     managed_root = tmp_path / "workspace"
 
@@ -2363,9 +2351,7 @@ def test_windows_native_state_open_rejects_changed_managed_root_identity(
     monkeypatch.setattr(
         ollama_runtime,
         "_normalise_windows_expected_path",
-        # The fake handle reports "/managed"; the expectation has to survive the
-        # same normalisation the runtime applies, or it never matches on Windows.
-        lambda _path: ollama_runtime._normalise_windows_final_path("/managed"),
+        lambda _path: "/managed",
     )
     managed_root = tmp_path / "workspace"
 
@@ -2429,9 +2415,7 @@ def test_windows_native_state_open_returns_only_a_stable_verified_descriptor(
     monkeypatch.setattr(
         ollama_runtime,
         "_normalise_windows_expected_path",
-        # The fake handle reports "/managed"; the expectation has to survive the
-        # same normalisation the runtime applies, or it never matches on Windows.
-        lambda _path: ollama_runtime._normalise_windows_final_path("/managed"),
+        lambda _path: "/managed",
     )
     managed_root = tmp_path / "workspace"
 
@@ -3789,14 +3773,7 @@ def test_cancelled_pull_after_remote_progress_is_indeterminate(
 
     if os.name != "nt":
         monkeypatch.setattr(ollama_runtime.os, "killpg", killpg)
-    # Declaring the injected factory is what lets the Windows teardown path bound
-    # a process double instead of demanding a real Job Object handle.
-    runtime = OllamaRuntime(
-        tmp_path,
-        probe=lambda: "0.32.0",
-        puller=puller,
-        process_factory=lambda *_args, **_kwargs: process,
-    )
+    runtime = OllamaRuntime(tmp_path, probe=lambda: "0.32.0", puller=puller)
     runtime._process = process
 
     queued = runtime.pull_model_async("qwen3:8b")
@@ -6933,10 +6910,7 @@ def test_uninstall_rolls_back_all_quarantines_when_prepare_cannot_finish(
     runtime = _versioned_runtime(workspace, archives, target_version="v0.32.0")
     runtime.update()
     state_before = runtime._runtime_state_path().read_bytes()
-    # The quarantine moves go through ``durable_replace``, which only reaches
-    # ``os.replace`` on POSIX — on Windows it uses a write-through native move,
-    # so the injection has to hook the call site the runtime actually uses.
-    durable_replace = ollama_runtime.durable_replace
+    replace = ollama_runtime.os.replace
     quarantine_moves = 0
 
     def fail_second_quarantine(source: Any, destination: Any) -> None:
@@ -6947,9 +6921,9 @@ def test_uninstall_rolls_back_all_quarantines_when_prepare_cannot_finish(
             quarantine_moves += 1
             if quarantine_moves == 2:
                 raise OSError("injected quarantine failure")
-        durable_replace(source, destination)
+        replace(source, destination)
 
-    monkeypatch.setattr(ollama_runtime, "durable_replace", fail_second_quarantine)
+    monkeypatch.setattr(ollama_runtime.os, "replace", fail_second_quarantine)
 
     with pytest.raises(OllamaRuntimeError, match="uninstall"):
         runtime.uninstall()
@@ -7024,9 +6998,7 @@ def test_prepared_uninstall_is_rolled_back_after_an_abrupt_exit(
     _versioned_runtime(workspace, archives, target_version="v0.31.2").install()
     runtime = _versioned_runtime(workspace, archives, target_version="v0.32.0")
     runtime.update()
-    # See the sibling rollback test: ``durable_replace`` is the portable seam,
-    # because the Windows implementation never reaches ``os.replace``.
-    durable_replace = ollama_runtime.durable_replace
+    replace = ollama_runtime.os.replace
     quarantine_moves = 0
 
     def interrupt_second_quarantine(source: Any, destination: Any) -> None:
@@ -7037,12 +7009,12 @@ def test_prepared_uninstall_is_rolled_back_after_an_abrupt_exit(
             quarantine_moves += 1
             if quarantine_moves == 2:
                 raise SystemExit("simulated process exit")
-        durable_replace(source, destination)
+        replace(source, destination)
 
-    monkeypatch.setattr(ollama_runtime, "durable_replace", interrupt_second_quarantine)
+    monkeypatch.setattr(ollama_runtime.os, "replace", interrupt_second_quarantine)
     with pytest.raises(SystemExit, match="simulated process exit"):
         runtime.uninstall()
-    monkeypatch.setattr(ollama_runtime, "durable_replace", durable_replace)
+    monkeypatch.setattr(ollama_runtime.os, "replace", replace)
 
     restarted = _versioned_runtime(workspace, archives, target_version="v0.32.0")
 

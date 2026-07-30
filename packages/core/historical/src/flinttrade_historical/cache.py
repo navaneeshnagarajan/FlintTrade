@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from .pipeline import (
-    INTERVAL_TABLES,
     DataPipeline,
+    INTERVAL_TABLES,
     _default_db_path,
     _validate_table,
 )
@@ -229,7 +229,7 @@ class OHLCVCache:
         if entry.last_fetch is None:
             return False
         ttl = self._ttl_for(interval)
-        age = (datetime.now(tz=UTC) - entry.last_fetch).total_seconds()
+        age = (datetime.now(tz=timezone.utc) - entry.last_fetch).total_seconds()
         return age < ttl
 
     # ------------------------------------------------------------------
@@ -258,9 +258,9 @@ class OHLCVCache:
         head_bar_ts = row[4]
         # DuckDB returns timestamps as datetime objects
         if isinstance(last_fetch, str):
-            last_fetch = datetime.fromisoformat(last_fetch).replace(tzinfo=UTC)
+            last_fetch = datetime.fromisoformat(last_fetch).replace(tzinfo=timezone.utc)
         elif isinstance(last_fetch, datetime) and last_fetch.tzinfo is None:
-            last_fetch = last_fetch.replace(tzinfo=UTC)
+            last_fetch = last_fetch.replace(tzinfo=timezone.utc)
 
         if isinstance(head_bar_ts, str):
             head_bar_ts = datetime.fromisoformat(head_bar_ts)
@@ -287,7 +287,7 @@ class OHLCVCache:
             head_bar_ts: Timestamp of the newest cached bar.
             provider: Provider name that supplied the data.
         """
-        now_utc = datetime.now(tz=UTC).replace(tzinfo=None)
+        now_utc = datetime.now(tz=timezone.utc).replace(tzinfo=None)
         head_ts = head_bar_ts.replace(tzinfo=None) if head_bar_ts else None
 
         existing = self.get_entry(symbol, exchange, interval)
@@ -585,9 +585,9 @@ class OHLCVCache:
         for row in rows:
             last_fetch = row[3]
             if isinstance(last_fetch, datetime) and last_fetch.tzinfo is None:
-                last_fetch = last_fetch.replace(tzinfo=UTC)
+                last_fetch = last_fetch.replace(tzinfo=timezone.utc)
             elif isinstance(last_fetch, str):
-                last_fetch = datetime.fromisoformat(last_fetch).replace(tzinfo=UTC)
+                last_fetch = datetime.fromisoformat(last_fetch).replace(tzinfo=timezone.utc)
             entries.append(
                 CacheEntry(
                     symbol=row[0], exchange=row[1], interval=row[2],

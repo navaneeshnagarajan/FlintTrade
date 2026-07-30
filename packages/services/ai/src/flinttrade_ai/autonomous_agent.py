@@ -25,7 +25,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any
 
@@ -389,10 +389,10 @@ class AutonomousTrader:
         self.order_executor = order_executor
         self.entry_intent_sink = entry_intent_sink
         self._market_session_provider = market_session_provider
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.state = AgentState(
-            trade_counts=dict.fromkeys(self.config.symbols, 0),
-            last_signals=dict.fromkeys(self.config.symbols, TradeSignal.HOLD),
+            trade_counts={sym: 0 for sym in self.config.symbols},
+            last_signals={sym: TradeSignal.HOLD for sym in self.config.symbols},
         )
         self._status: AgentStatus = AgentStatus.IDLE
         self._state_lock = asyncio.Lock()
@@ -1630,10 +1630,8 @@ def _build_signal_prompt(
     """
     lines = [
         f"Symbol: {data.symbol} | Exchange: {config.exchange}",
-        (
-            f"LTP: {data.ltp:.2f} | Prev Close: {data.prev_close:.2f} | "
-            f"Open: {data.open:.2f} | High: {data.high:.2f} | Low: {data.low:.2f}"
-        ),
+        f"LTP: {data.ltp:.2f} | Prev Close: {data.prev_close:.2f} | "
+        f"Open: {data.open:.2f} | High: {data.high:.2f} | Low: {data.low:.2f}",
         f"Volume: {data.volume:,} | Bid/Ask Ratio: {data.bid_ask_ratio:.2f}",
         "",
         "Technical indicators (5m bars):",

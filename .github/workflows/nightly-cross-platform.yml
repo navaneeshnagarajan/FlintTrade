@@ -87,49 +87,6 @@ jobs:
       - run: uv sync --frozen          # SC-07: hash-verified install
       - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60
 
-  # The DECLARED TARGETS from flint.toml [requirements] - python_target and
-  # node_target - are exercised here and nowhere else. Every per-push lane runs
-  # the FLOOR (Python 3.12, Node 22), which is correct: the floor is what users
-  # must be able to run. But a target nothing ever executes is an aspiration
-  # dressed up as a guarantee, and the point of tracking latest continuously is
-  # to find breakage before it is forced on us.
-  #
-  # Fail-soft on purpose. A target is by definition ahead of the supported floor,
-  # so a break here is information, not a reason to block a release. When a
-  # target becomes the floor, its lane moves into test.yml and stops being
-  # continue-on-error.
-  #
-  # tests/test_minimum_requirements_single_source.py asserts these versions match
-  # flint.toml, so raising a target without exercising it fails CI.
-  python-target-version:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with: { python-version: '3.14' }
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
-      - run: uv sync --frozen
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
-
-  node-target-version:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @flinttrade/terminal run typecheck
-      - run: pnpm --filter @flinttrade/terminal run lint
-      - run: pnpm --filter @flinttrade/terminal exec vitest run
-
   desktop-electron-package-smoke:
     strategy:
       fail-fast: false

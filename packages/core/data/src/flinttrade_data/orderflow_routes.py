@@ -27,7 +27,7 @@ import math
 import time
 from collections import defaultdict
 from datetime import datetime
-from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from typing import Any
 from zoneinfo import ZoneInfo
 

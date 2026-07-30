@@ -89,7 +89,7 @@ case "\${1-}" in */corepack.js) shift;; *) exit 71;; esac
 [ "\${COREPACK_DEFAULT_TO_LATEST-}" = 0 ] || exit 72
 [ -n "\${COREPACK_HOME-}" ] || exit 73
 if [ "\${1-}" = "--version" ]; then printf '%s\\n' 0.29.4; exit 0; fi
-if [ "\${1-}" = pnpm ] && [ "\${2-}" = "--version" ]; then printf '%s\\n' 10.34.5; fi
+if [ "\${1-}" = pnpm ] && [ "\${2-}" = "--version" ]; then printf '%s\\n' 9.15.0; fi
 exit 0
 `,
         );
@@ -106,7 +106,7 @@ exit 0
         for (const executable of [node, corepack, uv]) chmodSync(executable, 0o755);
 
         expect(() =>
-          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "9.15.0"], {
             env: { PATH: "/usr/bin:/bin" },
           }),
         ).not.toThrow();
@@ -123,7 +123,7 @@ exit 0
 
     expect(combined).toContain("sync --frozen --all-packages --no-install-package flinttrade-ticks");
     expect(combined).toContain('"--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks"');
-    expect(combined).toContain("pnpm 10.34.5");
+    expect(combined).toContain("pnpm 9.15.0");
     expect(combined).toContain("--frozen-lockfile");
     expect(combined).toContain("COREPACK_HOME");
     expect(combined).toContain("UV_CACHE_DIR");

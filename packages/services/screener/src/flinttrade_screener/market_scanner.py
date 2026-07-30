@@ -39,7 +39,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import numpy as np
@@ -144,7 +144,7 @@ class ScanCondition(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_fields(self) -> ScanCondition:
+    def _validate_fields(self) -> "ScanCondition":
         if self.indicator not in _VALID_INDICATORS:
             raise ValueError(
                 f"Unknown indicator '{self.indicator}'. "
@@ -611,7 +611,7 @@ class MarketScanner:
         """
         symbols = config.get_symbols()
         results: list[ScanResult] = []
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
 
         for symbol in symbols:
             try:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _IST = ZoneInfo("Asia/Kolkata")
@@ -14,4 +14,4 @@ def next_6am_ist_timestamp(now: datetime | None = None) -> float:
     expiry = current.replace(hour=6, minute=0, second=0, microsecond=0)
     if expiry <= current:
         expiry += timedelta(days=1)
-    return expiry.astimezone(UTC).timestamp()
+    return expiry.astimezone(timezone.utc).timestamp()

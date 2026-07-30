@@ -38,7 +38,7 @@ import math
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timezone
 from itertools import islice
 from threading import RLock
 from typing import Any, Literal
@@ -116,12 +116,12 @@ def _persisted_timestamp(value: Any) -> float | None:
         if isinstance(value, bool):
             return None
         if isinstance(value, datetime):
-            timestamp = value.replace(tzinfo=UTC).timestamp() if value.tzinfo is None else value.timestamp()
+            timestamp = value.replace(tzinfo=timezone.utc).timestamp() if value.tzinfo is None else value.timestamp()
         elif isinstance(value, (int, float)):
             timestamp = float(value)
         elif isinstance(value, str):
-            parsed = datetime.fromisoformat(value)
-            timestamp = parsed.replace(tzinfo=UTC).timestamp() if parsed.tzinfo is None else parsed.timestamp()
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            timestamp = parsed.replace(tzinfo=timezone.utc).timestamp() if parsed.tzinfo is None else parsed.timestamp()
         else:
             return None
     except (OverflowError, TypeError, ValueError):

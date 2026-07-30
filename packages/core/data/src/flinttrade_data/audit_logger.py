@@ -230,7 +230,7 @@ class AuditLogger:
         if path.suffix == ".gz":
             with gzip.open(path, "rt", encoding="utf-8") as fh:
                 return [ln for ln in fh if ln.strip()]
-        with open(path, encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             return [ln for ln in fh if ln.strip()]
 
     def _resolve_chain_tail(self) -> None:
@@ -481,7 +481,7 @@ class AuditLogger:
                         return [json.loads(line) for line in f if line.strip()]
                 return []
 
-            with open(filepath, encoding="utf-8") as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 return [json.loads(line) for line in f if line.strip()]
 
     def list_audit_files(self) -> list[str]:

@@ -24,7 +24,7 @@ import logging
 import time
 from datetime import date, datetime, time as dtime
 from enum import StrEnum
-from typing import Callable
+from typing import Callable, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -127,7 +127,7 @@ class StraddleConfig(BaseModel):
     poll_interval: float = Field(default=1.0, ge=0.01)
 
     @model_validator(mode="after")
-    def _derive_exchange(self) -> StraddleConfig:
+    def _derive_exchange(self) -> "StraddleConfig":
         if not self.exchange:
             self.exchange = _INDEX_EXCHANGE.get(self.index.upper(), "NFO")
         return self
@@ -267,7 +267,7 @@ class MTMStraddleStrategy:
         self.ce_sell_price: float = 0.0
         self.pe_sell_price: float = 0.0
         self.premium_collected: float = 0.0
-        self.exit_reason: ExitReason | None = None
+        self.exit_reason: Optional[ExitReason] = None
         self.final_pnl: float = 0.0
 
     # ------------------------------------------------------------------
@@ -437,7 +437,7 @@ class TrailingStopStraddle:
         self.sell_premium: float = 0.0  # combined CE+PE at entry
         self.stop_premium: float = 0.0  # current combined premium stop level
         self.premium_base: float = 0.0  # lowest combined premium seen so far
-        self.exit_reason: ExitReason | None = None
+        self.exit_reason: Optional[ExitReason] = None
         self.final_pnl: float = 0.0
 
     # ------------------------------------------------------------------
@@ -598,7 +598,7 @@ class CombinedPremiumStraddle:
         self.ce_symbol: str = ""
         self.pe_symbol: str = ""
         self.entry_premium: float = 0.0
-        self.exit_reason: ExitReason | None = None
+        self.exit_reason: Optional[ExitReason] = None
         self.final_pnl: float = 0.0
 
     # ------------------------------------------------------------------

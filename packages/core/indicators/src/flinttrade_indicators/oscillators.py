@@ -174,8 +174,8 @@ def coppock_curve(
     Returns:
         Coppock Curve values, shape (n,). NaN during warm-up.
     """
-    from .momentum import roc as _roc
     from .trend import wma as _wma
+    from .momentum import roc as _roc
 
     validate_series(close, min_length=long_roc_period + wma_period + 1)
     n = len(close)
@@ -385,8 +385,8 @@ def kst(
     Returns:
         Tuple of (kst_line, signal_line), each shape (n,).
     """
-    from .momentum import roc as _roc
     from .trend import sma as _sma
+    from .momentum import roc as _roc
 
     validate_series(close, min_length=r4 + n4)
     n = len(close)

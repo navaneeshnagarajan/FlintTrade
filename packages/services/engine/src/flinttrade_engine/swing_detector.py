@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.swing_detector")
@@ -50,7 +50,7 @@ def _now_ist() -> datetime:
 
         return datetime.now(ZoneInfo("Asia/Kolkata"))
     except Exception:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ class SwingDetector:
         Scans all previous bars [0, i-1] to accumulate watch counts.
         Triggers as soon as any bar's watch counter reaches the threshold.
         """
-        for j in range(i):
+        for j in range(0, i):
             prev = self._bars[j]
 
             # low_watch: current has HIGHER high AND HIGHER close

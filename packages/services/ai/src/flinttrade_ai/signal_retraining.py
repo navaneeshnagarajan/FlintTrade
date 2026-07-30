@@ -16,7 +16,7 @@ import zipfile
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time as wall_time, timedelta, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from queue import Empty, Queue
 from statistics import fmean, pstdev
@@ -24,11 +24,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .pipeline import (
-    MarketSessionProvider,
-    _filter_closed_bars,
-    _prepare_scheduled_bars,
-)
 from .signals import (
     FeatureSet,
     SignalGenerator,
@@ -36,6 +31,11 @@ from .signals import (
     engineer_features,
     generate_labels,
     walk_forward_split_bounds,
+)
+from .pipeline import (
+    MarketSessionProvider,
+    _filter_closed_bars,
+    _prepare_scheduled_bars,
 )
 
 try:
@@ -465,7 +465,7 @@ def _read_verified_bundle(
             raise ValueError("Signal model bundle has an invalid accepted timestamp") from exc
         if accepted_at.tzinfo is None:
             raise ValueError("Signal model bundle accepted timestamp must include a timezone")
-        accepted_at = accepted_at.astimezone(UTC)
+        accepted_at = accepted_at.astimezone(timezone.utc)
         raw_session_date = metadata.get("session_date")
         if raw_session_date is not None:
             if not isinstance(raw_session_date, str):
@@ -518,12 +518,12 @@ def _write_model_bundle(
 
         baseline_payload = _baseline_payload(baseline, model_sha256=actual_digest)
         _validate_baseline(baseline_payload, model_sha256=actual_digest)
-        accepted = accepted_at or datetime.now(UTC)
+        accepted = accepted_at or datetime.now(timezone.utc)
         if accepted.tzinfo is None:
             raise ValueError("accepted_at must include a timezone")
         metadata = {
             "bundle_version": _BUNDLE_VERSION,
-            "accepted_at": accepted.astimezone(UTC).isoformat(),
+            "accepted_at": accepted.astimezone(timezone.utc).isoformat(),
             "identity": {
                 "exchange": exchange,
                 "symbol": symbol,
@@ -546,10 +546,7 @@ def _write_model_bundle(
             bundle.writestr("metadata.json", metadata_bytes)
             bundle.writestr("model.joblib", model_bytes)
             bundle.writestr("model.sha256", actual_digest.encode("ascii"))
-        # The handle must carry write access: Windows ``_commit`` rejects a
-        # read-only descriptor with EBADF, so ``rb`` silently made every bundle
-        # write fail there while behaving on POSIX.
-        with path.open("rb+") as bundle_file:
+        with path.open("rb") as bundle_file:
             os.fsync(bundle_file.fileno())
     finally:
         temp_model.unlink(missing_ok=True)
@@ -588,7 +585,7 @@ class SignalRetrainer:
         self._data_fetcher = data_fetcher
         self._pipeline = pipeline
         self._instrument_provider = instrument_provider
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._cancel_requested = cancel_requested or (lambda: False)
         pipeline_interval = getattr(pipeline, "interval", None)
         self._bar_interval = (
@@ -626,7 +623,7 @@ class SignalRetrainer:
         now = self._clock()
         if now.tzinfo is None:
             raise ValueError("Signal retraining clock must return a timezone-aware datetime")
-        return now.astimezone(UTC)
+        return now.astimezone(timezone.utc)
 
     def _is_cancelled(self) -> bool:
         return bool(self._cancel_requested())

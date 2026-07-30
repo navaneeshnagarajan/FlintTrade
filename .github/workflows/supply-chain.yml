@@ -174,12 +174,7 @@ jobs:
 
   electron-package-verification:
     name: Electron Linux directory verification
-    # ubuntu-24.04, matching flint.toml [requirements].os_requires. Same
-    # reasoning as test.yml's electron-desktop-tests: this lane packages `--dir`
-    # and verifies the security contract, publishing nothing, so the build host's
-    # glibc never reaches a user. desktop-release.yml's Linux build legs stay on
-    # 22.04 deliberately - they ship a compiled native addon inside the AppImage.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     if: ${{ !github.event.pull_request.draft }}
     steps:

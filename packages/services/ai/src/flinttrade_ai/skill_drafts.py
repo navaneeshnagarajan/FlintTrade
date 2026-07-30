@@ -17,8 +17,8 @@ near-duplicates.
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
+import re
 from typing import Any
 
 logger = logging.getLogger("flinttrade.ai.skill_drafts")

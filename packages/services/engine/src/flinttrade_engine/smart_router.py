@@ -46,7 +46,7 @@ import asyncio
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Callable, Literal
 
 from flinttrade_core.models import Action, Exchange, Order, PriceType
@@ -88,7 +88,7 @@ class ChildOrderResult:
     order_id: str = ""
     error: str = ""
     slippage_bps: float = 0.0
-    placed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    placed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -522,14 +522,15 @@ class SmartOrderRouter:
                     order_id=decision.order_response.orderid,
                     slippage_bps=slippage_bps,
                 )
-            err = decision.error or "safety block"
-            return ChildOrderResult(
-                quantity=quantity,
-                price_type=price_type.value if hasattr(price_type, "value") else str(price_type),
-                status="failed",
-                error=err,
-                slippage_bps=slippage_bps,
-            )
+            else:
+                err = decision.error or "safety block"
+                return ChildOrderResult(
+                    quantity=quantity,
+                    price_type=price_type.value if hasattr(price_type, "value") else str(price_type),
+                    status="failed",
+                    error=err,
+                    slippage_bps=slippage_bps,
+                )
         except SmartRouteAbort:
             # Session revoked / operator cancel — stop the WHOLE route, do not
             # record-and-continue like an ordinary child failure.

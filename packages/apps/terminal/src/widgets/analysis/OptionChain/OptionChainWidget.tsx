@@ -203,7 +203,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       setSecondsAgo(Math.round((Date.now() - lastRefresh.getTime()) / 1000));
     }, 1000);
     return () => clearInterval(id);
-   
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastRefresh]);
 
   // Max Pain — fetched per expiry, 60s refresh
@@ -295,7 +295,7 @@ function OptionChainWidget(props: Partial<WidgetProps> = {}) {
       }
     }
     if (anyChanged) bumpFlashTick();
-   
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strikes]);
 
   // Basket helpers

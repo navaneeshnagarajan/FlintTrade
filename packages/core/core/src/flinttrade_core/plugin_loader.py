@@ -69,7 +69,7 @@ class PluginInterface(ABC):
     description: str
 
     @abstractmethod
-    def activate(self, context: PluginContext) -> None:
+    def activate(self, context: "PluginContext") -> None:
         """Called once when the plugin is activated.
 
         Args:

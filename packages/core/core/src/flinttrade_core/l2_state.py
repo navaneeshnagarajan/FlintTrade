@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+import math
 from types import SimpleNamespace
 from typing import Any
+
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _CASH_EXCHANGES = frozenset({"BSE", "NSE"})
@@ -1272,7 +1273,7 @@ def _reservation_fill_is_represented(reservation: Any, positions: Any, filled_qu
     if key is None:
         raise PortfolioSafetyStateError("Local order reservation lacks canonical instrument identity")
     try:
-        starting_quantity = float(reservation.starting_quantity)
+        starting_quantity = float(getattr(reservation, "starting_quantity"))
     except (TypeError, ValueError) as exc:
         raise PortfolioSafetyStateError("Local order reservation has invalid starting quantity") from exc
     if not math.isfinite(starting_quantity):

@@ -15,7 +15,8 @@ import logging
 import math
 import threading
 import time as _time
-from collections.abc import Awaitable as AwaitableABC, Coroutine as CoroutineABC
+from collections.abc import Awaitable as AwaitableABC
+from collections.abc import Coroutine as CoroutineABC
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -561,16 +562,17 @@ class TimeScheduler:
                     "fetch asynchronously and call set_holidays()"
                 )
                 return []
-            # One-owner-loop rule for the shared client's pooled connections.
-            from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
+            else:
+                # One-owner-loop rule for the shared client's pooled connections.
+                from flinttrade_core.openalgo_client import client_call_sync  # noqa: PLC0415
 
-            data = client_call_sync(
-                self._client,
-                self._client.holidays(  # type: ignore[union-attr]
-                    year=y,
-                    allow_legacy_fallback=True,
-                ),
-            )
+                data = client_call_sync(
+                    self._client,
+                    self._client.holidays(  # type: ignore[union-attr]
+                        year=y,
+                        allow_legacy_fallback=True,
+                    ),
+                )
 
             holidays = self.set_holidays(data, year=y)
             logger.info("Loaded %d holidays for %s", len(holidays), y)
@@ -1758,8 +1760,8 @@ class CronStrategyScheduler:
             if self._scheduler is not None:
                 raise RuntimeError("CronStrategyScheduler cannot restart until the previous backend stops")
             try:
-                import pytz as _pytz  # pytz required by APScheduler for named TZ
                 from apscheduler.schedulers.background import BackgroundScheduler
+                import pytz as _pytz  # pytz required by APScheduler for named TZ
 
                 self._scheduler = BackgroundScheduler(
                     timezone=_pytz.timezone(_IST_PYTZ_NAME),
@@ -2238,8 +2240,8 @@ class CronStrategyScheduler:
     @staticmethod
     def _build_cron_trigger(cron_parts: dict[str, str]) -> Any:
         """Build and validate an APScheduler cron trigger in IST."""
-        import pytz as _pytz
         from apscheduler.triggers.cron import CronTrigger
+        import pytz as _pytz
 
         return CronTrigger(
             timezone=_pytz.timezone(_IST_PYTZ_NAME),

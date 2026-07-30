@@ -41,7 +41,7 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -137,7 +137,7 @@ class BlockedOrder:
     quantity: int
     limit: int
     blocked_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
     def to_dict(self) -> dict:

@@ -12,7 +12,6 @@ import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { renderReactRoot } from "./lib/reactRoot";
-import { isPublicDemoBuild } from "./lib/demoSession";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -97,10 +96,8 @@ const router = createBrowserRouter([
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
       { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
-      /* Setup collects real credentials (account password, PIN, broker API keys),
-         so the public demo build sends both routes to Explore instead. */
-      { path: "setup", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
-      { path: "setup-account", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
+      { path: "setup", element: <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
+      { path: "setup-account", element: <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {

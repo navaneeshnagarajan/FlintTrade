@@ -30,9 +30,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
-
 from flinttrade_core.source_root import discover_source_root
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("flinttrade.ai.skills")
 

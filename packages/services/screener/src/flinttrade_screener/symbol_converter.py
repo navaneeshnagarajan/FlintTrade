@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
+from typing import Optional
+
 
 # ---------------------------------------------------------------------------
 # Types
@@ -56,9 +58,9 @@ class SymbolParts:
     """
     base: str
     instrument_type: InstrumentType
-    expiry_date: date | None = None
-    strike: float | None = None
-    option_type: str | None = None
+    expiry_date: Optional[date] = None
+    strike: Optional[float] = None
+    option_type: Optional[str] = None
     original: str = ""
 
 
@@ -167,9 +169,9 @@ def normalise_base(raw: str) -> str:
 
 def build_openalgo_symbol(
     base: str,
-    expiry: date | None = None,
-    strike: float | None = None,
-    option_type: str | None = None,
+    expiry: Optional[date] = None,
+    strike: Optional[float] = None,
+    option_type: Optional[str] = None,
 ) -> str:
     """Build an OpenAlgo symbol string from its components.
 

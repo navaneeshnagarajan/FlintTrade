@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/electron-main.mjs",
   "engines": {
-    "node": ">=22.22.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "dev": "node scripts/build-windows-job-supervisor.mjs && node scripts/build-atomic-promoter.mjs && node scripts/bundle-electron.mjs --dev && electron .",

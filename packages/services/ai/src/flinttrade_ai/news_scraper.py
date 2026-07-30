@@ -5,11 +5,11 @@ retains the former import surface without carrying a second implementation.
 """
 
 from .sentiment import (
-    _CACHE_TTL_SECS,
     IST,
     RSS_SOURCES,
     NewsArticle,
     NewsScraper,
+    _CACHE_TTL_SECS,
     _link,
     _parse_rss_xml,
     _strip_html,

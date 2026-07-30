@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 import logging
 import math
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from datetime import UTC, date, datetime
-from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -17,7 +17,6 @@ import httpx
 from .config import Settings, openalgo_rest_base_url
 from .exceptions import APIError, OpenAlgoAuthError, OpenAlgoRateLimitError
 from .models import (
-    OHLCV,
     BasketOrder,
     CancelGttOrder,
     Depth,
@@ -28,6 +27,7 @@ from .models import (
     Holding,
     ModifyGttOrder,
     ModifyOrder,
+    OHLCV,
     OptionChain,
     OptionChainStrike,
     OptionGreek,
@@ -82,7 +82,7 @@ def _normalise_history_timestamp(value: Any) -> str:
         if abs(epoch) >= 100_000_000_000:
             epoch /= 1000.0
         try:
-            return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
+            return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
         except (OSError, OverflowError, ValueError) as exc:
             raise ValueError("history timestamp is outside the supported range") from exc
     if isinstance(value, str):

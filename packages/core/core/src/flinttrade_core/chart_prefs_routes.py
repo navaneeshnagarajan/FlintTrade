@@ -12,8 +12,9 @@ existing :class:`flinttrade_core.chart_prefs.ChartPreferences` store.
 
 from __future__ import annotations
 
-import logging
 import re
+
+import logging
 from typing import Any
 
 from flask import Blueprint, jsonify, request

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.ai.strategy_refiner")
@@ -44,7 +44,7 @@ class RefinementSuggestion:
     reasoning: str
     confidence: float
     timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
     def to_dict(self) -> dict[str, Any]:
@@ -231,7 +231,8 @@ class StrategyRefiner:
         for fence in ("```json", "```"):
             if text.startswith(fence):
                 text = text[len(fence):]
-                text = text.removesuffix("```")
+                if text.endswith("```"):
+                    text = text[:-3]
                 break
         text = text.strip()
 

@@ -25,6 +25,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("flinttrade.core.auth_state")
 
@@ -167,7 +168,7 @@ class AuthState:
             self._conn.close()
 
 
-_SINGLETON: AuthState | None = None
+_SINGLETON: Optional[AuthState] = None
 _SINGLETON_LOCK = threading.Lock()
 
 

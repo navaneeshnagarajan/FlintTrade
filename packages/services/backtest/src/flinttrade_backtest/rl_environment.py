@@ -467,8 +467,9 @@ class TradingEnvironment:
                 else:
                     prices.append(0.0)
             return np.array(prices, dtype=np.float32)
-        idx = min(self._day, len(self._df) - 1)
-        return np.array([float(self._df["close"].iloc[idx])], dtype=np.float32)
+        else:
+            idx = min(self._day, len(self._df) - 1)
+            return np.array([float(self._df["close"].iloc[idx])], dtype=np.float32)
 
     def _get_features(self) -> np.ndarray:
         """Get feature values for current day, all stocks."""
@@ -487,14 +488,15 @@ class TradingEnvironment:
                     else:
                         result.append(0.0)
             return np.array(result, dtype=np.float32)
-        idx = min(self._day, len(self._df) - 1)
-        result = []
-        for feat in self._features:
-            if feat in self._df.columns:
-                result.append(float(self._df[feat].iloc[idx]))
-            else:
-                result.append(0.0)
-        return np.array(result, dtype=np.float32)
+        else:
+            idx = min(self._day, len(self._df) - 1)
+            result = []
+            for feat in self._features:
+                if feat in self._df.columns:
+                    result.append(float(self._df[feat].iloc[idx]))
+                else:
+                    result.append(0.0)
+            return np.array(result, dtype=np.float32)
 
     def _get_turbulence(self) -> float:
         """Get turbulence value for current day (0.0 if not available)."""

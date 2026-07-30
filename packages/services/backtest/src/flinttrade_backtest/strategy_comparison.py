@@ -419,7 +419,7 @@ class StrategyComparator:
         raw_weights: dict[str, float] = {}
         names_with_returns = list(aligned.keys())
         selected: list[str] = []
-        penalties: dict[str, float] = dict.fromkeys(names_with_returns, 1.0)
+        penalties: dict[str, float] = {n: 1.0 for n in names_with_returns}
 
         for name in names_with_returns:
             for sel in selected:

@@ -13,7 +13,7 @@ Pure and clock-injectable — no network, fully unit-testable.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -36,7 +36,7 @@ class ReauthStatus:
 
 
 def _to_utc(dt: datetime) -> datetime:
-    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def last_reset_at_or_before(now: datetime) -> datetime:
@@ -45,7 +45,7 @@ def last_reset_at_or_before(now: datetime) -> datetime:
     reset_ist = now_ist.replace(hour=DAILY_RESET_HOUR_IST, minute=0, second=0, microsecond=0)
     if now_ist < reset_ist:
         reset_ist -= timedelta(days=1)
-    return reset_ist.astimezone(UTC)
+    return reset_ist.astimezone(timezone.utc)
 
 
 def next_reset_after(now: datetime) -> datetime:

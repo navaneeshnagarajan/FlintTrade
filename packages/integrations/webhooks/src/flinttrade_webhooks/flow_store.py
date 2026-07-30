@@ -19,7 +19,7 @@ import logging
 import os
 import re
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -196,7 +196,7 @@ class FlowFileStore:
         """
         path = self._path_for(flow_id)
         stored = dict(workflow)
-        stored["saved_at"] = datetime.now(UTC).isoformat()
+        stored["saved_at"] = datetime.now(timezone.utc).isoformat()
         encoded = json.dumps(stored, ensure_ascii=False)
         if len(encoded.encode("utf-8")) > MAX_FLOW_BYTES:
             raise FlowStoreError("Workflow too large — stored flows are capped at 512 KiB")

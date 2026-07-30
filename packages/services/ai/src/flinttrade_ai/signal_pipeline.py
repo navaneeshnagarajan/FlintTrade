@@ -18,13 +18,12 @@ import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from flinttrade_indicators.streaming import StreamingEMA, StreamingMACD, StreamingRSI
-
 from .signal_models import SignalConfig, SignalEvent, normalise_instrument_identity, now_iso
+from flinttrade_indicators.streaming import StreamingEMA, StreamingMACD, StreamingRSI
 
 logger = logging.getLogger("flinttrade.ai.signal_pipeline")
 
@@ -66,7 +65,7 @@ def _normalise_event_number(value: object, *, field_name: str) -> float:
 def _normalise_observation_timestamp(value: object | None) -> datetime | None:
     """Return one UTC observation timestamp without replacing invalid source time."""
     if value is None:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, bool):
@@ -79,7 +78,7 @@ def _normalise_observation_timestamp(value: object | None) -> datetime | None:
         if not math.isfinite(epoch):
             return None
         try:
-            return datetime.fromtimestamp(epoch, tz=UTC)
+            return datetime.fromtimestamp(epoch, tz=timezone.utc)
         except (OSError, OverflowError, ValueError):
             return None
     elif isinstance(value, str) and value.strip():
@@ -92,7 +91,7 @@ def _normalise_observation_timestamp(value: object | None) -> datetime | None:
         return None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
-    return parsed.astimezone(UTC)
+    return parsed.astimezone(timezone.utc)
 
 
 def _normalise_event(signal: SignalEvent) -> SignalEvent:
@@ -254,7 +253,7 @@ class LiveSignalPipeline:
         Returns:
             A ``Signal`` instance if a threshold was crossed, else ``None``.
         """
-        observation_at = observation_at or datetime.now(UTC)
+        observation_at = observation_at or datetime.now(timezone.utc)
         identity = (exchange, symbol)
         previous_observation = self._last_observation_at.get(identity)
         if previous_observation is not None and observation_at < previous_observation:

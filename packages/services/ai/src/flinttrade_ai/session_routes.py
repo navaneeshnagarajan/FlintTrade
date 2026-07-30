@@ -9,10 +9,10 @@ direction as the broker management guard, G9).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import logging
 import re
-from datetime import UTC, datetime
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -184,7 +184,7 @@ def import_session() -> tuple[Any, int]:
         timestamp = message.get("timestamp")
         if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool) and timestamp > 0:
             try:
-                entry["created_at"] = datetime.fromtimestamp(timestamp / 1000, tz=UTC).isoformat()
+                entry["created_at"] = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).isoformat()
             except (OverflowError, OSError, ValueError):
                 pass  # Nonsense legacy timestamps fall back to the import time.
         prepared.append(entry)

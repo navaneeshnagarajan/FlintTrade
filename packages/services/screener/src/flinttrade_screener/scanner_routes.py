@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -204,7 +204,7 @@ def _registry_data_fetcher(
     if not account_id:
         raise ValueError("Broker registry is connected but has no usable account id")
 
-    end = datetime.now(UTC).date()
+    end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=365)
 
     def _fetch(symbol: str, exchange: str, timeframe: str) -> list[dict[str, Any]]:

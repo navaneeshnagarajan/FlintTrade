@@ -28,10 +28,10 @@ def _load_backtest_engine() -> tuple[Any, Any, Any, Any]:
         the returned tuple.
     """
     # Imported from the installed flinttrade_backtest package (no sys.path hack).
-    from flinttrade_backtest.data_connector import DataConnector
-    from flinttrade_backtest.metrics import PerformanceMetrics
     from flinttrade_backtest.simulator import BacktestConfig, BacktestSimulator
     from flinttrade_backtest.strategies import ALL_STRATEGIES, BUILTIN_STRATEGIES
+    from flinttrade_backtest.data_connector import DataConnector
+    from flinttrade_backtest.metrics import PerformanceMetrics
 
     # Expose the FULL strategy library, not just the 12 curated BUILTINs: every
     # ALL_STRATEGIES class subclasses the same engine BaseStrategy the simulator

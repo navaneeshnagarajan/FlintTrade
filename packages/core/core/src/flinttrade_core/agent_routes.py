@@ -32,7 +32,7 @@ import asyncio
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -456,8 +456,8 @@ def start_agent() -> tuple[Any, int]:
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
-        _record_trade_journal,
         _require_live_safety,
+        _record_trade_journal,
         _safety_runtime_unavailable_response,
     )
     from .smart_order_routes import GatedChildExecutor  # noqa: PLC0415
@@ -793,7 +793,7 @@ def start_agent() -> tuple[Any, int]:
             "trader": trader,
             "thread": session_thread,
             "producer_ref": producer_ref,
-            "started_at": datetime.now(UTC).isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "params": {
                 "symbols": symbols, "exchange": exchange, "product": product,
                 "broker": adapter_id, "account_id": account_id,

@@ -31,8 +31,8 @@ regular one — no parallel order path.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 from flinttrade_core.exceptions import BrokerError
@@ -478,7 +478,7 @@ class IndMoneyAdapter(BrokerAdapter):
         # No revoke endpoint is documented (revocation is dashboard-side); drop
         # the local transport so the session can no longer be used. Idempotent.
         session.extra.pop("transport", None)
-        return
+        return None
 
     # ---------- trading: writes (safety-critical; router-only) ----------
 
@@ -1395,7 +1395,7 @@ class IndMoneyAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=UTC)
+        generated_at = datetime.now(tz=timezone.utc)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
             broker_orders = declare_unavailable_order_fields(

@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal
+
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
@@ -219,7 +220,7 @@ class StrategyMarketplace:
                 f"Must be one of: {sorted(VALID_CATEGORIES)}"
             )
         if not strategy.created_at:
-            strategy.created_at = datetime.now(UTC).isoformat()
+            strategy.created_at = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self._strategies[strategy.strategy_id] = strategy
 

@@ -4,8 +4,6 @@ from flinttrade_core.version import APP_VERSION
 
 __version__ = APP_VERSION
 
-from .bracket_order import BracketOrder, BracketOrderError, BracketOrderService, BracketResult
-from .position_sizer import PositionSizer
 from .safety import (
     DailyPnLLimits,
     IntradayAllowList,
@@ -32,6 +30,8 @@ from .scheduler import (
     StrategyStartTimeoutError,
     TimeScheduler,
 )
+from .bracket_order import BracketOrder, BracketOrderError, BracketOrderService, BracketResult
+from .position_sizer import PositionSizer
 from .strategy import BaseStrategy, StrategyRegistry, StrategyState
 from .strategy_execution import (
     GatedStrategyDispatcher,

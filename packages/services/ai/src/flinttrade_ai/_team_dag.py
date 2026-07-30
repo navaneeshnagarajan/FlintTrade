@@ -8,7 +8,7 @@ import logging
 import threading
 from collections.abc import Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from string import Formatter
 from typing import Any, Literal, TypeAlias, TypeVar
 
@@ -55,7 +55,7 @@ class TeamEvent(BaseModel):
     agent_role: str
     event_type: TeamEventType
     data: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 EventCallback: TypeAlias = Callable[[TeamEvent], Awaitable[None] | None]
@@ -97,7 +97,7 @@ def detect_cycle(tasks: list[TeamTask]) -> None:
     task_ids = _validate_graph_references(tasks)
     dependencies = {task.id: task.depends_on for task in tasks}
     white, grey, black = 0, 1, 2
-    colour = dict.fromkeys(task_ids, white)
+    colour = {task_id: white for task_id in task_ids}
     path: list[str] = []
 
     def visit(task_id: str) -> None:

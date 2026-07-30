@@ -54,7 +54,7 @@ sample_data_bp = Blueprint("sample_data", __name__, url_prefix="/api/v1")
 
 def _utc_iso() -> str:
     """Return the current UTC time as an ISO-8601 string."""
-    return _dt.datetime.now(_dt.UTC).isoformat()
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ _SAMPLE_FUNDING_RATES: list[dict[str, Any]] = [
         "symbol": "BTCUSD",
         "rate": 0.00012,
         "predicted_rate": 0.00015,
-        "next_funding_ms": int(_dt.datetime.now(_dt.UTC).timestamp() * 1000) + 3 * 3600 * 1000,
+        "next_funding_ms": int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000) + 3 * 3600 * 1000,
         "history": [0.0001, 0.00011, 0.00012, 0.00010, 0.00013, 0.00012, 0.00011, 0.00012],
         "open_interest_usd": 8_400_000_000.0,
     },
@@ -243,7 +243,7 @@ _SAMPLE_FUNDING_RATES: list[dict[str, Any]] = [
         "symbol": "ETHUSD",
         "rate": 0.00009,
         "predicted_rate": 0.00008,
-        "next_funding_ms": int(_dt.datetime.now(_dt.UTC).timestamp() * 1000) + 3 * 3600 * 1000,
+        "next_funding_ms": int(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000) + 3 * 3600 * 1000,
         "history": [0.00008, 0.00009, 0.00010, 0.00008, 0.00009, 0.00008, 0.00009, 0.00009],
         "open_interest_usd": 4_200_000_000.0,
     },

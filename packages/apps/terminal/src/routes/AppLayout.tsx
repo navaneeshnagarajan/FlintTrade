@@ -121,10 +121,7 @@ function SmallScreenOverlay({ onDismiss }: { onDismiss: () => void }) {
           </p>
         </div>
         <Button
-          // Autofocus is deliberate: this is a modal dismissal prompt, so the
-          // only actionable control should already hold focus. (The directive
-          // that used to sit here named jsx-a11y, a plugin this repo has never
-          // installed, so it silenced nothing.)
+          // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
           variant="outline"
           onClick={onDismiss}

@@ -19,8 +19,8 @@ function Invoke-Checked {
     }
 }
 
-if ($PnpmVersion -ne "10.34.5") {
-    throw "Bootstrap entrypoint requires pnpm 10.34.5."
+if ($PnpmVersion -ne "9.15.0") {
+    throw "Bootstrap entrypoint requires pnpm 9.15.0."
 }
 
 @("package.json", "pyproject.toml", "uv.lock", "pnpm-lock.yaml", "packages/apps/terminal/package.json") |
@@ -51,10 +51,10 @@ try {
     Invoke-Checked $Uv @("python", "install", "3.12")
     Invoke-Checked $Uv @("venv", "--relocatable", "--python", "3.12", ".venv")
     Invoke-Checked $Uv @("sync", "--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks")
-    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 10.34.5 dependencies"
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 9.15.0 dependencies"
     $resolvedPnpmVersion = (& $Node $CorepackJs pnpm --version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -ne "10.34.5") {
-        throw "Corepack did not resolve the repository-pinned pnpm 10.34.5."
+    if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -ne "9.15.0") {
+        throw "Corepack did not resolve the repository-pinned pnpm 9.15.0."
     }
     Invoke-Checked $Node @($CorepackJs, "pnpm", "install", "--frozen-lockfile")
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tbuilding-terminal`t84`tBuilding the terminal for production"

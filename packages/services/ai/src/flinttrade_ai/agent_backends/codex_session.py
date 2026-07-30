@@ -142,7 +142,7 @@ def project_codex_notification(note: Mapping[str, Any]) -> list[AgentEvent]:
     params = note.get("params") or {}
 
     # Streaming text deltas (display-only chunks before item/completed).
-    if method.endswith(("Delta", "/delta", "outputDelta")):
+    if method.endswith("Delta") or method.endswith("/delta") or method.endswith("outputDelta"):
         delta = params.get("delta") or params.get("text") or ""
         if delta:
             return [AgentEvent(AgentEventKind.OUTPUT, text=str(delta), data={"streaming": True})]
@@ -404,7 +404,7 @@ class _CodexAppServerClient:
         await self._send({"id": rid, "method": method, "params": params or {}})
         try:
             msg = await asyncio.wait_for(fut, timeout)
-        except TimeoutError as exc:
+        except (asyncio.TimeoutError, TimeoutError) as exc:
             self._pending.pop(rid, None)
             raise TimeoutError(
                 f"codex app-server method {method!r} timed out after {timeout}s"
@@ -753,7 +753,7 @@ class CodexAppServerSession(AgentSession):
                 msg = await asyncio.wait_for(
                     client.next_inbound(), timeout=min(_NOTIFICATION_POLL, remaining)
                 )
-            except TimeoutError:
+            except (asyncio.TimeoutError, TimeoutError):
                 if not client.is_alive():
                     error = "codex app-server subprocess exited unexpectedly"
                     break

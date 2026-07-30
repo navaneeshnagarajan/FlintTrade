@@ -17,12 +17,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+
 try:
-    # Relative first: these strategy modules are also loaded standalone by file
-    # path, where __package__ is unset and the relative form raises. The absolute
-    # form is the except-branch fallback below, so rewriting this to absolute
-    # would make both branches identical and kill the fallback.
-    from ..base_strategy import BaseBacktestStrategy  # noqa: TID252
+    from ..base_strategy import BaseBacktestStrategy
 except ImportError:
     from flinttrade_backtest.base_strategy import BaseBacktestStrategy  # type: ignore[no-redef]
 

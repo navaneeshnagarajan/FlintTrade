@@ -15,8 +15,8 @@ server-style deployments.
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
+import re
 from typing import Any
 
 from .secure_file import read_owner_owned_text, write_secret_text

@@ -4,10 +4,24 @@ from flinttrade_core.version import APP_VERSION
 
 __version__ = APP_VERSION
 
+from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
 from ._team_dag import TeamEvent, TeamTask
 from ._team_modes import AnalysisState, AnalystChain, DebateResult, DebateRound, RiskDebate
 from ._team_presets import TeamPreset, TeamPresetAgent
-from .advisor import PortfolioSuggestion, StockAdvisor, StockFeatures, StockRanking
+from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TeamMode, TradeRecommendation
+from .multi_agent import AgentTeam, AutonomousResearchLoop, ResearchIteration, default_agents
+from .rag_pipeline import (
+    Document,
+    DomainFilter,
+    LegacyRetrievedChunk as RetrievedChunk,
+    PipelineConfig,
+    RAGEngine,
+    RAGPipeline,
+    RAGResponse,
+)
+from .news_summarizer import MarketNewsSummarizer, NewsSummary
+from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
+from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
 from .agent_backends import (
     AGENT_BACKEND_CATALOGUE,
     AgentAuthMode,
@@ -26,24 +40,6 @@ from .agent_backends import (
     list_backends,
     register_backend,
 )
-from .agent_models import AgentAnalysis, AgentRole, AgentRoleType, TeamAnalysis, TeamMode, TradeRecommendation
-from .ensemble_selector import (
-    EnsembleResult,
-    EnsembleSelector,
-    ModelCandidate,
-    calculate_di,
-    compute_dissimilarity_index,
-)
-from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
-from .llm_client import LLMClient, LLMConfig, LLMMessage, LLMProvider, LLMResponse
-from .market_simulator import (
-    DEFAULT_PARTICIPANTS,
-    MarketParticipant,
-    MarketSimulator,
-    ParticipantAction,
-    SimulationResult,
-)
-from .mcp_bridge import MCPBridge, MCPResult, MCPToolCall
 from .memory import (
     CATEGORY_IMPORTANCE,
     HierarchicalMemoryManager,
@@ -59,31 +55,12 @@ from .memory import (
     TradedMemory,
     create_memory_backend,
 )
-from .multi_agent import AgentTeam, AutonomousResearchLoop, ResearchIteration, default_agents
-from .news_scheduler import NewsEvent, NewsScheduler, PollType, ScheduledJob
-from .news_summarizer import MarketNewsSummarizer, NewsSummary
-from .pipeline import SignalPipeline
-from .rag_pipeline import (
-    Document,
-    DomainFilter,
-    LegacyRetrievedChunk as RetrievedChunk,
-    PipelineConfig,
-    RAGEngine,
-    RAGPipeline,
-    RAGResponse,
-)
-from .regime_detector import (
-    RegimeResult,
-    RegimeState,
-    detect_regime,
-    detect_regime_detailed,
-)
 from .sentiment import (
-    MARKET_SUMMARY_SCHEMA,
     AggregatedSentiment,
     FiiDiiFlow,
     IndexSignal,
     IndexSnapshot,
+    MARKET_SUMMARY_SCHEMA,
     MarketSummary,
     NewsArticle,
     NewsScraper,
@@ -94,20 +71,43 @@ from .sentiment import (
     generate_market_summary,
     sentiment_label_from_score,
 )
-from .signal_models import LiveSignal, SignalConfig, SignalEvent
-from .signal_pipeline import LiveSignalPipeline
+from .market_simulator import (
+    DEFAULT_PARTICIPANTS,
+    MarketParticipant,
+    MarketSimulator,
+    ParticipantAction,
+    SimulationResult,
+)
+from .pipeline import SignalPipeline
 from .signal_retraining import (
     RetrainConfig,
+    RetrainResult,
     RetrainingRetry,
     RetrainingRosterPlan,
-    RetrainResult,
     SignalRetrainer,
     plan_retraining_roster,
     select_retraining_roster,
 )
+from .signal_models import LiveSignal, SignalConfig, SignalEvent
+from .signal_pipeline import LiveSignalPipeline
 from .signals import MLSignal, Signal, SignalGenerator, compute_turbulence, generate_sharpe_labels
+from .ensemble_selector import (
+    EnsembleResult,
+    EnsembleSelector,
+    ModelCandidate,
+    calculate_di,
+    compute_dissimilarity_index,
+)
+from .regime_detector import (
+    RegimeResult,
+    RegimeState,
+    detect_regime,
+    detect_regime_detailed,
+)
+from .hyperopt_strategy import OptimisationResult, StrategyOptimiser
 from .strategy_refiner import RefinementSuggestion, StrategyRefiner
 from .trade_reflection import ReflectionConfig, ReflectionResult, TradeOutcome, TradeReflector
+from .news_scheduler import NewsEvent, NewsScheduler, PollType, ScheduledJob
 
 __all__ = [
     # LLM

@@ -17,9 +17,9 @@ is kept as a fallback so older checkouts still work during the transition.
 from __future__ import annotations
 
 import importlib
-import inspect
 import logging
 import sys
+import inspect
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -813,41 +813,29 @@ OPENALGO_PLATFORM_MCP: dict[str, Any] = {
     "trading_supported": True,
     "login_steps": [
         "Run your self-hosted OpenAlgo instance and generate an API key in its dashboard.",
-        (
-            "Local clients (Claude Desktop, Cursor, Windsurf): launch the bundled stdio server "
-            "with `python -m mcp.mcpserver <api_key> <host>` from the OpenAlgo checkout."
-        ),
-        (
-            "Hosted clients (claude.ai, ChatGPT): enable the opt-in remote MCP on your install "
-            "(`install/enable-remote-mcp.sh`), then connect https://<your-openalgo-domain>/mcp "
-            "and complete the OAuth approval."
-        ),
+        "Local clients (Claude Desktop, Cursor, Windsurf): launch the bundled stdio server "
+        "with `python -m mcp.mcpserver <api_key> <host>` from the OpenAlgo checkout.",
+        "Hosted clients (claude.ai, ChatGPT): enable the opt-in remote MCP on your install "
+        "(`install/enable-remote-mcp.sh`), then connect https://<your-openalgo-domain>/mcp "
+        "and complete the OAuth approval.",
         "Keep FlintTrade live orders on the gated OpenAlgo bridge/native path.",
     ],
     "use_cases": [
         "One MCP server covering all 30+ OpenAlgo-bridged brokers",
-        (
-            "Order management (place/modify/cancel, baskets, split, smart orders) tagged "
-            "'python mcp' for auditability"
-        ),
+        "Order management (place/modify/cancel, baskets, split, smart orders) tagged "
+        "'python mcp' for auditability",
         "Market data, option chain, funds, holdings, positions, and tradebook lookup",
         "Analyzer/sandbox toggling so MCP flows can be rehearsed without live orders",
     ],
     "cautions": [
-        (
-            "OpenAlgo MCP tools act on your OpenAlgo instance outside FlintTrade's in-process "
-            "safety gate; FlintTrade automation must still use gate_order or gate_broker_write "
-            "through BrokerRouter."
-        ),
-        (
-            "Remote MCP is off by default and requires the enable helper; keep "
-            "MCP_OAUTH_WRITE_SCOPE_ENABLED=False unless you explicitly want hosted clients "
-            "placing orders."
-        ),
-        (
-            "OpenAlgo's sandbox can send real orders for some brokers — verify analyzer/sandbox "
-            "isolation before rehearsing order flows."
-        ),
+        "OpenAlgo MCP tools act on your OpenAlgo instance outside FlintTrade's in-process "
+        "safety gate; FlintTrade automation must still use gate_order or gate_broker_write "
+        "through BrokerRouter.",
+        "Remote MCP is off by default and requires the enable helper; keep "
+        "MCP_OAUTH_WRITE_SCOPE_ENABLED=False unless you explicitly want hosted clients "
+        "placing orders.",
+        "OpenAlgo's sandbox can send real orders for some brokers — verify analyzer/sandbox "
+        "isolation before rehearsing order flows.",
     ],
     "client_configs": [
         {

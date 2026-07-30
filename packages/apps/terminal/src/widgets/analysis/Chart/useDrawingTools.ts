@@ -529,16 +529,9 @@ export function useDrawingTools({
     drawingRenderPlanRef.current = renderPlan;
   }, [drawings, selectedDrawingId, chartRef, candleRef, markersPluginRef]);
 
-  // Unmount teardown. The rule's usual advice — copy `ref.current` into a local
-  // inside the effect body — is wrong here: this effect runs once, so a copy
-  // would capture the empty mount-time chart and series maps and tear down
-  // nothing, leaking every series drawn afterwards. Reading the refs at cleanup
-  // time is the point, so the three reads below keep their directives.
   useEffect(() => {
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
       const chart = chartRef.current;
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
       const dsMap = drawingSeriesRef.current;
       if (chart) {
         for (const series of dsMap.values()) {
@@ -546,7 +539,6 @@ export function useDrawingTools({
         }
       }
       dsMap.clear();
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
       for (const ref of hlineSeriesRef.current.values()) {
         try { ref._series.removePriceLine(ref._priceLine); } catch { /* gone */ }
       }

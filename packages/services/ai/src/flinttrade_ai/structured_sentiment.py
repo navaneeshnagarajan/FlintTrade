@@ -6,9 +6,6 @@ without carrying a second implementation.
 """
 
 from .sentiment import (
-    _SCHEMA_HINT,
-    _SYSTEM_PROMPT,
-    _USER_PROMPT_TEMPLATE,
     MARKET_SUMMARY_SCHEMA,
     FiiDiiFlow,
     IndexSignal,
@@ -16,6 +13,9 @@ from .sentiment import (
     MarketSummary,
     SectorOutlook,
     SentimentLabel,
+    _SCHEMA_HINT,
+    _SYSTEM_PROMPT,
+    _USER_PROMPT_TEMPLATE,
     _build_prompt,
     generate_market_summary,
     prepare_market_summary_data,

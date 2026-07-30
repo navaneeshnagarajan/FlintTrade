@@ -312,9 +312,9 @@ def _build_options_symbol(underlying: str, strike: str, opt_type: str) -> str:
         Concatenated symbol string, e.g. ``"BANKNIFTY24000CE"``.
     """
     ot = opt_type.upper()
-    if ot == "CALL":
+    if ot in {"CALL"}:
         ot = "CE"
-    elif ot == "PUT":
+    elif ot in {"PUT"}:
         ot = "PE"
     return f"{underlying.upper()}{strike}{ot}"
 

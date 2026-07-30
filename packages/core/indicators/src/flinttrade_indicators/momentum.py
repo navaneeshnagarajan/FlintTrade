@@ -142,8 +142,8 @@ def stochastic(
     Returns:
         Tuple of (%K, %D) arrays, each shape (n,). NaN where insufficient data.
     """
-    from .trend import sma
     from .utils import validate_ohlcv
+    from .trend import sma
 
     validate_ohlcv(high, low, close, min_length=k_period)
     n = len(close)
@@ -490,8 +490,8 @@ def awesome_oscillator(
     Raises:
         ValueError: If fast >= slow or either period < 1.
     """
-    from .trend import sma as _sma
     from .utils import validate_ohlcv as _val
+    from .trend import sma as _sma
 
     _val(high, low, high, min_length=slow)  # high as close proxy for length check
     if fast < 1:
@@ -545,8 +545,8 @@ def squeeze_momentum(
         - squeeze_on: Boolean array, shape (n,). True = squeeze is active
           (BB inside KC). False = squeeze is released.
     """
-    from .trend import linreg as _linreg, sma as _sma
     from .volatility import bollinger_bands, keltner_channels
+    from .trend import sma as _sma, linreg as _linreg
 
     validate_ohlcv(high, low, close, min_length=max(bb_period, kc_period, mom_period))
 

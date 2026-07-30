@@ -15,7 +15,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from .tax_report import TaxableTransaction, TaxReportGenerator
+from .tax_report import TaxReportGenerator, TaxableTransaction
 
 logger = logging.getLogger("flinttrade.data.tax_routes")
 

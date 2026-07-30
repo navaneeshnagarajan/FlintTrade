@@ -15,50 +15,8 @@ repository = "https://github.com/navaneeshnagarajan/FlintTrade"
 # `python scripts/check-site-url-consistency.py` (and
 # tests/test_site_url_single_source.py in CI) fail on any surface that disagrees.
 site_url = "https://flinttrade.vercel.app"
-
-# ============================================================
-# Supported versions — the single source of truth
-# ============================================================
-#
-# Two distinct numbers per runtime, and the difference matters:
-#
-#   *_requires  the FLOOR: the lowest version that actually works. It is set by
-#               what the dependency tree genuinely needs, never by ambition.
-#               Raising a floor past the real requirement breaks installs for
-#               people whose platform is fine, and buys nothing.
-#   *_target    what this repo develops against and moves toward. It tracks the
-#               current stable release, so upgrades arrive continuously instead
-#               of accumulating into a migration.
-#
-# Where each is actually exercised, because a version nobody runs is an
-# aspiration rather than a guarantee:
-#   floor   - every per-push lane in test.yml. This is the version users must be
-#             able to run, so it is the one that gates a merge.
-#   target  - the python-target-version and node-target-version legs of
-#             nightly-cross-platform.yml, fail-soft by design: a target is ahead
-#             of the supported floor, so a break there is information, not a
-#             reason to block a release.
-#
-# The bootstrap pins are a third thing again, and deliberately conservative -
-# they are what the one-line installer downloads onto a stranger's machine.
-#
-# tests/test_minimum_requirements_single_source.py fails, naming the file and
-# line, when any tracked surface disagrees with the values below.
-[requirements]
-# Every packages/*/*/pyproject.toml declares this floor (14 of them).
 python_requires = ">=3.12"
-python_target = "3.14"
-# react-router@8 declares engines.node ">=22.22.0" and is the binding constraint;
-# nothing else in the tree needs more. Node 22 is in maintenance, so the target
-# runs ahead of the floor rather than dragging it up.
-node_requires = ">=22.22.0"
-node_target = "24"
-# Derived, not chosen: the floor is whichever release provides Python >= 3.12.
-# Ubuntu 24.04 LTS ships 3.12; 22.04 ships 3.10 and cannot meet the floor with
-# its system interpreter. The one-line installer sidesteps this entirely by
-# provisioning its own managed Python, so this constrains source installs only.
-os_requires = "Ubuntu 24.04 LTS or any platform providing Python >= 3.12"
-os_target = "Ubuntu 26.04 LTS"
+node_requires = ">=22.0.0"
 
 [packages]
 core = { path = "packages/core/core", lang = "python", description = "Framework, CLI, OpenAlgo API client, config, models, logging" }

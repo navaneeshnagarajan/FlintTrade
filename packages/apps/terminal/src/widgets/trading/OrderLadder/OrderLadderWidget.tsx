@@ -470,7 +470,7 @@ function OrderLadderWidget(props: Props) {
   // reproduces its 5-level view: params { tick: 0.05 }).
   const persistParams = useCallback((patch: Record<string, unknown>) => {
     props.api?.updateParameters({ ...patch });
-  }, [props.api]);
+  }, [panelParams, props.api]);
 
   const handleExchangeChange = useCallback((next: string) => {
     setExchange(next);

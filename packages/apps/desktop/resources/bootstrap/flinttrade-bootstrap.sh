@@ -14,8 +14,8 @@ corepack_js=$4
 tools=$5
 pnpm_version_expected=$6
 
-[ "$pnpm_version_expected" = "10.34.5" ] || {
-  printf '%s\n' "bootstrap entrypoint requires pnpm 10.34.5" >&2
+[ "$pnpm_version_expected" = "9.15.0" ] || {
+  printf '%s\n' "bootstrap entrypoint requires pnpm 9.15.0" >&2
   exit 66
 }
 
@@ -48,10 +48,10 @@ printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-python\t48\tInstalling managed Pytho
 "$uv" python install 3.12
 "$uv" venv --relocatable --python 3.12 .venv
 "$uv" sync --frozen --all-packages --no-install-package flinttrade-ticks
-printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 10.34.5 dependencies\n'
+printf 'FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 9.15.0 dependencies\n'
 pnpm_version=$("$node" "$corepack_js" pnpm --version)
-[ "$pnpm_version" = "10.34.5" ] || {
-  printf 'Corepack resolved pnpm %s; expected 10.34.5.\n' "$pnpm_version" >&2
+[ "$pnpm_version" = "9.15.0" ] || {
+  printf 'Corepack resolved pnpm %s; expected 9.15.0.\n' "$pnpm_version" >&2
   exit 66
 }
 "$node" "$corepack_js" pnpm install --frozen-lockfile

@@ -190,15 +190,6 @@ def test_windows_owner_lock_rejects_unsafe_descriptor_security(
     assert lock_path.exists()
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason=(
-        "the substitution is staged with rename-over-an-open-handle plus an unprivileged symlink, "
-        "neither of which Windows provides; "
-        "test_windows_owner_lock_rejects_post_lock_identity_rebinding covers the same product "
-        "branch on every host"
-    ),
-)
 def test_windows_owner_lock_rejects_post_lock_path_substitution(tmp_path, monkeypatch) -> None:
     events: list[str] = []
     security = _FakeWindowsDescriptorSecurity(events)
@@ -223,50 +214,6 @@ def test_windows_owner_lock_rejects_post_lock_path_substitution(tmp_path, monkey
     assert lock.is_locked is False
     assert original_path.exists()
     assert lock_path.is_symlink()
-    assert substitute.read_text(encoding="utf-8") == "do-not-touch"
-
-
-def test_windows_owner_lock_rejects_post_lock_identity_rebinding(tmp_path, monkeypatch) -> None:
-    """The lock path must still name the locked inode after hardening.
-
-    The sibling test stages the rebinding with real filesystem calls, which only
-    POSIX permits: Windows refuses to rename, replace or unlink a file while a
-    handle without ``FILE_SHARE_DELETE`` is open on it (WinError 5/32), and it
-    refuses unprivileged symlink creation. This test therefore drives the same
-    product branch through the one call the post-lock revalidation actually
-    makes - ``os.lstat`` on the lock path - so the rejection stays covered on
-    every host.
-    """
-    events: list[str] = []
-    security = _FakeWindowsDescriptorSecurity(events)
-    lock_path = tmp_path / "owner.lock"
-    substitute = tmp_path / "substitute"
-    substitute.write_text("do-not-touch", encoding="utf-8")
-    lock_path.write_bytes(b"")
-    real_lstat = os.lstat
-    rebound = False
-
-    def rebinding_lstat(path, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if rebound and os.fspath(path) == os.fspath(lock_path):
-            # The kernel now resolves the lock path to a different inode.
-            return real_lstat(substitute)
-        return real_lstat(path, *args, **kwargs)
-
-    def rebind_path() -> None:
-        nonlocal rebound
-        rebound = True
-
-    _install_fake_msvcrt(monkeypatch, events, on_lock=rebind_path)
-    monkeypatch.setattr(owner_file_lock, "_windows_descriptor_security", lambda: security)
-    monkeypatch.setattr(owner_file_lock.os, "lstat", rebinding_lstat)
-    lock = owner_file_lock._WindowsOwnerSafeFileLock(lock_path, timeout=0, mode=0o600)
-
-    with pytest.raises(owner_file_lock.UnsafeFileLockPathError):
-        lock._acquire()
-
-    assert events == ["prepare", "owner", "lock", "harden", "owner", "dacl", "unlock"]
-    assert lock.is_locked is False
-    assert lock_path.exists()
     assert substitute.read_text(encoding="utf-8") == "do-not-touch"
 
 

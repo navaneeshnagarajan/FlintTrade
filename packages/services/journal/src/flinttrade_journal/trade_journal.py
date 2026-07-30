@@ -431,7 +431,7 @@ def _coerce_timestamp(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value if value.tzinfo is not None else value.replace(tzinfo=IST)
     try:
-        dt = datetime.fromisoformat(str(value))
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=IST)
@@ -1169,7 +1169,7 @@ class TradeJournal:
                     if isinstance(raw_ts, (int, float)):
                         entry_time = datetime.fromtimestamp(raw_ts, tz=IST)
                     else:
-                        entry_time = datetime.fromisoformat(str(raw_ts))
+                        entry_time = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
                 except (ValueError, OSError):
                     entry_time = datetime.now(IST)
 

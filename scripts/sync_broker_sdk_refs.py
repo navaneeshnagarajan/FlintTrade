@@ -205,7 +205,7 @@ def select_pypi_artifact(files: list[Mapping[str, Any]]) -> Mapping[str, Any]:
             return (2, filename)
         return (3, filename)
 
-    return min(files, key=score)
+    return sorted(files, key=score)[0]
 
 
 def download_pypi_artifact(

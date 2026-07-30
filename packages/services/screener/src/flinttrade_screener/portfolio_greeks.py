@@ -24,14 +24,13 @@ from typing import NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
-from flinttrade_core.models import OptionGreek
-
 from .greeks import (
     OptionPosition,
     PortfolioGreeks,
     PortfolioGreeksResult,
     PositionGreeks,
 )
+from flinttrade_core.models import OptionGreek
 
 logger = logging.getLogger("flinttrade.screener.portfolio_greeks")
 

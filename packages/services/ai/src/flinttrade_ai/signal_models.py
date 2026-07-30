@@ -11,7 +11,7 @@ import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Literal, TypeAlias
 
 
@@ -219,4 +219,4 @@ class SignalConfig:
 
 def now_iso() -> str:
     """Return current UTC time as an ISO-8601 string."""
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()

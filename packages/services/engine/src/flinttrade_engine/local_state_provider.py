@@ -18,7 +18,7 @@ import threading
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 from zoneinfo import ZoneInfo
@@ -396,14 +396,14 @@ def _finite_number(value: Any, *, field: str, default: float = 0.0) -> float:
 
 def _utc_datetime(value: datetime | str | None = None) -> datetime:
     if value is None:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
     if isinstance(value, str):
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     else:
         parsed = value
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _utc_iso(value: datetime | str | None = None) -> str:
@@ -820,7 +820,7 @@ class OrderLifecycleLedger:
         # Retained for source compatibility with the earlier provider constructor.
         self._storage_provider = storage_provider
         self._lock_provider = lock_provider
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._audit_receipt_verifier = audit_receipt_verifier
         self._lock = threading.RLock()
         self._outcome_resolution_lock = threading.RLock()

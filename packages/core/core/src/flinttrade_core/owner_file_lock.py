@@ -6,28 +6,12 @@ import errno
 import os
 import pathlib
 import stat
-import time
 from typing import Protocol, cast
 
 from filelock import UnixFileLock, WindowsFileLock
 
 if os.name != "nt":
     import fcntl
-
-_OPEN_DENIAL_RETRY_SECONDS = 2.0
-"""How long a Windows open denial is treated as contention before it turns fatal.
-
-Windows reports a *transient* sharing violation - a foreign handle opened
-without ``FILE_SHARE_WRITE``, or a delete still pending - through the very same
-``EACCES`` that a *permanent* ACL denial uses, and ``os.open`` discards the
-``NTSTATUS`` that would tell them apart. Treating every denial as fatal turned a
-momentary foreign handle on the lock file into an immediate hard failure, which
-is what made first-run provisioning fail and then succeed on the next attempt.
-
-Retrying briefly recovers the transient case. Re-raising once the budget is
-spent keeps a genuine denial fast and fatal, rather than stalling for the
-caller's whole (possibly 30 s) acquisition timeout.
-"""
 
 
 class UnsafeFileLockPathError(RuntimeError):
@@ -129,28 +113,6 @@ def _validate_windows_lock_descriptor(
 class _WindowsOwnerSafeFileLock(WindowsFileLock):
     """Windows byte-range lock with descriptor-bound ownership and ACL proof."""
 
-    def _open_denial_is_still_contention(self, exc: OSError) -> bool:
-        """Report whether an open denial may still be transient contention.
-
-        The first denial starts a short budget; while it lasts the caller polls
-        again, exactly as it already does for ``FileExistsError`` and a busy
-        byte-range lock. Once the budget is spent the denial is reported as the
-        permission failure it is.
-
-        Args:
-            exc: The error raised by :func:`os.open` on the lock path.
-
-        Returns:
-            ``True`` while the denial should be retried as contention.
-        """
-        if exc.errno not in (errno.EACCES, errno.EPERM):
-            return False
-        deadline = getattr(self, "_open_denial_deadline", None)
-        if deadline is None:
-            deadline = time.monotonic() + _OPEN_DENIAL_RETRY_SECONDS
-            self._open_denial_deadline = deadline
-        return time.monotonic() < deadline
-
     def _open_validated_candidate(
         self,
     ) -> tuple[int, bool, os.stat_result | None] | None:
@@ -188,10 +150,7 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
             except FileExistsError:
                 return None
             except OSError as exc:
-                if self._open_denial_is_still_contention(exc):
-                    return None
                 raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
-            self._open_denial_deadline = None
             return descriptor, True, None
 
         _assert_safe_windows_lock_stat(path_stat)
@@ -200,10 +159,7 @@ class _WindowsOwnerSafeFileLock(WindowsFileLock):
         except FileNotFoundError:
             return None
         except OSError as exc:
-            if self._open_denial_is_still_contention(exc):
-                return None
             raise UnsafeFileLockPathError("owner-validated lock path is unsafe") from exc
-        self._open_denial_deadline = None
         return descriptor, False, path_stat
 
     def _acquire(self) -> None:

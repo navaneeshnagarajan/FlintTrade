@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, jsonify, request
-
 from flinttrade_gateway.log_safety import log_ref
 
 logger = logging.getLogger("flinttrade.shortcuts")

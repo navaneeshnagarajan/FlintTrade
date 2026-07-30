@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getWsService } from "@/services/websocket";
 import { useConnectionStore } from "@/stores/connectionStore";
 import type { WsInstrument, WsTick, WsMode } from "@/types/api";
@@ -17,10 +17,7 @@ function useTickBatcher(): [
   const pendingRef = useRef<TickMap>({});
   const rafRef = useRef<number>(0);
 
-  // Referentially stable: it closes over refs and a setState only, so it can be
-  // an honest dependency of the tick-subscription effect below. Left unmemoised
-  // it changed identity every render, which is why that effect had to omit it.
-  const pushTick = useCallback((key: string, tick: WsTick) => {
+  const pushTick = (key: string, tick: WsTick) => {
     pendingRef.current[key] = tick;
     if (!rafRef.current) {
       rafRef.current = requestAnimationFrame(() => {
@@ -30,7 +27,7 @@ function useTickBatcher(): [
         setTicks((prev) => ({ ...prev, ...batch }));
       });
     }
-  }, []);
+  };
 
   // Cancel any pending rAF on unmount to prevent stale setState calls.
   useEffect(() => {
@@ -89,7 +86,7 @@ export default function useWebSocket(
       unsubTick();
       unsubStatus();
     };
-  }, [enabled, wsUrl, apiKey, pushTick]);
+  }, [enabled, wsUrl, apiKey]);
 
   // Manage instrument subscriptions
   useEffect(() => {

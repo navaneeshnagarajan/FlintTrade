@@ -25,42 +25,17 @@ platform. Pick whatever you already run.
 
 | Tool | Version | How we manage it |
 |---|---|---|
-| **Python** | `>=3.12` (we develop against 3.14) | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
-| **Node.js** | `>=22.22.0` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
+| **Python** | `>=3.12,<3.14` | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
+| **Node.js** | `>=22` | [`pnpm`](https://pnpm.io/) via Corepack — the repo pins the package manager. |
 | **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick engine. |
 
-Those floors are not maintained here. `[requirements]` in
-[`flint.toml`](flint.toml) is the single source of truth for every version floor
-and target, and `tests/test_minimum_requirements_single_source.py` fails — naming
-the file and the disagreeing value — when a tracked surface drifts from it.
-
 `uv` and `pnpm` install cleanly on Linux, macOS, and Windows; follow each tool's
-own cross-platform instructions.
-
-The repo pins **pnpm 10.34.5** in the `packageManager` field of the root
-`package.json`, integrity-hashed, and `packageManagerStrictVersion` in
-`pnpm-workspace.yaml` turns a mismatch into an error rather than a warning. Any
-of these gets you that version:
+own cross-platform instructions. Enable Corepack once so the pinned `pnpm`
+version is used automatically:
 
 ```bash
-npm install -g pnpm@10.34.5   # explicit install, works on every Node version
-pnpm --version                # must print 10.34.5
+corepack enable
 ```
-
-```bash
-corepack enable               # optional: only if your Node still bundles Corepack
-```
-
-Corepack is an accelerator, not a prerequisite. Node unbundled it in 25.0.0, so
-on a current Node there is no `corepack` binary to enable and the command simply
-fails — install pnpm directly instead. `scripts/ft.py` already resolves whichever
-you have, trying Corepack, then a pinned `pnpm` on `PATH`, then
-`npx --yes pnpm@10.34.5`.
-
-> All pnpm settings live in `pnpm-workspace.yaml`. From pnpm 10 onwards `.npmrc`
-> is read for registry and auth keys only, so a resolution setting parked there
-> silently does nothing — that is why the repo carries no `.npmrc` at the root or
-> in `packages/apps/terminal`.
 
 ### Install
 
@@ -130,19 +105,9 @@ file.
 Lint and type-checks are part of CI too — run them locally before pushing:
 
 ```bash
-python scripts/ft.py lint                          # ruff (Python) + the terminal's react-hooks gate
+python scripts/ft.py lint                          # ruff over all Python packages
 pnpm --filter @flinttrade/terminal typecheck       # tsc --noEmit, strict mode
 ```
-
-`ft.py lint` runs both languages: `ruff check packages/ tests/`, then the
-terminal's `lint` script (`eslint src --max-warnings=0`, enforcing
-`react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps`) — the same
-command CI runs in `node-core-tests`. Both halves always run, so one report
-cannot hide the other, and the first non-zero exit code is returned. A missing
-toolchain is reported and skipped rather than failed: ruff is optional for a
-terminal-only change exactly as Node is for a Python-only one. The hooks half is
-skipped with a hint if `packages/apps/terminal/node_modules` is absent, so run
-`pnpm install --frozen-lockfile` first if you want it.
 
 ## How to build
 
@@ -242,15 +207,11 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
 ### Python
 
 - Follow PEP 8. Lint with `ruff` — `python scripts/ft.py lint` (POSIX alias:
-  `make lint`) must be clean before commit. That target lints the terminal too;
-  see [TypeScript and React](#typescript-and-react) below.
+  `make lint`) must be clean before commit.
 - Type hints on every public function and class attribute.
 - Google-style docstrings (`Args:`, `Returns:`, `Raises:`).
 - Absolute imports only — no `from .foo import bar`.
-- The floor is Python 3.12 (`python_requires` in `flint.toml`); we develop and
-  run CI against `python_target`, currently 3.14. Write to the floor — `StrEnum`
-  and other 3.11+ features are used deliberately — but do not assume 3.12 is what
-  is executing.
+- Target Python 3.12. We use `StrEnum` and other 3.11+ features deliberately.
 
 ### TypeScript and React
 
@@ -258,13 +219,7 @@ Tiny doc fixes (typos, broken links) can skip the PR for now and go straight to 
 - All new code lives in `.ts` or `.tsx`. No new `.js` or `.jsx` files.
 - Functional components and hooks only.
 - Use `shadcn/ui` components and `lucide-react` icons. No raw HTML `<button>`, `<input>`, or `<dialog>`.
-- Every widget is registered as a FlexLayout panel in `widgetFactory.tsx`.
-- ESLint gates the hooks rules at zero warnings — `react-hooks/rules-of-hooks`
-  and `react-hooks/exhaustive-deps` are errors, not suggestions. Run
-  `pnpm --filter @flinttrade/terminal lint` (or `python scripts/ft.py lint`,
-  which runs it alongside ruff) before you push; CI runs the same command in
-  `node-core-tests`. Silence a dependency-array warning only with a comment
-  explaining why the dependency is genuinely stable.
+- Every widget is registered as a Dockview panel in `widgetFactory.tsx`.
 
 ### British English (prose, not code)
 

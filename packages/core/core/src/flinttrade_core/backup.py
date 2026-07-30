@@ -33,7 +33,7 @@ import json
 import logging
 import tarfile
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -379,7 +379,7 @@ class WorkspaceBackup:
         backup_dir.mkdir(parents=True, exist_ok=True)
 
         def _run_backup() -> None:
-            ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             out = backup_dir / f"flint_backup_{ts}.tar.gz"
             try:
                 self.create_backup(out)
@@ -388,7 +388,7 @@ class WorkspaceBackup:
                 return
 
             # Prune old backups.
-            cutoff = datetime.now(UTC).timestamp() - retention_days * 86400
+            cutoff = datetime.now(timezone.utc).timestamp() - retention_days * 86400
             for old in backup_dir.glob("*.tar.gz"):
                 if old.stat().st_mtime < cutoff:
                     old.unlink(missing_ok=True)
@@ -475,7 +475,7 @@ class WorkspaceBackup:
         """
         total_bytes = sum(f.stat().st_size for f in files)
         return {
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "workspace_dir": str(self._workspace_dir),
             "file_count": len(files),
             "workspace_size_mb": round(total_bytes / (1024 * 1024), 3),

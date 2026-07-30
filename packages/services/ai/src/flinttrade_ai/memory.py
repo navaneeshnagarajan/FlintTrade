@@ -18,7 +18,7 @@ import random
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Protocol
 
@@ -116,7 +116,7 @@ class MemoryEntry(BaseModel):
     importance: float = Field(default=_DEFAULT_CATEGORY_IMPORTANCE, ge=0.0, le=1.0)
     recency_delta: int = Field(default=0, ge=0)
     access_count: int = Field(default=0, ge=0)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed: datetime | None = None
     embedding: list[float] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -562,7 +562,7 @@ class TradedMemory:
         if entry.layer is None:
             raise ValueError("Persistent memory entries require a MemoryLayer")
         entry.access_count += 1
-        entry.last_accessed = datetime.now(UTC)
+        entry.last_accessed = datetime.now(timezone.utc)
         collection = self._get_collection(entry.layer)
         collection.update(
             ids=[entry.id],
@@ -611,7 +611,7 @@ class TradedMemory:
         else:
             normalised_importance = initial_importance(layer) / 100.0
         persisted_importance = normalised_importance * 100.0
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
 
         entry = MemoryEntry(
             id=memory_id,

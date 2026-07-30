@@ -13,7 +13,7 @@ from typing import Any
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
 
-from ._indicators import ema, macd, rsi
+from ._indicators import rsi, ema, macd
 from ._mixin import _BacktestStrategyMixin
 
 logger = logging.getLogger("flinttrade.backtest.strategies.ml_ensemble_voter")

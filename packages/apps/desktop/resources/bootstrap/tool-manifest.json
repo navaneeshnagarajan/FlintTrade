@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "generatedFrom": {
     "node": {
-      "sha256": "778ac5b2fcdbd68d9c0ae9f4310674faa3af0910bd0d18e7f6597787c40a3e39",
+      "sha256": "158f2e2c580c610b9cef2853f3444c7369b84cc23e7ad764e3c40e9d60d82ea0",
       "signature": {
-        "fingerprint": "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
-        "keySha256": "9c51e903b0da945fc21947fd6fce8fb4d72bc20ddf82e8f0aada694e9688447d",
-        "sha256": "169f1452c14cd653247408352f1534b9f31e3d13f9c6399c3977368095e11eda",
-        "url": "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt.sig"
+        "fingerprint": "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4",
+        "keySha256": "05a4080f671246086a2590bfad78965dcceaa823df1786f4ef52d58e5e3362b8",
+        "sha256": "259516b9d4fe69474373c02ac684edfe20c7675e6070e26a55fb514016f138d9",
+        "url": "https://nodejs.org/dist/v22.23.1/SHASUMS256.txt.sig"
       },
-      "url": "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt"
+      "url": "https://nodejs.org/dist/v22.23.1/SHASUMS256.txt"
     },
     "uv": {
       "sha256": "8ef7fe76d67be3330e18e8d6ecbbb68f7a1ae46fe31198008170e911ad025c6a",
@@ -17,44 +17,44 @@
     }
   },
   "node": {
-    "version": "22.23.2",
+    "version": "22.23.1",
     "assets": {
       "darwin-arm64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-darwin-arm64/bin/node",
-        "sha256": "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz"
+        "executable": "node-v22.23.1-darwin-arm64/bin/node",
+        "sha256": "ef28d8fab2c0e4314522d4bb1b7173270aa3937e93b92cb7de79c112ac1fa953",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-arm64.tar.gz"
       },
       "darwin-x64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-darwin-x64/bin/node",
-        "sha256": "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz"
+        "executable": "node-v22.23.1-darwin-x64/bin/node",
+        "sha256": "b8da981b8a0b1241b70249204916da76c63573ddf5814dbd2d1e41069105cb81",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-x64.tar.gz"
       },
       "linux-arm64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-linux-arm64/bin/node",
-        "sha256": "013b59cfd2819703a6f4a14ab891fc46fc2a4e3f5bcd92de3fb4929b43e35b30",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-arm64.tar.gz"
+        "executable": "node-v22.23.1-linux-arm64/bin/node",
+        "sha256": "543fa39e57d4c07855939459a323f4deb9a79dd1bb45e6e99458b0f2de10db8d",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-arm64.tar.gz"
       },
       "linux-x64": {
         "archive": "tar.gz",
-        "executable": "node-v22.23.2-linux-x64/bin/node",
-        "sha256": "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz"
+        "executable": "node-v22.23.1-linux-x64/bin/node",
+        "sha256": "7a8cb04b4a1df4eaf432125324b81b29a088e73570a23259a8de1c65d07fc129",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-x64.tar.gz"
       },
       "win32-x64": {
         "archive": "zip",
-        "executable": "node-v22.23.2-win-x64/node.exe",
-        "sha256": "1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97",
-        "url": "https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip"
+        "executable": "node-v22.23.1-win-x64/node.exe",
+        "sha256": "7df0bc9375723f4a86b3aa1b7cc73342423d9677a8df4538aca31a049e309c29",
+        "url": "https://nodejs.org/dist/v22.23.1/node-v22.23.1-win-x64.zip"
       }
     }
   },
   "pnpm": {
-    "version": "10.34.5",
-    "integrity": "sha512-a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
-    "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e"
+    "version": "9.15.0",
+    "integrity": "sha512-76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+    "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
   },
   "uv": {
     "version": "0.11.16",

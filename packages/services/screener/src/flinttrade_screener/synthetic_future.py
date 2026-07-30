@@ -49,6 +49,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+
 # ---------------------------------------------------------------------------
 # Core formula functions
 # ---------------------------------------------------------------------------

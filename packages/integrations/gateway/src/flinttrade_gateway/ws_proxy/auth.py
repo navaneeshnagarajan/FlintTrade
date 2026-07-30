@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import Awaitable, Callable
+from typing import Callable, Awaitable
 
 logger = logging.getLogger("flinttrade.gateway.ws_proxy.auth")
 

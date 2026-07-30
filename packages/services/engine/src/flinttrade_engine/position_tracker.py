@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -38,7 +38,7 @@ def _now_ist() -> datetime:
 
         return datetime.now(ZoneInfo("Asia/Kolkata"))
     except Exception:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
 
 def _now_iso() -> str:
@@ -406,7 +406,7 @@ class PositionTracker:
             if recovered:
                 logger.info("[RECOVERY] Reloaded %d open position(s) from DuckDB.", recovered)
         except Exception as exc:
-            logger.exception("[RECOVERY] Failed to reload positions: %s", exc)
+            logger.error("[RECOVERY] Failed to reload positions: %s", exc, exc_info=True)
 
     def _persist(self, pos: _LivePosition) -> None:
         """Upsert a single position to DuckDB.

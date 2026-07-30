@@ -561,7 +561,7 @@ function PositionsWidget(props: WidgetProps) {
       setView(next);
       props.api.updateParameters({ view: next });
     },
-    [props.api, view],
+    [panelParams, props.api, view],
   );
 
   const handleGroupChange = useCallback(
@@ -569,7 +569,7 @@ function PositionsWidget(props: WidgetProps) {
       setGroupMode(next);
       props.api.updateParameters({ group: next });
     },
-    [props.api],
+    [panelParams, props.api],
   );
 
   const handleExport = useCallback(async () => {

@@ -462,44 +462,14 @@ def _record_transition_guard(path: Path) -> Iterator[None]:
     )
     try:
         with _RECORD_TRANSITION_THREAD_LOCK, guard:
-            _reassert_held_transition_lock(guard_path)
+            # OwnerSafeFileLock proves the descriptor and directory entry are
+            # the same regular single-link inode. This second descriptor-bound
+            # check also requires the exact POSIX mode / Windows DACL without
+            # ever chmoding a path supplied by another process.
+            _read_hardened_recovery_file(guard_path, max_bytes=1)
             yield
     except UnsafeFileLockPathError as exc:
         raise OSError("recovery-record transition lock is unsafe") from exc
-
-
-def _reassert_held_transition_lock(guard_path: Path) -> None:
-    """Re-prove the owner policy of an already-held transition-lock inode.
-
-    ``OwnerSafeFileLock`` proves the descriptor and directory entry are the
-    same regular single-link inode. What still needs proving on top of that
-    differs by platform, and the difference is not cosmetic.
-
-    POSIX: the lock's own checks cover uid, regular-file and single-link, but
-    NOT the exact 0600 mode. A second descriptor-bound read supplies that,
-    without ever chmoding a path supplied by another process. ``flock`` is
-    advisory, so the lock the caller holds does not impede the read.
-
-    Windows: the lock ALREADY proves current-user ownership and the exact DACL,
-    on the locked descriptor itself - see ``_validate_windows_lock_descriptor``
-    in ``owner_file_lock.py``. So the read proves nothing new here, and worse,
-    it cannot succeed: the lock is ``msvcrt.locking`` over byte 0, and Windows
-    refuses a second descriptor's read of a byte-range-locked region with
-    ``PermissionError`` [Errno 13].
-
-    Reading unconditionally therefore failed EVERY recovery-record transition
-    on Windows - the guard deadlocked against its own lock - which is why
-    ``create_pending_application_pid_record``, ``publish_cleanup_complete_proof``
-    and ``finalise_source_cleanup`` all returned False there. Callers that must
-    prove the lock file pre-existed still read it *before* acquiring the lock,
-    where no byte range is held and the read succeeds on every platform.
-
-    Args:
-        guard_path: The transition-lock path whose lock the caller already holds.
-    """
-    if os.name == "nt":
-        return
-    _read_hardened_recovery_file(guard_path, max_bytes=1)
 
 
 def _read_hardened_recovery_file(path: Path, *, max_bytes: int) -> bytes:
@@ -756,21 +726,7 @@ def _capture_recovery_process_identity(
 
 
 def _recovery_process_group_liveness(pgid: int) -> str:
-    """Probe a containment group without delivering a signal.
-
-    Windows has no numeric containment group to probe: the desktop guardian
-    contains its tree in an anonymous kill-on-close Job Object, which cannot be
-    reopened by identifier and which cannot outlive its last member. Every PID
-    recorded for that job - the guardian and the promoted application, which are
-    the same process on Windows - has already been individually proved dead or
-    reused by the caller before this probe runs, so the job is provably gone.
-
-    Args:
-        pgid: The recorded containment-group identifier to probe.
-
-    Returns:
-        ``dead``, ``reused``, or ``alive``.
-    """
+    """Probe a POSIX containment group without delivering a signal."""
     if os.name == "nt":
         return _RECOVERY_PROCESS_DEAD
     try:
@@ -914,19 +870,12 @@ def recover_stale_desktop_record(
             for pid in process_pids:
                 states[pid] = inspect(pid, shell=False)
 
-            if record.spawn_contained:
+            if record.spawn_contained and os.name != "nt":
                 # Legacy packaged-shell v4 groups were led by the launcher; source
                 # guardian v4 groups are led by the promoted application.
                 # Proving both possible group identifiers dead preserves
                 # the union during migration. A reused leader proves its
                 # former numeric group generation is gone.
-                #
-                # The probe is consulted on every platform. Windows containment
-                # is an anonymous kill-on-close Job Object rather than a numeric
-                # group, so its probe reports "dead" (see
-                # _recovery_process_group_liveness) - but gating the loop on the
-                # platform instead of the probe silently dropped the containment
-                # question, so a future Windows probe could never be honoured.
                 containment_pids = {record.guardian_pid}
                 if record.application_pid is not None:
                     containment_pids.add(record.application_pid)
@@ -1443,7 +1392,7 @@ def finalise_source_cleanup(
         if any(pid_alive(pid) for pid in recorded_pids):
             return False
         with _record_transition_guard(record_path):
-            _reassert_held_transition_lock(guard_path)
+            _read_owner_cleanup_file(guard_path, max_bytes=1)
             try:
                 record_payload = _read_owner_cleanup_file(record_path, max_bytes=4096)
             except FileNotFoundError:
@@ -1470,7 +1419,7 @@ def finalise_source_cleanup(
                     return False
                 if any(pid_alive(pid) for pid in recorded_pids):
                     return False
-                _reassert_held_transition_lock(guard_path)
+                _read_owner_cleanup_file(guard_path, max_bytes=1)
                 try:
                     record_path.lstat()
                 except FileNotFoundError:

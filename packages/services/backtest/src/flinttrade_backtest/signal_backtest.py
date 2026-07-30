@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Sequence
 
 try:
@@ -348,7 +348,7 @@ def _coerce_timestamp(value: Any, index: int) -> float:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     if isinstance(value, datetime):
-        dt = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        dt = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
         return dt.timestamp()
     if isinstance(value, str):
         try:
@@ -362,7 +362,7 @@ def _coerce_timestamp(value: Any, index: int) -> float:
                 f"bar at index {index} has an unparseable timestamp: {value!r}"
             ) from exc
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+            dt = dt.replace(tzinfo=timezone.utc)
         return dt.timestamp()
     raise ValueError(f"bar at index {index} is missing a usable 'timestamp' value")
 

@@ -70,7 +70,7 @@ import threading
 import traceback
 from collections import defaultdict, deque, namedtuple
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.engine.sandbox_executor")
@@ -493,7 +493,7 @@ def _build_sandbox_namespace(
 
     def _make_signal_fn(action: str):
         def _signal(*, price: float = 0.0, **metadata: Any) -> None:
-            ts = datetime.now(UTC).isoformat()
+            ts = datetime.now(timezone.utc).isoformat()
             captured_signals.append(
                 SignalEvent(
                     timestamp=ts,
@@ -919,7 +919,7 @@ class SandboxExecutor:
 
         def _make_signal_fn(action: str):
             def _signal(*, price: float = 0.0, **metadata: Any) -> None:
-                ts = datetime.now(UTC).isoformat()
+                ts = datetime.now(timezone.utc).isoformat()
                 captured_signals.append(
                     SignalEvent(
                         timestamp=ts,

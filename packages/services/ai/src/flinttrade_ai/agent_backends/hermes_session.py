@@ -502,7 +502,7 @@ class _HermesACPClient:
         rid, fut = await self.send_request(method, params)
         try:
             msg = await asyncio.wait_for(fut, timeout)
-        except TimeoutError as exc:
+        except (asyncio.TimeoutError, TimeoutError) as exc:
             self._pending.pop(rid, None)
             raise TimeoutError(f"hermes ACP method {method!r} timed out after {timeout}s") from exc
         if "error" in msg:
@@ -947,7 +947,7 @@ class HermesACPSession(AgentSession):
                 msg = await asyncio.wait_for(
                     client.next_inbound(), timeout=min(_NOTIFICATION_POLL, remaining)
                 )
-            except TimeoutError:
+            except (asyncio.TimeoutError, TimeoutError):
                 if not client.is_alive() and not prompt_future.done():
                     error = "hermes ACP subprocess exited unexpectedly"
                     break

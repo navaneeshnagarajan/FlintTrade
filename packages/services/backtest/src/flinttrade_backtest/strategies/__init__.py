@@ -563,10 +563,7 @@ from .composite import (  # noqa: E402
 # STRATEGY_REGISTRY and get_strategy() — for the BaseBacktestStrategy-based classes
 # ---------------------------------------------------------------------------
 try:
-    # Relative first: this package is also loaded standalone by file path, where
-    # __package__ is unset and the relative form raises. The absolute form is the
-    # except-branch fallback, so rewriting this makes both branches identical.
-    from ..base_strategy import BaseBacktestStrategy as _BaseBacktestStrategy  # noqa: E402,TID252
+    from ..base_strategy import BaseBacktestStrategy as _BaseBacktestStrategy  # noqa: E402
 except ImportError:
     from flinttrade_backtest.base_strategy import BaseBacktestStrategy as _BaseBacktestStrategy  # type: ignore[no-redef]  # noqa: E402
 

@@ -90,7 +90,7 @@ class EventRBIPolicy(BaseStrategy, _BacktestStrategyMixin):
                     self._bars_held = 0
                     self._entry_price = 0.0
                     return
-                if self._position == -1 and bar.close >= self._stop:
+                elif self._position == -1 and bar.close >= self._stop:
                     self._buy()
                     self._flat()
                     self._bars_held = 0

@@ -48,7 +48,8 @@ import math
 import numpy as np
 from pydantic import BaseModel, Field
 
-from flinttrade_indicators.momentum import macd as _macd, rsi as _rsi
+from flinttrade_indicators.momentum import macd as _macd
+from flinttrade_indicators.momentum import rsi as _rsi
 from flinttrade_indicators.trend import ema as _ema
 
 logger = logging.getLogger("flinttrade.screener.multi_timeframe")

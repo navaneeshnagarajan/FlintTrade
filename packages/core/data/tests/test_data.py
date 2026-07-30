@@ -798,10 +798,6 @@ class TestAuditLogger:
         assert audit.list_audit_files() == ["audit_2020-01-01.jsonl.gz"]
         assert audit.read_day("2020-01-01")[0]["event_type"] == "OLD_EVENT"
 
-    @pytest.mark.skipif(
-        os.name == "nt",
-        reason="AuditLogger._fsync_dir is a documented no-op on Windows, so no directory barrier is emitted",
-    )
     def test_compression_durability_order_is_file_replace_dir_unlink_dir(self, tmp_path, monkeypatch):
         import stat
 

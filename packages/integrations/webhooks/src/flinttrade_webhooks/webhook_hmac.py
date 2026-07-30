@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 
+
 _SIGNED_ENVELOPE_VERSION = "flinttrade-webhook-v1"
 
 

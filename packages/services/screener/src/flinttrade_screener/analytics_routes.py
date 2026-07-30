@@ -363,7 +363,6 @@ def analytics_seasonality() -> Any:
         422: Series too short to compute any seasonality statistics.
     """
     import pandas as pd  # noqa: PLC0415
-
     from flinttrade_indicators.seasonality import (  # noqa: PLC0415
         build_seasonality_matrix,
         compute_day_of_month_seasonality,

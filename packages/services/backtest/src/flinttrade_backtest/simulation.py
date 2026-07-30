@@ -59,18 +59,18 @@ logger = logging.getLogger("flinttrade.backtest.simulation")
 # ---------------------------------------------------------------------------
 
 try:
-    from .base_strategy import (  # type: ignore[import]
-        BaseBacktestStrategy,
-    )
     from .engine import (  # type: ignore[import]
         BacktestEngine,
         EngineConfig,
         EngineResult,
     )
+    from .base_strategy import (  # type: ignore[import]
+        BaseBacktestStrategy,
+    )
 except ImportError:
     # Allow direct execution / tests that add the src dir to sys.path
-    from flinttrade_backtest.base_strategy import BaseBacktestStrategy  # type: ignore[import]
     from flinttrade_backtest.engine import BacktestEngine, EngineConfig, EngineResult  # type: ignore[import]
+    from flinttrade_backtest.base_strategy import BaseBacktestStrategy  # type: ignore[import]
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +507,7 @@ class SimulationEngine:
                 recovery_time_bars=None,
                 phase_returns={},
                 events_impact=[],
-                final_equity=Decimal(0),
+                final_equity=Decimal("0"),
                 trades=[],
             )
 
@@ -565,7 +565,7 @@ class SimulationEngine:
         max_dd = float(
             max(
                 (pt.drawdown_pct for pt in engine_result.equity_curve),
-                default=Decimal(0),
+                default=Decimal("0"),
             )
         )
 
@@ -573,7 +573,7 @@ class SimulationEngine:
         recovery_bars = self._compute_recovery_time(equity_by_bar)
 
         final_equity = engine_result.final_equity
-        survived = final_equity > Decimal(0)
+        survived = final_equity > Decimal("0")
 
         logger.info(
             "SimulationEngine: scenario=%r bars=%d survived=%s max_dd=%.2f%%"
@@ -887,12 +887,12 @@ class SimulationEngine:
             eq_before = (
                 equity_by_bar[bar_idx - 1]
                 if bar_idx > 0 and bar_idx - 1 < len(equity_by_bar)
-                else Decimal(0)
+                else Decimal("0")
             )
             eq_after = (
                 equity_by_bar[bar_idx]
                 if bar_idx < len(equity_by_bar)
-                else Decimal(0)
+                else Decimal("0")
             )
             pnl_impact = eq_after - eq_before
             for event in events:

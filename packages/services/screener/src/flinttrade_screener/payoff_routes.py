@@ -410,7 +410,7 @@ def correlation_matrix() -> Any:
 
     if not returns:
         is_sample_data = True
-        use_syms = symbols_raw or None
+        use_syms = symbols_raw if symbols_raw else None
         returns = make_sample_returns(n_days=period, symbols=use_syms)
         logger.info("Correlation: using sample return data")
 

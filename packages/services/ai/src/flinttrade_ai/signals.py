@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 try:
-    import numpy as np
     from numpy.typing import NDArray
+    import numpy as np
 
     _NUMPY_AVAILABLE = True
 except ImportError:  # numpy not installed — use plain lists throughout
@@ -457,7 +457,7 @@ def _compute_turbulence_single(returns: NDArray, window: int) -> NDArray:
     return scores  # type: ignore[return-value]
 
 
-def _compute_turbulence_multi(returns: np.ndarray, window: int) -> np.ndarray:
+def _compute_turbulence_multi(returns: "np.ndarray", window: int) -> "np.ndarray":
     """Multi-asset turbulence: full Mahalanobis distance over rolling window.
 
     Requires numpy.  ``returns`` must have shape (N, M) — N bars, M assets.

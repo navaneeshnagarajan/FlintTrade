@@ -120,12 +120,6 @@ import type {
 const DEFAULT_SYMBOL = "NIFTY";
 const DEFAULT_EXCHANGE = "NSE_INDEX";
 
-/** The object form `getIntervals()` may return. Named rather than inlined as an
- * `as { … }` cast: see the parser note in `eslint.config.mjs`. */
-interface IntervalsPayload {
-  intervals?: string[];
-}
-
 const STATIC_INTERVALS: IntervalOption[] = [
   { label: "1m",  value: "1m"  },
   { label: "3m",  value: "3m"  },
@@ -624,7 +618,7 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
     setPendingPoints([]);
     setAwaitingText(null);
   // drawingsStorageKey encodes symbol+exchange — run only when the key changes
-   
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawingsStorageKey]);
 
   useEffect(() => {
@@ -1024,8 +1018,8 @@ function ChartWidget(props: Partial<WidgetProps> = {}) {
         let list: IntervalOption[] = [];
         if (Array.isArray(raw)) {
           list = raw.map((v) => typeof v === "string" ? { label: v, value: v } : (v as IntervalOption));
-        } else if ((raw as IntervalsPayload).intervals && Array.isArray((raw as IntervalsPayload).intervals)) {
-          list = ((raw as IntervalsPayload).intervals ?? []).map((v) =>
+        } else if ((raw as { intervals?: string[] }).intervals && Array.isArray((raw as { intervals: string[] }).intervals)) {
+          list = (raw as { intervals: string[] }).intervals.map((v) =>
             typeof v === "string" ? { label: v, value: v } : { label: String(v), value: String(v) },
           );
         }

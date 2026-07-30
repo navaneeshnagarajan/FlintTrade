@@ -14,39 +14,8 @@ regardless of run order.
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 from pathlib import Path
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
-
-
-def _scratch_workspace():
-    """Return the shared scratch-workspace finaliser module.
-
-    Loaded by path under a private ``sys.modules`` name rather than imported as
-    ``tests.scratch_workspace``: a per-package run binds ``tests`` to *this*
-    package's tests directory, which shadows the repo-root ``tests`` package. The
-    private name keeps exactly one registry per process, shared by every conftest
-    that creates a scratch workspace.
-
-    Returns:
-        The loaded ``tests/scratch_workspace.py`` module.
-    """
-    import importlib.util
-
-    module = sys.modules.get(_SCRATCH_MODULE_NAME)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            _SCRATCH_MODULE_NAME,
-            _REPO_ROOT / "tests" / "scratch_workspace.py",
-        )
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[_SCRATCH_MODULE_NAME] = module
-        spec.loader.exec_module(module)
-    return module
-
 
 # DBs whose on-disk engine changed DuckDB→SQLite. A persistent test workspace
 # reused across the migration may still hold the legacy DuckDB file, which
@@ -77,8 +46,6 @@ def _seed_test_master_password(base: Path) -> None:
 
 
 def _isolate_workspace() -> None:
-    register = _scratch_workspace().register
-
     # Under xdist, each worker MUST get its own workspace dir even when the
     # controller already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it).
     # Otherwise all workers share one dir and collide on the still-DuckDB engine
@@ -93,14 +60,12 @@ def _isolate_workspace() -> None:
         # (webhook_secrets.db) written under one run's cached master password
         # poison later runs with InvalidTag failures. A fresh dir per run also
         # mirrors core/core's conftest, which this override used to defeat.
-        # register(): this process created the directory, so this process removes
-        # it at session end. An operator-supplied `existing` is never registered.
-        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
+        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         _clean_legacy_scratch_dbs(Path(existing))
         return
     else:
-        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # Per-package runs (uv run pytest packages/core/data/tests …) resolve
@@ -115,14 +80,3 @@ def _isolate_workspace() -> None:
 
 
 _isolate_workspace()
-
-
-def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
-    """Release the scratch workspaces this run created.
-
-    Registered here as well as in the repo-root conftest because a per-package
-    run resolves rootdir to this package and never loads that one.
-    """
-    scratch = _scratch_workspace()
-    scratch.release_all()
-    scratch.sweep_stale()
