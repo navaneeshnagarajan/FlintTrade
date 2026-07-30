@@ -52,6 +52,15 @@ TERMINAL_PKG = "packages/apps/terminal"
 
 PINNED_PNPM_VERSION = "10.34.5"
 
+PYTEST_TIMEOUT_SECONDS = 120
+"""Per-test wall-clock bound for local runs.
+
+Higher than CI's 60 because a developer machine is usually running a browser, an
+editor and often the app itself, so the honest ceiling is looser. The point is
+not the exact number - it is that an unbounded local run turns a flaky
+process-spawning test into an indefinite hang with no output at all.
+"""
+
 # Directories that `clean` and the workspace walk never descend into: the repo
 # virtualenv, the git object store, and the gitignored .local/ scratch tree
 # (external test-dep clones and archives live there and are not ours to delete).
@@ -1073,7 +1082,28 @@ def _run_pytest(extra_flags: Sequence[str]) -> int:
     if not paths:
         fail("No test directories found.")
         return 1
-    argv = [python, "-m", "pytest", *paths, *extra_flags, "--tb=short", "--import-mode=importlib"]
+    argv = [
+        python,
+        "-m",
+        "pytest",
+        *paths,
+        *extra_flags,
+        "--tb=short",
+        "--import-mode=importlib",
+        # Match the CI invocation in .github/workflows/test.yml. Without these,
+        # a local run has NO time bound at all: a process-spawning test whose
+        # child never exits blocks the whole suite indefinitely, and because
+        # pytest prints its summary only at the end there is no output to say so
+        # - it looks identical to "still running". One such flake was measured
+        # holding a local run for 93 minutes, at 0.015s of CPU, before it was
+        # killed; the same suite finishes in 5 minutes once bounded.
+        #
+        # --timeout-method=thread uses a watchdog thread rather than SIGALRM,
+        # which cannot reliably interrupt CPython's thread.join(). That is the
+        # difference between a named test with a traceback and a silent hang.
+        f"--timeout={PYTEST_TIMEOUT_SECONDS}",
+        "--timeout-method=thread",
+    ]
     return run(argv, env=python_env(), check=False)
 
 
