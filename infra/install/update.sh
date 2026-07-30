@@ -100,9 +100,31 @@ if [ "$MODE" = "native" ]; then
     log "Building React terminal..."
 
     cd "$REPO_ROOT"
-    corepack enable
-    pnpm install --frozen-lockfile
-    pnpm --dir packages/apps/terminal run build
+
+    # Corepack is no longer distributed with Node.js from v25.0.0 onwards, so
+    # 'corepack enable' is simply absent on a current Node. It also needs write
+    # access to the Node install prefix, which a system-managed Node denies. Fall
+    # through to a version-matched pnpm on PATH and finally to npx with the
+    # pinned version — the same chain as infra/scripts/setup.sh.
+    PINNED_PNPM_VERSION="9.15.0"
+    pnpm_run() {
+        if command -v corepack >/dev/null 2>&1; then
+            corepack pnpm "$@"
+            return $?
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ "$(pnpm --version 2>/dev/null)" = "$PINNED_PNPM_VERSION" ]; then
+            pnpm "$@"
+            return $?
+        fi
+        if command -v npx >/dev/null 2>&1; then
+            npx --yes "pnpm@$PINNED_PNPM_VERSION" "$@"
+            return $?
+        fi
+        return 127
+    }
+
+    pnpm_run install --frozen-lockfile
+    pnpm_run --dir packages/apps/terminal run build
 
     ok "Terminal built"
 

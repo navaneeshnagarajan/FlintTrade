@@ -633,6 +633,17 @@ def ci_env() -> dict[str, str]:
 INIT_ARGV: tuple[str, ...] = ("-m", "flinttrade_core.cli", "init", "--provision-master-password")
 """The first-run workspace/master-password provisioning step."""
 
+INIT_VERBOSE_ARGV: tuple[str, ...] = (*INIT_ARGV, "--verbose")
+"""The same step with the full traceback enabled, for the re-run hint."""
+
+EXIT_PROVISION_DEGRADED = 3
+"""Provisioning failed but left a usable vault secret; start anyway.
+
+Mirrors ``flinttrade_core.cli.EXIT_PROVISION_DEGRADED``. Refusing to launch when
+the secret the backend actually needs is present and hardened turns a transient
+hiccup into an outage, which is precisely the first-run failure this guards.
+"""
+
 
 def provision_workspace(python: str, env: dict[str, str]) -> None:
     """Run the first-run workspace provisioning step.
@@ -653,9 +664,17 @@ def provision_workspace(python: str, env: dict[str, str]) -> None:
     code = run([python, *INIT_ARGV], env=env, check=False, quiet=True)
     if code == 0:
         return
+    if code == EXIT_PROVISION_DEGRADED:
+        warn("Workspace provisioning did not complete, but the existing credential-vault")
+        warn("secret is present and hardened, so FlintTrade is starting anyway. The cause")
+        warn("is printed above; re-run the command below if it recurs.")
+        warn(f"  {python} " + " ".join(INIT_VERBOSE_ARGV))
+        return
     fail(f"Workspace initialisation failed (exit {code}); any error above came from that step.")
-    fail("Re-run it on its own to see the full output:")
-    fail(f"  {python} " + " ".join(INIT_ARGV))
+    fail("The failure is often transient - a lock or a file still held by another")
+    fail("process - so re-running can simply succeed. Run it from this directory to")
+    fail("keep the same interpreter and module search path, and add the traceback:")
+    fail(f"  {python} " + " ".join(INIT_VERBOSE_ARGV))
     raise SystemExit(code)
 
 
