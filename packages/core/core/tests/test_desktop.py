@@ -832,6 +832,21 @@ def test_desktop_local_ai_finishing_at_the_deadline_remains_unproved(
     assert "local-ai" not in owner._completed
 
 
+# Shutdown deadline that is expected to EXPIRE mid-teardown. It has to satisfy
+# two things at once: still be in the future when the shutdown strategy is first
+# invoked, and elapse while that strategy is blocked. At 20ms it did not - a
+# loaded machine could reach the strategy after the deadline had already passed,
+# taking a different branch and failing on an assertion unrelated to the subject.
+# The strategy blocks for _LIVENESS_S, so anything comfortably below that still
+# expires exactly where the test intends.
+_EXPIRING_DEADLINE_S = 0.5
+
+# Waits that exist only so the test does not race thread start-up. These are not
+# the property under test, so they are generous: a real hang still fails, a busy
+# runner no longer does.
+_LIVENESS_S = 10.0
+
+
 @pytest.mark.unit
 def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
     monkeypatch: pytest.MonkeyPatch,
@@ -848,7 +863,7 @@ def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
         strategy_calls.append(len(strategy_calls) + 1)
         if len(strategy_calls) == 1:
             strategy_started.set()
-            assert release_strategy.wait(timeout=2)
+            assert release_strategy.wait(timeout=_LIVENESS_S)
 
     tracker = SimpleNamespace(wait_for_idle=lambda _timeout: True)
     flask_app = Flask("desktop-retained-shutdown-owner")
@@ -895,15 +910,15 @@ def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
             desktop.serve(
                 5100,
                 ready_writer=lambda _message: None,
-                shutdown_deadline=time.monotonic() + 0.02,
+                shutdown_deadline=time.monotonic() + _EXPIRING_DEADLINE_S,
             )
         except BaseException as exc:  # noqa: BLE001 - asserted below
             failures.append(exc)
 
     serve_thread = threading.Thread(target=run_serve)
     serve_thread.start()
-    assert strategy_started.wait(timeout=1)
-    serve_thread.join(timeout=0.2)
+    assert strategy_started.wait(timeout=_LIVENESS_S)
+    serve_thread.join(timeout=_LIVENESS_S)
     try:
         assert serve_thread.is_alive() is False
         assert len(failures) == 1
@@ -916,13 +931,13 @@ def test_desktop_shutdown_timeout_retains_exact_owner_and_rejoins_one_worker(
         lease.release.assert_not_called()
 
         with pytest.raises(desktop.DesktopBackendShutdownIncomplete) as retried:
-            owner.release(deadline=time.monotonic() + 0.02)
+            owner.release(deadline=time.monotonic() + _EXPIRING_DEADLINE_S)
         assert retried.value.recovery_owner is owner
         assert strategy_calls == [1]
         lease.release.assert_not_called()
 
         release_strategy.set()
-        owner.release(deadline=time.monotonic() + 1.0)
+        owner.release(deadline=time.monotonic() + _LIVENESS_S)
 
         assert strategy_calls == [1, 2]
         release_lease.assert_called_once_with(lease)
