@@ -36,7 +36,8 @@ import { PresetSection }     from "@/tools/Settings/PresetSection";
 import { UpdatesSection }    from "@/tools/Settings/UpdatesSection";
 import { SupportSection }    from "@/tools/Settings/SupportSection";
 import { TickerSettings }    from "@/routes/settings/TickerSettings";
-import { SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
+import { SECTIONS, DEMO_HIDDEN_SECTIONS, type SectionId } from "@/tools/Settings/settingsConfig";
+import { isPublicDemoBuild } from "@/lib/demoSession";
 import { useSettingsState } from "@/hooks/useSettingsState";
 
 const SETTINGS_DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
@@ -165,6 +166,18 @@ export default function SettingsRoute() {
   }
 
   function renderContent(): JSX.Element {
+    // Hiding these from the nav is not enough on its own: activeSection can be
+    // restored from a deep link or persisted state, so the render path has to
+    // refuse them too.
+    if (isPublicDemoBuild() && DEMO_HIDDEN_SECTIONS.includes(activeSection)) {
+      return (
+        <div className="p-6 text-sm text-muted-foreground">
+          This section is unavailable in the hosted demo because it collects real
+          credentials. Install FlintTrade to connect a broker — your keys then stay
+          on your own machine and are never typed into a public website.
+        </div>
+      );
+    }
     switch (activeSection) {
       case "profile":    return <ProfileSection />;
       case "general":    return <GeneralSection    settings={general}    onChange={updateGeneral} />;
