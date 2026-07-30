@@ -1240,7 +1240,7 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0
-    assert events == [
+    startup = [
         "validate-parent",
         "acquire-lease",
         "recover-record",
@@ -1253,9 +1253,20 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
         "watch-sigterm",
         "core:['--port', '0']:True",
     ]
-
-    cleanup_callbacks[0]()
-    assert events[-1] == "release-lease"
+    if os.name == "nt":
+        # Windows contains the tree in-process, so this process is itself the
+        # guardian and nothing outlives run_desktop_backend to hand the
+        # workspace lease back. The release is therefore part of the terminal
+        # sequence here - but strictly after the backend has returned, never
+        # while it is still running. Asserting the whole list also pins that it
+        # happens exactly once.
+        assert events == [*startup, "release-lease"]
+    else:
+        # POSIX forks an external guardian which owns the release, so this
+        # process must still be holding the lease when the backend returns.
+        assert events == startup
+        cleanup_callbacks[0]()
+        assert events[-1] == "release-lease"
 
 
 @pytest.mark.unit
@@ -1398,6 +1409,9 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
             events.append("release-lease")
 
     monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    # The Windows terminal cleanup consults the launch's record path, so pin its
+    # absence rather than inheriting whatever the developer's shell exported.
+    monkeypatch.delenv(entry.SIDECAR_RECORD_PATH_ENV, raising=False)
     monkeypatch.setattr(entry.sys, "frozen", True, raising=False)
     monkeypatch.setattr(
         entry,
@@ -1432,7 +1446,7 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0
-    assert events == [
+    startup = [
         "validate-parent",
         "acquire-lease",
         "recover-record",
@@ -1442,6 +1456,10 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
         "announce-pid",
         "core:['--port', '0']:True",
     ]
+    # A stale sys.frozen must not skip a single check on either platform. On
+    # Windows the in-process guardian additionally hands its own lease back once
+    # the backend returns; the ordering is what matters, so pin the full list.
+    assert events == ([*startup, "release-lease"] if os.name == "nt" else startup)
 
 
 @pytest.mark.unit
@@ -1737,6 +1755,73 @@ def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
     _write_hardened_text(record, pending)
     assert entry.clear_pending_application_pid_record(environ=environ) is True
     assert guarded == [record, record]
+
+
+@pytest.mark.unit
+def test_held_transition_lock_reassertion_never_fails_against_its_own_lock(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Every guarded path must be able to re-prove the lock inode it holds.
+
+    Windows byte-range-locks byte 0 of the guard file, so an unconditional
+    second-descriptor read of it raises PermissionError. Reading anyway turned
+    every recovery-record transition and every managed cleanup into a silent
+    refusal on Windows, because the callers swallow OSError as "not proved".
+    """
+    record = tmp_path / "desktop_backend.pid"
+    guard = record.with_name(f".{record.name}.lock")
+
+    with entry._record_transition_guard(record):
+        entry._reassert_held_transition_lock(guard)
+        if os.name == "nt":
+            # Pin the platform hazard itself, so the skip above can never be
+            # widened back into an unconditional read without this failing.
+            with pytest.raises(PermissionError):
+                entry._read_hardened_recovery_file(guard, max_bytes=1)
+        else:
+            # The POSIX branch must stay a real read: the lock proves uid,
+            # regular-file and single-link, but not the exact 0600 mode.
+            guard.chmod(0o644)
+            with pytest.raises(OSError):
+                entry._reassert_held_transition_lock(guard)
+            guard.chmod(0o600)
+
+
+@pytest.mark.unit
+def test_managed_cleanup_reasserts_the_lock_it_holds_rather_than_reading_it(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Managed cleanup must prove the guard pre-existed without self-deadlocking.
+
+    The pre-lock read is what proves the guardian created the lock; the two
+    in-lock proofs must go through the platform-aware re-assertion instead.
+    """
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(proof, f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n")
+    guard = record.with_name(f".{record.name}.lock")
+    reasserted: list[Path] = []
+    original = entry._reassert_held_transition_lock
+
+    def trace(path: Path) -> None:
+        reasserted.append(path)
+        original(path)
+
+    monkeypatch.setattr(entry, "_reassert_held_transition_lock", trace)
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+    # One re-assertion from the transition guard itself, one from the cleanup
+    # body; the absent-record branch is not reached for a promoted record.
+    assert reasserted == [guard, guard]
+    assert record.exists() is False
+    assert proof.exists() is False
 
 
 @pytest.mark.unit
