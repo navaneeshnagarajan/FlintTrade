@@ -1,16 +1,129 @@
 {
-  "extends": ["config:recommended"],
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "FlintTrade dependency automation.",
+    "config:recommended already covers every ecosystem Renovate can detect on its own: npm/pnpm (the root manifest, the four workspace manifests, pnpm-lock.yaml and pnpm-workspace.yaml overrides), pep621 (14 pyproject.toml files plus uv.lock), cargo (packages/core/ticks), github-actions (every `uses:` in .github/workflows) and the Docker images in Dockerfile and docker-compose.yml.",
+    "What it could NOT see, and what the customManagers below now cover, are the desktop bootstrap's own toolchain pins: the Node runtime, pnpm release and uv build recorded in packages/apps/desktop/resources/bootstrap/tool-manifest.json and in the generator that produces it. Those are hash-and-signature pinned, so a Renovate PR against them is a work order, not a merge candidate - see the bootstrap rule's prBodyNotes.",
+    "Deliberately NOT managed: requirements.lock, supply-chain/audit-tooling.lock and brokers.lock. requirements.lock is a hashed EXPORT of uv.lock (scripts/check-uv-lock-export-drift.py fails when the two disagree) and brokers.lock is derived from it (scripts/check-brokers-lock.py), so they must be regenerated from their source, never bumped in place. Renovate's pip_requirements manager does not match a .lock suffix, so no explicit ignore is needed - this note exists so nobody adds one."
+  ],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
+  ],
   "timezone": "Asia/Kolkata",
   "schedule": ["before 9am on Monday"],
+  "configMigration": true,
+  "osvVulnerabilityAlerts": true,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Bootstrap toolchain: the Node runtime the Electron shell downloads on first run. Pinned in tool-manifest.json and in the generator's own constant, so both move in one PR.",
+      "managerFilePatterns": [
+        "/^packages/apps/desktop/resources/bootstrap/tool-manifest\\.json$/",
+        "/^packages/apps/desktop/scripts/generate-bootstrap-tool-manifest\\.mjs$/"
+      ],
+      "matchStrings": [
+        "\"node\":\\s*\\{\\s*\"version\":\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "const nodeVersion = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "node",
+      "datasourceTemplate": "node-version",
+      "versioningTemplate": "node"
+    },
+    {
+      "customType": "regex",
+      "description": "Bootstrap toolchain: the pnpm release the Electron shell enables via corepack. Must stay identical to the root packageManager field, which the npm manager updates - scripts/check-toolchain-freshness.py fails when the two drift.",
+      "managerFilePatterns": [
+        "/^packages/apps/desktop/resources/bootstrap/tool-manifest\\.json$/"
+      ],
+      "matchStrings": [
+        "\"pnpm\":\\s*\\{\\s*\"version\":\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "pnpm",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Bootstrap toolchain: the uv build that provisions the managed Python. Pinned in tool-manifest.json and in the generator's own constant.",
+      "managerFilePatterns": [
+        "/^packages/apps/desktop/resources/bootstrap/tool-manifest\\.json$/",
+        "/^packages/apps/desktop/scripts/generate-bootstrap-tool-manifest\\.mjs$/"
+      ],
+      "matchStrings": [
+        "\"uv\":\\s*\\{\\s*\"version\":\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "const uvVersion = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "astral-sh/uv",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
   "packageRules": [
     {
+      "description": "Broker SDKs move real money. Never automerged, always founder-reviewed, and a bump also needs brokers.lock regenerated (the sha256 and licence evidence are pinned per version).",
       "matchPackageNames": ["dhanhq", "upstox-python-sdk", "neo-api-client", "growwapi"],
       "groupName": "python brokers (manual review only)",
       "automerge": false,
-      "labels": ["needs-founder-review", "needs-sandbox-smoke-test"]
+      "labels": ["needs-founder-review", "needs-sandbox-smoke-test"],
+      "prBodyNotes": [
+        "**brokers.lock is not updated by this PR.** After reviewing, regenerate the pinned evidence and re-run the gates:",
+        "```sh",
+        "uv sync",
+        "python scripts/check-brokers-lock.py",
+        "python scripts/check-broker-sdk-licences.py",
+        "python scripts/generate-notice.py",
+        "```"
+      ]
     },
     {
+      "description": "JavaScript never automerges: the terminal is the order-entry surface and pnpm-lock.yaml changes have to be read.",
       "matchManagers": ["npm", "pnpm"],
+      "automerge": false
+    },
+    {
+      "description": "engines.node is NOT Renovate's to raise. flint.toml [requirements].node_requires is the single source of truth for the floor and tests/test_minimum_requirements_single_source.py pins five package.json files to it. The floor is set by what the dependency tree genuinely needs (react-router@8's >=22.22.0 today), so a Renovate bump here breaks installs on platforms that are fine. Move flint.toml first; scripts/check-toolchain-freshness.py is what notices when the floor reaches end of life.",
+      "matchDepTypes": ["engines"],
+      "enabled": false
+    },
+    {
+      "description": "Bootstrap toolchain pins are hash- and signature-verified, so the version string is only half the change. A Renovate PR here is a work order: it will fail `pnpm --filter @flinttrade/desktop verify:bootstrap-manifest` until the checksums, the detached signature and the mirrored release key are refreshed and the manifest is REGENERATED. Never hand-edit a digest.",
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": [
+        "packages/apps/desktop/resources/bootstrap/tool-manifest.json",
+        "packages/apps/desktop/scripts/generate-bootstrap-tool-manifest.mjs"
+      ],
+      "automerge": false,
+      "labels": ["bootstrap-pin", "needs-manifest-regeneration"],
+      "prBodyNotes": [
+        "**This PR bumps a version string only. The manifest must be regenerated before it can merge.**",
+        "`verify:bootstrap-manifest` (supply-chain.yml) fails closed until the checked-in checksum sources match the new version, and `key-freshness.yml` fails if the mirrored Node release key is not currently valid for it. Node releases are signed by whichever release manager cut them, so a Node bump can also require a NEW mirrored key.",
+        "```sh",
+        "# 1. refresh the checksum sources under packages/apps/desktop/resources/bootstrap/checksums/",
+        "#    (SHASUMS256.txt, SHASUMS256.txt.sig and the signer's .asc for Node; sha256.sum for uv)",
+        "# 2. regenerate - never hand-edit a digest:",
+        "node packages/apps/desktop/scripts/generate-bootstrap-tool-manifest.mjs --verify-signature",
+        "# 3. re-run the gates:",
+        "pnpm --filter @flinttrade/desktop verify:bootstrap-manifest",
+        "python scripts/check-node-release-key-freshness.py",
+        "python scripts/check-toolchain-freshness.py",
+        "```"
+      ]
+    },
+    {
+      "description": "The bootstrap Node pin may drift forward inside its release line automatically, but a LINE move (22 -> 24) is a deliberate decision: it has to agree with flint.toml [requirements].node_target and it usually arrives with a different release manager's signing key. scripts/check-toolchain-freshness.py is what raises the line move.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "pnpm and the root packageManager field are the same pin in two files; group them so they can never merge apart.",
+      "matchDepNames": ["pnpm"],
+      "groupName": "pnpm toolchain",
+      "automerge": false
+    },
+    {
+      "description": "Action digests are pinned to a SHA with a version comment. Renovate maintains both; keep it non-automerged so a supply-chain change to a third-party action is always read by a human.",
+      "matchManagers": ["github-actions"],
       "automerge": false
     }
   ]

@@ -411,9 +411,15 @@ def test_native_promoter_harnesses_are_required_after_bundle() -> None:
         assert isinstance(document, dict), path
         workflows[path.name] = document
 
+    # The two verification lanes pin ubuntu-24.04, matching flint.toml
+    # [requirements].os_requires. They package `--dir` and verify the security
+    # contract; they publish nothing, so the build host's glibc never reaches a
+    # user. desktop-release.yml's Linux build legs stay on ubuntu-22.04/-arm on
+    # purpose - they compile flinttrade-fs-promoter.node and ship it inside the
+    # AppImage, which makes the build host's glibc the installer's real floor.
     required_posix = {
-        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-22.04"),
-        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-22.04"),
+        ("test.yml", "electron-desktop-tests"): (None, "ubuntu-24.04"),
+        ("supply-chain.yml", "electron-package-verification"): (None, "ubuntu-24.04"),
         ("nightly-cross-platform.yml", "desktop-electron-package-smoke"): (
             "runner.os != 'Windows'",
             None,
