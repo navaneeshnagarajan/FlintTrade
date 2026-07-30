@@ -463,10 +463,30 @@ def _record_transition_guard(path: Path) -> Iterator[None]:
     try:
         with _RECORD_TRANSITION_THREAD_LOCK, guard:
             # OwnerSafeFileLock proves the descriptor and directory entry are
-            # the same regular single-link inode. This second descriptor-bound
-            # check also requires the exact POSIX mode / Windows DACL without
-            # ever chmoding a path supplied by another process.
-            _read_hardened_recovery_file(guard_path, max_bytes=1)
+            # the same regular single-link inode. What still needs proving on
+            # top of that differs by platform, and the difference is not
+            # cosmetic.
+            #
+            # POSIX: the lock's own checks cover uid, regular-file and
+            # single-link, but NOT the exact 0600 mode. A second
+            # descriptor-bound read supplies that, without ever chmoding a path
+            # supplied by another process. flock is advisory, so the lock this
+            # block holds does not impede the read.
+            #
+            # Windows: the lock ALREADY proves current-user ownership and the
+            # exact DACL, on the locked descriptor itself - see
+            # _validate_windows_lock_descriptor in owner_file_lock.py. So the
+            # read proves nothing new here, and worse, it cannot succeed: the
+            # lock is msvcrt.locking over byte 0, the guard file is one byte
+            # long, and Windows refuses a second descriptor's read of a
+            # byte-range-locked region with PermissionError [Errno 13].
+            #
+            # Reading unconditionally therefore failed EVERY recovery-record
+            # transition on Windows - the guard deadlocked against its own
+            # lock - which is why create_pending_application_pid_record and
+            # publish_cleanup_complete_proof returned False there.
+            if os.name != "nt":
+                _read_hardened_recovery_file(guard_path, max_bytes=1)
             yield
     except UnsafeFileLockPathError as exc:
         raise OSError("recovery-record transition lock is unsafe") from exc
