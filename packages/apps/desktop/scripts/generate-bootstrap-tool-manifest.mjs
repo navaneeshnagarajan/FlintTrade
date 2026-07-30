@@ -242,12 +242,27 @@ function assertGpgReportedACurrentlyValidKey(verified) {
   }
 }
 
+// Git for Windows ships an MSYS gpg that cannot parse a "C:\..." argument: it
+// reads the drive letter as a relative segment, prepends the working directory,
+// and dies with "no writable keyring found" before verifying anything. That made
+// --verify-signature unusable on a Windows developer host - the one place a
+// maintainer would run it by hand - so signature verification only ever ran in
+// CI. cygpath performs the conversion that build expects; its absence means gpg
+// is a native build that wants the Windows path unchanged.
+function gpgHomedirArgument(home) {
+  if (process.platform !== "win32") return home;
+  const converted = spawnSync("cygpath", ["-u", home], { encoding: "utf8" });
+  if (converted.status !== 0 || !converted.stdout?.trim()) return home;
+  return converted.stdout.trim();
+}
+
 function verifyNodeSignature(options) {
   const home = mkdtempSync(path.join(tmpdir(), "flinttrade-node-signature-"));
+  const homeArgument = gpgHomedirArgument(home);
   try {
     const imported = spawnSync(
       "gpg",
-      ["--homedir", home, "--batch", "--status-fd", "1", "--import", options.nodeReleaseKey],
+      ["--homedir", homeArgument, "--batch", "--status-fd", "1", "--import", options.nodeReleaseKey],
       { encoding: "utf8" },
     );
     if (imported.status !== 0) throw new Error(imported.stderr || "Could not import the pinned Node release key.");
@@ -255,7 +270,7 @@ function verifyNodeSignature(options) {
       "gpg",
       [
         "--homedir",
-        home,
+        homeArgument,
         "--batch",
         "--status-fd",
         "1",

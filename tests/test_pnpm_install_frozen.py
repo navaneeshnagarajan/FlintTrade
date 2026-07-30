@@ -128,9 +128,24 @@ def test_pnpm_workspace_files_present() -> None:
 
 
 @pytest.mark.unit
-def test_npmrc_strict_peer_deps() -> None:
+def test_strict_peer_deps_declared_where_pnpm_will_read_it() -> None:
+    """Strict peer resolution must be declared in BOTH supported locations.
+
+    pnpm 9 reads ``strict-peer-dependencies`` from ``.npmrc``; pnpm 10 and 11
+    read only auth and registry settings from there and take everything else
+    from ``pnpm-workspace.yaml``. Asserting ``.npmrc`` alone - as this test used
+    to - pins the location pnpm is walking away from: deleting the YAML line
+    would silently disable strict peer resolution while the test stayed green.
+
+    Both are asserted until the pnpm 10 bump lands, at which point ``.npmrc``
+    can go and this test drops to the YAML alone.
+    """
     npmrc = (_REPO_ROOT / ".npmrc").read_text(encoding="utf-8")
-    assert "strict-peer-dependencies=true" in npmrc
+    assert "strict-peer-dependencies=true" in npmrc, ".npmrc lost strict-peer-dependencies (pnpm 9 reads this)"
+    workspace = (_REPO_ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8")
+    assert "strictPeerDependencies: true" in workspace, (
+        "pnpm-workspace.yaml lost strictPeerDependencies (pnpm 10+ reads this)"
+    )
 
 
 @pytest.mark.unit
