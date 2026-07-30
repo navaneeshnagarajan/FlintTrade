@@ -396,6 +396,13 @@ runs:
 - Linux x64 on `ubuntu-22.04`;
 - Linux ARM64 on `ubuntu-22.04-arm`.
 
+The two Linux legs stay on 22.04 deliberately, and are the one place in CI
+exempt from the supported-runner floor in `flint.toml`. They compile the
+native addon that ships inside the installer, so the runner's glibc becomes
+the minimum glibc of the published binary — raising the runner would raise
+the floor for every user. The jobs that compile nothing (`validate`,
+`publish`, `electron-desktop-tests`) track the supported floor instead.
+
 Each job installs the frozen JavaScript workspace, verifies the bootstrap tool
 manifest, bundles Electron, builds the installer and verifies the packaged
 security contract. Publication refuses an existing non-empty release, creates
