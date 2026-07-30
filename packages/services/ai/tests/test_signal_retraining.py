@@ -322,9 +322,25 @@ def test_run_all_cancels_before_training_and_stops_roster(
 
     results = retrainer.run_all()
 
+    # The roster stopped after one instrument and nothing trained - that is what
+    # this test is named for and what it asserts.
     assert len(results) == 1
-    assert results[0].reason == "Cancelled"
     train.assert_not_called()
+
+    # The exact cancellation wording is deliberately NOT asserted here, because
+    # this fixture cannot determine it. `fetcher` flips `cancelled` from inside
+    # the worker thread, so the fetch is by construction still running at that
+    # moment; whether the poll in `_fetch_bars` observes the worker alive or
+    # already exited decides between "Cancellation pending: data fetch still
+    # running" and "Cancelled". Both are correct - the first is arguably more
+    # correct here - and under parallel load the slower one wins often enough to
+    # fail roughly one run in three.
+    #
+    # Each wording is pinned deterministically where it can be: the pending form
+    # by test_run_once_reports_pending_cancellation_until_single_fetch_owner_stops,
+    # which gates the fetch on explicit events, and the terminal form by the
+    # cancellation paths that never start a fetch at all.
+    assert results[0].reason.startswith("Cancel")
 
 
 def test_run_once_reports_pending_cancellation_until_single_fetch_owner_stops(tmp_path: Path) -> None:
