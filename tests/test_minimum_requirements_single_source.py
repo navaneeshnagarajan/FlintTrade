@@ -116,3 +116,26 @@ def test_the_readme_documents_the_declared_floors() -> None:
     readme = (_REPO_ROOT / "readme.md").read_text(encoding="utf-8")
     for value in (declared["python_requires"], declared["node_requires"]):
         assert value in readme, f"readme.md does not document the declared floor {value!r}"
+
+
+@pytest.mark.unit
+def test_the_declared_targets_are_actually_exercised_somewhere() -> None:
+    """A target no lane runs is an aspiration dressed up as a guarantee.
+
+    Every per-push lane runs the FLOOR, which is right - that is the version
+    users must be able to run. But before this guard existed, ``python_target``
+    and ``node_target`` were declared as "what CI builds" while nothing anywhere
+    executed either of them.
+    """
+    declared = _requirements()
+    nightly = (_REPO_ROOT / ".github/workflows/nightly-cross-platform.yml").read_text(encoding="utf-8")
+    python_target = str(declared["python_target"])
+    node_target = str(declared["node_target"])
+    assert f"python-version: '{python_target}'" in nightly, (
+        f"flint.toml declares python_target {python_target!r}, but no nightly lane installs it. "
+        "Either exercise the target or stop declaring it."
+    )
+    assert f"node-version: '{node_target}'" in nightly, (
+        f"flint.toml declares node_target {node_target!r}, but no nightly lane installs it. "
+        "Either exercise the target or stop declaring it."
+    )

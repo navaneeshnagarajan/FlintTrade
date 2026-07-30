@@ -193,7 +193,16 @@ def _report_provision_failure(ws: Workspace, exc: BaseException, *, verbose: boo
         for line in _describe_cause(exc, ws):
             print(line, file=sys.stderr)
     if verbose:
-        traceback.print_exception(exc, file=sys.stderr)
+        # Rendered and redacted rather than printed directly, so that EVERY byte
+        # this command writes leaves through one redactor.
+        #
+        # Defence in depth, stated honestly: no leak was demonstrated here.
+        # traceback.print_exception renders str(exc), not repr(exc), and the
+        # UnicodeDecodeError this path can raise names a byte offset without the
+        # content. But it was the only branch bypassing _redact, and "the summary
+        # is redacted, the traceback is not" is a distinction no future caller
+        # should have to know about.
+        print(_redact("".join(traceback.format_exception(exc)), ws), file=sys.stderr, end="")
     else:
         print(
             f"  Re-run with --verbose (or {_VERBOSE_ERRORS_ENV}=1) for the full traceback.",

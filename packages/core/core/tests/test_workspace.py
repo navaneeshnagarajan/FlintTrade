@@ -1051,6 +1051,48 @@ class TestWorkspaceInit:
         assert "do-not-touch" not in result.stderr
         assert outside.read_text(encoding="utf-8") == "do-not-touch"
 
+    def test_master_password_cli_verbose_traceback_never_prints_the_secret(self, tmp_path):
+        """--verbose output must not contain the secret either.
+
+        A forward guard rather than proof of a past leak: this passes against the
+        old unredacted traceback too, because ``traceback.print_exception``
+        renders ``str(exc)`` and ``UnicodeDecodeError`` names a byte offset
+        without the content. It pins the property so a future change - an
+        exception type that does carry the value, or a switch to ``repr`` - is
+        caught rather than shipped.
+        """
+        from flinttrade_core.workspace import Workspace
+
+        workspace = tmp_path / "ws"
+        ws = Workspace(home_dir=workspace)
+        ws.initialise()
+        secret_bytes = b"REAL-MASTER-PASSWORD-abc123deadbeef" + bytes([0xFF, 0xFE])
+        password_file = workspace / "master_password"
+        password_file.write_bytes(secret_bytes)
+        password_file.chmod(0o600)
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "flinttrade_core.cli",
+                "init",
+                "--provision-master-password",
+                "--verbose",
+            ],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert "Traceback" in result.stderr, "--verbose should still render a traceback"
+        assert "REAL-MASTER-PASSWORD" not in result.stdout
+        assert "REAL-MASTER-PASSWORD" not in result.stderr
+        assert password_file.read_bytes() == secret_bytes
+
     def test_master_password_cli_failure_never_prints_a_non_utf8_secret(self, tmp_path):
         """A non-UTF-8 secret must not reach stderr through a decode error.
 
