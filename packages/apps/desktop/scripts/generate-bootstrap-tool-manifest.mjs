@@ -142,8 +142,8 @@ export function generateManifest({ nodeChecksumContent, nodeReleaseKeyContent, n
   }
   const packageMetadata = JSON.parse(packageContent);
   const packageManager = /^pnpm@(\d+\.\d+\.\d+)\+(sha512)\.([0-9a-f]+)$/.exec(packageMetadata.packageManager ?? "");
-  if (!packageManager || packageManager[1] !== "9.15.0") {
-    throw new Error("The repository packageManager must integrity-pin pnpm 9.15.0.");
+  if (!packageManager || packageManager[1] !== "10.34.5") {
+    throw new Error("The repository packageManager must integrity-pin pnpm 10.34.5.");
   }
   const nodeChecksums = checksumTable(nodeChecksumContent, "Node");
   const uvChecksums = checksumTable(uvChecksumContent, "uv");

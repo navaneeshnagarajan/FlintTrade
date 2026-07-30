@@ -50,7 +50,7 @@ DEV_LOG_DIR = REPO_ROOT / ".local" / "dev-logs"
 DESKTOP_PKG = "packages/apps/desktop"
 TERMINAL_PKG = "packages/apps/terminal"
 
-PINNED_PNPM_VERSION = "9.15.0"
+PINNED_PNPM_VERSION = "10.34.5"
 
 # Directories that `clean` and the workspace walk never descend into: the repo
 # virtualenv, the git object store, and the gitignored .local/ scratch tree

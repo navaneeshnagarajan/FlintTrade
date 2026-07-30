@@ -14,7 +14,7 @@ import { createUpdateState } from "./state";
 
 const manifest = {
   node: { assets: {}, version: "22.23.1" },
-  pnpm: { integrity: "sha512-test", packageManager: "pnpm@9.15.0+sha512.test", version: "9.15.0" },
+  pnpm: { integrity: "sha512-test", packageManager: "pnpm@10.34.5+sha512.test", version: "10.34.5" },
   schemaVersion: 1,
   uv: { assets: {}, version: "0.11.16" },
 } as unknown as BootstrapToolManifest;

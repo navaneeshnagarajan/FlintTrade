@@ -7,7 +7,7 @@ FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$FLINTTRADE_DIR"
 
 # Keep in step with package.json packageManager and scripts/install/*.
-PINNED_PNPM_VERSION="9.15.0"
+PINNED_PNPM_VERSION="10.34.5"
 
 GREEN='\033[32m'
 RED='\033[31m'

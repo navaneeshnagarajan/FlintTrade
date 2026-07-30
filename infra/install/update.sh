@@ -106,7 +106,7 @@ if [ "$MODE" = "native" ]; then
     # access to the Node install prefix, which a system-managed Node denies. Fall
     # through to a version-matched pnpm on PATH and finally to npx with the
     # pinned version — the same chain as infra/scripts/setup.sh.
-    PINNED_PNPM_VERSION="9.15.0"
+    PINNED_PNPM_VERSION="10.34.5"
     pnpm_run() {
         if command -v corepack >/dev/null 2>&1; then
             corepack pnpm "$@"

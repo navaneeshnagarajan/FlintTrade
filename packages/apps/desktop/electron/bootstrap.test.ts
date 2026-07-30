@@ -105,7 +105,7 @@ const manifest: BootstrapToolManifest = {
       },
     },
   },
-  pnpm: { integrity: "sha512-test", packageManager: "pnpm@9.15.0+sha512.test", version: "9.15.0" },
+  pnpm: { integrity: "sha512-test", packageManager: "pnpm@10.34.5+sha512.test", version: "10.34.5" },
   uv: {
     version: "0.11.16",
     assets: {
@@ -162,7 +162,7 @@ async function writeRepositoryShape(
   }
   await writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@9.15.0+sha512.test" }),
+    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@10.34.5+sha512.test" }),
   );
   for (const file of ["pyproject.toml", "uv.lock", "pnpm-lock.yaml"]) await writeFile(path.join(root, file), file);
   await writeFile(path.join(root, "packages", "apps", "terminal", "package.json"), '{"name":"@flinttrade/terminal"}');
@@ -745,7 +745,7 @@ async function fixture(options: FixtureOptions = {}) {
             await writeFile(pytest, platform === "win32" ? "pytest launcher" : "#!/bin/sh\nexit 0\n");
             if (platform !== "win32") await chmod(pytest, 0o755);
           }
-          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 9.15.0 dependencies", "stdout");
+          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 10.34.5 dependencies", "stdout");
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tbuilding-terminal\t84\tBuilding the terminal for production", "stdout");
           return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
@@ -992,7 +992,7 @@ describe("first-run source bootstrap", () => {
     const buildCall = test.calls.find((call) => call.command === "/bin/sh");
     expect(buildCall?.args[0]).toMatch(/resources\/bootstrap\/flinttrade-bootstrap\.sh$/);
     expect(buildCall?.args[1]).toMatch(/FlintTrade\.candidate-1-[0-9a-f-]{36}$/);
-    expect(buildCall?.args.at(-1)).toBe("9.15.0");
+    expect(buildCall?.args.at(-1)).toBe("10.34.5");
     expect(buildCall?.args.some((argument) => argument.endsWith("corepack.js"))).toBe(true);
     expect(test.calls.some((call) => call.command.endsWith("corepack.cmd"))).toBe(false);
     expect(test.calls.some((call) => /cargo/i.test([call.command, ...call.args].join(" ")))).toBe(false);

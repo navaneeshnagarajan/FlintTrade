@@ -2,7 +2,7 @@
   "name": "flinttrade-monorepo",
   "version": "0.0.1",
   "private": true,
-  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "engines": {
     "node": ">=22.22.0"
   },
@@ -13,44 +13,10 @@
     "packages/apps/desktop"
   ],
   "//": [
-    "brace-expansion overrides (GHSA-mh99-v99m-4gvg, advisory range <=5.0.7): the selectors below",
-    "cover EVERY vulnerable range, not just the ones the tree happens to resolve today, so a future",
-    "transitive copy cannot silently reintroduce the flaw behind the audit allowlist entry.",
-    "Patched releases per major line: 2.1.3 (dist-tag maintenance-v2), 3.0.5 (maintenance-v3),",
-    "5.0.8 (latest). 1.x has no patched release of its own, so it is pulled onto 2.1.3, which keeps",
-    "the callable CommonJS default export that minimatch 3.x/5.x/9.x require.",
-    "The 4.x line is the exception: npm publishes only 4.0.0 and 4.0.1, both inside the advisory",
-    "range, and there is no maintenance-v4 dist-tag - no patched 4.x exists. It is therefore mapped",
-    "to 3.0.5, the newest patched release that keeps 4.x's API: 3.x and 4.x are both ESM-only with",
-    "the same `export default expandTop` shape (3.x additionally accepts an options argument), and",
-    "the only 3.0.4 -> 4.0.1 change is an internal split/join -> regex refactor. 5.0.8 is NOT usable",
-    "there: 5.x replaced the default export with a named `expand`.",
-    "Verify a target exists before pinning to it: npm view brace-expansion@<version> version"
-  ],
-  "pnpm": {
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "@glideapps/glide-data-grid>marked": "18",
-        "@napi-rs/wasm-runtime>@emnapi/core": "1",
-        "@napi-rs/wasm-runtime>@emnapi/runtime": "1"
-      }
-    },
-    "overrides": {
-      "@babel/core": "7.29.6",
-      "@hono/node-server": "2.0.10",
-      "body-parser@>=2.0.0 <2.3.0": "2.3.0",
-      "brace-expansion@<2.0.0": "2.1.3",
-      "brace-expansion@>=2.0.0 <2.1.3": "2.1.3",
-      "brace-expansion@>=3.0.0 <3.0.5": "3.0.5",
-      "brace-expansion@>=4.0.0 <5.0.0": "3.0.5",
-      "brace-expansion@>=5.0.0 <5.0.8": "5.0.8",
-      "esbuild": "0.28.1",
-      "fast-uri": "4.1.1",
-      "hono": "4.12.27",
-      "js-yaml": "4.3.0",
-      "postcss": "8.5.23",
-      "sharp": "0.35.3",
-      "undici": "7.28.0"
-    }
-  }
+    "pnpm settings, overrides and peerDependencyRules all live in pnpm-workspace.yaml, which is the",
+    "single source of truth from pnpm 10 onwards. The `pnpm` field that used to sit here was removed",
+    "in the 9.15.0 -> 10.34.5 migration: pnpm 11 ignores it outright, and keeping a second copy in",
+    "two files that disagree about precedence is how the earlier override drift happened.",
+    "Do NOT reintroduce a `pnpm` key here - add the setting to pnpm-workspace.yaml instead."
+  ]
 }

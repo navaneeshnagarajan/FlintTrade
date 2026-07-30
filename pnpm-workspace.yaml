@@ -4,6 +4,9 @@ packages:
   - packages/apps/site
   - packages/apps/desktop
 
+# This file is the ONLY place pnpm settings live. From pnpm 10 onwards .npmrc is
+# read for auth and registry keys alone, so the six settings below were moved
+# here out of a .npmrc that was deleted in the 9.15.0 -> 10.34.5 migration.
 strictPeerDependencies: true
 autoInstallPeers: false
 saveExact: true
@@ -11,17 +14,32 @@ auditLevel: high
 verifyStoreIntegrity: true
 fund: false
 
+# pnpm self-management, disabled deliberately.
+#
+# pnpm 10 defaults `managePackageManagerVersions` to true. Under pnpm 9 that
+# behaviour was masked by an internal `!isExecutedByCorepack()` guard, and this
+# repo no longer routes pnpm through Corepack, so the guard no longer applies:
+# left at its default, a pinned pnpm would silently re-exec whichever version it
+# decided the checkout wanted. The bootstrap scripts and installers already
+# resolve the pinned release themselves and verify `pnpm --version` against the
+# pin, so pnpm managing itself on top of that can only fight them.
+#
+# packageManagerStrictVersion turns a version mismatch against the
+# "packageManager" field in package.json into an error rather than a warning,
+# which is what makes the integrity pin load-bearing instead of advisory.
+managePackageManagerVersions: false
+packageManagerStrictVersion: true
+
 # Dependency build scripts.
 #
-# pnpm 9 runs every dependency lifecycle script. pnpm 10 stopped doing that
-# unless the package is allowlisted here, and pnpm 11 turns an un-allowlisted
-# build script into a hard ERR_PNPM_IGNORED_BUILDS failure. Declaring the
-# allowlist now is inert under pnpm 9 and makes the eventual upgrade a no-op
-# instead of a silent loss of the esbuild and electron-winstaller builds.
+# pnpm 9 ran every dependency lifecycle script. pnpm 10 does not, unless the
+# package is allowlisted here, and pnpm 11 turns an un-allowlisted build script
+# into a hard ERR_PNPM_IGNORED_BUILDS failure.
 #
 # NOTE: this block needs pnpm >= 10.26.0. Earlier 10.x releases ignore it
 # SILENTLY - the install still exits 0 while building nothing - so any pnpm 10
-# pin below 10.26.0 would look green while enforcing nothing.
+# pin below 10.26.0 would look green while enforcing nothing. That is the hard
+# floor for the "packageManager" pin; do not lower it.
 allowBuilds:
   # esbuild ships its platform binary as an optional dependency; the postinstall
   # re-validates it. Required by the terminal's vite build.
@@ -40,14 +58,15 @@ peerDependencyRules:
     '@napi-rs/wasm-runtime>@emnapi/core': '1'
     '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
 
-# These MUST stay byte-identical to the "pnpm.overrides" block in package.json
-# until that block is removed, because the two files disagree about who wins:
-# pnpm 9 and 10 read package.json and ignore this block, while pnpm 11 ignores
-# the package.json "pnpm" field entirely and reads only this one. An earlier
-# revision of this file had drifted - it pinned hono 4.12.25, js-yaml 4.2.0 and
-# postcss 8.5.15, and omitted eight entries including every brace-expansion
-# selector - so a pnpm 11 upgrade would have silently downgraded three packages
-# and dropped the security pins below.
+# These fifteen entries are now the only copy: the duplicate "pnpm.overrides"
+# block in package.json was removed in the pnpm 10 migration, so this block is
+# what pnpm actually resolves against. Nothing cross-checks it any more - the
+# lockfile's own `overrides:` header is the audit trail, and an entry deleted
+# here disappears from that header on the next install. An earlier revision of
+# this file had drifted while package.json was still authoritative - it pinned
+# hono 4.12.25, js-yaml 4.2.0 and postcss 8.5.15, and omitted eight entries
+# including every brace-expansion selector. Re-check the lockfile header after
+# touching anything below.
 #
 # brace-expansion overrides (GHSA-mh99-v99m-4gvg, advisory range <=5.0.7): the
 # selectors below cover EVERY vulnerable range, not just the ones the tree

@@ -8,8 +8,9 @@ dependency installs and asserts:
   * no bare `npm install` / `npm ci` of workspace deps survives the pnpm migration
     (corepack bootstrap lines are exempt)
 
-Also asserts the workspace lockfile + config landed: pnpm-lock.yaml, pnpm-workspace.yaml,
-.npmrc (strict-peer-dependencies), and a sha512-pinned packageManager field.
+Also asserts the workspace lockfile + config landed: pnpm-lock.yaml, pnpm-workspace.yaml
+(strictPeerDependencies, since pnpm 10 no longer reads settings from .npmrc), and a
+sha512-pinned packageManager field.
 """
 
 from __future__ import annotations
@@ -129,19 +130,19 @@ def test_pnpm_workspace_files_present() -> None:
 
 @pytest.mark.unit
 def test_strict_peer_deps_declared_where_pnpm_will_read_it() -> None:
-    """Strict peer resolution must be declared in BOTH supported locations.
+    """Strict peer resolution must be declared in ``pnpm-workspace.yaml``.
 
-    pnpm 9 reads ``strict-peer-dependencies`` from ``.npmrc``; pnpm 10 and 11
-    read only auth and registry settings from there and take everything else
-    from ``pnpm-workspace.yaml``. Asserting ``.npmrc`` alone - as this test used
-    to - pins the location pnpm is walking away from: deleting the YAML line
-    would silently disable strict peer resolution while the test stayed green.
-
-    Both are asserted until the pnpm 10 bump lands, at which point ``.npmrc``
-    can go and this test drops to the YAML alone.
+    This used to assert ``.npmrc`` as well, because pnpm 9 read
+    ``strict-peer-dependencies`` from there. pnpm 10 reads only auth and
+    registry keys out of ``.npmrc`` and takes every other setting from
+    ``pnpm-workspace.yaml``, so the 9.15.0 -> 10.34.5 bump deleted ``.npmrc``
+    and the YAML is now the sole source. Asserting the deleted file would fail;
+    asserting neither would let the setting be dropped silently.
     """
-    npmrc = (_REPO_ROOT / ".npmrc").read_text(encoding="utf-8")
-    assert "strict-peer-dependencies=true" in npmrc, ".npmrc lost strict-peer-dependencies (pnpm 9 reads this)"
+    assert not (_REPO_ROOT / ".npmrc").exists(), (
+        ".npmrc is back: pnpm 10 ignores its settings, so a setting parked there is a setting "
+        "that silently does nothing. Put it in pnpm-workspace.yaml instead."
+    )
     workspace = (_REPO_ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8")
     assert "strictPeerDependencies: true" in workspace, (
         "pnpm-workspace.yaml lost strictPeerDependencies (pnpm 10+ reads this)"

@@ -24,7 +24,7 @@ every file that still disagrees.
 Regenerate the public site afterwards so the generated MDX picks up the doc
 edits:
 
-    npx --yes pnpm@9.15.0 --dir packages/apps/site run generate:content
+    npx --yes pnpm@10.34.5 --dir packages/apps/site run generate:content
 
 Usage:
     python scripts/apply-site-url.py https://flinttrade.dev
@@ -106,7 +106,7 @@ def main() -> int:
               f"{len(_checker.SITE_URL_FILES)} file(s), plus {_checker.SITE_URL_AUTHORITY})")
         print(
             "Regenerate the site content so the published docs follow: "
-            "npx --yes pnpm@9.15.0 --dir packages/apps/site run generate:content"
+            "npx --yes pnpm@10.34.5 --dir packages/apps/site run generate:content"
         )
 
     result = subprocess.run(

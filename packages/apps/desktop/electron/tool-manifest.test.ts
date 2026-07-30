@@ -56,9 +56,9 @@ describe("bootstrap tool manifest", () => {
     expect(Object.keys(manifest.node.assets).sort()).toEqual(targets);
     expect(Object.keys(manifest.uv.assets).sort()).toEqual(targets);
     expect(manifest.pnpm).toEqual({
-      integrity: "sha512-76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
-      packageManager: "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
-      version: "9.15.0",
+      integrity: "sha512-a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+      packageManager: "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+      version: "10.34.5",
     });
     expect(manifest.generatedFrom).toMatchObject({
       node: {

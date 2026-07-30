@@ -169,7 +169,7 @@ services:
     command: >
       sh -c "if command -v corepack >/dev/null 2>&1; then corepack enable; fi;
              if command -v pnpm >/dev/null 2>&1; then PNPM='pnpm';
-             else PNPM='npx --yes pnpm@9.15.0'; fi;
+             else PNPM='npx --yes pnpm@10.34.5'; fi;
              $$PNPM install --frozen-lockfile &&
              $$PNPM --dir packages/apps/terminal run build"
     environment:
