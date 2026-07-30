@@ -979,7 +979,10 @@ class TestWorkspaceInit:
         )
 
         assert result.returncode == 1
-        assert result.stderr.strip() == "Master password provisioning failed."
+        stderr_lines = result.stderr.strip().splitlines()
+        assert stderr_lines[0] == "Master password provisioning failed."
+        assert any(line.startswith("  Stage: read-existing-secret") for line in stderr_lines)
+        assert any(line.startswith("  Cause: OSError") for line in stderr_lines)
         assert "operator-owned-secret" not in result.stdout
         assert "operator-owned-secret" not in result.stderr
         assert outside.read_text(encoding="utf-8") == "operator-owned-secret"
@@ -1005,11 +1008,79 @@ class TestWorkspaceInit:
         )
 
         assert result.returncode == 1
-        assert result.stderr.strip() == "Master password provisioning failed."
+        stderr_lines = result.stderr.strip().splitlines()
+        assert stderr_lines[0] == "Master password provisioning failed."
+        assert any(line.startswith("  Stage: acquire-provision-lock") for line in stderr_lines)
+        assert any("UnsafeFileLockPathError" in line for line in stderr_lines)
         assert "do-not-touch" not in result.stdout
         assert "do-not-touch" not in result.stderr
         assert outside.read_text(encoding="utf-8") == "do-not-touch"
         assert (workspace / "master_password").exists() is False
+
+    def test_master_password_cli_reports_degraded_when_existing_secret_is_usable(self, tmp_path):
+        """A failure over a present, hardened secret exits 3 so callers may continue.
+
+        The backend only needs the secret to exist and be readable. Refusing to
+        start when it demonstrably does turns a transient provisioning fault
+        into an outage.
+        """
+        from flinttrade_core import cli
+        from flinttrade_core.secure_file import write_secret_text
+        from flinttrade_core.workspace import Workspace
+
+        workspace = tmp_path / "ws"
+        ws = Workspace(home_dir=workspace)
+        ws.initialise()
+        write_secret_text(workspace / "master_password", "a" * 64)
+        outside = tmp_path / "outside-lock-target"
+        outside.write_text("do-not-touch", encoding="utf-8")
+        (workspace / cli._MASTER_PASSWORD_PROVISION_LOCK).symlink_to(outside)
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [sys.executable, "-m", "flinttrade_core.cli", "init", "--provision-master-password"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        assert result.returncode == cli.EXIT_PROVISION_DEGRADED
+        assert result.stderr.splitlines()[0] == "Master password provisioning failed."
+        assert "credential vault remains usable" in result.stderr
+        assert "do-not-touch" not in result.stderr
+        assert outside.read_text(encoding="utf-8") == "do-not-touch"
+
+    def test_master_password_cli_failure_never_prints_a_non_utf8_secret(self, tmp_path):
+        """A non-UTF-8 secret must not reach stderr through a decode error.
+
+        ``repr(UnicodeDecodeError)`` embeds the offending bytes - which here are
+        the master password - so the reporter must render ``str(exc)`` only.
+        """
+        from flinttrade_core.workspace import Workspace
+
+        workspace = tmp_path / "ws"
+        ws = Workspace(home_dir=workspace)
+        ws.initialise()
+        secret_bytes = b"REAL-MASTER-PASSWORD-abc123deadbeef\xff\xfe"
+        password_file = workspace / "master_password"
+        password_file.write_bytes(secret_bytes)
+        password_file.chmod(0o600)
+        env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
+
+        result = subprocess.run(
+            [sys.executable, "-m", "flinttrade_core.cli", "init", "--provision-master-password"],
+            check=False,
+            capture_output=True,
+            env=env,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert result.stderr.splitlines()[0] == "Master password provisioning failed."
+        assert "REAL-MASTER-PASSWORD" not in result.stdout
+        assert "REAL-MASTER-PASSWORD" not in result.stderr
+        assert password_file.read_bytes() == secret_bytes
 
 
 class TestWorkspaceLoadSave:

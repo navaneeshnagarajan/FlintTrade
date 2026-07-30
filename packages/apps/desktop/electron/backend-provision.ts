@@ -6,6 +6,16 @@ import { activeSourcePythonPath, sourceGuardianScriptPath } from "./parent-ident
 
 const DEFAULT_PROVISION_TIMEOUT_MS = 45_000;
 
+/**
+ * Provisioning did not complete, but re-proved that the existing credential-vault
+ * secret is present and hardened under the full at-rest policy.
+ *
+ * Mirrors `flinttrade_core.cli.EXIT_PROVISION_DEGRADED`. The backend only needs
+ * that secret to exist and be readable, so refusing to launch would turn a
+ * transient provisioning hiccup into a shell that will not open.
+ */
+const EXIT_PROVISION_DEGRADED = 3;
+
 export type BackendProvisionFailureReason = "cancelled" | "provision" | "setup";
 
 export interface BackendProvisionInvocation {
@@ -137,7 +147,7 @@ export async function provisionBackendMasterPassword(
     }
     throw new BackendProvisionError("provision", "Backend credential provisioning failed.");
   }
-  if (exitCode !== 0) {
+  if (exitCode !== 0 && exitCode !== EXIT_PROVISION_DEGRADED) {
     throw new BackendProvisionError("provision", "Backend credential provisioning failed.");
   }
 }
