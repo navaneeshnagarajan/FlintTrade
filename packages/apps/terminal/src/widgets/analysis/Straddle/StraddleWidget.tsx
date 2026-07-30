@@ -470,7 +470,7 @@ function StraddleChart({
       spotRef.current = null;
       synfutRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [height, chartTheme]);
 
   useEffect(() => {
@@ -943,11 +943,17 @@ function StraddleWidget(props: WidgetProps) {
     if (next === view) return;
     setView(next);
     props.api.updateParameters({ view: next });
-  }, [panelParams, props.api, view]);
+  }, [props.api, view]);
 
-  // Stable chart data arrays
+  // Stable chart data arrays. The three memos below snapshot mutable refs that
+  // the tick handler appends to in place; `chartVersion` is bumped whenever it
+  // does. That counter is therefore the real dependency, and a ref read is
+  // invisible to the dependency checker, hence the three directives.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   const chartStraddlePoints = useMemo(() => [...straddlePointsRef.current], [chartVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   const chartSpotPoints     = useMemo(() => [...spotPointsRef.current],     [chartVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
   const chartSynfutPoints   = useMemo(() => [...synfutPointsRef.current],   [chartVersion]);
 
   const hasChartData = chartStraddlePoints.length > 0;

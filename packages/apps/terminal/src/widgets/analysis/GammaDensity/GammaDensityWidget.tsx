@@ -202,7 +202,7 @@ function GammaDensityWidget(props: WidgetProps) {
       props.api.updateParameters({ view: next });
       return next;
     });
-  }, [panelParams, props.api]);
+  }, [props.api]);
 
   useEffect(() => {
     setExpiry(null);

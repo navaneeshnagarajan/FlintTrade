@@ -155,7 +155,7 @@ ticks-test: ## Run the Rust ticks-crate tests (skipped when cargo is absent)
 test-fast: ## Run tests, stop on first failure
 	@"$(PYTHON)" scripts/ft.py test-fast
 
-lint: ## Run linter (ruff)
+lint: ## Run linters (ruff + the terminal's react-hooks gate)
 	@"$(PYTHON)" scripts/ft.py lint
 
 # ======================================================================

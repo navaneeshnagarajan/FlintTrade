@@ -233,6 +233,24 @@ export default function DocsSearch({
     };
   }, [query]);
 
+  // Declared before the keyboard handler that calls it, so that handler can
+  // name it as a dependency: with `handleSelect` omitted, an `onSelectDoc`
+  // change alone left Enter dispatching to the previous selection handler.
+  const handleSelect = useCallback(
+    (result: DocSearchResult) => {
+      if (onSelectDoc) {
+        onSelectDoc(result);
+      } else {
+        // Default: open docs in a new tab or dispatch event
+        window.dispatchEvent(
+          new CustomEvent("flinttrade:openDoc", { detail: { path: result.path } }),
+        );
+      }
+      onClose();
+    },
+    [onSelectDoc, onClose],
+  );
+
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -256,22 +274,7 @@ export default function DocsSearch({
         handleSelect(results[activeIndex]);
       }
     },
-    [results, activeIndex, onClose],
-  );
-
-  const handleSelect = useCallback(
-    (result: DocSearchResult) => {
-      if (onSelectDoc) {
-        onSelectDoc(result);
-      } else {
-        // Default: open docs in a new tab or dispatch event
-        window.dispatchEvent(
-          new CustomEvent("flinttrade:openDoc", { detail: { path: result.path } }),
-        );
-      }
-      onClose();
-    },
-    [onSelectDoc, onClose],
+    [results, activeIndex, onClose, handleSelect],
   );
 
   const handleClear = useCallback(() => {

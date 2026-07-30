@@ -141,7 +141,7 @@ function MarketOverviewWidget(props: WidgetProps) {
       setTab(resolved);
       props.api?.updateParameters({ tab: resolved });
     },
-    [panelParams, props.api, tab],
+    [props.api, tab],
   );
 
   useEffect(() => {

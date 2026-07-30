@@ -71,7 +71,7 @@ COMMANDS: dict[str, str] = {
     "setup": "First-time setup - install Python and Node dependencies",
     "test": "Run the full pytest suite (plus the Rust ticks crate when cargo is present)",
     "test-fast": "Run pytest and stop on the first failure",
-    "lint": "Run ruff over packages/ and tests/",
+    "lint": "Run ruff over packages/ and tests/, then the terminal's react-hooks gate",
     "clean": "Delete __pycache__, .pytest_cache and node_modules trees",
     "version": "Print the FlintTrade version",
     "help": "Show this command table",
@@ -1113,23 +1113,46 @@ def cmd_test_fast(_args: list[str]) -> int:
 
 
 def cmd_lint(_args: list[str]) -> int:
-    """Run ruff over ``packages/`` and ``tests/``.
+    """Run ruff over ``packages/`` and ``tests/``, then the terminal's hooks gate.
 
-    A missing ruff is reported with install guidance and is not a failure; a
-    genuine lint violation is propagated.
+    The two halves mirror the two languages: ruff for Python, and the terminal's
+    ``lint`` script (``react-hooks/rules-of-hooks`` plus
+    ``react-hooks/exhaustive-deps``) for the React sources. The hooks gate is the
+    same command CI runs in ``node-core-tests``, so a contributor hits it before
+    pushing rather than after.
+
+    A missing toolchain is reported with install guidance and is not a failure -
+    the JavaScript workspace is optional for a Python-only change, exactly as
+    ruff is optional for a terminal-only one. A genuine lint violation from
+    either half is propagated, and both halves always run so one report does not
+    hide the other.
 
     Args:
         _args: Unused positional arguments.
 
     Returns:
-        ruff's exit code, or 0 when ruff is not installed.
+        The first non-zero exit code of the two lints, or 0 when both pass (or
+        are skipped for a missing toolchain).
     """
     python = resolve_python()
     env = python_env()
     if capture([python, "-m", "ruff", "--version"]) is None:
         info("ruff not installed. Install with: uv sync --frozen --all-packages (or: pip install ruff)")
-        return 0
-    return run([python, "-m", "ruff", "check", "packages/", "tests/"], env=env, check=False)
+        ruff_code = 0
+    else:
+        ruff_code = run([python, "-m", "ruff", "check", "packages/", "tests/"], env=env, check=False)
+
+    pnpm = pnpm_argv()
+    if pnpm is None:
+        info("No Node toolchain found; skipped the terminal react-hooks lint.")
+        return ruff_code
+    if not (REPO_ROOT / TERMINAL_PKG / "node_modules").is_dir():
+        info("Terminal node_modules missing; run `pnpm install --frozen-lockfile` to include the hooks lint.")
+        return ruff_code
+
+    header("Linting the terminal (react-hooks)")
+    hooks_code = run([*pnpm, "--dir", TERMINAL_PKG, "run", "lint"], env=ci_env(), check=False)
+    return ruff_code or hooks_code
 
 
 def _clean_targets() -> Iterator[Path]:

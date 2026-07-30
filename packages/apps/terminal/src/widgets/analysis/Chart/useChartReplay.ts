@@ -90,7 +90,7 @@ export function useChartReplay(
     }));
     candle.setData(candles);
     chart.timeScale().fitContent();
-  }, [candleRef, chartRef]);
+  }, [candleRef, chartRef, barsRef]);
 
   // ---------------------------------------------------------------------------
   // Replay ticker
@@ -124,7 +124,7 @@ export function useChartReplay(
     }, intervalMs);
 
     return () => clearInterval(id);
-  }, [isReplaying, isPlaying, replaySpeed, candleRef]);
+  }, [isReplaying, isPlaying, replaySpeed, candleRef, barsRef]);
 
   // ---------------------------------------------------------------------------
   // Controls
@@ -152,7 +152,7 @@ export function useChartReplay(
       applyBarsUpTo(0);
     }
     setIsPlaying(true);
-  }, [isReplaying, applyBarsUpTo]);
+  }, [isReplaying, applyBarsUpTo, barsRef]);
 
   const pause = useCallback(() => {
     setIsPlaying(false);
@@ -171,7 +171,7 @@ export function useChartReplay(
     setReplayIndex(clamped);
     indexRef.current = clamped;
     applyBarsUpTo(clamped);
-  }, [applyBarsUpTo]);
+  }, [applyBarsUpTo, barsRef]);
 
   const exitReplay = useCallback(() => {
     setIsPlaying(false);

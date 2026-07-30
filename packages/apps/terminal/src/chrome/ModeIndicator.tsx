@@ -69,7 +69,10 @@ export default function ModeIndicator() {
       setPinError("");
       setConfirmOpen(true);
     }
-  }, [mode, setMode, token, updateToken]);
+    // `token` is deliberately not a dependency: the live→practice branch reads
+    // the freshest token from `useAuthStore.getState()` rather than the closure,
+    // so listing it here only churned this callback's identity on every refresh.
+  }, [mode, setMode, updateToken]);
 
   const handleConfirmLive = useCallback(async () => {
     if (pin.length !== 6 || /\D/.test(pin)) {

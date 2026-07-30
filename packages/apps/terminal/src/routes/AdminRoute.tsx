@@ -69,6 +69,12 @@ interface LogEntry {
   request_id?: string;
 }
 
+/** Shape of `GET /ft-api/v1/logs/recent`. Named rather than inlined as an
+ * `as { … }` cast: see the parser note in `eslint.config.mjs`. */
+interface RecentLogsResponse {
+  entries: LogEntry[];
+}
+
 const logEntrySchema = z.object({
   timestamp: z.string(),
   level: z.enum(["ERROR", "WARNING", "INFO", "DEBUG"]),
@@ -111,6 +117,13 @@ const EMPTY_INTROSPECT: IntrospectData = {
   package_count: 0,
 };
 
+/** Shape of `GET /ft-api/v1/admin/introspect`. Named rather than inlined as an
+ * `as { … }` cast: see the parser note in `eslint.config.mjs`. */
+interface IntrospectResponse {
+  status: string;
+  data: IntrospectData;
+}
+
 function isDemoAuthSession(): boolean {
   const token = useAuthStore.getState().token;
   return token === "demo-user" || token === "dev-bypass";
@@ -131,7 +144,7 @@ function useIntrospect(): { data: IntrospectData | null; loading: boolean; error
     fetch("/ft-api/v1/admin/introspect")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{ status: string; data: IntrospectData }>;
+        return res.json() as Promise<IntrospectResponse>;
       })
       .then((json) => setData(json.data))
       .catch((err: Error) => setError(err.message))
@@ -671,7 +684,7 @@ function LogsPanel(): JSX.Element {
       try {
         const res = await fetch("/ft-api/v1/logs/recent");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { entries: LogEntry[] };
+        const data = (await res.json()) as RecentLogsResponse;
         if (!cancelled) {
           setBackendAvailable(true);
           setEntries(data.entries.slice(-MAX_ENTRIES));

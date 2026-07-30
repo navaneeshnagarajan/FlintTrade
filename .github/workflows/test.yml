@@ -285,6 +285,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
+      # react-hooks/rules-of-hooks + exhaustive-deps. Deliberately beside the
+      # typecheck: it catches the two runtime faults tsc cannot see — a
+      # conditional hook call, and a dependency array that lets a widget act on
+      # a stale price.
+      - name: React hooks lint gate
+        run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
         env:

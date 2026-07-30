@@ -21,11 +21,12 @@ What only a lint pass covers, and what this script therefore checks:
   only with an issue link
 
 What neither covers, and what genuinely needs ESLint: ``react-hooks/rules-of-hooks``
-and ``react-hooks/exhaustive-deps``. Those are not emulated here; a regular
-expression cannot see a dependency array's closure. The terminal carries 33
-``eslint-disable-next-line react-hooks/exhaustive-deps`` comments that are inert
-today, which is the argument for adding the real plugin - a separate change, since
-it needs four new devDependencies and a regenerated ``pnpm-lock.yaml``.
+and ``react-hooks/exhaustive-deps``. Those are still not emulated here - a regular
+expression cannot see a dependency array's closure - but they are no longer
+unenforced: ``packages/apps/terminal/eslint.config.mjs`` now runs both as errors
+via ``pnpm --dir packages/apps/terminal run lint``, wired into ``node-core-tests``
+and into ``python scripts/ft.py lint``. This script and that gate are
+complementary, not overlapping.
 
 Usage::
 
