@@ -652,3 +652,72 @@ def test_blocked_rotation_sdk_work_times_out_without_accumulating_workers() -> N
         time.sleep(0.01)
     with routes._CANDIDATE_RUNNER_LOCK:
         assert routes._ACTIVE_CANDIDATE_ATTEMPT is None
+
+
+def test_abandoned_candidate_keeps_its_own_selector_credentials(monkeypatch) -> None:
+    """A timed-out login must never adopt the next selector's vault material.
+
+    ``_run_bounded_candidate_coroutine`` gives up on a slow attempt by calling
+    ``attempt.abandon()``, which only sets a flag - Python cannot stop the
+    thread, so the coroutine carries on running while the per-selector
+    ``except`` moves the refresh loop to the next account. While
+    ``authenticate_candidate`` read its loop variables late, that orphaned
+    attempt would log in with whichever credentials the loop had since rebound,
+    writing another account's session into the registry under its id.
+
+    The test reproduces the shape exactly: capture each selector's coroutine
+    without running it, let the loop finish, then run the FIRST one and assert
+    it still sees the first selector's credentials.
+    """
+    import flinttrade_gateway.native_login as native_login
+
+    from flinttrade_core import native_account_routes
+
+    adapter = _Adapter()
+    registry = _Registry()
+    store = _Store(
+        {
+            ("dhan", "acc-A"): {"access_token": "token-A"},
+            ("dhan", "acc-B"): {"access_token": "token-B"},
+        }
+    )
+    app = _app(adapter, registry, store)
+
+    captured: list[Any] = []
+
+    def _capture_and_abandon(coroutine_factory: Any, attempt_owner: Any, *, timeout: float) -> Any:
+        captured.append(coroutine_factory)
+        raise RuntimeError("candidate native login timed out")
+
+    monkeypatch.setattr(
+        native_account_routes,
+        "_run_bounded_candidate_coroutine",
+        _capture_and_abandon,
+    )
+
+    seen: list[tuple[dict[str, Any], str]] = []
+
+    async def _establish(
+        adapter_: Any,
+        registry_: Any,
+        credentials: dict[str, Any],
+        broker: str,
+        account_id: str,
+        *,
+        verify: bool = False,
+    ) -> Any:
+        seen.append((dict(credentials), account_id))
+        return _Session("candidate")
+
+    monkeypatch.setattr(native_login, "establish_native_session", _establish)
+
+    with pytest.raises(RuntimeError):
+        NativeSessionRefresher(app).refresh_token("dhan")
+
+    assert len(captured) == 2, "both selectors should have started a candidate login"
+
+    # Run the first selector's coroutine only now, after the loop has advanced
+    # past it — the position an abandoned thread actually occupies.
+    asyncio.run(captured[0]())
+
+    assert seen == [({"access_token": "token-A"}, "acc-A")]

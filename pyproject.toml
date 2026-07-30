@@ -163,8 +163,6 @@ ignore = [
     "UP042",  # 7  — `str, Enum` → `StrEnum`; changes `__str__`/format output,
               #      which some serialised payloads depend on. Needs review.
     "UP047",  # 2  — PEP 695 generic functions.
-    "B023",   # 21 — function-uses-loop-variable. POSSIBLE REAL BUGS: each site
-              #      needs individual review, not a blanket rewrite.
     "B904",   # 18 — `raise ... from err` inside except.
     "B905",   # 63 — `zip(strict=...)`. Turning strictness on can raise where
               #      today it truncates, so it is a behaviour decision per site.
