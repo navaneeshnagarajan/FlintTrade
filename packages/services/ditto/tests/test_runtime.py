@@ -1131,7 +1131,6 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock = [100.0]
-    monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", lambda: clock[0])
 
     # This test is about the DEADLINE ARITHMETIC: one shared deadline, the
     # remaining budget handed to each client, and an unclosed client being
@@ -1175,6 +1174,8 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
 
         def revoke_and_drain(self, *, timeout: float) -> bool:
             self.timeouts.append(timeout)
+            # Draining happens on the calling thread, so spending the driven
+            # clock here is ordered against every later read.
             clock[0] += 0.25
             return True
 
@@ -1182,10 +1183,21 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
         def __init__(self, elapsed: float) -> None:
             self.elapsed = elapsed
             self.timeouts: list[float] = []
+            self.unbanked = 0.0
+            self.worker: threading.Thread | None = None
 
         def close_sync(self, *, timeout: float) -> None:
             self.timeouts.append(timeout)
-            clock[0] += self.elapsed
+            # Deliberately does NOT spend the clock here. Cleanup runs each
+            # close on its own worker thread and derives that thread's join
+            # budget from this same driven clock while ``join()`` itself blocks
+            # on the real one. A worker that spent the budget before the parent
+            # had read it would leave the parent joining for zero seconds and
+            # abandoning a close that had in fact finished, so which clients
+            # survived would be decided by OS scheduling rather than by the
+            # deadline. Bank the elapsed time instead and let the parent claim
+            # it once this worker has demonstrably gone.
+            self.unbanked = self.elapsed
 
     router = _Router()
     first = _Client(0.0)
@@ -1193,6 +1205,36 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     owner = object.__new__(DittoRouterOwner)
     owner.router = router
     owner._clients = {"first": first, "second": second}
+
+    def _worker_finished(client: _Client) -> bool:
+        """Report whether cleanup's close worker for ``client`` has ended.
+
+        The worker is remembered on first sight because cleanup drops its own
+        record of the attempt as soon as the join succeeds, and the elapsed
+        time still has to land on the read that follows.
+        """
+        attempts = getattr(owner, "_client_close_attempts", {})
+        for attempt_client, thread, _state in attempts.values():
+            if attempt_client is client:
+                client.worker = thread
+                break
+        return client.worker is not None and not client.worker.is_alive()
+
+    def _driven_monotonic() -> float:
+        """Return the driven clock, banking finished workers' elapsed time.
+
+        Elapsed time only lands once ``thread.is_alive()`` is already False —
+        the very predicate cleanup checks immediately after its join — so the
+        clock can never cross the deadline while a close is still running, and
+        the outcome no longer depends on which thread is scheduled first.
+        """
+        for client in (first, second):
+            if client.unbanked and _worker_finished(client):
+                clock[0] += client.unbanked
+                client.unbanked = 0.0
+        return clock[0]
+
+    monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", _driven_monotonic)
 
     assert owner.close(timeout=1.0) is False
     assert router.timeouts == [1.0]
