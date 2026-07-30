@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime
 from unittest.mock import MagicMock, call
@@ -419,6 +420,10 @@ def test_checkpoint_owner_retains_exact_lineage_obligation_until_acknowledged(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows publishes write-through; the parent-directory fsync path is POSIX-only",
+)
 def test_checkpoint_owner_retries_uncertain_publication_before_newer_live_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

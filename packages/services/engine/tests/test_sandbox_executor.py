@@ -13,10 +13,12 @@ Covers:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 import flinttrade_engine.sandbox_executor as mod
 from flinttrade_engine.sandbox_executor import (
@@ -390,6 +392,10 @@ class TestSubprocessIsolation:
     the boundary contracts that the in-thread fallback CANNOT enforce.
     """
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX session isolation; the executor deliberately omits start_new_session on Windows",
+    )
     def test_posix_child_uses_private_process_group_inside_managed_tree(self):
         """Local timeout containment coexists with the desktop tree guardian."""
         body = (
@@ -407,6 +413,10 @@ class TestSubprocessIsolation:
         assert result.success is True
         assert popen.call_args.kwargs["start_new_session"] is True
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX process-group teardown; os.getpgid/os.killpg do not exist on Windows",
+    )
     def test_timeout_kill_signals_only_the_private_child_process_group(self):
         """POSIX timeout atomically kills the isolated sandbox tree."""
         proc = MagicMock()
@@ -421,6 +431,10 @@ class TestSubprocessIsolation:
         killpg.assert_called_once_with(123, mod.signal.SIGKILL)
         proc.kill.assert_not_called()
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX process-group teardown; os.getpgid/os.killpg do not exist on Windows",
+    )
     def test_timeout_kill_reaps_discovered_descendants_when_group_signal_fails(self):
         """Identity discovery remains the fallback when group signalling fails."""
         proc = MagicMock()
@@ -443,6 +457,10 @@ class TestSubprocessIsolation:
         fake_psutil.wait_procs.assert_called_once_with([first_child, second_child], timeout=1)
         proc.kill.assert_called_once_with()
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX process-group teardown; os.getpgid/os.killpg do not exist on Windows",
+    )
     def test_timeout_uses_captured_group_after_session_leader_exits(self):
         """A vanished leader cannot hide descendants in its private group."""
         proc = MagicMock()
@@ -465,6 +483,10 @@ class TestSubprocessIsolation:
         killpg.assert_called_once_with(321, mod.signal.SIGKILL)
         proc.kill.assert_not_called()
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="POSIX process-group teardown; os.getpgid/os.killpg do not exist on Windows",
+    )
     def test_timeout_reports_unconfirmed_child_reap(self):
         """Containment is not reported as complete when reap times out."""
         proc = MagicMock()

@@ -645,9 +645,15 @@ class TestPackageExports:
 
 class TestDefaultDB:
     def test_default_db_with_env_var(self, monkeypatch):
+        from pathlib import Path
+
         from flinttrade_ditto.account_manager import _default_db
         monkeypatch.setenv("DATA_DIR", "/tmp/data")
-        assert _default_db() == "/tmp/data/ditto_accounts.sqlite"
+
+        # The helper returns a native path string, so the expectation has to be
+        # built with the host separator exactly as the workspace test below does.
+        expected = str(Path("/tmp/data") / "ditto_accounts.sqlite")
+        assert _default_db() == expected
 
     def test_default_db_with_workspace(self, monkeypatch):
         import sys

@@ -40,16 +40,29 @@ if fault.startswith("workspace-update-"):
 
     Workspace.update = crash_after_workspace_update
 elif fault == "secret-installed":
-    original_replace = os.replace
+    # A Windows host already runs the write-through install path for real, so it
+    # only needs the crash hook wrapped around the genuine implementation. The
+    # POSIX shims below must NOT be installed there: os.dup returns a handle
+    # without WRITE_DAC, and the owner-validated lock's real DACL install then
+    # fails with WinError 5 long before the fault boundary is reached.
+    if os.name == "nt":
+        original_replace = secure_file._windows_replace_write_through
+    else:
+        original_replace = os.replace
 
-    def portable_windows_harden(path, user=None):
-        del user
-        os.chmod(path, 0o600)
+        def portable_windows_harden(path, user=None):
+            del user
+            os.chmod(path, 0o600)
 
-    def portable_windows_reopen(descriptor, **_kwargs):
-        reopened = os.dup(descriptor)
-        os.close(descriptor)
-        return reopened
+        def portable_windows_reopen(descriptor, **_kwargs):
+            reopened = os.dup(descriptor)
+            os.close(descriptor)
+            return reopened
+
+        secure_file._is_windows = lambda: True
+        secure_file.harden = portable_windows_harden
+        secure_file._assert_current_user_owns = lambda *args: None
+        secure_file._reopen_windows_descriptor_for_security = portable_windows_reopen
 
     def crash_after_windows_secret_install(source, destination):
         result = original_replace(source, destination)
@@ -58,16 +71,16 @@ elif fault == "secret-installed":
             os._exit(91)
         return result
 
-    secure_file._is_windows = lambda: True
-    secure_file.harden = portable_windows_harden
-    secure_file._assert_current_user_owns = lambda *args: None
-    secure_file._reopen_windows_descriptor_for_security = portable_windows_reopen
     secure_file._windows_replace_write_through = crash_after_windows_secret_install
 elif fault == "committed-cleanup":
     original_unlink = Path.unlink
 
     def crash_before_backup_cleanup(self, *args, **kwargs):
-        if self.name.startswith(".llm_api_key") and "old" in self.name:
+        # ``durable_unlink`` renames to a ``.<name>.delete-pending`` tombstone
+        # before unlinking on Windows, so a predicate anchored to the start of
+        # the backup name never fires there. Matching the substring covers the
+        # tombstone as well, which is the descriptor the deletion truly unlinks.
+        if ".llm_api_key" in self.name and "old" in self.name:
             os._exit(91)
         return original_unlink(self, *args, **kwargs)
 
@@ -1070,6 +1083,43 @@ def test_startup_recovers_every_llm_config_transaction_fault_boundary(
     assert list((tmp_path / "secrets").glob(".llm_api_key*")) == []
 
 
+def _durable_deletion_targets(path: Path) -> set[Path]:
+    """Every path that a durable deletion of *path* actually unlinks.
+
+    :func:`flinttrade_core.secure_file.durable_unlink` unlinks the file itself on
+    POSIX, but on Windows it first renames it to a ``.delete-pending`` tombstone
+    and unlinks *that*. A deletion fault keyed only on the original name is
+    therefore never reached on Windows, so both names have to be faulted for the
+    injection to be host-independent.
+
+    Args:
+        path: The file whose durable deletion is being faulted.
+
+    Returns:
+        The set of paths a durable deletion of *path* may unlink on this host.
+    """
+    from flinttrade_core.secure_file import pending_unlink_path
+
+    return {path, pending_unlink_path(path)}
+
+
+def _durably_deleted_bytes_path(path: Path) -> Path:
+    """Where the bytes of *path* survive a failed durable deletion.
+
+    The Windows tombstone rename commits before the unlink, so a cleanup failure
+    leaves the retained bytes under the tombstone name rather than the original.
+
+    Args:
+        path: The file whose durable deletion failed.
+
+    Returns:
+        The path holding the retained bytes on this host.
+    """
+    from flinttrade_core.secure_file import pending_unlink_path
+
+    return pending_unlink_path(path) if os.name == "nt" else path
+
+
 def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     monkeypatch,
     tmp_path: Path,
@@ -1081,9 +1131,10 @@ def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     llm_config.persist_llm_config({"provider": "openai", "api_key": "old-secret"})
     secret_path = tmp_path / "secrets" / "llm_api_key"
     original_unlink = Path.unlink
+    faulted = _durable_deletion_targets(secret_path)
 
     def refuse_secret_deletion(self, *args, **kwargs):
-        if self == secret_path:
+        if self in faulted:
             raise PermissionError("simulated credential deletion failure")
         return original_unlink(self, *args, **kwargs)
 
@@ -1092,7 +1143,8 @@ def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     with pytest.raises(RuntimeError, match="credential cleanup is pending"):
         llm_config.persist_llm_config({"api_key": ""})
 
-    assert secret_path.read_text(encoding="utf-8") == "old-secret"
+    retained = _durably_deleted_bytes_path(secret_path)
+    assert retained.read_text(encoding="utf-8") == "old-secret"
     assert Workspace().get("llm.api_key_ref") == ""
 
     monkeypatch.setattr(Path, "unlink", original_unlink)
@@ -1115,7 +1167,10 @@ def test_old_api_key_backup_deletion_failure_is_reported_and_recovered(
     original_unlink = Path.unlink
 
     def refuse_old_backup_deletion(self, *args, **kwargs):
-        if self.name.startswith(".llm_api_key") and "old" in self.name:
+        # A substring match rather than a prefix match: the Windows tombstone
+        # (``.<backup name>.delete-pending``) is the descriptor the durable
+        # deletion truly unlinks, and its name gains a leading dot.
+        if ".llm_api_key" in self.name and "old" in self.name:
             raise PermissionError("simulated backup deletion failure")
         return original_unlink(self, *args, **kwargs)
 

@@ -2768,6 +2768,10 @@ def test_pipe_lease_observes_eof_only_after_every_writer_closes(entry: ModuleTyp
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX signal set; the guardian reaper needs signal.SIGKILL, which Windows does not define",
+)
 def test_macos_guardian_retains_recovery_for_live_unattributed_lease(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -2802,6 +2806,10 @@ def test_macos_guardian_retains_recovery_when_libproc_scan_fails(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX process reaping; the guardian needs os.WNOHANG, which Windows does not define",
+)
 def test_macos_guardian_refuses_generation_change_before_the_signal_sink(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -2941,6 +2949,10 @@ def test_macos_registration_identity_rejects_mixed_pid_generations(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX process reaping; the guardian needs os.WNOHANG, which Windows does not define",
+)
 def test_guardian_requires_a_quiet_second_empty_snapshot(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -3533,6 +3545,10 @@ def test_posix_process_identity_is_stable_and_uses_a_kernel_start_token(entry: M
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX parent identity; the watchdog reports high-resolution process identity as unsupported on win32",
+)
 def test_posix_watcher_returns_after_first_orphan_request(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
