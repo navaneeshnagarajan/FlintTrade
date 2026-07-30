@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-from flinttrade_core.workspace import duckdb_path
 
+from flinttrade_core.workspace import duckdb_path
 
 from .downloader import DownloadResult
 from .free_data import FreeDataResult
@@ -491,7 +491,7 @@ class DataPipeline:
             raise ValueError(f"Output path must not contain single quotes: {safe_output_str!r}")
         self.connection.execute(
             f"COPY ({query}) TO '{safe_output_str}' (FORMAT PARQUET)",
-            params if params else None,
+            params or None,
         )
         logger.info("Exported %s to %s", table, safe_output)
         return str(safe_output)

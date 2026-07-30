@@ -7,7 +7,6 @@ from typing import Any
 
 from .agent_models import AgentRole, AgentRoleType
 
-
 _ROLE_TYPES = {
     "options_analyst": AgentRoleType.TECHNICAL,
     "greeks_monitor": AgentRoleType.RISK_MANAGER,

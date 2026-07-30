@@ -19,7 +19,7 @@ Adapted from:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -61,7 +61,7 @@ class CorrelationMatrix(BaseModel):
     matrix: list[list[float]]
     period_days: int
     regime: RegimeSignal
-    updated_at: str = Field(default_factory=lambda: datetime.now(tz=timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(tz=UTC).isoformat())
     is_sample_data: bool = False
 
     # Convenience properties not serialised (computed on access)

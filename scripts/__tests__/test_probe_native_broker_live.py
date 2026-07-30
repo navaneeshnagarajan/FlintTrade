@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from scripts import probe_native_broker_live as probe
-from scripts import probe_kotakneo_live as kotak_wrapper
+from scripts import probe_kotakneo_live as kotak_wrapper, probe_native_broker_live as probe
 
 
 class _FakeAdapter:
@@ -238,7 +237,7 @@ def test_dhan_market_probe_bootstraps_security_resolver(monkeypatch, capsys) -> 
     code = asyncio.run(probe.run_probe("dhan", "access_token", ["quotes", "margin", "history"]))
 
     out = capsys.readouterr().out
-    resolver = getattr(fake, "_security_resolver")
+    resolver = fake._security_resolver
     assert code == 0
     assert fake.fetch_security_list_calls == ["compact"]
     assert callable(resolver)

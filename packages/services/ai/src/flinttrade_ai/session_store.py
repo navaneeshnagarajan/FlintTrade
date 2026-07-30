@@ -17,14 +17,14 @@ history on every request.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timezone
 import functools
 import hashlib
 import logging
-from pathlib import Path
 import sqlite3
 import threading
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, TypeVar
 
 logger = logging.getLogger("flinttrade.ai.session_store")
@@ -38,7 +38,7 @@ _DEFAULT_MAX_SESSIONS = 500
 
 def _locked(method: Callable[..., _T]) -> Callable[..., _T]:
     @functools.wraps(method)
-    def wrapper(self: "AiSessionStore", *args: Any, **kwargs: Any) -> _T:
+    def wrapper(self: AiSessionStore, *args: Any, **kwargs: Any) -> _T:
         with self._lock:
             return method(self, *args, **kwargs)
 
@@ -85,7 +85,7 @@ _SCHEMA_STATEMENTS = [
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class AiSessionStore:
@@ -191,7 +191,7 @@ class AiSessionStore:
                 """,
                 (message_id, session_id, role, content, created_at),
             )
-            inserted += cursor.rowcount if cursor.rowcount > 0 else 0
+            inserted += max(0, cursor.rowcount)
         self._conn.commit()
         return inserted
 

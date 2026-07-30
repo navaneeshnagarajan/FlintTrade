@@ -178,7 +178,7 @@ class OptionLeg(BaseModel):
     lot_size: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
-    def _validate_fields(self) -> "OptionLeg":
+    def _validate_fields(self) -> OptionLeg:
         """Validate that strike and premium are non-negative."""
         if self.strike <= 0:
             raise ValueError("strike must be positive")

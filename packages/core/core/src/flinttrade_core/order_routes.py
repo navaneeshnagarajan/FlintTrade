@@ -1596,7 +1596,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         ).strip().upper()
         if (
             ft_action in {"place", "place-smart", "open-position", "close-position", "modify"}
-            and practice_order_type not in {"MARKET"}
+            and practice_order_type != "MARKET"
             and current_app.config.get("TICK_RECORDER") is None
         ):
             return jsonify({
@@ -3623,14 +3623,14 @@ def _build_strategy_legs(
         KeyError: When a required strategy-specific parameter is missing.
         ValueError: When parameter values are invalid.
     """
-    kwargs = dict(
-        underlying=underlying,
-        expiry=expiry,
-        lots=lots,
-        lot_size=lot_size,
-        exchange=exchange,
-        product=product,
-    )
+    kwargs = {
+        "underlying": underlying,
+        "expiry": expiry,
+        "lots": lots,
+        "lot_size": lot_size,
+        "exchange": exchange,
+        "product": product,
+    }
 
     if strategy_name == "short_straddle":
         return builder.short_straddle(strike=float(body["strike"]), **kwargs)

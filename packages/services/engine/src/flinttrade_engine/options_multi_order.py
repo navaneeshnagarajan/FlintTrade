@@ -43,7 +43,6 @@ from __future__ import annotations
 
 from flinttrade_engine.basket_orders import BasketLeg
 
-
 # ---------------------------------------------------------------------------
 # Symbol helpers
 # ---------------------------------------------------------------------------

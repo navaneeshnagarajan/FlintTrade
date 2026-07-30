@@ -1711,7 +1711,7 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
         return {}
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Could not read workspace.json at %s: %s", path, exc)
@@ -7288,7 +7288,7 @@ class FlintTradeApp:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            setattr(backend_lease, "_recovery_owner", self)
+            backend_lease._recovery_owner = self
         retain_backend_instance_lease(backend_lease)
 
     def retry_recovery(self, *, timeout: float | None = None) -> None:
@@ -7434,7 +7434,7 @@ class _WSGIStartupRecovery:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            setattr(self._backend_lease, "_recovery_owner", self)
+            self._backend_lease._recovery_owner = self
         retain_backend_instance_lease(self._backend_lease)
         _WSGI_STARTUP_RECOVERY = self
 

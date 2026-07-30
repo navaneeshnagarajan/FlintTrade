@@ -8,7 +8,7 @@ import os
 import sqlite3
 import threading
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -1102,7 +1102,7 @@ class EmergencyIntentJournal:
                         source, selector, session_key, reason_hash, state, revision, created_at
                     ) VALUES (?, ?, ?, ?, 'active', 1, ?)
                     """,
-                    (source, selector, session_key, reason_hash, datetime.now(timezone.utc).isoformat()),
+                    (source, selector, session_key, reason_hash, datetime.now(UTC).isoformat()),
                 )
                 row = conn.execute(
                     "SELECT * FROM emergency_episodes WHERE episode_id = ?",
@@ -1285,7 +1285,7 @@ class EmergencyIntentJournal:
                     ).fetchone()
                 if unsettled is not None:
                     raise EmergencyIntentConflict("emergency episode has unsettled broker intents")
-                settled_at = datetime.now(timezone.utc).isoformat()
+                settled_at = datetime.now(UTC).isoformat()
                 for episode in expected:
                     cursor = conn.execute(
                         """
@@ -1397,7 +1397,7 @@ class EmergencyIntentJournal:
                         target_order_id,
                         exit_tag,
                         episode_id,
-                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(UTC).isoformat(),
                     ),
                 )
                 row = conn.execute(
@@ -1434,7 +1434,7 @@ class EmergencyIntentJournal:
                     """,
                     (
                         json.dumps(canonical_ids, separators=(",", ":")),
-                        datetime.now(timezone.utc).isoformat(),
+                        datetime.now(UTC).isoformat(),
                         int(intent_id),
                     ),
                 )
@@ -1517,7 +1517,7 @@ class EmergencyIntentJournal:
                         WHERE intent_id IN ({intent_placeholders})
                           AND state IN ('reserved', 'acknowledged', 'outcome_unknown')
                         """,  # noqa: S608 - placeholders are generated, not caller-controlled
-                        (datetime.now(timezone.utc).isoformat(), *current_ids),
+                        (datetime.now(UTC).isoformat(), *current_ids),
                     )
                     if cursor.rowcount != len(current_ids):
                         raise EmergencyIntentConflict("emergency intent set changed during settlement")

@@ -527,7 +527,7 @@ class TrafficLogger:
         with self._lock:
             self._conn.close()
 
-    def __enter__(self) -> "TrafficLogger":
+    def __enter__(self) -> TrafficLogger:
         return self
 
     def __exit__(self, *args: Any) -> None:

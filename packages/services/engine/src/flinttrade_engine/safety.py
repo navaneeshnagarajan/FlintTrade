@@ -29,7 +29,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager, closing, contextmanager, nullcontext
 from dataclasses import dataclass, field
-from datetime import date, datetime, time as dt_time, timedelta, timezone
+from datetime import UTC, date, datetime, time as dt_time, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, AsyncIterator, ContextManager, Iterator, Literal, Protocol
@@ -181,7 +181,7 @@ def _hmac_canonical(
             intent_source,
             external_nonce_hash,
             list(failover_allowed_adapters),
-            expires_at.astimezone(timezone.utc).isoformat(),
+            expires_at.astimezone(UTC).isoformat(),
         ],
         separators=(",", ":"),
         ensure_ascii=False,
@@ -244,7 +244,7 @@ class SafetyContext:
         external_nonce_hash: str | None = None,
         failover_allowed_adapters: tuple[str, ...] = (),
         ttl_seconds: int = 10,
-    ) -> "SafetyContext":
+    ) -> SafetyContext:
         """Mint a fresh one-shot context. Only ``engine.safety`` mints; adapters
         MUST NOT (contract §8.1).
 
@@ -253,7 +253,7 @@ class SafetyContext:
         gate cannot be replayed against a different account.
         """
         gate_id = secrets.token_urlsafe(18)
-        expires_at = datetime.now(tz=timezone.utc) + timedelta(seconds=ttl_seconds)
+        expires_at = datetime.now(tz=UTC) + timedelta(seconds=ttl_seconds)
         order_hash = _canonical_order_hash(order)
         failover = tuple(failover_allowed_adapters)
         signature = _hmac_canonical(
@@ -330,7 +330,7 @@ class SafetyContext:
             return False
         if request_ctx.external_nonce_hash != self.external_nonce_hash:
             return False
-        if datetime.now(tz=timezone.utc) >= self.expires_at:
+        if datetime.now(tz=UTC) >= self.expires_at:
             return False
         return True
 
@@ -2744,7 +2744,7 @@ class KillSwitch:
                 prepared_targets=prepared_targets,
             )
         lease_method = getattr(type(dispatcher), "generation_lease", None)
-        lease = getattr(dispatcher, "generation_lease") if callable(lease_method) else None
+        lease = dispatcher.generation_lease if callable(lease_method) else None
         try:
             with lease() if callable(lease) else nullcontext():
                 return self._dispatch_coordinated_under_lease(
@@ -2780,7 +2780,7 @@ class KillSwitch:
         if prepared_targets is not None and not callable(dispatch_prepared_method):
             raise SafetyBypassError("prepared emergency authority requires dispatch_prepared support")
         prepare = getattr(dispatcher, "prepare_targets", None)
-        dispatch_prepared = getattr(dispatcher, "dispatch_prepared")
+        dispatch_prepared = dispatcher.dispatch_prepared
 
         if prepared_targets is None:
             try:
@@ -2910,7 +2910,7 @@ class KillSwitch:
 
     def _aggregate_locked(self) -> EmergencyDispatchResult | None:
         grouped: dict[str, dict[str, EmergencyVerbOutcome]] = {}
-        for (_selector, _verb), (_sequence, outcome) in self._emergency_outcomes.items():
+        for _sequence, outcome in self._emergency_outcomes.values():
             grouped.setdefault(outcome.selector, {})[outcome.verb] = outcome
         if not grouped:
             return None
@@ -3133,7 +3133,7 @@ class KillSwitch:
                 selectors = frozenset(
                     {
                         *(selector for selector, _verb in self._emergency_outcomes if selector),
-                        *((episode.affected_selectors if episode is not None else ())),
+                        *(episode.affected_selectors if episode is not None else ()),
                     }
                 )
                 try:
@@ -3660,7 +3660,7 @@ class SafetySystem:
             selector=selector,
             order=copy.deepcopy(order),
             starting_quantity=self._reservation_position_quantity(order, positions),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
         )
         with self._order_admission_registry_lock:
             if self._order_reservation_store is not None:
@@ -4230,8 +4230,10 @@ class IntradayAllowList:
         if normalised in self.BLOCKED_SCRIPS:
             return (
                 False,
-                f"{symbol} is blocked for intraday (MIS) trading. "
-                "Use CNC/NRML or remove it from the blocked list in Settings.",
+                (
+                    f"{symbol} is blocked for intraday (MIS) trading. "
+                    "Use CNC/NRML or remove it from the blocked list in Settings."
+                ),
             )
 
         return True, ""

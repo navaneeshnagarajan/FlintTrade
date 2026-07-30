@@ -239,7 +239,7 @@ class PortfolioGreeks:
 
         try:
             from py_vollib_vectorized import vectorized_implied_volatility as viv  # noqa: F401
-            from py_vollib_vectorized.api import price, delta, gamma, theta, vega  # noqa: F401
+            from py_vollib_vectorized.api import delta, gamma, price, theta, vega  # noqa: F401
 
             d = delta(flag, spot, strike, time_to_expiry, risk_free_rate, iv, model="black_scholes")
             g = gamma(flag, spot, strike, time_to_expiry, risk_free_rate, iv, model="black_scholes")

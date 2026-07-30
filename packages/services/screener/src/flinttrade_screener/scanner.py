@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 
@@ -275,7 +276,7 @@ class ScannerEngine:
         if override_params:
             params.update(override_params)
 
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         start = time.monotonic()
         namespace: dict[str, Any] = {
@@ -295,7 +296,7 @@ class ScannerEngine:
                     matched_symbols=[],
                     total_scanned=0,
                     elapsed_ms=0.0,
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    timestamp=datetime.now(UTC).isoformat(),
                     error=f"Syntax error: {syn_err}",
                 )
             _FORBIDDEN_NODES = (
@@ -316,19 +317,19 @@ class ScannerEngine:
                 if isinstance(node, _FORBIDDEN_NODES):
                     return ScanResult(
                         scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
-                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        elapsed_ms=0.0, timestamp=datetime.now(UTC).isoformat(),
                         error=f"Forbidden construct: {type(node).__name__}",
                     )
                 if isinstance(node, _ast.Attribute) and node.attr in _FORBIDDEN_ATTRS:
                     return ScanResult(
                         scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
-                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        elapsed_ms=0.0, timestamp=datetime.now(UTC).isoformat(),
                         error=f"Forbidden attribute: {node.attr}",
                     )
                 if isinstance(node, _ast.Name) and node.id in _FORBIDDEN_NAMES:
                     return ScanResult(
                         scanner_name=scanner_name, matched_symbols=[], total_scanned=0,
-                        elapsed_ms=0.0, timestamp=datetime.now(timezone.utc).isoformat(),
+                        elapsed_ms=0.0, timestamp=datetime.now(UTC).isoformat(),
                         error=f"Forbidden name: {node.id}",
                     )
             exec(scanner.code, {"__builtins__": {}}, namespace)  # noqa: S102 — AST-validated
@@ -342,7 +343,7 @@ class ScannerEngine:
                 matched_symbols=matched,
                 total_scanned=len(data),
                 elapsed_ms=round(elapsed, 2),
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             )
         except Exception as exc:
             elapsed = (time.monotonic() - start) * 1000
@@ -351,7 +352,7 @@ class ScannerEngine:
                 total_scanned=len(data),
                 elapsed_ms=round(elapsed, 2),
                 error=str(exc),
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             )
 
     def get_categories(self) -> list[str]:

@@ -40,12 +40,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .flow_nodes.base import FlowContext
-from .flow_nodes.executor import FlowExecutor, FlowRunResult, NodeSpec
 from .flow_nodes import (
     AlertNode,
     AndGate,
     DelayNode,
+    FlowNode,
     HTTPRequestNode,
     IfThenElseNode,
     MathNode,
@@ -54,8 +53,9 @@ from .flow_nodes import (
     OrGate,
     SwitchNode,
     XorGate,
-    FlowNode,
 )
+from .flow_nodes.base import FlowContext
+from .flow_nodes.executor import FlowExecutor, FlowRunResult, NodeSpec
 
 logger = logging.getLogger("flinttrade.automation.flows")
 
@@ -101,7 +101,7 @@ class FlowDefinition:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FlowDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> FlowDefinition:
         """Deserialise from a dict.
 
         Args:

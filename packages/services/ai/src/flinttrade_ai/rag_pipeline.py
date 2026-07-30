@@ -327,7 +327,6 @@ class DomainFilter:
             "allocation",
             "rebalance",
             # Market data & finance
-            "market",
             "price",
             "ltp",
             "ohlc",
@@ -374,7 +373,7 @@ class DomainFilter:
         self,
         extra_keywords: set[str] | None = None,
         semantic_threshold: float = 0.35,
-        embedding_provider: "EmbeddingProvider | None" = None,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> None:
         base = self.TRADING_KEYWORDS | {k.lower() for k in extra_keywords} if extra_keywords else self.TRADING_KEYWORDS
         # Pre-compile one regex per keyword using word boundaries so that

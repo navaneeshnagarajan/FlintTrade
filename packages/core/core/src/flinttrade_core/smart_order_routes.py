@@ -46,7 +46,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -321,7 +321,7 @@ class _SmartJob:
 
     job_id: str
     params: dict[str, Any]
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     status: str = "running"  # running | done | error
     error: str = ""
     result: Any = None  # live SmartRouteResult once the router creates it
@@ -524,8 +524,8 @@ def start_smart_route() -> tuple[Any, int]:
         _decode_request_payload,
         _gated_target,
         _is_live_mode_unlocked,
-        _require_live_safety,
         _record_trade_journal,
+        _require_live_safety,
         _run_on_client_loop,
         _safety_runtime_unavailable_response,
     )

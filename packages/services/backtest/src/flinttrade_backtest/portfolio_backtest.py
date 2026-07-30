@@ -126,12 +126,12 @@ def _equal_weight(symbols: list[str], **_kwargs: Any) -> dict[str, float]:
         Dict mapping each symbol to weight = 1 / len(symbols).
     """
     w = 1.0 / len(symbols)
-    return {s: w for s in symbols}
+    return dict.fromkeys(symbols, w)
 
 
 def _inverse_volatility(
     symbols: list[str],
-    price_data: "pd.DataFrame",
+    price_data: pd.DataFrame,
     lookback: int = 63,
 ) -> dict[str, float]:
     """Weight inversely proportional to historical daily volatility.
@@ -172,7 +172,7 @@ def _inverse_volatility(
 
 def _momentum_weight(
     symbols: list[str],
-    price_data: "pd.DataFrame",
+    price_data: pd.DataFrame,
     lookback: int = 126,
     top_n: int | None = None,
 ) -> dict[str, float]:
@@ -211,7 +211,7 @@ def _momentum_weight(
 
     total = sum(momentum.values())
     if total <= 0:
-        return {s: 0.0 for s in symbols}
+        return dict.fromkeys(symbols, 0.0)
     return {s: v / total for s, v in momentum.items()}
 
 
@@ -221,8 +221,8 @@ def _momentum_weight(
 
 
 def _simulate_portfolio_pure(
-    price_matrix: "pd.DataFrame",
-    rebalance_dates: "pd.DatetimeIndex",
+    price_matrix: pd.DataFrame,
+    rebalance_dates: pd.DatetimeIndex,
     allocation_fn: Any,
     initial_capital: float,
     fees: float,
@@ -246,7 +246,7 @@ def _simulate_portfolio_pure(
     """
 
     symbols = list(price_matrix.columns)
-    shares: dict[str, float] = {s: 0.0 for s in symbols}
+    shares: dict[str, float] = dict.fromkeys(symbols, 0.0)
     cash = initial_capital
     equity_curve: list[float] = []
     rebalance_log: list[RebalanceEntry] = []
@@ -423,8 +423,8 @@ def _compute_result_metrics(
 
 
 def _simulate_portfolio_vbt(
-    price_matrix: "pd.DataFrame",
-    rebalance_dates: "pd.DatetimeIndex",
+    price_matrix: pd.DataFrame,
+    rebalance_dates: pd.DatetimeIndex,
     allocation_fn: Any,
     initial_capital: float,
     fees: float,
@@ -580,7 +580,7 @@ class PortfolioBacktester:
         start_date: str,
         end_date: str,
         allocation_strategy: str = "equal_weight",
-        price_data: "pd.DataFrame | None" = None,
+        price_data: pd.DataFrame | None = None,
         momentum_lookback: int = 126,
         vol_lookback: int = 63,
         top_n: int | None = None,
@@ -683,8 +683,8 @@ class PortfolioBacktester:
     def compare_benchmark(
         self,
         result: PortfolioResult,
-        price_data: "pd.DataFrame | None" = None,
-        benchmark_prices: "pd.Series | None" = None,
+        price_data: pd.DataFrame | None = None,
+        benchmark_prices: pd.Series | None = None,
         start_date: str = "",
         end_date: str = "",
     ) -> BenchmarkComparison:
@@ -749,10 +749,10 @@ class PortfolioBacktester:
 
     def _build_price_matrix(
         self,
-        price_data: "pd.DataFrame | None",
+        price_data: pd.DataFrame | None,
         start_date: str,
         end_date: str,
-    ) -> "pd.DataFrame":
+    ) -> pd.DataFrame:
         """Return (or generate) a price matrix aligned to symbols.
 
         If price_data is supplied it is used directly (filtered to the
@@ -800,7 +800,7 @@ class PortfolioBacktester:
             data[sym] = prices
         return pd.DataFrame(data, index=dates)
 
-    def _buy_and_hold_curve(self, price_matrix: "pd.DataFrame") -> list[float]:
+    def _buy_and_hold_curve(self, price_matrix: pd.DataFrame) -> list[float]:
         """Equal-weight buy-and-hold: invest 1/N in each symbol on day 0.
 
         Args:

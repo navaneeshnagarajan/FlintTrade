@@ -79,7 +79,7 @@ def _mock_pip_audit(monkeypatch, module, *, returncode: int, stdout: str, stderr
 def test_lock_state_normalises_names_versions_and_binds_raw_digest(tmp_path: Path) -> None:
     module = _load_module()
     lock = tmp_path / "requirements.lock"
-    raw = ("Example_Package==1.0.0\npycparser==3.0 ; implementation_name != 'PyPy'\n").encode()
+    raw = (b"Example_Package==1.0.0\npycparser==3.0 ; implementation_name != 'PyPy'\n")
     lock.write_bytes(raw)
 
     state = module._load_lock_state(lock)

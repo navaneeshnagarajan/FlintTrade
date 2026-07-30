@@ -246,7 +246,7 @@ def import_tradebook() -> tuple[Response, int]:
     body = request.get_json(silent=True)
     trades = body.get("trades") if isinstance(body, dict) else body
     if not isinstance(trades, list):
-        return _err("Request body must be a list of trades or {\"trades\": [...]}", 400)
+        return _err('Request body must be a list of trades or {"trades": [...]}', 400)
     created = journal.import_from_tradebook(trades)
     return _ok({"created": created, "count": len(created)}, 201)
 

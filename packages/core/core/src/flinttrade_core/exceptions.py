@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-
 # ===========================================================================
 # OpenAlgo HTTP-client errors (legacy tree)
 # ===========================================================================

@@ -101,7 +101,7 @@ class NewsArticle:
         allowed = {*canonical_fields, "feed_title"}
         unknown = set(kwargs) - allowed
         if unknown:
-            name = sorted(unknown)[0]
+            name = min(unknown)
             raise TypeError(f"NewsArticle got an unexpected keyword argument {name!r}")
         if len(args) > len(canonical_fields):
             raise TypeError(f"NewsArticle expected at most 6 positional arguments, got {len(args)}")

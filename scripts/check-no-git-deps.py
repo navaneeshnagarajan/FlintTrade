@@ -64,8 +64,7 @@ def _normalise_git_repo(url: str) -> str:
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
     path = parsed.path.rstrip("/")
-    if path.endswith(".git"):
-        path = path[: -len(".git")]
+    path = path.removesuffix(".git")
     return f"{scheme}://{host}{path}".lower()
 
 
@@ -103,7 +102,7 @@ def check_requirements() -> list[str]:
             continue
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
             s = line.strip()
-            if not s or s.startswith("#") or s.startswith("--hash"):
+            if not s or s.startswith(("#", "--hash")):
                 continue
             if _FORBIDDEN_REQ.search(s):
                 fails.append(f"{fname}:{n}: forbidden non-registry source: {s!r}")

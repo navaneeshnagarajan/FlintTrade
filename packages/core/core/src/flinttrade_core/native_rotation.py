@@ -176,10 +176,10 @@ class NativeSessionRefresher:
 
         from .native_account_routes import (  # noqa: PLC0415
             _MISSING_REGISTRY_SESSION,
+            _candidate_login_timeout_seconds,
             _compare_and_put_registry_session,
             _compare_and_remove_registry_session,
             _compare_and_update_selector_credentials,
-            _candidate_login_timeout_seconds,
             _registry_session_generation,
             _registry_session_generation_matches,
             _run_bounded_candidate_coroutine,

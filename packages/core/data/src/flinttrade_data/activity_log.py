@@ -231,7 +231,7 @@ class ActivityLog:
         """Close the underlying SQLite connection."""
         self._conn.close()
 
-    def __enter__(self) -> "ActivityLog":
+    def __enter__(self) -> ActivityLog:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -373,7 +373,7 @@ class LoginActivity:
         """Close the underlying SQLite connection."""
         self._conn.close()
 
-    def __enter__(self) -> "LoginActivity":
+    def __enter__(self) -> LoginActivity:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -517,7 +517,7 @@ class SessionTracker:
         """Close the underlying SQLite connection."""
         self._conn.close()
 
-    def __enter__(self) -> "SessionTracker":
+    def __enter__(self) -> SessionTracker:
         return self
 
     def __exit__(self, *args: Any) -> None:

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 import math
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Enums

@@ -104,9 +104,9 @@ class VectorBTRunner:
         self,
         strategy_class: type,
         symbol: str,
-        data: "pd.DataFrame",
+        data: pd.DataFrame,
         param_grid: dict[str, list[Any]],
-    ) -> "pd.DataFrame":
+    ) -> pd.DataFrame:
         """Run a full Cartesian-product parameter sweep using vectorbt.
 
         Each parameter combination is evaluated in a single vectorbt
@@ -278,7 +278,7 @@ class VectorBTRunner:
         self,
         strategy_class: type,
         symbol: str,
-        data: "pd.DataFrame",
+        data: pd.DataFrame,
         metric: str = "sharpe",
         param_grid: dict[str, list[Any]] | None = None,
     ) -> dict[str, Any]:

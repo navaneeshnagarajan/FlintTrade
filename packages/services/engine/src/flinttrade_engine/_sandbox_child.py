@@ -48,7 +48,6 @@ import struct
 import sys
 import traceback
 
-
 # Memory + CPU limits as soft signals — exceeding triggers MemoryError
 # inside the child's exec() rather than a SIGKILL with no diagnostic.
 _DEFAULT_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024  # 256 MiB
@@ -122,7 +121,7 @@ class _SandboxBlockedFinder:
         root = name.split(".")[0]
         if root in self._BLOCKED:
             raise ImportError(f"SANDBOX_BLOCKED_IMPORT:{name}")
-        return None  # defer to the default finder chain for everything else
+        return  # defer to the default finder chain for everything else
 
 
 def _install_import_block() -> None:

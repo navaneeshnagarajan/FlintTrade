@@ -398,7 +398,7 @@ class ErrorLog:
         with self._lock:
             self._conn.close()
 
-    def __enter__(self) -> "ErrorLog":
+    def __enter__(self) -> ErrorLog:
         return self
 
     def __exit__(self, *args: Any) -> None:

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -156,7 +156,7 @@ class MemoryManager:
         if top_k <= 0 or not self._entries:
             return []
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         scored: list[tuple[float, MemoryEntry]] = []
 
         query_tokens = set(query.lower().split())
@@ -205,7 +205,7 @@ class MemoryManager:
             Composite float score. Higher is more relevant.
         """
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
         hours_old = max(0.0, (now - entry.timestamp).total_seconds() / 3600.0)
         return shared_compound_score(
@@ -231,7 +231,7 @@ class MemoryManager:
         In practice, ``retrieve()`` already computes fresh recency per call,
         so ``decay_all`` is mainly useful for monitoring and logging.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for entry in self._entries:
             hours_old = max(0.0, (now - entry.timestamp).total_seconds() / 3600.0)
             score = math.pow(self._decay_rate, hours_old)
@@ -255,7 +255,7 @@ class MemoryManager:
         Returns:
             Number of entries removed.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         before = len(self._entries)
         self._entries = [e for e in self._entries if self.compound_score(e, relevance=0.0, now=now) >= min_score]
         removed = before - len(self._entries)
@@ -542,7 +542,7 @@ class HierarchicalMemoryManager:
         """
         if top_k <= 0:
             return []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         query_tokens = set(query.lower().split())
         scored: list[tuple[float, MemoryEntry]] = []
 
@@ -640,7 +640,7 @@ class HierarchicalMemoryManager:
         Returns:
             Total number of entries removed across all tiers.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         total_removed = 0
 
         for tier, entries in self._tiers.items():

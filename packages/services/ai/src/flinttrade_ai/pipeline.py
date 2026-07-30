@@ -14,7 +14,7 @@ import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, time as wall_time, timedelta, timezone
+from datetime import UTC, date, datetime, time as wall_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +137,7 @@ def _parse_bar_timestamp(value: object) -> datetime | None:
         if abs(epoch) >= 100_000_000_000:
             epoch /= 1000.0
         try:
-            return datetime.fromtimestamp(epoch, tz=timezone.utc)
+            return datetime.fromtimestamp(epoch, tz=UTC)
         except (OSError, OverflowError, ValueError):
             return None
     elif isinstance(value, str) and value.strip():
@@ -150,7 +150,7 @@ def _parse_bar_timestamp(value: object) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=_IST)
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def _interval_duration(value: str) -> timedelta | None:
@@ -337,7 +337,7 @@ def _bar_closes_at(
             symbol,
             timestamp.astimezone(_IST).date(),
         )
-        return session.closes_at.astimezone(timezone.utc) if session is not None else None
+        return session.closes_at.astimezone(UTC) if session is not None else None
 
     session = resolve_effective_session(
         market_session_provider,
@@ -348,7 +348,7 @@ def _bar_closes_at(
     if session is None:
         return None
     closes_at = timestamp + interval
-    if closes_at > session.closes_at.astimezone(timezone.utc):
+    if closes_at > session.closes_at.astimezone(UTC):
         return None
     return closes_at
 
@@ -367,8 +367,8 @@ def _filter_closed_bars(
     if duration is None:
         return []
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    now_utc = now.astimezone(timezone.utc)
+        now = now.replace(tzinfo=UTC)
+    now_utc = now.astimezone(UTC)
     session_cache: dict[date, tuple[wall_time, wall_time] | None] = {}
 
     def cached_session_for(
@@ -466,7 +466,7 @@ class SignalPipeline:
         self._turbulence_threshold: float = turbulence_threshold
         self._turbulence_window: int = turbulence_window
         self._signal_sink = signal_sink
-        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._market_session_provider = market_session_provider
         self._emission_lock = threading.Lock()
         self._last_emitted_candles: dict[tuple[str, str], datetime] = {}
@@ -787,11 +787,11 @@ class SignalPipeline:
             return []
         now = self._clock()
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
         newest = _parse_bar_timestamp(bars[-1].get("timestamp"))
         if newest is None:
             return []
-        if newest > now.astimezone(timezone.utc):
+        if newest > now.astimezone(UTC):
             logger.warning(
                 "Skipping %s: latest bar timestamp %s is in the future",
                 instrument,
@@ -823,8 +823,8 @@ class SignalPipeline:
 
         now = self._clock()
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        now_utc = now.astimezone(timezone.utc)
+            now = now.replace(tzinfo=UTC)
+        now_utc = now.astimezone(UTC)
         interval = _interval_duration(self.interval)
         if interval is None:
             logger.warning("Skipping %s: unsupported bar interval %r", instrument, self.interval)

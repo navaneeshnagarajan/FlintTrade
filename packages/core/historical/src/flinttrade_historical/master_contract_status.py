@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import duckdb
+
 from flinttrade_core.workspace import duckdb_path
 
 logger = logging.getLogger("flinttrade.historical.master_contract_status")
@@ -121,7 +122,7 @@ class MasterContractStatus:
             symbol_count: Number of symbols downloaded.
             checksum: Hash of the contract file (for change detection).
         """
-        now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
+        now = datetime.now(tz=UTC).replace(tzinfo=None)
         self.connection.execute(
             """
             INSERT INTO master_contract_status (broker, exchange, last_sync_utc, symbol_count, checksum)
@@ -161,9 +162,9 @@ class MasterContractStatus:
             return None
         ts = row[0]
         if isinstance(ts, datetime):
-            return ts.replace(tzinfo=timezone.utc)
+            return ts.replace(tzinfo=UTC)
         # DuckDB may return a string in some builds
-        return datetime.fromisoformat(str(ts)).replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(str(ts)).replace(tzinfo=UTC)
 
     def needs_sync(
         self,
@@ -186,7 +187,7 @@ class MasterContractStatus:
             logger.debug("needs_sync(%s, %s): no prior sync", broker, exchange)
             return True
 
-        age_hours = (datetime.now(tz=timezone.utc) - last).total_seconds() / 3600
+        age_hours = (datetime.now(tz=UTC) - last).total_seconds() / 3600
         stale = age_hours > max_age_hours
         logger.debug(
             "needs_sync(%s, %s): age=%.1fh max=%dh → %s",
@@ -212,7 +213,7 @@ class MasterContractStatus:
             entry: dict[str, Any] = dict(zip(columns, row))
             ts = entry.get("last_sync_utc")
             if isinstance(ts, datetime):
-                entry["last_sync_utc"] = ts.replace(tzinfo=timezone.utc).isoformat()
+                entry["last_sync_utc"] = ts.replace(tzinfo=UTC).isoformat()
             else:
                 entry["last_sync_utc"] = str(ts)
             rows.append(entry)
@@ -228,14 +229,14 @@ class MasterContractStatus:
             Subset of :meth:`all_statuses` where ``last_sync_utc`` is older
             than *max_age_hours*, plus all brokers/exchanges with no record.
         """
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         stale = []
         for entry in self.all_statuses():
             ts_str = entry.get("last_sync_utc", "")
             try:
                 last = datetime.fromisoformat(ts_str)
                 if last.tzinfo is None:
-                    last = last.replace(tzinfo=timezone.utc)
+                    last = last.replace(tzinfo=UTC)
                 age_hours = (now - last).total_seconds() / 3600
                 if age_hours > max_age_hours:
                     stale.append(entry)

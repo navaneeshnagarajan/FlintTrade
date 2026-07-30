@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("flinttrade.historical.normaliser")
@@ -158,9 +158,9 @@ def _to_ist_naive(raw: Any) -> str:
         # year 2000 in seconds = 946684800, in milliseconds = 946684800000
         # If the value is > 1e10 assume milliseconds (openchart sends ms).
         if raw > 1e10:
-            dt = datetime.fromtimestamp(raw / 1000.0, tz=timezone.utc)
+            dt = datetime.fromtimestamp(raw / 1000.0, tz=UTC)
         else:
-            dt = datetime.fromtimestamp(raw, tz=timezone.utc)
+            dt = datetime.fromtimestamp(raw, tz=UTC)
 
     elif isinstance(raw, datetime):
         if raw.tzinfo is None:
@@ -508,8 +508,7 @@ class OHLCVNormaliser:
                     result.dropped += 1
                     result.warnings.append(msg)
                     continue
-                else:
-                    result.warnings.append(msg)
+                result.warnings.append(msg)
 
             prev_close = close
 

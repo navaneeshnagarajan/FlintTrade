@@ -68,7 +68,7 @@ class PivotLevels(BaseModel):
     s4: float | None = None
 
     @model_validator(mode="after")
-    def _round_levels(self) -> "PivotLevels":
+    def _round_levels(self) -> PivotLevels:
         """Round all float fields to 2 decimal places for display consistency."""
         for field in ("pivot", "r1", "r2", "r3", "r4", "s1", "s2", "s3", "s4"):
             val = getattr(self, field)

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -43,7 +43,7 @@ def _now_ist() -> datetime:
 
         return datetime.now(ZoneInfo("Asia/Kolkata"))
     except Exception:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 def _now_iso() -> str:
@@ -347,7 +347,7 @@ class StateManager:
             if recovered:
                 logger.info("[RECOVERY] Reloaded state for %d strategy/ies from DuckDB.", recovered)
         except Exception as exc:
-            logger.error("[RECOVERY] Failed to reload states: %s", exc, exc_info=True)
+            logger.exception("[RECOVERY] Failed to reload states: %s", exc)
 
     def _get_lock(self, strategy_id: str) -> threading.Lock:
         """Return (creating if necessary) the per-strategy lock."""

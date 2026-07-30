@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger("flinttrade.data.questdb_client")
@@ -623,10 +623,10 @@ class QuestDBClient:
 
         trunc_unit = _interval_to_trunc_unit(interval)
         start_ts = _parse_ts_arg(start) if start else _today_midnight_utc()
-        end_ts = _parse_ts_arg(end) if end else datetime.now(timezone.utc)
+        end_ts = _parse_ts_arg(end) if end else datetime.now(UTC)
 
         sql = (
-            "SELECT date_trunc('{unit}', timestamp) AS ts, "
+            f"SELECT date_trunc('{trunc_unit}', timestamp) AS ts, "
             "       first(ltp) AS open, "
             "       max(ltp)   AS high, "
             "       min(ltp)   AS low, "
@@ -638,7 +638,7 @@ class QuestDBClient:
             "  AND timestamp BETWEEN %s AND %s "
             "GROUP BY ts "
             "ORDER BY ts"
-        ).format(unit=trunc_unit)
+        )
 
         try:
             self._cursor.execute(sql, (symbol, exchange, start_ts, end_ts))
@@ -842,9 +842,9 @@ def _coerce_ts(ts: datetime | None) -> datetime:
         # datetime.utcnow() is deprecated in Python 3.12+; preserve the naive-UTC
         # semantic the rest of this module expects (psycopg2 wire adapter doesn't
         # take tzinfo) by using timezone-aware now() and stripping tzinfo.
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return datetime.now(UTC).replace(tzinfo=None)
     if ts.tzinfo is not None:
-        return ts.astimezone(timezone.utc).replace(tzinfo=None)
+        return ts.astimezone(UTC).replace(tzinfo=None)
     return ts
 
 
@@ -873,5 +873,5 @@ def _parse_ts_arg(value: datetime | str) -> datetime:
 
 def _today_midnight_utc() -> datetime:
     """Return today's midnight in UTC as a naive datetime."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return datetime(now.year, now.month, now.day, 0, 0, 0)

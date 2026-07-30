@@ -18,7 +18,7 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -583,5 +583,4 @@ class StrategyLifecycleManager:
 
 def _now_iso() -> str:
     """Current UTC datetime as ISO-8601 string."""
-    from datetime import timezone
-    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    return datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"

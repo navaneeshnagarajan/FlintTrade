@@ -28,7 +28,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, time
-from typing import Optional
 
 logger = logging.getLogger("flinttrade.engine.market_hours")
 
@@ -139,8 +138,8 @@ for _session in SPECIAL_SESSIONS:
 
 def is_special_session(
     target_date: date,
-    exchange: Optional[str] = None,
-) -> Optional[SpecialTradingSession]:
+    exchange: str | None = None,
+) -> SpecialTradingSession | None:
     """Check whether a date has a special trading session.
 
     Args:
@@ -244,7 +243,7 @@ def add_special_session(session: SpecialTradingSession) -> None:
 
 
 def list_upcoming_sessions(
-    from_date: Optional[date] = None,
+    from_date: date | None = None,
     limit: int = 10,
 ) -> list[SpecialTradingSession]:
     """Return upcoming special sessions sorted by date.

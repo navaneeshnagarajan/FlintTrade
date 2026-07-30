@@ -142,6 +142,7 @@ class APIAnalyzer:
         enabled: bool | None = None,
     ) -> None:
         import os  # noqa: PLC0415
+
         import duckdb  # lazy import
 
         if db_path is None:
@@ -465,7 +466,7 @@ class APIAnalyzer:
         """Close the underlying DuckDB connection."""
         self._conn.close()
 
-    def __enter__(self) -> "APIAnalyzer":
+    def __enter__(self) -> APIAnalyzer:
         return self
 
     def __exit__(self, *args: Any) -> None:

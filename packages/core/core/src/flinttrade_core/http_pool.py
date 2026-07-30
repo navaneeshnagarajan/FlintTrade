@@ -218,7 +218,7 @@ class HTTPClientPool:
     # Async context manager
     # ------------------------------------------------------------------
 
-    async def __aenter__(self) -> "HTTPClientPool":
+    async def __aenter__(self) -> HTTPClientPool:
         return self
 
     async def __aexit__(self, *_: object) -> None:

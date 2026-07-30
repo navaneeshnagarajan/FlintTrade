@@ -18,7 +18,6 @@ import random
 from dataclasses import dataclass
 from typing import Sequence
 
-
 # ---------------------------------------------------------------------------
 # Config / Result dataclasses (match raptorbt MonteCarloConfig/Result shape)
 # ---------------------------------------------------------------------------

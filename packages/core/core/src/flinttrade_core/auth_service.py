@@ -28,10 +28,10 @@ import logging
 import os
 import secrets
 import sqlite3
-from typing import Any
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import argon2
 import pyotp
@@ -233,7 +233,7 @@ class AuthService:
                    totp_secret_encrypted, totp_salt, created_at)
                    VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
                 [username, email, password_hash, pin_hash, encrypted, totp_salt,
-                 datetime.now(timezone.utc).isoformat()],
+                 datetime.now(UTC).isoformat()],
             )
             self._db.commit()
 

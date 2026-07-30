@@ -155,7 +155,7 @@ class RoutingConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_workspace(cls, brokers: dict[str, Any]) -> "RoutingConfig":
+    def from_workspace(cls, brokers: dict[str, Any]) -> RoutingConfig:
         """Parse and validate a ``workspace.json.brokers`` block.
 
         Args:
