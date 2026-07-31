@@ -461,27 +461,31 @@ jobs:
             echo "--- every row mentioning sleep, whatever its group ---"
             /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
               | /usr/bin/grep -E "sleep 8" | /usr/bin/grep -v grep | cut -c1-56 | cat -A
-            # Which kill form actually reaches an orphaned in-group process?
-            # `/bin/kill -TERM -$$` is what the anchor and the parent-death
-            # watchdog both use, and on 24.04 it returns 0 while killing nothing.
-            survivors() {
-              /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
-                | /usr/bin/grep -c "sleep 8[0-9]* " || true
-            }
-            for form in "procps-group" "procps-group-ddash" "builtin-group" "procps-per-pid"; do
-              /bin/sh -c "sleep 82 &" & wait
-              target=$(/usr/bin/ps axeww -o pid= -o pgid= -o command= 2>/dev/null \
-                | /usr/bin/grep "sleep 82 " | /usr/bin/grep -v grep \
-                | /usr/bin/awk "{print \$1}" | head -1)
+            # Which kill form reaches an orphaned in-group process?
+            # `/bin/kill -TERM -<pgid>` is what the anchor and the parent-death
+            # watchdog both use. Each form is aimed at a SEPARATE victim group,
+            # never at our own: signalling our own group is suicide for whichever
+            # form works, which is why the previous round printed almost nothing.
+            for form in procps-group procps-group-ddash builtin-group procps-per-pid; do
+              tag="victim-$form"
+              # A victim group whose leader exits immediately, leaving an orphan
+              # still in the group — the exact shape the failing test builds.
+              setsid /bin/sh -c "/bin/sh -c \"sleep 300 & echo $tag >/dev/null\" & wait" >/dev/null 2>&1
+              sleep 1
+              row=$(/usr/bin/ps axeww -o pid= -o pgid= -o command= 2>/dev/null \
+                | /usr/bin/grep "sleep 300" | /usr/bin/grep -v grep | head -1)
+              vpid=$(echo "$row" | /usr/bin/awk "{print \$1}")
+              vpgid=$(echo "$row" | /usr/bin/awk "{print \$2}")
               case "$form" in
-                procps-group)       /bin/kill -TERM -$$ 2>&1; rc=$? ;;
-                procps-group-ddash) /bin/kill -s TERM -- -$$ 2>&1; rc=$? ;;
-                builtin-group)      kill -TERM -$$ 2>&1; rc=$? ;;
-                procps-per-pid)     /bin/kill -TERM "$target" 2>&1; rc=$? ;;
+                procps-group)       /bin/kill -TERM "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                procps-group-ddash) /bin/kill -s TERM -- "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                builtin-group)      kill -TERM "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                procps-per-pid)     /bin/kill -TERM "$vpid" >/dev/null 2>&1; rc=$? ;;
               esac
               sleep 1
-              echo "form=$form rc=$rc target=$target survivors=$(survivors)"
-              /bin/kill -KILL "$target" 2>/dev/null || true
+              if /usr/bin/kill -0 "$vpid" 2>/dev/null; then alive=YES; else alive=no; fi
+              echo "form=$form rc=$rc victim_pid=$vpid victim_pgid=$vpgid still_alive=$alive"
+              /bin/kill -KILL "$vpid" 2>/dev/null || true
             done
           ' </dev/null || true
 
