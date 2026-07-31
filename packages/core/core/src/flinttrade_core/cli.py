@@ -29,8 +29,13 @@ from .secure_file import (
 from .workspace import Workspace
 
 _MASTER_PASSWORD_MAX_BYTES = 4 * 1024
-_MASTER_PASSWORD_PROVISION_LOCK = ".vault-provision.lock"
-_MASTER_PASSWORD_PROVISION_TIMEOUT_SECONDS = 30
+
+# The advisory lock file that serialises provisioning, and how long a second
+# process waits for it. Neither holds - nor is derived from - the master
+# password; they are named for what they are so that a reader (and a scanner)
+# is not told otherwise by the identifier.
+_VAULT_PROVISION_LOCK_NAME = ".vault-provision.lock"
+_VAULT_PROVISION_LOCK_TIMEOUT_SECONDS = 30
 
 _PROVISION_STAGE_NOTE_PREFIX = "flinttrade-provision-stage:"
 _VERBOSE_ERRORS_ENV = "FLINTTRADE_VERBOSE_ERRORS"
@@ -184,8 +189,8 @@ def _report_provision_failure(ws: Workspace, exc: BaseException, *, verbose: boo
     if isinstance(exc, Timeout):
         print(
             "  Cause: Timeout: another FlintTrade process holds "
-            f"{_MASTER_PASSWORD_PROVISION_LOCK}; waited "
-            f"{_MASTER_PASSWORD_PROVISION_TIMEOUT_SECONDS} s. Stop the other "
+            f"{_VAULT_PROVISION_LOCK_NAME}; waited "
+            f"{_VAULT_PROVISION_LOCK_TIMEOUT_SECONDS} s. Stop the other "
             "FlintTrade process and retry.",
             file=sys.stderr,
         )
@@ -224,8 +229,8 @@ def _provision_master_password(ws: Workspace) -> bool:
     """
     password_file = ws.workspace_dir / "master_password"
     provision_lock = OwnerSafeFileLock(
-        ws.workspace_dir / _MASTER_PASSWORD_PROVISION_LOCK,
-        timeout=_MASTER_PASSWORD_PROVISION_TIMEOUT_SECONDS,
+        ws.workspace_dir / _VAULT_PROVISION_LOCK_NAME,
+        timeout=_VAULT_PROVISION_LOCK_TIMEOUT_SECONDS,
         mode=0o600,
     )
     with _provision_stage("acquire-provision-lock"):

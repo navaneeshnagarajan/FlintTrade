@@ -996,7 +996,7 @@ class TestWorkspaceInit:
         ws.initialise()
         outside = tmp_path / "outside-lock-target"
         outside.write_text("do-not-touch", encoding="utf-8")
-        (workspace / cli._MASTER_PASSWORD_PROVISION_LOCK).symlink_to(outside)
+        (workspace / cli._VAULT_PROVISION_LOCK_NAME).symlink_to(outside)
         env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
 
         result = subprocess.run(
@@ -1034,7 +1034,7 @@ class TestWorkspaceInit:
         write_secret_text(workspace / "master_password", "a" * 64)
         outside = tmp_path / "outside-lock-target"
         outside.write_text("do-not-touch", encoding="utf-8")
-        (workspace / cli._MASTER_PASSWORD_PROVISION_LOCK).symlink_to(outside)
+        (workspace / cli._VAULT_PROVISION_LOCK_NAME).symlink_to(outside)
         env = {**os.environ, "FLINTTRADE_WORKSPACE_DIR": str(workspace)}
 
         result = subprocess.run(
