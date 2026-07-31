@@ -8,10 +8,17 @@ name: Node release key freshness
 # pinned key expired on 2026-07-08 and nothing in CI noticed, because nothing
 # ran scripts/check-node-release-key-freshness.py.
 #
-# This workflow is that missing scheduler. It fails closed - an unreachable
-# keyserver is already handled inside the script (the drift comparison is
-# informational and skips itself), so any non-zero exit here is a real finding
-# about the pin, never a network blip.
+# This workflow is that missing scheduler, and it is also the ONLY lane that can
+# see a revocation. A revocation packet published after we mirrored the key never
+# reaches the checked-in `.asc`, so no offline check can find it; the script
+# fetches the keyserver's copy and merges it into the same keyring before
+# reporting, which is why this scheduled job needs the network and the per-PR
+# `--offline` step in test.yml cannot replace it.
+#
+# It fails closed on trust and open on availability: an unreachable, 404ing or
+# unparseable keyserver is reported as NOT CHECKED and leaves the exit code
+# alone, so any non-zero exit here is a real finding about the pin, never a
+# network blip.
 #
 # The 30-day warning window lives HERE, and only here. The path filters mean the
 # push/PR legs fire on exactly one kind of change - a bootstrap pin, its

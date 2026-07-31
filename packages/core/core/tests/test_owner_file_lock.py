@@ -332,6 +332,99 @@ def test_windows_owner_lock_rejects_a_hard_link_without_truncation(tmp_path, mon
     assert target.read_text(encoding="utf-8") == "do-not-truncate"
 
 
+def _install_denying_open(  # type: ignore[no-untyped-def]
+    monkeypatch,
+    lock_path,
+    clock: list[float],
+    attempts: list[int],
+    *,
+    seconds_per_attempt: float,
+) -> None:
+    """Make every ``os.open`` of ``lock_path`` deny access and burn clock time."""
+    real_open = os.open
+
+    def denying_open(path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if os.fspath(path) == os.fspath(lock_path):
+            attempts.append(1)
+            clock[0] += seconds_per_attempt
+            raise PermissionError(errno.EACCES, "sharing violation")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(owner_file_lock.os, "open", denying_open)
+    # ``_acquire`` imports msvcrt before it opens anything, so the denial path
+    # is only reachable on a POSIX host once that import resolves.
+    _install_fake_msvcrt(monkeypatch, [])
+
+
+def test_windows_owner_lock_reopens_the_denial_budget_for_each_acquisition(tmp_path, monkeypatch) -> None:
+    """A spent denial budget must not poison the next acquisition.
+
+    The lock object is reused - ``AuditLogger._chain_lock`` is built once and
+    entered on every append - so a deadline that survives a failed acquisition
+    would make the very next brief sharing violation fatal on sight.
+    """
+    clock = [0.0]
+    attempts: list[int] = []
+    monkeypatch.setattr(owner_file_lock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    lock_path = tmp_path / "owner.lock"
+    lock_path.write_bytes(b"")
+    _install_denying_open(monkeypatch, lock_path, clock, attempts, seconds_per_attempt=1.5)
+    lock = owner_file_lock._WindowsOwnerSafeFileLock(lock_path, timeout=30, mode=0o600, poll_interval=0.001)
+
+    with pytest.raises(owner_file_lock.UnsafeFileLockPathError):
+        lock.acquire()
+    first_attempts = len(attempts)
+    attempts.clear()
+
+    with pytest.raises(owner_file_lock.UnsafeFileLockPathError):
+        lock.acquire()
+
+    # Retried, then gave up - exactly as the first acquisition did.
+    assert first_attempts > 1
+    assert len(attempts) == first_attempts
+
+
+def test_windows_owner_lock_reopens_the_denial_budget_after_a_timeout(tmp_path, monkeypatch) -> None:
+    """A budget left unspent by a timed-out acquisition must not leak either."""
+    clock = [0.0]
+    attempts: list[int] = []
+    monkeypatch.setattr(owner_file_lock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    lock_path = tmp_path / "owner.lock"
+    lock_path.write_bytes(b"")
+    _install_denying_open(monkeypatch, lock_path, clock, attempts, seconds_per_attempt=1.5)
+    lock = owner_file_lock._WindowsOwnerSafeFileLock(lock_path, timeout=0, mode=0o600)
+
+    # One denial, then the caller's own budget expires before ours does.
+    with pytest.raises(Timeout):
+        lock.acquire()
+    assert len(attempts) == 1
+    attempts.clear()
+
+    # Much later, a fresh acquisition still gets the full retry window.
+    clock[0] += 3600.0
+    with pytest.raises(owner_file_lock.UnsafeFileLockPathError):
+        lock.acquire(timeout=30, poll_interval=0.001)
+
+    assert len(attempts) > 1
+
+
+def test_windows_owner_lock_denial_budget_still_expires_within_one_acquisition(tmp_path, monkeypatch) -> None:
+    """The budget is per acquisition, not per poll: a real denial stays fatal."""
+    clock = [0.0]
+    attempts: list[int] = []
+    monkeypatch.setattr(owner_file_lock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    lock_path = tmp_path / "owner.lock"
+    lock_path.write_bytes(b"")
+    _install_denying_open(monkeypatch, lock_path, clock, attempts, seconds_per_attempt=0.25)
+    lock = owner_file_lock._WindowsOwnerSafeFileLock(lock_path, timeout=3600, mode=0o600, poll_interval=0.001)
+
+    with pytest.raises(owner_file_lock.UnsafeFileLockPathError):
+        lock.acquire()
+
+    # Bounded by the 2 s budget, not by the caller's hour-long timeout.
+    assert len(attempts) <= owner_file_lock._OPEN_DENIAL_RETRY_SECONDS / 0.25 + 2
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows lock and ACL runtime semantics")
 def test_windows_owner_lock_runtime_persists_inode_and_exact_dacl(tmp_path) -> None:
     lock_path = tmp_path / "owner.lock"

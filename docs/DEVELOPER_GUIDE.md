@@ -373,9 +373,15 @@ without presenting them as ready to connect.
 ### TypeScript
 
 - **Strict mode**. No `any`, no `@ts-ignore`, no `@ts-nocheck`.
-- **Hooks lint at zero warnings**. `pnpm --filter @flinttrade/terminal lint`
-  runs `eslint src --max-warnings=0`, making `react-hooks/rules-of-hooks` and
-  `react-hooks/exhaustive-deps` errors rather than suggestions. CI runs it in
+- **Lint at zero warnings**. `pnpm --filter @flinttrade/terminal lint`
+  runs `eslint src --max-warnings=0`, making four rules errors rather than
+  suggestions: `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps`
+  for the runtime faults `tsc` cannot see, plus `local/no-explicit-any` and
+  `local/no-ts-suppression` for the two bans above — `strict` permits an
+  explicit `any` by design, and a pragma is only a comment, so the compiler
+  enforces neither. Both local rules are AST rules
+  (`packages/apps/terminal/eslint-local-rules.mjs`); the regular-expression
+  script they replaced missed `type Payload = any`. CI runs the gate in
   `node-core-tests`; `python scripts/ft.py lint` runs it alongside ruff.
 - **Path alias** `@` → `packages/apps/terminal/src/`. Configured in
   `tsconfig.json` and `vite.config.ts` (the Vitest config lives inside
@@ -413,7 +419,7 @@ without presenting them as ready to connect.
    - `python -m pytest --tb=short --import-mode=importlib`
    - `python scripts/ft.py lint` — the shell-independent way to run
      `ruff check packages/ tests/` *and* the terminal's `eslint src
-     --max-warnings=0` hooks gate (identical on Windows, macOS and Linux;
+     --max-warnings=0` lint gate (identical on Windows, macOS and Linux;
      the same scope `make lint` runs on POSIX)
 3. **Open the PR.** Use the template in
    `.github/PULL_REQUEST_TEMPLATE.md`. Tick every checklist item that

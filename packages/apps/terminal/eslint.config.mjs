@@ -1,11 +1,25 @@
-// ESLint flat config for the terminal - deliberately two rules and nothing else.
+// ESLint flat config for the terminal - deliberately four rules and nothing else.
 //
 // WHY THIS EXISTS AT ALL
 // ----------------------
-// `tsc --noEmit` (npm run typecheck) and `scripts/check-terminal-type-safety.py`
-// already cover types, unused bindings and suppression pragmas. Neither can see
-// a React hook's *call position* or a dependency array's *closure*, because both
-// are runtime semantics that type-check clean:
+// `tsc --noEmit` (npm run typecheck) covers types and unused bindings. It cannot
+// see three other things, all of which type-check clean:
+//
+// 1. A React hook's *call position* and a dependency array's *closure* - runtime
+//    semantics, covered by the two react-hooks rules below.
+// 2. An *explicit* `any`, which `strict` permits by design because it is the
+//    deliberate escape from the type system.
+// 3. A suppression pragma, which is a comment.
+//
+// (2) and (3) used to live in `scripts/check-terminal-type-safety.py`, which
+// matched regular expressions against comment-stripped source. That script has
+// been deleted and its two checks reimplemented as AST rules in
+// ./eslint-local-rules.mjs, because the regular expressions missed the most
+// obvious spelling of the thing they banned - `type Payload = any` - along with
+// unions, intersections, function-type return positions and `keyof any`. The
+// full list, and why the parser has no such boundary, is in that file's header.
+//
+// Taking the hooks rules in particular:
 //
 //   * react-hooks/rules-of-hooks catches a hook called conditionally or inside a
 //     callback/loop. That corrupts React's hook ordering and crashes at runtime,
@@ -25,7 +39,8 @@
 // ----------------------
 // No eslint:recommended, no stylistic presets, no typescript-eslint rule sets.
 // Ruff-equivalent churn across 1000+ files buys nothing here; correctness does.
-// Adding a rule to this file should mean a class of runtime bug was found.
+// Adding a rule to this file should mean a class of runtime bug was found, or a
+// house rule that no other gate in the repository can enforce.
 //
 // WHY @babel/eslint-parser AND NOT typescript-eslint
 // --------------------------------------------------
@@ -35,9 +50,14 @@
 // no longer exports that API - `require("typescript")` yields { version,
 // versionMajorMinor } and nothing else. Its peer range stops at <6.1.0 for the
 // same reason. @babel/eslint-parser parses TS and TSX syntax without the
-// TypeScript compiler, and both rules below are syntactic - neither needs type
+// TypeScript compiler, and all four rules below are syntactic - none needs type
 // information - so nothing is lost. Revisit when typescript-eslint ships a
 // TypeScript 7 line.
+//
+// This is also why `local/no-explicit-any` exists here instead of
+// `@typescript-eslint/no-explicit-any`: that package cannot be installed, but
+// the node it keys off (TSAnyKeyword) is emitted by this parser too, so the
+// check itself costs nothing beyond the rule in ./eslint-local-rules.mjs.
 //
 // @babel/core is already in the tree; the parser adds only @babel/eslint-parser
 // and @babel/preset-typescript on top of eslint + eslint-plugin-react-hooks
@@ -65,6 +85,7 @@
 
 import reactHooks from "eslint-plugin-react-hooks";
 import babelParser from "@babel/eslint-parser";
+import localRules from "./eslint-local-rules.mjs";
 
 export default [
   {
@@ -73,7 +94,7 @@ export default [
   },
   {
     files: ["src/**/*.{ts,tsx}"],
-    plugins: { "react-hooks": reactHooks },
+    plugins: { "react-hooks": reactHooks, local: localRules },
     languageOptions: {
       parser: babelParser,
       parserOptions: {
@@ -131,6 +152,17 @@ export default [
       // time. It does not mean deleting the comment, adding a file-level or
       // rule-level disable, or downgrading this rule to "warn".
       "react-hooks/exhaustive-deps": "error",
+
+      // The house rule `tsc` cannot enforce: explicit `any` is legal under
+      // `strict`, so the compiler is silent on it by design. Clean across all
+      // 1017 files at the time this replaced the regular-expression script, so
+      // it starts at zero debt - see ./eslint-local-rules.mjs for the six forms
+      // the predecessor let through.
+      "local/no-explicit-any": "error",
+
+      // @ts-ignore and @ts-nocheck outright; @ts-expect-error only with an issue
+      // link, per the house rules. Also clean at zero findings today.
+      "local/no-ts-suppression": "error",
     },
   },
 ];

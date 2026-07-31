@@ -7,9 +7,9 @@ import os
 import pathlib
 import stat
 import time
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
-from filelock import UnixFileLock, WindowsFileLock
+from filelock import AcquireReturnProxy, UnixFileLock, WindowsFileLock
 
 if os.name != "nt":
     import fcntl
@@ -129,13 +129,36 @@ def _validate_windows_lock_descriptor(
 class _WindowsOwnerSafeFileLock(WindowsFileLock):
     """Windows byte-range lock with descriptor-bound ownership and ACL proof."""
 
+    def acquire(self, *args: Any, **kwargs: Any) -> AcquireReturnProxy:
+        """Acquire the lock, giving this attempt its own open-denial budget.
+
+        The budget spans one acquisition's poll loop, not the lock object's
+        lifetime. These locks are long-lived and reused - ``AuditLogger`` builds
+        its chain lock once and enters it on every append - so a deadline left
+        behind by an earlier acquisition would already be in the past, and the
+        next brief sharing violation would be judged fatal on sight instead of
+        being retried. Only an intervening successful open cleared it otherwise,
+        which is precisely the case that never happens when the denial persists.
+
+        Args:
+            *args: Forwarded unchanged to :meth:`filelock.BaseFileLock.acquire`.
+            **kwargs: Forwarded unchanged to the same method.
+
+        Returns:
+            The base class's proxy, which releases the lock when its context exits.
+        """
+        self._open_denial_deadline = None
+        return super().acquire(*args, **kwargs)
+
     def _open_denial_is_still_contention(self, exc: OSError) -> bool:
         """Report whether an open denial may still be transient contention.
 
-        The first denial starts a short budget; while it lasts the caller polls
-        again, exactly as it already does for ``FileExistsError`` and a busy
-        byte-range lock. Once the budget is spent the denial is reported as the
-        permission failure it is.
+        The first denial of an acquisition starts a short budget; while it lasts
+        the caller polls again, exactly as it already does for
+        ``FileExistsError`` and a busy byte-range lock. Once the budget is spent
+        the denial is reported as the permission failure it is. :meth:`acquire`
+        reopens the budget, so it bounds one acquisition rather than the reused
+        lock object's whole lifetime.
 
         Args:
             exc: The error raised by :func:`os.open` on the lock path.

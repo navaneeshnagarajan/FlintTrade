@@ -23,7 +23,7 @@ workflow YAML should read this once.
 | `release-please.yml` | push to `main` | Linux control jobs | Maintains the release PR/version contract and dispatches `desktop-release.yml` after a release tag is created. |
 | `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
-| `key-freshness.yml` | daily cron; manual dispatch; push touching `packages/apps/desktop/resources/bootstrap/checksums/**` | 1 Linux job (~1 minute) | Fails while the pinned Node release key is expired, revoked, or expiring inside 30 days. Node releases are signed by whichever release manager cut them, using their own key with their own expiry, so this is upstream state we consume — it can be refreshed, never regenerated. `gpg` exits 0 on an expired key and reports `EXPKEYSIG` out of band, so a check that only reads the exit status passes indefinitely against a dead key. |
+| `key-freshness.yml` | daily cron; manual dispatch; push touching `packages/apps/desktop/resources/bootstrap/checksums/**` | 1 Linux job (~1 minute) | Fails while the pinned Node release key is expired, revoked, or expiring inside 30 days. Node releases are signed by whichever release manager cut them, using their own key with their own expiry, so this is upstream state we consume — it can be refreshed, never regenerated. `gpg` exits 0 on an expired key and reports `EXPKEYSIG` out of band, so a check that only reads the exit status passes indefinitely against a dead key. Revocation is upstream-only state — the packet lands on the keyserver, never in the mirrored `.asc` — so this job fetches the keyserver copy and merges it into the same keyring before reporting; that is why the per-PR `--offline` step in `test.yml` cannot replace it. Availability is handled separately from trust: an unreachable or unparseable keyserver prints `Upstream: NOT CHECKED` and leaves the exit code alone. |
 | `toolchain-freshness.yml` | daily cron; manual dispatch | 1 Linux job (~1 minute) | Fails when a pinned or floor version is EOL or has fallen outside the N-1 band declared in `flint.toml` `[requirements]`, reading nodejs.org/dist, the Node LTS schedule, the npm registry, uv's GitHub releases and the CPython EOL calendar. `pnpm audit` audits the dependency tree and pnpm is not a node in the lockfile, so nothing else can see toolchain binaries. Network-tolerant: an unreachable source skips with a note rather than failing an unrelated PR. |
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
@@ -119,8 +119,9 @@ these may be chained with it.
      surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
    - `python scripts/ft.py lint` — runs `ruff check packages/ tests/` and then
-     the terminal's `eslint src --max-warnings=0` hooks gate
-     (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`), the same
+     the terminal's `eslint src --max-warnings=0` lint gate
+     (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`,
+     `local/no-explicit-any`, `local/no-ts-suppression`), the same
      command `node-core-tests` runs. Same scope as `make lint`,
      shell-independent on every platform. Both halves always run and the first
      non-zero exit code wins; a missing ruff or a missing
