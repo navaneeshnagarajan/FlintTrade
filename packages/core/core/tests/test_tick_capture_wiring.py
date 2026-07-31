@@ -652,12 +652,20 @@ async def test_tick_storage_close_timeout_retains_owner_and_retries_truthfully()
     app.version = "test"
     app._stop_event = asyncio.Event()
 
-    started = time.monotonic()
     with pytest.raises(RuntimeError, match="tick storage"):
         await app.stop()
 
-    assert time.monotonic() - started < 0.2
+    # The subject is that the close is BOUNDED, not that the machine is fast.
+    # This asserted `time.monotonic() - started < 0.2` against a 0.01s configured
+    # timeout, which is a wall-clock budget the product never promised: on a
+    # loaded runner the coroutine alone took 0.53s and the test failed 8 times in
+    # 10, while passing 8/8 idle. What actually proves the bound is that stop()
+    # returned while the close was still in progress - the worker blocks for up
+    # to 2s, so a stop() that waited for it could not still see it running.
     assert close_started.wait(1)
+    assert storage.closed is False
+    assert app._tick_storage_close_worker is not None
+    assert not app._tick_storage_close_worker._done.is_set()
     assert app._tick_storage is storage
     assert app._orderflow_checkpoint_owner is checkpoint_owner
     assert app._stop_event.is_set() is False

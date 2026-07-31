@@ -828,9 +828,17 @@ if ! IFS= read -r start; then
 fi
 tab=$(printf '\t')
 case "$start" in
-  "FLINTTRADE_CANCEL\${tab}cancelled") status=130 ;;
-  "FLINTTRADE_CANCEL\${tab}timeout") status=124 ;;
-  "FLINTTRADE_CANCEL\${tab}listener"|"FLINTTRADE_CANCEL\${tab}containment") status=1 ;;
+  # These use "$tab" rather than a braced form. Writing the braced form here
+  # means escaping the dollar to stop String.raw interpolating it - and the
+  # backslash it preserves then reaches the shell, where an escaped dollar
+  # inside double quotes is a LITERAL dollar. The pattern became the literal
+  # six characters of a brace expansion instead of a tab, which no
+  # tab-separated line can ever equal, so every pre-start cancel fell through
+  # to *) status=125 instead of 130/124/1. Closing the quote after $tab
+  # expands the variable and concatenates the rest, with nothing to escape.
+  "FLINTTRADE_CANCEL$tab"cancelled) status=130 ;;
+  "FLINTTRADE_CANCEL$tab"timeout) status=124 ;;
+  "FLINTTRADE_CANCEL$tab"listener|"FLINTTRADE_CANCEL$tab"containment) status=1 ;;
   FLINTTRADE_START) status= ;;
   *) status=125 ;;
 esac

@@ -3192,11 +3192,17 @@ describe("POSIX anchor script source", () => {
     const template = body.slice(0, body.indexOf("\n`;\n"));
 
     expect(template).not.toContain("`");
-    // ${...} is legitimate here (probes, enumerationFlags, tab), so only flag a
-    // lone dollar-brace that never closes on the same line.
-    const unclosed = template
-      .split("\n")
-      .filter((line) => /\$\{/.test(line) && !/\$\{[^}]*\}/.test(line));
-    expect(unclosed).toEqual([]);
+    // Exactly three interpolations belong here. Anything else is evaluated as
+    // TypeScript and fails as "Cannot find name", pointing at prose - most
+    // easily by writing a brace expansion into a shell COMMENT while
+    // documenting the script, which is how it happened. Allow-listing the three
+    // is what catches that; the previous version only flagged an UNCLOSED
+    // dollar-brace, so a perfectly well-formed wrong one walked straight past.
+    // Deliberately matches the ESCAPED form too. A backslash only stops the
+    // JavaScript side from interpolating; String.raw keeps the backslash, so the
+    // shell receives an escaped dollar and reads the whole thing as literal
+    // text. That is how the pre-start cancel patterns silently stopped matching.
+    const interpolations = [...template.matchAll(/\$\{([^}]*)\}/g)].map((match) => match[1]);
+    expect([...new Set(interpolations)].sort()).toEqual(["enumerationFlags", "probes"]);
   });
 });
