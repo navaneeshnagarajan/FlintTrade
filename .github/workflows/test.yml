@@ -416,6 +416,48 @@ jobs:
           workspaces: packages/core/ticks
       - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
 
+  # TEMPORARY diagnostic — delete once the ubuntu-24.04 containment failure below
+  # is understood and fixed.
+  #
+  # bootstrap-io's POSIX anchor enumerates its own process group with
+  # `ps axeww -o pid= -o ppid= -o pgid= -o state= -o command=` and selects members
+  # with the regex `^ *[0-9]+ +[0-9]+ +<anchor pid> `. One containment test passes
+  # on ubuntu-22.04 (procps 3.3.17) and fails on ubuntu-24.04 (procps-ng 4.0.4)
+  # with byte-identical test code, so the enumeration contract is the prime
+  # suspect. This runs the exact command on both images and prints what the regex
+  # actually matches. It cannot fail the workflow.
+  posix-enumeration-diagnostic:
+    name: POSIX enumeration diagnostic (${{ matrix.os }})
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - name: Enumerate a known process group the way the anchor does
+        run: |
+          echo "--- ps identity ---"
+          /usr/bin/ps --version 2>&1 | head -2 || true
+          /bin/sh -c '
+            sleep 5 &
+            child=$!
+            echo "anchor=$$ child=$child"
+            echo "--- three raw rows, control characters shown ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | head -3 | cut -c1-48 | cat -A
+            echo "--- rows the anchor regex selects ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -E "^ *[0-9]+ +[0-9]+ +$$ " | cut -c1-48 | cat -A
+            echo "--- selected row count (expect at least 2: this sh and its sleep) ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -cE "^ *[0-9]+ +[0-9]+ +$$ "
+            kill "$child" 2>/dev/null
+            wait 2>/dev/null
+          ' || true
+
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
   # directory package on every non-draft code change; the weekly workflow
