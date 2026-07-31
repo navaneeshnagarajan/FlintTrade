@@ -136,14 +136,58 @@ def _clean_legacy_scratch_dbs(base: Path) -> None:
 
 
 def _seed_test_master_password(base: Path) -> None:
-    pw_file = base / "master_password"
-    try:
-        if not pw_file.exists():
-            from flinttrade_core.secure_file import write_secret_text
+    """Seed the per-worker master password, and prove the app will accept it.
 
-            write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
-    except OSError:
+    Existence is not the property that matters. The backend reads this through
+    ``read_hardened_owner_owned_text``, which rejects a file whose mode is any
+    broader than owner-only, so a present-but-unhardened file fails exactly as a
+    missing one does - with ``master password required but no TTY available``
+    raised from whichever unrelated test first builds a full app.
+
+    That is why this reseeds on an unreadable file rather than only an absent
+    one, and why the failure is no longer swallowed. A silent ``except OSError``
+    here turned a one-line setup fault into fifteen errors in a package that has
+    nothing to do with credentials, several minutes away and on one xdist worker
+    only.
+
+    Args:
+        base: The workspace directory this worker was given.
+
+    Raises:
+        RuntimeError: If the secret cannot be written, or cannot be read back by
+            the same reader the backend uses.
+    """
+    from flinttrade_core.secure_file import read_hardened_owner_owned_text, write_secret_text
+
+    pw_file = base / "master_password"
+
+    def _usable() -> bool:
+        try:
+            return read_hardened_owner_owned_text(pw_file) == _TEST_MASTER_PASSWORD
+        except (OSError, ValueError, UnicodeDecodeError):
+            return False
+
+    if _usable():
+        return
+
+    try:
+        pw_file.unlink()
+    except FileNotFoundError:
         pass
+    except OSError as exc:
+        raise RuntimeError(f"could not replace the unusable test master password at {pw_file}: {exc}") from exc
+
+    try:
+        write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
+    except OSError as exc:
+        raise RuntimeError(f"could not seed the test master password at {pw_file}: {exc}") from exc
+
+    if not _usable():
+        raise RuntimeError(
+            f"seeded the test master password at {pw_file}, but the backend's own reader rejects it. "
+            "Every test that builds a full app in this worker would fail with a misleading "
+            "'master password required' error."
+        )
 
 
 def _isolate_workspace() -> None:

@@ -224,7 +224,9 @@ jobs:
       # 6-hour runner timeout. Watchdog method works regardless. See the
       # PositionWatcher fix in packages/services/ditto/src/mirror.py for the original
       # hang vector.
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
+      # scripts/__tests__ is listed explicitly: it matches neither glob, so its
+      # 114 tests ran in no lane at all and one of them had been failing at head.
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ scripts/__tests__/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
       # Lint path: this used to be `packages/*/*/src/` only, which was NARROWER
       # than the documented gate - `scripts/ft.py lint` and docs/CI.md both run
       # `ruff check packages/ tests/` - so the one job that carries the lint gate
@@ -245,15 +247,16 @@ jobs:
       # refresh (a version bump plus a mirrored key swap) was arranged.
       - name: Pinned Node release key is not expired or revoked
         run: uv run python scripts/check-node-release-key-freshness.py --offline --days 0
-      # The terminal's only lint gate. packages/apps/terminal/eslint.config.mjs
-      # claimed this rule and never ran: none of its four plugins were in
-      # pnpm-lock.yaml, no npm script invoked it and no CI job called it. The
-      # config is gone; this replaces the one rule in it that `tsc --noEmit`
-      # cannot enforce (explicit `any` is legal under `strict` by design), at
-      # zero new dependencies. react-hooks/exhaustive-deps still needs real
-      # ESLint - see the follow-up note in the script's docstring.
-      - name: Terminal type-safety gate (no explicit `any`, no suppressions)
-        run: uv run python scripts/check-terminal-type-safety.py
+      # NOTE: `scripts/check-terminal-type-safety.py` used to run here, matching
+      # regular expressions for explicit `any` and suppression pragmas. It missed
+      # `type Payload = any` — the most obvious spelling of the thing it banned —
+      # along with unions, intersections, function-type return positions and
+      # `keyof any`, because an alias body carries none of the punctuation the
+      # patterns keyed off. Both checks are now AST rules in
+      # packages/apps/terminal/eslint-local-rules.mjs, enforced by the "Terminal
+      # lint gate" step in node-core-tests, which is ungated exactly like this
+      # job, so the gate runs on the same set of pushes it always did.
+      # tests/test_terminal_lint_gate_wiring.py fails if that step goes away.
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On
@@ -285,11 +288,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
-      # react-hooks/rules-of-hooks + exhaustive-deps. Deliberately beside the
-      # typecheck: it catches the two runtime faults tsc cannot see — a
-      # conditional hook call, and a dependency array that lets a widget act on
-      # a stale price.
-      - name: React hooks lint gate
+      # Four rules, all of them things tsc cannot see. react-hooks/rules-of-hooks
+      # + exhaustive-deps catch the two runtime faults — a conditional hook call,
+      # and a dependency array that lets a widget act on a stale price.
+      # local/no-explicit-any + local/no-ts-suppression carry the house rules that
+      # `strict` permits by design: an explicit `any`, and a suppression pragma.
+      # The latter two replaced a regex script that missed `type Payload = any`.
+      - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
         run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/

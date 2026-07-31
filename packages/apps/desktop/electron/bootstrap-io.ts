@@ -743,17 +743,23 @@ elif [ -x /bin/grep ]; then filter=/bin/grep
 fi
 # Signal a whole process group, portably.
 #
-# procps-ng 4.x — Ubuntu 24.04, this project's declared minimum — parses a bare
-# leading "-PGID" as an option rather than as a negative pid. It matches nothing,
-# signals nobody, and still exits 0, so a group-directed /bin/kill reports success
-# while the group runs on untouched. Measured directly on both runner images: on
-# ubuntu-22.04 (procps-ng 3.3.17) that form kills the orphan; on ubuntu-24.04
-# (procps-ng 4.0.4) the orphan survives and the caller is told it did not.
+# A group-directed /bin/kill with a bare negative pgid as its first operand is
+# not dependable, and its exit status does not tell you whether it worked.
+# Measured, same orphan shape each time:
 #
-# The shell builtin is POSIX and has no such parsing quirk, and "--" fixes
-# /bin/kill where it is reached. Both are issued because a group signal is
-# idempotent, and because neither one's exit status distinguishes "delivered" from
-# "parsed as an option" — which is precisely the failure being worked around.
+#   GitHub ubuntu-22.04, procps-ng 3.3.17 : rc=0, orphan killed
+#   GitHub ubuntu-24.04, procps-ng 4.0.4  : rc=0, orphan SURVIVED
+#   WSL2   Ubuntu 26.04, procps-ng 4.0.4  : rc=1, orphan killed
+#
+# Note the last two: same procps version, opposite outcomes, and the run that
+# delivered the signal is the one that reported failure. So this is not a clean
+# "procps 4.x parses it as an option" story - whatever the trigger is, it varies
+# by environment and the return code cannot be used to detect it. That is the
+# whole argument for not relying on the form at all.
+#
+# The POSIX shell builtin and the "--" form both returned 0 and both delivered on
+# every host tested. Both are issued: a group signal is idempotent, so the cost is
+# nil, and no single form has been shown to be reliable everywhere.
 signal_group() {
   kill -"$1" "-$2" 2>/dev/null || :
   /bin/kill -s "$1" -- "-$2" 2>/dev/null || :

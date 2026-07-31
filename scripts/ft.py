@@ -1065,6 +1065,11 @@ def pytest_paths() -> list[str]:
     )
     if (REPO_ROOT / "tests").is_dir():
         paths.append("tests")
+    # scripts/__tests__ does not match the packages glob and is not under tests/,
+    # so it ran nowhere - not here, not in CI - while holding 114 tests. One of
+    # them had been failing at head unnoticed because of it.
+    if (REPO_ROOT / "scripts" / "__tests__").is_dir():
+        paths.append("scripts/__tests__")
     return paths
 
 
