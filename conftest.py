@@ -14,6 +14,10 @@ The mechanism:
   * This module is imported by pytest *before* any test module, so the env
     var is set before `auth_service.py`, `app.py`, etc. resolve their
     module-level DB-path constants.
+  * The minting itself lives in `tests/scratch_workspace.py` because two
+    package conftests need the same thing and a per-package run never loads
+    this file. `acquire_workspace()` is memoised per process, so whichever of
+    the three gets there first owns the directory and the others adopt it.
 
 Why module-level (not `pytest_configure`):
   several singletons in `packages/core/core/src/app.py` and `auth_service.py`
@@ -30,7 +34,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 
@@ -113,68 +116,9 @@ def _install_local_package_paths() -> None:
             sys.path.append(src)
 
 
-# DBs whose on-disk engine changed DuckDB→SQLite. A persistent test workspace
-# reused across the migration may still hold the legacy DuckDB file, which
-# open_sqlite cannot read — wipe these scratch files so the SQLite code recreates
-# them. Only ever touches the throw-away pytest workspace.
-_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db")
-
-# Master password no longer auto-generates (locked decision #13: getpass/fd only).
-# Seed a hardened-equivalent file so app-creating tests don't block on a TTY prompt.
-_TEST_MASTER_PASSWORD = "pytest-master-password"
-
-
-def _clean_legacy_scratch_dbs(base: Path) -> None:
-    for name in _MIGRATED_SCRATCH_DBS:
-        for path in (base / name, base / f"{name}-wal", base / f"{name}-shm"):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                pass
-
-
-def _seed_test_master_password(base: Path) -> None:
-    """Seed this workspace's master password via the one shared implementation.
-
-    Args:
-        base: The workspace directory this run was given.
-    """
-    _scratch_workspace().seed_master_password(base)
-
-
-def _isolate_workspace() -> None:
-    # Under xdist each worker MUST get its own dir even when the controller
-    # already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it) — otherwise
-    # all workers share one dir and collide on the still-DuckDB engine
-    # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
-    # (gw0, gw1, …) and absent in the controller / serial runs. A user-supplied
-    # FLINTTRADE_WORKSPACE_DIR (no xdist) is still respected.
-    register = _scratch_workspace().register
-
-    worker = os.environ.get("PYTEST_XDIST_WORKER")
-    existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    if worker:
-        # register(): the directory this process created is this process's to
-        # remove at session end. An operator-supplied `existing` never is.
-        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
-    elif existing:
-        base = Path(existing)
-    else:
-        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
-    base.mkdir(parents=True, exist_ok=True)
-    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
-    # The operator's machine-local .env may pin DUCKDB_PATH at one real,
-    # shared DuckDB file (a single-writer engine). Full-app constructions on
-    # several xdist workers then contend on that file — losers boot with
-    # TRADE_STORAGE=None and store-wiring tests flake. Pin the variable to a
-    # per-worker scratch file FIRST: load_dotenv() never overrides an existing
-    # env var, so the .env value cannot leak into ANY package's test run.
-    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
-    _clean_legacy_scratch_dbs(base)
-    _seed_test_master_password(base)
-
-
 _install_local_package_paths()
-_isolate_workspace()
+# One workspace per process, minted, seeded and env-pinned by the shared helper.
+# Each of the three conftests that isolate FLINTTRADE_WORKSPACE_DIR used to mint
+# its own, so a worker created three and whichever conftest imported last won
+# the env var; acquire_workspace() memoises, so the later callers adopt this one.
+_scratch_workspace().acquire_workspace()

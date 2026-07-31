@@ -18,6 +18,19 @@ that is not a ``flinttrade-pytest-`` directory inside the temp directory.
 Every step is best-effort. A cleanup failure must never fail an otherwise green
 run, so all errors are swallowed and a directory that will not go away is simply
 left behind.
+
+Two properties keep the sweep from eating a workspace that is still in use:
+
+* :func:`acquire_workspace` mints **one** workspace per process. Every conftest
+  that isolates ``FLINTTRADE_WORKSPACE_DIR`` calls it, so the last one imported
+  no longer decides which of three freshly minted directories the process ends
+  up pointing at.
+* :func:`register` takes an OS-level exclusive lock on the workspace and holds
+  it for the process lifetime, and :func:`sweep_stale` refuses any candidate
+  whose lock is still held. Liveness is therefore an operating-system fact
+  rather than an inference from a timestamp, so no clock skew, no long-running
+  session and no caller can talk the sweep into removing a live sibling's
+  workspace.
 """
 
 from __future__ import annotations
@@ -51,17 +64,169 @@ _STALE_AGE_SECONDS = 6 * 60 * 60
 
 An app-building test holds DuckDB/SQLite handles on its workspace for the whole
 process lifetime - later than ``atexit``, so no in-process finaliser can unlink
-it. The next run collects it instead. Six hours is far longer than any suite
-invocation, so a concurrently running sibling process (xdist workers, a second
-checkout, another agent's run) can never be swept out from under itself.
+it. The next run collects it instead, and waiting six hours means a workspace
+left by a run that predates :data:`_LOCK_NAME` is very unlikely still to be in
+use.
+
+This is a grace period, not the safety property. It used to be treated as the
+safety property - "six hours is longer than any suite invocation, so a
+concurrently running sibling can never be swept out from under itself" - and
+that reasoning does not survive anything that distorts the comparison. The
+liveness claim is what actually protects a live sibling.
 """
 
 _SWEEP_LIMIT = 200
 """Cap on directories swept per run, so session finish never stalls."""
 
+_LOCK_NAME = ".flinttrade-pytest-scratch.lock"
+"""Liveness claim: an exclusive OS lock held for the owning process's lifetime.
+
+:data:`_STALE_AGE_SECONDS` alone was never a safe liveness test. It infers "no
+one is using this" from a timestamp, and an inference can be wrong - a clock
+that skews, a suite that outruns the window, or a caller that supplies its own
+reference time. When it was wrong the sweep did not merely leave rubbish behind:
+it recursively removed a *live* sibling xdist worker's workspace, taking that
+worker's ``master_password`` with it and failing every subsequent test there
+with a misleading "master password required but no TTY available".
+
+A held lock is not an inference. The operating system releases it when the
+owning process exits, however it exits, so a workspace is sweepable exactly
+when nobody is left to care.
+"""
+
 _registered: list[Path] = []
 _deferred: list[Path] = []
+_claims: dict[Path, int] = {}
 _atexit_armed = False
+
+
+def _open_lock_fd(path: Path) -> int | None:
+    """Open (creating if needed) a workspace's lock file.
+
+    Args:
+        path: The lock file itself.
+
+    Returns:
+        A read/write descriptor, or ``None`` if it could not be opened.
+    """
+    try:
+        return os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        return None
+
+
+def _try_lock(fd: int) -> bool:
+    """Take the exclusive lock without blocking.
+
+    Args:
+        fd: A descriptor on the lock file.
+
+    Returns:
+        ``True`` if the lock was taken, ``False`` if another process holds it.
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt  # noqa: PLC0415
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock(fd: int) -> None:
+    """Drop the exclusive lock, tolerating any failure.
+
+    Args:
+        fd: A descriptor that currently holds the lock.
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt  # noqa: PLC0415
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _claim(path: Path) -> None:
+    """Announce that this process is using *path*, for as long as it lives.
+
+    Args:
+        path: The scratch workspace root.
+    """
+    if path in _claims:
+        return
+    fd = _open_lock_fd(path / _LOCK_NAME)
+    if fd is None:
+        return
+    if _try_lock(fd):
+        _claims[path] = fd
+    else:
+        os.close(fd)
+
+
+def _unclaim(path: Path) -> None:
+    """Drop this process's claim so the workspace can be removed.
+
+    Windows will not unlink a file another handle holds open, so the claim has
+    to go before the tree can.
+
+    Args:
+        path: The scratch workspace root.
+    """
+    fd = _claims.pop(path, None)
+    if fd is None:
+        return
+    _unlock(fd)
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _owner_is_live(candidate: Path) -> bool:
+    """Whether some process is still using *candidate*.
+
+    Args:
+        candidate: A marked scratch workspace found in the temp directory.
+
+    Returns:
+        ``True`` while any process holds the workspace's lock. A workspace left
+        by a run that predates the lock has no lock file and is not live.
+    """
+    if candidate in _claims:
+        return True
+    lock_path = candidate / _LOCK_NAME
+    try:
+        if not lock_path.is_file():
+            return False
+    except OSError:
+        return True
+    fd = _open_lock_fd(lock_path)
+    if fd is None:
+        # Windows refuses the open while the owner holds the handle.
+        return True
+    try:
+        if _try_lock(fd):
+            _unlock(fd)
+            return False
+        return True
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _mark(path: Path) -> None:
@@ -84,6 +249,10 @@ def _mark(path: Path) -> None:
 def register(path: Path | str) -> Path:
     """Record a scratch workspace for release at the end of the session.
 
+    Also takes the liveness claim, so a concurrently sweeping process - another
+    xdist worker, a second checkout, another agent's run - can see that this
+    directory is in use rather than having to guess from its age.
+
     Args:
         path: The directory that was just created for this run.
 
@@ -93,6 +262,7 @@ def register(path: Path | str) -> Path:
     """
     resolved = Path(path)
     _mark(resolved)
+    _claim(resolved)
     _registered.append(resolved)
     return resolved
 
@@ -204,6 +374,7 @@ def release(path: Path) -> None:
 
     if not _is_releasable(path):
         return
+    _unclaim(path)
     if not path.exists():
         return
     unwind_protected_dacls(path)
@@ -222,21 +393,29 @@ def release_all() -> None:
         release(_registered.pop())
 
 
-def sweep_stale(*, now: float | None = None) -> list[Path]:
+def sweep_stale() -> list[Path]:
     """Collect marked workspaces that an earlier run could not remove itself.
 
     A workspace whose test built the Flask app keeps store handles open until the
     process exits, which is later than any finaliser can run, so it survives its
-    own session. The next run picks it up here. Only directories carrying this
-    suite's marker and older than :data:`_STALE_AGE_SECONDS` are considered.
+    own session. The next run picks it up here.
 
-    Args:
-        now: Reference timestamp, for tests. Defaults to the current time.
+    The glob is over the whole shared temp directory, so most candidates belong
+    to *other* processes and a mistake here is cross-process data loss. Three
+    conditions must therefore all hold before a candidate is removed: it carries
+    this suite's marker, nothing holds its liveness claim, and its marker is
+    older than :data:`_STALE_AGE_SECONDS`.
+
+    The claim is the load-bearing one. Age is a courtesy check for workspaces
+    left by runs that predate the claim, and it takes no caller-supplied
+    reference time: the previous signature accepted ``now``, and a test that
+    passed a future timestamp to age its own decoy aged every live sibling
+    worker's workspace with it and had them recursively removed mid-run.
 
     Returns:
         The workspaces that were successfully removed.
     """
-    reference = time.time() if now is None else now
+    reference = time.time()
     try:
         candidates = sorted(Path(tempfile.gettempdir()).glob(f"{_SCRATCH_PREFIX}*"))
     except OSError:
@@ -254,6 +433,8 @@ def sweep_stale(*, now: float | None = None) -> list[Path]:
         except OSError:
             continue
         if not _is_releasable(candidate):
+            continue
+        if _owner_is_live(candidate):
             continue
         unwind_protected_dacls(candidate)
         if _try_remove(candidate):
@@ -326,3 +507,99 @@ def seed_master_password(base: Path | str) -> None:
             "Every test that builds a full app in this worker would fail with a misleading "
             "'master password required' error."
         )
+
+
+# ---------------------------------------------------------------------------
+# Workspace acquisition
+# ---------------------------------------------------------------------------
+
+_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db", "emergency_intents.sqlite")
+"""Scratch stores that must not carry state between independent pytest runs.
+
+``activity``/``security`` changed engine DuckDB->SQLite and a reused workspace
+may still hold a file ``open_sqlite`` cannot read. The emergency journal
+intentionally survives production restarts, but a prior simulated kill episode
+must not poison a later test process.
+"""
+
+_acquired: Path | None = None
+
+
+def clean_legacy_scratch_dbs(base: Path | str) -> None:
+    """Remove scratch stores that must not survive into this run.
+
+    Args:
+        base: The workspace directory to clean.
+    """
+    root = Path(base)
+    for name in _MIGRATED_SCRATCH_DBS:
+        for path in (root / name, root / f"{name}-wal", root / f"{name}-shm"):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass  # locked by a concurrent worker - that worker owns cleanup
+
+
+def acquire_workspace() -> Path:
+    """Return the one scratch workspace this pytest process uses.
+
+    Three conftests isolate ``FLINTTRADE_WORKSPACE_DIR``: the repo-root one and
+    one each under ``packages/core/core/tests`` and ``packages/core/data/tests``
+    (the package ones exist because a per-package run resolves rootdir to that
+    package and never loads the root conftest). Each used to mint and seed its
+    own ``mkdtemp``, so a full-suite worker created three workspaces, whichever
+    conftest was imported last won the env var, and the other two were abandoned
+    still-registered. Memoising here makes the second and third callers adopt
+    the first's directory, which is the only one any test ever sees.
+
+    Isolation is unchanged: the memo is per process, so each xdist worker still
+    gets its own directory and DuckDB/SQLite exclusive locks cannot collide. It
+    is still ``mkdtemp`` rather than a deterministic per-worker path - a stable
+    directory is reused by every later invocation, and stores encrypted under a
+    previous run's master password then fail to decrypt with ``InvalidTag``.
+
+    Returns:
+        The workspace directory, which is also now
+        ``os.environ["FLINTTRADE_WORKSPACE_DIR"]``.
+    """
+    global _acquired
+
+    if _acquired is not None:
+        return _acquired
+
+    # Under xdist each worker MUST get its own directory even though the
+    # controller already exported FLINTTRADE_WORKSPACE_DIR and workers inherit
+    # it - otherwise every worker shares one directory and they collide on the
+    # SandboxEngine / traffic / error stores. PYTEST_XDIST_WORKER is set per
+    # worker (gw0, gw1, ...) and absent in the controller and in serial runs, so
+    # an operator-supplied value is still honoured there.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    supplied = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
+    if supplied and not worker:
+        base = Path(supplied)
+        ours = False
+    else:
+        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker or 'main'}-"))
+        ours = True
+
+    base.mkdir(parents=True, exist_ok=True)
+    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
+    # The operator's machine-local .env may pin DUCKDB_PATH at one real, shared
+    # DuckDB file (a single-writer engine). Full-app constructions on several
+    # xdist workers then contend on that file - the losers boot with
+    # TRADE_STORAGE=None and store-wiring tests flake. Pin the variable to a
+    # per-worker scratch file FIRST: load_dotenv() never overrides an existing
+    # env var, so the .env value cannot leak into any package's test run.
+    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
+    clean_legacy_scratch_dbs(base)
+    # Master password no longer auto-generates (locked decision #13: getpass or
+    # fd only), so app-building tests need a file or they block on a TTY prompt.
+    # A directory the operator supplied is theirs: seed it only when it holds no
+    # secret at all, never over the top of a real one.
+    if ours or not (base / "master_password").exists():
+        seed_master_password(base)
+
+    _acquired = base
+    return base

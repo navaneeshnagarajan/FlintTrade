@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -72,75 +71,19 @@ def _scratch_workspace():
     return module
 
 
-# Persistent scratch DBs must not carry state between independent pytest runs.
-# activity/security also changed DuckDB→SQLite and may hold a foreign-format
-# file; the emergency journal intentionally survives production restarts but a
-# prior simulated kill episode must not poison a later test process.
-_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db", "emergency_intents.sqlite")
-
-
-def _clean_legacy_scratch_dbs(base: Path) -> None:
-    for name in _MIGRATED_SCRATCH_DBS:
-        for path in (base / name, base / f"{name}-wal", base / f"{name}-shm"):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                pass
-
-
 # The constant every seeded workspace's master_password file carries. The
 # per-module fixture below also pins the process cache to it so the password an
 # app encrypts under always matches the file beside its stores.
 _TEST_MASTER_PASSWORD = "pytest-master-password"
 
-
-def _seed_test_master_password(base: Path) -> None:
-    # Master password no longer auto-generates (locked #13: getpass/fd only).
-    # Seed a file so app-creating tests don't block on a TTY prompt. Delegated:
-    # three near-copies of this existed and the one that drifted broke CI.
-    _scratch_workspace().seed_master_password(base)
-
-
-def _isolate_workspace() -> None:
-    # Under xdist, each worker MUST get its own workspace dir even when the
-    # controller already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it),
-    # else all workers share one dir and collide on the still-DuckDB engine
-    # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
-    # (gw0, gw1, …) and absent in the controller / serial runs.
-    register = _scratch_workspace().register
-
-    worker = os.environ.get("PYTEST_XDIST_WORKER")
-    existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    if worker:
-        # register(): this process created the directory, so this process removes
-        # it at session end. An operator-supplied `existing` is never registered.
-        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
-    elif existing:
-        _clean_legacy_scratch_dbs(Path(existing))
-        _pin_duckdb_path(Path(existing))
-        return
-    else:
-        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
-    base.mkdir(parents=True, exist_ok=True)
-    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
-    _pin_duckdb_path(base)
-    _clean_legacy_scratch_dbs(base)
-    _seed_test_master_password(base)
-
-
-def _pin_duckdb_path(base: Path) -> None:
-    # The operator's machine-local .env may pin DUCKDB_PATH at a real, shared
-    # DuckDB file (a single-writer engine). Full-app constructions on several
-    # xdist workers then contend on that one file — the losers boot with
-    # TRADE_STORAGE=None and store-wiring tests flake. Pin the variable to a
-    # per-worker scratch file FIRST: load_dotenv() never overrides an existing
-    # env var, so the .env value cannot leak into test runs.
-    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
-
-
-_isolate_workspace()
+# One workspace per process. A per-package run (uv run pytest
+# packages/core/core/tests …) resolves rootdir to THIS package, so the repo-root
+# conftest is above --confcutdir and never loads — this call is what mints,
+# seeds and env-pins the workspace then. In a full-suite run the root conftest
+# got there first and acquire_workspace() hands back the directory it already
+# minted, rather than this conftest minting a second one and quietly re-pointing
+# FLINTTRADE_WORKSPACE_DIR at it.
+_scratch_workspace().acquire_workspace()
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
@@ -180,29 +123,26 @@ def _per_module_workspace(request):
     rows written by an earlier round under a different cached password fails
     with ``InvalidTag`` (the TestWebhooksManagement 503 flake). Pinning makes
     every round of every core module encrypt and decrypt under the same
-    password that ``_seed_test_master_password`` wrote beside the store.
+    password that ``seed_master_password`` wrote beside the store.
     """
     import flinttrade_core.app as app_mod
 
-    prev = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    # mkdtemp fallback, NOT a deterministic path: a stable directory would be
-    # reused by every later suite invocation, and stale encrypted stores under
-    # yesterday's master password fail with InvalidTag (see 82d7e17f, which
-    # removed the same reusable-path pattern from the data conftest).
-    if prev:
-        base = Path(prev)
-    else:
-        base = _scratch_workspace().register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+    scratch = _scratch_workspace()
+    # This process's one workspace, not whatever FLINTTRADE_WORKSPACE_DIR
+    # happens to say: reading the env var made the module subdirectory hang off
+    # a value another fixture could have moved, and made teardown restore that
+    # same accident. The base is a mkdtemp, NOT a deterministic path — a stable
+    # directory would be reused by every later suite invocation, and stale
+    # encrypted stores under yesterday's master password fail with InvalidTag
+    # (see 82d7e17f, which removed the same reusable-path pattern).
+    base = scratch.acquire_workspace()
     mod_dir = base / Path(request.module.__file__).stem
     mod_dir.mkdir(parents=True, exist_ok=True)
-    _clean_legacy_scratch_dbs(mod_dir)
-    _seed_test_master_password(mod_dir)
+    scratch.clean_legacy_scratch_dbs(mod_dir)
+    scratch.seed_master_password(mod_dir)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(mod_dir)
     prev_cached_pw = app_mod._MASTER_PASSWORD
     app_mod._MASTER_PASSWORD = _TEST_MASTER_PASSWORD
     yield
     app_mod._MASTER_PASSWORD = prev_cached_pw
-    if prev is not None:
-        os.environ["FLINTTRADE_WORKSPACE_DIR"] = prev
-    else:
-        os.environ.pop("FLINTTRADE_WORKSPACE_DIR", None)
+    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
