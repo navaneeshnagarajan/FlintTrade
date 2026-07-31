@@ -122,16 +122,53 @@ def test_runtime_code_does_not_use_pre_restructure_repo_paths() -> None:
 
 
 def test_site_vercel_config_uses_workspace_pnpm_lockfile() -> None:
-    """Vercel deploys should use the workspace package manager and frozen lockfile."""
+    """Vercel deploys must run the *pinned* pnpm against a frozen lockfile.
+
+    Vercel's build image ships its own pnpm - 10.28.0 when this was written - and
+    does not honour the ``packageManager`` pin, because Corepack is not enabled
+    there. pnpm will not fetch its own pin either: ``pnpm-workspace.yaml`` sets
+    ``managePackageManagerVersions: false`` deliberately. So both commands resolve
+    the pin from the root ``package.json`` themselves and hand it to
+    ``npx --package``, which runs that exact release instead of whatever ``pnpm``
+    happens to sit on ``PATH``.
+
+    ``packageManagerStrictVersion: true`` stays on: it is what turns "wrong pnpm"
+    into a failed deploy rather than a lockfile quietly resolved by a version it
+    was never written for. Bypassing it would defeat ``--frozen-lockfile``.
+
+    The pin is asserted to be *absent* as a literal - deriving it is the point, and
+    a second copy here would be one more place to forget on the next bump.
+    """
     vercel_config = json.loads((ROOT / "packages" / "apps" / "site" / "vercel.json").read_text(encoding="utf-8"))
 
     install_command = vercel_config.get("installCommand", "")
     build_command = vercel_config.get("buildCommand", "")
 
     assert "pnpm install --frozen-lockfile" in install_command
-    assert build_command == "pnpm run build"
+    assert "pnpm run build" in build_command
     assert re.search(r"(^|[;&|]\s*)npm(?:\s|$)", install_command) is None
     assert re.search(r"(^|[;&|]\s*)npm(?:\s|$)", build_command) is None
+
+    pinned_version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["packageManager"]
+    pinned_version = pinned_version.removeprefix("pnpm@").split("+")[0]
+    for name, command in (("installCommand", install_command), ("buildCommand", build_command)):
+        assert pinned_version not in command, (
+            f"vercel.json {name} hardcodes pnpm {pinned_version}. Derive it from the root "
+            "package.json packageManager field instead - the pin has one home."
+        )
+        assert "packageManager" in command, (
+            f"vercel.json {name} must read the pnpm pin out of the root package.json "
+            "packageManager field, or Vercel's own stale pnpm runs the command."
+        )
+        assert 'npx --yes --package "$PNPM_PIN" --' in command, (
+            f"vercel.json {name} must invoke the resolved pin via npx --package, which runs that "
+            "exact release rather than the pnpm on PATH."
+        )
+        for bypass in ("package-manager-strict", "COREPACK_ENABLE_STRICT"):
+            assert bypass not in command, (
+                f"vercel.json {name} disables the pnpm version check via {bypass}. That lets a "
+                "wrong pnpm resolve the lockfile differently - the exact failure --frozen-lockfile exists to stop."
+            )
 
 
 def test_make_dev_starts_flinttrade_backend_not_openalgo() -> None:

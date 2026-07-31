@@ -32,20 +32,6 @@ async function sha256File(target: string): Promise<string> {
   return createHash("sha256").update(await readFile(target)).digest("hex");
 }
 
-/**
- * How long the orphan-containment fixture's descendant waits before writing its
- * marker.
- *
- * Sized against the containment path it is testing: that sends SIGTERM to the
- * process group and then allows up to 2s for the group to settle before
- * escalating to SIGKILL. A descendant that writes inside that window can win the
- * race on a busy runner without the product being wrong, because the guarantee
- * is that no orphan SURVIVES, not that no orphan executes an instruction. 4s
- * leaves the settle window comfortable headroom while keeping the test well
- * inside its 15s budget.
- */
-const DESCENDANT_WRITE_MS = 4_000;
-
 const TEST_WINDOWS_NATIVE_IDENTITY = "0000000000000001:00000000000000000000000000000001";
 const TEST_WINDOWS_NATIVE_IDENTITY_DRIFT = "0000000000000002:00000000000000000000000000000002";
 
@@ -1418,22 +1404,9 @@ describe("bootstrap system boundaries", () => {
       const root = await mkdtemp(path.join(tmpdir(), "flinttrade-bootstrap-success-tree-"));
       roots.push(root);
       const marker = path.join(root, "descendant-survived");
-      // The descendant waits DESCENDANT_WRITE_MS before writing, and the
-      // assertion below is that it never gets there. That delay is fixture
-      // headroom for containment latency, not a tolerance on the assertion:
-      // the property under test is "the orphan does not survive", and it only
-      // tests that if the delay comfortably exceeds how long containment takes.
-      //
-      // It was 700ms, and containment SIGTERMs the process group and then waits
-      // up to 2s for it to settle before escalating. On a loaded Linux runner
-      // the descendant therefore won the race and wrote, failing this test on CI
-      // while never running locally at all (it is POSIX-only, so a Windows
-      // machine skips it). The assertion is unchanged and just as strict - the
-      // marker must still never appear - it simply is not decided by scheduler
-      // luck any more.
       const parent = [
         "const {spawn}=require('node:child_process');",
-        `spawn(process.execPath,['-e',"setTimeout(()=>require('node:fs').writeFileSync(process.argv[1],'alive'),${DESCENDANT_WRITE_MS})",process.argv[1]],{stdio:'ignore'}).unref();`,
+        "spawn(process.execPath,['-e',\"setTimeout(()=>require('node:fs').writeFileSync(process.argv[1],'alive'),700)\",process.argv[1]],{stdio:'ignore'}).unref();",
       ].join("");
 
       const result = await createNodeBootstrapDependencies(process.platform).command.run({
@@ -1444,9 +1417,7 @@ describe("bootstrap system boundaries", () => {
 
       expect(result).toMatchObject({ contained: true, exitCode: 1 });
       expect(result.stderr).toMatch(/descendant|containment/i);
-      // Wait past the descendant's write deadline, then require the marker to
-      // be absent: had it survived containment, it would have written by now.
-      await new Promise((resolve) => setTimeout(resolve, DESCENDANT_WRITE_MS + 500));
+      await new Promise((resolve) => setTimeout(resolve, 850));
       await expect(access(marker)).rejects.toThrow();
     },
     15_000,
