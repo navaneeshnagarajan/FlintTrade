@@ -98,15 +98,9 @@ _TEST_MASTER_PASSWORD = "pytest-master-password"
 
 def _seed_test_master_password(base: Path) -> None:
     # Master password no longer auto-generates (locked #13: getpass/fd only).
-    # Seed a file so app-creating tests don't block on a TTY prompt.
-    pw_file = base / "master_password"
-    try:
-        if not pw_file.exists():
-            from flinttrade_core.secure_file import write_secret_text
-
-            write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
-    except OSError:
-        pass
+    # Seed a file so app-creating tests don't block on a TTY prompt. Delegated:
+    # three near-copies of this existed and the one that drifted broke CI.
+    _scratch_workspace().seed_master_password(base)
 
 
 def _isolate_workspace() -> None:

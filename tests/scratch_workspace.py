@@ -259,3 +259,70 @@ def sweep_stale(*, now: float | None = None) -> list[Path]:
         if _try_remove(candidate):
             swept.append(candidate)
     return swept
+
+
+# ---------------------------------------------------------------------------
+# Master-password seeding
+#
+# Not cleanup, so the best-effort rule above does NOT apply here: a seeding
+# failure must be loud. This lives beside register() because all three
+# conftests that isolate a workspace already load this module, and because
+# keeping three copies of it is what broke CI. The copy in
+# packages/core/data/tests wrote the secret with a plain Path.write_text, which
+# on POSIX leaves mode 0644 while the backend reads through
+# read_hardened_owner_owned_text and rejects anything broader than owner-only.
+# Every test in that worker which built a full app then failed with "master
+# password required but no TTY available", naming a workspace that did have the
+# file. Windows has no POSIX mode bits, so it never reproduced there.
+# ---------------------------------------------------------------------------
+
+#: The value every seeded workspace's ``master_password`` file carries.
+TEST_MASTER_PASSWORD = "pytest-master-password"
+
+
+def seed_master_password(base: Path | str) -> None:
+    """Seed *base*'s master password, and prove the backend will accept it.
+
+    Existence is not the property that matters - the file must also be hardened
+    to owner-only, or the reader rejects it exactly as it rejects a missing one.
+    So this reseeds an unreadable file rather than only an absent one, and
+    writes through ``write_secret_text`` rather than a plain write.
+
+    Args:
+        base: The workspace directory to seed.
+
+    Raises:
+        RuntimeError: If the secret cannot be written, or cannot be read back
+            by the same reader the backend uses.
+    """
+    from flinttrade_core.secure_file import read_hardened_owner_owned_text, write_secret_text
+
+    pw_file = Path(base) / "master_password"
+
+    def _usable() -> bool:
+        try:
+            return read_hardened_owner_owned_text(pw_file) == TEST_MASTER_PASSWORD
+        except (OSError, ValueError, UnicodeDecodeError):
+            return False
+
+    if _usable():
+        return
+
+    try:
+        pw_file.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RuntimeError(f"could not replace the unusable test master password at {pw_file}: {exc}") from exc
+
+    try:
+        write_secret_text(pw_file, TEST_MASTER_PASSWORD)
+    except OSError as exc:
+        raise RuntimeError(f"could not seed the test master password at {pw_file}: {exc}") from exc
+
+    if not _usable():
+        raise RuntimeError(
+            f"seeded the test master password at {pw_file}, but the backend's own reader rejects it. "
+            "Every test that builds a full app in this worker would fail with a misleading "
+            "'master password required' error."
+        )

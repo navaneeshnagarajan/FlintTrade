@@ -68,12 +68,12 @@ def _clean_legacy_scratch_dbs(base: Path) -> None:
 
 def _seed_test_master_password(base: Path) -> None:
     # Master password no longer auto-generates (locked #13: getpass/fd only).
-    pw_file = base / "master_password"
-    try:
-        if not pw_file.exists():
-            pw_file.write_text("pytest-master-password")
-    except OSError:
-        pass
+    # This used to write the secret with a plain Path.write_text, which leaves
+    # mode 0644 on POSIX; the backend reads it through
+    # read_hardened_owner_owned_text and rejects anything broader than
+    # owner-only, so every app-building test in the worker failed naming a
+    # workspace that did contain the file.
+    _scratch_workspace().seed_master_password(base)
 
 
 def _isolate_workspace() -> None:
