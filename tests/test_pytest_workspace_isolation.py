@@ -308,3 +308,30 @@ def test_every_conftest_shares_one_workspace_per_process(tmp_path: Path) -> None
     assert workspace.parent == tmp_path
     assert workspace.name.startswith("flinttrade-pytest-gw7-")
     assert (workspace / "master_password").is_file()
+
+
+def test_register_leaves_an_unclaimable_workspace_unmarked(monkeypatch) -> None:
+    """A workspace whose liveness claim fails must not become sweepable.
+
+    The marker is what makes a directory collectable. Marking one whose claim
+    did not hold produces a workspace that looks dead to every other process the
+    moment it passes the age threshold - which is precisely the cross-process
+    deletion this module exists to prevent, reintroduced through the failure
+    path rather than the happy one.
+
+    Failing this way leaks the directory instead: no later run collects it. That
+    is the deliberate trade, because leaking a scratch directory is recoverable
+    and wiping a live one is not.
+    """
+    monkeypatch.setattr(scratch_workspace, "_open_lock_fd", lambda _path: None)
+
+    unclaimable = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+    try:
+        register(unclaimable)
+        assert not (unclaimable / _MARKER_NAME).exists(), (
+            "register() marked a workspace it could not claim; a later sweep would delete it while in use"
+        )
+        assert unclaimable not in scratch_workspace._claims
+    finally:
+        scratch_workspace._registered.remove(unclaimable)
+        shutil.rmtree(unclaimable, ignore_errors=True)

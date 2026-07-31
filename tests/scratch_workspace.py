@@ -159,21 +159,25 @@ def _unlock(fd: int) -> None:
         pass
 
 
-def _claim(path: Path) -> None:
+def _claim(path: Path) -> bool:
     """Announce that this process is using *path*, for as long as it lives.
 
     Args:
         path: The scratch workspace root.
+
+    Returns:
+        ``True`` once this process holds the workspace's lock.
     """
     if path in _claims:
-        return
+        return True
     fd = _open_lock_fd(path / _LOCK_NAME)
     if fd is None:
-        return
+        return False
     if _try_lock(fd):
         _claims[path] = fd
-    else:
-        os.close(fd)
+        return True
+    os.close(fd)
+    return False
 
 
 def _unclaim(path: Path) -> None:
@@ -261,8 +265,15 @@ def register(path: Path | str) -> Path:
         ``mkdtemp`` result inline.
     """
     resolved = Path(path)
-    _mark(resolved)
-    _claim(resolved)
+    # Claim BEFORE marking, and mark only if the claim held. The marker is what
+    # makes a directory sweepable; a marked-but-unclaimed workspace looks dead to
+    # every other process the moment it passes the age threshold, which is the
+    # exact deletion this module exists to prevent. If the lock cannot be taken
+    # the directory simply stays unmarked: no later run will collect it, so it
+    # leaks into the temp directory instead of being deleted while in use.
+    # Leaking a scratch directory is recoverable; wiping a live one is not.
+    if _claim(resolved):
+        _mark(resolved)
     _registered.append(resolved)
     return resolved
 
