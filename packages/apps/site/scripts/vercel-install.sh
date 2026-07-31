@@ -17,4 +17,8 @@ if [ ! -f .pnpmfile.cjs ]; then
 	cp packages/apps/site/pnpmfile.cjs .pnpmfile.cjs
 fi
 
-exec "$here/vercel-pnpm.sh" install --frozen-lockfile --reporter=append-only
+# Invoked through `sh` rather than executed directly: tracked shell scripts in
+# this repo carry a shebang but not the exec bit (14 of 27 at the time of
+# writing), so exec'ing one straight fails with "Permission denied" — which is
+# exactly how the first version of this script died on Vercel.
+exec sh "$here/vercel-pnpm.sh" install --frozen-lockfile --reporter=append-only

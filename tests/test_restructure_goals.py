@@ -185,6 +185,11 @@ def test_site_vercel_config_uses_workspace_pnpm_lockfile() -> None:
             f"{name} must go through vercel-pnpm.sh, or Vercel's own stale pnpm runs the command. "
             "`pnpm run` trips the same strict-version gate as `pnpm install`."
         )
+        assert re.search(r"exec\s+sh\s", body), (
+            f"{name} must invoke vercel-pnpm.sh through an explicit `sh`, not execute it directly. "
+            "Tracked shell scripts here carry a shebang but not the exec bit, so a direct exec "
+            "fails with 'Permission denied' - which is how this failed on Vercel once already."
+        )
 
     pinned_version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["packageManager"]
     pinned_version = pinned_version.removeprefix("pnpm@").split("+")[0]

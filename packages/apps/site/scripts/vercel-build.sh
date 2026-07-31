@@ -9,4 +9,6 @@
 # packages/apps/site, which is where the build script lives.
 set -eu
 
-exec "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/vercel-pnpm.sh" run build
+# Through `sh`, not executed directly — these scripts are tracked without the
+# exec bit, matching the rest of the repo's shell scripts.
+exec sh "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/vercel-pnpm.sh" run build
