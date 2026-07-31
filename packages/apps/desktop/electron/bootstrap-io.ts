@@ -741,6 +741,23 @@ filter=
 if [ -x /usr/bin/grep ]; then filter=/usr/bin/grep
 elif [ -x /bin/grep ]; then filter=/bin/grep
 fi
+# Signal a whole process group, portably.
+#
+# procps-ng 4.x — Ubuntu 24.04, this project's declared minimum — parses a bare
+# leading "-PGID" as an option rather than as a negative pid. It matches nothing,
+# signals nobody, and still exits 0, so a group-directed /bin/kill reports success
+# while the group runs on untouched. Measured directly on both runner images: on
+# ubuntu-22.04 (procps-ng 3.3.17) that form kills the orphan; on ubuntu-24.04
+# (procps-ng 4.0.4) the orphan survives and the caller is told it did not.
+#
+# The shell builtin is POSIX and has no such parsing quirk, and "--" fixes
+# /bin/kill where it is reached. Both are issued because a group signal is
+# idempotent, and because neither one's exit status distinguishes "delivered" from
+# "parsed as an option" — which is precisely the failure being worked around.
+signal_group() {
+  kill -"$1" "-$2" 2>/dev/null || :
+  /bin/kill -s "$1" -- "-$2" 2>/dev/null || :
+}
 snapshot_tagged_descendants() {
   [ -n "$enumerator" ] && [ -n "$filter" ] || return 1
   tagged_snapshot=$("$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null) || return 1
@@ -771,7 +788,7 @@ trap on_term TERM
 (
   trap '' TERM HUP INT
   if IFS= read -r _ <&4; then exit 0; fi
-  /bin/kill -TERM -$$ 2>/dev/null || :
+  signal_group TERM "$$"
   watchdog_attempts=0
   watchdog_empty_scans=0
   while [ "$watchdog_attempts" -lt 150 ]; do
@@ -795,7 +812,7 @@ FLINT_WATCHDOG_TAGGED
     fi
     /bin/sleep 0.02
   done
-  /bin/kill -KILL -$$ 2>/dev/null || :
+  signal_group KILL "$$"
 ) &
 watchdog=$!
 if ! IFS= read -r start; then
@@ -922,7 +939,14 @@ FLINT_SNAPSHOT_MARKED
     printf '%s\n' containment-failed >&3
     while :; do /bin/sleep 3600; done
   fi
-  if [ -n "$external" ]; then /bin/kill -TERM -$$ 2>/dev/null || :; fi
+  if [ -n "$external" ]; then
+    signal_group TERM "$$"
+    # Belt and braces: the enumeration already names every in-group member, and a
+    # per-pid signal cannot be lost to a group-argument parsing quirk.
+    for external_member in $external; do
+      /bin/kill -TERM "$external_member" 2>/dev/null || :
+    done
+  fi
   for escaped_member in $escaped; do
     /bin/kill -KILL "$escaped_member" 2>/dev/null || :
   done
