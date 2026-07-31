@@ -545,11 +545,22 @@ def _admit_modify_intent(
             )
         )
     except PortfolioSafetyStateError as refusal:
-        # Every PortfolioSafetyStateError message is a sentence written in
+        # Every PortfolioSafetyStateError message is a sentence authored in
         # l2_state (e.g. "An OPEN Upstox GTT order cannot change quantity",
         # "Super-order modify has an invalid leg name") — a crafted,
-        # operator-actionable rule refusal, never runtime or exception detail.
-        # A generic 503 would hide exactly what the operator must change.
+        # operator-actionable rule refusal. A generic 503 would hide exactly
+        # what the operator must change.
+        #
+        # Stated precisely, because the looser version of this claim is wrong:
+        # of the 129 raise sites, 101 pass a bare literal and 28 interpolate a
+        # value — a field label, an internal reader method name, or the
+        # exchange:symbol of an instrument in the request. So runtime values DO
+        # reach the operator here. What never does
+        # is a traceback, a filesystem path, a credential, or the text of an
+        # underlying exception: no site wraps str(exc), and the `from exc` sites
+        # attach the cause without putting it in the message. The operator is
+        # the data principal and the instrument is their own input, so echoing
+        # it back is the point rather than a leak.
         # Matching the narrow type here, rather than testing isinstance inside
         # a bare ``except Exception``, is what makes "only l2_state's own
         # refusal sentences are ever echoed" structural rather than a runtime
