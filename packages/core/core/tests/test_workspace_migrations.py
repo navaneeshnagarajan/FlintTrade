@@ -579,10 +579,15 @@ def test_110_to_current_retires_bound_secret_when_scheme_and_hostname_case_diffe
     assert not secret_path.exists()
 
 
-def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfully(
-    tmp_path,
-    monkeypatch,
-):
+def _seed_lmstudio_retirement(tmp_path):
+    """Plant a 1.1.0 workspace whose LM Studio secret is due for retirement.
+
+    Args:
+        tmp_path: The workspace directory to seed.
+
+    Returns:
+        A ``(secret_path, workspace_path)`` pair.
+    """
     secret_path = tmp_path / "secrets" / "llm_api_key"
     secret_path.parent.mkdir(parents=True)
     secret_path.write_text("legacy-local-secret", encoding="utf-8")
@@ -599,13 +604,29 @@ def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfu
             },
         },
     )
+    return secret_path, workspace_path
+
+
+def _refuse_first_staged_retirement_deletion(monkeypatch):
+    """Fail the first staged-secret deletion, then let deletions through.
+
+    A substring match rather than a prefix match: ``durable_unlink`` renames to a
+    ``.<name>.delete-pending`` tombstone before unlinking on Windows, so the
+    descriptor the deletion truly unlinks carries an extra leading dot.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+
+    Returns:
+        The unpatched ``Path.unlink``, for restoring before the retry.
+    """
     original_unlink = Path.unlink
     refused_stage_deletion = False
 
     def fail_final_staged_secret_deletion(self, *args, **kwargs):
         nonlocal refused_stage_deletion
         if (
-            self.name.startswith(".llm_api_key.lmstudio-retirement.")
+            ".llm_api_key.lmstudio-retirement." in self.name
             and self.exists()
             and self.stat().st_size > 0
             and not refused_stage_deletion
@@ -615,6 +636,23 @@ def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfu
         return original_unlink(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_final_staged_secret_deletion)
+    return original_unlink
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason=(
+        "rollback is the POSIX shape of this fault: durable_unlink deletes in one step there, so "
+        "the failure precedes any commit. On Windows the tombstone rename commits first, which is "
+        "covered by test_default_lmstudio_secret_deletion_reports_pending_cleanup_and_retries"
+    ),
+)
+def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfully(
+    tmp_path,
+    monkeypatch,
+):
+    secret_path, workspace_path = _seed_lmstudio_retirement(tmp_path)
+    original_unlink = _refuse_first_staged_retirement_deletion(monkeypatch)
 
     with pytest.raises(PermissionError, match="credential deletion failure"):
         run_migrations(tmp_path)
@@ -627,7 +665,46 @@ def test_default_lmstudio_secret_deletion_failure_rolls_back_and_retries_truthfu
 
     assert recovered["llm"]["provider"] == "ollama"
     assert not secret_path.exists()
-    assert list((tmp_path / "secrets").glob(".llm_api_key.lmstudio-retirement.*")) == []
+    # A ``*`` prefix so a leftover Windows ``.delete-pending`` tombstone, whose
+    # name gains a leading dot, cannot slip past this assertion.
+    assert list((tmp_path / "secrets").glob("*llm_api_key.lmstudio-retirement.*")) == []
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the .delete-pending tombstone that commits before cleanup is Windows-only",
+)
+def test_default_lmstudio_secret_deletion_reports_pending_cleanup_and_retries(
+    tmp_path,
+    monkeypatch,
+):
+    """A committed retirement whose tombstone cleanup fails is reported truthfully.
+
+    Windows ``durable_unlink`` renames the staged secret to a ``.delete-pending``
+    tombstone before unlinking it, so a cleanup failure arrives *after* the
+    retirement has committed. The migration must therefore say so rather than
+    claim a rollback, leave no readable legacy secret behind, and clear the
+    tombstone on the next run.
+    """
+    secret_path, workspace_path = _seed_lmstudio_retirement(tmp_path)
+    original_unlink = _refuse_first_staged_retirement_deletion(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="staged secret cleanup is pending"):
+        run_migrations(tmp_path)
+
+    assert json.loads(workspace_path.read_text(encoding="utf-8"))["llm"]["provider"] == "ollama"
+    assert not secret_path.exists()
+    tombstones = list((tmp_path / "secrets").glob("*llm_api_key.lmstudio-retirement.*"))
+    assert len(tombstones) == 1
+    assert tombstones[0].name.startswith("..llm_api_key.lmstudio-retirement.")
+    assert tombstones[0].name.endswith(".delete-pending")
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    recovered = run_migrations(tmp_path)
+
+    assert recovered["llm"]["provider"] == "ollama"
+    assert not secret_path.exists()
+    assert list((tmp_path / "secrets").glob("*llm_api_key.lmstudio-retirement.*")) == []
 
 
 def test_110_to_current_preserves_a_secret_bound_to_an_unrelated_destination(tmp_path):
@@ -754,7 +831,11 @@ def test_unlocked_incomplete_lock_record_does_not_block(tmp_path):
     with _migration_lock(tmp_path, wait=True, timeout=0.02):
         assert lock.exists()
 
-    assert lock.exists()
+    if os.name != "nt":
+        # filelock retains the lock file on POSIX but deletes it when a Windows
+        # lock is released; the pre-existing record not blocking acquisition is
+        # the property under test on every host.
+        assert lock.exists()
 
 
 def test_stale_lock_contents_do_not_block(tmp_path):

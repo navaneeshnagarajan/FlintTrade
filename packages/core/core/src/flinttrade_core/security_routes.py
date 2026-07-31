@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from flask import Blueprint, Flask, current_app, jsonify, request
+
 from flinttrade_gateway.log_safety import log_ref
 
 from .security import SecurityMonitor

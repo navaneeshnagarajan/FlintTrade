@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import UTC
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request
@@ -69,7 +70,7 @@ def create_backup_blueprint(
     Returns:
         Configured Flask :class:`~flask.Blueprint`.
     """
-    from flinttrade_core.backup import WorkspaceBackup, BackupError  # noqa: PLC0415
+    from flinttrade_core.backup import BackupError, WorkspaceBackup  # noqa: PLC0415
 
     bp = Blueprint("backup_admin", __name__, url_prefix="/v1/admin")
 
@@ -111,9 +112,9 @@ def create_backup_blueprint(
             # Default into the same directory backup_list() searches —
             # a temp-dir default would vanish on OS cleanup and never
             # show up in /admin/backup/list.
-            from datetime import datetime, timezone  # noqa: PLC0415
+            from datetime import datetime  # noqa: PLC0415
 
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = backup_dir / f"flint_backup_{ts}.tar.gz"
 

@@ -531,7 +531,7 @@ def _admit_modify_intent(
     lease: Any,
 ) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
     """Prove no-increase intent or run complete admission for a live modify."""
-    from .l2_state import classify_modify_intent  # noqa: PLC0415
+    from .l2_state import PortfolioSafetyStateError, classify_modify_intent  # noqa: PLC0415
 
     try:
         intent = _run_on_client_loop(
@@ -544,6 +544,34 @@ def _admit_modify_intent(
                 family=family,
             )
         )
+    except PortfolioSafetyStateError as refusal:
+        # Every PortfolioSafetyStateError message is a sentence authored in
+        # l2_state (e.g. "An OPEN Upstox GTT order cannot change quantity",
+        # "Super-order modify has an invalid leg name") — a crafted,
+        # operator-actionable rule refusal. A generic 503 would hide exactly
+        # what the operator must change.
+        #
+        # Stated precisely, because the looser version of this claim is wrong:
+        # of the 129 raise sites, 101 pass a bare literal and 28 interpolate a
+        # value — a field label, an internal reader method name, or the
+        # exchange:symbol of an instrument in the request. So runtime values DO
+        # reach the operator here. What never does
+        # is a traceback, a filesystem path, a credential, or the text of an
+        # underlying exception: no site wraps str(exc), and the `from exc` sites
+        # attach the cause without putting it in the message. The operator is
+        # the data principal and the instrument is their own input, so echoing
+        # it back is the point rather than a leak.
+        # Matching the narrow type here, rather than testing isinstance inside
+        # a bare ``except Exception``, is what makes "only l2_state's own
+        # refusal sentences are ever echoed" structural rather than a runtime
+        # branch. Still a refusal: same 409, same fail-closed return shape.
+        logger.error(
+            "Modify intent refused | family=%s adapter=%s: %s",
+            family,
+            adapter_id,
+            refusal,
+        )
+        return (jsonify({"status": "error", "message": str(refusal)}), 409), None, []
     except Exception as exc:  # noqa: BLE001 - an unprovable modify must fail closed
         logger.error(
             "Modify intent unavailable | family=%s adapter=%s: %s",
@@ -551,13 +579,6 @@ def _admit_modify_intent(
             adapter_id,
             type(exc).__name__,
         )
-        from .l2_state import PortfolioSafetyStateError  # noqa: PLC0415
-
-        if isinstance(exc, PortfolioSafetyStateError):
-            # These are crafted, user-actionable rule refusals (e.g. "quantity
-            # cannot be modified once OPEN", "invalid leg name") — a generic
-            # 503 hides exactly what the operator must change. Still a refusal.
-            return (jsonify({"status": "error", "message": str(exc)}), 409), None, []
         return _safety_state_unavailable_response(), None, []
     if not intent.risk_increasing:
         return None, None, []
@@ -1596,7 +1617,7 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
         ).strip().upper()
         if (
             ft_action in {"place", "place-smart", "open-position", "close-position", "modify"}
-            and practice_order_type not in {"MARKET"}
+            and practice_order_type != "MARKET"
             and current_app.config.get("TICK_RECORDER") is None
         ):
             return jsonify({
@@ -3623,14 +3644,14 @@ def _build_strategy_legs(
         KeyError: When a required strategy-specific parameter is missing.
         ValueError: When parameter values are invalid.
     """
-    kwargs = dict(
-        underlying=underlying,
-        expiry=expiry,
-        lots=lots,
-        lot_size=lot_size,
-        exchange=exchange,
-        product=product,
-    )
+    kwargs = {
+        "underlying": underlying,
+        "expiry": expiry,
+        "lots": lots,
+        "lot_size": lot_size,
+        "exchange": exchange,
+        "product": product,
+    }
 
     if strategy_name == "short_straddle":
         return builder.short_straddle(strike=float(body["strike"]), **kwargs)

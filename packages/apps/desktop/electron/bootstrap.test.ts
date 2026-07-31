@@ -79,33 +79,33 @@ const manifest: BootstrapToolManifest = {
     node: {
       sha256: "1".repeat(64),
       signature: {
-        fingerprint: "890C08DB8579162FEE0DF9DB8BEAB4DFCF555EF4",
+        fingerprint: "CC68F5A3106FF448322E48ED27F5E38D5B0A215F",
         keySha256: "3".repeat(64),
         sha256: "4".repeat(64),
-        url: "https://nodejs.org/dist/v22.23.1/SHASUMS256.txt.sig",
+        url: "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt.sig",
       },
-      url: "https://nodejs.org/dist/v22.23.1/SHASUMS256.txt",
+      url: "https://nodejs.org/dist/v22.23.2/SHASUMS256.txt",
     },
     uv: { sha256: "2".repeat(64), url: "https://github.com/astral-sh/uv/releases/download/0.11.16/sha256.sum" },
   },
   node: {
-    version: "22.23.1",
+    version: "22.23.2",
     assets: {
       "darwin-arm64": {
         archive: "tar.gz",
-        executable: "node-v22.23.1-darwin-arm64/bin/node",
+        executable: "node-v22.23.2-darwin-arm64/bin/node",
         sha256: sha256(nodeBytes),
-        url: "https://nodejs.org/dist/v22.23.1/node-v22.23.1-darwin-arm64.tar.gz",
+        url: "https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz",
       },
       "win32-x64": {
         archive: "zip",
-        executable: "node-v22.23.1-win-x64/node.exe",
+        executable: "node-v22.23.2-win-x64/node.exe",
         sha256: sha256(nodeBytes),
-        url: "https://nodejs.org/dist/v22.23.1/node-v22.23.1-win-x64.zip",
+        url: "https://nodejs.org/dist/v22.23.2/node-v22.23.2-win-x64.zip",
       },
     },
   },
-  pnpm: { integrity: "sha512-test", packageManager: "pnpm@9.15.0+sha512.test", version: "9.15.0" },
+  pnpm: { integrity: "sha512-test", packageManager: "pnpm@10.34.5+sha512.test", version: "10.34.5" },
   uv: {
     version: "0.11.16",
     assets: {
@@ -162,7 +162,7 @@ async function writeRepositoryShape(
   }
   await writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@9.15.0+sha512.test" }),
+    JSON.stringify({ name: "flinttrade-monorepo", packageManager: "pnpm@10.34.5+sha512.test" }),
   );
   for (const file of ["pyproject.toml", "uv.lock", "pnpm-lock.yaml"]) await writeFile(path.join(root, file), file);
   await writeFile(path.join(root, "packages", "apps", "terminal", "package.json"), '{"name":"@flinttrade/terminal"}');
@@ -654,7 +654,7 @@ async function fixture(options: FixtureOptions = {}) {
           {
             name: "node --version",
             matches: toolName === "node" && versionProbe && invocation.args.length === 1,
-            stdout: "v22.23.1\n",
+            stdout: "v22.23.2\n",
           },
           {
             name: "node <corepack.js> --version",
@@ -745,7 +745,7 @@ async function fixture(options: FixtureOptions = {}) {
             await writeFile(pytest, platform === "win32" ? "pytest launcher" : "#!/bin/sh\nexit 0\n");
             if (platform !== "win32") await chmod(pytest, 0o755);
           }
-          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 9.15.0 dependencies", "stdout");
+          invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tsyncing-javascript\t68\tInstalling pnpm 10.34.5 dependencies", "stdout");
           invocation.onOutput?.("FLINTTRADE_BOOTSTRAP_PHASE\tbuilding-terminal\t84\tBuilding the terminal for production", "stdout");
           return { contained: true, exitCode: 0, stderr: "", stdout: "" };
         }
@@ -822,10 +822,10 @@ async function fixture(options: FixtureOptions = {}) {
           await chmod(executable, 0o755);
           const corepack =
             platform === "win32"
-              ? path.join(destination, "node-v22.23.1-win-x64", "node_modules", "corepack", "dist", "corepack.js")
+              ? path.join(destination, "node-v22.23.2-win-x64", "node_modules", "corepack", "dist", "corepack.js")
               : path.join(
                   destination,
-                  "node-v22.23.1-darwin-arm64",
+                  "node-v22.23.2-darwin-arm64",
                   "lib",
                   "node_modules",
                   "corepack",
@@ -992,7 +992,7 @@ describe("first-run source bootstrap", () => {
     const buildCall = test.calls.find((call) => call.command === "/bin/sh");
     expect(buildCall?.args[0]).toMatch(/resources\/bootstrap\/flinttrade-bootstrap\.sh$/);
     expect(buildCall?.args[1]).toMatch(/FlintTrade\.candidate-1-[0-9a-f-]{36}$/);
-    expect(buildCall?.args.at(-1)).toBe("9.15.0");
+    expect(buildCall?.args.at(-1)).toBe("10.34.5");
     expect(buildCall?.args.some((argument) => argument.endsWith("corepack.js"))).toBe(true);
     expect(test.calls.some((call) => call.command.endsWith("corepack.cmd"))).toBe(false);
     expect(test.calls.some((call) => /cargo/i.test([call.command, ...call.args].join(" ")))).toBe(false);
@@ -1689,9 +1689,9 @@ describe("first-run source bootstrap", () => {
         test.root,
         "tools",
         "node",
-        "22.23.1",
+        "22.23.2",
         "darwin-arm64",
-        "node-v22.23.1-darwin-arm64",
+        "node-v22.23.2-darwin-arm64",
         "lib",
         "node_modules",
         "corepack",

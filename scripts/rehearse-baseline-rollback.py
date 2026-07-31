@@ -8,7 +8,6 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-
 DEFAULT_OUTPUT_DIR = Path("/private/tmp/flinttrade-rollback-rehearsal")
 
 

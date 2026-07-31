@@ -25,7 +25,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..adapter import BROKER_CATALOG
+from flinttrade_gateway.adapter import BROKER_CATALOG
+
 from ._base import BrokerAdapter
 from .dhan import DhanAdapter
 from .groww import GrowwAdapter

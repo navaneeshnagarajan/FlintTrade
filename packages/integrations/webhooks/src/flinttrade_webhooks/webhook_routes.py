@@ -42,20 +42,20 @@ import json
 import logging
 import math
 import time
-from datetime import datetime, timezone
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from flask import Blueprint, Response, jsonify, request
 
 try:
-    from .webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver
     from .webhook_hmac import build_webhook_signature_payload
+    from .webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver
     from .webhook_replay import REASON_REPLAY, REASON_STALE
     from .webhook_secret_store import WebhookSecretStore
 except ImportError:
-    from webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver  # type: ignore[no-redef]
     from webhook_hmac import build_webhook_signature_payload  # type: ignore[no-redef]
+    from webhook_receiver import WebhookConfig, WebhookPayload, WebhookReceiver  # type: ignore[no-redef]
     from webhook_replay import REASON_REPLAY, REASON_STALE  # type: ignore[no-redef]
     from webhook_secret_store import WebhookSecretStore  # type: ignore[no-redef]
 
@@ -172,7 +172,7 @@ def _parse_replay_timestamp(value: Any) -> float | None:
             text = f"{text[:-1]}+00:00"
         dt = datetime.fromisoformat(text)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         parsed = dt.timestamp()
         return parsed if math.isfinite(parsed) else None
     except ValueError:

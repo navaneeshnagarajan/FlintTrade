@@ -48,7 +48,7 @@ class DittoCapabilityUnavailable(RuntimeError):
 
 def _ditto_ledger_account_id(account_id: str) -> str:
     """Return a stable non-secret ledger identity outside the main bridge scope."""
-    digest = hashlib.sha256(f"ditto\0{account_id}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"ditto\0{account_id}".encode()).hexdigest()
     return f"ditto-{digest[:24]}"
 
 

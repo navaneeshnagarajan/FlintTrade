@@ -169,7 +169,7 @@ describe("AIBackendsWidget", () => {
 
   it("surfaces an honest backend error when the run helper throws", async () => {
     mockRunAgent.mockImplementation(() => {
-      // eslint-disable-next-line require-yield
+       
       async function* thrower(): AsyncGenerator<AgentEvent, void, unknown> {
         throw new Error("Codex CLI is not installed on this host.");
       }

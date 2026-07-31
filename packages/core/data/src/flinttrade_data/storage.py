@@ -13,11 +13,12 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
+
 from flinttrade_core.workspace import duckdb_path
 
 logger = logging.getLogger("flinttrade.data.storage")
@@ -169,14 +170,14 @@ def _metadata_prune_cutoff(value: Any) -> str | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
 
 
 def _normalise_ts(value: Any) -> Any:
     """Store aware timestamps as naive UTC for DuckDB TIMESTAMP columns."""
     if isinstance(value, datetime) and value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.astimezone(UTC).replace(tzinfo=None)
     return value
 
 
@@ -661,7 +662,7 @@ class StorageManager:
         """
         if days_to_keep <= 0:
             return 0
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_to_keep)
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_to_keep)
         conn = self.connection
         conn.execute("BEGIN TRANSACTION")
         try:
@@ -1005,7 +1006,7 @@ class StorageManager:
         if cutoff > current:
             self._set_metadata_value(
                 _TICK_PRUNED_BEFORE_KEY,
-                cutoff.replace(tzinfo=timezone.utc).isoformat(),
+                cutoff.replace(tzinfo=UTC).isoformat(),
             )
 
     def _read_prune_cutoff(self) -> datetime:
@@ -1020,7 +1021,7 @@ class StorageManager:
         except ValueError as exc:
             raise RuntimeError("tick storage prune cutoff is invalid") from exc
         if cutoff.tzinfo is not None:
-            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+            cutoff = cutoff.astimezone(UTC).replace(tzinfo=None)
         return cutoff
 
     def _read_tick_replay_high_water(self) -> int:

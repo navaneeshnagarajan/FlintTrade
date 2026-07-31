@@ -338,7 +338,7 @@ function TimeSalesWidget(props: WidgetProps) {
     if (next === view) return;
     setView(next);
     props.api.updateParameters({ view: next });
-  }, [panelParams, props.api, view]);
+  }, [props.api, view]);
 
   const content = (
     <div className="flex flex-col h-full gap-2 p-3 text-xs" aria-label="Tape and Microstructure widget">

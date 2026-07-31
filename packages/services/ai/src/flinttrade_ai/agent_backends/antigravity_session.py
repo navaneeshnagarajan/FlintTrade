@@ -112,7 +112,7 @@ def _is_secret_env_key(name: str) -> bool:
     and similar non-secrets survive.
     """
     lowered = name.lower()
-    if lowered.endswith("_key") or lowered.endswith("_key_id"):
+    if lowered.endswith(("_key", "_key_id")):
         return True
     return any(marker in lowered for marker in _SECRET_ENV_MARKERS)
 
@@ -375,7 +375,7 @@ class AntigravitySession(AgentSession):
                     break
                 try:
                     item = await asyncio.wait_for(queue.get(), timeout=min(_POLL_INTERVAL, remaining))
-                except (asyncio.TimeoutError, TimeoutError):
+                except TimeoutError:
                     # No line this tick; loop re-checks the deadline. A stalled
                     # child is thus bounded by turn_timeout, never an infinite wait.
                     continue

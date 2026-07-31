@@ -159,9 +159,9 @@ def get_timings() -> tuple[Any, int]:
 
     try:
         from flinttrade_engine.market_hours import (  # noqa: PLC0415
+            STANDARD_HOURS,
             get_standard_hours,
             list_upcoming_sessions,
-            STANDARD_HOURS,
         )
     except ImportError as exc:
         logger.error("market_hours module not available: %s", exc)

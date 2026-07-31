@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -123,7 +123,7 @@ def _default_db_path() -> str:
 def _format_ts(value: Any) -> str:
     """Return a stable ISO-ish string for API/export compatibility."""
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
     return str(value)
 
 
@@ -137,11 +137,11 @@ def _coerce_timestamp(value: Any, default: float) -> float:
         parsed = float(value)
     except (TypeError, ValueError, OverflowError):
         try:
-            parsed_datetime = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+            parsed_datetime = datetime.fromisoformat(str(value).strip())
         except (TypeError, ValueError) as exc:
             raise ValueError("Invalid timestamp") from exc
         if parsed_datetime.tzinfo is None:
-            parsed_datetime = parsed_datetime.replace(tzinfo=timezone.utc)
+            parsed_datetime = parsed_datetime.replace(tzinfo=UTC)
         parsed = parsed_datetime.timestamp()
     if not math.isfinite(parsed) or parsed < 0:
         raise ValueError("Invalid timestamp")
@@ -992,7 +992,7 @@ class SandboxEngine:
                FROM positions"""
         ).fetchone()
 
-        realised, unrealised = row if row else (0.0, 0.0)
+        realised, unrealised = row or (0.0, 0.0)
         return {
             "realised": realised,
             "unrealised": unrealised,
@@ -1157,7 +1157,7 @@ class SandboxEngine:
                 "orders": self.get_all_orders(),
                 "trades": self.get_trades(),
                 "pnl_history": self.get_pnl_history(),
-                "reset_at": datetime.now(timezone.utc).isoformat(),
+                "reset_at": datetime.now(UTC).isoformat(),
             }
 
             now = time.time()
@@ -1197,7 +1197,7 @@ class SandboxEngine:
             "orders": self.get_all_orders(),
             "trades": self.get_trades(),
             "pnl_history": self.get_pnl_history(),
-            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "exported_at": datetime.now(UTC).isoformat(),
         }
         return json.dumps(payload, default=str)
 

@@ -52,7 +52,7 @@ from typing import Any
 
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_core.openalgo_client import OpenAlgoClient
-from ..strategy import BaseStrategy
+from flinttrade_engine.strategy import BaseStrategy
 
 logger = logging.getLogger("flinttrade.engine.strategies.wheel_live")
 

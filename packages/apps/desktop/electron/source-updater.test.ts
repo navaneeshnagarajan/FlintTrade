@@ -1042,8 +1042,8 @@ describe("source update orchestration", () => {
         buildIdentity: {
           frontendOutputDigest: (candidateValidationCount > 1 ? "4" : "3").repeat(64),
           markerSchemaVersion: 3 as const,
-          packageManager: "pnpm@9.15.0+sha512.fixture",
-          toolchain: { node: "22.23.1", pnpm: "9.15.0", uv: "0.11.16" },
+          packageManager: "pnpm@10.34.5+sha512.fixture",
+          toolchain: { node: "22.23.1", pnpm: "10.34.5", uv: "0.11.16" },
         },
         canonicalPath: test.candidate,
         contentIdentity: "2".repeat(40),

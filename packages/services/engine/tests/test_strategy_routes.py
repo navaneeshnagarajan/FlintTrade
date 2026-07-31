@@ -6,6 +6,7 @@ Subprocess launch is mocked to avoid spawning real processes.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -203,6 +204,10 @@ class TestStrategyRoutes:
         resp = client.get("/api/v1/strategies")
         assert len(resp.get_json()["data"]["strategies"]) == 1
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="the fixture pins platform.system() to Linux, whose hard limits need the POSIX resource module",
+    )
     def test_start_strategy(self, client):
         upload_resp = client.post(
             "/api/v1/strategies/upload",

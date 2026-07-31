@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 import errno
 import os
 import threading
+from contextlib import suppress
 from typing import Any
 from weakref import WeakSet
 

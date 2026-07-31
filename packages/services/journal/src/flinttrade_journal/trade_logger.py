@@ -140,8 +140,7 @@ class TradeLogger:
         """
         if action.upper() == "BUY":
             return (exit_price - entry_price) * quantity
-        else:
-            return (entry_price - exit_price) * quantity
+        return (entry_price - exit_price) * quantity
 
     def compute_daily_summary(
         self, trade_date: str, strategy: str,

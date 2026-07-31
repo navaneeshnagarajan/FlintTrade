@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +97,7 @@ class PresetUpdateRequest(BaseModel):
 # Built-in presets (read-only, not persisted to disk)
 # ---------------------------------------------------------------------------
 
-_EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
 _BUILTIN_PRESETS: list[WorkspacePreset] = [
     WorkspacePreset(
@@ -444,7 +444,7 @@ def create_preset() -> tuple[Response, int]:
     if name_stripped.lower() in all_names:
         return jsonify({"status": "error", "message": f"A preset named '{name_stripped}' already exists"}), 400
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     preset = WorkspacePreset(
         id=str(uuid.uuid4()),
         name=name_stripped,
@@ -531,7 +531,7 @@ def update_preset(preset_id: str) -> tuple[Response, int]:
             return jsonify({"status": "error", "message": f"A preset named '{new_name}' already exists"}), 400
         update_data["name"] = new_name
 
-    updated = preset.model_copy(update={**update_data, "updated_at": datetime.now(tz=timezone.utc)})
+    updated = preset.model_copy(update={**update_data, "updated_at": datetime.now(tz=UTC)})
     custom[preset_id] = updated
     _save_custom(custom)
     logger.info("Updated preset '%s' (id=%s)", updated.name, preset_id)
@@ -604,7 +604,7 @@ def fork_preset(preset_id: str) -> tuple[Response, int]:
     if fork_name.lower() in all_names:
         return jsonify({"status": "error", "message": f"A preset named '{fork_name}' already exists"}), 400
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     forked = WorkspacePreset(
         id=str(uuid.uuid4()),
         name=fork_name,

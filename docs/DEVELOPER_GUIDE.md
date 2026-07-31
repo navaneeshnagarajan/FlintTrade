@@ -85,7 +85,7 @@ Linux. `make <target>` is the POSIX alias for the same targets.
 ```bash
 python scripts/ft.py test        # full pytest suite
 python scripts/ft.py test-fast   # stop on first failure
-python scripts/ft.py lint        # ruff check over packages/ and tests/
+python scripts/ft.py lint        # ruff over packages/ + tests/, then the terminal hooks lint
 
 # Single file
 python -m pytest packages/core/core/tests/test_app.py -v
@@ -358,9 +358,11 @@ without presenting them as ready to connect.
 ### Python
 
 - **PEP 8** with `ruff` as the enforcement tool. Run
-  `python scripts/ft.py lint` (POSIX alias: `make lint`) before committing.
-- **Type hints** on every public function. We target Python 3.12 syntax
-  (`list[int]` not `List[int]`, `X | None` not `Optional[X]`).
+  `python scripts/ft.py lint` (POSIX alias: `make lint`) before committing —
+  that target lints the terminal as well, see [TypeScript](#typescript) below.
+- **Type hints** on every public function. We write to the `python_requires`
+  floor in `flint.toml` — currently 3.12 — so `list[int]` not `List[int]`,
+  `X | None` not `Optional[X]`. CI runs `python_target` (3.14).
 - **Google-style docstrings** for every public function and class.
 - **Absolute imports**. Never use `from .foo import bar` inside
   `packages/<pkg>/src/`.
@@ -371,6 +373,16 @@ without presenting them as ready to connect.
 ### TypeScript
 
 - **Strict mode**. No `any`, no `@ts-ignore`, no `@ts-nocheck`.
+- **Lint at zero warnings**. `pnpm --filter @flinttrade/terminal lint`
+  runs `eslint src --max-warnings=0`, making four rules errors rather than
+  suggestions: `react-hooks/rules-of-hooks` and `react-hooks/exhaustive-deps`
+  for the runtime faults `tsc` cannot see, plus `local/no-explicit-any` and
+  `local/no-ts-suppression` for the two bans above — `strict` permits an
+  explicit `any` by design, and a pragma is only a comment, so the compiler
+  enforces neither. Both local rules are AST rules
+  (`packages/apps/terminal/eslint-local-rules.mjs`); the regular-expression
+  script they replaced missed `type Payload = any`. CI runs the gate in
+  `node-core-tests`; `python scripts/ft.py lint` runs it alongside ruff.
 - **Path alias** `@` → `packages/apps/terminal/src/`. Configured in
   `tsconfig.json` and `vite.config.ts` (the Vitest config lives inside
   `vite.config.ts`, so it inherits the alias).
@@ -406,7 +418,8 @@ without presenting them as ready to connect.
      from `packages/apps/terminal` for affected files
    - `python -m pytest --tb=short --import-mode=importlib`
    - `python scripts/ft.py lint` — the shell-independent way to run
-     `ruff check packages/ tests/` (identical on Windows, macOS and Linux;
+     `ruff check packages/ tests/` *and* the terminal's `eslint src
+     --max-warnings=0` lint gate (identical on Windows, macOS and Linux;
      the same scope `make lint` runs on POSIX)
 3. **Open the PR.** Use the template in
    `.github/PULL_REQUEST_TEMPLATE.md`. Tick every checklist item that

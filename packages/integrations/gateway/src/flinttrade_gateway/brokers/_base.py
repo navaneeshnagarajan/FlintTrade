@@ -20,11 +20,11 @@ without overscoping into those waves.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import asyncio
+from abc import ABC, abstractmethod
 from contextvars import copy_context
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -100,13 +100,13 @@ class Session:
     read_only_until_at: float | None = None
 
     def is_expiring_soon(self, leeway_seconds: int = 60) -> bool:
-        return self.expires_at <= datetime.now(tz=timezone.utc).timestamp() + leeway_seconds
+        return self.expires_at <= datetime.now(tz=UTC).timestamp() + leeway_seconds
 
     @property
     def is_read_only(self) -> bool:
         if self.read_only_until_at is None:
             return False
-        return datetime.now(tz=timezone.utc).timestamp() < self.read_only_until_at
+        return datetime.now(tz=UTC).timestamp() < self.read_only_until_at
 
 
 class BrokerAdapter(ABC):

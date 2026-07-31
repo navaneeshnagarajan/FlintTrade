@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  finaliseBackendRecoveryRecord,
+  type BackendProvisionInvocation,
+} from "./backend-provision";
+import {
   BackendSupervisor,
   BackendSupervisorError,
   createBackendEnvironment,
@@ -158,6 +162,30 @@ function createFixture(overrides: {
     workspace: WORKSPACE,
   });
   return { backendSpawn, states, supervisor };
+}
+
+/** Mirrors `packaging/desktop_backend.py::CLEANUP_CONTENDED_EXIT_CODE`. */
+const CONTENDED = 75;
+
+/**
+ * Drive the supervisor through the real managed-cleanup primitive so the exit
+ * status it reads is the one managed Python actually emits.
+ */
+function managedFinalise(
+  execute: (invocation: BackendProvisionInvocation) => Promise<{ exitCode: number | null }>,
+): (input: BackendRecordFinaliseInput) => Promise<void> {
+  return (input) => finaliseBackendRecoveryRecord({
+    applicationPid: input.applicationPid,
+    contentionRetryIntervalMs: 0,
+    env: input.environment,
+    guardianPid: input.guardianPid,
+    // The fixture declares darwin while `SOURCE` comes from `path.resolve`;
+    // pin the primitive to the host so its absolute-path check agrees.
+    platform: process.platform,
+    process: { execute },
+    sourceRoot: input.sourceRoot,
+    wait: async () => undefined,
+  });
 }
 
 async function startReady(supervisor: BackendSupervisor, backendSpawn: FakeBackendSpawn) {
@@ -418,6 +446,46 @@ describe("backend supervisor", () => {
     await expect(draining).rejects.toMatchObject({ reason: "record-cleanup" });
     await expect(supervisor.start()).rejects.toMatchObject({ reason: "record-cleanup" });
     expect(supervisor.getState().stoppedSafe).toBe(false);
+    expect(backendSpawn.handles).toHaveLength(1);
+  });
+
+  it("clears a transient recovery-record lock instead of latching the start interlock", async () => {
+    // Exit 75 is packaging/desktop_backend.py::CLEANUP_CONTENDED_EXIT_CODE:
+    // another transition holds the lock, nothing was removed, retry. Passing it
+    // straight through as unproved cleanup latched `recordInterlock`, so one
+    // transient Windows lock refused every later start until Electron restarted.
+    const codes = [CONTENDED, CONTENDED, 0];
+    const execute = vi.fn(async () => ({ exitCode: codes.shift() ?? 0 }));
+    const { backendSpawn, supervisor } = createFixture({ finaliseRecord: managedFinalise(execute) });
+    const { handle, running } = await startReady(supervisor, backendSpawn);
+    const draining = running.drain();
+    handle.emitStdout(`FLINTTRADE_BACKEND_CLEANUP_COMPLETE token=${running.launchToken}\n`);
+    handle.exit(0);
+
+    await expect(draining).resolves.toMatchObject({ outcome: "clean", recordRemovalSafe: true });
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(supervisor.getState()).toMatchObject({ status: "stopped", stoppedSafe: true });
+
+    // The interlock never latched, so the shell can still start a backend.
+    const successor = supervisor.start();
+    await eventually(() => backendSpawn.handles.length === 2);
+    backendSpawn.handles[1]!.emitStdout("FLINTTRADE_BACKEND_PID pid=9002\n");
+    backendSpawn.handles[1]!.emitStdout("FLINTTRADE_BACKEND_READY port=5200\n");
+    await expect(successor).resolves.toMatchObject({ applicationPid: 9002, port: 5200 });
+  });
+
+  it("still latches the start interlock when managed cleanup reports a genuine failure", async () => {
+    const execute = vi.fn(async () => ({ exitCode: 1 }));
+    const { backendSpawn, supervisor } = createFixture({ finaliseRecord: managedFinalise(execute) });
+    const { handle, running } = await startReady(supervisor, backendSpawn);
+    const draining = running.drain();
+    handle.emitStdout(`FLINTTRADE_BACKEND_CLEANUP_COMPLETE token=${running.launchToken}\n`);
+    handle.exit(0);
+
+    await expect(draining).rejects.toMatchObject({ reason: "record-cleanup" });
+    // Unproved cleanup is never retried and never forgiven.
+    expect(execute).toHaveBeenCalledOnce();
+    await expect(supervisor.start()).rejects.toMatchObject({ reason: "record-cleanup" });
     expect(backendSpawn.handles).toHaveLength(1);
   });
 

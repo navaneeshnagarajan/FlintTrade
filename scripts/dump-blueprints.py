@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import ast
 import csv
-from pathlib import Path
 import sys
+from pathlib import Path
 
 APP_PACKAGE_DIR = Path("packages/core/core/src/flinttrade_core")
 APP_PY = APP_PACKAGE_DIR / "app.py"

@@ -35,8 +35,8 @@ Usage::
 
 from __future__ import annotations
 
-import argparse
 import _thread
+import argparse
 import asyncio
 import logging
 import os
@@ -48,17 +48,17 @@ from typing import Any, Protocol
 
 # Importing the app module first applies its UTF-8 stdout configuration.
 from .app import (
-    _OrderFlowCheckpointOwner,
     _bind_runtime_emergency_dispatcher,
     _build_tick_recorder,
     _close_runtime_request_admission,
+    _OrderFlowCheckpointOwner,
     _pending_tick_count,
     _prepare_tick_orderflow_state,
     _record_tick_capture_failure,
     _sanitise_tick_capture_error,
     _set_tick_capture_intent,
-    _start_rotation_scheduler,
     _shutdown_rotation_scheduler,
+    _start_rotation_scheduler,
     _tick_capture_enabled,
     _tick_capture_lifecycle_lock,
     _tick_capture_mode,
@@ -131,7 +131,7 @@ def _retain_backend_recovery_owner(owner: Any, lease: Any) -> None:
     if callable(retain_owner):
         retain_owner(owner)
     else:
-        setattr(lease, "_recovery_owner", owner)
+        lease._recovery_owner = owner
     retain_backend_instance_lease(lease)
 
 

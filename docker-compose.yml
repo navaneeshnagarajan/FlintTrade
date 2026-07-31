@@ -161,10 +161,17 @@ services:
       - .:/workspace
       - terminal_dist:/workspace/packages/apps/terminal/dist
       - terminal_node_modules:/workspace/node_modules
+    # Corepack is no longer distributed with Node.js from v25.0.0 onwards, so
+    # 'corepack enable' cannot be relied on once this image moves off the 22
+    # line. Fall through to a version-matched pnpm and finally to npx with the
+    # pinned version - the same chain as infra/scripts/setup.sh.
+    # '$$' escapes Compose's own interpolation so the shell receives '$PNPM'.
     command: >
-      sh -c "corepack enable &&
-             pnpm install --frozen-lockfile &&
-             pnpm --dir packages/apps/terminal run build"
+      sh -c "if command -v corepack >/dev/null 2>&1; then corepack enable; fi;
+             if command -v pnpm >/dev/null 2>&1; then PNPM='pnpm';
+             else PNPM='npx --yes pnpm@10.34.5'; fi;
+             $$PNPM install --frozen-lockfile &&
+             $$PNPM --dir packages/apps/terminal run build"
     environment:
       - NODE_ENV=production
     restart: "no"

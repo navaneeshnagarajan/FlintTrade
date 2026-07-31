@@ -186,7 +186,7 @@ class CSVConnector:
     def load_file(path: str) -> DataResult:
         """Load bars from a CSV file."""
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return CSVConnector.load_string(f.read())
         except Exception as exc:
             return DataResult(source="csv", error=str(exc))
@@ -217,7 +217,7 @@ class JSONConnector:
     def load_file(path: str) -> DataResult:
         """Load bars from a JSON file."""
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 return DataResult(source="json", error="JSON must be an array of bar objects")

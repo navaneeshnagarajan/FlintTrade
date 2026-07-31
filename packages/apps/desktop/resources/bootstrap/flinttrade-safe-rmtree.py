@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Remove one journal-bound POSIX directory without following path aliases.
 
 The Electron caller supplies a trusted absolute parent directory, two confined
@@ -9,6 +8,15 @@ same-account filesystem mutation is outside this helper's authority boundary
 (and cannot be made inode-conditional by POSIX unlink/rmdir APIs).
 The helper emits only stable JSON result codes; filesystem paths are never
 included in output.
+
+Deliberately carries NO shebang and stays non-executable.  Every caller spawns
+it with an explicit interpreter — the Electron shell uses the managed
+candidate venv's Python (`createSafeDirectoryRemover`, with
+`inheritEnvironment: false`), and the subprocess tests use `sys.executable`.
+A `#!/usr/bin/env python3` line would advertise a second entry point that
+resolves the interpreter through `PATH`, defeating exactly the interpreter
+pinning this helper's authority boundary depends on.  Adding one back also
+trips ruff's EXE001 on POSIX while passing silently on Windows.
 """
 
 from __future__ import annotations

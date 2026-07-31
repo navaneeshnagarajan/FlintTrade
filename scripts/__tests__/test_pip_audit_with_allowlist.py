@@ -79,7 +79,7 @@ def _mock_pip_audit(monkeypatch, module, *, returncode: int, stdout: str, stderr
 def test_lock_state_normalises_names_versions_and_binds_raw_digest(tmp_path: Path) -> None:
     module = _load_module()
     lock = tmp_path / "requirements.lock"
-    raw = ("Example_Package==1.0.0\npycparser==3.0 ; implementation_name != 'PyPy'\n").encode()
+    raw = (b"Example_Package==1.0.0\npycparser==3.0 ; implementation_name != 'PyPy'\n")
     lock.write_bytes(raw)
 
     state = module._load_lock_state(lock)
@@ -477,7 +477,11 @@ def test_workflows_cannot_upload_or_refresh_stale_unvalidated_evidence() -> None
     refresh = (root / ".github" / "workflows" / "refresh-vuln-snapshot.yml").read_text(encoding="utf-8")
 
     remove_index = supply_chain.index("Remove stale pip-audit evidence from checkout")
-    setup_index = supply_chain.index("actions/setup-python@v5", remove_index)
+    # Matched on the action name alone: the workflow pins actions by commit SHA
+    # (a supply-chain requirement), so asserting a floating "@v5" tag pinned this
+    # guard to the very practice the repository moved away from, and it began
+    # failing the moment supply-chain.yml was hardened.
+    setup_index = supply_chain.index("actions/setup-python@", remove_index)
     audit_index = supply_chain.index("pip-audit (allowlist + offline fallback)")
     upload_index = supply_chain.index("Upload newly generated pip-audit evidence")
     assert remove_index < setup_index < audit_index < upload_index

@@ -17,7 +17,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Feature list constants (inspired by FinRL's INDICATORS config)
 # ---------------------------------------------------------------------------
@@ -303,12 +302,12 @@ def compute_reward(
     if reward_type == RewardType.PNL:
         return (current_value - previous_value) * scaling
 
-    elif reward_type == RewardType.LOG_RETURN:
+    if reward_type == RewardType.LOG_RETURN:
         if previous_value <= 0:
             return 0.0
         return math.log(current_value / previous_value) * scaling
 
-    elif reward_type == RewardType.SHARPE:
+    if reward_type == RewardType.SHARPE:
         if state is None or len(state.portfolio_values) < 2:
             return (current_value - previous_value) * scaling
         returns = _compute_returns_from_values(state.portfolio_values)
@@ -321,7 +320,7 @@ def compute_reward(
         sharpe = np.mean(excess) / std
         return float(sharpe) * scaling
 
-    elif reward_type == RewardType.SORTINO:
+    if reward_type == RewardType.SORTINO:
         if state is None or len(state.portfolio_values) < 2:
             return (current_value - previous_value) * scaling
         returns = _compute_returns_from_values(state.portfolio_values)
@@ -335,7 +334,7 @@ def compute_reward(
         sortino = np.mean(excess) / down_std
         return float(sortino) * scaling
 
-    elif reward_type == RewardType.RISK_ADJUSTED:
+    if reward_type == RewardType.RISK_ADJUSTED:
         # Blend: PnL reward penalised by drawdown
         pnl_reward = (current_value - previous_value) * scaling
         if state is not None and len(state.portfolio_values) > 0:

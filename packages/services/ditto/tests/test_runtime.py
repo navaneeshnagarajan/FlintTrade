@@ -1131,7 +1131,42 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock = [100.0]
-    monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", lambda: clock[0])
+
+    # This test is about the DEADLINE ARITHMETIC: one shared deadline, the
+    # remaining budget handed to each client, and an unclosed client being
+    # retained rather than dropped. Nothing here is about threading.
+    #
+    # But `_close_clients` runs each close on a real thread and joins it with
+    # `deadline - time.monotonic()`. With the clock driven, that budget is
+    # deterministic while the join stays a REAL wall-clock wait, so under a
+    # loaded run (-n 4) the worker was not always scheduled inside the 0.75s
+    # window; `is_alive()` was then true and the owner correctly returned False,
+    # failing assertions that expect the client removed. The product was right
+    # every time - refusing to drop a client whose close has not finished is the
+    # fail-closed behaviour we want - so the flake was this test asserting
+    # arithmetic while depending on OS scheduling.
+    #
+    # Running the close inline removes the scheduling variable and changes no
+    # assertion. The real-thread path keeps its own coverage in
+    # test_router_owner_cleanup_returns_at_deadline_when_client_close_hangs,
+    # which uses a genuine clock and a client that genuinely blocks.
+    class _InlineThread:
+        def __init__(self, *, target: Any, name: str = "", daemon: bool = False) -> None:
+            del name, daemon
+            self._target = target
+            self._ran = False
+
+        def start(self) -> None:
+            self._target()
+            self._ran = True
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+
+        def is_alive(self) -> bool:
+            return not self._ran
+
+    monkeypatch.setattr("flinttrade_ditto.runtime.threading.Thread", _InlineThread)
 
     class _Router:
         def __init__(self) -> None:
@@ -1139,6 +1174,8 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
 
         def revoke_and_drain(self, *, timeout: float) -> bool:
             self.timeouts.append(timeout)
+            # Draining happens on the calling thread, so spending the driven
+            # clock here is ordered against every later read.
             clock[0] += 0.25
             return True
 
@@ -1146,10 +1183,21 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
         def __init__(self, elapsed: float) -> None:
             self.elapsed = elapsed
             self.timeouts: list[float] = []
+            self.unbanked = 0.0
+            self.worker: threading.Thread | None = None
 
         def close_sync(self, *, timeout: float) -> None:
             self.timeouts.append(timeout)
-            clock[0] += self.elapsed
+            # Deliberately does NOT spend the clock here. Cleanup runs each
+            # close on its own worker thread and derives that thread's join
+            # budget from this same driven clock while ``join()`` itself blocks
+            # on the real one. A worker that spent the budget before the parent
+            # had read it would leave the parent joining for zero seconds and
+            # abandoning a close that had in fact finished, so which clients
+            # survived would be decided by OS scheduling rather than by the
+            # deadline. Bank the elapsed time instead and let the parent claim
+            # it once this worker has demonstrably gone.
+            self.unbanked = self.elapsed
 
     router = _Router()
     first = _Client(0.0)
@@ -1157,6 +1205,36 @@ def test_router_owner_cleanup_uses_one_deadline_and_retains_unclosed_clients(
     owner = object.__new__(DittoRouterOwner)
     owner.router = router
     owner._clients = {"first": first, "second": second}
+
+    def _worker_finished(client: _Client) -> bool:
+        """Report whether cleanup's close worker for ``client`` has ended.
+
+        The worker is remembered on first sight because cleanup drops its own
+        record of the attempt as soon as the join succeeds, and the elapsed
+        time still has to land on the read that follows.
+        """
+        attempts = getattr(owner, "_client_close_attempts", {})
+        for attempt_client, thread, _state in attempts.values():
+            if attempt_client is client:
+                client.worker = thread
+                break
+        return client.worker is not None and not client.worker.is_alive()
+
+    def _driven_monotonic() -> float:
+        """Return the driven clock, banking finished workers' elapsed time.
+
+        Elapsed time only lands once ``thread.is_alive()`` is already False —
+        the very predicate cleanup checks immediately after its join — so the
+        clock can never cross the deadline while a close is still running, and
+        the outcome no longer depends on which thread is scheduled first.
+        """
+        for client in (first, second):
+            if client.unbanked and _worker_finished(client):
+                clock[0] += client.unbanked
+                client.unbanked = 0.0
+        return clock[0]
+
+    monkeypatch.setattr("flinttrade_ditto.runtime.time.monotonic", _driven_monotonic)
 
     assert owner.close(timeout=1.0) is False
     assert router.timeouts == [1.0]

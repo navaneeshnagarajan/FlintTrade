@@ -43,6 +43,34 @@ for _rel_path in _PY_PACKAGE_SRCS:
     if _src not in sys.path:
         sys.path.append(_src)
 
+_SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
+
+
+def _scratch_workspace():
+    """Return the shared scratch-workspace finaliser module.
+
+    Loaded by path under a private ``sys.modules`` name rather than imported as
+    ``tests.scratch_workspace``: a per-package run binds ``tests`` to *this*
+    package's tests directory, which shadows the repo-root ``tests`` package. The
+    private name keeps exactly one registry per process, shared by every conftest
+    that creates a scratch workspace.
+
+    Returns:
+        The loaded ``tests/scratch_workspace.py`` module.
+    """
+    import importlib.util
+
+    module = sys.modules.get(_SCRATCH_MODULE_NAME)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            _SCRATCH_MODULE_NAME,
+            _REPO_ROOT / "tests" / "scratch_workspace.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[_SCRATCH_MODULE_NAME] = module
+        spec.loader.exec_module(module)
+    return module
+
 
 # Persistent scratch DBs must not carry state between independent pytest runs.
 # activity/security also changed DuckDB→SQLite and may hold a foreign-format
@@ -87,16 +115,20 @@ def _isolate_workspace() -> None:
     # else all workers share one dir and collide on the still-DuckDB engine
     # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
     # (gw0, gw1, …) and absent in the controller / serial runs.
+    register = _scratch_workspace().register
+
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
+        # register(): this process created the directory, so this process removes
+        # it at session end. An operator-supplied `existing` is never registered.
+        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         _clean_legacy_scratch_dbs(Path(existing))
         _pin_duckdb_path(Path(existing))
         return
     else:
-        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     _pin_duckdb_path(base)
@@ -115,6 +147,17 @@ def _pin_duckdb_path(base: Path) -> None:
 
 
 _isolate_workspace()
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
+    """Release the scratch workspaces this run created.
+
+    Registered here as well as in the repo-root conftest because a per-package
+    run resolves rootdir to this package and never loads that one.
+    """
+    scratch = _scratch_workspace()
+    scratch.release_all()
+    scratch.sweep_stale()
 
 
 @pytest.fixture(autouse=True)
@@ -152,7 +195,10 @@ def _per_module_workspace(request):
     # reused by every later suite invocation, and stale encrypted stores under
     # yesterday's master password fail with InvalidTag (see 82d7e17f, which
     # removed the same reusable-path pattern from the data conftest).
-    base = Path(prev) if prev else Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+    if prev:
+        base = Path(prev)
+    else:
+        base = _scratch_workspace().register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     mod_dir = base / Path(request.module.__file__).stem
     mod_dir.mkdir(parents=True, exist_ok=True)
     _clean_legacy_scratch_dbs(mod_dir)

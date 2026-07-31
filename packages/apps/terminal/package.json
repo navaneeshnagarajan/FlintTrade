@@ -12,6 +12,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src --max-warnings=0",
     "test": "npm run test:base && npm run test:widgets:analysis && npm run test:widgets:trading && npm run test:widgets:utility",
     "test:vitest": "NODE_OPTIONS=\"${NODE_OPTIONS:-} --max-old-space-size=${VITEST_HEAP_MB:-4096}\" vitest run",
     "test:base": "npm run test:vitest -- src/__tests__ src/admin src/atoms src/chrome src/components src/hooks src/layout src/lib src/providers src/routes src/services src/stores src/test-utils src/tools",
@@ -64,6 +65,9 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@babel/core": "7.29.6",
+    "@babel/eslint-parser": "7.29.7",
+    "@babel/preset-typescript": "7.29.7",
     "@playwright/test": "^1.61.1",
     "@sentry/react": "^10.68.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -78,6 +82,8 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.185.1",
     "@vitejs/plugin-react": "^6.0.4",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "5.2.0",
     "jsdom": "^29.0.0",
     "mapbox-gl": "^1.13.3",
     "marked": "^18.0.7",

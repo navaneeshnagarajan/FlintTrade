@@ -1086,6 +1086,203 @@ def test_managed_cleanup_refuses_record_and_proof_symlinks(
 
 
 @pytest.mark.unit
+def test_managed_cleanup_fails_closed_when_the_guard_inode_is_absent(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A guard the guardian never created stays a permanent refusal."""
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(proof, f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n")
+    record.with_name(f".{record.name}.lock").unlink()
+    original_record = record.read_bytes()
+
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is False
+    assert record.read_bytes() == original_record
+    assert proof.exists() is True
+
+
+@pytest.mark.unit
+def test_guard_probe_waits_out_a_held_lock_and_then_reports_contention(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Lock denial is transient, so it is retried and never reads as absence."""
+    guard = tmp_path / ".desktop_backend.pid.lock"
+    denials = 2
+    reads: list[Path] = []
+
+    def read(path: Path, *, max_bytes: int) -> bytes:
+        nonlocal denials
+        reads.append(path)
+        if denials:
+            denials -= 1
+            raise PermissionError(errno.EACCES, "the process cannot access the file")
+        return b""
+
+    monkeypatch.setattr(entry, "_read_owner_cleanup_file", read)
+    monkeypatch.setattr(entry, "_is_held_lock_denial", lambda _path, _exc: True)
+    ticks = iter([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    sleeps: list[float] = []
+    entry._probe_cleanup_guard_inode(
+        guard,
+        timeout=5.0,
+        clock=lambda: next(ticks),
+        sleep=sleeps.append,
+    )
+    assert reads == [guard, guard, guard]
+    assert sleeps == [entry.RECORD_PUBLISH_POLL_SECONDS] * 2
+
+    denials = 99
+    reads.clear()
+    with pytest.raises(entry.SourceCleanupContended):
+        entry._probe_cleanup_guard_inode(
+            guard,
+            timeout=0.0,
+            clock=lambda: 0.0,
+            sleep=sleeps.append,
+        )
+    assert reads == [guard]
+
+
+@pytest.mark.unit
+def test_guard_probe_keeps_every_other_denial_fatal(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Only a proven byte-range-lock denial is retryable; nothing else is."""
+    guard = tmp_path / ".desktop_backend.pid.lock"
+
+    def denied(_path: Path, *, max_bytes: int) -> bytes:
+        raise PermissionError(errno.EACCES, "access is denied")
+
+    monkeypatch.setattr(entry, "_read_owner_cleanup_file", denied)
+    with pytest.raises(PermissionError):
+        entry._probe_cleanup_guard_inode(guard, timeout=0.0, sleep=lambda _seconds: None)
+
+    def missing(_path: Path, *, max_bytes: int) -> bytes:
+        raise FileNotFoundError(errno.ENOENT, "no such file")
+
+    monkeypatch.setattr(entry, "_read_owner_cleanup_file", missing)
+    with pytest.raises(FileNotFoundError):
+        entry._probe_cleanup_guard_inode(guard, timeout=0.0, sleep=lambda _seconds: None)
+
+
+@pytest.mark.unit
+def test_windows_held_transition_lock_denies_the_guard_read_as_contention(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Prove the Windows denial directly rather than inferring it."""
+    if os.name != "nt":
+        pytest.skip("only Windows denies a read of a byte-range-locked region")
+    import msvcrt  # noqa: PLC0415 - Windows-only primitive
+
+    record, _environ = _write_cleanup_fixture(entry, tmp_path)
+    guard = record.with_name(f".{record.name}.lock")
+    denial = PermissionError(errno.EACCES, "permission denied")
+    descriptor = os.open(guard, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    try:
+        msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        try:
+            assert entry._is_held_lock_denial(guard, denial) is True
+            with pytest.raises(entry.SourceCleanupContended):
+                entry._probe_cleanup_guard_inode(guard, timeout=0.0)
+        finally:
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+    finally:
+        os.close(descriptor)
+
+    # The very same probe succeeds once the transition releases the lock, so
+    # the refusal above was contention and not a missing or unsafe guard.
+    assert entry._is_held_lock_denial(guard, denial) is False
+    entry._probe_cleanup_guard_inode(guard, timeout=0.0)
+
+
+@pytest.mark.unit
+def test_lock_denial_classifier_only_answers_yes_for_a_readable_locked_file(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Absence, unreadability and a plain readable file are all fatal denials."""
+    denial = PermissionError(errno.EACCES, "permission denied")
+    readable = tmp_path / "readable"
+    _write_hardened_text(readable, "")
+
+    assert entry._is_held_lock_denial(tmp_path / "absent", denial) is False
+    assert entry._is_held_lock_denial(readable, denial) is False
+    assert entry._is_held_lock_denial(tmp_path, denial) is False
+    assert entry._is_held_lock_denial(readable, OSError(errno.EIO, "io error")) is False
+
+
+@pytest.mark.unit
+def test_managed_cleanup_surfaces_contention_instead_of_swallowing_it(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Contention must escape the fail-closed OSError funnel untouched."""
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    original_record = record.read_bytes()
+
+    def contended(_guard: Path) -> None:
+        raise entry.SourceCleanupContended("held")
+
+    monkeypatch.setattr(entry, "_probe_cleanup_guard_inode", contended)
+    with pytest.raises(entry.SourceCleanupContended):
+        entry.finalise_source_cleanup(
+            1234,
+            5678,
+            environ=environ,
+            pid_alive=lambda _pid: False,
+        )
+    assert record.read_bytes() == original_record
+
+
+@pytest.mark.unit
+def test_managed_cleanup_command_reports_contention_apart_from_missing_proof(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The two failures must not share one indistinguishable exit status."""
+    arguments = [
+        "--flinttrade-finalise-cleanup",
+        "--guardian-pid",
+        "1234",
+        "--application-pid",
+        "5678",
+    ]
+    monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "validate_source_parent_identity", lambda: "v1|test")
+
+    def contended(_guardian_pid: int, _application_pid: int | None) -> bool:
+        raise entry.SourceCleanupContended("held")
+
+    monkeypatch.setattr(entry, "finalise_source_cleanup", contended)
+    with pytest.raises(SystemExit) as retryable:
+        entry.run_desktop_backend(arguments)
+    assert retryable.value.code == entry.CLEANUP_CONTENDED_EXIT_CODE
+    assert "contended by a concurrent recovery-record" in capsys.readouterr().err
+
+    monkeypatch.setattr(entry, "finalise_source_cleanup", lambda *_args: False)
+    with pytest.raises(SystemExit, match="validation failed; recovery state retained") as unproved:
+        entry.run_desktop_backend(arguments)
+
+    # Retryable contention and unproved authority must never look the same.
+    assert retryable.value.code != unproved.value.code
+    assert entry.CLEANUP_CONTENDED_EXIT_CODE != 0
+
+
+@pytest.mark.unit
 def test_managed_cleanup_command_validates_parent_and_emits_no_token(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1170,6 +1367,29 @@ def test_source_guardian_pending_record_crash_boundary_is_absent_or_complete(
 
 
 @pytest.mark.unit
+
+def _fake_owned_process_tree():
+    """Stand in for whatever ``_prepare_owned_process_tree`` returns.
+
+    ``_complete_guardian_cleanup`` takes the drain-then-release path only when
+    the tree exposes ``drain_to_sole_member``, which production defines solely on
+    ``_WindowsOwnedProcessTree`` (built when ``os.name == "nt"``). A bare
+    ``lambda: True`` therefore always fell through to the terminate path, which
+    these tests do not model - so they failed with a BrokenPipeError from the
+    proof publication that path performs.
+
+    Mirroring the platform gate keeps the fake honest on both: Windows exercises
+    the drained terminal sequence, POSIX exercises the fallback, each matching
+    what the real object would do there.
+    """
+    def terminate() -> bool:
+        return True
+
+    if os.name == "nt":
+        terminate.drain_to_sole_member = lambda **_kwargs: True  # type: ignore[attr-defined]
+    return terminate
+
+
 def test_source_guardian_acquires_lease_before_record_containment_and_backend_import(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1227,7 +1447,7 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
         assert publish_application_identity is None
         assert callable(cleanup_complete)
         cleanup_callbacks.append(cleanup_complete)
-        return lambda: True
+        return _fake_owned_process_tree()
 
     monkeypatch.setattr(entry, "_prepare_owned_process_tree", prepare)
     monkeypatch.setattr(entry, "start_parent_watchdog", lambda *_args, **_kwargs: events.append("watch-parent"))
@@ -1240,7 +1460,7 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0
-    assert events == [
+    startup = [
         "validate-parent",
         "acquire-lease",
         "recover-record",
@@ -1253,9 +1473,20 @@ def test_source_guardian_acquires_lease_before_record_containment_and_backend_im
         "watch-sigterm",
         "core:['--port', '0']:True",
     ]
-
-    cleanup_callbacks[0]()
-    assert events[-1] == "release-lease"
+    if os.name == "nt":
+        # Windows contains the tree in-process, so this process is itself the
+        # guardian and nothing outlives run_desktop_backend to hand the
+        # workspace lease back. The release is therefore part of the terminal
+        # sequence here - but strictly after the backend has returned, never
+        # while it is still running. Asserting the whole list also pins that it
+        # happens exactly once.
+        assert events == [*startup, "release-lease"]
+    else:
+        # POSIX forks an external guardian which owns the release, so this
+        # process must still be holding the lease when the backend returns.
+        assert events == startup
+        cleanup_callbacks[0]()
+        assert events[-1] == "release-lease"
 
 
 @pytest.mark.unit
@@ -1398,6 +1629,9 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
             events.append("release-lease")
 
     monkeypatch.setenv("FLINTTRADE_DESKTOP", "1")
+    # The Windows terminal cleanup consults the launch's record path, so pin its
+    # absence rather than inheriting whatever the developer's shell exported.
+    monkeypatch.delenv(entry.SIDECAR_RECORD_PATH_ENV, raising=False)
     monkeypatch.setattr(entry.sys, "frozen", True, raising=False)
     monkeypatch.setattr(
         entry,
@@ -1418,7 +1652,7 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
     monkeypatch.setattr(
         entry,
         "_prepare_owned_process_tree",
-        lambda **_kwargs: events.append("prepare-containment") or (lambda: True),
+        lambda **_kwargs: events.append("prepare-containment") or _fake_owned_process_tree(),
     )
     monkeypatch.setattr(entry, "require_application_pid_record", lambda: events.append("promote-record"))
     monkeypatch.setattr(entry, "announce_application_pid", lambda: events.append("announce-pid"))
@@ -1432,7 +1666,7 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
     )
 
     assert entry.run_desktop_backend(["--port", "0"]) == 0
-    assert events == [
+    startup = [
         "validate-parent",
         "acquire-lease",
         "recover-record",
@@ -1442,6 +1676,10 @@ def test_stale_sys_frozen_cannot_bypass_source_guardian_parent_and_lease_checks(
         "announce-pid",
         "core:['--port', '0']:True",
     ]
+    # A stale sys.frozen must not skip a single check on either platform. On
+    # Windows the in-process guardian additionally hands its own lease back once
+    # the backend returns; the ordering is what matters, so pin the full list.
+    assert events == ([*startup, "release-lease"] if os.name == "nt" else startup)
 
 
 @pytest.mark.unit
@@ -1737,6 +1975,73 @@ def test_promotion_and_pending_cleanup_share_the_record_transition_guard(
     _write_hardened_text(record, pending)
     assert entry.clear_pending_application_pid_record(environ=environ) is True
     assert guarded == [record, record]
+
+
+@pytest.mark.unit
+def test_held_transition_lock_reassertion_never_fails_against_its_own_lock(
+    entry: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Every guarded path must be able to re-prove the lock inode it holds.
+
+    Windows byte-range-locks byte 0 of the guard file, so an unconditional
+    second-descriptor read of it raises PermissionError. Reading anyway turned
+    every recovery-record transition and every managed cleanup into a silent
+    refusal on Windows, because the callers swallow OSError as "not proved".
+    """
+    record = tmp_path / "desktop_backend.pid"
+    guard = record.with_name(f".{record.name}.lock")
+
+    with entry._record_transition_guard(record):
+        entry._reassert_held_transition_lock(guard)
+        if os.name == "nt":
+            # Pin the platform hazard itself, so the skip above can never be
+            # widened back into an unconditional read without this failing.
+            with pytest.raises(PermissionError):
+                entry._read_hardened_recovery_file(guard, max_bytes=1)
+        else:
+            # The POSIX branch must stay a real read: the lock proves uid,
+            # regular-file and single-link, but not the exact 0600 mode.
+            guard.chmod(0o644)
+            with pytest.raises(OSError):
+                entry._reassert_held_transition_lock(guard)
+            guard.chmod(0o600)
+
+
+@pytest.mark.unit
+def test_managed_cleanup_reasserts_the_lock_it_holds_rather_than_reading_it(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Managed cleanup must prove the guard pre-existed without self-deadlocking.
+
+    The pre-lock read is what proves the guardian created the lock; the two
+    in-lock proofs must go through the platform-aware re-assertion instead.
+    """
+    record, environ = _write_cleanup_fixture(entry, tmp_path)
+    proof = entry._cleanup_complete_proof_path(record)
+    _write_hardened_text(proof, f"FLINTTRADE_BACKEND_CLEANUP_COMPLETE token={'a' * 64}\n")
+    guard = record.with_name(f".{record.name}.lock")
+    reasserted: list[Path] = []
+    original = entry._reassert_held_transition_lock
+
+    def trace(path: Path) -> None:
+        reasserted.append(path)
+        original(path)
+
+    monkeypatch.setattr(entry, "_reassert_held_transition_lock", trace)
+    assert entry.finalise_source_cleanup(
+        1234,
+        5678,
+        environ=environ,
+        pid_alive=lambda _pid: False,
+    ) is True
+    # One re-assertion from the transition guard itself, one from the cleanup
+    # body; the absent-record branch is not reached for a promoted record.
+    assert reasserted == [guard, guard]
+    assert record.exists() is False
+    assert proof.exists() is False
 
 
 @pytest.mark.unit
@@ -2768,6 +3073,10 @@ def test_pipe_lease_observes_eof_only_after_every_writer_closes(entry: ModuleTyp
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX signal set; the guardian reaper needs signal.SIGKILL, which Windows does not define",
+)
 def test_macos_guardian_retains_recovery_for_live_unattributed_lease(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -2802,6 +3111,10 @@ def test_macos_guardian_retains_recovery_when_libproc_scan_fails(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX process reaping; the guardian needs os.WNOHANG, which Windows does not define",
+)
 def test_macos_guardian_refuses_generation_change_before_the_signal_sink(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -2941,6 +3254,10 @@ def test_macos_registration_identity_rejects_mixed_pid_generations(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX process reaping; the guardian needs os.WNOHANG, which Windows does not define",
+)
 def test_guardian_requires_a_quiet_second_empty_snapshot(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -3216,6 +3533,270 @@ def test_windows_job_setup_fails_closed_and_releases_unassigned_handle(entry: Mo
 
     assert entry._prepare_windows_owned_process_tree(api=FailingJobApi()) is None
     assert calls == [("kill-on-close", 99), ("close", 99)]
+
+
+class _FakeJobApi:
+    """Job API stand-in whose membership answers the test scripts."""
+
+    def __init__(self, memberships: list[tuple[int, ...] | None]) -> None:
+        self.memberships = memberships
+        self.calls: list[object] = []
+
+    def create_job(self) -> int:
+        return 99
+
+    def enable_kill_on_close(self, _handle: int) -> bool:
+        return True
+
+    def assign_current_process(self, _handle: int) -> bool:
+        return True
+
+    def close_handle(self, handle: int) -> bool:
+        self.calls.append(("close", handle))
+        return True
+
+    def job_process_ids(self, handle: int) -> tuple[int, ...] | None:
+        self.calls.append(("query", handle))
+        return self.memberships.pop(0) if self.memberships else (os.getpid(),)
+
+
+@pytest.mark.unit
+def test_windows_owned_tree_drains_only_on_a_complete_sole_member_list(
+    entry: ModuleType,
+) -> None:
+    """The kernel's own job membership is the proof that the tree is gone."""
+    api = _FakeJobApi([(4242, 777), (4242, 777), (4242,)])
+    tree = entry._prepare_windows_owned_process_tree(api=api)
+    assert tree is not None
+    sleeps: list[float] = []
+
+    assert tree.drain_to_sole_member(
+        pid=4242,
+        timeout=10.0,
+        clock=lambda: 0.0,
+        sleep=sleeps.append,
+    ) is True
+    assert api.calls == [("query", 99)] * 3
+    assert sleeps == [entry.WINDOWS_TREE_DRAIN_POLL_SECONDS] * 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "membership",
+    [None, (4242, 777), ()],
+    ids=["unreadable", "straggler-present", "empty"],
+)
+def test_windows_owned_tree_never_reads_an_unprovable_job_as_drained(
+    entry: ModuleType,
+    membership: tuple[int, ...] | None,
+) -> None:
+    """An unreadable, larger or impossible membership must fail closed."""
+    api = _FakeJobApi([membership])
+    tree = entry._prepare_windows_owned_process_tree(api=api)
+    assert tree is not None
+
+    assert tree.drain_to_sole_member(
+        pid=4242,
+        timeout=0.0,
+        clock=lambda: 0.0,
+        sleep=lambda _seconds: None,
+    ) is False
+
+
+@pytest.mark.unit
+def test_windows_owned_tree_cannot_be_drained_after_its_handle_is_closed(
+    entry: ModuleType,
+) -> None:
+    """A closed job proves nothing about processes that may still be alive."""
+    api = _FakeJobApi([(os.getpid(),)])
+    tree = entry._prepare_windows_owned_process_tree(api=api)
+    assert tree is not None
+
+    assert tree() is True
+    assert tree.drain_to_sole_member(timeout=0.0, clock=lambda: 0.0) is False
+    assert api.calls == [("close", 99)]
+
+
+@pytest.mark.unit
+def test_windows_job_membership_query_matches_the_real_kernel(
+    entry: ModuleType,
+) -> None:
+    """Bind the drain proof to the real API, not only to a fake of it."""
+    if os.name != "nt":
+        pytest.skip("Job Objects are a Windows-only containment primitive")
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    process_set_quota = 0x0100
+    process_terminate = 0x0001
+    process_query_information = 0x0400
+
+    api = entry._WindowsJobApi()
+    handle = api.create_job()
+    assert handle
+    # No kill-on-close here: this job exists to be queried, not to contain the
+    # test runner, so closing its handle must stay harmless.
+    child = subprocess.Popen(  # noqa: S603 - fixed interpreter invocation
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        stdin=subprocess.PIPE,
+    )
+    try:
+        assert api.job_process_ids(handle) == ()
+        child_handle = kernel32.OpenProcess(
+            process_set_quota | process_terminate | process_query_information,
+            0,
+            child.pid,
+        )
+        assert child_handle
+        try:
+            assert kernel32.AssignProcessToJobObject(
+                ctypes.c_void_p(handle),
+                ctypes.c_void_p(child_handle),
+            )
+            assert api.job_process_ids(handle) == (child.pid,)
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(child_handle))
+    finally:
+        child.kill()
+        child.wait(timeout=POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS)
+        deadline = time.monotonic() + POSIX_GUARDIAN_DRILL_TIMEOUT_SECONDS
+        while api.job_process_ids(handle) and time.monotonic() < deadline:
+            time.sleep(entry.WINDOWS_TREE_DRAIN_POLL_SECONDS)
+        drained = api.job_process_ids(handle)
+        api.close_handle(handle)
+
+    # A dead member leaves the job, which is exactly what the drain wait reads.
+    assert drained == ()
+
+
+@pytest.mark.unit
+def test_windows_guardian_releases_the_lease_only_after_the_job_drains(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Descendants must be provably gone before the workspace is free."""
+    events: list[object] = []
+
+    class Tree:
+        def __call__(self) -> bool:
+            events.append("terminate-tree")
+            return True
+
+        def drain_to_sole_member(self, *, pid: int, **_kwargs: object) -> bool:
+            events.append(("drain-tree", pid))
+            return True
+
+    monkeypatch.setattr(
+        entry,
+        "_publish_cleanup_complete_proof_with_retry",
+        lambda pid, **_kwargs: events.append(("proof", pid)) or True,
+    )
+
+    assert entry._complete_windows_guardian_cleanup(
+        Tree(),
+        lambda: events.append("release-lease"),
+        application_pid=4242,
+    ) is True
+    assert events == [("drain-tree", 4242), ("proof", 4242), "release-lease"]
+
+
+@pytest.mark.unit
+def test_windows_lease_becomes_free_only_after_the_last_descendant_leaves_the_job(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordering itself: descendant gone first, lease observable free after.
+
+    Drives the real containment object against a job whose straggler dies part
+    way through the wait, and records the job membership at the exact moment
+    each step runs. A release seen while ``777`` is still a member would be the
+    Windows window this guarding exists to close.
+    """
+    members = {4242, 777}
+    observations: list[tuple[str, tuple[int, ...]]] = []
+
+    class Api:
+        def close_handle(self, _handle: int) -> bool:
+            observations.append(("terminate", tuple(sorted(members))))
+            return True
+
+        def job_process_ids(self, _handle: int) -> tuple[int, ...]:
+            return tuple(sorted(members))
+
+    def sleep(_seconds: float) -> None:
+        members.discard(777)
+
+    monkeypatch.setattr(
+        entry,
+        "_publish_cleanup_complete_proof_with_retry",
+        lambda _pid, **_kwargs: observations.append(("proof", tuple(sorted(members)))) or True,
+    )
+
+    assert entry._complete_windows_guardian_cleanup(
+        entry._WindowsOwnedProcessTree(Api(), 99),
+        lambda: observations.append(("lease-free", tuple(sorted(members)))),
+        application_pid=4242,
+        sleep=sleep,
+    ) is True
+    assert observations == [("proof", (4242,)), ("lease-free", (4242,))]
+
+
+@pytest.mark.unit
+def test_windows_guardian_retains_the_lease_and_kills_a_tree_that_will_not_drain(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Job closure then kills the straggler while the lease is still held."""
+    events: list[object] = []
+
+    class Tree:
+        def __call__(self) -> bool:
+            events.append("terminate-tree")
+            return True
+
+        def drain_to_sole_member(self, *, pid: int, **_kwargs: object) -> bool:
+            events.append(("drain-tree", pid))
+            return False
+
+    monkeypatch.setattr(
+        entry,
+        "_publish_cleanup_complete_proof_with_retry",
+        lambda pid, **_kwargs: events.append(("proof", pid)) or True,
+    )
+
+    assert entry._complete_windows_guardian_cleanup(
+        Tree(),
+        lambda: events.append("release-lease"),
+        application_pid=4242,
+    ) is False
+    assert events == [("drain-tree", 4242), ("proof", 4242), "terminate-tree"]
+    assert "did not drain" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_windows_guardian_refuses_to_release_without_a_drain_probe(
+    entry: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Containment that cannot prove emptiness is not evidence of emptiness."""
+    events: list[object] = []
+    monkeypatch.setattr(
+        entry,
+        "_publish_cleanup_complete_proof_with_retry",
+        lambda pid, **_kwargs: events.append(("proof", pid)) or True,
+    )
+
+    assert entry._complete_windows_guardian_cleanup(
+        lambda: events.append("terminate-tree") or True,
+        lambda: events.append("release-lease"),
+        application_pid=4242,
+    ) is False
+    assert "release-lease" not in events
 
 
 @pytest.mark.unit
@@ -3533,6 +4114,10 @@ def test_posix_process_identity_is_stable_and_uses_a_kernel_start_token(entry: M
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX parent identity; the watchdog reports high-resolution process identity as unsupported on win32",
+)
 def test_posix_watcher_returns_after_first_orphan_request(
     entry: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

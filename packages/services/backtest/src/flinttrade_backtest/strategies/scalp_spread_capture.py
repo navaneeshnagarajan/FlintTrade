@@ -16,7 +16,7 @@ from typing import Any
 from flinttrade_core.models import OHLCV, Order, Quote
 from flinttrade_engine.strategy import BaseStrategy
 
-from ._indicators import sma, atr
+from ._indicators import atr, sma
 from ._mixin import _BacktestStrategyMixin
 
 logger = logging.getLogger("flinttrade.backtest.strategies.scalp_spread_capture")

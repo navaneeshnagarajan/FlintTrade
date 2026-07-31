@@ -77,7 +77,7 @@ class OptimiserConfig(BaseModel):
     rebalance_frequency: RebalanceFrequency = "monthly"
 
     @model_validator(mode="after")
-    def _validate_weight_bounds(self) -> "OptimiserConfig":
+    def _validate_weight_bounds(self) -> OptimiserConfig:
         if self.min_weight > self.max_weight:
             raise ValueError(
                 f"min_weight ({self.min_weight}) must be <= max_weight ({self.max_weight})"

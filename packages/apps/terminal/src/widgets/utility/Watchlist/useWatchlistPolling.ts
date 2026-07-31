@@ -120,7 +120,7 @@ export function useWatchlistPolling(watchlist: WatchlistItem[]): UseWatchlistPol
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [fetchQuotes, instrumentsMemo]);
 
   return { quotes, sparkHistory, fetchError };

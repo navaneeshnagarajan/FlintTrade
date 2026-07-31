@@ -224,8 +224,39 @@ jobs:
       # 6-hour runner timeout. Watchdog method works regardless. See the
       # PositionWatcher fix in packages/services/ditto/src/mirror.py for the original
       # hang vector.
-      - run: uv run python -m pytest packages/*/*/tests/ tests/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
-      - run: uv run ruff check packages/*/*/src/ --output-format=github
+      # scripts/__tests__ is listed explicitly: it matches neither glob, so its
+      # 114 tests ran in no lane at all and one of them had been failing at head.
+      - run: uv run python -m pytest packages/*/*/tests/ tests/ scripts/__tests__/ -n auto -v --tb=short --import-mode=importlib --timeout=60 --timeout-method=thread
+      # Lint path: this used to be `packages/*/*/src/` only, which was NARROWER
+      # than the documented gate - `scripts/ft.py lint` and docs/CI.md both run
+      # `ruff check packages/ tests/` - so the one job that carries the lint gate
+      # never saw the F821/F401 import-NameError class in any test file. Now
+      # identical to the local command, so local green means CI green.
+      # See the dated per-file-ignores in pyproject.toml for the measured
+      # modern-rule debt that the test trees still carry.
+      - run: uv run ruff check packages/ tests/ --output-format=github
+      # Fail-closed half of the Node-release-key guard. `--days 0` narrows the
+      # check to conditions that are already broken - an expired or revoked key,
+      # a mirrored key that no longer matches the pinned keySha256, a checksum
+      # file with no GOODSIG - so a genuinely unverifiable bootstrap cannot merge.
+      # `--offline` keeps it network-free and therefore safe on every PR.
+      #
+      # The 30-day EXPIRY WARNING deliberately does NOT live here: it belongs on
+      # the daily schedule in key-freshness.yml. A warning window in this lane
+      # would redden every unrelated pull request for up to a month while the
+      # refresh (a version bump plus a mirrored key swap) was arranged.
+      - name: Pinned Node release key is not expired or revoked
+        run: uv run python scripts/check-node-release-key-freshness.py --offline --days 0
+      # NOTE: `scripts/check-terminal-type-safety.py` used to run here, matching
+      # regular expressions for explicit `any` and suppression pragmas. It missed
+      # `type Payload = any` — the most obvious spelling of the thing it banned —
+      # along with unions, intersections, function-type return positions and
+      # `keyof any`, because an alias body carries none of the punctuation the
+      # patterns keyed off. Both checks are now AST rules in
+      # packages/apps/terminal/eslint-local-rules.mjs, enforced by the "Terminal
+      # lint gate" step in node-core-tests, which is ungated exactly like this
+      # job, so the gate runs on the same set of pushes it always did.
+      # tests/test_terminal_lint_gate_wiring.py fails if that step goes away.
 
   # NOTE: macOS and Windows cross-platform checks used to run on every push +
   # PR with `continue-on-error: true` (cosmetic — never gated anything). On
@@ -257,6 +288,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: TypeScript strict check
         run: pnpm --dir packages/apps/terminal exec tsc --noEmit
+      # Four rules, all of them things tsc cannot see. react-hooks/rules-of-hooks
+      # + exhaustive-deps catch the two runtime faults — a conditional hook call,
+      # and a dependency array that lets a widget act on a stale price.
+      # local/no-explicit-any + local/no-ts-suppression carry the house rules that
+      # `strict` permits by design: an explicit `any`, and a suppression pragma.
+      # The latter two replaced a regex script that missed `type Payload = any`.
+      - name: Terminal lint gate (hooks, no explicit `any`, no suppressions)
+        run: pnpm --dir packages/apps/terminal run lint
       - name: Run core tests
         run: pnpm --dir packages/apps/terminal exec vitest run --pool=forks --maxWorkers=1 --no-file-parallelism src/lib/ src/stores/ src/atoms/ src/services/ src/test-utils/ src/hooks/ src/layout/ src/admin/ src/providers/ src/__tests__/
         env:
@@ -382,6 +421,79 @@ jobs:
           workspaces: packages/core/ticks
       - run: cargo test --manifest-path packages/core/ticks/Cargo.toml
 
+  # TEMPORARY diagnostic — delete once the ubuntu-24.04 containment failure below
+  # is understood and fixed.
+  #
+  # bootstrap-io's POSIX anchor enumerates its own process group with
+  # `ps axeww -o pid= -o ppid= -o pgid= -o state= -o command=` and selects members
+  # with the regex `^ *[0-9]+ +[0-9]+ +<anchor pid> `. One containment test passes
+  # on ubuntu-22.04 (procps 3.3.17) and fails on ubuntu-24.04 (procps-ng 4.0.4)
+  # with byte-identical test code, so the enumeration contract is the prime
+  # suspect. This runs the exact command on both images and prints what the regex
+  # actually matches. It cannot fail the workflow.
+  posix-enumeration-diagnostic:
+    name: POSIX enumeration diagnostic (${{ matrix.os }})
+    needs: changed-surfaces
+    if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      # `setsid` is load-bearing: the anchor is spawned detached by Node, so it is
+      # a process-group leader and `$$` really is its pgid. A plain `sh -c`
+      # inherits the runner's group instead, which is why the first version of
+      # this step matched nothing on either image and proved nothing.
+      - name: Enumerate a leader-owned process group the way the anchor does
+        run: |
+          echo "--- ps identity ---"
+          /usr/bin/ps --version 2>&1 | head -2 || true
+          setsid /bin/sh -c '
+            # An orphan in the group: the intermediate leader exits at once, so
+            # the sleep is reparented while staying in the anchor group. This is
+            # the exact shape of the one containment test that fails on 24.04.
+            /bin/sh -c "sleep 8 &" &
+            wait
+            echo "anchor=$$ own_pgid=$(/usr/bin/ps -o pgid= -p $$ | tr -d " ")"
+            echo "--- rows the anchor regex selects ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -E "^ *[0-9]+ +[0-9]+ +$$ " | cut -c1-56 | cat -A
+            echo "--- selected row count (expect >= 2: this sh and the orphaned sleep) ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -cE "^ *[0-9]+ +[0-9]+ +$$ "
+            echo "--- every row mentioning sleep, whatever its group ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -E "sleep 8" | /usr/bin/grep -v grep | cut -c1-56 | cat -A
+            # Which kill form reaches an orphaned in-group process?
+            # `/bin/kill -TERM -<pgid>` is what the anchor and the parent-death
+            # watchdog both use. Each form is aimed at a SEPARATE victim group,
+            # never at our own: signalling our own group is suicide for whichever
+            # form works, which is why the previous round printed almost nothing.
+            for form in procps-group procps-group-ddash builtin-group procps-per-pid; do
+              tag="victim-$form"
+              # A victim group whose leader exits immediately, leaving an orphan
+              # still in the group — the exact shape the failing test builds.
+              setsid /bin/sh -c "/bin/sh -c \"sleep 300 & echo $tag >/dev/null\" & wait" >/dev/null 2>&1
+              sleep 1
+              row=$(/usr/bin/ps axeww -o pid= -o pgid= -o command= 2>/dev/null \
+                | /usr/bin/grep "sleep 300" | /usr/bin/grep -v grep | head -1)
+              vpid=$(echo "$row" | /usr/bin/awk "{print \$1}")
+              vpgid=$(echo "$row" | /usr/bin/awk "{print \$2}")
+              case "$form" in
+                procps-group)       /bin/kill -TERM "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                procps-group-ddash) /bin/kill -s TERM -- "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                builtin-group)      kill -TERM "-$vpgid" >/dev/null 2>&1; rc=$? ;;
+                procps-per-pid)     /bin/kill -TERM "$vpid" >/dev/null 2>&1; rc=$? ;;
+              esac
+              sleep 1
+              if /usr/bin/kill -0 "$vpid" 2>/dev/null; then alive=YES; else alive=no; fi
+              echo "form=$form rc=$rc victim_pid=$vpid victim_pgid=$vpgid still_alive=$alive"
+              /bin/kill -KILL "$vpid" 2>/dev/null || true
+            done
+          ' </dev/null || true
+
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
   # directory package on every non-draft code change; the weekly workflow
@@ -389,7 +501,22 @@ jobs:
   electron-desktop-tests:
     needs: changed-surfaces
     if: github.event.pull_request.draft != true && needs.changed-surfaces.outputs.code == 'true'
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04, not 22.04. The 22.04 pin was inherited from the retired Tauri
+    # lane, where it was a stated choice: that job compiled the same crate the
+    # release matrix built, on the 22.04 glibc/webkit support floor. The Electron
+    # cutover kept the runner and lost the reason.
+    #
+    # The reason no longer applies here. This job packages `--dir` and verifies
+    # the security contract; it publishes nothing, so the glibc its native addon
+    # links against never reaches a user. flint.toml declares
+    # os_requires = "Ubuntu 24.04 LTS or any platform providing Python >= 3.12",
+    # so per-push CI running on 22.04 was testing below the project's own floor.
+    #
+    # desktop-release.yml's Linux build legs DO stay on ubuntu-22.04/-arm, and
+    # deliberately: they compile flinttrade-fs-promoter.node with /usr/bin/cc and
+    # ship it inside the AppImage, so the build host's glibc becomes the
+    # installer's real floor. That is a distribution decision, not a test one.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

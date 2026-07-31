@@ -61,6 +61,15 @@ _IMMUTABLE_KEYS = frozenset({"id", "created_at", "updated_at"})
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 _MAX_NOTE_CONTENT_CHARS = 100_000
 
+# The single caller-facing sentence for a screenshot the store refuses. The store
+# raises a plain ``ValueError`` for half a dozen distinct faults, and one of them
+# (a decode failure) can carry library detail, so the reason is logged rather
+# than echoed. The text still states every rule the upload must satisfy.
+_SCREENSHOT_REJECTED_MESSAGE = (
+    "Screenshot rejected — send a base64 data URL of a PNG, JPEG, WebP or GIF "
+    "image no larger than 2 MiB."
+)
+
 
 def _valid_note_date(note_date: str) -> bool:
     """Return ``True`` only for a real ASCII ``YYYY-MM-DD`` calendar date.
@@ -246,7 +255,7 @@ def import_tradebook() -> tuple[Response, int]:
     body = request.get_json(silent=True)
     trades = body.get("trades") if isinstance(body, dict) else body
     if not isinstance(trades, list):
-        return _err("Request body must be a list of trades or {\"trades\": [...]}", 400)
+        return _err('Request body must be a list of trades or {"trades": [...]}', 400)
     created = journal.import_from_tradebook(trades)
     return _ok({"created": created, "count": len(created)}, 201)
 
@@ -349,7 +358,8 @@ def add_screenshot() -> tuple[Response, int]:
     try:
         row, created = journal.add_screenshot(trade_key, data_url)
     except ValueError as exc:
-        return _err(str(exc), 400)
+        logger.warning("Screenshot rejected for trade %r: %s", trade_key, exc)
+        return _err(_SCREENSHOT_REJECTED_MESSAGE, 400)
     return _ok(row, 201 if created else 200)
 
 

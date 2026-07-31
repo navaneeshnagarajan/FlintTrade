@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes
@@ -88,7 +88,7 @@ class WebhookSecretStore:
     def store_secret(self, path: str, source: str, name: str, secret: str) -> None:
         """Encrypt and persist the signing secret for one mounted webhook path."""
         webhook_id = canonical_webhook_id(path)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         blob = encrypt_webhook_secret(secret.encode("utf-8"), webhook_id, self._master_dek)
         with closing(self._connect()) as conn:
             conn.execute(

@@ -476,12 +476,18 @@ class TelegramBot:
         logger.critical("KILL SWITCH activated via Telegram by %s", username or "operator")
 
         status_lines = [
-            f"{'✅' if cancel_requests_accepted else '❌'} "
-            f"{'Order cancellation requests accepted' if cancel_requests_accepted else 'Order cancellation incomplete'}",
-            f"{'✅' if exit_requests_accepted else '❌'} "
-            f"{'Position exit requests accepted' if exit_requests_accepted else 'Position exit requests incomplete'}",
-            f"{'✅' if strategies_stopped else '❌'} "
-            f"{'All strategies stopped' if strategies_stopped else 'Strategies not stopped'}",
+            (
+                f"{'✅' if cancel_requests_accepted else '❌'} "
+                f"{'Order cancellation requests accepted' if cancel_requests_accepted else 'Order cancellation incomplete'}"
+            ),
+            (
+                f"{'✅' if exit_requests_accepted else '❌'} "
+                f"{'Position exit requests accepted' if exit_requests_accepted else 'Position exit requests incomplete'}"
+            ),
+            (
+                f"{'✅' if strategies_stopped else '❌'} "
+                f"{'All strategies stopped' if strategies_stopped else 'Strategies not stopped'}"
+            ),
         ]
 
         if errors:

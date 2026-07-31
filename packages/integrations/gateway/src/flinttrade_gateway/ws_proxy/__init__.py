@@ -9,12 +9,12 @@ Public surface:
     validate_api_key   — API key validation helper
 """
 
+from .auth import validate_api_key
 from .broker_adapter import AbstractBrokerAdapter
 from .client_manager import ClientManager, ClientSession
 from .mock_adapter import MockBrokerAdapter
 from .router import TickRouter
 from .server import WSProxyServer
-from .auth import validate_api_key
 
 __all__ = [
     "WSProxyServer",

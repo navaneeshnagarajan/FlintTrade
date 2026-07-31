@@ -176,10 +176,10 @@ class NativeSessionRefresher:
 
         from .native_account_routes import (  # noqa: PLC0415
             _MISSING_REGISTRY_SESSION,
+            _candidate_login_timeout_seconds,
             _compare_and_put_registry_session,
             _compare_and_remove_registry_session,
             _compare_and_update_selector_credentials,
-            _candidate_login_timeout_seconds,
             _registry_session_generation,
             _registry_session_generation_matches,
             _run_bounded_candidate_coroutine,
@@ -240,7 +240,22 @@ class NativeSessionRefresher:
                     else registry_generation
                 )
 
-                async def authenticate_candidate() -> tuple[dict[str, Any], Any]:
+                # Every loop-carried value this coroutine reads is bound HERE, at
+                # definition time, rather than looked up when the thread happens to
+                # run. That is load-bearing, not tidiness: on timeout
+                # `_run_bounded_candidate_coroutine` calls `attempt.abandon()`, which
+                # only sets a flag - Python cannot stop the thread, so `_run` keeps
+                # executing this coroutine. The `_CandidateLoginTimeoutError` it
+                # raises is caught by the per-selector `except` below and the loop
+                # moves to the NEXT account. A late-binding closure would then read
+                # that next account's credentials, registry and id, so an abandoned
+                # refresh for one selector could log in as another one.
+                async def authenticate_candidate(
+                    stored_credentials: dict[str, Any] = stored_credentials,
+                    prior_session: Any = prior_session,
+                    candidate_registry: BrokerRegistry = candidate_registry,
+                    account_id: str = account_id,
+                ) -> tuple[dict[str, Any], Any]:
                     credentials = dict(stored_credentials)
                     renew = getattr(adapter, "renew_token", None)
                     if callable(renew) and prior_session is not None:
@@ -298,9 +313,9 @@ class NativeSessionRefresher:
                             lambda: _compare_and_update_selector_credentials(
                                 store,
                                 broker,
-                                account_id,
-                                credential_generation,
-                                replayable_credentials,
+                                account_id,  # noqa: B023 - invoked before the loop advances
+                                credential_generation,  # noqa: B023 - invoked before the loop advances
+                                replayable_credentials,  # noqa: B023 - invoked before the loop advances
                             ),
                         )
                     except _RotationAdmissionRevoked:
@@ -327,9 +342,9 @@ class NativeSessionRefresher:
                     lambda: _compare_and_put_registry_session(
                         registry,
                         broker,
-                        account_id,
-                        registry_generation,
-                        candidate_session,
+                        account_id,  # noqa: B023 - invoked before the loop advances
+                        registry_generation,  # noqa: B023 - invoked before the loop advances
+                        candidate_session,  # noqa: B023 - invoked before the loop advances
                     ),
                 )
                 if not registry_published:
@@ -354,14 +369,17 @@ class NativeSessionRefresher:
                         lambda: _compare_and_remove_registry_session(
                             registry,
                             broker,
-                            account_id,
-                            candidate_session,
+                            account_id,  # noqa: B023 - invoked before the loop advances
+                            candidate_session,  # noqa: B023 - invoked before the loop advances
                         ),
                     )
                     continue
                 self._admission.publish_if_current(
                     generation,
-                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(selector, "ok"),
+                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(
+                        selector,  # noqa: B023 - invoked before the loop advances
+                        "ok",
+                    ),
                 )
             except _RotationAdmissionRevoked:
                 raise
@@ -384,8 +402,8 @@ class NativeSessionRefresher:
                         lambda: _compare_and_remove_registry_session(
                             registry,
                             broker,
-                            account_id,
-                            registry_generation,
+                            account_id,  # noqa: B023 - invoked before the loop advances
+                            registry_generation,  # noqa: B023 - invoked before the loop advances
                         ),
                     )
                     if not registry_removed:
@@ -399,7 +417,10 @@ class NativeSessionRefresher:
                     continue
                 self._admission.publish_if_current(
                     generation,
-                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(selector, message),
+                    lambda: app.config.setdefault("NATIVE_SESSION_STATUS", {}).__setitem__(
+                        selector,  # noqa: B023 - invoked before the loop advances
+                        message,  # noqa: B023 - invoked before the loop advances
+                    ),
                 )
                 failures.append(f"{broker}: {message}")
         if failures:

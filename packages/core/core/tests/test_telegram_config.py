@@ -217,6 +217,32 @@ def test_route_rejects_malformed_payload_with_400(monkeypatch, tmp_path: Path) -
         assert "requires both" in resp.get_json()["message"]
 
 
+def test_route_does_not_echo_a_valueerror_from_underneath(monkeypatch, tmp_path: Path) -> None:
+    """Only our own refusals are caller-facing; a deeper ValueError is a 500.
+
+    ``update_workspace_config`` raises a ``json.JSONDecodeError`` (itself a
+    ``ValueError``) for a malformed ``workspace.json``, plus two more carrying
+    internal version detail. Those are server faults, not settings refusals,
+    and their text must never reach the client.
+    """
+    app = _make_app(monkeypatch, tmp_path)
+
+    def _explode(payload, ws=None):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr("flinttrade_core.telegram_config.persist_telegram_config", _explode)
+
+    with app.test_client() as client:
+        resp = client.post(
+            "/v1/config/telegram",
+            json={"enabled": False, "chat_id": "42"},
+            headers=_headers(),
+        )
+        assert resp.status_code == 500
+        assert resp.get_json()["message"] == "Could not persist Telegram config"
+        assert "Expecting value" not in resp.get_data(as_text=True)
+
+
 def test_route_requires_control_auth(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(monkeypatch, tmp_path)
     with app.test_client() as client:

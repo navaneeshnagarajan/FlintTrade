@@ -11,8 +11,7 @@ from collections import deque
 from typing import Any
 
 from flinttrade_core.models import OHLCV, Order, Quote
-
-from ..strategy import BaseStrategy
+from flinttrade_engine.strategy import BaseStrategy
 
 logger = logging.getLogger("flinttrade.engine.strategies.ema_crossover")
 

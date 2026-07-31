@@ -23,6 +23,8 @@ workflow YAML should read this once.
 | `release-please.yml` | push to `main` | Linux control jobs | Maintains the release PR/version contract and dispatches `desktop-release.yml` after a release tag is created. |
 | `refresh-vuln-snapshot.yml` | weekly cron (Sun 04:00 UTC); manual dispatch | 1 Linux job | Refreshes the offline OSV vuln snapshot used by `pip-audit-with-allowlist.py` and opens a PR for the founder to merge, keeping the snapshot inside its freshness window. |
 | `status-report.yml` | weekly cron (Mon 07:00 UTC); manual dispatch | 1 Linux job (~5 minutes) | Emits a repo-health snapshot artefact. |
+| `key-freshness.yml` | daily cron; manual dispatch; push touching `packages/apps/desktop/resources/bootstrap/checksums/**` | 1 Linux job (~1 minute) | Fails while the pinned Node release key is expired, revoked, or expiring inside 30 days. Node releases are signed by whichever release manager cut them, using their own key with their own expiry, so this is upstream state we consume — it can be refreshed, never regenerated. `gpg` exits 0 on an expired key and reports `EXPKEYSIG` out of band, so a check that only reads the exit status passes indefinitely against a dead key. Revocation is upstream-only state — the packet lands on the keyserver, never in the mirrored `.asc` — so this job fetches the keyserver copy and merges it into the same keyring before reporting; that is why the per-PR `--offline` step in `test.yml` cannot replace it. Availability is handled separately from trust: an unreachable or unparseable keyserver prints `Upstream: NOT CHECKED` and leaves the exit code alone. |
+| `toolchain-freshness.yml` | daily cron; manual dispatch | 1 Linux job (~1 minute) | Fails when a pinned or floor version is EOL or has fallen outside the N-1 band declared in `flint.toml` `[requirements]`, reading nodejs.org/dist, the Node LTS schedule, the npm registry, uv's GitHub releases and the CPython EOL calendar. `pnpm audit` audits the dependency tree and pnpm is not a node in the lockfile, so nothing else can see toolchain binaries. Network-tolerant: an unreachable source skips with a note rather than failing an unrelated PR. |
 | `claude.yml` | issue / PR comment containing `@claude` | 1 Linux job per invocation | Zero per-push cost. Runs only when explicitly tagged. |
 | `claude-code-review.yml` | PR opened / ready-for-review / reopened (paths-ignore + draft guard) | 1 Linux job per qualifying transition | Skips `synchronize` events to avoid running on every PR commit. |
 
@@ -50,7 +52,7 @@ parallel jobs to keep wall-clock time low:
    cheap.
 9. `electron-desktop-tests` — strict Electron TypeScript, the full desktop
    Vitest suite, main/preload bundle, Linux x64 directory package and packaged
-   security-contract verification on `ubuntu-22.04`.
+   security-contract verification on `ubuntu-24.04`.
 
 All nine must be green for the workflow to be reported as passing. The shard
 path lists are hand-maintained, but `tests/test_ci_vitest_shard_coverage.py`
@@ -116,16 +118,28 @@ these may be chained with it.
      `pnpm --filter @flinttrade/terminal test` if you touched the widget
      surface.
    - `python -m pytest <changed-tests> --tb=short --import-mode=importlib`
-   - `python scripts/ft.py lint` — runs `ruff check packages/ tests/`
-     (the same scope as `make lint`), shell-independent on every platform.
+   - `python scripts/ft.py lint` — runs `ruff check packages/ tests/` and then
+     the terminal's `eslint src --max-warnings=0` lint gate
+     (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`,
+     `local/no-explicit-any`, `local/no-ts-suppression`), the same
+     command `node-core-tests` runs. Same scope as `make lint`,
+     shell-independent on every platform. Both halves always run and the first
+     non-zero exit code wins; a missing ruff or a missing
+     `packages/apps/terminal/node_modules` skips that half with a hint rather
+     than failing.
 2. **Before you push:**
    - `git status` clean — no stray `__init__.py` or `package-lock.json`
      left out of the commit.
    - `python scripts/ft.py test` (POSIX alias: `make test`) if anything inside
      `packages/*/src/` changed.
-3. **Doc-only commits** (paths listed above) skip the `test.yml` matrix by
-   design, but changes under `docs/**` still run the site typecheck, tests and
-   build through `site.yml`.
+3. **Doc-only commits** no longer skip `test.yml`. `python-tests`,
+   `node-core-tests` and `secrets-check` always run — the first carries
+   `tests/test_windows_command_docs.py`, the guard that stops a Windows page
+   prescribing `make` or a fence chained with `&&`, so ignoring docs used to
+   skip precisely the job that polices docs. Only the expensive lanes (the four
+   widget shards, `rust-ticks-tests`, `electron-desktop-tests`) gate on the
+   `changed-surfaces` classifier. Changes under `docs/**` additionally run the
+   site typecheck, tests and build through `site.yml`.
 4. **Draft PRs are free.** Open as draft, iterate, mark "ready for
    review" when you want CI to run.
 
@@ -399,7 +413,7 @@ locations" came from partial logs, while a control run of the identical commit
 returned 19. Wait for the run to complete, and re-run the same commit before
 believing any delta between two numbers.
 
-Reproduce on ubuntu-22.04 + Node 22 (Docker is sufficient). This is fail-closed
+Reproduce on ubuntu-24.04 + Node 22 (Docker is sufficient). This is fail-closed
 containment — the guardian that stops orphaned bootstrap processes surviving —
 so do not relax an assertion or extend a timeout to get green; the 2026-07-26
 fix strengthened enforcement (faster sweeps, immediate SIGKILL for

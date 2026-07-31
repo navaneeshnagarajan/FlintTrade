@@ -43,6 +43,35 @@ that require local credentials and live-read evidence before they are exposed as
 connectable. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the current
 matrix.
 
+## Supported versions
+
+FlintTrade tracks current stable releases rather than deferring upgrades into
+periodic migrations. Two numbers per runtime, and the difference matters:
+
+| | Minimum (the floor) | Target (what CI builds and the installer pins) |
+|---|---|---|
+| Python | `>=3.12` | 3.14 |
+| Node | `>=22.22.0` | 24 |
+| OS | Ubuntu 24.04 LTS, or any platform providing Python >= 3.12 | Ubuntu 26.04 LTS |
+
+The **floor** is the lowest version that actually works — set by what the
+dependency tree genuinely needs, never by ambition. Node's floor comes from
+`react-router@8`'s own `engines` field, and the OS floor is derived rather than
+chosen: Ubuntu 24.04 ships Python 3.12, whereas 22.04 ships 3.10 and cannot meet
+the Python floor with its system interpreter.
+
+The **target** is where development, CI and the pinned bootstrap toolchain live,
+so early adopters of newer releases are supported rather than merely tolerated.
+
+If you use the one-line installer below, none of this constrains you: it
+provisions its own SHA-256-verified Python, Node and pnpm under
+`~/.flinttrade/tools` and never touches your system toolchain. The floors apply
+to source installs and contributors.
+
+These values are declared once, in `flint.toml`'s `[requirements]` table.
+`tests/test_minimum_requirements_single_source.py` fails if any manifest, or
+this table, disagrees with it.
+
 ## Quickstart
 
 ### Install (recommended — no prerequisites)

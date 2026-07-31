@@ -39,7 +39,51 @@ def pytest_configure(config) -> None:
     config._flinttrade_ci_env_at_start = dict(os.environ)
 
 
+def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
+    """Release the scratch workspaces this run created.
+
+    Without this the suite left one hardened ``flinttrade-pytest-*`` tree in the
+    system temp directory per invocation, each carrying an owner-only protected
+    DACL on Windows that ordinary recursive deletes stumble over.
+
+    ``sweep_stale`` then collects the marked workspaces that earlier runs could
+    not remove themselves, because an app-building test holds store handles open
+    for the whole process lifetime.
+    """
+    scratch = _scratch_workspace()
+    scratch.release_all()
+    scratch.sweep_stale()
+
+
 _REPO_ROOT = Path(__file__).resolve().parent
+_SCRATCH_MODULE_NAME = "_flinttrade_scratch_workspace"
+
+
+def _scratch_workspace():
+    """Return the shared scratch-workspace finaliser module.
+
+    Loaded by path under a private ``sys.modules`` name rather than imported as
+    ``tests.scratch_workspace``, because a per-package run binds ``tests`` to that
+    package's own tests directory. The private name keeps exactly one registry per
+    process, shared by this conftest and the per-package ones.
+
+    Returns:
+        The loaded ``tests/scratch_workspace.py`` module.
+    """
+    import importlib.util
+
+    module = sys.modules.get(_SCRATCH_MODULE_NAME)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            _SCRATCH_MODULE_NAME,
+            _REPO_ROOT / "tests" / "scratch_workspace.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[_SCRATCH_MODULE_NAME] = module
+        spec.loader.exec_module(module)
+    return module
+
+
 _PY_PACKAGE_SRCS = [
     "packages/core/core/src",
     "packages/core/data/src",
@@ -92,14 +136,58 @@ def _clean_legacy_scratch_dbs(base: Path) -> None:
 
 
 def _seed_test_master_password(base: Path) -> None:
-    pw_file = base / "master_password"
-    try:
-        if not pw_file.exists():
-            from flinttrade_core.secure_file import write_secret_text
+    """Seed the per-worker master password, and prove the app will accept it.
 
-            write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
-    except OSError:
+    Existence is not the property that matters. The backend reads this through
+    ``read_hardened_owner_owned_text``, which rejects a file whose mode is any
+    broader than owner-only, so a present-but-unhardened file fails exactly as a
+    missing one does - with ``master password required but no TTY available``
+    raised from whichever unrelated test first builds a full app.
+
+    That is why this reseeds on an unreadable file rather than only an absent
+    one, and why the failure is no longer swallowed. A silent ``except OSError``
+    here turned a one-line setup fault into fifteen errors in a package that has
+    nothing to do with credentials, several minutes away and on one xdist worker
+    only.
+
+    Args:
+        base: The workspace directory this worker was given.
+
+    Raises:
+        RuntimeError: If the secret cannot be written, or cannot be read back by
+            the same reader the backend uses.
+    """
+    from flinttrade_core.secure_file import read_hardened_owner_owned_text, write_secret_text
+
+    pw_file = base / "master_password"
+
+    def _usable() -> bool:
+        try:
+            return read_hardened_owner_owned_text(pw_file) == _TEST_MASTER_PASSWORD
+        except (OSError, ValueError, UnicodeDecodeError):
+            return False
+
+    if _usable():
+        return
+
+    try:
+        pw_file.unlink()
+    except FileNotFoundError:
         pass
+    except OSError as exc:
+        raise RuntimeError(f"could not replace the unusable test master password at {pw_file}: {exc}") from exc
+
+    try:
+        write_secret_text(pw_file, _TEST_MASTER_PASSWORD)
+    except OSError as exc:
+        raise RuntimeError(f"could not seed the test master password at {pw_file}: {exc}") from exc
+
+    if not _usable():
+        raise RuntimeError(
+            f"seeded the test master password at {pw_file}, but the backend's own reader rejects it. "
+            "Every test that builds a full app in this worker would fail with a misleading "
+            "'master password required' error."
+        )
 
 
 def _isolate_workspace() -> None:
@@ -109,14 +197,18 @@ def _isolate_workspace() -> None:
     # SandboxEngine / traffic / error logs. PYTEST_XDIST_WORKER is set per worker
     # (gw0, gw1, …) and absent in the controller / serial runs. A user-supplied
     # FLINTTRADE_WORKSPACE_DIR (no xdist) is still respected.
+    register = _scratch_workspace().register
+
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
     if worker:
-        base = Path(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
+        # register(): the directory this process created is this process's to
+        # remove at session end. An operator-supplied `existing` never is.
+        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
     elif existing:
         base = Path(existing)
     else:
-        base = Path(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
+        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
     base.mkdir(parents=True, exist_ok=True)
     os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
     # The operator's machine-local .env may pin DUCKDB_PATH at one real,

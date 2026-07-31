@@ -741,6 +741,29 @@ filter=
 if [ -x /usr/bin/grep ]; then filter=/usr/bin/grep
 elif [ -x /bin/grep ]; then filter=/bin/grep
 fi
+# Signal a whole process group, portably.
+#
+# A group-directed /bin/kill with a bare negative pgid as its first operand is
+# not dependable, and its exit status does not tell you whether it worked.
+# Measured, same orphan shape each time:
+#
+#   GitHub ubuntu-22.04, procps-ng 3.3.17 : rc=0, orphan killed
+#   GitHub ubuntu-24.04, procps-ng 4.0.4  : rc=0, orphan SURVIVED
+#   WSL2   Ubuntu 26.04, procps-ng 4.0.4  : rc=1, orphan killed
+#
+# Note the last two: same procps version, opposite outcomes, and the run that
+# delivered the signal is the one that reported failure. So this is not a clean
+# "procps 4.x parses it as an option" story - whatever the trigger is, it varies
+# by environment and the return code cannot be used to detect it. That is the
+# whole argument for not relying on the form at all.
+#
+# The POSIX shell builtin and the "--" form both returned 0 and both delivered on
+# every host tested. Both are issued: a group signal is idempotent, so the cost is
+# nil, and no single form has been shown to be reliable everywhere.
+signal_group() {
+  kill -"$1" "-$2" 2>/dev/null || :
+  /bin/kill -s "$1" -- "-$2" 2>/dev/null || :
+}
 snapshot_tagged_descendants() {
   [ -n "$enumerator" ] && [ -n "$filter" ] || return 1
   tagged_snapshot=$("$enumerator" ${enumerationFlags} -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null) || return 1
@@ -771,7 +794,7 @@ trap on_term TERM
 (
   trap '' TERM HUP INT
   if IFS= read -r _ <&4; then exit 0; fi
-  /bin/kill -TERM -$$ 2>/dev/null || :
+  signal_group TERM "$$"
   watchdog_attempts=0
   watchdog_empty_scans=0
   while [ "$watchdog_attempts" -lt 150 ]; do
@@ -795,7 +818,7 @@ FLINT_WATCHDOG_TAGGED
     fi
     /bin/sleep 0.02
   done
-  /bin/kill -KILL -$$ 2>/dev/null || :
+  signal_group KILL "$$"
 ) &
 watchdog=$!
 if ! IFS= read -r start; then
@@ -922,7 +945,14 @@ FLINT_SNAPSHOT_MARKED
     printf '%s\n' containment-failed >&3
     while :; do /bin/sleep 3600; done
   fi
-  if [ -n "$external" ]; then /bin/kill -TERM -$$ 2>/dev/null || :; fi
+  if [ -n "$external" ]; then
+    signal_group TERM "$$"
+    # Belt and braces: the enumeration already names every in-group member, and a
+    # per-pid signal cannot be lost to a group-argument parsing quirk.
+    for external_member in $external; do
+      /bin/kill -TERM "$external_member" 2>/dev/null || :
+    done
+  fi
   for escaped_member in $escaped; do
     /bin/kill -KILL "$escaped_member" 2>/dev/null || :
   done

@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from flinttrade_core.models import (
@@ -306,7 +306,7 @@ class BasketOrderExecutor:
         Returns:
             :class:`BasketResult` describing the outcome of the basket.
         """
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         try:
             _validate_legs(legs)

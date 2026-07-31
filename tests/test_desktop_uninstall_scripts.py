@@ -274,6 +274,7 @@ def test_unix_uninstaller_is_valid_bash() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_ordinary_uninstall_removes_shell_and_preserves_every_data_surface(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, os_name="Linux")
@@ -288,6 +289,7 @@ def test_linux_ordinary_uninstall_removes_shell_and_preserves_every_data_surface
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_extracted_shell_uninstall_requires_and_uses_its_exact_receipt(tmp_path: Path) -> None:
     target = tmp_path / ".local" / "opt" / "flinttrade"
     executable = target / "squashfs-root" / "AppRun"
@@ -334,6 +336,7 @@ def test_linux_unreceipted_same_name_collision_is_preserved_and_fails(tmp_path: 
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_receipt_does_not_authorise_an_additional_same_name_shell(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     collision = tmp_path / ".local" / "opt" / "flinttrade" / "unrelated.txt"
@@ -351,6 +354,7 @@ def test_linux_receipt_does_not_authorise_an_additional_same_name_shell(tmp_path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_tampered_wrapper_is_not_deleted_with_the_receipted_shell(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     paths["wrapper"].write_text("#!/bin/sh\nexec unrelated\n", encoding="utf-8")
@@ -366,6 +370,7 @@ def test_linux_tampered_wrapper_is_not_deleted_with_the_receipted_shell(tmp_path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_non_private_shell_receipt_is_preserved_and_fails_closed(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     paths["receipt"].chmod(0o644)
@@ -379,6 +384,7 @@ def test_non_private_shell_receipt_is_preserved_and_fails_closed(tmp_path: Path)
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_malformed_shell_receipt_field_is_preserved_and_fails_closed(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     receipt_text = paths["receipt"].read_text(encoding="utf-8")
@@ -393,6 +399,7 @@ def test_malformed_shell_receipt_field_is_preserved_and_fails_closed(tmp_path: P
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_shell_target_remove_failure_retains_receipt_for_recovery(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     bin_dir = tmp_path / "bin"
@@ -415,6 +422,7 @@ def test_shell_target_remove_failure_retains_receipt_for_recovery(tmp_path: Path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_missing_linux_integration_parent_is_reported_without_removing_shell(tmp_path: Path) -> None:
     target = tmp_path / ".local" / "opt" / "flinttrade"
     executable = target / "squashfs-root" / "AppRun"
@@ -476,6 +484,7 @@ def test_direct_appimage_process_requires_exact_appimage_environment_identity(tm
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_confirmed_purge_removes_workspace_profile_source_tools_and_legacy_storage(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, "--purge", "--yes", os_name="Linux")
@@ -496,6 +505,7 @@ def test_linux_confirmed_purge_accepts_a_genuinely_empty_home_on_bash_3(tmp_path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_shell_only_uninstall_does_not_claim_that_data_was_retained(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     _remove_linux_data_roots(tmp_path)
@@ -509,6 +519,7 @@ def test_linux_shell_only_uninstall_does_not_claim_that_data_was_retained(tmp_pa
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_shell_only_purge_does_not_claim_confirmation_for_absent_data(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     _remove_linux_data_roots(tmp_path)
@@ -537,6 +548,7 @@ def test_linux_data_only_purge_reports_cleanup_without_claiming_shell_removal(tm
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_linux_unconfirmed_noninteractive_purge_preserves_data(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(tmp_path, "--purge", os_name="Linux")
@@ -550,6 +562,7 @@ def test_linux_unconfirmed_noninteractive_purge_preserves_data(tmp_path: Path) -
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_installer_yes_does_not_authorise_uninstall_purge(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(
@@ -564,6 +577,7 @@ def test_installer_yes_does_not_authorise_uninstall_purge(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_uninstall_specific_environment_can_confirm_purge(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     result = _run(
@@ -580,6 +594,7 @@ def test_uninstall_specific_environment_can_confirm_purge(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_purge_honours_override_and_also_removes_platform_default(tmp_path: Path) -> None:
     paths = _linux_footprint(tmp_path)
     override = tmp_path / "custom-workspace"
@@ -656,6 +671,7 @@ def test_purge_refuses_unproven_arbitrary_workspace_override(tmp_path: Path) -> 
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_MODES, reason=NO_POSIX_MODES_REASON)
 def test_purge_refuses_proven_custom_workspace_below_symlinked_parent(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     workspace = outside / "workspace"

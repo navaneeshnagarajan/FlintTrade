@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
 from flinttrade_ai.session_store import AiSessionStore
@@ -47,6 +50,48 @@ def test_replaying_the_full_history_is_idempotent(store: AiSessionStore) -> None
     session = store.get_session("s1")
     assert session is not None
     assert len(session["messages"]) == 2
+
+
+def test_legacy_content_ids_are_rekeyed_on_open(tmp_path: Path) -> None:
+    """A store written before the SHA-256 switch stays replay-idempotent.
+
+    The migration recomputes every ``h-`` id from the columns that produced
+    it, so it does not care what the old digest was — the stand-in ids below
+    play the part of the pre-SHA-256 ones.
+    """
+    db = tmp_path / "ai_sessions.sqlite"
+    store = AiSessionStore(db)
+    _exchange(store)
+    store.close()
+
+    conn = sqlite3.connect(db)
+    for index, (rowid,) in enumerate(conn.execute("SELECT rowid FROM messages").fetchall()):
+        conn.execute(
+            "UPDATE messages SET id = ? WHERE rowid = ?", (f"h-legacy{index:014d}", rowid)
+        )
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
+
+    upgraded = AiSessionStore(db)
+    try:
+        # Replaying the same history must still insert nothing — no duplicates.
+        assert _exchange(upgraded) == 0
+        session = upgraded.get_session("s1")
+        assert session is not None
+        assert len(session["messages"]) == 2
+        assert all(not m["id"].startswith("h-legacy") for m in session["messages"])
+        # Search still resolves through the FTS mirror after the re-key.
+        assert upgraded.search("banknifty")[0]["session_id"] == "s1"
+    finally:
+        upgraded.close()
+
+    # Re-opening does not re-run the migration.
+    reopened = AiSessionStore(db)
+    try:
+        assert reopened.get_session("s1") is not None
+    finally:
+        reopened.close()
 
 
 def test_fts_search_hits_message_content(store: AiSessionStore) -> None:

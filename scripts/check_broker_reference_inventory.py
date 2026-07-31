@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-
 DEFAULT_REFERENCE_ROOT = Path(".local/reference-research/2026-07-06")
 DEFAULT_API_REFERENCE_ROOT = Path(".local/reference-research/2026-07-03")
 MCP_SOURCES = {

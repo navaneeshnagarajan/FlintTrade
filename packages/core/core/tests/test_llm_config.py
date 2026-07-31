@@ -40,16 +40,29 @@ if fault.startswith("workspace-update-"):
 
     Workspace.update = crash_after_workspace_update
 elif fault == "secret-installed":
-    original_replace = os.replace
+    # A Windows host already runs the write-through install path for real, so it
+    # only needs the crash hook wrapped around the genuine implementation. The
+    # POSIX shims below must NOT be installed there: os.dup returns a handle
+    # without WRITE_DAC, and the owner-validated lock's real DACL install then
+    # fails with WinError 5 long before the fault boundary is reached.
+    if os.name == "nt":
+        original_replace = secure_file._windows_replace_write_through
+    else:
+        original_replace = os.replace
 
-    def portable_windows_harden(path, user=None):
-        del user
-        os.chmod(path, 0o600)
+        def portable_windows_harden(path, user=None):
+            del user
+            os.chmod(path, 0o600)
 
-    def portable_windows_reopen(descriptor, **_kwargs):
-        reopened = os.dup(descriptor)
-        os.close(descriptor)
-        return reopened
+        def portable_windows_reopen(descriptor, **_kwargs):
+            reopened = os.dup(descriptor)
+            os.close(descriptor)
+            return reopened
+
+        secure_file._is_windows = lambda: True
+        secure_file.harden = portable_windows_harden
+        secure_file._assert_current_user_owns = lambda *args: None
+        secure_file._reopen_windows_descriptor_for_security = portable_windows_reopen
 
     def crash_after_windows_secret_install(source, destination):
         result = original_replace(source, destination)
@@ -58,16 +71,16 @@ elif fault == "secret-installed":
             os._exit(91)
         return result
 
-    secure_file._is_windows = lambda: True
-    secure_file.harden = portable_windows_harden
-    secure_file._assert_current_user_owns = lambda *args: None
-    secure_file._reopen_windows_descriptor_for_security = portable_windows_reopen
     secure_file._windows_replace_write_through = crash_after_windows_secret_install
 elif fault == "committed-cleanup":
     original_unlink = Path.unlink
 
     def crash_before_backup_cleanup(self, *args, **kwargs):
-        if self.name.startswith(".llm_api_key") and "old" in self.name:
+        # ``durable_unlink`` renames to a ``.<name>.delete-pending`` tombstone
+        # before unlinking on Windows, so a predicate anchored to the start of
+        # the backup name never fires there. Matching the substring covers the
+        # tombstone as well, which is the descriptor the deletion truly unlinks.
+        if ".llm_api_key" in self.name and "old" in self.name:
             os._exit(91)
         return original_unlink(self, *args, **kwargs)
 
@@ -1070,6 +1083,43 @@ def test_startup_recovers_every_llm_config_transaction_fault_boundary(
     assert list((tmp_path / "secrets").glob(".llm_api_key*")) == []
 
 
+def _durable_deletion_targets(path: Path) -> set[Path]:
+    """Every path that a durable deletion of *path* actually unlinks.
+
+    :func:`flinttrade_core.secure_file.durable_unlink` unlinks the file itself on
+    POSIX, but on Windows it first renames it to a ``.delete-pending`` tombstone
+    and unlinks *that*. A deletion fault keyed only on the original name is
+    therefore never reached on Windows, so both names have to be faulted for the
+    injection to be host-independent.
+
+    Args:
+        path: The file whose durable deletion is being faulted.
+
+    Returns:
+        The set of paths a durable deletion of *path* may unlink on this host.
+    """
+    from flinttrade_core.secure_file import pending_unlink_path
+
+    return {path, pending_unlink_path(path)}
+
+
+def _durably_deleted_bytes_path(path: Path) -> Path:
+    """Where the bytes of *path* survive a failed durable deletion.
+
+    The Windows tombstone rename commits before the unlink, so a cleanup failure
+    leaves the retained bytes under the tombstone name rather than the original.
+
+    Args:
+        path: The file whose durable deletion failed.
+
+    Returns:
+        The path holding the retained bytes on this host.
+    """
+    from flinttrade_core.secure_file import pending_unlink_path
+
+    return pending_unlink_path(path) if os.name == "nt" else path
+
+
 def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     monkeypatch,
     tmp_path: Path,
@@ -1081,9 +1131,10 @@ def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     llm_config.persist_llm_config({"provider": "openai", "api_key": "old-secret"})
     secret_path = tmp_path / "secrets" / "llm_api_key"
     original_unlink = Path.unlink
+    faulted = _durable_deletion_targets(secret_path)
 
     def refuse_secret_deletion(self, *args, **kwargs):
-        if self == secret_path:
+        if self in faulted:
             raise PermissionError("simulated credential deletion failure")
         return original_unlink(self, *args, **kwargs)
 
@@ -1092,7 +1143,8 @@ def test_api_key_deletion_failure_is_reported_and_recovered_on_next_startup(
     with pytest.raises(RuntimeError, match="credential cleanup is pending"):
         llm_config.persist_llm_config({"api_key": ""})
 
-    assert secret_path.read_text(encoding="utf-8") == "old-secret"
+    retained = _durably_deleted_bytes_path(secret_path)
+    assert retained.read_text(encoding="utf-8") == "old-secret"
     assert Workspace().get("llm.api_key_ref") == ""
 
     monkeypatch.setattr(Path, "unlink", original_unlink)
@@ -1115,7 +1167,10 @@ def test_old_api_key_backup_deletion_failure_is_reported_and_recovered(
     original_unlink = Path.unlink
 
     def refuse_old_backup_deletion(self, *args, **kwargs):
-        if self.name.startswith(".llm_api_key") and "old" in self.name:
+        # A substring match rather than a prefix match: the Windows tombstone
+        # (``.<backup name>.delete-pending``) is the descriptor the durable
+        # deletion truly unlinks, and its name gains a leading dot.
+        if ".llm_api_key" in self.name and "old" in self.name:
             raise PermissionError("simulated backup deletion failure")
         return original_unlink(self, *args, **kwargs)
 
@@ -1531,6 +1586,90 @@ def test_llm_transition_snapshot_is_unredacted_and_rejects_a_bypass_write(
     assert effective["api_key"] == "snapshot-secret"
 
 
+class _DrainedChild:
+    """A child process whose pipes are drained on their own threads.
+
+    An undrained ``stdout``/``stderr`` pipe deadlocks a child that fills the
+    kernel buffer, and a child killed by that deadlock is indistinguishable
+    from one blocked on the lock the test is asserting about. Reading both
+    streams from the moment of spawn removes that failure mode, keeps the
+    child's output available for a fail-fast assertion message, and guarantees
+    the process is reaped even when an assertion fires mid-test — a leaked
+    child still holding a workspace lock blocks every later test in the run.
+    """
+
+    def __init__(self, process: subprocess.Popen[str]) -> None:
+        self._process = process
+        self._captured: dict[str, str] = {}
+        self._readers = [
+            threading.Thread(target=self._drain, args=(name,), name=f"child-{name}", daemon=True)
+            for name in ("stdout", "stderr")
+        ]
+        for reader in self._readers:
+            reader.start()
+
+    def _drain(self, name: str) -> None:
+        stream = getattr(self._process, name)
+        if stream is None:
+            return
+        with stream:
+            self._captured[name] = stream.read()
+
+    @property
+    def process(self) -> subprocess.Popen[str]:
+        """Return the underlying process handle."""
+        return self._process
+
+    def output(self) -> str:
+        """Return everything the child has written so far, for diagnostics."""
+        return f"rc={self._process.poll()} stdout={self._captured.get('stdout', '')!r} stderr={self._captured.get('stderr', '')!r}"
+
+    def wait_for_marker(self, marker: Path, timeout: float) -> None:
+        """Wait until the child writes ``marker``, failing fast if it exits first.
+
+        Args:
+            marker: The file the child writes once it is ready.
+            timeout: Seconds to allow for a cold interpreter start.
+        """
+        deadline = time.monotonic() + timeout
+        while not marker.exists():
+            if self._process.poll() is not None:
+                raise AssertionError(f"the writer exited before signalling readiness: {self.output()}")
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"the writer never signalled readiness: {self.output()}")
+            time.sleep(0.01)
+
+    def wait(self, timeout: float) -> int:
+        """Wait for exit and return the code, raising on a hung child."""
+        try:
+            returncode = self._process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError(f"the writer never exited: {self.output()}") from exc
+        for reader in self._readers:
+            reader.join(timeout=timeout)
+        return returncode
+
+    def close(self) -> None:
+        """Kill and reap the child, whatever state the test left it in."""
+        if self._process.poll() is None:
+            self._process.kill()
+        self._process.wait()
+        for reader in self._readers:
+            reader.join(timeout=5.0)
+
+
+# A cold child interpreter importing ``flinttrade_core`` costs ~0.6s on an idle
+# host and far more on a loaded one. That start-up cost is not the behaviour
+# under test, so these are fail-fast diagnostics bounds rather than the
+# assertion: the guard's blocking is proved by the negative check below, which
+# no amount of slowness can turn green. Both together stay inside CI's
+# ``--timeout=60`` so a genuinely stuck child reports its own output rather
+# than dying as an opaque pytest timeout. Once the guard is released the child
+# has only its own 10s transition-lock budget left to spend.
+_WRITER_READY_TIMEOUT = 30.0
+_WRITER_EXIT_TIMEOUT = 20.0
+
+
 def test_llm_transition_guard_blocks_a_separate_process_writer(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1545,32 +1684,39 @@ def test_llm_transition_guard_blocks_a_separate_process_writer(
     completed_path = tmp_path / "writer-completed"
     environment = os.environ.copy()
 
-    with llm_config_transition_guard(workspace):
-        writer = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                _WRITE_LLM_CONFIG_AFTER_TRANSITION_LOCK,
-                str(tmp_path),
-                str(started_path),
-                str(completed_path),
-            ],
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        deadline = time.monotonic() + 2.0
-        while not started_path.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert started_path.exists()
-        time.sleep(0.1)
-        assert completed_path.exists() is False
-        assert writer.poll() is None
+    writer: _DrainedChild | None = None
+    try:
+        with llm_config_transition_guard(workspace):
+            # Spawned under the held guard: a writer started beforehand could
+            # win the transition lock and the test would prove nothing.
+            writer = _DrainedChild(
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        _WRITE_LLM_CONFIG_AFTER_TRANSITION_LOCK,
+                        str(tmp_path),
+                        str(started_path),
+                        str(completed_path),
+                    ],
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+            writer.wait_for_marker(started_path, _WRITER_READY_TIMEOUT)
+            # A negative assertion: while the guard is held the writer can never
+            # complete, so a slow host can only make this wait longer, never wrong.
+            time.sleep(0.1)
+            assert completed_path.exists() is False, writer.output()
+            assert writer.process.poll() is None, writer.output()
 
-    stdout, stderr = writer.communicate(timeout=5.0)
-    assert writer.returncode == 0, stdout + stderr
-    assert completed_path.exists()
+        assert writer.wait(_WRITER_EXIT_TIMEOUT) == 0, writer.output()
+        assert completed_path.exists()
+    finally:
+        if writer is not None:
+            writer.close()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX hard-link lock-path assertion")

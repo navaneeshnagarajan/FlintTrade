@@ -127,16 +127,16 @@ def _find_25delta_strike(
         target_k = spot * 1.10
         return min(strikes, key=lambda s: abs(s.strike_price - target_k))
 
-    else:  # PE
-        # For puts, find strike where |pe_delta| ≈ 0.25 (OTM puts)
-        candidates = [s for s in strikes if s.strike_price < spot and s.pe_delta < 0]
-        if not candidates:
-            candidates = [s for s in strikes if s.pe_delta < 0]
-        if candidates:
-            return min(candidates, key=lambda s: abs(abs(s.pe_delta) - target_delta))
-        # Fallback: estimate ~10% OTM put
-        target_k = spot * 0.90
-        return min(strikes, key=lambda s: abs(s.strike_price - target_k))
+    # PE
+    # For puts, find strike where |pe_delta| ≈ 0.25 (OTM puts)
+    candidates = [s for s in strikes if s.strike_price < spot and s.pe_delta < 0]
+    if not candidates:
+        candidates = [s for s in strikes if s.pe_delta < 0]
+    if candidates:
+        return min(candidates, key=lambda s: abs(abs(s.pe_delta) - target_delta))
+    # Fallback: estimate ~10% OTM put
+    target_k = spot * 0.90
+    return min(strikes, key=lambda s: abs(s.strike_price - target_k))
 
 
 def calculate_iv_smile(

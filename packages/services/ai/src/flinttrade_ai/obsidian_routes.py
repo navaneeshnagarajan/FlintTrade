@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -101,7 +102,19 @@ def obsidian_config() -> tuple[Any, int]:
     if not isinstance(vault_path, str):
         return jsonify({"status": "error", "message": "vault_path must be a string"}), 400
     vault_path = vault_path.strip()
-    if vault_path and not os.path.isdir(vault_path):
+    # Validate the path the vault will actually open: ObsidianVault expands
+    # ``~`` on construction, so checking the unexpanded string refused
+    # "~/notes" as non-existent even though the vault opens it happily. This
+    # is the operator naming their own vault root — the value is the root, not
+    # a name resolved inside one — so the check is an existence probe, and
+    # confinement below that root is ObsidianVault._resolve's job.
+    # os.path.expanduser, not Path.expanduser: the pathlib form raises
+    # RuntimeError whenever the leading ``~`` cannot be resolved - an unknown
+    # user on POSIX, or any ``~`` at all when the process has no HOME (a systemd
+    # unit without Environment=HOME=, a container run with --env-clear). Both are
+    # operator-input cases that must answer 400, and neither can be allowed to
+    # escape as a 500.
+    if vault_path and not Path(os.path.expanduser(vault_path)).is_dir():
         return (
             jsonify({"status": "error", "message": "vault_path is not an existing directory"}),
             400,

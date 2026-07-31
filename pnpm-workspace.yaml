@@ -4,6 +4,9 @@ packages:
   - packages/apps/site
   - packages/apps/desktop
 
+# This file is the ONLY place pnpm settings live. From pnpm 10 onwards .npmrc is
+# read for auth and registry keys alone, so the six settings below were moved
+# here out of a .npmrc that was deleted in the 9.15.0 -> 10.34.5 migration.
 strictPeerDependencies: true
 autoInstallPeers: false
 saveExact: true
@@ -11,10 +14,104 @@ auditLevel: high
 verifyStoreIntegrity: true
 fund: false
 
+# pnpm self-management, disabled deliberately.
+#
+# pnpm 10 defaults `managePackageManagerVersions` to true. Under pnpm 9 that
+# behaviour was masked by an internal `!isExecutedByCorepack()` guard, and this
+# repo no longer routes pnpm through Corepack, so the guard no longer applies:
+# left at its default, a pinned pnpm would silently re-exec whichever version it
+# decided the checkout wanted. The bootstrap scripts and installers already
+# resolve the pinned release themselves and verify `pnpm --version` against the
+# pin, so pnpm managing itself on top of that can only fight them.
+#
+# packageManagerStrictVersion turns a version mismatch against the
+# "packageManager" field in package.json into an error rather than a warning,
+# which is what makes the integrity pin load-bearing instead of advisory.
+managePackageManagerVersions: false
+packageManagerStrictVersion: true
+
+# Dependency build scripts.
+#
+# pnpm 9 ran every dependency lifecycle script. pnpm 10 does not, unless the
+# package is allowlisted here, and pnpm 11 turns an un-allowlisted build script
+# into a hard ERR_PNPM_IGNORED_BUILDS failure.
+#
+# NOTE: this block needs pnpm >= 10.26.0. Earlier 10.x releases ignore it
+# SILENTLY - the install still exits 0 while building nothing - so any pnpm 10
+# pin below 10.26.0 would look green while enforcing nothing. That is the hard
+# floor for the "packageManager" pin; do not lower it.
+allowBuilds:
+  # esbuild ships its platform binary as an optional dependency; the postinstall
+  # re-validates it. Required by the terminal's vite build.
+  esbuild: true
+  # Copies vendor/7z-<arch>.{exe,dll} to vendor/7z.{exe,dll} for Squirrel.Windows.
+  # The tarball ships only the per-arch names, so this script is the only thing
+  # that produces the ones the packager opens. Required by desktop-package.
+  electron-winstaller: true
+  # A donation notice that already swallows its own failure. Denied explicitly
+  # so pnpm 11 does not fail the install over it.
+  es5-ext: false
+
+peerDependencyRules:
+  allowedVersions:
+    '@glideapps/glide-data-grid>marked': '18'
+    '@napi-rs/wasm-runtime>@emnapi/core': '1'
+    '@napi-rs/wasm-runtime>@emnapi/runtime': '1'
+
+# These fifteen entries are now the only copy: the duplicate "pnpm.overrides"
+# block in package.json was removed in the pnpm 10 migration, so this block is
+# what pnpm actually resolves against. Nothing cross-checks it any more - the
+# lockfile's own `overrides:` header is the audit trail, and an entry deleted
+# here disappears from that header on the next install. An earlier revision of
+# this file had drifted while package.json was still authoritative - it pinned
+# hono 4.12.25, js-yaml 4.2.0 and postcss 8.5.15, and omitted eight entries
+# including every brace-expansion selector. Re-check the lockfile header after
+# touching anything below.
+#
+# brace-expansion overrides (GHSA-mh99-v99m-4gvg / CVE-2026-14257, advisory
+# range <=5.0.7): the selectors below cover EVERY vulnerable range, not just the
+# ones the tree happens to resolve today, so a future transitive copy cannot
+# silently reintroduce the flaw behind the audit allowlist entry.
+# Patched releases per major line: 1.1.18 (dist-tag maintenance-v1), 2.1.4
+# (maintenance-v2), 3.0.6 (maintenance-v3), 5.0.9 (latest).
+#
+# These are the SECOND round of fixes, published 2026-07-30. Do not pin back to
+# the first round (2.1.3 / 3.0.5 / 5.0.8): that round bounded only the `combine`
+# accumulator and left two paths unbounded - `expandSequence`, and the loop that
+# concatenates each comma part's expansion into `values`. Measured on a 512 MB
+# heap, the input '{' + '0'.repeat(4000000) + '1..99999}' still runs for over
+# 120 s on 5.0.8 and 2.1.3 but returns in under 100 ms on 5.0.9 and 2.1.4, for
+# byte-identical output.
+#
+# 1.x is pulled onto 2.1.4 rather than onto its own 1.1.18 backport: 2.x keeps
+# the same callable CommonJS default export that minimatch 3.x/5.x/9.x require,
+# and collapsing both lines onto one release keeps a single copy in the store.
+# The 4.x line has no patched release of its own - npm publishes only 4.0.0 and
+# 4.0.1, both inside the advisory range, and there is no maintenance-v4 dist-tag.
+# It is therefore mapped to 3.0.6, the newest patched release that keeps 4.x's
+# API: 3.x and 4.x are both ESM-only with the same `export default expandTop`
+# shape (3.x additionally accepts an options argument), and the only
+# 3.0.4 -> 4.0.1 change is an internal split/join -> regex refactor.
+#
+# Nothing on 3.x or newer can serve minimatch 3.x/5.x/9.x, which `require()` the
+# package and call the result directly: 3.x and 4.x are ESM-only, and 5.x
+# replaced the callable default export with a named `expand`. That is why those
+# paths stay on the 2.x line, and why the pnpm-audit allowlist entry for this
+# advisory has to exist at all.
+# Verify a target exists before pinning to it: npm view brace-expansion@<version> version
 overrides:
   '@babel/core': 7.29.6
+  '@hono/node-server': 2.0.10
+  'body-parser@>=2.0.0 <2.3.0': 2.3.0
+  'brace-expansion@<2.0.0': 2.1.4
+  'brace-expansion@>=2.0.0 <2.1.4': 2.1.4
+  'brace-expansion@>=3.0.0 <3.0.6': 3.0.6
+  'brace-expansion@>=4.0.0 <5.0.0': 3.0.6
+  'brace-expansion@>=5.0.0 <5.0.9': 5.0.9
   esbuild: 0.28.1
-  hono: 4.12.25
-  js-yaml: 4.2.0
-  postcss: 8.5.15
+  fast-uri: 4.1.1
+  hono: 4.12.27
+  js-yaml: 4.3.0
+  postcss: 8.5.23
+  sharp: 0.35.3
   undici: 7.28.0

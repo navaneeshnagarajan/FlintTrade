@@ -111,7 +111,7 @@ class TranscribeUnavailableError(VoiceOrderError):
 class PendingApprovalError(VoiceOrderError):
     """Raised when a high-risk action requires confirmation before execution."""
 
-    def __init__(self, intent: "VoiceOrderIntent") -> None:
+    def __init__(self, intent: VoiceOrderIntent) -> None:
         self.intent = intent
         super().__init__(
             f"High-risk action '{intent.action}' requires approval via /admin/action-center"
@@ -466,16 +466,15 @@ class VoiceOrderBridge:
         try:
             if intent.action == "STATUS":
                 return await self._handle_status(intent)
-            elif intent.action in ("BUY", "SELL"):
+            if intent.action in ("BUY", "SELL"):
                 return await self._handle_order(intent)
-            elif intent.action == "CANCEL":
+            if intent.action == "CANCEL":
                 return await self._handle_cancel(intent)
-            elif intent.action == "EXIT":
+            if intent.action == "EXIT":
                 return await self._handle_exit(intent)
-            elif intent.action == "MODIFY":
+            if intent.action == "MODIFY":
                 return await self._handle_modify(intent)
-            else:
-                return {"status": "error", "message": f"Unsupported action: {intent.action}"}
+            return {"status": "error", "message": f"Unsupported action: {intent.action}"}
         except (PendingApprovalError, LowConfidenceError):
             raise
         except Exception as exc:
@@ -604,8 +603,8 @@ class VoiceOrderBridge:
                 "Run: pip install openai-whisper"
             ) from exc
 
-        import tempfile
         import os
+        import tempfile
 
         # Whisper requires a file path — write bytes to a temp file
         try:

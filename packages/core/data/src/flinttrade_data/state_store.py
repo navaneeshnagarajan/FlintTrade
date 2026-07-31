@@ -286,7 +286,7 @@ class StateStore:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "StateStore":
+    def __enter__(self) -> StateStore:
         return self
 
     def __exit__(self, *exc: Any) -> None:

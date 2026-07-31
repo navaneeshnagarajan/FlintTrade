@@ -16,10 +16,9 @@ deterministically under test without a scheduler, an LLM, or live data.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Callable
-
 import logging
+from datetime import UTC, datetime
+from typing import Any, Callable
 
 logger = logging.getLogger("flinttrade.ai.overnight_optimiser")
 
@@ -97,7 +96,7 @@ class OvernightOptimiser:
         self._strategy_provider = strategy_provider
         self._refiner = refiner
         self._report_sink = report_sink
-        self._clock = clock or (lambda: datetime.now(tz=timezone.utc))
+        self._clock = clock or (lambda: datetime.now(tz=UTC))
 
     def run(self) -> dict[str, Any]:
         """Optimise every registered strategy; return (and optionally persist) the report.

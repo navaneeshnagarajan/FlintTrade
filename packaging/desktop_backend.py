@@ -21,7 +21,8 @@ promotes the shell's exact boot-bound recovery record to the backend leader
 PID, and announces that PID on stdout. On POSIX an external guardian remains
 alive until same-group and tracked new-session descendants are gone. On Windows
 a non-breakaway Job Object kills its complete tree when the last application
-handle closes.
+handle closes, and the workspace lease is handed back only after the kernel
+reports that job holding no process but this one.
 
 The real serving logic lives in :mod:`flinttrade_core.desktop`.
 """
@@ -123,6 +124,20 @@ POSIX_CLEANUP_PROOF_RETRY_SECONDS = 5.0
 POSIX_PROCESS_QUERY_TIMEOUT_SECONDS = 1.0
 LINUX_PROC_ROOT = Path("/proc")
 
+#: How long managed finalisation waits out a *held* recovery-record transition
+#: lock before reporting contention. The holders are short single transitions.
+CLEANUP_GUARD_CONTENTION_SECONDS = 2.0
+
+#: Exit status for a contended managed finalisation (``EX_TEMPFAIL``). Nothing
+#: was removed and nothing was disproved, so the invocation may simply be
+#: repeated. Any non-zero status still reads as failure to existing callers.
+CLEANUP_CONTENDED_EXIT_CODE = 75
+
+#: Bounded wait for the Windows containment job to hold no process but this
+#: one, and its poll cadence. Only then may the workspace lease be handed back.
+WINDOWS_TREE_DRAIN_SECONDS = 5.0
+WINDOWS_TREE_DRAIN_POLL_SECONDS = 0.05
+
 _RECORD_TRANSITION_THREAD_LOCK = threading.Lock()
 
 _RECOVERY_PROCESS_DEAD = "dead"
@@ -152,6 +167,16 @@ class _RecoveryProcessIdentity(NamedTuple):
 
 class _StaleRecoveryRecordBlocked(OSError):
     """Signal an unresolved record without exposing process details to Electron."""
+
+
+class SourceCleanupContended(RuntimeError):
+    """Managed finalisation was denied by a *held* transition lock, not by absence.
+
+    Deliberately not an :class:`OSError`: the finalisation body converts every
+    ``OSError`` into a fail-closed ``False``, and this condition must stay
+    distinguishable from one. Nothing was removed and nothing was proved - the
+    same call is safe, and expected, to retry.
+    """
 
 
 def _valid_hex_identity(value: str, *, minimum: int, maximum: int) -> bool:
@@ -462,14 +487,44 @@ def _record_transition_guard(path: Path) -> Iterator[None]:
     )
     try:
         with _RECORD_TRANSITION_THREAD_LOCK, guard:
-            # OwnerSafeFileLock proves the descriptor and directory entry are
-            # the same regular single-link inode. This second descriptor-bound
-            # check also requires the exact POSIX mode / Windows DACL without
-            # ever chmoding a path supplied by another process.
-            _read_hardened_recovery_file(guard_path, max_bytes=1)
+            _reassert_held_transition_lock(guard_path)
             yield
     except UnsafeFileLockPathError as exc:
         raise OSError("recovery-record transition lock is unsafe") from exc
+
+
+def _reassert_held_transition_lock(guard_path: Path) -> None:
+    """Re-prove the owner policy of an already-held transition-lock inode.
+
+    ``OwnerSafeFileLock`` proves the descriptor and directory entry are the
+    same regular single-link inode. What still needs proving on top of that
+    differs by platform, and the difference is not cosmetic.
+
+    POSIX: the lock's own checks cover uid, regular-file and single-link, but
+    NOT the exact 0600 mode. A second descriptor-bound read supplies that,
+    without ever chmoding a path supplied by another process. ``flock`` is
+    advisory, so the lock the caller holds does not impede the read.
+
+    Windows: the lock ALREADY proves current-user ownership and the exact DACL,
+    on the locked descriptor itself - see ``_validate_windows_lock_descriptor``
+    in ``owner_file_lock.py``. So the read proves nothing new here, and worse,
+    it cannot succeed: the lock is ``msvcrt.locking`` over byte 0, and Windows
+    refuses a second descriptor's read of a byte-range-locked region with
+    ``PermissionError`` [Errno 13].
+
+    Reading unconditionally therefore failed EVERY recovery-record transition
+    on Windows - the guard deadlocked against its own lock - which is why
+    ``create_pending_application_pid_record``, ``publish_cleanup_complete_proof``
+    and ``finalise_source_cleanup`` all returned False there. Callers that must
+    prove the lock file pre-existed still read it *before* acquiring the lock,
+    where no byte range is held and the read succeeds on every platform.
+
+    Args:
+        guard_path: The transition-lock path whose lock the caller already holds.
+    """
+    if os.name == "nt":
+        return
+    _read_hardened_recovery_file(guard_path, max_bytes=1)
 
 
 def _read_hardened_recovery_file(path: Path, *, max_bytes: int) -> bytes:
@@ -726,7 +781,21 @@ def _capture_recovery_process_identity(
 
 
 def _recovery_process_group_liveness(pgid: int) -> str:
-    """Probe a POSIX containment group without delivering a signal."""
+    """Probe a containment group without delivering a signal.
+
+    Windows has no numeric containment group to probe: the desktop guardian
+    contains its tree in an anonymous kill-on-close Job Object, which cannot be
+    reopened by identifier and which cannot outlive its last member. Every PID
+    recorded for that job - the guardian and the promoted application, which are
+    the same process on Windows - has already been individually proved dead or
+    reused by the caller before this probe runs, so the job is provably gone.
+
+    Args:
+        pgid: The recorded containment-group identifier to probe.
+
+    Returns:
+        ``dead``, ``reused``, or ``alive``.
+    """
     if os.name == "nt":
         return _RECOVERY_PROCESS_DEAD
     try:
@@ -870,12 +939,19 @@ def recover_stale_desktop_record(
             for pid in process_pids:
                 states[pid] = inspect(pid, shell=False)
 
-            if record.spawn_contained and os.name != "nt":
+            if record.spawn_contained:
                 # Legacy packaged-shell v4 groups were led by the launcher; source
                 # guardian v4 groups are led by the promoted application.
                 # Proving both possible group identifiers dead preserves
                 # the union during migration. A reused leader proves its
                 # former numeric group generation is gone.
+                #
+                # The probe is consulted on every platform. Windows containment
+                # is an anonymous kill-on-close Job Object rather than a numeric
+                # group, so its probe reports "dead" (see
+                # _recovery_process_group_liveness) - but gating the loop on the
+                # platform instead of the probe silently dropped the containment
+                # question, so a future Windows probe could never be honoured.
                 containment_pids = {record.guardian_pid}
                 if record.application_pid is not None:
                     containment_pids.add(record.application_pid)
@@ -1320,6 +1396,82 @@ def _complete_guardian_cleanup(
     return True
 
 
+def _complete_windows_guardian_cleanup(
+    terminate_owned_tree: Callable[[], bool] | None,
+    cleanup_complete: Callable[[], None] | None,
+    *,
+    application_pid: int | None = None,
+    drain_timeout: float = WINDOWS_TREE_DRAIN_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Hand the workspace lease back only once the job holds no other process.
+
+    Windows has no external guardian: this process owns the lease *and* holds
+    the only handle to the kill-on-close job, so its own exit is what kills a
+    straggling descendant. Releasing the lease first therefore published a
+    window - short, but real - in which another backend could take the
+    workspace and start mutating the managed source tree while a
+    previous-generation descendant was still alive inside the job. POSIX has no
+    such window because its external guardian terminates the tree first.
+
+    The job's own process-id list is the kernel's answer to "is the tree gone",
+    so this waits for it and only then publishes proof and releases, matching
+    the POSIX ordering. If the tree will not drain, the lease is *kept* and the
+    job handle is closed instead: that terminates the straggler together with
+    this process, so the kernel releases the lease only as this process dies -
+    never while the descendant it was guarding against is still running.
+
+    Args:
+        terminate_owned_tree: The containment handle prepared at startup.
+        cleanup_complete: The lease release, or ``None`` when nothing is held.
+        application_pid: Sole expected job member; defaults to this process.
+        drain_timeout: Bound on the wait for the contained tree to drain.
+        clock: Monotonic clock source, injected by the tests.
+        sleep: Sleep function, injected by the tests.
+
+    Returns:
+        ``True`` only when the tree drained, proof was published and the lease
+        was released. ``False`` leaves the lease held until process exit.
+    """
+    pid = os.getpid() if application_pid is None else application_pid
+    drain = getattr(terminate_owned_tree, "drain_to_sole_member", None)
+    drained = False
+    if callable(drain):
+        drained = bool(drain(pid=pid, timeout=drain_timeout, clock=clock, sleep=sleep))
+    if drained:
+        return _complete_guardian_cleanup(pid, cleanup_complete)
+
+    # Publish the durable proof first, because the termination below never
+    # returns on Windows. It cannot be read as a premature claim: managed
+    # finalisation additionally requires this guardian PID to be dead, and this
+    # process only dies together with the job it is about to close - by which
+    # point the contained tree really is gone.
+    _publish_cleanup_complete_proof_with_retry(pid)
+    try:
+        print(
+            "[desktop-sidecar] contained process tree did not drain; terminating it "
+            "with the workspace lease still held",
+            file=sys.stderr,
+            flush=True,
+        )
+    except OSError:
+        pass
+    if terminate_owned_tree is not None:
+        try:
+            terminate_owned_tree()
+        except OSError as exc:
+            try:
+                print(
+                    f"[desktop-sidecar] owned process-tree termination failed: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except OSError:
+                pass
+    return False
+
+
 def _cleanup_pid_alive(pid: int) -> bool:
     """Return whether a recorded cleanup PID still identifies a live process."""
     if os.name == "nt":
@@ -1339,6 +1491,95 @@ def _durably_unlink_cleanup_file(path: Path) -> None:
     durable_unlink(path)
 
 
+def _is_held_lock_denial(path: Path, exc: OSError) -> bool:
+    """Return whether a denial is Windows refusing a *locked byte range*.
+
+    The exception alone cannot answer this. ``os.read`` goes through the CRT,
+    which collapses ``ERROR_LOCK_VIOLATION`` into a bare ``EACCES`` and leaves
+    ``winerror`` unset, so a lock conflict and a genuine permission denial
+    arrive looking identical (verified directly, not assumed).
+
+    The *file* can answer it. Windows evaluates the DACL when a handle is
+    opened, so an open that succeeds proves read access was granted; a read
+    denied on that very handle can then only be a byte-range lock conflict. An
+    open that fails, or a read that succeeds, leaves the original denial fatal.
+    This decides only which failure is reported - it never grants authority,
+    and the caller re-runs the full hardened read before proceeding.
+
+    Args:
+        path: The file whose denial is being classified.
+        exc: The denial raised by the hardened read.
+
+    Returns:
+        ``True`` only for a proven held byte-range lock.
+    """
+    if not isinstance(exc, PermissionError):
+        return False
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return False
+    try:
+        os.read(descriptor, 1)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+    return False
+
+
+def _probe_cleanup_guard_inode(
+    guard_path: Path,
+    *,
+    timeout: float = CLEANUP_GUARD_CONTENTION_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Prove the guardian created the transition-lock inode before its record.
+
+    This proof has to be taken *outside* the transition lock and cannot be
+    moved under it: acquiring that lock creates the inode, so a check taken
+    while holding it could never tell a guardian-published guard apart from one
+    this very call had just manufactured. Reading first is the ordering proof.
+
+    Windows adds a wrinkle the POSIX path does not have. The transition lock is
+    a ``msvcrt`` byte-range lock over byte 0, and Windows refuses any other
+    descriptor's read of a locked range with ``PermissionError`` [Errno 13]. A
+    concurrent transition therefore denies this read even though the inode
+    plainly exists. Reporting that as a plain failure made it indistinguishable
+    from "the guardian never created the guard" - a permanently fail-closed
+    state - when it is in fact transient. A denial proved to be a held lock
+    (see :func:`_is_held_lock_denial`) is waited out briefly and then reported
+    as :class:`SourceCleanupContended`; genuine absence and every other
+    unsafety keep failing closed exactly as before.
+
+    Args:
+        guard_path: The transition-lock path the guardian must have created.
+        timeout: How long a held lock is tolerated before reporting contention.
+        clock: Monotonic clock source, injected by the tests.
+        sleep: Sleep function, injected by the tests.
+
+    Raises:
+        SourceCleanupContended: If the guard inode exists but stays locked.
+        OSError: If the guard inode is absent, unsafe or otherwise unreadable.
+    """
+    deadline = clock() + max(0.0, float(timeout))
+    while True:
+        try:
+            _read_owner_cleanup_file(guard_path, max_bytes=1)
+            return
+        except PermissionError as exc:
+            if not _is_held_lock_denial(guard_path, exc):
+                raise
+            if clock() >= deadline:
+                raise SourceCleanupContended(
+                    "recovery-record transition lock is held; managed cleanup is retryable"
+                ) from None
+        sleep(RECORD_PUBLISH_POLL_SECONDS)
+
+
 def finalise_source_cleanup(
     expected_guardian_pid: int,
     expected_application_pid: int | None,
@@ -1346,7 +1587,23 @@ def finalise_source_cleanup(
     environ: dict[str, str] | None = None,
     pid_alive: Callable[[int], bool] = _cleanup_pid_alive,
 ) -> bool:
-    """Remove only one exact, dead, proof-bound source recovery record."""
+    """Remove only one exact, dead, proof-bound source recovery record.
+
+    Args:
+        expected_guardian_pid: The guardian PID the record must name.
+        expected_application_pid: The promoted application PID, or ``None`` for
+            a still-pending record.
+        environ: Environment to read the launch identity from.
+        pid_alive: Liveness probe for the recorded PIDs.
+
+    Returns:
+        ``True`` only when this exact record was proved dead and removed.
+        ``False`` for every unproved shape, including a missing guard inode.
+
+    Raises:
+        SourceCleanupContended: If the guard inode exists but its transition
+            lock is held. Nothing was removed; the call is safe to retry.
+    """
     env = os.environ if environ is None else environ
     raw_path = env.get(SIDECAR_RECORD_PATH_ENV) or ""
     boot_id = env.get(BOOT_ID_ENV) or ""
@@ -1387,12 +1644,14 @@ def finalise_source_cleanup(
 
     try:
         # The guardian created this lock before publishing its record. Refuse
-        # to manufacture authority around a foreign standalone record.
-        _read_owner_cleanup_file(guard_path, max_bytes=1)
+        # to manufacture authority around a foreign standalone record. A held
+        # lock is reported as retryable contention rather than as absent proof
+        # - see ``_probe_cleanup_guard_inode``.
+        _probe_cleanup_guard_inode(guard_path)
         if any(pid_alive(pid) for pid in recorded_pids):
             return False
         with _record_transition_guard(record_path):
-            _read_owner_cleanup_file(guard_path, max_bytes=1)
+            _reassert_held_transition_lock(guard_path)
             try:
                 record_payload = _read_owner_cleanup_file(record_path, max_bytes=4096)
             except FileNotFoundError:
@@ -1419,7 +1678,7 @@ def finalise_source_cleanup(
                     return False
                 if any(pid_alive(pid) for pid in recorded_pids):
                     return False
-                _read_owner_cleanup_file(guard_path, max_bytes=1)
+                _reassert_held_transition_lock(guard_path)
                 try:
                     record_path.lstat()
                 except FileNotFoundError:
@@ -3159,6 +3418,11 @@ class _WindowsJobApi:
 
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x0000_2000
     JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+    JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
+
+    #: Upper bound on the process ids one query may report. A tree larger than
+    #: this reads as "not drained", which is the safe direction.
+    PROCESS_ID_LIST_CAPACITY = 512
 
     def __init__(self) -> None:
         import ctypes  # noqa: PLC0415 - Windows-only
@@ -3167,6 +3431,14 @@ class _WindowsJobApi:
         self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
         self._kernel32.CreateJobObjectW.restype = ctypes.c_void_p
         self._kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        self._kernel32.QueryInformationJobObject.restype = ctypes.c_int
+        self._kernel32.QueryInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
         self._kernel32.SetInformationJobObject.restype = ctypes.c_int
         self._kernel32.SetInformationJobObject.argtypes = [
             ctypes.c_void_p,
@@ -3241,6 +3513,108 @@ class _WindowsJobApi:
     def close_handle(self, handle: int) -> bool:
         return bool(self._kernel32.CloseHandle(self._ctypes.c_void_p(handle)))
 
+    def job_process_ids(self, handle: int) -> tuple[int, ...] | None:
+        """Return every process id the kernel still associates with this job.
+
+        Returns:
+            The complete membership, or ``None`` when the kernel could not
+            report it completely. A partial answer is never returned, because
+            callers use membership to decide that nothing else is alive.
+        """
+        ctypes = self._ctypes
+        capacity = self.PROCESS_ID_LIST_CAPACITY
+
+        class ProcessIdList(ctypes.Structure):  # type: ignore[misc, name-defined]
+            _fields_ = [
+                ("number_of_assigned_processes", ctypes.c_uint32),
+                ("number_of_process_ids_in_list", ctypes.c_uint32),
+                ("process_id_list", ctypes.c_size_t * capacity),
+            ]
+
+        information = ProcessIdList()
+        returned_length = ctypes.c_uint32(0)
+        if not self._kernel32.QueryInformationJobObject(
+            ctypes.c_void_p(handle),
+            self.JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+            ctypes.byref(information),
+            ctypes.sizeof(information),
+            ctypes.byref(returned_length),
+        ):
+            return None
+        listed = int(information.number_of_process_ids_in_list)
+        assigned = int(information.number_of_assigned_processes)
+        if listed != assigned or not 0 <= listed <= capacity:
+            # ``ERROR_MORE_DATA`` truncates the list. Refuse the partial answer.
+            return None
+        return tuple(int(information.process_id_list[index]) for index in range(listed))
+
+
+class _WindowsOwnedProcessTree:
+    """Kill-on-close job handle that can also prove sole job membership.
+
+    Callable so every existing call site keeps treating containment as a plain
+    ``terminate()``; the drain probe is an addition, never a replacement.
+    """
+
+    def __init__(self, api: object, handle: int) -> None:
+        self._api = api
+        self._handle: int | None = handle
+        # The watchdog, the stdin listener and the exit path can all reach this
+        # object. Claiming the handle under a lock keeps a stale handle value -
+        # which the kernel may already have reused - from being closed twice.
+        self._guard = threading.Lock()
+
+    def __call__(self) -> bool:
+        """Close the handle, terminating this process together with its tree."""
+        with self._guard:
+            handle = self._handle
+            self._handle = None
+        if handle is None:
+            return False
+        close_handle = self._api.close_handle  # type: ignore[attr-defined]
+        return bool(close_handle(handle))
+
+    def drain_to_sole_member(
+        self,
+        *,
+        pid: int | None = None,
+        timeout: float = WINDOWS_TREE_DRAIN_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """Wait, bounded, until the kernel lists only this process in the job.
+
+        Membership is the kernel's own answer to "is the contained tree gone",
+        and it cannot grow behind this check: a process joins an anonymous job
+        only by being created by a process already inside it, and by the time
+        this runs the backend has returned and spawns nothing further.
+
+        Args:
+            pid: The process expected to be the sole member; defaults to this one.
+            timeout: How long a straggler is tolerated before reporting failure.
+            clock: Monotonic clock source, injected by the tests.
+            sleep: Sleep function, injected by the tests.
+
+        Returns:
+            ``True`` only on a complete kernel membership list equal to
+            ``{pid}``. Every unreadable, truncated or larger answer is
+            ``False``, so an unprovable tree never reads as a drained one.
+        """
+        with self._guard:
+            handle = self._handle
+        query = getattr(self._api, "job_process_ids", None)
+        if handle is None or not callable(query):
+            return False
+        sole_member = os.getpid() if pid is None else pid
+        deadline = clock() + max(0.0, float(timeout))
+        while True:
+            members = query(handle)
+            if members is not None and set(members) == {sole_member}:
+                return True
+            if clock() >= deadline:
+                return False
+            sleep(WINDOWS_TREE_DRAIN_POLL_SECONDS)
+
 
 def _prepare_windows_owned_process_tree(
     *,
@@ -3257,17 +3631,7 @@ def _prepare_windows_owned_process_tree(
     if not job_api.assign_current_process(handle):
         job_api.close_handle(handle)
         return None
-    active_handle: int | None = handle
-
-    def terminate() -> bool:
-        nonlocal active_handle
-        if active_handle is None:
-            return False
-        handle_to_close = active_handle
-        active_handle = None
-        return bool(job_api.close_handle(handle_to_close))
-
-    return terminate
+    return _WindowsOwnedProcessTree(job_api, handle)
 
 
 def _prepare_owned_process_tree(
@@ -3848,7 +4212,21 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
         if not _source_desktop_mode() or parsed_cleanup is None:
             raise SystemExit("managed source cleanup arguments are invalid")
         validate_source_parent_identity()
-        if not finalise_source_cleanup(*parsed_cleanup):
+        try:
+            finalised = finalise_source_cleanup(*parsed_cleanup)
+        except SourceCleanupContended:
+            # Distinct from validation failure on purpose: nothing is wrong with
+            # this record, another transition simply holds its lock right now.
+            # The dedicated exit code keeps the two distinguishable to a caller
+            # that reads only the status, not just to one reading the message.
+            print(
+                "managed source cleanup is contended by a concurrent recovery-record "
+                "transition; retry once it completes",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise SystemExit(CLEANUP_CONTENDED_EXIT_CODE) from None
+        if not finalised:
             raise SystemExit("managed source cleanup validation failed; recovery state retained")
         return 0
     if arguments == [PRINT_PARENT_IDENTITY_ARG]:
@@ -3921,11 +4299,14 @@ def run_desktop_backend(argv: list[str] | None = None) -> int:
 
     if source_mode and os.name == "nt":
         release = getattr(source_lease, "release", None)
-        if not _complete_guardian_cleanup(
-            os.getpid(),
+        if not _complete_windows_guardian_cleanup(
+            terminate_owned_tree,
             release if callable(release) else None,
         ):
-            raise SystemExit("source guardian cleanup proof failed; recovery state retained")
+            raise SystemExit(
+                "source guardian could not prove its contained tree drained; "
+                "the workspace lease is retained until this process exits"
+            )
     return 0
 
 

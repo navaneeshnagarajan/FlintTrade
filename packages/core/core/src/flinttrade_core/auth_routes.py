@@ -20,11 +20,11 @@ import os
 import secrets
 import time
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger("flinttrade.auth")
 
@@ -269,7 +269,7 @@ def _get_jwt_secret() -> str:
 
 def _next_8am_ist() -> datetime:
     """Calculate the next 8:00 AM IST from now."""
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     now_ist = now_utc + _IST_OFFSET
     today_8am_ist = now_ist.replace(hour=8, minute=0, second=0, microsecond=0)
     if now_ist >= today_8am_ist:
@@ -304,7 +304,7 @@ def _create_token(
     exp = _next_8am_ist()
     payload = {
         "sub": username,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "exp": exp,
         "type": "session",
         "jti": secrets.token_hex(16),
@@ -943,7 +943,7 @@ def _create_reset_token(username: str) -> str:
     """
     from datetime import timedelta as _td  # noqa: PLC0415
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": username,
         "iat": now,
@@ -1094,8 +1094,8 @@ def auth_reset_password() -> tuple[Any, int]:
 
 import random  # noqa: E402 (standard library, safe here)
 import smtplib  # noqa: E402
-from email.mime.text import MIMEText  # noqa: E402
 from email.mime.multipart import MIMEMultipart  # noqa: E402
+from email.mime.text import MIMEText  # noqa: E402
 
 # {email: [(otp_str, expiry_epoch), ...]}
 # Each email can have at most one live OTP; older entries are replaced.

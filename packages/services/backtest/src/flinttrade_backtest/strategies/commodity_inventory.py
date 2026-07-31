@@ -92,7 +92,7 @@ class CommodityInventory(BaseStrategy, _BacktestStrategyMixin):
                     self._sell()
                     self._bars_held = 0
                     return
-                elif self._position == -1 and bar.close >= self._stop:
+                if self._position == -1 and bar.close >= self._stop:
                     self._buy()
                     self._flat()
                     self._bars_held = 0

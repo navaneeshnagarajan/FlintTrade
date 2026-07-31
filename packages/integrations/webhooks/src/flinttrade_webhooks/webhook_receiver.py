@@ -40,7 +40,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from inspect import isawaitable
 from typing import Any
 
@@ -105,7 +105,7 @@ class WebhookPayload(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     webhook_nonce: str | None = None
     webhook_path: str | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("action")
     @classmethod

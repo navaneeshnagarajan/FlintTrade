@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, jsonify
+
 from flinttrade_core.source_root import discover_source_root
 
 logger = logging.getLogger("flinttrade.screener.ipo_routes")

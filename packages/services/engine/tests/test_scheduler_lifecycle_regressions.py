@@ -640,8 +640,31 @@ async def test_start_all_drains_a_timed_out_start_before_late_activation_can_esc
             await original_runner_stop()
 
 
+_LIFECYCLE_SETTLE_TIMEOUT = 5.0
+"""How long a lifecycle transition is given to settle before it counts as wedged.
+
+Generous on purpose. The property under test is *whether* a transition completes
+at all, never how fast; a fixed sub-100 ms budget turned an ordinary scheduling
+hiccup on a loaded host into a failure (the same wall-clock flake 8ae51cd0
+removed from the ollama_runtime tests). ``asyncio.wait`` returns the moment the
+task finishes, so the healthy path is still as quick as the machine allows and
+only a genuine wedge waits out the whole budget.
+"""
+
+
+async def _assert_settles(task: "asyncio.Task[None]", message: str) -> None:
+    """Assert one lifecycle task completes rather than holding a lock forever.
+
+    Args:
+        task: The transition task that must not stay pending.
+        message: The assertion message describing the wedge being ruled out.
+    """
+    done, _pending = await asyncio.wait({task}, timeout=_LIFECYCLE_SETTLE_TIMEOUT)
+    assert task in done, message
+
+
 @pytest.mark.asyncio
-@pytest.mark.timeout(1)
+@pytest.mark.timeout(30)
 async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions() -> None:
     scheduler = StrategyScheduler(client=MagicMock())
     blocked_strategy = _TestStrategy(name="blocked-generation")
@@ -667,10 +690,9 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
     healthy_start: asyncio.Task[None] | None = None
     aggregate_stop: asyncio.Task[None] | None = None
     try:
-        assert await asyncio.to_thread(hook_entered.wait, 0.5)
-        await asyncio.sleep(0.08)
+        assert await asyncio.to_thread(hook_entered.wait, _LIFECYCLE_SETTLE_TIMEOUT)
 
-        assert blocked_start.done(), "a wedged hook retained the scheduler transition lock"
+        await _assert_settles(blocked_start, "a wedged hook retained the scheduler transition lock")
         blocked_result = (await asyncio.gather(blocked_start, return_exceptions=True))[0]
         assert isinstance(blocked_result, TimeoutError)
         assert blocked.has_live_owner is True
@@ -678,14 +700,12 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
         assert blocked._task is None
 
         healthy_start = asyncio.create_task(scheduler.start_one(healthy_strategy.name))
-        await asyncio.sleep(0.08)
-        assert healthy_start.done(), "a quarantined generation blocked a later start"
+        await _assert_settles(healthy_start, "a quarantined generation blocked a later start")
         await healthy_start
         assert healthy.is_running is True
 
         aggregate_stop = asyncio.create_task(scheduler.stop_all())
-        await asyncio.sleep(0.08)
-        assert aggregate_stop.done(), "a quarantined generation blocked aggregate shutdown"
+        await _assert_settles(aggregate_stop, "a quarantined generation blocked aggregate shutdown")
         stop_result = (await asyncio.gather(aggregate_stop, return_exceptions=True))[0]
         assert isinstance(stop_result, ExceptionGroup)
         assert healthy.has_live_owner is False
@@ -699,7 +719,7 @@ async def test_never_returning_start_hook_does_not_wedge_scheduler_transitions()
             await asyncio.gather(aggregate_stop, return_exceptions=True)
         start_hook = blocked._start_hook_task
         if start_hook is not None:
-            await asyncio.wait_for(start_hook, timeout=0.5)
+            await asyncio.wait_for(start_hook, timeout=_LIFECYCLE_SETTLE_TIMEOUT)
         await blocked.stop()
 
     assert blocked.has_live_owner is False

@@ -89,6 +89,18 @@ def test_slug_validation_blocks_traversal(tmp_path: Path) -> None:
         approve_draft(tmp_path, "../x")
 
 
+def test_slug_validation_rejects_a_trailing_newline(tmp_path: Path) -> None:
+    """A ``$``-anchored match would have admitted "name\\n"; fullmatch does not."""
+    draft_skill_from_reflection(tmp_path, _result(), session_date="2026-07-19", symbols=["X"])
+    assert not is_valid_slug("session-lessons-2026-07-19\n")
+    assert read_draft(tmp_path, "session-lessons-2026-07-19\n") is None
+    assert reject_draft(tmp_path, "session-lessons-2026-07-19\n") is False
+    with pytest.raises(ValueError):
+        approve_draft(tmp_path, "session-lessons-2026-07-19\n")
+    # The real draft is untouched.
+    assert read_draft(tmp_path, "session-lessons-2026-07-19") is not None
+
+
 # ---------------------------------------------------------------------------
 # Approve / reject + registry visibility
 # ---------------------------------------------------------------------------
@@ -172,3 +184,22 @@ def test_routes_approve_and_reject_are_guarded(app: Flask, tmp_path: Path) -> No
     assert client.post("/api/v1/ai/skill-drafts/session-lessons-2026-07-19/approve").status_code == 404
     assert client.delete("/api/v1/ai/skill-drafts/session-lessons-2026-07-19").status_code == 404
     assert client.post("/api/v1/ai/skill-drafts/BAD_NAME/approve").status_code == 400
+
+
+def test_a_directory_named_like_a_draft_is_not_a_draft(tmp_path: Path) -> None:
+    """A directory called ``<slug>.md`` must not be served as a draft.
+
+    ``Path.glob`` yields directories as well as files, so selecting the draft
+    out of a listing rather than joining a path drops the ``is_file`` guarantee
+    unless it is restated. Reading one then raises ``IsADirectoryError`` on
+    POSIX and ``PermissionError`` on Windows, and the routes catch neither - a
+    documented 404 becomes an unhandled 500.
+    """
+    directory = drafts_dir(tmp_path)
+    directory.mkdir(parents=True)
+    (directory / "trap.md").mkdir()
+
+    assert read_draft(tmp_path, "trap") is None
+    assert reject_draft(tmp_path, "trap") is False
+    with pytest.raises(FileNotFoundError):
+        approve_draft(tmp_path, "trap")

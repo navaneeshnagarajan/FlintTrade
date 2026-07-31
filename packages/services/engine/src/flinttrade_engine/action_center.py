@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
@@ -339,7 +339,7 @@ class ApprovalDispatchResult:
     outcome_uncertain: bool = False
 
     @classmethod
-    def success(cls, broker_order_id: str) -> "ApprovalDispatchResult":
+    def success(cls, broker_order_id: str) -> ApprovalDispatchResult:
         """Build a confirmed broker-dispatch result."""
         return cls(
             succeeded=True,
@@ -354,7 +354,7 @@ class ApprovalDispatchResult:
         message: str,
         *,
         outcome_uncertain: bool = False,
-    ) -> "ApprovalDispatchResult":
+    ) -> ApprovalDispatchResult:
         """Build a failed or refused dispatch result."""
         return cls(
             succeeded=False,
@@ -460,7 +460,7 @@ class ApprovalRequest:
         }
 
     @classmethod
-    def from_row(cls, row: tuple[Any, ...]) -> "ApprovalRequest":
+    def from_row(cls, row: tuple[Any, ...]) -> ApprovalRequest:
         """Reconstruct from a DuckDB row (ordered by column definition).
 
         Args:
@@ -496,7 +496,7 @@ class ApprovalRequest:
 
 def _utc_now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _iso_to_ts(iso: str) -> float:
@@ -762,7 +762,7 @@ class PendingOrderQueue:
         self._reject_sensitive_material(context, path="intent_context")
 
         req_id = request_id or str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         created_at = now.isoformat()
         expires_at = (now + timedelta(minutes=ttl_minutes)).isoformat()
 
@@ -1077,7 +1077,7 @@ class PendingOrderQueue:
             from datetime import timedelta
 
             cutoff = (
-                datetime.now(timezone.utc) - timedelta(minutes=minutes)
+                datetime.now(UTC) - timedelta(minutes=minutes)
             ).isoformat()
             pre_count: int = self._conn.execute(
                 """

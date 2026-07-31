@@ -1,0 +1,92 @@
+name: Node release key freshness
+
+# The pinned Node release key is upstream state, not a repository constant.
+# ``SHASUMS256.txt`` is signed by whichever release manager cut that release,
+# using their personal GPG key with their own expiry, and the failure mode is
+# silent: gpg exits 0 for a signature made by a key that has since expired,
+# reporting ``EXPKEYSIG`` out of band rather than ``GOODSIG``. The previously
+# pinned key expired on 2026-07-08 and nothing in CI noticed, because nothing
+# ran scripts/check-node-release-key-freshness.py.
+#
+# This workflow is that missing scheduler, and it is also the ONLY lane that can
+# see a revocation. A revocation packet published after we mirrored the key never
+# reaches the checked-in `.asc`, so no offline check can find it; the script
+# fetches the keyserver's copy and merges it into the same keyring before
+# reporting, which is why this scheduled job needs the network and the per-PR
+# `--offline` step in test.yml cannot replace it.
+#
+# It fails closed on trust and open on availability: an unreachable, 404ing or
+# unparseable keyserver is reported as NOT CHECKED and leaves the exit code
+# alone, so any non-zero exit here is a real finding about the pin, never a
+# network blip.
+#
+# The 30-day warning window lives HERE, and only here. The path filters mean the
+# push/PR legs fire on exactly one kind of change - a bootstrap pin, its
+# checksums or its mirrored key - where refusing a key that expires within the
+# month is the correct gate. Every OTHER pull request gets the fail-closed half
+# instead, as a `--offline --days 0` step inside test.yml's python-tests job: a
+# warning window in that lane would redden unrelated work for up to a month
+# while the refresh (a version bump plus a key swap) was arranged.
+#
+# Deliberately no `issues: write` and no issue-creation step: a failing
+# scheduled run already notifies the repository owner, and a bot that files
+# issues needs a write scope this job has no other use for.
+
+on:
+  schedule:
+    # Daily 05:00 UTC = 10:30 IST. The script's default 30-day warning window
+    # means a daily cadence gives a month of notice before a pin goes stale,
+    # which is the whole point: the refresh needs a version bump plus a mirrored
+    # key swap, not a one-line edit.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+  push:
+    # A change to the mirrored key, the pinned checksums or the detached
+    # signature must be verified on the commit that makes it, not a day later.
+    branches: [main, dev]
+    paths:
+      - 'packages/apps/desktop/resources/bootstrap/checksums/**'
+      - 'packages/apps/desktop/resources/bootstrap/tool-manifest.json'
+      - 'scripts/check-node-release-key-freshness.py'
+      - '.github/workflows/key-freshness.yml'
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, ready_for_review, reopened]
+    paths:
+      - 'packages/apps/desktop/resources/bootstrap/checksums/**'
+      - 'packages/apps/desktop/resources/bootstrap/tool-manifest.json'
+      - 'scripts/check-node-release-key-freshness.py'
+      - '.github/workflows/key-freshness.yml'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Least-privilege token: this job checks out and runs one stdlib Python script.
+permissions:
+  contents: read
+
+concurrency:
+  group: key-freshness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-release-key:
+    name: Pinned Node release key is currently valid
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    # Import a key, list it, verify one detached signature. Seconds of work; the
+    # cap is the runaway guard, not a budget.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: '3.12' }
+      # gpg ships in the ubuntu runner image; installing it explicitly (as the
+      # CLA binding job does) means a future image change cannot turn a missing
+      # binary into a finding about the pin.
+      - name: Ensure gnupg is present
+        run: sudo apt-get install -y --no-install-recommends gnupg
+      # No uv sync: the script is stdlib-only, so the whole job is a checkout
+      # plus an interpreter.
+      - name: Check the pinned Node release key
+        run: python scripts/check-node-release-key-freshness.py --days 30

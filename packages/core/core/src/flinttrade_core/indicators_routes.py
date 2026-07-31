@@ -139,7 +139,7 @@ def indicators_compute() -> tuple[Any, int]:
             "message": "Invalid bar data. Ensure each bar has numeric open/high/low/close and int time fields.",
         }), 400
 
-    def _to_list(arr: "np.ndarray") -> list:
+    def _to_list(arr: np.ndarray) -> list:
         """Convert numpy array to JSON-serialisable list (NaN -> None)."""
         return [None if math.isnan(v) else float(v) for v in arr]
 

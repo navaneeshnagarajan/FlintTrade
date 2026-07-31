@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -370,7 +370,7 @@ class CredentialStore:
         except Exception as exc:  # pragma: no cover
             raise CredentialError(f"Encryption failed: {exc}") from exc
 
-        created_at: str = datetime.now(tz=timezone.utc).isoformat()
+        created_at: str = datetime.now(tz=UTC).isoformat()
         is_primary_int: int = int(is_primary)
         resolved_adapter_id: str = adapter_id or broker
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import platform
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -108,11 +108,11 @@ def _safe_timestamp(value: Any) -> str:
         if not raw:
             return ""
         try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(raw)
         except ValueError:
             return ""
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed.isoformat()
 
 
@@ -177,7 +177,7 @@ def support_diagnostics() -> Response:
     """Return bounded diagnostics that are safe to review or attach publicly."""
     payload = {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "app": {"name": "FlintTrade", "version": APP_VERSION_TAG},
         "runtime": {
             "os": platform.system() or "unknown",

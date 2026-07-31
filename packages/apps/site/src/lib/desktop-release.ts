@@ -309,8 +309,36 @@ function isVersionTag(value: string): boolean {
   return value.startsWith('v') && isVersion(value.slice(1));
 }
 
+// The version is split on its literal '-' and each half is matched with an
+// unambiguous pattern, rather than by one all-in-one semver regex. The
+// published semver.org expression spells a prerelease identifier as
+// `[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*`, which can match a run of hyphens in as
+// many ways as the run is long; chained across dot-separated identifiers that
+// is exponential. A release tag of "0.0.0-0." plus twenty-eight "--." groups —
+// under a hundred characters — took 110 seconds to reject, and every further
+// pair of groups multiplied that by four. Neither pattern below can match an
+// input in more than one way, so the check is linear in the length of the
+// version.
+const SEMVER_CORE = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+const DOT_SEPARATED_IDENTIFIERS = /^[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$/;
+const DIGITS_ONLY = /^\d+$/;
+
+/**
+ * True for one well-formed dot-separated prerelease identifier. The caller has
+ * already confined it to `[0-9A-Za-z-]+`, so only the numeric rule is left: an
+ * all-digit identifier carries no leading zero.
+ */
+function isPrereleaseIdentifier(identifier: string): boolean {
+  if (!DIGITS_ONLY.test(identifier)) return true;
+  return identifier === '0' || !identifier.startsWith('0');
+}
+
 function isVersion(value: string): boolean {
-  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$/.test(value);
+  const separator = value.indexOf('-');
+  if (!SEMVER_CORE.test(separator < 0 ? value : value.slice(0, separator))) return false;
+  if (separator < 0) return true;
+  const prerelease = value.slice(separator + 1);
+  return DOT_SEPARATED_IDENTIFIERS.test(prerelease) && prerelease.split('.').every(isPrereleaseIdentifier);
 }
 
 function prereleaseChannel(version: string): string | null {

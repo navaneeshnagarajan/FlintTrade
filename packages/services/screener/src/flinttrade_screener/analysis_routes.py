@@ -28,7 +28,7 @@ import logging
 import math
 import re
 from dataclasses import asdict
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
@@ -1436,7 +1436,7 @@ def iv_smile_endpoint() -> Any:
     # collapsing the whole response into is_sample_data=True — sample points
     # must never ship under a live flag, and a response-wide sample flag makes
     # the connected widget discard every valid live curve.
-    curves = live_curves if live_curves else sample_curves
+    curves = live_curves or sample_curves
     used_sample = not live_curves
 
     expiry = expiries[0]
@@ -2106,7 +2106,7 @@ def _candles_to_series(candles: list[dict[str, Any]]) -> _Series:
     Returns:
         _Series with ISO date strings and close prices, sorted ascending.
     """
-    from datetime import datetime, timezone  # noqa: PLC0415
+    from datetime import datetime  # noqa: PLC0415
 
     dates: list[str] = []
     closes: list[float] = []
@@ -2121,7 +2121,7 @@ def _candles_to_series(candles: list[dict[str, Any]]) -> _Series:
             # Handle millisecond timestamps (> year 2100 in seconds)
             if ts > 4_102_444_800:
                 ts = ts // 1000
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts, tz=UTC)
             dates.append(dt.date().isoformat())
             closes.append(close)
         except (ValueError, OSError):

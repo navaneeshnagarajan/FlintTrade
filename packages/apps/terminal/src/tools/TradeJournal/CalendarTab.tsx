@@ -192,7 +192,13 @@ export function CalendarTab() {
     () => (isExplore ? getSampleJournalTrades(start, end, undefined, JOURNAL_MAX_LIMIT) : []),
     [isExplore, start, end],
   );
-  const rows = isExplore ? sampleRows : journalQuery.data?.trades ?? [];
+  // Memoised so the `?? []` fallback does not mint a fresh array on every
+  // render, which would re-run every derived memo below it.
+  const journalTrades = journalQuery.data?.trades;
+  const rows = useMemo<JournalTrade[]>(
+    () => (isExplore ? sampleRows : journalTrades ?? []),
+    [isExplore, sampleRows, journalTrades],
+  );
 
   const daily = useMemo(() => computeDayPnl(rows), [rows]);
 

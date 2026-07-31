@@ -34,7 +34,7 @@ import stat
 import threading
 import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -140,7 +140,7 @@ def _error_payload(adapter_id: str, account_id: str, error: str) -> dict[str, An
     return {
         "adapter_id": adapter_id,
         "account_id": account_id,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "orders_diff": [],
         "positions_diff": [],
         "holdings_diff": [],
@@ -246,7 +246,7 @@ def _normalise_report_payload(payload: Any) -> dict[str, Any] | None:
         return None
 
     all_diffs = [*orders_diff, *positions_diff, *holdings_diff]
-    actual_counts = {name: 0 for name in _SEVERITY_NAMES}
+    actual_counts = dict.fromkeys(_SEVERITY_NAMES, 0)
     for row in all_diffs:
         actual_counts[row["severity"]] += 1
     if counts != actual_counts:
@@ -632,12 +632,12 @@ class ReconciliationRunner:
         canonical_report = build_report(
             adapter_id=report_adapter_id,
             account_id=report_account_id,
-            generated_at=getattr(report, "generated_at"),
-            broker_orders=getattr(report, "broker_orders"),
-            broker_positions=getattr(report, "broker_positions"),
-            broker_holdings=getattr(report, "broker_holdings"),
-            local_state=getattr(report, "local_state"),
-            error=getattr(report, "error"),
+            generated_at=report.generated_at,
+            broker_orders=report.broker_orders,
+            broker_positions=report.broker_positions,
+            broker_holdings=report.broker_holdings,
+            local_state=report.local_state,
+            error=report.error,
         )
         current_payload = report.as_dict()
         if payload is not None and payload != current_payload:

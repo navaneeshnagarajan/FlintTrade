@@ -8,7 +8,6 @@ __version__ = APP_VERSION
 
 from .activity_log import ActivityEntry, ActivityLog, LoginActivity, SessionTracker
 from .audit_logger import AuditLogger
-from .security_tracker import SecurityTracker
 from .orderflow import FootprintBucket, FootprintCell, OrderFlowAggregator
 from .orderflow_aggregator import (
     FootprintBucket as FootprintBucketV2,
@@ -16,6 +15,7 @@ from .orderflow_aggregator import (
 )
 from .questdb_bridge import QuestDBBridge, QuestDBBridgeError
 from .questdb_client import OHLCV, MarketStats, QuestDBClient, QuestDBClientError
+from .security_tracker import SecurityTracker
 from .storage import StorageManager
 from .tick_recorder import TickRecorder
 

@@ -388,6 +388,29 @@ class TrafficCounter:
 # ---------------------------------------------------------------------------
 
 
+def _percentile(sorted_latencies: list[float], percentile: float) -> float:
+    """Return one percentile of an already-sorted latency series.
+
+    Defined at module level rather than inside the per-broker loop it serves.
+    A nested helper closed over the loop's ``sorted_lat`` and ``n``, which was
+    harmless because it was called in the same iteration - but only until
+    someone stored or deferred it. Taking the series as an argument removes the
+    question, and makes the calculation directly testable.
+
+    Args:
+        sorted_latencies: Latencies in ascending order.
+        percentile: The percentile to read, 0-100.
+
+    Returns:
+        The percentile value rounded to two decimal places, or ``0.0`` when the
+        series is empty.
+    """
+    if not sorted_latencies:
+        return 0.0
+    index = int(percentile / 100 * (len(sorted_latencies) - 1))
+    return round(sorted_latencies[index], 2)
+
+
 @dataclass
 class _LatencyRecord:
     """Internal record of a single order RTT measurement."""
@@ -459,19 +482,12 @@ class LatencyTracker:
         for broker, latencies in broker_map.items():
             sorted_lat = sorted(latencies)
             n = len(sorted_lat)
-
-            def _pct(p: float) -> float:
-                if n == 0:
-                    return 0.0
-                idx = int(p / 100 * (n - 1))
-                return round(sorted_lat[idx], 2)
-
             result[broker] = {
                 "count": n,
                 "avg_ms": round(sum(latencies) / n, 2),
-                "p50_ms": _pct(50),
-                "p95_ms": _pct(95),
-                "p99_ms": _pct(99),
+                "p50_ms": _percentile(sorted_lat, 50),
+                "p95_ms": _percentile(sorted_lat, 95),
+                "p99_ms": _percentile(sorted_lat, 99),
             }
 
         return result

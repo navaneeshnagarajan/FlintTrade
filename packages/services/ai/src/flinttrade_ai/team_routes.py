@@ -9,11 +9,11 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
 import queue
 import threading
+from contextlib import suppress
 from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context

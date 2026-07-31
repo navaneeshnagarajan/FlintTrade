@@ -29,7 +29,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from flask import Flask
@@ -139,8 +139,8 @@ class BracketOrder:
     entry_pricetype: str = "MARKET"
     status: str = "active"
     cancel_warnings: list[str] = field(default_factory=list)
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict for API responses."""
@@ -689,7 +689,7 @@ class BracketOrderService:
 
         bracket.cancel_warnings = warnings
         bracket.status = "cancelled"
-        bracket.updated_at = datetime.now(timezone.utc).isoformat()
+        bracket.updated_at = datetime.now(UTC).isoformat()
         logger.info("Bracket %s cancelled (%d warnings)", bracket_id, len(warnings))
         return True
 
@@ -729,7 +729,7 @@ class BracketOrderService:
         if bracket is None:
             return False
         bracket.status = "completed"
-        bracket.updated_at = datetime.now(timezone.utc).isoformat()
+        bracket.updated_at = datetime.now(UTC).isoformat()
         return True
 
     # ------------------------------------------------------------------

@@ -29,7 +29,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
 # Rounding to paise (2 decimal places)
@@ -79,9 +79,9 @@ _STT_RATES: dict[tuple[TradeType, bool], Decimal] = {
     # (trade_type, is_buy) -> rate
     (TradeType.DELIVERY, True):  Decimal("0.001"),    # 0.1% on buy (unchanged)
     (TradeType.DELIVERY, False): Decimal("0.001"),    # 0.1% on sell (unchanged)
-    (TradeType.INTRADAY, True):  Decimal("0"),        # No STT on intraday buy
+    (TradeType.INTRADAY, True):  Decimal(0),        # No STT on intraday buy
     (TradeType.INTRADAY, False): Decimal("0.00025"),  # 0.025% on sell (unchanged)
-    (TradeType.FO, True):        Decimal("0"),        # No STT on F&O buy
+    (TradeType.FO, True):        Decimal(0),        # No STT on F&O buy
     (TradeType.FO, False):       Decimal("0.0005"),   # 0.05% on F&O sell (futures, Apr 2026)
 }
 
@@ -133,13 +133,13 @@ class TaxBreakdown:
     trade_value: Decimal
     trade_type: TradeType
     is_buy: bool
-    brokerage: Decimal = Decimal("0")
-    stt: Decimal = Decimal("0")
-    stamp_duty: Decimal = Decimal("0")
-    exchange_charges: Decimal = Decimal("0")
-    sebi_fee: Decimal = Decimal("0")
-    gst: Decimal = Decimal("0")
-    total_charges: Decimal = Decimal("0")
+    brokerage: Decimal = Decimal(0)
+    stt: Decimal = Decimal(0)
+    stamp_duty: Decimal = Decimal(0)
+    exchange_charges: Decimal = Decimal(0)
+    sebi_fee: Decimal = Decimal(0)
+    gst: Decimal = Decimal(0)
+    total_charges: Decimal = Decimal(0)
 
     def as_dict(self) -> dict[str, str]:
         """Return human-readable string values for all charges.
@@ -179,17 +179,17 @@ class TaxSummary:
         total_trade_value: Sum of all trade values processed.
     """
 
-    total_brokerage: Decimal = Decimal("0")
-    total_stt: Decimal = Decimal("0")
-    total_stamp_duty: Decimal = Decimal("0")
-    total_exchange_charges: Decimal = Decimal("0")
-    total_sebi_fee: Decimal = Decimal("0")
-    total_gst: Decimal = Decimal("0")
-    total_charges: Decimal = Decimal("0")
+    total_brokerage: Decimal = Decimal(0)
+    total_stt: Decimal = Decimal(0)
+    total_stamp_duty: Decimal = Decimal(0)
+    total_exchange_charges: Decimal = Decimal(0)
+    total_sebi_fee: Decimal = Decimal(0)
+    total_gst: Decimal = Decimal(0)
+    total_charges: Decimal = Decimal(0)
     delivery_trades: int = 0
     intraday_trades: int = 0
     fo_trades: int = 0
-    total_trade_value: Decimal = Decimal("0")
+    total_trade_value: Decimal = Decimal(0)
 
     @property
     def effective_charge_rate_pct(self) -> Decimal:
@@ -199,7 +199,7 @@ class TaxSummary:
             Charge rate percentage (0.0 if no trades processed).
         """
         if self.total_trade_value <= 0:
-            return Decimal("0")
+            return Decimal(0)
         return (self.total_charges / self.total_trade_value * 100).quantize(
             Decimal("0.0001"), rounding=ROUND_HALF_UP
         )
@@ -236,8 +236,8 @@ class IndianTaxCalculator:
         self,
         instrument_type: str = "fo",
         exchange: Exchange = Exchange.NSE_FO,
-        brokerage_per_order: Decimal = Decimal("20"),
-        brokerage_pct: Decimal = Decimal("0"),
+        brokerage_per_order: Decimal = Decimal(20),
+        brokerage_pct: Decimal = Decimal(0),
         zero_brokerage_delivery: bool = False,
     ) -> None:
         self.instrument_type = instrument_type.lower()
@@ -280,13 +280,13 @@ class IndianTaxCalculator:
         brokerage = self._compute_brokerage(tv, trade_type, is_buy)
 
         # STT
-        stt_rate = _STT_RATES.get((trade_type, is_buy), Decimal("0"))
+        stt_rate = _STT_RATES.get((trade_type, is_buy), Decimal(0))
         stt = (tv * stt_rate).quantize(_TWO, rounding=ROUND_HALF_UP)
 
         # Stamp duty — buy side only
-        stamp_duty = Decimal("0")
+        stamp_duty = Decimal(0)
         if is_buy:
-            stamp_rate = _STAMP_DUTY_RATES.get(trade_type, Decimal("0"))
+            stamp_rate = _STAMP_DUTY_RATES.get(trade_type, Decimal(0))
             stamp_duty = (tv * stamp_rate).quantize(_TWO, rounding=ROUND_HALF_UP)
 
         # Exchange transaction charges
@@ -395,8 +395,8 @@ class IndianTaxCalculator:
             Brokerage amount in INR.
         """
         if self.zero_brokerage_delivery and trade_type == TradeType.DELIVERY:
-            return Decimal("0")
-        pct_fee = trade_value * self.brokerage_pct / Decimal("100")
+            return Decimal(0)
+        pct_fee = trade_value * self.brokerage_pct / Decimal(100)
         return (self.brokerage_per_order + pct_fee).quantize(_TWO, rounding=ROUND_HALF_UP)
 
     def _default_trade_type(self) -> TradeType:
@@ -442,7 +442,7 @@ class IndianTaxCalculator:
 
 def make_equity_calculator(
     exchange: Exchange = Exchange.NSE,
-    brokerage_per_order: Decimal = Decimal("0"),
+    brokerage_per_order: Decimal = Decimal(0),
     zero_brokerage: bool = True,
 ) -> IndianTaxCalculator:
     """Create a calculator pre-configured for equity delivery.
@@ -465,7 +465,7 @@ def make_equity_calculator(
 
 def make_intraday_calculator(
     exchange: Exchange = Exchange.NSE,
-    brokerage_per_order: Decimal = Decimal("20"),
+    brokerage_per_order: Decimal = Decimal(20),
 ) -> IndianTaxCalculator:
     """Create a calculator pre-configured for equity intraday.
 
@@ -485,7 +485,7 @@ def make_intraday_calculator(
 
 def make_fo_calculator(
     exchange: Exchange = Exchange.NSE_FO,
-    brokerage_per_order: Decimal = Decimal("20"),
+    brokerage_per_order: Decimal = Decimal(20),
 ) -> IndianTaxCalculator:
     """Create a calculator pre-configured for F&O.
 

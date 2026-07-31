@@ -7,7 +7,7 @@ FLINTTRADE_DIR="${FLINTTRADE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$FLINTTRADE_DIR"
 
 # Keep in step with package.json packageManager and scripts/install/*.
-PINNED_PNPM_VERSION="9.15.0"
+PINNED_PNPM_VERSION="10.34.5"
 
 GREEN='\033[32m'
 RED='\033[31m'
@@ -294,9 +294,17 @@ esac
 cd "$FLINTTRADE_DIR"
 # Do NOT swallow this failure: reporting "Workspace initialized" after the init
 # command died is how a broken install looks like a good one.
-if PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src${PATH_SEP}${PYTHONPATH:-}" \
-        python3 -m flinttrade_core.cli init --provision-master-password >/dev/null; then
+init_status=0
+PYTHONPATH="$FLINTTRADE_DIR/packages/core/core/src${PATH_SEP}${PYTHONPATH:-}" \
+    python3 -m flinttrade_core.cli init --provision-master-password >/dev/null \
+    || init_status=$?
+if [ "$init_status" -eq 0 ]; then
     ok "Workspace initialised: $WORKSPACE_DIR"
+elif [ "$init_status" -eq 3 ]; then
+    # Exit 3 means provisioning did not complete but re-proved that the existing
+    # vault secret is present and hardened, so the backend still has what it needs.
+    warn "Workspace provisioning did not complete, but the existing credential-vault"
+    warn "secret is present and hardened — the cause is printed above."
 else
     fail "Workspace initialisation failed — FlintTrade will not start until this is fixed."
     exit 1

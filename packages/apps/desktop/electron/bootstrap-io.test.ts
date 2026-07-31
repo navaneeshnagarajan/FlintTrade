@@ -3175,3 +3175,28 @@ describe("bootstrap system boundaries", () => {
     ).toThrow(/missing|another link/i);
   });
 });
+
+describe("POSIX anchor script source", () => {
+  // The anchor is emitted from a String.raw template literal, so a backtick or a
+  // ${ sequence anywhere inside it - including inside a shell comment - silently
+  // terminates the literal and turns the rest of the script into TypeScript.
+  // tsc catches it, but only as a pile of "Cannot find name" errors pointing at
+  // prose, which reads like anything except the real cause. It has happened
+  // twice while documenting this function.
+  it("carries no backtick or interpolation that would break out of the raw template", async () => {
+    const source = await readFile(new URL("./bootstrap-io.ts", import.meta.url), "utf8");
+    const opener = "return String.raw" + "`";
+    const start = source.indexOf(opener);
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start + opener.length);
+    const template = body.slice(0, body.indexOf("\n`;\n"));
+
+    expect(template).not.toContain("`");
+    // ${...} is legitimate here (probes, enumerationFlags, tab), so only flag a
+    // lone dollar-brace that never closes on the same line.
+    const unclosed = template
+      .split("\n")
+      .filter((line) => /\$\{/.test(line) && !/\$\{[^}]*\}/.test(line));
+    expect(unclosed).toEqual([]);
+  });
+});

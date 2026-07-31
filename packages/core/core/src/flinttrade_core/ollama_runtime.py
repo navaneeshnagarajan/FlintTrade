@@ -25,8 +25,7 @@ import zipfile
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator
 from urllib.parse import urlsplit
 
@@ -1113,7 +1112,7 @@ def _create_windows_job(process: Any) -> _WindowsJobHandle:
             ctypes.sizeof(limits),
         ):
             raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
-        process_handle = int(getattr(process, "_handle"))
+        process_handle = int(process._handle)
         if not kernel32.AssignProcessToJobObject(handle, ctypes.c_void_p(process_handle)):
             raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
         return _WindowsJobHandle(int(handle), kernel32, _BasicAccountingInformation)
@@ -1131,7 +1130,7 @@ def _resume_windows_process(process: Any) -> None:
         ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
         ntdll.NtResumeProcess.argtypes = [ctypes.c_void_p]
         ntdll.NtResumeProcess.restype = ctypes.c_long
-        status = int(ntdll.NtResumeProcess(ctypes.c_void_p(int(getattr(process, "_handle")))))
+        status = int(ntdll.NtResumeProcess(ctypes.c_void_p(int(process._handle))))
         if status != 0:
             raise OSError(status, "NtResumeProcess failed")
     except Exception as exc:

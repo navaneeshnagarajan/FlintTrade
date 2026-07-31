@@ -22,6 +22,16 @@ GITHUB_API_BASE = f"https://api.github.com/repos/{REPO_SLUG}"
 RELEASE_DOWNLOAD_BASE = f"https://github.com/{REPO_SLUG}/releases/download"
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 NO_POWERSHELL_REASON = "PowerShell (pwsh/powershell) is not available on this runner"
+POSIX_INSTALL_SEMANTICS = os.name != "nt"
+NO_POSIX_INSTALL_REASON = (
+    "the offline installer scenarios need POSIX filesystem semantics - executable bits, private "
+    "0700 receipts, AppImage self-extraction and absolute POSIX $APPIMAGE paths - which a Windows "
+    "host cannot report"
+)
+NO_POSIX_SHELL_REASON = (
+    "flinttrade-install.sh refuses any host whose uname is not Linux or Darwin; install.ps1 is the "
+    "Windows installer"
+)
 
 
 def _case_dir(tmp_path: Path, name: str) -> Path:
@@ -543,6 +553,7 @@ def test_unix_macos_selects_universal_dmg(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_appimage_install_verifies_checksum_and_signals_handoff(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     running = _running_appimage(tmp_path)
@@ -569,6 +580,7 @@ def test_unix_appimage_install_verifies_checksum_and_signals_handoff(tmp_path: P
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_custom_appimage_update_uses_stable_desktop_wrapper(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     running = tmp_path / "custom target" / "FlintTrade.AppImage"
@@ -626,6 +638,7 @@ def test_unix_dry_run_never_signals_handoff(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_handoff_refuses_to_clobber_an_existing_path(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     handoff.write_text("do not clobber", encoding="utf-8")
@@ -650,6 +663,7 @@ def test_unix_handoff_refuses_to_clobber_an_existing_path(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_handoff_requires_exact_parent_pid_before_marker(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     running = _running_appimage(tmp_path)
@@ -665,6 +679,7 @@ def test_unix_handoff_requires_exact_parent_pid_before_marker(tmp_path: Path) ->
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_handoff_timeout_happens_after_marker_but_before_installed_shell_mutation(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     running = _running_appimage(tmp_path)
@@ -714,6 +729,7 @@ def test_unix_linux_handoff_refuses_to_fall_back_without_exact_appimage(tmp_path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_linux_handoff_stages_direct_appimage_before_marker(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     running = _running_appimage(tmp_path)
@@ -742,6 +758,7 @@ def test_unix_linux_handoff_stages_direct_appimage_before_marker(tmp_path: Path)
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_linux_handoff_forces_managed_extracted_mode(tmp_path: Path) -> None:
     handoff = tmp_path / "handoff"
     extracted_root = tmp_path / ".local" / "opt" / "flinttrade"
@@ -814,6 +831,7 @@ def test_unix_linux_handoff_rejects_ambiguous_appimage_and_extracted_targets(tmp
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_fresh_install_ignores_untrusted_inherited_appimage(tmp_path: Path) -> None:
     running = tmp_path / "custom" / "FlintTrade.AppImage"
     running.parent.mkdir()
@@ -878,6 +896,7 @@ def test_unix_appimage_installer_uses_only_the_packaged_flinttrade_icon(tmp_path
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_fresh_install_refuses_unproved_existing_appimage_target(tmp_path: Path) -> None:
     target = tmp_path / ".local" / "bin" / "flinttrade.AppImage"
     target.parent.mkdir(parents=True)
@@ -946,6 +965,7 @@ def test_unix_fresh_install_refuses_symlinked_integration_leaf(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failed_publication", ["desktop", "receipt"])
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_install_publication_failure_rolls_back_shell_and_integrations(
     tmp_path: Path,
     failed_publication: str,
@@ -978,6 +998,7 @@ def test_unix_install_publication_failure_rolls_back_shell_and_integrations(
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_signal_after_preserving_target_restores_the_journalled_backup(tmp_path: Path) -> None:
     installed = tmp_path / ".local" / "bin" / "flinttrade.AppImage"
     installed.parent.mkdir(parents=True)
@@ -1045,6 +1066,7 @@ def test_unix_directory_shell_replacements_are_staged_and_rollback_capable() -> 
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_unix_extracted_shell_swap_failure_restores_previous_install(tmp_path: Path) -> None:
     old_app_run = tmp_path / ".local" / "opt" / "flinttrade" / "squashfs-root" / "AppRun"
     old_app_run.parent.mkdir(parents=True)
@@ -1117,6 +1139,7 @@ def test_unix_interrupted_directory_swap_restores_previous_install(tmp_path: Pat
     sys.platform == "darwin",
     reason="would target the real writable /Applications on macOS",
 )
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_INSTALL_REASON)
 def test_macos_dmg_installs_after_same_release_verification(tmp_path: Path) -> None:
     bin_dir = _fake_uname(tmp_path, "Darwin", "arm64")
     (bin_dir / "hdiutil").write_text(
@@ -1146,6 +1169,7 @@ def test_macos_dmg_installs_after_same_release_verification(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_SHELL_REASON)
 def test_source_build_is_electron_only_and_refuses_foreign_existing_checkout(tmp_path: Path) -> None:
     checkout = tmp_path / "checkout"
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
@@ -1165,6 +1189,7 @@ def test_source_build_is_electron_only_and_refuses_foreign_existing_checkout(tmp
 
 
 @pytest.mark.unit
+@pytest.mark.skipif(not POSIX_INSTALL_SEMANTICS, reason=NO_POSIX_SHELL_REASON)
 def test_source_build_refuses_managed_active_checkout(tmp_path: Path) -> None:
     managed = tmp_path / ".flinttrade" / "src" / "FlintTrade"
     result = subprocess.run(

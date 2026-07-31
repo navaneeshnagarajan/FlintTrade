@@ -7,8 +7,18 @@ JSON verbatim plus a server-stamped ``saved_at`` ISO timestamp.
 Flow ids are validated against ``[A-Za-z0-9_-]{1,64}`` (``re.fullmatch``, so a
 trailing newline can never sneak past a ``$`` anchor) before any path is
 built — this is the path-traversal guard (client ids like ``flow_1720…`` fit).
+:meth:`FlowFileStore._path_for` is the single choke point every read, write
+and delete goes through: it applies that allowlist and then asserts that the
+normalised path it produced still sits directly inside ``base_dir``, so
+containment is checked rather than merely implied by the alphabet.
+
 Stored files are capped at 512 KiB. Writes are atomic (temp file +
 ``os.replace``) so a crash mid-save never corrupts an existing flow.
+
+Rejections carry a stable ``REASON_*`` code rather than free-form text;
+:data:`REJECTION_MESSAGES` maps each code to the one fixed operator-facing
+string a caller may return over HTTP, so exception text never becomes a
+response body.
 """
 
 from __future__ import annotations
@@ -19,7 +29,7 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +43,43 @@ FLOW_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # Cap on the stored file content (SavedWorkflow JSON + saved_at).
 MAX_FLOW_BYTES = 512 * 1024
 
+# Stable rejection codes for the whole saved-flow surface (the store and the
+# routes in front of it both raise FlowStoreError). Codes, not sentences, so
+# the operator-facing wording lives in exactly one table below.
+REASON_INVALID_ID = "invalid_id"
+REASON_TOO_LARGE = "too_large"
+REASON_INVALID_NODE = "invalid_node"
+REASON_INVALID_EDGE = "invalid_edge"
+
+# The only strings a caller may put in an HTTP response for a rejected flow.
+# Every value is a fixed literal — none is derived from caller input or from
+# an exception — so returning one verbatim can never leak internals.
+REJECTION_MESSAGES: dict[str, str] = {
+    REASON_INVALID_ID: "Invalid flow id — use 1-64 characters from letters, digits, underscore, or hyphen",
+    REASON_TOO_LARGE: "Workflow too large — stored flows are capped at 512 KiB",
+    REASON_INVALID_NODE: "Each node must be an object with a string id",
+    REASON_INVALID_EDGE: "Each edge must be an object with string source and target",
+}
+
+# Fallback for a code with no entry above (an unreleased code path).
+GENERIC_REJECTION_MESSAGE = "Workflow rejected"
+
 
 class FlowStoreError(ValueError):
-    """Raised when a flow id or payload is rejected by the store."""
+    """Raised when a flow id or payload is rejected by the store.
+
+    Args:
+        reason: One of the module's ``REASON_*`` codes. The exception's own
+            string is the mapped human wording, which is for logs; a caller
+            answering an HTTP request should look ``reason`` up in
+            :data:`REJECTION_MESSAGES` instead of stringifying the exception,
+            so only reviewed, fixed messages ever reach a client.
+    """
+
+    def __init__(self, reason: str) -> None:
+        """Build the error from a rejection code, deriving its message."""
+        super().__init__(REJECTION_MESSAGES.get(reason, GENERIC_REJECTION_MESSAGE))
+        self.reason = reason
 
 
 def _legacy_flows_dir() -> Path:
@@ -121,12 +165,40 @@ class FlowFileStore:
         return self._base_dir
 
     def _path_for(self, flow_id: str) -> Path:
-        """Validate ``flow_id`` and return its file path (traversal guard)."""
+        """Validate ``flow_id`` and return the only path the store may touch.
+
+        The single filesystem choke point of this class — every read, write
+        and delete resolves its path here, so both guarantees below hold for
+        all of them:
+
+        1. the id is drawn from an allowlisted alphabet that contains no
+           separator, no colon and no dot, so it cannot name a parent
+           directory, a drive or a hidden extension; and
+        2. the normalised path built from it still sits directly inside
+           ``base_dir``.
+
+        The second check is redundant given the first, and deliberately so:
+        it makes containment a property the code asserts rather than one a
+        reader has to re-derive from the regex, and it holds even if the
+        alphabet is ever widened.
+
+        Args:
+            flow_id: Candidate flow id, as supplied by the caller.
+
+        Returns:
+            The normalised ``<base_dir>/<flow_id>.json`` path.
+
+        Raises:
+            FlowStoreError: If the id is outside the allowlist, or if the
+                normalised path would land outside ``base_dir``.
+        """
         if not isinstance(flow_id, str) or not FLOW_ID_RE.fullmatch(flow_id):
-            raise FlowStoreError(
-                "Invalid flow id — use 1-64 characters from letters, digits, underscore, or hyphen"
-            )
-        return self._base_dir / f"{flow_id}.json"
+            raise FlowStoreError(REASON_INVALID_ID)
+        base_dir = os.path.abspath(self._base_dir)
+        candidate = os.path.normpath(os.path.join(base_dir, f"{flow_id}.json"))
+        if not candidate.startswith(base_dir + os.sep):
+            raise FlowStoreError(REASON_INVALID_ID)
+        return Path(candidate)
 
     def list_flows(self) -> list[dict[str, Any]]:
         """List summaries of every stored flow, most recently saved first.
@@ -196,12 +268,16 @@ class FlowFileStore:
         """
         path = self._path_for(flow_id)
         stored = dict(workflow)
-        stored["saved_at"] = datetime.now(timezone.utc).isoformat()
+        stored["saved_at"] = datetime.now(UTC).isoformat()
         encoded = json.dumps(stored, ensure_ascii=False)
         if len(encoded.encode("utf-8")) > MAX_FLOW_BYTES:
-            raise FlowStoreError("Workflow too large — stored flows are capped at 512 KiB")
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=str(self._base_dir), prefix=f".{flow_id}.", suffix=".tmp")
+            raise FlowStoreError(REASON_TOO_LARGE)
+        # Both the temp file's directory and its prefix come from the checked
+        # path, never from the raw id, so the write side inherits _path_for's
+        # containment guarantee instead of re-deriving it.
+        parent = path.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=f".{path.stem}.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(encoded)

@@ -1133,7 +1133,10 @@ def test_provider_transition_rejects_uninstalled_or_external_ollama_without_pers
                 {"provider": "ollama"},
                 read_config=lambda: {"provider": "openai", "host": "", "model": "gpt-4o"},
                 resolve_secret=lambda: "",
-                persist_config=lambda payload: events.append(f"persist:{payload['provider']}") or dict(payload),
+                persist_config=lambda payload: events.append(  # noqa: B023 - consumed in this iteration
+                    f"persist:{payload['provider']}"
+                )
+                or dict(payload),
             )
 
         assert events == []

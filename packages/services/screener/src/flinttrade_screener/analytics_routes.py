@@ -43,6 +43,11 @@ analytics_bp = Blueprint("analytics_ext", __name__, url_prefix="/v1")
 _pair_engine = PairCorrelationEngine()
 _mtf_analyser = MultiTimeframeAnalyser()
 
+# The one caller-facing sentence for an unparseable bar series. It is owned here
+# rather than lifted off the exception, so a pandas-internal ``ValueError`` can
+# never put library detail into a response.
+_UNUSABLE_BARS_MESSAGE = "No usable bars: each bar needs a 'close' and a 'timestamp'/'time'/'date'"
+
 
 # ---------------------------------------------------------------------------
 # POST /ft-api/v1/indicators/vwap
@@ -363,6 +368,7 @@ def analytics_seasonality() -> Any:
         422: Series too short to compute any seasonality statistics.
     """
     import pandas as pd  # noqa: PLC0415
+
     from flinttrade_indicators.seasonality import (  # noqa: PLC0415
         build_seasonality_matrix,
         compute_day_of_month_seasonality,
@@ -388,7 +394,8 @@ def analytics_seasonality() -> Any:
     try:
         ohlc = _bars_to_close_frame(bars)
     except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+        logger.warning("Seasonality: unusable bar series for %s: %s", symbol, exc)
+        return jsonify({"status": "error", "message": _UNUSABLE_BARS_MESSAGE}), 400
 
     try:
         monthly = compute_monthly_seasonality(ohlc)
@@ -498,9 +505,7 @@ def _bars_to_close_frame(bars: list[Any]) -> pd.DataFrame:
         closes.append(close)
 
     if not stamps:
-        raise ValueError(
-            "No usable bars: each bar needs a 'close' and a 'timestamp'/'time'/'date'"
-        )
+        raise ValueError(_UNUSABLE_BARS_MESSAGE)
 
     frame = pd.DataFrame({"close": closes}, index=pd.DatetimeIndex(stamps))
     return frame.sort_index()

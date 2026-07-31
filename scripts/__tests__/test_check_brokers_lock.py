@@ -5,7 +5,6 @@ import pathlib
 import sys
 import textwrap
 
-
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SHA = "a" * 64
 

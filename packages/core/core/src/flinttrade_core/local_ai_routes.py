@@ -13,8 +13,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
 from filelock import Timeout as FileLockTimeout
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from .ollama_runtime import OllamaRuntime, OllamaRuntimeError
 

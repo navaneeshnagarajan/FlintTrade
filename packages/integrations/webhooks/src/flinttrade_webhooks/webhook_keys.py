@@ -55,7 +55,7 @@ def derive_webhook_dek(
     Returns:
         32-byte AES-256 key for AES-GCM-SIV.
     """
-    info_blob = f"{key_version}:{webhook_id}".encode("utf-8")
+    info_blob = f"{key_version}:{webhook_id}".encode()
     return HKDF(
         algorithm=hashes.SHA256(),
         length=32,
@@ -66,7 +66,7 @@ def derive_webhook_dek(
 
 def _aad(webhook_id: str, key_version: int) -> bytes:
     """Associated data binds ciphertext to (key_version, webhook_id) (Security H14)."""
-    return f"{key_version}:{webhook_id}".encode("utf-8")
+    return f"{key_version}:{webhook_id}".encode()
 
 
 def encrypt_webhook_secret(

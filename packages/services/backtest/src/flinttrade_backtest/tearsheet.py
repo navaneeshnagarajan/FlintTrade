@@ -192,8 +192,8 @@ def _stub_html(title: str, message: str) -> str:
 
 
 def generate_tearsheet(
-    returns: "pd.Series",
-    benchmark_returns: "pd.Series | None" = None,
+    returns: pd.Series,
+    benchmark_returns: pd.Series | None = None,
     title: str = "Strategy",
 ) -> str:
     """Generate a full QuantStats HTML tearsheet with FlintTrade branding.
@@ -237,7 +237,7 @@ def generate_tearsheet(
 
 
 def generate_snapshot(
-    returns: "pd.Series",
+    returns: pd.Series,
     title: str = "Strategy",
 ) -> str:
     """Generate a compact snapshot report as an HTML page.
@@ -299,7 +299,7 @@ def generate_snapshot(
 
 
 def compare_strategies(
-    strategy_returns: dict[str, "pd.Series"],
+    strategy_returns: dict[str, pd.Series],
 ) -> str:
     """Generate a multi-strategy comparison report as an HTML page.
 

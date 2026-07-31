@@ -194,7 +194,7 @@ class NSESession:
             self._client = None
             self._warmed = False
 
-    async def __aenter__(self) -> "NSESession":
+    async def __aenter__(self) -> NSESession:
         await self._ensure_client()
         return self
 

@@ -1711,7 +1711,7 @@ def _read_openalgo_from_workspace() -> dict[str, Any]:
         return {}
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Could not read workspace.json at %s: %s", path, exc)
@@ -5019,7 +5019,12 @@ def create_flask_app(
         if denied is not None:
             return denied
 
-        from .telegram_config import persist_telegram_config, read_telegram_config  # noqa: PLC0415
+        from .telegram_config import (  # noqa: PLC0415
+            TelegramConfigError,
+            persist_telegram_config,
+            read_telegram_config,
+            refusal_message,
+        )
 
         if request.method == "GET":
             return jsonify({"status": "success", "data": read_telegram_config()}), 200
@@ -5027,8 +5032,15 @@ def create_flask_app(
         payload = request.get_json(silent=True) or {}
         try:
             data = persist_telegram_config(payload)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except TelegramConfigError as refusal:
+            # The body is rendered from telegram_config's own refusal table, not
+            # from the exception. Catching the narrow type matters: a bare
+            # ``except ValueError`` also swallowed every ValueError raised
+            # underneath (a malformed workspace.json parses as a
+            # json.JSONDecodeError, which IS a ValueError) and answered 400 with
+            # that library's text. Those now fall through to the generic 500.
+            logger.warning("Rejected Telegram settings (%s)", refusal.code)
+            return jsonify({"status": "error", "message": refusal_message(refusal.code)}), 400
         except Exception as exc:  # noqa: BLE001 - never surface secret material
             logger.error("Failed to persist Telegram config (%s)", type(exc).__name__)
             return jsonify({"status": "error", "message": "Could not persist Telegram config"}), 500
@@ -6100,8 +6112,32 @@ class FlintTradeApp:
         finally:
             self._startup_rollback_in_progress = False
 
+    def _claim_start(self) -> None:
+        """Claim the process-wide start, rejecting a concurrent second caller.
+
+        Claimed *before* this call installs an owner ledger. A rejected caller
+        acquired nothing, so it must never reach the startup-rollback path: that
+        path releases the running runtime's owners and closes its OpenAlgo
+        client and audit logger, which would tear down a live backend because a
+        duplicate start was requested.
+
+        Raises:
+            RuntimeError: If another caller already claimed the start.
+        """
+        start_claim_lock = getattr(self, "_start_claim_lock", None)
+        if start_claim_lock is None:
+            start_claim_lock = threading.Lock()
+            self._start_claim_lock = start_claim_lock
+        with start_claim_lock:
+            if getattr(self, "_start_claimed", False):
+                raise RuntimeError("FlintTrade runtime already started")
+            self._start_claimed = True
+
     async def start(self) -> None:
         """Start transactionally and retain every unproved rollback owner."""
+        # Never before the claim: a rejected duplicate start must not replace
+        # the winning start's retained owner ledger with an empty one.
+        self._claim_start()
         ledger = _AcquiredOwnerLedger()
         self._startup_owner_ledger = ledger
         try:
@@ -6124,16 +6160,11 @@ class FlintTradeApp:
             raise
 
     async def _start_owned(self, startup_owners: _AcquiredOwnerLedger) -> None:
-        """Start all services and wait until stopped under an owner ledger."""
-        start_claim_lock = getattr(self, "_start_claim_lock", None)
-        if start_claim_lock is None:
-            start_claim_lock = threading.Lock()
-            self._start_claim_lock = start_claim_lock
-        with start_claim_lock:
-            if getattr(self, "_start_claimed", False):
-                raise RuntimeError("FlintTrade runtime already started")
-            self._start_claimed = True
+        """Start all services and wait until stopped under an owner ledger.
 
+        The process-wide start claim is taken by :meth:`start` before the owner
+        ledger exists, so this method always runs as the winning caller.
+        """
         if await self._wait_for_shutdown_if_started():
             return
 
@@ -7288,7 +7319,7 @@ class FlintTradeApp:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            setattr(backend_lease, "_recovery_owner", self)
+            backend_lease._recovery_owner = self
         retain_backend_instance_lease(backend_lease)
 
     def retry_recovery(self, *, timeout: float | None = None) -> None:
@@ -7434,7 +7465,7 @@ class _WSGIStartupRecovery:
         if callable(retain_owner):
             retain_owner(self)
         else:
-            setattr(self._backend_lease, "_recovery_owner", self)
+            self._backend_lease._recovery_owner = self
         retain_backend_instance_lease(self._backend_lease)
         _WSGI_STARTUP_RECOVERY = self
 

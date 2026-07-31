@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import metadata
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
@@ -133,7 +133,7 @@ def _expiry_from_token_payload(payload: Any) -> float:
     """Best-effort expiry parser for Groww token responses."""
     if not isinstance(payload, dict):
         return next_6am_ist_timestamp()
-    now = datetime.now(tz=timezone.utc).timestamp()
+    now = datetime.now(tz=UTC).timestamp()
     for key in ("expires_at", "expiry", "expiresAt", "expiryTime", "expiry_time"):
         value = payload.get(key)
         if value in (None, ""):
@@ -147,11 +147,11 @@ def _expiry_from_token_payload(payload: Any) -> float:
             numeric = float(text)
             return numeric / 1000 if numeric > 10_000_000_000 else numeric
         try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(text)
         except ValueError:
             continue
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return parsed.timestamp()
     expires_in = payload.get("expires_in") or payload.get("expiresIn")
     try:
@@ -233,8 +233,8 @@ class GrowwAdapter(BrokerAdapter):
         if totp:
             body: dict[str, Any] = {"key_type": "totp", "totp": totp}
         else:
-            timestamp = str(int(datetime.now(tz=timezone.utc).timestamp()))
-            checksum = hashlib.sha256(f"{api_secret}{timestamp}".encode("utf-8")).hexdigest()
+            timestamp = str(int(datetime.now(tz=UTC).timestamp()))
+            checksum = hashlib.sha256(f"{api_secret}{timestamp}".encode()).hexdigest()
             body = {
                 "key_type": "approval",
                 "checksum": checksum,
@@ -312,7 +312,7 @@ class GrowwAdapter(BrokerAdapter):
 
     async def logout(self, session: Session) -> None:
         session.extra.pop("transport", None)
-        return None
+        return
 
     async def place_order(self, session: Session, order: Order, *, _router_token: object | None = None) -> str:
         self._require_router_token(_router_token, _ROUTER_TOKEN)
@@ -505,7 +505,7 @@ class GrowwAdapter(BrokerAdapter):
         return out
 
     async def historical(self, session: Session, req: dict) -> Candles:
-        from flinttrade_core.models import Candles, OHLCV  # noqa: PLC0415
+        from flinttrade_core.models import OHLCV, Candles  # noqa: PLC0415
 
         symbol = str(req.get("symbol") or "")
         exchange = str(req.get("exchange") or "NSE")
@@ -615,7 +615,7 @@ class GrowwAdapter(BrokerAdapter):
             declare_unavailable_order_fields,
         )
 
-        generated_at = datetime.now(tz=timezone.utc)
+        generated_at = datetime.now(tz=UTC)
         local = EMPTY_LOCAL_STATE if self._local_state_provider is None else self._local_state_provider(session)
         try:
             broker_orders = list(

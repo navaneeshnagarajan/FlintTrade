@@ -40,7 +40,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -448,7 +448,7 @@ class NewsScheduler:
             poll_type=poll_type,
             articles_fetched=len(all_articles),
             new_articles=new_articles,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             sources=sources,
         )
 

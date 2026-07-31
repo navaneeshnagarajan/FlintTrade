@@ -99,6 +99,10 @@ export default function PublicRouteShell({
       cssVar("--particle-secondary", "#86efac"),
       cssVar("--particle-tertiary", "#38bdf8"),
     ],
+    // `cssVar` reads the live computed style, so the active theme is a real
+    // dependency that no static analysis can see. Dropping it would freeze the
+    // particle colours on whichever theme was active at first render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
     [activeThemeId],
   );
 

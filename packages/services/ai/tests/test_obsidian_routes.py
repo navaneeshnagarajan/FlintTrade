@@ -108,6 +108,20 @@ def test_config_roundtrip_persists_the_vault_path(workspace_client, tmp_path):
     assert status.get_json()["data"]["configured"] is True
 
 
+def test_config_accepts_a_home_relative_path(workspace_client, tmp_path, monkeypatch):
+    """``~/vault`` is validated as the vault will open it (ObsidianVault expands ~)."""
+    home = tmp_path / "home"
+    (home / "vault").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # Windows' expanduser source.
+
+    resp = workspace_client.post("/api/v1/ai/obsidian/config", json={"vault_path": "~/vault"})
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()["data"]["vault_path"] == "~/vault"
+    status = workspace_client.get("/api/v1/ai/obsidian/status")
+    assert status.get_json()["data"]["available"] is True
+
+
 def test_config_rejects_a_nonexistent_directory(workspace_client, tmp_path):
     resp = workspace_client.post(
         "/api/v1/ai/obsidian/config", json={"vault_path": str(tmp_path / "missing")}
@@ -144,3 +158,23 @@ def test_env_variable_overrides_the_stored_path(workspace_client, tmp_path, monk
         "/api/v1/ai/obsidian/config", json={"vault_path": str(stored)}
     )
     assert "overrides" in save.get_json()["message"]
+
+
+def test_config_rejects_an_unresolvable_home_path_without_raising(workspace_client, monkeypatch):
+    """An unresolvable ``~`` must answer 400, not escape as a 500.
+
+    ``Path.expanduser`` raises ``RuntimeError`` whenever the leading ``~``
+    cannot be resolved - ``~someuser`` for a user absent from the passwd
+    database, or any ``~`` at all when the process has no HOME. Both are POSIX
+    behaviours, so a Windows-only test pass cannot see them; this drives the
+    same branch by making the expansion a no-op, which is exactly what
+    ``posixpath.expanduser`` does in those cases.
+    """
+    monkeypatch.setattr("flinttrade_ai.obsidian_routes.os.path.expanduser", lambda value: value)
+
+    resp = workspace_client.post(
+        "/api/v1/ai/obsidian/config", json={"vault_path": "~nosuchuser/vault"}
+    )
+
+    assert resp.status_code == 400, resp.get_json()
+    assert resp.get_json()["message"] == "vault_path is not an existing directory"

@@ -28,7 +28,7 @@ import socket
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -43,6 +43,15 @@ _DISK_WARN_GB: float = 2.0
 _DISK_CRIT_GB: float = 0.5
 # Warn when open FD count exceeds this fraction of the rlimit
 _FD_WARN_FRACTION: float = 0.80
+
+_WINDOWS_HANDLE_WARN_CEILING: int = 10_000
+"""Handle count at which a Windows process is treated as fully utilised.
+
+Not an operating-system limit: Windows enforces no per-process descriptor rlimit,
+so there is nothing to read. A healthy Python service sits in the low thousands
+of kernel handles, so this is a leak heuristic - crossing 80 % of it means
+handles are accumulating, not that the process is near a hard boundary.
+"""
 # Thread count growth that triggers a warning (new threads vs baseline)
 _THREAD_GROWTH_WARN: int = 50
 
@@ -353,9 +362,16 @@ class HealthMonitor:
         )
 
     def check_file_descriptors(self) -> HealthCheck:
-        """Report open file descriptor count vs the process rlimit.
+        """Report open descriptor usage against the platform's limit.
 
         Warns at :data:`_FD_WARN_FRACTION` (80 %) of the soft limit.
+
+        What is being measured differs by platform, and the metric names do not
+        say so: on POSIX ``open_fds`` is the file-descriptor count and
+        ``soft_limit`` the real ``RLIMIT_NOFILE``, whereas on Windows there is no
+        per-process limit to read, so ``open_fds`` is the total kernel handle
+        count and ``soft_limit`` is :data:`_WINDOWS_HANDLE_WARN_CEILING`, a leak
+        heuristic. The keys are shared so the health payload keeps one shape.
 
         Returns:
             :class:`HealthCheck` with metrics ``open_fds``, ``soft_limit``,
@@ -365,15 +381,31 @@ class HealthMonitor:
             import psutil  # type: ignore[import]
 
             proc = psutil.Process()
-            open_fds = proc.num_fds() if hasattr(proc, "num_fds") else len(proc.open_files())
 
             try:
                 import resource  # Unix only
-
-                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
             except ImportError:
-                # Windows — psutil provides a rough count but no rlimit
-                soft, hard = 1024, 1024  # conservative estimate
+                # Windows. Two things differ, and they have to change together.
+                #
+                # 1. There is no num_fds, and the previous fallback was
+                #    len(proc.open_files()). That call walks the SYSTEM-WIDE
+                #    handle table and resolves every handle name: measured at
+                #    0.17-0.56s per call against 0.0000s for num_handles(). It
+                #    was slow enough to wedge a pytest worker, and this check is
+                #    the only open_files() caller in packages/.
+                # 2. num_handles() counts every kernel handle, not just files,
+                #    so the figure is an order of magnitude larger - a few
+                #    thousand on an idle process. Comparing it against the old
+                #    invented 1024 "rlimit" would report degraded permanently.
+                #
+                # Windows enforces no per-process descriptor limit at all, so
+                # there is no true rlimit to read. The ceiling below is an
+                # explicit leak heuristic and is reported as such.
+                open_fds = proc.num_handles() if hasattr(proc, "num_handles") else 0
+                soft = hard = _WINDOWS_HANDLE_WARN_CEILING
+            else:
+                open_fds = proc.num_fds() if hasattr(proc, "num_fds") else len(proc.open_files())
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 
             utilisation = (open_fds / soft) if soft > 0 else 0.0
             pct = round(utilisation * 100, 1)
