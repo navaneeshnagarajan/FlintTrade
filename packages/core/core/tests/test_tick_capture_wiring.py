@@ -23,7 +23,6 @@ import logging
 import os
 from pathlib import Path
 import threading
-import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -626,7 +625,12 @@ async def test_tick_storage_close_timeout_retains_owner_and_retries_truthfully()
 
         def close(self) -> None:
             close_started.set()
-            assert release_close.wait(2)
+            # Untimed on purpose. A bounded wait here would be a wall-clock
+            # assumption smuggled into the fixture: if the test coroutine were
+            # not scheduled before it expired, this worker would finish and set
+            # _done, failing the assertion below even though shutdown behaved
+            # correctly. The finally block always releases it.
+            release_close.wait()
             self.closed = True
 
     flask_app = Flask("bounded-tick-storage-shutdown")
@@ -652,17 +656,30 @@ async def test_tick_storage_close_timeout_retains_owner_and_retries_truthfully()
     app.version = "test"
     app._stop_event = asyncio.Event()
 
-    started = time.monotonic()
     with pytest.raises(RuntimeError, match="tick storage"):
         await app.stop()
 
-    assert time.monotonic() - started < 0.2
-    assert close_started.wait(1)
-    assert app._tick_storage is storage
-    assert app._orderflow_checkpoint_owner is checkpoint_owner
-    assert app._stop_event.is_set() is False
+    # The subject is that the close is BOUNDED, not that the machine is fast.
+    # This asserted `time.monotonic() - started < 0.2` against a 0.01s configured
+    # timeout, which is a wall-clock budget the product never promised: on a
+    # loaded runner the coroutine alone took 0.53s and the test failed 8 times in
+    # 10, while passing 8/8 idle. What actually proves the bound is that stop()
+    # returned while the close was still in progress - the worker blocks for up
+    # blocks until this test releases it, so a stop() that waited for it could
+    # not still see it running.
+    try:
+        assert close_started.wait(1)
+        assert storage.closed is False
+        assert app._tick_storage_close_worker is not None
+        assert not app._tick_storage_close_worker._done.is_set()
+        assert app._tick_storage is storage
+        assert app._orderflow_checkpoint_owner is checkpoint_owner
+        assert app._stop_event.is_set() is False
+    finally:
+        # Always, so a failing assertion above cannot strand the close worker on
+        # an untimed wait.
+        release_close.set()
 
-    release_close.set()
     await app.stop()
 
     assert storage.closed is True
@@ -1051,7 +1068,10 @@ def test_failed_recorder_completion_offloads_blocking_checkpoint_and_close() -> 
 
     def close_owned_storage() -> None:
         close_started.set()
-        assert release_close.wait(2)
+        # Untimed, like its sibling above: a bounded wait here is a wall-clock
+        # assumption in the fixture, and a stalled runner would fail it for a
+        # reason that has nothing to do with the behaviour under test.
+        release_close.wait()
         storage.close()
 
     worker = _BoundedTickStorageCloseWorker(
@@ -1068,7 +1088,6 @@ def test_failed_recorder_completion_offloads_blocking_checkpoint_and_close() -> 
         ORDERFLOW_AGGREGATOR=object(),
     )
 
-    started = time.monotonic()
     assert _handle_tick_recorder_completion(
         flask_app,
         recorder,
@@ -1077,11 +1096,17 @@ def test_failed_recorder_completion_offloads_blocking_checkpoint_and_close() -> 
         close_worker=worker,
     ) is True
 
-    assert time.monotonic() - started < 0.2
-    assert close_started.wait(1)
-    assert worker.wait(0.01) is None
-    assert owner["storage"] is storage
-    release_close.set()
+    try:
+        # `worker.wait(0.01) is None` already carries what the removed
+        # `time.monotonic() - started < 0.2` was reaching for - the close had not
+        # finished when the handler returned - and it cannot be defeated by a
+        # slow machine, because the worker is blocked on an event this test owns.
+        assert close_started.wait(1)
+        assert worker.wait(0.01) is None
+        assert owner["storage"] is storage
+    finally:
+        release_close.set()
+
     assert worker.wait(1) is True
     assert owner["storage"] is None
 
