@@ -13,9 +13,7 @@ regardless of run order.
 
 from __future__ import annotations
 
-import os
 import sys
-import tempfile
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -48,73 +46,14 @@ def _scratch_workspace():
     return module
 
 
-# DBs whose on-disk engine changed DuckDB→SQLite. A persistent test workspace
-# reused across the migration may still hold the legacy DuckDB file, which
-# open_sqlite cannot read. Remove these scratch files so the SQLite code
-# recreates them fresh. Only ever touches the throw-away pytest workspace.
-_MIGRATED_SCRATCH_DBS = ("activity.db", "security.db")
-
-
-def _clean_legacy_scratch_dbs(base: Path) -> None:
-    for name in _MIGRATED_SCRATCH_DBS:
-        for path in (base / name, base / f"{name}-wal", base / f"{name}-shm"):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                pass  # locked by a concurrent worker — that worker owns cleanup
-
-
-def _seed_test_master_password(base: Path) -> None:
-    # Master password no longer auto-generates (locked #13: getpass/fd only).
-    # This used to write the secret with a plain Path.write_text, which leaves
-    # mode 0644 on POSIX; the backend reads it through
-    # read_hardened_owner_owned_text and rejects anything broader than
-    # owner-only, so every app-building test in the worker failed naming a
-    # workspace that did contain the file.
-    _scratch_workspace().seed_master_password(base)
-
-
-def _isolate_workspace() -> None:
-    register = _scratch_workspace().register
-
-    # Under xdist, each worker MUST get its own workspace dir even when the
-    # controller already exported FLINTTRADE_WORKSPACE_DIR (workers inherit it).
-    # Otherwise all workers share one dir and collide on the still-DuckDB engine
-    # SandboxEngine / traffic / error logs ("file is being used by another
-    # process"). PYTEST_XDIST_WORKER is set in worker subprocesses (gw0, gw1, …)
-    # and absent in the controller / serial runs.
-    worker = os.environ.get("PYTEST_XDIST_WORKER")
-    existing = os.environ.get("FLINTTRADE_WORKSPACE_DIR")
-    if worker:
-        # mkdtemp, NOT a deterministic per-worker path: a stable directory is
-        # reused by every subsequent suite invocation, so encrypted stores
-        # (webhook_secrets.db) written under one run's cached master password
-        # poison later runs with InvalidTag failures. A fresh dir per run also
-        # mirrors core/core's conftest, which this override used to defeat.
-        # register(): this process created the directory, so this process removes
-        # it at session end. An operator-supplied `existing` is never registered.
-        base = register(tempfile.mkdtemp(prefix=f"flinttrade-pytest-{worker}-"))
-    elif existing:
-        _clean_legacy_scratch_dbs(Path(existing))
-        return
-    else:
-        base = register(tempfile.mkdtemp(prefix="flinttrade-pytest-main-"))
-    base.mkdir(parents=True, exist_ok=True)
-    os.environ["FLINTTRADE_WORKSPACE_DIR"] = str(base)
-    # Per-package runs (uv run pytest packages/core/data/tests …) resolve
-    # rootdir to THIS package, so the repo-root conftest's DUCKDB_PATH pin is
-    # above --confcutdir and never loads. Pin it here too so the operator's
-    # machine-local .env DUCKDB_PATH cannot make parallel workers contend on
-    # one real DuckDB file (the recurring trade-store flake). This is the
-    # DuckDB-heaviest package; mirrors the root + core/core pins.
-    os.environ["DUCKDB_PATH"] = str(base / "data" / "flint.duckdb")
-    _clean_legacy_scratch_dbs(base)
-    _seed_test_master_password(base)
-
-
-_isolate_workspace()
+# One workspace per process. A per-package run (uv run pytest
+# packages/core/data/tests …) resolves rootdir to THIS package, so the repo-root
+# conftest is above --confcutdir and never loads — this call is what mints,
+# seeds and env-pins the workspace then. In a full-suite run the root conftest
+# got there first and acquire_workspace() hands back the directory it already
+# minted, rather than this conftest minting a second one and quietly re-pointing
+# FLINTTRADE_WORKSPACE_DIR at it.
+_scratch_workspace().acquire_workspace()
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
