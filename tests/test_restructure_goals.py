@@ -16,6 +16,11 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
+#: Vercel rejects a configuration whose buildCommand or installCommand exceeds this,
+#: before the build starts and without emitting a build log.
+_VERCEL_COMMAND_MAX_CHARS = 256
+
+
 def test_github_workflows_do_not_reference_pre_restructure_paths() -> None:
     """CI must not call directories that commit 1 moved or archived."""
     forbidden = {
@@ -127,8 +132,8 @@ def test_site_vercel_config_uses_workspace_pnpm_lockfile() -> None:
     Vercel's build image ships its own pnpm - 10.28.0 when this was written - and
     does not honour the ``packageManager`` pin, because Corepack is not enabled
     there. pnpm will not fetch its own pin either: ``pnpm-workspace.yaml`` sets
-    ``managePackageManagerVersions: false`` deliberately. So both commands resolve
-    the pin from the root ``package.json`` themselves and hand it to
+    ``managePackageManagerVersions: false`` deliberately. So the deploy resolves
+    the pin from the root ``package.json`` itself and hands it to
     ``npx --package``, which runs that exact release instead of whatever ``pnpm``
     happens to sit on ``PATH``.
 
@@ -137,36 +142,78 @@ def test_site_vercel_config_uses_workspace_pnpm_lockfile() -> None:
     was never written for. Bypassing it would defeat ``--frozen-lockfile``.
 
     The pin is asserted to be *absent* as a literal - deriving it is the point, and
-    a second copy here would be one more place to forget on the next bump.
+    a second copy would be one more place to forget on the next bump.
+
+    Both commands delegate to scripts because Vercel caps ``buildCommand`` and
+    ``installCommand`` at 256 characters and rejects the whole configuration
+    without ever starting a build - which it did, silently, with no build log to
+    read.
     """
-    vercel_config = json.loads((ROOT / "packages" / "apps" / "site" / "vercel.json").read_text(encoding="utf-8"))
+    site = ROOT / "packages" / "apps" / "site"
+    vercel_config = json.loads((site / "vercel.json").read_text(encoding="utf-8"))
 
     install_command = vercel_config.get("installCommand", "")
     build_command = vercel_config.get("buildCommand", "")
 
-    assert "pnpm install --frozen-lockfile" in install_command
-    assert "pnpm run build" in build_command
-    assert re.search(r"(^|[;&|]\s*)npm(?:\s|$)", install_command) is None
-    assert re.search(r"(^|[;&|]\s*)npm(?:\s|$)", build_command) is None
+    for name, command in (("installCommand", install_command), ("buildCommand", build_command)):
+        assert len(command) <= _VERCEL_COMMAND_MAX_CHARS, (
+            f"vercel.json {name} is {len(command)} characters; Vercel's limit is "
+            f"{_VERCEL_COMMAND_MAX_CHARS}. Over it, the deployment is rejected before the build "
+            "starts and produces no build log at all. Move the logic into a script under "
+            "packages/apps/site/scripts/ and call that."
+        )
+
+    scripts = {
+        "installCommand": site / "scripts" / "vercel-install.sh",
+        "buildCommand": site / "scripts" / "vercel-build.sh",
+    }
+    for name, script in scripts.items():
+        assert script.is_file(), f"vercel.json {name} delegates to {script.name}, which is missing."
+        command = install_command if name == "installCommand" else build_command
+        assert script.name in command, f"vercel.json {name} must invoke {script.name}."
+
+    runner = site / "scripts" / "vercel-pnpm.sh"
+    assert runner.is_file(), "packages/apps/site/scripts/vercel-pnpm.sh is missing."
+    runner_body = runner.read_text(encoding="utf-8")
+    install_body = scripts["installCommand"].read_text(encoding="utf-8")
+    build_body = scripts["buildCommand"].read_text(encoding="utf-8")
+
+    assert "install --frozen-lockfile" in install_body
+    assert "run build" in build_body
+    for name, body in (("vercel-install.sh", install_body), ("vercel-build.sh", build_body)):
+        assert "vercel-pnpm.sh" in body, (
+            f"{name} must go through vercel-pnpm.sh, or Vercel's own stale pnpm runs the command. "
+            "`pnpm run` trips the same strict-version gate as `pnpm install`."
+        )
 
     pinned_version = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["packageManager"]
     pinned_version = pinned_version.removeprefix("pnpm@").split("+")[0]
-    for name, command in (("installCommand", install_command), ("buildCommand", build_command)):
-        assert pinned_version not in command, (
-            f"vercel.json {name} hardcodes pnpm {pinned_version}. Derive it from the root "
-            "package.json packageManager field instead - the pin has one home."
+
+    assert "packageManager" in runner_body, (
+        "vercel-pnpm.sh must read the pnpm pin out of the root package.json packageManager field."
+    )
+    assert 'npx --yes --package "$pin" --' in runner_body, (
+        "vercel-pnpm.sh must invoke the resolved pin via npx --package, which runs that exact "
+        "release rather than the pnpm on PATH."
+    )
+
+    for name, body in (
+        ("vercel.json installCommand", install_command),
+        ("vercel.json buildCommand", build_command),
+        ("vercel-pnpm.sh", runner_body),
+        ("vercel-install.sh", install_body),
+        ("vercel-build.sh", build_body),
+    ):
+        assert pinned_version not in body, (
+            f"{name} hardcodes pnpm {pinned_version}. Derive it from the root package.json "
+            "packageManager field instead - the pin has one home."
         )
-        assert "packageManager" in command, (
-            f"vercel.json {name} must read the pnpm pin out of the root package.json "
-            "packageManager field, or Vercel's own stale pnpm runs the command."
-        )
-        assert 'npx --yes --package "$PNPM_PIN" --' in command, (
-            f"vercel.json {name} must invoke the resolved pin via npx --package, which runs that "
-            "exact release rather than the pnpm on PATH."
+        assert re.search(r"(^|[;&|]\s*)npm(?:\s|$)", body) is None, (
+            f"{name} calls npm directly; the workspace is pnpm-managed."
         )
         for bypass in ("package-manager-strict", "COREPACK_ENABLE_STRICT"):
-            assert bypass not in command, (
-                f"vercel.json {name} disables the pnpm version check via {bypass}. That lets a "
+            assert bypass not in body, (
+                f"{name} disables the pnpm version check via {bypass}. That lets a "
                 "wrong pnpm resolve the lockfile differently - the exact failure --frozen-lockfile exists to stop."
             )
 
