@@ -437,26 +437,37 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-      - name: Enumerate a known process group the way the anchor does
+      # `setsid` is load-bearing: the anchor is spawned detached by Node, so it is
+      # a process-group leader and `$$` really is its pgid. A plain `sh -c`
+      # inherits the runner's group instead, which is why the first version of
+      # this step matched nothing on either image and proved nothing.
+      - name: Enumerate a leader-owned process group the way the anchor does
         run: |
           echo "--- ps identity ---"
           /usr/bin/ps --version 2>&1 | head -2 || true
-          /bin/sh -c '
-            sleep 5 &
-            child=$!
-            echo "anchor=$$ child=$child"
-            echo "--- three raw rows, control characters shown ---"
-            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
-              | head -3 | cut -c1-48 | cat -A
+          setsid /bin/sh -c '
+            # An orphan in the group: the intermediate leader exits at once, so
+            # the sleep is reparented while staying in the anchor group. This is
+            # the exact shape of the one containment test that fails on 24.04.
+            /bin/sh -c "sleep 8 &" &
+            wait
+            echo "anchor=$$ own_pgid=$(/usr/bin/ps -o pgid= -p $$ | tr -d " ")"
             echo "--- rows the anchor regex selects ---"
             /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
-              | /usr/bin/grep -E "^ *[0-9]+ +[0-9]+ +$$ " | cut -c1-48 | cat -A
-            echo "--- selected row count (expect at least 2: this sh and its sleep) ---"
+              | /usr/bin/grep -E "^ *[0-9]+ +[0-9]+ +$$ " | cut -c1-56 | cat -A
+            echo "--- selected row count (expect >= 2: this sh and the orphaned sleep) ---"
             /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
               | /usr/bin/grep -cE "^ *[0-9]+ +[0-9]+ +$$ "
-            kill "$child" 2>/dev/null
-            wait 2>/dev/null
-          ' || true
+            echo "--- every row mentioning sleep, whatever its group ---"
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -E "sleep 8" | /usr/bin/grep -v grep | cut -c1-56 | cat -A
+            echo "--- does a group-directed SIGTERM from inside the group kill it? ---"
+            /bin/kill -TERM -$$ 2>/dev/null || echo "group kill returned non-zero"
+            sleep 1
+            /usr/bin/ps axeww -o pid= -o ppid= -o pgid= -o state= -o command= 2>/dev/null \
+              | /usr/bin/grep -E "sleep 8" | /usr/bin/grep -v grep | cut -c1-56 | cat -A \
+              || echo "SURVIVOR COUNT 0 (group SIGTERM worked)"
+          ' </dev/null || true
 
   # Electron owns desktop process supervision, renderer isolation and native
   # lifecycle. Exercise the complete Electron suite and a hardened Linux
