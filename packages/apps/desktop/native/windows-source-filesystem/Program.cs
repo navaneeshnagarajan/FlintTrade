@@ -145,7 +145,7 @@ internal static class Program
 
     private static int RecoverJournal(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string target = ChildPath(parent, options.Require("target"));
         ReconcileJournalTransaction(parent, target);
         EmitSuccess("journal-recovered");
@@ -171,7 +171,7 @@ internal static class Program
 
     private static int RenameDirectory(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string source = ChildPath(parent, options.Require("source"));
         string destination = ChildPath(parent, options.Require("destination"));
         string expected = RequireIdentity(options.Require("expected"));
@@ -198,7 +198,7 @@ internal static class Program
 
     private static int CommitJournal(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string temporary = ChildPath(parent, options.Require("temporary"));
         string target = ChildPath(parent, options.Require("target"));
         ReconcileJournalTransaction(parent, target);
@@ -286,7 +286,7 @@ internal static class Program
 
     private static int RemoveJournal(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string target = ChildPath(parent, options.Require("target"));
         ReconcileJournalTransaction(parent, target);
         string previous = ChildPath(parent, Path.GetFileName(target) + ".previous");
@@ -332,7 +332,7 @@ internal static class Program
 
     private static int QuarantineDirectory(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string target = ChildPath(parent, options.Require("target"));
         string quarantine = ChildPath(parent, options.Require("quarantine"));
         RequireManagedQuarantineName(Path.GetFileName(quarantine));
@@ -378,7 +378,7 @@ internal static class Program
 
     private static int RemoveQuarantinedDirectory(Options options)
     {
-        string parent = RequireTrustedParent(options.Require("parent"));
+        string parent = RequireCanonicalParentDirectory(options.Require("parent"));
         string quarantine = ChildPath(parent, options.Require("quarantine"));
         RequireManagedQuarantineName(Path.GetFileName(quarantine));
         string expected = RequireIdentity(options.Require("expected"));
@@ -570,7 +570,7 @@ internal static class Program
 
     private static void ReconcileJournalTransaction(string suppliedParent, string suppliedTarget)
     {
-        string parent = RequireTrustedParent(suppliedParent);
+        string parent = RequireCanonicalParentDirectory(suppliedParent);
         string target = NormaliseAbsolutePath(suppliedTarget);
         string targetName = Path.GetFileName(target);
         if (!String.Equals(target, ChildPath(parent, targetName), StringComparison.OrdinalIgnoreCase))
@@ -765,7 +765,7 @@ internal static class Program
         RequireAbsent(path);
     }
 
-    private static string RequireTrustedParent(string supplied)
+    private static string RequireCanonicalParentDirectory(string supplied)
     {
         string parent = NormaliseAbsolutePath(supplied);
         using (PinnedEntry entry = RequirePinned(parent, EntryKind.Directory))

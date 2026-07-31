@@ -101,7 +101,18 @@ def get_session(session_id: str) -> tuple[Any, int]:
 
 
 def _derived_import_id(surface: str, messages: list[dict[str, Any]]) -> str:
-    """Deterministic session id for imports without one (idempotent re-import)."""
+    """Deterministic session id for imports without one (idempotent re-import).
+
+    The digest is a content address, not a security or integrity digest — it
+    exists so re-importing the same conversation lands on the same row. It
+    stays SHA-1 deliberately, unlike the store's message ids (which moved to
+    SHA-256 with a migration): this value becomes the ``sessions`` primary key
+    that ``messages.session_id`` references, and it cannot be recomputed from
+    stored rows afterwards (the derivation covers the submitted payload's
+    order, including messages the store then skipped). Changing the algorithm
+    would therefore fork every already-imported conversation into a duplicate
+    on the next re-import rather than being idempotent.
+    """
     digest = hashlib.sha1()
     digest.update(surface.encode())
     for message in messages:
@@ -226,8 +237,17 @@ def import_session() -> tuple[Any, int]:
     title = title_raw.strip() if isinstance(title_raw, str) and title_raw.strip() else None
     try:
         store.record_exchange(session_id, surface, prepared, title=title)
-    except ValueError as exc:
-        return jsonify({"status": "error", "message": str(exc)}), 400
+    except ValueError:
+        # The store rejects a blank session id or an unknown surface, and both
+        # are already refused above — so this is a defect, not caller guidance.
+        # The detail goes to the log; the caller gets the rule it broke.
+        logger.warning("AI session import refused by the store (surface=%s)", surface, exc_info=True)
+        return (
+            jsonify(
+                {"status": "error", "message": "Import rejected — session id and surface must be valid"}
+            ),
+            400,
+        )
     if store.get_session(session_id) is None:
         # Every message was skipped (blank content / unknown roles) — nothing stored.
         return jsonify({"status": "error", "message": "messages contained no importable entries"}), 400

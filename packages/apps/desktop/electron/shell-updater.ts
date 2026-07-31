@@ -3,8 +3,19 @@ import type { ShellAttestationVerifier } from "./shell-attestation";
 
 const CHECKSUM_ASSET_NAME = "SHA256SUMS.txt";
 const RELEASE_DOWNLOAD_PREFIX = "/navaneeshnagarajan/FlintTrade/releases/download/";
-const SEMVER_PATTERN =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+// Semantic versions are split on their literal delimiters and each piece is
+// matched with an unambiguous pattern, rather than by one all-in-one semver
+// regex. The published semver.org expression spells a prerelease identifier as
+// `[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*`, which can match a run of hyphens in as
+// many ways as the run is long; chained across dot-separated identifiers that
+// is exponential. A release tag of "0.0.0-0." plus twenty-eight "--." groups —
+// under a hundred characters — took 110 seconds to reject, and every further
+// pair of groups multiplied that by four. Every pattern below is anchored, and
+// none of them can match an input in more than one way, so parsing is linear in
+// the length of the tag.
+const SEMVER_CORE_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const DOT_SEPARATED_IDENTIFIERS_PATTERN = /^[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$/;
+const DIGITS_ONLY_PATTERN = /^\d+$/;
 
 type ShellUpdateState = ReturnType<typeof createUpdateState>;
 
@@ -80,14 +91,46 @@ interface CheckedRelease {
   semver: Semver;
 }
 
-function parseSemver(value: string): Semver | null {
-  const match = SEMVER_PATTERN.exec(value);
+/**
+ * Report whether one dot-separated prerelease identifier is well formed.
+ *
+ * The caller has already confined the identifier to `[0-9A-Za-z-]+`, so only
+ * the numeric rule is left: an all-digit identifier carries no leading zero.
+ * Anything holding a letter or a hyphen is an alphanumeric identifier and is
+ * accepted as it stands.
+ */
+function validPrereleaseIdentifier(identifier: string): boolean {
+  if (!DIGITS_ONLY_PATTERN.test(identifier)) return true;
+  return identifier === "0" || !identifier.startsWith("0");
+}
+
+/**
+ * Parse a semantic version into its comparable parts.
+ *
+ * Returns `null` for anything that is not a valid semantic version. Parsing is
+ * linear in the length of `value`: build metadata and the prerelease are cut
+ * off at their literal delimiters before any pattern is applied.
+ */
+export function parseSemver(value: string): Semver | null {
+  const buildStart = value.indexOf("+");
+  const withoutBuild = buildStart < 0 ? value : value.slice(0, buildStart);
+  if (buildStart >= 0 && !DOT_SEPARATED_IDENTIFIERS_PATTERN.test(value.slice(buildStart + 1))) return null;
+  const prereleaseStart = withoutBuild.indexOf("-");
+  const core = prereleaseStart < 0 ? withoutBuild : withoutBuild.slice(0, prereleaseStart);
+  const match = SEMVER_CORE_PATTERN.exec(core);
   if (!match) return null;
+  let prerelease: string[] = [];
+  if (prereleaseStart >= 0) {
+    const identifiers = withoutBuild.slice(prereleaseStart + 1);
+    if (!DOT_SEPARATED_IDENTIFIERS_PATTERN.test(identifiers)) return null;
+    prerelease = identifiers.split(".");
+    if (!prerelease.every(validPrereleaseIdentifier)) return null;
+  }
   return {
     major: match[1]!,
     minor: match[2]!,
     patch: match[3]!,
-    prerelease: match[4]?.split(".") ?? [],
+    prerelease,
     version: value,
   };
 }
@@ -112,8 +155,8 @@ function compareSemver(left: Semver, right: Semver): number {
     const rightPart = right.prerelease[index];
     if (leftPart === undefined || rightPart === undefined) return leftPart === undefined ? -1 : 1;
     if (leftPart === rightPart) continue;
-    const leftNumeric = /^\d+$/.test(leftPart);
-    const rightNumeric = /^\d+$/.test(rightPart);
+    const leftNumeric = DIGITS_ONLY_PATTERN.test(leftPart);
+    const rightNumeric = DIGITS_ONLY_PATTERN.test(rightPart);
     if (leftNumeric && rightNumeric) {
       return compareNumericIdentifier(leftPart, rightPart);
     }

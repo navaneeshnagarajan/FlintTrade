@@ -5019,7 +5019,12 @@ def create_flask_app(
         if denied is not None:
             return denied
 
-        from .telegram_config import persist_telegram_config, read_telegram_config  # noqa: PLC0415
+        from .telegram_config import (  # noqa: PLC0415
+            TelegramConfigError,
+            persist_telegram_config,
+            read_telegram_config,
+            refusal_message,
+        )
 
         if request.method == "GET":
             return jsonify({"status": "success", "data": read_telegram_config()}), 200
@@ -5027,8 +5032,15 @@ def create_flask_app(
         payload = request.get_json(silent=True) or {}
         try:
             data = persist_telegram_config(payload)
-        except ValueError as exc:
-            return jsonify({"status": "error", "message": str(exc)}), 400
+        except TelegramConfigError as refusal:
+            # The body is rendered from telegram_config's own refusal table, not
+            # from the exception. Catching the narrow type matters: a bare
+            # ``except ValueError`` also swallowed every ValueError raised
+            # underneath (a malformed workspace.json parses as a
+            # json.JSONDecodeError, which IS a ValueError) and answered 400 with
+            # that library's text. Those now fall through to the generic 500.
+            logger.warning("Rejected Telegram settings (%s)", refusal.code)
+            return jsonify({"status": "error", "message": refusal_message(refusal.code)}), 400
         except Exception as exc:  # noqa: BLE001 - never surface secret material
             logger.error("Failed to persist Telegram config (%s)", type(exc).__name__)
             return jsonify({"status": "error", "message": "Could not persist Telegram config"}), 500

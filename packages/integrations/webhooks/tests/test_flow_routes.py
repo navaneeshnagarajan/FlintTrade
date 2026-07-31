@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 import pytest
 from flask import Flask
 
 import flinttrade_webhooks.flow_routes as mod
-from flinttrade_webhooks.flow_store import FlowFileStore, FlowStoreError
+from flinttrade_webhooks.flow_store import (
+    REASON_INVALID_EDGE,
+    REASON_INVALID_NODE,
+    REASON_TOO_LARGE,
+    REJECTION_MESSAGES,
+    FlowFileStore,
+    FlowStoreError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -181,6 +190,37 @@ def test_store_rejects_traversal_ids_directly(store):
         store.delete_flow(".")
 
 
+def test_resolved_path_is_a_direct_child_of_base_dir(store):
+    """``_path_for`` returns an absolute, normalised path inside ``base_dir``.
+
+    The containment assertion is the store's second traversal guard, below
+    the id allowlist: whatever an accepted id produces must sit directly in
+    the flows directory, never a sibling or a descendant of one.
+    """
+    path = store._path_for("flow_ok")
+
+    assert path.is_absolute()
+    assert path.name == "flow_ok.json"
+    assert str(path.parent) == os.path.abspath(store.base_dir)
+
+
+def test_relative_base_dir_still_resolves(monkeypatch, tmp_path):
+    """A relative ``base_dir`` survives containment — it is absolutised first.
+
+    A lexical prefix check against a relative root would reject every id
+    (``"flows/x.json"`` normalises away the ``"./"`` the root still carries),
+    so the store absolutises both sides before comparing.
+    """
+    monkeypatch.chdir(tmp_path)
+    store = FlowFileStore(Path("flows"))
+
+    store.save_flow("flow_rel", _workflow("flow_rel"))
+
+    assert (tmp_path / "flows" / "flow_rel.json").is_file()
+    assert store.get_flow("flow_rel") is not None
+    assert store.delete_flow("flow_rel") is True
+
+
 def test_trailing_newline_id_rejected_by_routes_and_store(client, store):
     """"abc\\n" must fail the guard everywhere — ``match`` + ``$`` would pass it.
 
@@ -239,6 +279,23 @@ def test_size_cap_512_kib(client, store):
     assert resp.status_code == 400
     assert "512" in resp.get_json()["message"]
     assert not (store.base_dir / f"{fid}.json").exists()
+
+
+def test_rejection_bodies_are_the_fixed_table_entries(client):
+    """400 messages are the mapped constants, never the exception's own text.
+
+    The route logs the exception and answers with the string its rejection
+    code maps to, so no server-side detail can ride out in a response body.
+    """
+    fid = "flow_1"
+    resp = client.put(f"/api/v1/flows/{fid}", json=_workflow(fid, nodes=[{"data": {}}], edges=[]))
+    assert resp.get_json()["message"] == REJECTION_MESSAGES[REASON_INVALID_NODE]
+
+    resp = client.put(f"/api/v1/flows/{fid}", json=_workflow(fid, edges=[{"source": "n1"}]))
+    assert resp.get_json()["message"] == REJECTION_MESSAGES[REASON_INVALID_EDGE]
+
+    resp = client.put("/api/v1/flows/flow_big", json=_workflow("flow_big", notes="x" * (512 * 1024)))
+    assert resp.get_json()["message"] == REJECTION_MESSAGES[REASON_TOO_LARGE]
 
 
 # ---------------------------------------------------------------------------

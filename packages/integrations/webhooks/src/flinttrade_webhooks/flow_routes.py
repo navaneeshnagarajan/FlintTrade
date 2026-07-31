@@ -15,7 +15,9 @@ DELETE /<id>   — delete → 200 / 404
 
 Response conventions match the rest of the API: ``{"status": "success",
 "data": ...}`` / ``{"status": "error", "message": "..."}``; HTTP 503 when the
-flow store has not been initialised.
+flow store has not been initialised. Every rejection message comes from
+``flow_store.REJECTION_MESSAGES`` — a closed set of fixed strings selected by
+the rejection's code — so exception text is logged, never returned.
 """
 
 from __future__ import annotations
@@ -27,7 +29,16 @@ from typing import Any
 from flask import Blueprint, Response, jsonify, request
 
 from .flow_builder import validate_flow_graph
-from .flow_store import FLOW_ID_RE, FlowFileStore, FlowStoreError
+from .flow_store import (
+    FLOW_ID_RE,
+    GENERIC_REJECTION_MESSAGE,
+    REASON_INVALID_EDGE,
+    REASON_INVALID_ID,
+    REASON_INVALID_NODE,
+    REJECTION_MESSAGES,
+    FlowFileStore,
+    FlowStoreError,
+)
 
 logger = logging.getLogger("flinttrade.integration.flow_routes")
 
@@ -56,7 +67,7 @@ def _err(message: str, code: int) -> tuple[Response, int]:
     return jsonify({"status": "error", "message": message}), code
 
 
-_INVALID_ID_MESSAGE = "Invalid flow id — use 1-64 characters from letters, digits, underscore, or hyphen"
+_INVALID_ID_MESSAGE = REJECTION_MESSAGES[REASON_INVALID_ID]
 
 
 def _graph_from_workflow(
@@ -72,7 +83,7 @@ def _graph_from_workflow(
     graph_nodes: list[dict[str, Any]] = []
     for node in nodes:
         if not isinstance(node, dict) or not isinstance(node.get("id"), str):
-            raise FlowStoreError("Each node must be an object with a string id")
+            raise FlowStoreError(REASON_INVALID_NODE)
         data = node.get("data")
         node_type = data.get("nodeType") if isinstance(data, dict) else None
         graph_nodes.append({"id": node["id"], "node_type": node_type if isinstance(node_type, str) else ""})
@@ -83,7 +94,7 @@ def _graph_from_workflow(
             or not isinstance(edge.get("source"), str)
             or not isinstance(edge.get("target"), str)
         ):
-            raise FlowStoreError("Each edge must be an object with string source and target")
+            raise FlowStoreError(REASON_INVALID_EDGE)
         graph_edges.append({"source": edge["source"], "target": edge["target"]})
     return graph_nodes, graph_edges
 
@@ -134,7 +145,10 @@ def put_flow(flow_id: str) -> tuple[Response, int]:
         graph_nodes, graph_edges = _graph_from_workflow(nodes, edges)
         saved = store.save_flow(flow_id, body)
     except FlowStoreError as exc:
-        return _err(str(exc), 400)
+        # Log the exception here; answer with the fixed message its rejection
+        # code maps to, never with the exception's own text.
+        logger.warning("Rejected flow %s: %s", flow_id, exc)
+        return _err(REJECTION_MESSAGES.get(exc.reason, GENERIC_REJECTION_MESSAGE), 400)
     issues = validate_flow_graph(graph_nodes, graph_edges)
     return _ok({"flow": saved, "validation": [asdict(issue) for issue in issues]})
 

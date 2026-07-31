@@ -27,7 +27,9 @@ DRAFTS_DIRNAME = "skill_drafts"
 SKILLS_DIRNAME = "skills"
 
 # Slug-only names: file operations on these can never traverse paths.
-SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,80}$")
+# Matched with ``fullmatch`` rather than a ``$``-anchored ``match`` — ``$`` also
+# matches just before a trailing newline, so ``match`` admitted "some-name\n".
+SLUG_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,80}")
 
 
 def drafts_dir(workspace: Path) -> Path:
@@ -40,7 +42,37 @@ def skills_dir(workspace: Path) -> Path:
 
 def is_valid_slug(name: str) -> bool:
     """True for a safe, slug-only skill name."""
-    return bool(SLUG_PATTERN.match(name or ""))
+    return bool(SLUG_PATTERN.fullmatch(name or ""))
+
+
+def _existing_draft(workspace: Path, name: str) -> Path | None:
+    """Return the draft file called ``name``, or ``None`` when there is none.
+
+    The path is picked out of a listing of the drafts directory rather than
+    built by joining the caller's string onto it, so a draft is addressable
+    only when it is already one of the files in that directory. Containment is
+    therefore a property of how the path is obtained, not an assertion about a
+    string. :func:`is_valid_slug` still rejects non-slug names up front.
+
+    Args:
+        workspace: The workspace directory (``workspace_dir()``).
+        name: Requested draft name (must be a slug).
+
+    Returns:
+        The draft's path, or ``None`` when the name is invalid or unknown.
+    """
+    if not is_valid_slug(name):
+        return None
+    directory = drafts_dir(workspace)
+    if not directory.is_dir():
+        return None
+    filename = f"{name}.md"
+    match = next((path for path in directory.glob("*.md") if path.name == filename), None)
+    # glob() yields directories too, and a directory called "<slug>.md" would
+    # otherwise be returned as a draft: read_text() then raises IsADirectoryError
+    # on POSIX and PermissionError on Windows, and the routes catch neither, so a
+    # documented 404 becomes an unhandled 500.
+    return match if match is not None and match.is_file() else None
 
 
 def _render_list(title: str, items: list[str]) -> str:
@@ -149,10 +181,8 @@ def list_drafts(workspace: Path) -> list[dict[str, Any]]:
 
 def read_draft(workspace: Path, name: str) -> str | None:
     """Full markdown of one draft, or None."""
-    if not is_valid_slug(name):
-        return None
-    path = drafts_dir(workspace) / f"{name}.md"
-    if not path.is_file():
+    path = _existing_draft(workspace, name)
+    if path is None:
         return None
     return path.read_text(encoding="utf-8")
 
@@ -166,14 +196,16 @@ def approve_draft(workspace: Path, name: str) -> Path:
     """
     if not is_valid_slug(name):
         raise ValueError("invalid skill name")
-    source = drafts_dir(workspace) / f"{name}.md"
-    if not source.is_file():
+    source = _existing_draft(workspace, name)
+    if source is None:
         raise FileNotFoundError(name)
     content = source.read_text(encoding="utf-8")
     content = content.replace("status: draft", "status: approved", 1)
     target_dir = skills_dir(workspace)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"{name}.md"
+    # Named after the draft file itself, so the approved copy can only ever
+    # land beside the other skills under the name the drafts directory listed.
+    target = target_dir / source.name
     target.write_text(content, encoding="utf-8")
     source.unlink()
     logger.info("Skill draft approved: %s", name)
@@ -182,10 +214,8 @@ def approve_draft(workspace: Path, name: str) -> Path:
 
 def reject_draft(workspace: Path, name: str) -> bool:
     """Delete a draft. Returns True when it existed."""
-    if not is_valid_slug(name):
-        return False
-    path = drafts_dir(workspace) / f"{name}.md"
-    if not path.is_file():
+    path = _existing_draft(workspace, name)
+    if path is None:
         return False
     path.unlink()
     logger.info("Skill draft rejected: %s", name)

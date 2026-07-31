@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createShellUpdater, shellInstallerAssetName, type ShellRelease } from "./shell-updater";
+import { createShellUpdater, parseSemver, shellInstallerAssetName, type ShellRelease } from "./shell-updater";
 import { createUpdateState } from "./state";
 
 function asset(tag: string, name: string, overrides: Partial<{ digest: string | null; url: string }> = {}) {
@@ -89,6 +89,68 @@ function fixture(input: Partial<{
     updater,
   };
 }
+
+// A release tag the GitHub API could hand the updater: a version starting
+// "0.0.0-0." followed by many "--." groups. Under the published semver.org
+// regex each "--" group matches two ways, so the cost quadruples per pair —
+// twenty-eight groups took 110 seconds for a single rejection. Parsing must be
+// linear, so a thousand rejections of thirty groups take single-digit
+// milliseconds.
+const HOSTILE_PRERELEASE_VERSION = `0.0.0-0.${"--.".repeat(30)}`;
+
+describe("Electron shell semantic version parsing", () => {
+  it("rejects a hostile prerelease tag in linear time", () => {
+    const started = performance.now();
+    let rejections = 0;
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      if (parseSemver(HOSTILE_PRERELEASE_VERSION) === null) rejections += 1;
+    }
+    const elapsedMs = performance.now() - started;
+
+    expect(rejections).toBe(1_000);
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
+  it("ignores a release whose tag carries that prerelease without stalling the check", async () => {
+    const hostile = release(HOSTILE_PRERELEASE_VERSION);
+    const test = fixture({ releases: [hostile, release("0.6.0-beta.14")] });
+
+    await expect(test.updater.check()).resolves.toMatchObject({
+      status: "available",
+      version: "0.6.0-beta.14",
+    });
+  });
+
+  it("keeps the semantic versions the release policy depends on", () => {
+    expect(parseSemver("1.2.3")?.prerelease).toEqual([]);
+    expect(parseSemver("0.6.0-beta.13")?.prerelease).toEqual(["beta", "13"]);
+    expect(parseSemver("1.2.3-x-y-z.--")?.prerelease).toEqual(["x-y-z", "--"]);
+    expect(parseSemver("1.2.3-0.3.7+build.11.e0f985a")).toMatchObject({
+      major: "1",
+      prerelease: ["0", "3", "7"],
+      version: "1.2.3-0.3.7+build.11.e0f985a",
+    });
+    expect(parseSemver("1.2.3-0a")?.prerelease).toEqual(["0a"]);
+  });
+
+  it("rejects the malformed versions the old expression rejected", () => {
+    for (const value of [
+      "",
+      "1.2",
+      "v1.2.3",
+      "01.2.3",
+      "1.2.3-",
+      "1.2.3+",
+      "1.2.3-01",
+      "1.2.3-alpha..1",
+      "1.2.3-alpha_1",
+      "1.2.3+build+more",
+      "1.2.3 ",
+    ]) {
+      expect(parseSemver(value)).toBeNull();
+    }
+  });
+});
 
 describe("Electron shell release policy", () => {
   it("uses the four canonical physical installer names", () => {

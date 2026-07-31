@@ -35,6 +35,34 @@ _VALID_SURFACES = {"advisor", "tutor", "agent", "saved-chat"}
 _TITLE_MAX_CHARS = 120
 _DEFAULT_MAX_SESSIONS = 500
 
+# Content-hash message ids. This digest is a dedup key — "the client replayed a
+# message it already sent" — not a credential digest and not an integrity check
+# against an adversary: the only writer is the operator's own terminal. It is
+# still SHA-256 rather than SHA-1, because nothing here wanted SHA-1's
+# properties in the first place. Truncated to 20 hex characters (80 bits): an
+# accidental collision would merge two distinct messages, and 80 bits is orders
+# of magnitude beyond what a store capped at a few hundred sessions can reach.
+_CONTENT_ID_PREFIX = "h-"
+_CONTENT_ID_HEX_CHARS = 20
+# Bumped when a stored shape changes; tracked in SQLite's ``user_version``.
+# 1: content-hash message ids re-keyed from SHA-1 onto SHA-256.
+_SCHEMA_VERSION = 1
+
+
+def _content_message_id(session_id: str, role: str, content: str) -> str:
+    """Derive the deterministic id for a message the client did not name.
+
+    Args:
+        session_id: The owning session's id.
+        role: ``user`` or ``assistant``.
+        content: The message text.
+
+    Returns:
+        The ``h-``-prefixed content-hash id.
+    """
+    digest = hashlib.sha256(f"{session_id}:{role}:{content}".encode()).hexdigest()
+    return f"{_CONTENT_ID_PREFIX}{digest[:_CONTENT_ID_HEX_CHARS]}"
+
 
 def _locked(method: Callable[..., _T]) -> Callable[..., _T]:
     @functools.wraps(method)
@@ -106,6 +134,49 @@ class AiSessionStore:
         for statement in _SCHEMA_STATEMENTS:
             self._conn.execute(statement)
         self._conn.commit()
+        self._migrate_content_ids()
+
+    def _migrate_content_ids(self) -> None:
+        """Re-key legacy content-hash message ids onto the current digest.
+
+        The content-hash id is the whole of the store's idempotency: the
+        advisor replays the full history on every request and relies on those
+        ids colliding with the rows already stored. A store written before the
+        SHA-256 switch would therefore gain a second copy of every message the
+        first time an old conversation was continued. Recomputing the ids from
+        the columns that produced them fixes that without touching any other
+        stored data. Gated on ``PRAGMA user_version``, so it runs once.
+        """
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version >= _SCHEMA_VERSION:
+            return
+        rows = self._conn.execute(
+            "SELECT rowid, id, session_id, role, content FROM messages WHERE id LIKE ?",
+            (f"{_CONTENT_ID_PREFIX}%",),
+        ).fetchall()
+        rekeyed = 0
+        for row in rows:
+            new_id = _content_message_id(row["session_id"], row["role"], row["content"])
+            if new_id == row["id"]:
+                continue
+            # OR IGNORE: if the recomputed id somehow already exists, the old
+            # row simply keeps its id rather than aborting the whole migration.
+            cursor = self._conn.execute(
+                "UPDATE OR IGNORE messages SET id = ? WHERE rowid = ?",
+                (new_id, row["rowid"]),
+            )
+            if cursor.rowcount:
+                # The FTS mirror carries an UNINDEXED copy of the id; keep it
+                # truthful even though searches read the id from ``messages``.
+                self._conn.execute(
+                    "UPDATE messages_fts SET id = ? WHERE rowid = ?",
+                    (new_id, row["rowid"]),
+                )
+                rekeyed += 1
+        self._conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION:d}")
+        self._conn.commit()
+        if rekeyed:
+            logger.info("Re-keyed %d legacy content-hash message ids", rekeyed)
 
     # ------------------------------------------------------------------
     # Write
@@ -160,10 +231,7 @@ class AiSessionStore:
                 continue
             message_id = str(message.get("id", "") or "").strip()
             if not message_id:
-                digest = hashlib.sha1(
-                    f"{session_id}:{role}:{content}".encode()
-                ).hexdigest()[:20]
-                message_id = f"h-{digest}"
+                message_id = _content_message_id(session_id, role, content)
             created_at = str(message.get("created_at", "") or "").strip() or now
             clean.append((message_id, role, content, created_at))
         if not clean:

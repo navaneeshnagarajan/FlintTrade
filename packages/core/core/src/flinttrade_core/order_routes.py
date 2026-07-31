@@ -531,7 +531,7 @@ def _admit_modify_intent(
     lease: Any,
 ) -> tuple[tuple[Any, int] | None, Any | None, list[Any]]:
     """Prove no-increase intent or run complete admission for a live modify."""
-    from .l2_state import classify_modify_intent  # noqa: PLC0415
+    from .l2_state import PortfolioSafetyStateError, classify_modify_intent  # noqa: PLC0415
 
     try:
         intent = _run_on_client_loop(
@@ -544,6 +544,23 @@ def _admit_modify_intent(
                 family=family,
             )
         )
+    except PortfolioSafetyStateError as refusal:
+        # Every PortfolioSafetyStateError message is a sentence written in
+        # l2_state (e.g. "An OPEN Upstox GTT order cannot change quantity",
+        # "Super-order modify has an invalid leg name") — a crafted,
+        # operator-actionable rule refusal, never runtime or exception detail.
+        # A generic 503 would hide exactly what the operator must change.
+        # Matching the narrow type here, rather than testing isinstance inside
+        # a bare ``except Exception``, is what makes "only l2_state's own
+        # refusal sentences are ever echoed" structural rather than a runtime
+        # branch. Still a refusal: same 409, same fail-closed return shape.
+        logger.error(
+            "Modify intent refused | family=%s adapter=%s: %s",
+            family,
+            adapter_id,
+            refusal,
+        )
+        return (jsonify({"status": "error", "message": str(refusal)}), 409), None, []
     except Exception as exc:  # noqa: BLE001 - an unprovable modify must fail closed
         logger.error(
             "Modify intent unavailable | family=%s adapter=%s: %s",
@@ -551,13 +568,6 @@ def _admit_modify_intent(
             adapter_id,
             type(exc).__name__,
         )
-        from .l2_state import PortfolioSafetyStateError  # noqa: PLC0415
-
-        if isinstance(exc, PortfolioSafetyStateError):
-            # These are crafted, user-actionable rule refusals (e.g. "quantity
-            # cannot be modified once OPEN", "invalid leg name") — a generic
-            # 503 hides exactly what the operator must change. Still a refusal.
-            return (jsonify({"status": "error", "message": str(exc)}), 409), None, []
         return _safety_state_unavailable_response(), None, []
     if not intent.risk_increasing:
         return None, None, []

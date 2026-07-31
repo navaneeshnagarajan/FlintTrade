@@ -66,6 +66,41 @@ describe('Electron desktop release asset parsing', () => {
     ).toBeNull();
   });
 
+  it('applies the semantic-version rules to the version in an asset name', () => {
+    const parse = (version: string) => {
+      const name = `FlintTrade-${version}-win-x64.exe`;
+      return parseDesktopReleaseAsset({ name, browser_download_url: `${REPO_RELEASE}/${name}` });
+    };
+
+    expect(parse('1.2.3')).not.toBeNull();
+    expect(parse('1.2.3-beta.0a')).not.toBeNull();
+    expect(parse('1.2.3-x-y-z.--')).not.toBeNull();
+    expect(parse('01.2.3')).toBeNull();
+    expect(parse('1.2.3-01')).toBeNull();
+    expect(parse('1.2.3-beta..1')).toBeNull();
+    expect(parse('1.2.3+build.1')).toBeNull();
+  });
+
+  it('refuses a hostile version in an asset name in linear time', () => {
+    // A version starting "0.0.0-0." followed by many "--." groups. Under the
+    // published semver.org regex each "--" group matches two ways, so the cost
+    // quadruples per pair — twenty-eight groups took 110 seconds for a single
+    // rejection. The version check must be linear, so a thousand rejections of
+    // thirty groups take single-digit milliseconds.
+    const name = `FlintTrade-0.0.0-0.${'--.'.repeat(30)}-win-x64.exe`;
+    const asset = { name, browser_download_url: `${REPO_RELEASE}/${name}` };
+
+    const started = performance.now();
+    let rejections = 0;
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      if (parseDesktopReleaseAsset(asset) === null) rejections += 1;
+    }
+    const elapsedMs = performance.now() - started;
+
+    expect(rejections).toBe(1_000);
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
   it('refuses an installer asset outside the official release path', () => {
     expect(
       parseDesktopReleaseAsset({

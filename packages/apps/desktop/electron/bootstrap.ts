@@ -1179,8 +1179,19 @@ export function createFirstRunBootstrap(options: BootstrapOptions) {
       command: uvInstall.executable,
       timeoutMs: 15_000,
     });
-    const escapedUvVersion = manifest.uv.version.replace(/\./g, "\\.");
-    if (!new RegExp(`^uv ${escapedUvVersion}(?:\\s|$)`).test(uvProbe.stdout.trim())) {
+    // `uv --version` prints "uv <version> (<commit> <date> <triple>)", so the
+    // pinned version must end on a word boundary rather than merely start the
+    // line: "0.11.1" must not accept "uv 0.11.16". This was a regex assembled
+    // by escaping only the dots of the manifest version, which left every other
+    // metacharacter — a backslash above all — able to reshape the pattern the
+    // version was supposed to be literal text in. Comparing literal strings
+    // needs no escaping and cannot be reinterpreted.
+    const uvVersionLine = uvProbe.stdout.trim();
+    const expectedUvPrefix = `uv ${manifest.uv.version}`;
+    const uvVersionRemainder = uvVersionLine.startsWith(expectedUvPrefix)
+      ? uvVersionLine.slice(expectedUvPrefix.length)
+      : null;
+    if (uvVersionRemainder === null || (uvVersionRemainder !== "" && !/^\s/.test(uvVersionRemainder))) {
       throw new Error("The verified uv executable reported an unexpected version.");
     }
 
