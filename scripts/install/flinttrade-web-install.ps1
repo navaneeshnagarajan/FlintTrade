@@ -554,34 +554,59 @@ function Test-WebPathContainsReparsePoint([string]$Target) {
     return $false
 }
 
-function Test-OwnerLocalWebPath([string]$Target) {
+function Test-CurrentUserOnlyWebAcl(
+    [string]$Target,
+    [System.Security.AccessControl.InheritanceFlags]$ExpectedInheritance,
+    [bool]$RequireProtected,
+    [bool]$RequireExplicit
+) {
     try {
-        $owner = (Get-Acl -LiteralPath $Target).GetOwner([System.Security.Principal.SecurityIdentifier])
-        if (-not $owner) { return $false }
+        $acl = Get-Acl -LiteralPath $Target
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        $allowed = @([string]$identity.User.Value)
-        foreach ($group in @($identity.Groups)) { $allowed += [string]$group.Value }
-        return ($allowed -contains [string]$owner.Value)
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not $owner -or $owner.Value -ne $identity.User.Value) { return $false }
+        if ($RequireProtected -and -not $acl.AreAccessRulesProtected) { return $false }
+        $rules = @($acl.Access)
+        if ($rules.Count -ne 1) { return $false }
+        $ruleIdentity = $rules[0].IdentityReference.Translate(
+            [System.Security.Principal.SecurityIdentifier])
+        if ($RequireExplicit -and $rules[0].IsInherited) { return $false }
+        return (
+            $ruleIdentity.Value -eq $identity.User.Value -and
+            $rules[0].FileSystemRights -eq [System.Security.AccessControl.FileSystemRights]::FullControl -and
+            $rules[0].InheritanceFlags -eq $ExpectedInheritance -and
+            $rules[0].PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None -and
+            $rules[0].AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
+        )
     } catch {
         return $false
     }
 }
 
+function Test-TrustedWebReceiptAcl {
+    $directoryInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    return (
+        (Test-CurrentUserOnlyWebAcl $WebReceiptDir $directoryInheritance $true $true) -and
+        (Test-CurrentUserOnlyWebAcl $WebReceiptPath `
+            ([System.Security.AccessControl.InheritanceFlags]::None) $false $false)
+    )
+}
+
 # One field from the web-install receipt, and only when the receipt proves
 # itself exactly as flinttrade-uninstall.ps1's Read-WebInstallReceipt requires:
-# an owner-local receipt reached through a path with no reparse alias in it, and
-# the v1 format line. The receipt authorises destructive replacement, so this is
+# a current-user-only receipt reached through a path with no reparse alias in
+# it, and the v1 format line. The receipt authorises destructive replacement, so this is
 # the single reader every trusting caller goes through - a second, weaker one
 # would simply be the way round it.
 function Get-RecordedWebInstallField([string]$Prefix) {
     if (-not $WebReceiptPath -or -not $WebReceiptDir) { return "" }
     if (-not (Test-Path -LiteralPath $WebReceiptPath -PathType Leaf)) { return "" }
     if (Test-WebPathContainsReparsePoint $WebReceiptPath) { return "" }
-    if (-not (Test-OwnerLocalWebPath $WebReceiptDir)) { return "" }
-    if (-not (Test-OwnerLocalWebPath $WebReceiptPath)) { return "" }
+    if (-not (Test-TrustedWebReceiptAcl)) { return "" }
     $lines = @()
     try {
-        $lines = @(Get-Content -LiteralPath $WebReceiptPath)
+        $lines = @(Get-Content -LiteralPath $WebReceiptPath -Encoding UTF8)
     } catch {
         return ""
     }
@@ -1293,24 +1318,104 @@ function Install-StartMenuShortcut {
 # source checkout and the tools root. Mirrors the POSIX installer's receipt.
 # ---------------------------------------------------------------------------
 
-function Protect-WebReceiptDirectory([string]$Path) {
+function Test-OwnerOnlyWebAcl(
+    [string]$Path,
+    [System.Security.AccessControl.InheritanceFlags]$ExpectedInheritance
+) {
+    return Test-CurrentUserOnlyWebAcl $Path $ExpectedInheritance $true $true
+}
+
+function Set-OwnerOnlyWebAcl(
+    [string]$Path,
+    [System.Security.AccessControl.InheritanceFlags]$Inheritance,
+    [bool]$Directory
+) {
     try {
         $acl = Get-Acl -LiteralPath $Path
         $acl.SetAccessRuleProtection($true, $false)
         foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRule($existing) }
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-        $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
-            [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-            $identity,
-            [System.Security.AccessControl.FileSystemRights]::FullControl,
-            $inheritance,
-            [System.Security.AccessControl.PropagationFlags]::None,
-            [System.Security.AccessControl.AccessControlType]::Allow)
+        $acl.SetOwner($identity)
+        if ($Directory) {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $identity,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                $Inheritance,
+                [System.Security.AccessControl.PropagationFlags]::None,
+                [System.Security.AccessControl.AccessControlType]::Allow)
+        } else {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $identity,
+                [System.Security.AccessControl.FileSystemRights]::FullControl,
+                [System.Security.AccessControl.AccessControlType]::Allow)
+        }
         $acl.AddAccessRule($rule)
-        Set-Acl -LiteralPath $Path -AclObject $acl
+        if ($Directory) {
+            [System.IO.Directory]::SetAccessControl($Path, $acl)
+        } else {
+            [System.IO.File]::SetAccessControl($Path, $acl)
+        }
+        if (-not (Test-OwnerOnlyWebAcl $Path $Inheritance)) {
+            throw "the resulting ACL was not owner-only"
+        }
     } catch {
-        Warn "Could not restrict $Path to the current user: $($_.Exception.Message)"
+        Fail "Could not restrict $Path to the current user: $($_.Exception.Message)"
+    }
+}
+
+function Protect-WebReceiptDirectory([string]$Path) {
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Set-OwnerOnlyWebAcl $Path $inheritance $true
+}
+
+function Protect-WebReceiptFile([string]$Path) {
+    Set-OwnerOnlyWebAcl $Path ([System.Security.AccessControl.InheritanceFlags]::None) $false
+}
+
+function Initialize-WebReceiptStorage {
+    if (-not $WebReceiptDir -or -not $WebReceiptPath) {
+        Fail "Could not resolve the Windows application-data folder required for the web-install receipt."
+    }
+
+    if (Test-Path -LiteralPath $WebReceiptPath) {
+        if (-not (Test-Path -LiteralPath $WebReceiptPath -PathType Leaf)) {
+            Fail "Refusing a non-file web-install receipt path: $WebReceiptPath"
+        }
+        if (Test-WebPathContainsReparsePoint $WebReceiptPath) {
+            Fail "Refusing a reparse-point web-install receipt: $WebReceiptPath"
+        }
+        if (-not (Test-TrustedWebReceiptAcl)) {
+            Fail "Refusing a web-install receipt that is not current-user-only: $WebReceiptPath"
+        }
+        # Upgrade the safely inherited ACL written by earlier installers to an
+        # explicit protected file ACL before any source or launcher mutation.
+        Protect-WebReceiptDirectory $WebReceiptDir
+        Protect-WebReceiptFile $WebReceiptPath
+        return
+    }
+
+    if (Test-Path -LiteralPath $WebReceiptDir -PathType Leaf) {
+        Fail "Refusing a non-directory web-install receipt path: $WebReceiptDir"
+    }
+    if (-not (Test-Path -LiteralPath $WebReceiptDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $WebReceiptDir | Out-Null
+    }
+    if (Test-WebPathContainsReparsePoint $WebReceiptDir) {
+        Fail "Refusing a reparse-point web-install receipt directory: $WebReceiptDir"
+    }
+    Protect-WebReceiptDirectory $WebReceiptDir
+
+    # Prove file ACL publication while no source, launcher, or shortcut has
+    # been changed. The real receipt is written only after its fields exist.
+    $probe = Join-Path $WebReceiptDir (".receipt-acl-probe-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        [System.IO.File]::WriteAllText($probe, "", (New-Object System.Text.UTF8Encoding($false)))
+        Protect-WebReceiptFile $probe
+    } finally {
+        if (Test-Path -LiteralPath $probe -PathType Leaf) {
+            Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -1320,20 +1425,10 @@ function Get-ReceiptSafeValue([string]$Value) {
 }
 
 function Write-WebInstallReceipt {
-    if (-not $WebReceiptDir) {
-        Fail "Could not resolve the Windows application-data folder required for the web-install receipt."
-    }
+    Initialize-WebReceiptStorage
     if (-not (Test-Path -LiteralPath $ShimPath -PathType Leaf)) {
         Fail "The installed launcher is not an ordinary web-install receipt candidate."
     }
-    if (-not (Test-Path -LiteralPath $WebReceiptDir -PathType Container)) {
-        New-Item -ItemType Directory -Force -Path $WebReceiptDir | Out-Null
-    }
-    $receiptItem = Get-Item -LiteralPath $WebReceiptDir -Force
-    if ($receiptItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-        Fail "Refusing a reparse-point web-install receipt directory: $WebReceiptDir"
-    }
-    Protect-WebReceiptDirectory $WebReceiptDir
     $shim = [System.IO.Path]::GetFullPath($ShimPath)
     $shimHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $shim).Hash.ToLowerInvariant()
     $shortcut = ""
@@ -1352,6 +1447,7 @@ function Write-WebInstallReceipt {
         ("tools=" + (Get-ReceiptSafeValue $tools))
     )
     [System.IO.File]::WriteAllText($WebReceiptPath, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    Protect-WebReceiptFile $WebReceiptPath
     Say "Recorded the web-install receipt at $WebReceiptPath."
 }
 
@@ -1364,7 +1460,7 @@ function Write-PathReport {
     Say "Workspace and data : $(Get-WorkspaceDir)"
     Say "Verified tools     : $ToolsRoot"
     Say "Managed source     : $($script:SrcDir)  (the desktop shell keeps its own at $DesktopActiveSource)"
-    Say "Launcher           : $ShimPath  (also: flinttrade-web <subcommand>)"
+    Say "Launcher           : $ShimPath  (command alias after adding its directory to PATH: flinttrade-web <subcommand>)"
     Say "Install receipt    : $WebReceiptPath  (the uninstaller removes only what this proves)"
     Say "Runner             : python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help|desktop-test|desktop-build|desktop-package|desktop-dev>"
     Say "Open FlintTrade at : $BackendUrl"
@@ -1375,11 +1471,11 @@ function Write-PathReport {
 
 function Invoke-OptionalLaunch {
     if ($NoLaunch) {
-        Say "Not starting FlintTrade (-NoLaunch). Start it later with: flinttrade-web start"
+        Say "Not starting FlintTrade (-NoLaunch). Start it later with: & `"$ShimPath`" start"
         return
     }
     if (-not (Confirm-Step "Start FlintTrade now?")) {
-        Say "Not started. Start it later with: flinttrade-web start"
+        Say "Not started. Start it later with: & `"$ShimPath`" start"
         return
     }
     Say "Starting FlintTrade - open $BackendUrl in your browser. Press Ctrl-C to stop."
@@ -1439,6 +1535,7 @@ function Invoke-FlintTradeWebInstall {
     Say "Detected bootstrap target: $($script:Target)"
 
     Write-PreflightReport
+    if (-not $DryRun) { Initialize-WebReceiptStorage }
 
     Invoke-SourceAcquisition
 
