@@ -171,6 +171,22 @@ def _read(script: Path) -> str:
     return script.read_text(encoding="utf-8")
 
 
+def _staged_windows_installer(tmp_path: Path, *, elevated: bool) -> Path:
+    """Stage the installer with a deterministic token state for behavioural tests."""
+    staged_installer = tmp_path / PS1.name
+    staged_source = _read(PS1).replace(
+        "\nInvoke-FlintTradeWebInstall\n",
+        (
+            "\nfunction Test-FlintTradeProcessIsElevated "
+            f"{{ return ${str(elevated).lower()} }}\n"
+            "Invoke-FlintTradeWebInstall\n"
+        ),
+        1,
+    )
+    staged_installer.write_text(staged_source, encoding="utf-8")
+    return staged_installer
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("script", [SH, PS1], ids=["web-install.sh", "web-install.ps1"])
 def test_web_installers_exist_at_the_canonical_paths(script: Path) -> None:
@@ -643,11 +659,137 @@ def test_windows_web_installer_requires_the_same_source_identity_proof() -> None
 
 @pytest.mark.unit
 @pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_refuses_elevated_execution_before_source_acquisition(
+    tmp_path: Path,
+) -> None:
+    """An Administrator shell must fail before the per-user installer writes anything."""
+    source = _generic_mixed_project(tmp_path / "operator-source")
+    sentinel = source / "main.py"
+    profile = tmp_path / "profile"
+    staged_installer = _staged_windows_installer(tmp_path, elevated=True)
+
+    result = subprocess.run(
+        [
+            WINDOWS_POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(staged_installer),
+            "-Yes",
+            "-NoLaunch",
+            "-SrcDir",
+            str(source),
+        ],
+        cwd=_REPO_ROOT,
+        env=_windows_home_env(profile),
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert (
+        "Close this Administrator PowerShell window and rerun the command in a normal PowerShell window."
+        in combined
+    ), combined
+    assert sentinel.read_text(encoding="utf-8") == "print('irreplaceable')\n"
+    assert not (profile / ".flinttrade").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_allows_help_when_elevated(tmp_path: Path) -> None:
+    """Help remains usable because it exits before any PATH-resolved command can run."""
+    profile = tmp_path / "profile"
+    staged_installer = _staged_windows_installer(tmp_path, elevated=True)
+
+    command = [
+        WINDOWS_POWERSHELL,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(staged_installer),
+        "-Help",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=_REPO_ROOT,
+        env=_windows_home_env(profile),
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "Flags:" in combined, combined
+    assert "Close this Administrator PowerShell window" not in combined, combined
+    assert not (profile / ".flinttrade").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_refuses_elevated_dry_run_before_path_probes(tmp_path: Path) -> None:
+    """Dry-run must not execute user-writable PATH commands with an elevated token."""
+    profile = tmp_path / "profile"
+    marker = tmp_path / "path-command-ran"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    (fake_bin / "git.cmd").write_text(
+        f'@echo off\r\n> "{marker}" echo unsafe\r\necho git version 2.0\r\n',
+        encoding="utf-8",
+    )
+    staged_installer = _staged_windows_installer(tmp_path, elevated=True)
+
+    env = _windows_home_env(profile)
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        [
+            WINDOWS_POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(staged_installer),
+            "-DryRun",
+            "-Yes",
+            "-NoLaunch",
+            "-SrcDir",
+            str(profile / "planned-source"),
+        ],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "Close this Administrator PowerShell window" in combined, combined
+    assert not marker.exists(), "elevated dry-run executed a PATH-resolved command"
+    assert not (profile / ".flinttrade").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_a_src_without_identity(tmp_path: Path) -> None:
     """The Windows installer refuses an unproven -SrcDir before deleting anything."""
     src = _generic_mixed_project(tmp_path / "someone-elses-project")
     result = subprocess.run(
-        [WINDOWS_POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(src)],
+        [
+            WINDOWS_POWERSHELL,
+            "-NoProfile",
+            "-File",
+            str(_staged_windows_installer(tmp_path, elevated=False)),
+            "-DryRun",
+            "-Yes",
+            "-SrcDir",
+            str(src),
+        ],
         cwd=_REPO_ROOT,
         text=True,
         capture_output=True,
@@ -665,7 +807,16 @@ def test_windows_web_installer_refuses_a_marker_only_tree_it_cannot_update(tmp_p
     """The .ps1 mirrors the split: markers alone never authorise a recursive delete."""
     src = _marker_only_clone(tmp_path / "unpacked-copy")
     result = subprocess.run(
-        [WINDOWS_POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(src)],
+        [
+            WINDOWS_POWERSHELL,
+            "-NoProfile",
+            "-File",
+            str(_staged_windows_installer(tmp_path, elevated=False)),
+            "-DryRun",
+            "-Yes",
+            "-SrcDir",
+            str(src),
+        ],
         cwd=_REPO_ROOT,
         env=_windows_home_env(tmp_path),
         text=True,
@@ -1085,7 +1236,7 @@ def test_windows_web_installer_refuses_the_desktop_active_source(tmp_path: Path)
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            str(PS1),
+            str(_staged_windows_installer(tmp_path, elevated=False)),
             "-DryRun",
             "-SrcDir",
             str(shared),
@@ -1167,7 +1318,16 @@ def test_windows_web_installer_resolves_a_junctioned_parent_before_the_overlap_c
         pytest.skip("this runner cannot create directory junctions")
 
     result = subprocess.run(
-        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-DryRun", "-Yes", "-SrcDir", str(alias / "src" / "FlintTrade")],
+        [
+            POWERSHELL,
+            "-NoProfile",
+            "-File",
+            str(_staged_windows_installer(tmp_path, elevated=False)),
+            "-DryRun",
+            "-Yes",
+            "-SrcDir",
+            str(alias / "src" / "FlintTrade"),
+        ],
         cwd=_REPO_ROOT,
         env=_windows_home_env(tmp_path),
         text=True,

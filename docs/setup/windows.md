@@ -16,7 +16,8 @@ Bash, no make. Two Windows notes that apply to every command on this page:
 ## One-line install (recommended — no prerequisites)
 
 The web-app installer needs nothing pre-installed: no Python, no Node, no git
-and no make. Open Windows PowerShell and run:
+and no make. Open a normal (non-Administrator) Windows PowerShell window and
+run:
 
 ```powershell
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
@@ -29,7 +30,8 @@ checkout at `~\.flinttrade\web-src\FlintTrade`, and installs a launcher at
 Web** Start Menu shortcut. The Electron desktop shell owns
 `%LOCALAPPDATA%\Programs\FlintTrade` and its own Start Menu entry, so the two
 installs never collide and can be run in either order.
-The install is per-user — **no admin rights needed**.
+The install is per-user — **no admin rights needed**. An elevated Administrator
+PowerShell window is refused before installation begins.
 
 Then open http://127.0.0.1:5100 and complete Setup. Broker/OpenAlgo
 configuration is handled in the app; no `.env` file is required. Your workspace

@@ -37,6 +37,7 @@ curl -fsSL https://flinttrade.vercel.app/web-install.sh | bash
 
 ```powershell
 # Windows 10/11
+# Run in a normal (non-Administrator) PowerShell window
 irm https://flinttrade.vercel.app/web-install.ps1 | iex
 ```
 
@@ -67,6 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/
 
 ```powershell
 # Windows 10/11
+# Run in a normal (non-Administrator) PowerShell window
 irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex
 ```
 
