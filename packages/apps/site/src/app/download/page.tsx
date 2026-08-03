@@ -38,7 +38,7 @@ const webInstallCommands = [
   {
     platform: 'Windows 10/11',
     command: 'irm https://flinttrade.vercel.app/web-install.ps1 | iex',
-    needs: 'No prerequisites. Same bootstrap in PowerShell, with a per-user launcher and a Start Menu shortcut.',
+    needs: 'No prerequisites. Run in a normal (non-Administrator) PowerShell window; the same bootstrap installs a per-user launcher and Start Menu shortcut.',
   },
 ] as const;
 
@@ -57,7 +57,7 @@ const repoDirectCommands = [
     platform: 'Windows 10/11',
     command:
       'irm https://raw.githubusercontent.com/navaneeshnagarajan/FlintTrade/main/scripts/install/flinttrade-web-install.ps1 | iex',
-    needs: 'Same script in PowerShell. Swap flinttrade-web-install for flinttrade-uninstall to remove FlintTrade.',
+    needs: 'Run in a normal (non-Administrator) PowerShell window. Swap flinttrade-web-install for flinttrade-uninstall to remove FlintTrade.',
   },
 ] as const;
 

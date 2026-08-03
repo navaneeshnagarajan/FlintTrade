@@ -139,6 +139,16 @@ function Fail([string]$Message) {
 }
 function Have([string]$Command) { return ($null -ne (Get-Command $Command -ErrorAction SilentlyContinue)) }
 
+function Test-FlintTradeProcessIsElevated {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } finally {
+        $identity.Dispose()
+    }
+}
+
 function Show-Usage {
     Write-Host @"
 FlintTrade one-line web-app installer (Windows 10/11)
@@ -148,6 +158,7 @@ source checkout, and installs a 'flinttrade-web' launcher. No prior tooling
 needed. The FlintTrade Desktop shell is a separate install with its own
 launcher, Start Menu entry, source checkout and uninstall receipt; neither one
 touches the other's files, so the two can be installed in either order.
+Run this per-user installer from a normal (non-Administrator) PowerShell window.
 
 Flags:
   -Ref <git-ref>   Branch, tag or commit to install (default: main)
@@ -1388,6 +1399,12 @@ function Invoke-FlintTradeWebInstall {
         if ($Ref -notmatch '^[A-Za-z0-9._/-]+$' -or $Ref.Contains("..") -or $Ref.StartsWith("-")) {
             Fail "-Ref is not a well-formed Git reference: $Ref"
         }
+    }
+    if (Test-FlintTradeProcessIsElevated) {
+        Fail (
+            "FlintTrade installs per-user. Close this Administrator PowerShell window " +
+            "and rerun the command in a normal PowerShell window."
+        )
     }
     if (-not $LocalAppDataRoot -or -not $RoamingAppDataRoot) {
         Fail "Could not resolve the Windows application-data folders required to install FlintTrade."

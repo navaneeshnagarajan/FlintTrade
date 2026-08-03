@@ -1,5 +1,15 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -58,15 +68,18 @@ describe("packaged bootstrap entrypoints", () => {
   });
 
   it.runIf(process.platform !== "win32")(
-    "runs from a clean PATH with Corepack using the verified Node executable",
+    "reuses a validated POSIX virtual environment with the verified tools",
     () => {
       const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
       try {
-        const candidate = path.join(root, "workspace", "source", "FlintTrade.candidate-1");
+        const candidate = path.join(root, "workspace", "source", "FlintTrade.[candidate]-1");
         const tools = path.join(root, "workspace", "tools");
         const node = path.join(tools, "node", "bin", "node");
         const corepack = path.join(tools, "node", "lib", "node_modules", "corepack", "dist", "corepack.js");
         const uv = path.join(tools, "uv", "uv");
+        const pythonVersionRoot = path.join(tools, "python", "cpython-3.12.0");
+        const pythonAlias = path.join(tools, "python", "cpython-3.12");
+        const pythonHome = path.join(pythonAlias, "bin");
         for (const required of [
           "package.json",
           "pyproject.toml",
@@ -78,6 +91,23 @@ describe("packaged bootstrap entrypoints", () => {
           mkdirSync(path.dirname(target), { recursive: true });
           writeFileSync(target, "{}\n");
         }
+        const staleEnvironmentFile = path.join(candidate, ".venv", "stale");
+        mkdirSync(path.dirname(staleEnvironmentFile), { recursive: true });
+        writeFileSync(staleEnvironmentFile, "stale\n");
+        mkdirSync(path.join(pythonVersionRoot, "bin"), { recursive: true });
+        writeFileSync(path.join(pythonVersionRoot, "bin", "python3.12"), "managed python fixture\n");
+        symlinkSync(pythonVersionRoot, pythonAlias, "junction");
+        const environment = path.join(candidate, ".venv");
+        mkdirSync(path.join(environment, "lib"));
+        mkdirSync(path.join(environment, "bin"));
+        symlinkSync("lib", path.join(environment, "lib64"), "dir");
+        symlinkSync(`${pythonHome}/python3.12`, path.join(environment, "bin", "python"), "file");
+        symlinkSync("python", path.join(environment, "bin", "python3"), "file");
+        symlinkSync("python", path.join(environment, "bin", "python3.12"), "file");
+        writeFileSync(
+          path.join(candidate, ".venv", "pyvenv.cfg"),
+          `home = ${pythonHome}\nuv = 0.11.16\nversion_info = 3.12.0\nrelocatable = true\n`,
+        );
         mkdirSync(path.dirname(node), { recursive: true });
         mkdirSync(path.dirname(corepack), { recursive: true });
         mkdirSync(path.dirname(uv), { recursive: true });
@@ -100,6 +130,16 @@ exit 0
 [ "\${UV_NO_EDITABLE-}" = 1 ] || exit 74
 [ -n "\${UV_CACHE_DIR-}" ] || exit 75
 [ -n "\${UV_PYTHON_INSTALL_DIR-}" ] || exit 76
+if [ -e .venv ]; then
+  case "\${1-}" in python|venv) exit 77;; esac
+fi
+if [ "\${1-}" = venv ]; then
+  for argument in "\$@"; do
+    [ "\$argument" != --allow-existing ] || exit 78
+  done
+  mkdir .venv
+  printf '%s\n' 'home = ${pythonHome}' 'uv = 0.11.16' 'version_info = 3.12.0' 'relocatable = true' > .venv/pyvenv.cfg
+fi
 exit 0
 `,
         );
@@ -110,6 +150,302 @@ exit 0
             env: { PATH: "/usr/bin:/bin" },
           }),
         ).not.toThrow();
+        expect(readFileSync(staleEnvironmentFile, "utf8")).toBe("stale\n");
+        rmSync(path.join(candidate, ".venv"), { force: true, recursive: true });
+        expect(() =>
+          execFileSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+            env: { PATH: "/usr/bin:/bin" },
+          }),
+        ).not.toThrow();
+        expect(readFileSync(path.join(candidate, ".venv", "pyvenv.cfg"), "utf8")).toContain(
+          "version_info = 3.12.0",
+        );
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "reuses a validated Windows virtual environment with the verified tools",
+    () => {
+      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
+      try {
+        const candidate = path.join(root, "workspace", "source", "FlintTrade.[candidate]-1");
+        const tools = path.join(root, "workspace", "tools");
+        const node = path.join(tools, "node.cmd");
+        const uv = path.join(tools, "uv.cmd");
+        const corepack = path.join(tools, "corepack.js");
+        const pythonVersionRoot = path.join(tools, "python", "cpython-3.12.0");
+        const pythonAlias = path.join(tools, "python", "cpython-3.12");
+        const pythonHome = path.join(pythonAlias, "bin");
+        for (const required of [
+          "package.json",
+          "pyproject.toml",
+          "uv.lock",
+          "pnpm-lock.yaml",
+          "packages/apps/terminal/package.json",
+        ]) {
+          const target = path.join(candidate, required);
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, "{}\n");
+        }
+        const staleEnvironmentFile = path.join(candidate, ".venv", "stale");
+        mkdirSync(path.dirname(staleEnvironmentFile), { recursive: true });
+        writeFileSync(staleEnvironmentFile, "stale\n");
+        mkdirSync(path.join(pythonVersionRoot, "bin"), { recursive: true });
+        symlinkSync(pythonVersionRoot, pythonAlias, "junction");
+        writeFileSync(
+          path.join(candidate, ".venv", "pyvenv.cfg"),
+          `home = ${pythonHome}\nuv = 0.11.16\nversion_info = 3.12.0\nrelocatable = true\n`,
+        );
+        mkdirSync(tools, { recursive: true });
+        writeFileSync(corepack, "// verified Corepack fixture\n");
+        writeFileSync(
+          node,
+          `@echo off
+if "%~1"=="--version" (
+  echo v22.23.2
+  exit /b 0
+)
+if "%~2"=="--version" (
+  echo 0.34.6
+  exit /b 0
+)
+if "%~2"=="pnpm" if "%~3"=="--version" (
+  echo 10.34.5
+  exit /b 0
+)
+exit /b 0
+`,
+        );
+        writeFileSync(
+          uv,
+          `@echo off
+setlocal
+if "%~1"=="--version" exit /b 0
+if not "%UV_NO_EDITABLE%"=="1" exit /b 74
+if exist .venv if "%~1"=="python" exit /b 77
+if exist .venv if "%~1"=="venv" exit /b 77
+if "%~1"=="venv" goto venv
+exit /b 0
+:venv
+:scan
+if "%~1"=="" goto scanned
+if "%~1"=="--allow-existing" exit /b 78
+shift
+goto scan
+:scanned
+mkdir .venv
+exit /b 0
+`,
+        );
+
+        const result = spawnSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            powershellScript,
+            "-Candidate",
+            candidate,
+            "-Uv",
+            uv,
+            "-Node",
+            node,
+            "-CorepackJs",
+            corepack,
+            "-ToolsRoot",
+            tools,
+            "-PnpmVersion",
+            "10.34.5",
+          ],
+          { encoding: "utf8" },
+        );
+
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(readFileSync(staleEnvironmentFile, "utf8")).toBe("stale\n");
+        rmSync(path.join(candidate, ".venv"), { force: true, recursive: true });
+        const freshResult = spawnSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            powershellScript,
+            "-Candidate",
+            candidate,
+            "-Uv",
+            uv,
+            "-Node",
+            node,
+            "-CorepackJs",
+            corepack,
+            "-ToolsRoot",
+            tools,
+            "-PnpmVersion",
+            "10.34.5",
+          ],
+          { encoding: "utf8" },
+        );
+        expect(freshResult.status, `${freshResult.stdout}\n${freshResult.stderr}`).toBe(0);
+        expect(lstatSync(path.join(candidate, ".venv")).isDirectory()).toBe(true);
+      } finally {
+        rmSync(root, { force: true, recursive: true });
+      }
+    },
+    30_000,
+  );
+
+  it.each([
+    "top-level-link",
+    "nested-directory-link",
+    "nested-file-link",
+    "malformed-directory",
+    "missing-uv-metadata",
+    "wrong-python-version",
+    "not-relocatable",
+    "external-python-home",
+    "linked-python-root",
+    "fresh-linked-python-root",
+  ] as const)(
+    "refuses an unsafe %s virtual environment before invoking managed tools",
+    (scenario) => {
+      const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-linked-venv-"));
+      try {
+        const candidate = path.join(root, "candidate.[brackets]");
+        const outside = path.join(root, "outside");
+        const tools = path.join(root, "tools");
+        let pythonHome = path.join(tools, "python", "cpython-3.12", "bin");
+        for (const required of [
+          "package.json",
+          "pyproject.toml",
+          "uv.lock",
+          "pnpm-lock.yaml",
+          "packages/apps/terminal/package.json",
+        ]) {
+          const target = path.join(candidate, required);
+          mkdirSync(path.dirname(target), { recursive: true });
+          writeFileSync(target, "{}\n");
+        }
+        mkdirSync(outside, { recursive: true });
+        const sentinel = path.join(outside, "sentinel");
+        writeFileSync(sentinel, "keep\n");
+        if (scenario === "fresh-linked-python-root") {
+          const externalPythonRoot = path.join(outside, "fresh-python-root");
+          const managedPythonRoot = path.join(tools, "python");
+          mkdirSync(path.join(externalPythonRoot, "cpython-3.12", "bin"), { recursive: true });
+          mkdirSync(path.dirname(managedPythonRoot), { recursive: true });
+          symlinkSync(
+            externalPythonRoot,
+            managedPythonRoot,
+            process.platform === "win32" ? "junction" : "dir",
+          );
+        }
+        const environment = path.join(candidate, ".venv");
+        if (scenario !== "top-level-link" && scenario !== "fresh-linked-python-root") {
+          mkdirSync(environment);
+          if (scenario !== "malformed-directory") {
+            if (scenario === "linked-python-root") {
+              const externalPythonRoot = path.join(outside, "python-root");
+              const managedPythonRoot = path.join(tools, "python");
+              mkdirSync(path.join(externalPythonRoot, "cpython-3.12", "bin"), { recursive: true });
+              mkdirSync(path.dirname(managedPythonRoot), { recursive: true });
+              symlinkSync(
+                externalPythonRoot,
+                managedPythonRoot,
+                process.platform === "win32" ? "junction" : "dir",
+              );
+            } else if (scenario === "external-python-home") {
+              const externalPython = path.join(outside, "python-home");
+              const pythonAlias = path.join(tools, "python", "cpython-3.12");
+              mkdirSync(path.join(externalPython, "bin"), { recursive: true });
+              mkdirSync(path.dirname(pythonAlias), { recursive: true });
+              symlinkSync(externalPython, pythonAlias, process.platform === "win32" ? "junction" : "dir");
+              pythonHome = path.join(pythonAlias, "bin");
+            } else {
+              mkdirSync(pythonHome, { recursive: true });
+            }
+            const configuration = [
+              `home = ${pythonHome}`,
+              ...(scenario === "missing-uv-metadata" ? [] : ["uv = 0.11.16"]),
+              `version_info = ${scenario === "wrong-python-version" ? "3.13.1" : "3.12.0"}`,
+              `relocatable = ${scenario === "not-relocatable" ? "false" : "true"}`,
+            ];
+            writeFileSync(
+              path.join(environment, "pyvenv.cfg"),
+              `${configuration.join("\n")}\n`,
+            );
+          } else {
+            writeFileSync(path.join(environment, "not-a-virtual-environment"), "keep\n");
+          }
+        }
+        if (scenario === "top-level-link") {
+          symlinkSync(outside, environment, process.platform === "win32" ? "junction" : "dir");
+        } else if (scenario === "nested-directory-link") {
+          const link = path.join(environment, process.platform === "win32" ? "Lib" : "lib");
+          symlinkSync(outside, link, process.platform === "win32" ? "junction" : "dir");
+        } else if (scenario === "nested-file-link") {
+          const bin = path.join(environment, "bin");
+          mkdirSync(bin);
+          symlinkSync(
+            process.platform === "win32" ? outside : sentinel,
+            path.join(bin, "activate"),
+            process.platform === "win32" ? "junction" : "file",
+          );
+        }
+
+        const uv = path.join(tools, process.platform === "win32" ? "uv.cmd" : "uv");
+        const node = path.join(tools, process.platform === "win32" ? "node.cmd" : "node");
+        const corepack = path.join(tools, "corepack.js");
+        mkdirSync(tools, { recursive: true });
+        for (const tool of [uv, node, corepack]) writeFileSync(tool, "must not run\n");
+
+        const result =
+          process.platform === "win32"
+            ? spawnSync(
+                "powershell.exe",
+                [
+                  "-NoProfile",
+                  "-NonInteractive",
+                  "-ExecutionPolicy",
+                  "Bypass",
+                  "-File",
+                  powershellScript,
+                  "-Candidate",
+                  candidate,
+                  "-Uv",
+                  uv,
+                  "-Node",
+                  node,
+                  "-CorepackJs",
+                  corepack,
+                  "-ToolsRoot",
+                  tools,
+                  "-PnpmVersion",
+                  "10.34.5",
+                ],
+                { encoding: "utf8" },
+              )
+            : spawnSync("/bin/sh", [posixScript, candidate, uv, node, corepack, tools, "10.34.5"], {
+                encoding: "utf8",
+                env: { PATH: "/usr/bin:/bin" },
+              });
+
+        expect(result.status).not.toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).toContain(
+          scenario.endsWith("linked-python-root")
+            ? "Refusing managed Python tool root"
+            : scenario.endsWith("link")
+              ? "Refusing"
+              : "Refusing existing .venv",
+        );
+        expect(readFileSync(sentinel, "utf8")).toBe("keep\n");
       } finally {
         rmSync(root, { force: true, recursive: true });
       }
@@ -133,6 +469,8 @@ exit 0
     expect(powershell).toContain(
       'Invoke-Checked $Uv @("venv", "--relocatable", "--python", "3.12", ".venv")',
     );
+    expect(combined).not.toContain("--clear");
+    expect(combined).not.toContain("--allow-existing");
     expect(posix.indexOf('"$uv" venv --relocatable')).toBeLessThan(
       posix.indexOf('"$uv" sync --frozen'),
     );
