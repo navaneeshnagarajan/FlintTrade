@@ -19,7 +19,7 @@ function Invoke-Checked {
     }
 }
 
-function Get-CanonicalExistingDirectory {
+function Get-CanonicalExistingPath {
     param([string]$Path)
 
     $pending = [IO.Path]::GetFullPath($Path)
@@ -30,6 +30,7 @@ function Get-CanonicalExistingDirectory {
         }
         $components = @($pending.Substring($root.Length) -split '[\\/]' | Where-Object { $_ })
         $current = $root
+        $item = Get-Item -LiteralPath $root -Force -ErrorAction Stop
         $redirected = $false
         for ($index = 0; $index -lt $components.Count; $index++) {
             $current = Join-Path $current $components[$index]
@@ -52,13 +53,169 @@ function Get-CanonicalExistingDirectory {
             break
         }
         if (-not $redirected) {
-            if (-not $item.PSIsContainer) {
-                throw "Managed Python home is not a directory."
-            }
             return ([IO.Path]::GetFullPath($current)).TrimEnd('\', '/')
         }
     }
     throw "Managed Python path contains too many reparse points."
+}
+
+function Get-CanonicalExistingDirectory {
+    param([string]$Path)
+
+    $canonicalPath = Get-CanonicalExistingPath $Path
+    if (-not (Get-Item -LiteralPath $canonicalPath -Force -ErrorAction Stop).PSIsContainer) {
+        throw "Managed Python home is not a directory."
+    }
+    return $canonicalPath
+}
+
+function Assert-OrdinaryManagedToolsPath {
+    param([string]$Path)
+
+    $current = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    while ($current) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing managed Python tool root because its tools path contains a linked ancestor."
+        }
+        $parent = Split-Path -Parent $current
+        if (-not $parent -or $parent -eq $current) {
+            break
+        }
+        $current = $parent
+    }
+}
+
+function Assert-ManagedPythonTree {
+    param([string]$Path)
+
+    $rootItem = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $rootItem) {
+        return
+    }
+    if (
+        -not $rootItem.PSIsContainer -or
+        ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    ) {
+        throw "Refusing managed Python tool root because it is linked or not a directory."
+    }
+
+    $canonicalRoot = Get-CanonicalExistingDirectory $Path
+    $canonicalPrefix = "$($canonicalRoot.TrimEnd([IO.Path]::DirectorySeparatorChar))$([IO.Path]::DirectorySeparatorChar)"
+    $pendingDirectories = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $pendingDirectories.Push($rootItem)
+    while ($pendingDirectories.Count -gt 0) {
+        $directory = $pendingDirectories.Pop()
+        Get-ChildItem -LiteralPath $directory.FullName -Force | ForEach-Object {
+            if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $target = [string](@($_.Target) | Select-Object -First 1)
+                if (-not $target) {
+                    throw "Refusing managed Python tool root because a linked entry cannot be resolved."
+                }
+                if (-not [IO.Path]::IsPathRooted($target)) {
+                    $target = Join-Path (Split-Path -Parent $_.FullName) $target
+                }
+                try {
+                    $targetPath = [IO.Path]::GetFullPath($target)
+                    $targetParent = Get-CanonicalExistingDirectory (Split-Path -Parent $targetPath)
+                    $targetLocation = Join-Path $targetParent (Split-Path -Leaf $targetPath)
+                    $canonicalTarget = Get-CanonicalExistingPath $_.FullName
+                }
+                catch {
+                    throw "Refusing managed Python tool root because a linked entry cannot be resolved."
+                }
+                if (
+                    (
+                        -not $targetPath.Equals($canonicalRoot, [StringComparison]::Ordinal) -and
+                        -not $targetPath.StartsWith($canonicalPrefix, [StringComparison]::Ordinal)
+                    ) -or (
+                        -not $targetLocation.Equals($canonicalRoot, [StringComparison]::Ordinal) -and
+                        -not $targetLocation.StartsWith($canonicalPrefix, [StringComparison]::Ordinal)
+                    ) -or (
+                        -not $canonicalTarget.Equals($canonicalRoot, [StringComparison]::Ordinal) -and
+                        -not $canonicalTarget.StartsWith($canonicalPrefix, [StringComparison]::Ordinal)
+                    )
+                ) {
+                    throw "Refusing managed Python tool root because a linked entry resolves outside it."
+                }
+            }
+            elseif ($_.PSIsContainer) {
+                $pendingDirectories.Push($_)
+            }
+        }
+    }
+}
+
+function Get-ValidatedUvVenvConfiguration {
+    param([string[]]$Lines, [string]$ErrorMessage)
+
+    $values = New-Object 'System.Collections.Generic.Dictionary[string,string]' `
+        ([StringComparer]::Ordinal)
+    foreach ($line in $Lines) {
+        $separator = $line.IndexOf('=')
+        if ($separator -lt 0) {
+            continue
+        }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        if ($key -cnotmatch '^[A-Za-z0-9_-]+$') {
+            throw $ErrorMessage
+        }
+        $normalisedKey = $key.ToLowerInvariant()
+        $usesVersionAlias = $normalisedKey -eq "version"
+        if ($usesVersionAlias) {
+            $normalisedKey = "version_info"
+        }
+        if ($normalisedKey -notin @("home", "uv", "version_info", "relocatable")) {
+            continue
+        }
+        if (
+            $usesVersionAlias -or
+            $key -cne $normalisedKey -or
+            $values.ContainsKey($normalisedKey)
+        ) {
+            throw $ErrorMessage
+        }
+        $values.Add($normalisedKey, $value)
+    }
+
+    if (
+        $values.Count -ne 4 -or
+        -not $values.ContainsKey("home") -or -not $values["home"] -or
+        -not $values.ContainsKey("uv") -or $values["uv"] -cne "0.11.16" -or
+        -not $values.ContainsKey("version_info") -or
+        $values["version_info"] -notmatch '^3\.12\.[0-9]+$' -or
+        -not $values.ContainsKey("relocatable") -or $values["relocatable"] -cne "true"
+    ) {
+        throw $ErrorMessage
+    }
+    return $values
+}
+
+function Assert-OrdinaryWindowsDirectoryTree {
+    param([string]$Path, [string]$ErrorMessage)
+
+    $root = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (
+        $null -eq $root -or
+        -not $root.PSIsContainer -or
+        ($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    ) {
+        throw $ErrorMessage
+    }
+    $pendingDirectories = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $pendingDirectories.Push($root)
+    while ($pendingDirectories.Count -gt 0) {
+        $directory = $pendingDirectories.Pop()
+        Get-ChildItem -LiteralPath $directory.FullName -Force | ForEach-Object {
+            if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw $ErrorMessage
+            }
+            if ($_.PSIsContainer) {
+                $pendingDirectories.Push($_)
+            }
+        }
+    }
 }
 
 if ($PnpmVersion -ne "10.34.5") {
@@ -71,6 +228,7 @@ if ($PnpmVersion -ne "10.34.5") {
             throw "Candidate is missing $_."
         }
     }
+Assert-OrdinaryManagedToolsPath $ToolsRoot
 if (-not (Test-Path -LiteralPath $CorepackJs -PathType Leaf)) {
     throw "Verified Corepack JavaScript is missing."
 }
@@ -85,10 +243,9 @@ if (
 ) {
     throw "Refusing managed Python tool root because it is linked or not a directory."
 }
-
 $virtualEnvironmentPath = Join-Path $Candidate ".venv"
 $virtualEnvironment = Get-Item -LiteralPath $virtualEnvironmentPath -Force -ErrorAction SilentlyContinue
-$reuseVirtualEnvironment = $false
+$replaceVirtualEnvironment = $false
 if ($null -ne $virtualEnvironment) {
     if (($virtualEnvironment.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "Refusing linked .venv in the managed source checkout."
@@ -105,63 +262,196 @@ if ($null -ne $virtualEnvironment) {
     ) {
         throw "Refusing existing .venv because it is not a regular virtual environment."
     }
-    $virtualEnvironmentConfigLines = Get-Content -LiteralPath $virtualEnvironmentConfig.FullName
-    if (
-        -not ($virtualEnvironmentConfigLines -match '^uv = \S+$') -or
-        -not ($virtualEnvironmentConfigLines -match '^version_info = 3\.12\.[0-9]+$') -or
-        -not ($virtualEnvironmentConfigLines -match '^relocatable = true$')
-    ) {
-        throw "Refusing existing .venv because it is not a uv-managed relocatable Python 3.12 environment."
+    try {
+        $virtualEnvironmentConfigBytes = [IO.File]::ReadAllBytes($virtualEnvironmentConfig.FullName)
+        if (
+            $virtualEnvironmentConfigBytes.Length -ge 3 -and
+            $virtualEnvironmentConfigBytes[0] -eq 0xEF -and
+            $virtualEnvironmentConfigBytes[1] -eq 0xBB -and
+            $virtualEnvironmentConfigBytes[2] -eq 0xBF
+        ) {
+            throw "A UTF-8 byte-order mark is not permitted."
+        }
+        $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+        $virtualEnvironmentConfigText = $strictUtf8.GetString($virtualEnvironmentConfigBytes)
+        $virtualEnvironmentConfigLines = @($virtualEnvironmentConfigText -split '\r?\n')
     }
-    $pythonHomeLines = @($virtualEnvironmentConfigLines | Where-Object { $_ -match '^home = .+$' })
-    if ($pythonHomeLines.Count -ne 1) {
-        throw "Refusing existing .venv because its managed Python home is invalid."
+    catch {
+        throw "Refusing existing .venv because its pyvenv.cfg is not valid BOM-less UTF-8."
     }
-    $pythonHome = Get-CanonicalExistingDirectory ($pythonHomeLines[0].Substring("home = ".Length))
+    $virtualEnvironmentConfigValues = Get-ValidatedUvVenvConfiguration `
+        $virtualEnvironmentConfigLines `
+        "Refusing existing .venv because it is not a uv-managed relocatable Python 3.12 environment."
+    $pythonHome = Get-CanonicalExistingDirectory $virtualEnvironmentConfigValues["home"]
     $managedPythonRoot = Get-CanonicalExistingDirectory $managedPythonRootPath
     $managedPythonPrefix = "$($managedPythonRoot.TrimEnd([IO.Path]::DirectorySeparatorChar))$([IO.Path]::DirectorySeparatorChar)"
     if (
-        -not $pythonHome.StartsWith($managedPythonPrefix, [StringComparison]::OrdinalIgnoreCase)
+        -not $pythonHome.StartsWith($managedPythonPrefix, [StringComparison]::Ordinal)
     ) {
         throw "Refusing existing .venv because its Python is outside the managed tool root."
     }
-    $pendingEnvironmentDirectories = New-Object `
-        'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
-    $pendingEnvironmentDirectories.Push($virtualEnvironment)
-    while ($pendingEnvironmentDirectories.Count -gt 0) {
-        $environmentDirectory = $pendingEnvironmentDirectories.Pop()
-        Get-ChildItem -LiteralPath $environmentDirectory.FullName -Force | ForEach-Object {
-            if (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "Refusing linked entry inside .venv in the managed source checkout."
-            }
-            if ($_.PSIsContainer) {
-                $pendingEnvironmentDirectories.Push($_)
-            }
-        }
-    }
-    $reuseVirtualEnvironment = $true
+    Assert-ManagedPythonTree $managedPythonRootPath
+    Assert-OrdinaryWindowsDirectoryTree `
+        $virtualEnvironmentPath `
+        "Refusing linked entry inside .venv in the managed source checkout."
+    $replaceVirtualEnvironment = $true
 }
+Assert-ManagedPythonTree $managedPythonRootPath
 
 $env:COREPACK_DEFAULT_TO_LATEST = "0"
 $env:COREPACK_HOME = Join-Path $ToolsRoot "corepack"
-$env:UV_CACHE_DIR = Join-Path $ToolsRoot "uv-cache"
-$env:UV_NO_EDITABLE = "1"
-$env:UV_PYTHON = "3.12"
-$env:UV_PYTHON_INSTALL_DIR = Join-Path $ToolsRoot "python"
 $env:PATH = "$(Split-Path -Parent $Node)$([IO.Path]::PathSeparator)$env:PATH"
 
-Invoke-Checked $Uv @("--version")
-Invoke-Checked $Node @("--version")
-Invoke-Checked $Node @($CorepackJs, "--version")
-
-Push-Location -LiteralPath $Candidate
+$stagingVirtualEnvironmentPath = Join-Path `
+    $Candidate `
+    (".venv.flinttrade-staging-" + [Guid]::NewGuid().ToString("N"))
+if (Test-Path -LiteralPath $stagingVirtualEnvironmentPath) {
+    throw "Refusing to overwrite an existing virtual-environment staging path."
+}
+$backupVirtualEnvironmentPath = Join-Path `
+    $Candidate `
+    (".venv.flinttrade-backup-" + [Guid]::NewGuid().ToString("N"))
+if (Test-Path -LiteralPath $backupVirtualEnvironmentPath) {
+    throw "Refusing to overwrite an existing virtual-environment backup path."
+}
+$uvEnvironmentSnapshot = @{}
+Get-ChildItem Env: | Where-Object { $_.Name -like "UV_*" } | ForEach-Object {
+    $uvEnvironmentSnapshot[$_.Name] = $_.Value
+}
+$candidateLocationPushed = $false
+$stagingVirtualEnvironmentPromoted = $false
+$backupVirtualEnvironmentCreated = $false
+$bootstrapCompleted = $false
 try {
-    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.12"
-    if (-not $reuseVirtualEnvironment) {
-        Invoke-Checked $Uv @("python", "install", "3.12")
-        Invoke-Checked $Uv @("venv", "--relocatable", "--python", "3.12", ".venv")
+    Get-ChildItem Env: | Where-Object { $_.Name -like "UV_*" } | ForEach-Object {
+        Remove-Item -LiteralPath ("Env:\" + $_.Name)
     }
-    Invoke-Checked $Uv @("sync", "--frozen", "--all-packages", "--no-install-package", "flinttrade-ticks")
+    $env:UV_CACHE_DIR = Join-Path $ToolsRoot "uv-cache"
+    $env:UV_MANAGED_PYTHON = "1"
+    $env:UV_NO_CONFIG = "1"
+    $env:UV_NO_EDITABLE = "1"
+    $env:UV_PROJECT = $Candidate
+    $env:UV_PROJECT_ENVIRONMENT = $stagingVirtualEnvironmentPath
+    $env:UV_PYTHON = "3.12"
+    $env:UV_PYTHON_INSTALL_DIR = $managedPythonRootPath
+    $env:UV_WORKING_DIR = $Candidate
+
+    Invoke-Checked $Uv @("--version")
+    Invoke-Checked $Node @("--version")
+    Invoke-Checked $Node @($CorepackJs, "--version")
+
+    Push-Location -LiteralPath $Candidate
+    $candidateLocationPushed = $true
+    Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-python`t48`tInstalling managed Python 3.12"
+    Invoke-Checked $Uv @(
+        "python",
+        "install",
+        "3.12",
+        "--no-bin",
+        "--no-registry",
+        "--no-config",
+        "--directory",
+        $Candidate
+    )
+    Assert-ManagedPythonTree $managedPythonRootPath
+    Invoke-Checked $Uv @(
+        "venv",
+        "--relocatable",
+        "--python",
+        "3.12",
+        $stagingVirtualEnvironmentPath,
+        "--no-project",
+        "--no-config",
+        "--managed-python",
+        "--directory",
+        $Candidate
+    )
+    Invoke-Checked $Uv @(
+        "sync",
+        "--frozen",
+        "--all-packages",
+        "--no-install-package",
+        "flinttrade-ticks",
+        "--no-config",
+        "--managed-python",
+        "--directory",
+        $Candidate,
+        "--project",
+        $Candidate
+    )
+    Assert-OrdinaryWindowsDirectoryTree `
+        $stagingVirtualEnvironmentPath `
+        "Refusing a linked entry in the staged virtual environment."
+    $stagedVirtualEnvironmentConfig = Get-Item `
+        -LiteralPath (Join-Path $stagingVirtualEnvironmentPath "pyvenv.cfg") `
+        -Force `
+        -ErrorAction SilentlyContinue
+    if (
+        $null -eq $stagedVirtualEnvironmentConfig -or
+        $stagedVirtualEnvironmentConfig.PSIsContainer -or
+        ($stagedVirtualEnvironmentConfig.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    ) {
+        throw "Refusing staged .venv because it is not a regular virtual environment."
+    }
+    try {
+        $stagedVirtualEnvironmentConfigBytes = [IO.File]::ReadAllBytes(
+            $stagedVirtualEnvironmentConfig.FullName
+        )
+        if (
+            $stagedVirtualEnvironmentConfigBytes.Length -ge 3 -and
+            $stagedVirtualEnvironmentConfigBytes[0] -eq 0xEF -and
+            $stagedVirtualEnvironmentConfigBytes[1] -eq 0xBB -and
+            $stagedVirtualEnvironmentConfigBytes[2] -eq 0xBF
+        ) {
+            throw "A UTF-8 byte-order mark is not permitted."
+        }
+        $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+        $stagedVirtualEnvironmentConfigText = $strictUtf8.GetString(
+            $stagedVirtualEnvironmentConfigBytes
+        )
+        $stagedVirtualEnvironmentConfigLines = @(
+            $stagedVirtualEnvironmentConfigText -split '\r?\n'
+        )
+    }
+    catch {
+        throw "Refusing staged .venv because its pyvenv.cfg is not valid BOM-less UTF-8."
+    }
+    $stagedVirtualEnvironmentConfigValues = Get-ValidatedUvVenvConfiguration `
+        $stagedVirtualEnvironmentConfigLines `
+        "Refusing staged .venv because it is not a uv-managed relocatable Python 3.12 environment."
+    $stagedPythonHome = Get-CanonicalExistingDirectory `
+        $stagedVirtualEnvironmentConfigValues["home"]
+    $currentManagedPythonRoot = Get-CanonicalExistingDirectory $managedPythonRootPath
+    $currentManagedPythonPrefix = `
+        "$($currentManagedPythonRoot.TrimEnd([IO.Path]::DirectorySeparatorChar))$([IO.Path]::DirectorySeparatorChar)"
+    if (-not $stagedPythonHome.StartsWith($currentManagedPythonPrefix, [StringComparison]::Ordinal)) {
+        throw "Refusing staged .venv because its Python is outside the managed tool root."
+    }
+    Assert-ManagedPythonTree $managedPythonRootPath
+    if ($replaceVirtualEnvironment) {
+        Assert-OrdinaryWindowsDirectoryTree `
+            $virtualEnvironmentPath `
+            "Refusing to replace a changed or linked existing virtual environment."
+        $backupVirtualEnvironmentCreated = $true
+        [IO.Directory]::Move($virtualEnvironmentPath, $backupVirtualEnvironmentPath)
+    }
+    try {
+        [IO.Directory]::Move($stagingVirtualEnvironmentPath, $virtualEnvironmentPath)
+        $stagingVirtualEnvironmentPromoted = $true
+    }
+    catch {
+        if (
+            $backupVirtualEnvironmentCreated -and
+            -not (Test-Path -LiteralPath $virtualEnvironmentPath) -and
+            (Test-Path -LiteralPath $backupVirtualEnvironmentPath -PathType Container)
+        ) {
+            [IO.Directory]::Move($backupVirtualEnvironmentPath, $virtualEnvironmentPath)
+            $backupVirtualEnvironmentCreated = $false
+        }
+        throw
+    }
+    $env:UV_PROJECT_ENVIRONMENT = $virtualEnvironmentPath
+
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tsyncing-javascript`t68`tInstalling pnpm 10.34.5 dependencies"
     $resolvedPnpmVersion = (& $Node $CorepackJs pnpm --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $resolvedPnpmVersion -ne "10.34.5") {
@@ -170,7 +460,65 @@ try {
     Invoke-Checked $Node @($CorepackJs, "pnpm", "install", "--frozen-lockfile")
     Write-Output "FLINTTRADE_BOOTSTRAP_PHASE`tbuilding-terminal`t84`tBuilding the terminal for production"
     Invoke-Checked $Node @($CorepackJs, "pnpm", "--filter", "@flinttrade/terminal", "build")
+    $bootstrapCompleted = $true
 }
 finally {
-    Pop-Location
+    if ($candidateLocationPushed) {
+        Pop-Location
+    }
+    Get-ChildItem Env: | Where-Object { $_.Name -like "UV_*" } | ForEach-Object {
+        Remove-Item -LiteralPath ("Env:\" + $_.Name)
+    }
+    foreach ($uvEnvironmentName in $uvEnvironmentSnapshot.Keys) {
+        [Environment]::SetEnvironmentVariable(
+            $uvEnvironmentName,
+            $uvEnvironmentSnapshot[$uvEnvironmentName],
+            [EnvironmentVariableTarget]::Process
+        )
+    }
+    $backupVirtualEnvironment = Get-Item `
+        -LiteralPath $backupVirtualEnvironmentPath `
+        -Force `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $backupVirtualEnvironment) {
+        Assert-OrdinaryWindowsDirectoryTree `
+            $backupVirtualEnvironmentPath `
+            "Refusing a linked virtual-environment backup path during cleanup."
+        if ($bootstrapCompleted) {
+            Remove-Item -LiteralPath $backupVirtualEnvironmentPath -Recurse -Force
+            $backupVirtualEnvironmentCreated = $false
+        }
+        else {
+            $currentVirtualEnvironment = Get-Item `
+                -LiteralPath $virtualEnvironmentPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+            $stagedVirtualEnvironment = Get-Item `
+                -LiteralPath $stagingVirtualEnvironmentPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+            if ($null -ne $currentVirtualEnvironment) {
+                if ($null -ne $stagedVirtualEnvironment) {
+                    throw "Virtual-environment rollback state is ambiguous."
+                }
+                Assert-OrdinaryWindowsDirectoryTree `
+                    $virtualEnvironmentPath `
+                    "Refusing to roll back a linked current virtual environment."
+                [IO.Directory]::Move($virtualEnvironmentPath, $stagingVirtualEnvironmentPath)
+                $stagingVirtualEnvironmentPromoted = $false
+            }
+            [IO.Directory]::Move($backupVirtualEnvironmentPath, $virtualEnvironmentPath)
+            $backupVirtualEnvironmentCreated = $false
+        }
+    }
+    $stagingVirtualEnvironment = Get-Item `
+        -LiteralPath $stagingVirtualEnvironmentPath `
+        -Force `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $stagingVirtualEnvironment) {
+        Assert-OrdinaryWindowsDirectoryTree `
+            $stagingVirtualEnvironmentPath `
+            "Refusing to clean a linked virtual-environment staging path."
+        Remove-Item -LiteralPath $stagingVirtualEnvironmentPath -Recurse -Force
+    }
 }
