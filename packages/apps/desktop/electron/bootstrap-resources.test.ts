@@ -1,6 +1,9 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -279,8 +282,9 @@ exit 0
 
   it.runIf(process.platform === "win32")(
     "rebuilds a validated Windows virtual environment without executing its old contents",
-    () => {
+    async () => {
       const root = mkdtempSync(path.join(tmpdir(), "flinttrade-bootstrap-entrypoint-"));
+      let lockedNestedExecutableProcess: ReturnType<typeof spawn> | undefined;
       try {
         const poisonedUvTarget = path.join(root, "outside-uv-target");
         mkdirSync(poisonedUvTarget);
@@ -305,7 +309,28 @@ exit 0
         }
         const staleEnvironmentFile = path.join(candidate, ".venv", "stale");
         mkdirSync(path.dirname(staleEnvironmentFile), { recursive: true });
-        writeFileSync(staleEnvironmentFile, "stale\n");
+        const staleEnvironmentBytes = Buffer.from([0x00, 0x66, 0x6c, 0x69, 0x6e, 0x74, 0xff]);
+        writeFileSync(staleEnvironmentFile, staleEnvironmentBytes);
+        const staleScripts = path.join(candidate, ".venv", "Scripts");
+        const stalePython = path.join(staleScripts, "python.exe");
+        const stalePythonw = path.join(staleScripts, "pythonw.exe");
+        mkdirSync(staleScripts);
+        const system32 = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32");
+        copyFileSync(path.join(system32, "where.exe"), stalePython);
+        copyFileSync(path.join(system32, "where.exe"), stalePythonw);
+        const nestedNativeDirectory = path.join(candidate, ".venv", "Lib", "site-packages", "native");
+        const nestedSentinel = path.join(nestedNativeDirectory, "sentinel.bin");
+        const nestedSentinelBytes = Buffer.from([0xde, 0xad, 0x00, 0xbe, 0xef, 0x0a]);
+        const lockedNestedExecutable = path.join(nestedNativeDirectory, "worker-helper.exe");
+        mkdirSync(nestedNativeDirectory, { recursive: true });
+        writeFileSync(nestedSentinel, nestedSentinelBytes);
+        copyFileSync(
+          path.join(system32, "ping.exe"),
+          lockedNestedExecutable,
+        );
+        const lockedNestedExecutableSha256 = createHash("sha256")
+          .update(readFileSync(lockedNestedExecutable))
+          .digest("hex");
         mkdirSync(path.join(pythonVersionRoot, "bin"), { recursive: true });
         symlinkSync(pythonVersionRoot, pythonAlias, "junction");
         writeFileSync(
@@ -347,7 +372,7 @@ if defined UV_SYSTEM_PYTHON exit /b 85
 if "%~1"=="venv" if not "%~5"==".venv" (
   mkdir "%~5\\Scripts"
   copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\python.exe" >nul
-  copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\pythonw.exe" >nul
+  if not "%FLINTTRADE_TEST_MISSING_STAGED_LAUNCHER%"=="1" copy /y "%SystemRoot%\\System32\\where.exe" "%~5\\Scripts\\pythonw.exe" >nul
   >"%~5\\pyvenv.cfg" echo home = ${pythonHome}
   >>"%~5\\pyvenv.cfg" echo uv = 0.11.16
   if "%FLINTTRADE_TEST_INVALID_STAGED_CONFIG%"=="1" (
@@ -377,6 +402,72 @@ mkdir .venv
 exit /b 0
 `,
         );
+
+        const invokeBootstrap = (extraEnvironment: NodeJS.ProcessEnv = {}) =>
+          spawnSync(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              powershellScript,
+              "-Candidate",
+              candidate,
+              "-Uv",
+              uv,
+              "-Node",
+              node,
+              "-CorepackJs",
+              corepack,
+              "-ToolsRoot",
+              tools,
+              "-PnpmVersion",
+              "10.34.5",
+            ],
+            {
+              encoding: "utf8",
+              env: {
+                ...process.env,
+                UV_PROJECT_ENVIRONMENT: poisonedUvTarget,
+                UV_WORKING_DIR: poisonedUvTarget,
+                UV_PROJECT: poisonedUvTarget,
+                UV_SYSTEM_PYTHON: "1",
+                ...extraEnvironment,
+              },
+            },
+          );
+
+        rmSync(stalePythonw);
+        const missingCurrentLauncherResult = invokeBootstrap();
+        expect(missingCurrentLauncherResult.status).not.toBe(0);
+        expect(`${missingCurrentLauncherResult.stdout}\n${missingCurrentLauncherResult.stderr}`).toContain(
+          "Refusing existing .venv because its Python launchers are missing, linked, or not regular files.",
+        );
+        expect(readFileSync(staleEnvironmentFile)).toEqual(staleEnvironmentBytes);
+        expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
+          [],
+        );
+        copyFileSync(path.join(system32, "where.exe"), stalePythonw);
+
+        const missingStagedLauncherResult = invokeBootstrap({
+          FLINTTRADE_TEST_MISSING_STAGED_LAUNCHER: "1",
+        });
+        expect(missingStagedLauncherResult.status).not.toBe(0);
+        expect(`${missingStagedLauncherResult.stdout}\n${missingStagedLauncherResult.stderr}`).toContain(
+          "Refusing staged .venv because its Python launchers are missing, linked, or not regular files.",
+        );
+        expect(readFileSync(staleEnvironmentFile)).toEqual(staleEnvironmentBytes);
+        expect(readdirSync(candidate).filter((entry) => entry.startsWith(".venv.flinttrade-"))).toEqual(
+          [],
+        );
+
+        lockedNestedExecutableProcess = spawn(lockedNestedExecutable, ["-t", "127.0.0.1"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        await once(lockedNestedExecutableProcess, "spawn");
 
         const result = spawnSync(
           "powershell.exe",
@@ -413,7 +504,57 @@ exit /b 0
         );
 
         expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).toContain(
+          "Deferred cleanup of the retired virtual environment because one of its files is still in use.",
+        );
         expect(existsSync(staleEnvironmentFile)).toBe(false);
+        const retainedBackups = readdirSync(candidate).filter((entry) =>
+          /^\.venv\.flinttrade-backup-[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(entry),
+        );
+        expect(retainedBackups).toHaveLength(1);
+        const retainedBackup = path.join(candidate, retainedBackups[0]!);
+        expect(`${result.stdout}\n${result.stderr}`).toContain(
+          `Blocked file: '${path.join(retainedBackup, "Lib", "site-packages", "native", "worker-helper.exe")}'.`,
+        );
+        expect(`${result.stdout}\n${result.stderr}`).toContain(
+          `Retained path: '${retainedBackup}'.`,
+        );
+        expect(readdirSync(path.join(candidate, retainedBackups[0]!)).sort()).toEqual([
+          "Lib",
+          "Scripts",
+          "pyvenv.cfg",
+          "stale",
+        ]);
+        expect(readFileSync(path.join(retainedBackup, "stale"))).toEqual(staleEnvironmentBytes);
+        expect(readFileSync(path.join(retainedBackup, "Lib", "site-packages", "native", "sentinel.bin"))).toEqual(
+          nestedSentinelBytes,
+        );
+        expect(
+          createHash("sha256")
+            .update(
+              readFileSync(
+                path.join(retainedBackup, "Lib", "site-packages", "native", "worker-helper.exe"),
+              ),
+            )
+            .digest("hex"),
+        ).toBe(lockedNestedExecutableSha256);
+        expect(readdirSync(path.join(retainedBackup, "Lib", "site-packages", "native")).sort()).toEqual([
+          "sentinel.bin",
+          "worker-helper.exe",
+        ]);
+        if (lockedNestedExecutableProcess.exitCode === null) {
+          const lockedNestedExecutableExit = once(lockedNestedExecutableProcess, "exit");
+          lockedNestedExecutableProcess.kill();
+          await lockedNestedExecutableExit;
+        }
+        lockedNestedExecutableProcess = undefined;
+        const unownedLookalike = path.join(candidate, ".venv.flinttrade-backup-not-owned");
+        mkdirSync(unownedLookalike);
+        writeFileSync(path.join(unownedLookalike, "sentinel"), "preserve\n");
+        const incompleteOrphanName = ".venv.flinttrade-backup-00000000000040008000000000000000";
+        const incompleteOrphan = path.join(candidate, incompleteOrphanName);
+        mkdirSync(incompleteOrphan);
+        writeFileSync(path.join(incompleteOrphan, "sentinel"), "preserve\n");
         rmSync(path.join(candidate, ".venv"), { force: true, recursive: true });
         const freshResult = spawnSync(
           "powershell.exe",
@@ -449,7 +590,19 @@ exit /b 0
           },
         );
         expect(freshResult.status, `${freshResult.stdout}\n${freshResult.stderr}`).toBe(0);
+        expect(`${freshResult.stdout}\n${freshResult.stderr}`).toContain(
+          `Preserved an unvalidated retired virtual environment at '${incompleteOrphan}'.`,
+        );
         expect(lstatSync(path.join(candidate, ".venv")).isDirectory()).toBe(true);
+        expect(
+          readdirSync(candidate).filter((entry) =>
+            /^\.venv\.flinttrade-backup-[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$/.test(entry),
+          ),
+        ).toEqual([incompleteOrphanName]);
+        expect(readFileSync(path.join(unownedLookalike, "sentinel"), "utf8")).toBe("preserve\n");
+        expect(readFileSync(path.join(incompleteOrphan, "sentinel"), "utf8")).toBe("preserve\n");
+        rmSync(unownedLookalike, { recursive: true });
+        rmSync(incompleteOrphan, { recursive: true });
         const preservedEnvironmentFile = path.join(candidate, ".venv", "preserved");
         writeFileSync(preservedEnvironmentFile, "preserved\n");
         const invalidStagedResult = spawnSync(
@@ -531,6 +684,11 @@ exit /b 0
           [],
         );
       } finally {
+        if (lockedNestedExecutableProcess?.exitCode === null) {
+          const lockedNestedExecutableExit = once(lockedNestedExecutableProcess, "exit");
+          lockedNestedExecutableProcess.kill();
+          await lockedNestedExecutableExit;
+        }
         rmSync(root, { force: true, recursive: true });
       }
     },

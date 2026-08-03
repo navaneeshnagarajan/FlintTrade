@@ -19,6 +19,12 @@ function Invoke-Checked {
     }
 }
 
+function Write-BootstrapWarning {
+    param([string]$Message)
+
+    [Console]::Error.WriteLine("WARNING: $Message")
+}
+
 function Get-CanonicalExistingPath {
     param([string]$Path)
 
@@ -192,7 +198,7 @@ function Get-ValidatedUvVenvConfiguration {
     return $values
 }
 
-function Assert-OrdinaryWindowsDirectoryTree {
+function Get-OrdinaryWindowsFiles {
     param([string]$Path, [string]$ErrorMessage)
 
     $root = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
@@ -204,6 +210,7 @@ function Assert-OrdinaryWindowsDirectoryTree {
         throw $ErrorMessage
     }
     $pendingDirectories = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
     $pendingDirectories.Push($root)
     while ($pendingDirectories.Count -gt 0) {
         $directory = $pendingDirectories.Pop()
@@ -214,7 +221,188 @@ function Assert-OrdinaryWindowsDirectoryTree {
             if ($_.PSIsContainer) {
                 $pendingDirectories.Push($_)
             }
+            else {
+                [void]$files.Add($_)
+            }
         }
+    }
+    return $files.ToArray()
+}
+
+function Assert-OrdinaryWindowsDirectoryTree {
+    param([string]$Path, [string]$ErrorMessage)
+
+    $null = @(Get-OrdinaryWindowsFiles $Path $ErrorMessage)
+}
+
+function Assert-OrdinaryWindowsVirtualEnvironmentLaunchers {
+    param([string]$Path, [string]$ErrorMessage)
+
+    foreach ($launcherName in @("python.exe", "pythonw.exe")) {
+        $launcher = Get-Item `
+            -LiteralPath (Join-Path (Join-Path $Path "Scripts") $launcherName) `
+            -Force `
+            -ErrorAction SilentlyContinue
+        if (
+            $null -eq $launcher -or
+            $launcher.PSIsContainer -or
+            ($launcher.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+        ) {
+            throw $ErrorMessage
+        }
+    }
+}
+
+function Assert-ValidatedVirtualEnvironmentBackup {
+    param(
+        [string]$Path,
+        [string]$CandidatePath,
+        [string]$ManagedPythonRootPath,
+        [string]$ErrorMessage
+    )
+
+    $backup = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (
+        $null -eq $backup -or
+        -not $backup.PSIsContainer -or
+        ($backup.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $backup.Name -cnotmatch '^\.venv\.flinttrade-backup-[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$'
+    ) {
+        throw $ErrorMessage
+    }
+    try {
+        $canonicalCandidate = Get-CanonicalExistingDirectory $CandidatePath
+        $canonicalParent = Get-CanonicalExistingDirectory (Split-Path -Parent $backup.FullName)
+    }
+    catch {
+        throw $ErrorMessage
+    }
+    if (-not $canonicalParent.Equals($canonicalCandidate, [StringComparison]::Ordinal)) {
+        throw $ErrorMessage
+    }
+
+    Assert-OrdinaryWindowsDirectoryTree $Path $ErrorMessage
+    Assert-OrdinaryWindowsVirtualEnvironmentLaunchers $Path $ErrorMessage
+    $configuration = Get-Item `
+        -LiteralPath (Join-Path $Path "pyvenv.cfg") `
+        -Force `
+        -ErrorAction SilentlyContinue
+    if (
+        $null -eq $configuration -or
+        $configuration.PSIsContainer -or
+        ($configuration.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    ) {
+        throw $ErrorMessage
+    }
+    try {
+        $configurationBytes = [IO.File]::ReadAllBytes($configuration.FullName)
+        if (
+            $configurationBytes.Length -ge 3 -and
+            $configurationBytes[0] -eq 0xEF -and
+            $configurationBytes[1] -eq 0xBB -and
+            $configurationBytes[2] -eq 0xBF
+        ) {
+            throw "A UTF-8 byte-order mark is not permitted."
+        }
+        $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+        $configurationLines = @($strictUtf8.GetString($configurationBytes) -split '\r?\n')
+        $configurationValues = Get-ValidatedUvVenvConfiguration $configurationLines $ErrorMessage
+        $pythonHome = Get-CanonicalExistingDirectory $configurationValues["home"]
+        $managedPythonRoot = Get-CanonicalExistingDirectory $ManagedPythonRootPath
+    }
+    catch {
+        throw $ErrorMessage
+    }
+    $managedPythonPrefix = `
+        "$($managedPythonRoot.TrimEnd([IO.Path]::DirectorySeparatorChar))$([IO.Path]::DirectorySeparatorChar)"
+    if (-not $pythonHome.StartsWith($managedPythonPrefix, [StringComparison]::Ordinal)) {
+        throw $ErrorMessage
+    }
+    Assert-ManagedPythonTree $ManagedPythonRootPath
+
+}
+
+function Test-ExclusiveFileAccess {
+    param([string]$Path)
+
+    $stream = $null
+    try {
+        # Read-only access succeeds for mapped Windows executables, so the
+        # non-mutating removal probe must also request write access.
+        $stream = [IO.File]::Open(
+            $Path,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None
+        )
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Remove-ValidatedVirtualEnvironmentBackup {
+    param([string]$Path)
+
+    $backupFiles = @(
+        Get-OrdinaryWindowsFiles `
+            $Path `
+            "Refusing a changed or linked virtual-environment backup path during cleanup."
+    )
+    foreach ($backupFile in $backupFiles) {
+        if (-not (Test-ExclusiveFileAccess $backupFile.FullName)) {
+            Write-BootstrapWarning (
+                "Deferred cleanup of the retired virtual environment because one of its " +
+                "files is still in use. Blocked file: '$($backupFile.FullName)'. " +
+                "Retained path: '$Path'. " +
+                "FlintTrade will retry on the next installation."
+            )
+            return $false
+        }
+    }
+    Remove-Item -LiteralPath $Path -Recurse -Force
+    return $true
+}
+
+function Remove-OrphanedVirtualEnvironmentBackups {
+    param(
+        [string]$CandidatePath,
+        [string]$ManagedPythonRootPath
+    )
+
+    $orphanedBackups = @(
+        Get-ChildItem `
+            -LiteralPath $CandidatePath `
+            -Filter ".venv.flinttrade-backup-*" `
+            -Force `
+            -ErrorAction Stop |
+            Where-Object {
+                $_.Name -cmatch '^\.venv\.flinttrade-backup-[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}$'
+            }
+    )
+    foreach ($orphanedBackup in $orphanedBackups) {
+        try {
+            Assert-ValidatedVirtualEnvironmentBackup `
+                $orphanedBackup.FullName `
+                $CandidatePath `
+                $ManagedPythonRootPath `
+                "The retired virtual environment could not be proven safe to clean."
+        }
+        catch {
+            Write-BootstrapWarning (
+                "Preserved an unvalidated retired virtual environment at " +
+                "'$($orphanedBackup.FullName)'. " +
+                "Remove it manually only after confirming its exact path and contents."
+            )
+            continue
+        }
+        [void](Remove-ValidatedVirtualEnvironmentBackup $orphanedBackup.FullName)
     }
 }
 
@@ -294,9 +482,13 @@ if ($null -ne $virtualEnvironment) {
     Assert-OrdinaryWindowsDirectoryTree `
         $virtualEnvironmentPath `
         "Refusing linked entry inside .venv in the managed source checkout."
+    Assert-OrdinaryWindowsVirtualEnvironmentLaunchers `
+        $virtualEnvironmentPath `
+        "Refusing existing .venv because its Python launchers are missing, linked, or not regular files."
     $replaceVirtualEnvironment = $true
 }
 Assert-ManagedPythonTree $managedPythonRootPath
+Remove-OrphanedVirtualEnvironmentBackups $Candidate $managedPythonRootPath
 
 $env:COREPACK_DEFAULT_TO_LATEST = "0"
 $env:COREPACK_HOME = Join-Path $ToolsRoot "corepack"
@@ -382,6 +574,9 @@ try {
     Assert-OrdinaryWindowsDirectoryTree `
         $stagingVirtualEnvironmentPath `
         "Refusing a linked entry in the staged virtual environment."
+    Assert-OrdinaryWindowsVirtualEnvironmentLaunchers `
+        $stagingVirtualEnvironmentPath `
+        "Refusing staged .venv because its Python launchers are missing, linked, or not regular files."
     $stagedVirtualEnvironmentConfig = Get-Item `
         -LiteralPath (Join-Path $stagingVirtualEnvironmentPath "pyvenv.cfg") `
         -Force `
@@ -481,12 +676,16 @@ finally {
         -Force `
         -ErrorAction SilentlyContinue
     if ($null -ne $backupVirtualEnvironment) {
-        Assert-OrdinaryWindowsDirectoryTree `
+        Assert-ValidatedVirtualEnvironmentBackup `
             $backupVirtualEnvironmentPath `
-            "Refusing a linked virtual-environment backup path during cleanup."
+            $Candidate `
+            $managedPythonRootPath `
+            "Refusing an unvalidated virtual-environment backup path during cleanup."
         if ($bootstrapCompleted) {
-            Remove-Item -LiteralPath $backupVirtualEnvironmentPath -Recurse -Force
-            $backupVirtualEnvironmentCreated = $false
+            $backupRemoved = Remove-ValidatedVirtualEnvironmentBackup $backupVirtualEnvironmentPath
+            if ($backupRemoved) {
+                $backupVirtualEnvironmentCreated = $false
+            }
         }
         else {
             $currentVirtualEnvironment = Get-Item `
