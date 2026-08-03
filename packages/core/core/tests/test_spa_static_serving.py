@@ -14,18 +14,8 @@ import structlog
 from flask import Flask
 
 
-@pytest.fixture
-def built_frontend_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Flask:
-    """Build an app around a tiny, real frontend output tree."""
-    dist = tmp_path / "dist"
-    assets = dist / "assets"
-    assets.mkdir(parents=True)
-    (dist / "index.html").write_text(
-        '<!doctype html><script type="module" src="/assets/app.js"></script>',
-        encoding="utf-8",
-    )
-    (assets / "app.js").write_bytes(b"globalThis.flintTradeLoaded = true;\n")
-
+def _create_frontend_app(dist: Path, monkeypatch: pytest.MonkeyPatch) -> Flask:
+    """Create a rate-limited test app around the supplied frontend tree."""
     monkeypatch.setenv("FLINTTRADE_FRONTEND_DIST", str(dist))
     monkeypatch.setenv("OPENALGO_API_KEY", "spa-static-serving-test-key")
 
@@ -41,6 +31,24 @@ def built_frontend_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Flask
     app = app_module.create_flask_app()
     app.config["TESTING"] = True
     return app
+
+
+@pytest.fixture
+def built_frontend_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Flask:
+    """Build an app around a tiny, real frontend output tree."""
+    dist = tmp_path / "dist"
+    assets = dist / "assets"
+    fonts = dist / "fonts"
+    assets.mkdir(parents=True)
+    fonts.mkdir()
+    (dist / "index.html").write_text(
+        '<!doctype html><script type="module" src="/assets/app.js"></script>',
+        encoding="utf-8",
+    )
+    (assets / "app.js").write_bytes(b"globalThis.flintTradeLoaded = true;\n")
+    (fonts / "app.woff2").write_bytes(b"test-font")
+
+    return _create_frontend_app(dist, monkeypatch)
 
 
 @pytest.mark.unit
@@ -87,9 +95,134 @@ def test_frontend_asset_burst_is_not_rate_limited(built_frontend_app: Flask) -> 
     """One page load may fetch more than the API's 50-request default limit."""
     client = built_frontend_app.test_client()
 
-    statuses = [client.get("/assets/app.js").status_code for _ in range(2)]
+    statuses = [
+        [client.get(path).status_code for _ in range(2)]
+        for path in ("/assets/app.js", "/fonts/app.woff2")
+    ]
 
-    assert statuses == [200, 200]
+    assert statuses == [[200, 200], [200, 200]]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/assets/missing.js", "/fonts/missing.woff2"])
+def test_missing_frontend_asset_remains_rate_limited(built_frontend_app: Flask, path: str) -> None:
+    """Missing static paths must not bypass the default request limit."""
+    client = built_frontend_app.test_client()
+
+    statuses = [client.get(path).status_code for _ in range(2)]
+
+    assert statuses == [404, 429]
+
+
+@pytest.mark.unit
+def test_frontend_symlink_escape_remains_rate_limited(
+    built_frontend_app: Flask,
+    tmp_path: Path,
+) -> None:
+    """A static-path symlink outside dist is neither served nor exempted."""
+    outside = tmp_path / "outside.js"
+    outside.write_bytes(b"must not be served")
+    escaped = Path(built_frontend_app.config["_DIST_PATH"]) / "assets" / "escape.js"
+    try:
+        escaped.symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("this runner cannot create symbolic links")
+
+    client = built_frontend_app.test_client()
+    statuses = [client.get("/assets/escape.js").status_code for _ in range(2)]
+
+    assert statuses == [404, 429]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/assets/../index.html", "/assets/%2e%2e/index.html"])
+def test_frontend_static_traversal_alias_remains_rate_limited(
+    built_frontend_app: Flask,
+    path: str,
+) -> None:
+    """A static-looking URL may not exempt a file outside its static subtree."""
+    client = built_frontend_app.test_client()
+
+    statuses = [client.get(path).status_code for _ in range(2)]
+
+    assert statuses == [200, 429]
+
+
+@pytest.mark.unit
+def test_frontend_internal_symlink_alias_remains_rate_limited(
+    built_frontend_app: Flask,
+) -> None:
+    """A static-subtree symlink back to dist/index.html must not be exempted."""
+    dist = Path(built_frontend_app.config["_DIST_PATH"])
+    escaped = dist / "assets" / "index-alias.html"
+    try:
+        escaped.symlink_to(dist / "index.html")
+    except (NotImplementedError, OSError):
+        pytest.skip("this runner cannot create symbolic links")
+
+    client = built_frontend_app.test_client()
+    statuses = [client.get("/assets/index-alias.html").status_code for _ in range(2)]
+
+    assert statuses == [200, 429]
+
+
+@pytest.mark.unit
+def test_symlinked_static_root_does_not_broaden_the_exemption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An assets directory aliased to dist itself must not become an exemption root."""
+    dist = tmp_path / "dist-root-alias"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    try:
+        (dist / "assets").symlink_to(dist, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("this runner cannot create symbolic links")
+
+    app = _create_frontend_app(dist, monkeypatch)
+    client = app.test_client()
+    statuses = [client.get("/assets/index.html").status_code for _ in range(2)]
+
+    assert statuses == [200, 429]
+
+
+@pytest.mark.unit
+def test_looping_static_root_does_not_abort_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed optional assets directory must stay non-exempt without crashing."""
+    dist = tmp_path / "dist-static-loop"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    try:
+        (dist / "assets").symlink_to("assets", target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("this runner cannot create symbolic links")
+
+    app = _create_frontend_app(dist, monkeypatch)
+    client = app.test_client()
+    statuses = [client.get("/assets/missing.js").status_code for _ in range(2)]
+
+    assert statuses == [404, 429]
+
+
+@pytest.mark.unit
+def test_looping_frontend_override_degrades_to_api_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed optional dist override must not abort backend startup."""
+    dist = tmp_path / "dist-loop"
+    try:
+        dist.symlink_to(dist, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("this runner cannot create symbolic links")
+
+    app = _create_frontend_app(dist, monkeypatch)
+
+    assert app.config["_FRONTEND_AVAILABLE"] is False
 
 
 @pytest.mark.unit
