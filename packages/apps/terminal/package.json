@@ -67,7 +67,7 @@
   "devDependencies": {
     "@babel/core": "7.29.6",
     "@babel/eslint-parser": "7.29.7",
-    "@babel/preset-typescript": "7.29.7",
+    "@babel/preset-typescript": "8.0.1",
     "@playwright/test": "^1.61.1",
     "@sentry/react": "^10.68.0",
     "@tailwindcss/vite": "^4.3.3",
