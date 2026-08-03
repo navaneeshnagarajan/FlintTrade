@@ -82,6 +82,7 @@ from flask_limiter import Limiter  # noqa: E402
 from flask_limiter.util import get_remote_address  # noqa: E402
 import sentry_sdk  # noqa: E402
 from sentry_sdk.integrations.flask import FlaskIntegration  # noqa: E402
+from werkzeug.utils import safe_join as _safe_join  # noqa: E402
 
 from .backend_instance import (  # noqa: E402
     acquire_backend_instance_lease,
@@ -3090,27 +3091,84 @@ def create_flask_app(
     else:
         _dist_path = Path(_REPO_ROOT) / "packages" / "apps" / "terminal" / "dist"
     _dist_index = _dist_path / "index.html"
-    _frontend_available = _dist_index.exists()
+    spa_static_prefixes = ("assets/", "fonts/")
+    _frontend_available = False
+    _frontend_path_invalid = False
+    resolved_dist_path: Path | None = None
+    resolved_dist_index: Path | None = None
+    if _dist_index.exists():
+        try:
+            resolved_dist_path = _dist_path.resolve(strict=True)
+            resolved_dist_index = _dist_index.resolve(strict=True)
+            _frontend_available = (
+                resolved_dist_index.is_file() and resolved_dist_path in resolved_dist_index.parents
+            )
+            _frontend_path_invalid = not _frontend_available
+        except (OSError, RuntimeError, ValueError):
+            _frontend_path_invalid = True
 
-    if _frontend_available:
-        # Point Flask's built-in static_folder at the React build.  We use
-        # a dedicated static_url_path (``/_static_flask``) so Flask's
-        # default catch-all route does not pre-empt the SPA fallback
-        # registered later — we serve all of the root-level dist files
-        # (assets/, favicon.svg, index.html) through our fallback so
-        # the NotFound → index.html redirect can work cleanly.
-        app = Flask(
-            __name__,
-            static_folder=str(_dist_path),
-            static_url_path="/_static_flask",
-        )
-    else:
-        app = Flask(__name__)
+    resolved_static_roots: list[tuple[str, Path]] = []
+    if _frontend_available and resolved_dist_path is not None:
+        for prefix in spa_static_prefixes:
+            static_path = _dist_path / prefix.rstrip("/")
+            try:
+                if static_path.is_symlink() or static_path.is_junction() or not static_path.is_dir():
+                    continue
+                resolved_static_root = static_path.resolve(strict=True)
+                if resolved_dist_path in resolved_static_root.parents:
+                    resolved_static_roots.append((prefix, resolved_static_root))
+            except (OSError, RuntimeError, ValueError):
+                continue
+    resolved_spa_static_roots = tuple(resolved_static_roots)
+
+    def _resolve_frontend_dist_file(path: str) -> Path | None:
+        """Return an existing file contained by the frontend distribution."""
+        if resolved_dist_path is None:
+            return None
+        joined = _safe_join(str(_dist_path), path)
+        if joined is None:
+            return None
+        try:
+            resolved = Path(joined).resolve()
+            if not resolved.is_file() or resolved_dist_path not in resolved.parents:
+                return None
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return resolved
+
+    def _resolve_frontend_static_file(path: str) -> Path | None:
+        """Return a file contained by the matching frontend static subtree."""
+        resolved = _resolve_frontend_dist_file(path)
+        if resolved is None:
+            return None
+        for prefix, static_root in resolved_spa_static_roots:
+            if path.startswith(prefix) and static_root in resolved.parents:
+                return resolved
+        return None
+
+    # The SPA fallback owns every frontend response so index.html always goes
+    # through CSP nonce injection. A second Flask static route could expose the
+    # raw document with a nonce-bearing CSP header that blocks its scripts.
+    app = Flask(__name__, static_folder=None)
+    if _frontend_path_invalid:
+        logger.warning("Frontend build path is invalid; backend will serve API only.")
+    elif not _frontend_available:
         logger.warning(
             "Frontend not built — run `npm run build` in packages/apps/terminal. Backend will serve API only."
         )
     app.config["_FRONTEND_AVAILABLE"] = _frontend_available
     app.config["_DIST_PATH"] = _dist_path
+
+    @app.before_request
+    def _bind_request_context() -> None:
+        """Bind request fields before any hook can reject the request."""
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            request_id=request.headers.get("X-Request-ID", secrets.token_hex(8)),
+            method=request.method,
+            path=request.path,
+        )
+
     _install_runtime_request_tracking(app)
     app.config["LOG_STREAM_SHUTDOWN_EVENT"] = threading.Event()
     app.config["SIGNAL_STREAM_SHUTDOWN_EVENT"] = threading.Event()
@@ -3276,10 +3334,22 @@ def create_flask_app(
     # Rate limiting — 50 req/s default; tighter limits applied per-route
     # via @limiter.limit() on individual blueprints/views.
     # ------------------------------------------------------------------
+    spa_api_prefixes = ("/api/", "/ft-api/", "/v1/")
+
+    def _is_frontend_default_rate_limit_exempt() -> bool:
+        """Exempt frontend build files without exempting catch-all routes."""
+        path = request.path.lstrip("/")
+        return (
+            request.endpoint == "_spa_fallback"
+            and any(path.startswith(prefix) for prefix in spa_static_prefixes)
+            and _resolve_frontend_static_file(path) is not None
+        )
+
     limiter = Limiter(
         get_remote_address,
         app=app,
         default_limits=["50 per second"],
+        default_limits_exempt_when=_is_frontend_default_rate_limit_exempt,
         storage_uri="memory://",
     )
     app.config["LIMITER"] = limiter
@@ -4352,21 +4422,6 @@ def create_flask_app(
         "/v1/test-connection",  # Setup wizard — public, localhost-only
     )
 
-    @app.before_request
-    def _bind_request_context() -> None:
-        """Bind per-request fields into the structlog context variable store.
-
-        Attaches a unique request ID (from the X-Request-ID header, or a
-        freshly generated hex token), the HTTP method, and the path so that
-        every log line emitted during this request carries them automatically.
-        """
-        structlog.contextvars.clear_contextvars()
-        structlog.contextvars.bind_contextvars(
-            request_id=request.headers.get("X-Request-ID", secrets.token_hex(8)),
-            method=request.method,
-            path=request.path,
-        )
-
     @app.after_request
     def _log_request(response: Any) -> Any:
         """Emit a structured log line for every completed HTTP response."""
@@ -5212,9 +5267,9 @@ def create_flask_app(
     # ------------------------------------------------------------------
     if _frontend_available:
         from flask import Response as _Response, send_from_directory  # noqa: PLC0415
-        from werkzeug.utils import safe_join as _safe_join  # noqa: PLC0415
 
-        _API_PREFIXES = ("/api/", "/ft-api/", "/v1/")
+        assert resolved_dist_path is not None
+        assert resolved_dist_index is not None
 
         def _serve_index_with_nonce() -> Any:
             """Serve index.html with the per-request CSP nonce woven into <script> tags.
@@ -5235,7 +5290,7 @@ def create_flask_app(
             """Serve the React SPA for any non-API path."""
             # API paths must never be intercepted — let Flask 404 them.
             req_path = request.path
-            if any(req_path.startswith(p) for p in _API_PREFIXES):
+            if any(req_path.startswith(prefix) for prefix in spa_api_prefixes):
                 return jsonify(
                     {
                         "status": "error",
@@ -5245,23 +5300,23 @@ def create_flask_app(
 
             # If the exact file exists under dist/, serve it (favicon, assets/*).
             if path:
-                try:
-                    joined = _safe_join(str(_dist_path), path)
-                    if joined is None:
-                        return jsonify(
-                            {
-                                "status": "error",
-                                "message": "Not found",
-                            }
-                        ), 404
-                    # Guard against path traversal: resolved path must be
-                    # inside _dist_path.
-                    resolved = Path(joined).resolve()
-                    if resolved.is_file() and _dist_path.resolve() in resolved.parents:
-                        relative = resolved.relative_to(_dist_path.resolve())
-                        return send_from_directory(str(_dist_path), str(relative))
-                except Exception:
-                    pass
+                resolved = _resolve_frontend_dist_file(path)
+                if resolved == resolved_dist_index:
+                    return _serve_index_with_nonce()
+                if resolved is not None:
+                    relative = resolved.relative_to(resolved_dist_path)
+                    return send_from_directory(str(_dist_path), relative.as_posix())
+
+            # Static build paths are never client-side routes. Returning the
+            # SPA document for a missing chunk creates misleading MIME errors
+            # and browser retry loops instead of exposing the stale asset.
+            if any(path.startswith(prefix) for prefix in spa_static_prefixes):
+                return jsonify(
+                    {
+                        "status": "error",
+                        "message": "Not found",
+                    }
+                ), 404
 
             # Otherwise serve index.html (SPA client-side routing) with the CSP nonce.
             return _serve_index_with_nonce()

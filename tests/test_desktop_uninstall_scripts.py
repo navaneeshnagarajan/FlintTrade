@@ -955,6 +955,37 @@ def test_linux_uninstall_reports_an_orphaned_web_launcher(tmp_path: Path) -> Non
     assert launcher.exists(), "an unproven path must be reported, never removed"
 
 
+def _set_windows_owner_only_directory(path: Path) -> None:
+    """Apply the legacy web installer's protected, inheritable DACL."""
+    assert POWERSHELL is not None
+    script = r"""
+$Path = $env:FLINTTRADE_TEST_ACL_PATH
+$acl = Get-Acl -LiteralPath $Path
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($existing in @($acl.Access)) { [void]$acl.RemoveAccessRule($existing) }
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl.SetOwner($identity)
+$inheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+    [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $identity,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    $inheritance,
+    [System.Security.AccessControl.PropagationFlags]::None,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$acl.AddAccessRule($rule)
+[System.IO.Directory]::SetAccessControl($Path, $acl)
+"""
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-Command", script],
+        cwd=ROOT,
+        env={**os.environ, "FLINTTRADE_TEST_ACL_PATH": str(path)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def _windows_web_install(home: Path) -> dict[str, Path]:
     """Plant a Windows web install whose managed source sits outside the managed root.
 
@@ -975,6 +1006,7 @@ def _windows_web_install(home: Path) -> dict[str, Path]:
     tools = home / ".flinttrade" / "tools"
     for directory in (roaming, shim_dir, receipt_dir, source, tools):
         directory.mkdir(parents=True, exist_ok=True)
+    _set_windows_owner_only_directory(receipt_dir)
     shim = shim_dir / "flinttrade-web.cmd"
     shim.write_text("@echo off\r\n", encoding="ascii", newline="")
     (source / "package.json").write_text("{}", encoding="utf-8")
@@ -1063,6 +1095,46 @@ def test_windows_ordinary_uninstall_retains_the_web_receipt_that_proves_retained
         "the custom web source was never offered to a later -Purge"
     )
     assert paths["source"].exists(), "a dry-run purge must delete nothing"
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(not POWERSHELL or sys.platform != "win32", reason=NO_POWERSHELL_REASON)
+def test_windows_uninstaller_rejects_an_everyone_writable_web_receipt(tmp_path: Path) -> None:
+    """A permissive receipt must not authorise launcher or retained-data removal."""
+    paths = _windows_web_install(tmp_path)
+    assert POWERSHELL is not None
+    script = r"""
+$Path = $env:FLINTTRADE_TEST_ACL_PATH
+$acl = Get-Acl -LiteralPath $Path
+$everyone = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::Modify,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$acl.AddAccessRule($rule)
+[System.IO.File]::SetAccessControl($Path, $acl)
+"""
+    changed = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-Command", script],
+        cwd=ROOT,
+        env={**os.environ, "FLINTTRADE_TEST_ACL_PATH": str(paths["receipt"])},
+        text=True,
+        capture_output=True,
+    )
+    assert changed.returncode == 0, changed.stdout + changed.stderr
+
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-File", str(PS1), "-Purge", "-Yes"],
+        cwd=ROOT,
+        env=_windows_home_env(tmp_path),
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "not owner-private" in result.stdout
+    assert all(paths[key].exists() for key in ("shim", "receipt", "source"))
 
 
 @pytest.mark.unit

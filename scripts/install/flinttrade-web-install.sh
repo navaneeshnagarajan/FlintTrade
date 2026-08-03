@@ -1360,7 +1360,7 @@ report_paths() {
   say "Workspace and data : $(workspace_dir)"
   say "Verified tools     : $TOOLS_ROOT"
   say "Managed source     : $SRC_DIR  (the desktop shell keeps its own at $DESKTOP_ACTIVE_SOURCE)"
-  say "Launcher           : $SHIM_PATH  (also: flinttrade-web <subcommand>)"
+  say "Launcher           : $SHIM_PATH  (command alias after adding its directory to PATH: flinttrade-web <subcommand>)"
   say "Install receipt    : $WEB_RECEIPT_PATH  (the uninstaller removes only what this proves)"
   say "Runner             : python scripts/ft.py <start|stop|restart|status|dev|setup|test|lint|clean|version|help|desktop-test|desktop-build|desktop-package|desktop-dev>"
   say "Open FlintTrade at : $BACKEND_URL"
@@ -1371,11 +1371,11 @@ report_paths() {
 
 offer_to_start() {
   if [ "$NO_LAUNCH" = "1" ]; then
-    say "Not starting FlintTrade (--no-launch). Start it later with: flinttrade-web start"
+    say "Not starting FlintTrade (--no-launch). Start it later with: \"$SHIM_PATH\" start"
     return 0
   fi
   if ! confirm "Start FlintTrade now?"; then
-    say "Not started. Start it later with: flinttrade-web start"
+    say "Not started. Start it later with: \"$SHIM_PATH\" start"
     return 0
   fi
   say "Starting FlintTrade — open $BACKEND_URL in your browser. Press Ctrl-C to stop."

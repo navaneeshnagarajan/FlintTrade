@@ -187,6 +187,21 @@ def _staged_windows_installer(tmp_path: Path, *, elevated: bool) -> Path:
     return staged_installer
 
 
+def _staged_windows_installer_harness(tmp_path: Path, body: str) -> Path:
+    """Stage the real installer functions with a focused test entry point."""
+    staged_installer = tmp_path / "flinttrade-web-install-harness.ps1"
+    source = _read(PS1)
+    sentinel = "\nInvoke-FlintTradeWebInstall\n"
+    assert source.count(sentinel) == 1, "the installer entry-point sentinel changed"
+    staged_source = source.replace(
+        sentinel,
+        f"\n{body.rstrip()}\n",
+        1,
+    )
+    staged_installer.write_text(staged_source, encoding="utf-8")
+    return staged_installer
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("script", [SH, PS1], ids=["web-install.sh", "web-install.ps1"])
 def test_web_installers_exist_at_the_canonical_paths(script: Path) -> None:
@@ -776,6 +791,332 @@ def test_windows_web_installer_refuses_elevated_dry_run_before_path_probes(tmp_p
 
 @pytest.mark.unit
 @pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_receipt_directory_hardening_is_idempotent(tmp_path: Path) -> None:
+    """A reinstall must reapply and verify the owner-only DACL without a privilege warning."""
+    target = tmp_path / "receipt-state"
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+$target = $env:FLINTTRADE_ACL_TEST_PATH
+[void](New-Item -ItemType Directory -Force -Path $target)
+Protect-WebReceiptDirectory $target
+Protect-WebReceiptDirectory $target
+$acl = Get-Acl -LiteralPath $target
+$rules = @($acl.Access)
+$currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+$ruleSid = if ($rules.Count -eq 1) {
+    $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+} else { "" }
+$expectedInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+    [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+if (-not $acl.AreAccessRulesProtected -or $ownerSid -ne $currentSid -or $rules.Count -ne 1 -or
+    $rules[0].IsInherited -or $ruleSid -ne $currentSid -or
+    $rules[0].FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl -or
+    $rules[0].InheritanceFlags -ne $expectedInheritance -or
+    $rules[0].PropagationFlags -ne [System.Security.AccessControl.PropagationFlags]::None -or
+    $rules[0].AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
+    throw "receipt directory is not protected by one current-user FullControl rule"
+}
+Write-Output "ACL_OK"
+""",
+    )
+    env = os.environ.copy()
+    env["FLINTTRADE_ACL_TEST_PATH"] = str(target)
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "ACL_OK" in combined, combined
+    assert "Could not restrict" not in combined, combined
+    assert "SeSecurityPrivilege" not in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_receipt_hardening_failure_stops_the_installer(tmp_path: Path) -> None:
+    """A receipt must never be published after its owner-only DACL cannot be established."""
+    target = tmp_path / "not-a-directory"
+    target.write_text("ordinary file", encoding="utf-8")
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+Protect-WebReceiptDirectory $env:FLINTTRADE_ACL_TEST_PATH
+Write-Output "UNSAFE_CONTINUATION"
+""",
+    )
+    env = os.environ.copy()
+    env["FLINTTRADE_ACL_TEST_PATH"] = str(target)
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "UNSAFE_CONTINUATION" not in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_refuses_to_rewrite_an_existing_permissive_receipt(tmp_path: Path) -> None:
+    """Hardening after reading cannot make previously writable receipt contents trustworthy."""
+    receipt_dir = tmp_path / "receipt-state"
+    receipt_dir.mkdir()
+    receipt = receipt_dir / "web-install.receipt"
+    receipt.write_text("untrusted old contents", encoding="utf-8")
+    shim = tmp_path / "flinttrade-web.cmd"
+    shim.write_text("@echo off\r\n", encoding="utf-8")
+    source = tmp_path / "source"
+    tools = tmp_path / "tools"
+    source.mkdir()
+    tools.mkdir()
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+$WebReceiptDir = $env:FLINTTRADE_ACL_TEST_DIR
+$WebReceiptPath = Join-Path $WebReceiptDir "web-install.receipt"
+$ShimPath = $env:FLINTTRADE_ACL_TEST_SHIM
+$StartMenuShortcut = Join-Path $WebReceiptDir "missing-shortcut.lnk"
+$script:SrcDir = $env:FLINTTRADE_ACL_TEST_SOURCE
+$ToolsRoot = $env:FLINTTRADE_ACL_TEST_TOOLS
+$insecure = Get-Acl -LiteralPath $WebReceiptPath
+$insecure.SetAccessRuleProtection($true, $false)
+foreach ($existing in @($insecure.Access)) { [void]$insecure.RemoveAccessRule($existing) }
+$everyone = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
+$everyoneRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::FullControl,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$insecure.AddAccessRule($everyoneRule)
+[System.IO.File]::SetAccessControl($WebReceiptPath, $insecure)
+Write-WebInstallReceipt
+Write-Output "UNSAFE_RECEIPT_REWRITTEN"
+""",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "FLINTTRADE_ACL_TEST_DIR": str(receipt_dir),
+            "FLINTTRADE_ACL_TEST_SHIM": str(shim),
+            "FLINTTRADE_ACL_TEST_SOURCE": str(source),
+            "FLINTTRADE_ACL_TEST_TOOLS": str(tools),
+        }
+    )
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "UNSAFE_RECEIPT_REWRITTEN" not in combined, combined
+    assert "not current-user-only" in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_publishes_a_private_receipt_idempotently(tmp_path: Path) -> None:
+    """A fresh receipt and a reinstall both finish with the exact trusted ACL."""
+    receipt_dir = tmp_path / "receipt-state"
+    shim = tmp_path / "flinttrade-web.cmd"
+    shim.write_text("@echo off\r\n", encoding="utf-8")
+    source = tmp_path / "source"
+    tools = tmp_path / "tools"
+    source.mkdir()
+    tools.mkdir()
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+$WebReceiptDir = $env:FLINTTRADE_ACL_TEST_DIR
+$WebReceiptPath = Join-Path $WebReceiptDir "web-install.receipt"
+$ShimPath = $env:FLINTTRADE_ACL_TEST_SHIM
+$StartMenuShortcut = Join-Path $WebReceiptDir "missing-shortcut.lnk"
+$script:SrcDir = $env:FLINTTRADE_ACL_TEST_SOURCE
+$ToolsRoot = $env:FLINTTRADE_ACL_TEST_TOOLS
+Write-WebInstallReceipt
+Write-WebInstallReceipt
+if (-not (Test-TrustedWebReceiptAcl)) { throw "published receipt ACL is not trusted" }
+if (@(Get-ChildItem -LiteralPath $WebReceiptDir -Filter ".receipt-acl-probe-*" -Force).Count -ne 0) {
+    throw "receipt ACL preflight left a probe behind"
+}
+Write-Output "PRIVATE_RECEIPT_OK"
+""",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "FLINTTRADE_ACL_TEST_DIR": str(receipt_dir),
+            "FLINTTRADE_ACL_TEST_SHIM": str(shim),
+            "FLINTTRADE_ACL_TEST_SOURCE": str(source),
+            "FLINTTRADE_ACL_TEST_TOOLS": str(tools),
+        }
+    )
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "PRIVATE_RECEIPT_OK" in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_rejects_a_permissive_receipt_before_reading_it(tmp_path: Path) -> None:
+    """An Everyone-writable receipt must not authorise managed-source replacement."""
+    receipt_dir = tmp_path / "receipt-state"
+    source = tmp_path / "managed-source"
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+$WebReceiptDir = $env:FLINTTRADE_ACL_TEST_DIR
+$WebReceiptPath = Join-Path $WebReceiptDir "web-install.receipt"
+[void](New-Item -ItemType Directory -Force -Path $WebReceiptDir)
+Protect-WebReceiptDirectory $WebReceiptDir
+$lines = @(
+    "format=flinttrade-web-install-v1",
+    "platform=Windows",
+    "shim=C:\safe\flinttrade-web.cmd",
+    ("shim_sha256=" + ("0" * 64)),
+    "shortcut=",
+    ("source=" + $env:FLINTTRADE_ACL_TEST_SOURCE),
+    "tools=C:\safe\tools"
+)
+[System.IO.File]::WriteAllText(
+    $WebReceiptPath,
+    (($lines -join "`r`n") + "`r`n"),
+    (New-Object System.Text.UTF8Encoding($false)))
+$insecure = Get-Acl -LiteralPath $WebReceiptPath
+$everyone = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
+$everyoneRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    $everyone,
+    [System.Security.AccessControl.FileSystemRights]::Modify,
+    [System.Security.AccessControl.AccessControlType]::Allow)
+$insecure.AddAccessRule($everyoneRule)
+[System.IO.File]::SetAccessControl($WebReceiptPath, $insecure)
+$recorded = Get-RecordedWebInstallField "source="
+if ($recorded) { throw "trusted an Everyone-writable receipt: $recorded" }
+Write-Output "UNSAFE_RECEIPT_REJECTED"
+""",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "FLINTTRADE_ACL_TEST_DIR": str(receipt_dir),
+            "FLINTTRADE_ACL_TEST_SOURCE": str(source),
+        }
+    )
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "UNSAFE_RECEIPT_REJECTED" in combined, combined
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
+def test_windows_web_installer_accepts_a_legacy_inherited_owner_only_receipt(tmp_path: Path) -> None:
+    """A safe receipt inherited from the protected directory remains upgradeable."""
+    receipt_dir = tmp_path / "receipt-state"
+    source = tmp_path / "用户-managed-source"
+    harness = _staged_windows_installer_harness(
+        tmp_path,
+        r"""
+$WebReceiptDir = $env:FLINTTRADE_ACL_TEST_DIR
+$WebReceiptPath = Join-Path $WebReceiptDir "web-install.receipt"
+[void](New-Item -ItemType Directory -Force -Path $WebReceiptDir)
+Protect-WebReceiptDirectory $WebReceiptDir
+$lines = @(
+    "format=flinttrade-web-install-v1",
+    "platform=Windows",
+    "shim=C:\safe\flinttrade-web.cmd",
+    ("shim_sha256=" + ("0" * 64)),
+    "shortcut=",
+    ("source=" + $env:FLINTTRADE_ACL_TEST_SOURCE),
+    "tools=C:\safe\tools"
+)
+[System.IO.File]::WriteAllText(
+    $WebReceiptPath,
+    (($lines -join "`r`n") + "`r`n"),
+    (New-Object System.Text.UTF8Encoding($false)))
+$recorded = Get-RecordedWebInstallField "source="
+if ($recorded -cne $env:FLINTTRADE_ACL_TEST_SOURCE) {
+    throw "safe inherited receipt was not accepted: $recorded"
+}
+Write-Output "LEGACY_RECEIPT_ACCEPTED"
+""",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "FLINTTRADE_ACL_TEST_DIR": str(receipt_dir),
+            "FLINTTRADE_ACL_TEST_SOURCE": str(source),
+        }
+    )
+
+    result = subprocess.run(
+        [WINDOWS_POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "LEGACY_RECEIPT_ACCEPTED" in combined, combined
+
+
+@pytest.mark.unit
+def test_windows_web_installer_preflights_receipt_storage_before_source_changes() -> None:
+    """Receipt publication must be proved before source, launcher, or shortcut mutation."""
+    source = _read(PS1)
+    main = source[source.index("function Invoke-FlintTradeWebInstall") :]
+
+    assert "Initialize-WebReceiptStorage" in source
+    assert main.index("Initialize-WebReceiptStorage") < main.index("Invoke-SourceAcquisition")
+    assert main.index("Initialize-WebReceiptStorage") < main.index("Install-LauncherShim")
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_a_src_without_identity(tmp_path: Path) -> None:
     """The Windows installer refuses an unproven -SrcDir before deleting anything."""
     src = _generic_mixed_project(tmp_path / "someone-elses-project")
@@ -890,8 +1231,8 @@ def test_web_installers_read_the_receipt_through_one_strict_reader(
             "flinttrade-uninstall.sh does"
         )
     else:
-        assert "Test-OwnerLocalWebPath" in reader_body and "ReparsePoint" in reader_body, (
-            "the Windows reader must require an owner-local receipt with no reparse alias in its "
+        assert "Test-TrustedWebReceiptAcl" in reader_body and "ReparsePoint" in reader_body, (
+            "the Windows reader must require an owner-private receipt with no reparse alias in its "
             "path, exactly as flinttrade-uninstall.ps1 does"
         )
 
@@ -912,6 +1253,24 @@ def test_windows_web_installer_supports_the_shared_flags(parameter: str) -> None
         ".ps1 installers must stay at flag parity (--help/-Help, --dry-run/-DryRun, "
         "--yes/-Yes, --no-launch/-NoLaunch)"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("script", "launcher_variable"),
+    [(SH, "$SHIM_PATH"), (PS1, "$ShimPath")],
+    ids=["web-install.sh", "web-install.ps1"],
+)
+def test_install_only_guidance_uses_the_launcher_path_when_the_alias_may_be_off_path(
+    script: Path,
+    launcher_variable: str,
+) -> None:
+    """The no-launch result must give a command that works before PATH is edited."""
+    source = _read(script)
+
+    assert "Start it later with: flinttrade-web start" not in source
+    assert "(also: flinttrade-web <subcommand>)" not in source
+    assert launcher_variable in source[source.index("offer_to_start" if script == SH else "Invoke-OptionalLaunch") :]
 
 
 # ---------------------------------------------------------------------------

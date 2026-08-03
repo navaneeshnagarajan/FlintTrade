@@ -162,17 +162,43 @@ function Test-PathContainsReparsePoint([string]$Target) {
     return $false
 }
 
-function Test-OwnerLocalPath([string]$Path) {
+function Test-CurrentUserOnlyAcl(
+    [string]$Path,
+    [System.Security.AccessControl.InheritanceFlags]$ExpectedInheritance,
+    [bool]$RequireProtected,
+    [bool]$RequireExplicit
+) {
     try {
-        $owner = (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
-        if (-not $owner) { return $false }
+        $acl = Get-Acl -LiteralPath $Path
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-        $allowed = @([string]$identity.User.Value)
-        foreach ($group in @($identity.Groups)) { $allowed += [string]$group.Value }
-        return ($allowed -contains [string]$owner.Value)
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not $owner -or $owner.Value -ne $identity.User.Value) { return $false }
+        if ($RequireProtected -and -not $acl.AreAccessRulesProtected) { return $false }
+        $rules = @($acl.Access)
+        if ($rules.Count -ne 1) { return $false }
+        $ruleIdentity = $rules[0].IdentityReference.Translate(
+            [System.Security.Principal.SecurityIdentifier])
+        if ($RequireExplicit -and $rules[0].IsInherited) { return $false }
+        return (
+            $ruleIdentity.Value -eq $identity.User.Value -and
+            $rules[0].FileSystemRights -eq [System.Security.AccessControl.FileSystemRights]::FullControl -and
+            $rules[0].InheritanceFlags -eq $ExpectedInheritance -and
+            $rules[0].PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None -and
+            $rules[0].AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
+        )
     } catch {
         return $false
     }
+}
+
+function Test-TrustedWebReceiptAcl {
+    $directoryInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    return (
+        (Test-CurrentUserOnlyAcl $WebReceiptDir $directoryInheritance $true $true) -and
+        (Test-CurrentUserOnlyAcl $WebReceiptPath `
+            ([System.Security.AccessControl.InheritanceFlags]::None) $false $false)
+    )
 }
 
 function Read-WebInstallReceipt {
@@ -185,8 +211,8 @@ function Read-WebInstallReceipt {
         Warn "Leaving $WebReceiptPath because its path contains a reparse alias."
         return $null
     }
-    if (-not (Test-OwnerLocalPath $WebReceiptPath)) {
-        Warn "Leaving $WebReceiptPath because it is not owned by the current user."
+    if (-not (Test-TrustedWebReceiptAcl)) {
+        Warn "Leaving $WebReceiptPath because it is not owner-private for the current user."
         return $null
     }
     try {
