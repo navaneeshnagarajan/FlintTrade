@@ -11,9 +11,15 @@ import "@testing-library/jest-dom";
 import { MemoryRouter, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { mockSetConnectionStatus, mockDirectBrokerConnected } = vi.hoisted(() => ({
+const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery } = vi.hoisted(() => ({
   mockSetConnectionStatus: vi.fn(),
   mockDirectBrokerConnected: { value: false },
+  mockTimingsQuery: {
+    data: undefined as Array<{ exchange: string; start_time: number; end_time: number }> | undefined,
+    dataUpdatedAt: 0,
+    isError: false,
+    isLoading: false,
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -96,7 +102,7 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 }));
 
 vi.mock("@/hooks/useMarketStatus", () => ({
-  useTimings: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useTimings: vi.fn(() => mockTimingsQuery),
 }));
 
 vi.mock("@/services/api", () => ({
@@ -136,6 +142,10 @@ describe("TopBarV2", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;
+    mockTimingsQuery.data = undefined;
+    mockTimingsQuery.dataUpdatedAt = 0;
+    mockTimingsQuery.isError = false;
+    mockTimingsQuery.isLoading = false;
   });
 
   it("renders without crashing", () => {
@@ -197,12 +207,58 @@ describe("TopBarV2", () => {
     expect(screen.queryByText(/ai assistant/i)).not.toBeInTheDocument();
   });
 
-  it("renders the live market badge", () => {
+  it("reports the market session as unavailable until timing data is trustworthy", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("live-badge")).toBeInTheDocument();
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
-  it("live badge has accessible market status label", () => {
+  it("names a trustworthy in-session result Market open rather than Live", () => {
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+  });
+
+  it("names a trustworthy out-of-session result Market closed", () => {
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+  });
+
+  it("does not present stale timing data as an authoritative open market", () => {
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now - 2 * 60 * 60_000;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("reports market timing refresh failures instead of retaining an authoritative state", () => {
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+    mockTimingsQuery.isError = true;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("market session status has an accessible label", () => {
     renderTopBarV2();
     expect(screen.getByLabelText(/market status/i)).toBeInTheDocument();
   });

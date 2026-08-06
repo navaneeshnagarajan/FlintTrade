@@ -3,7 +3,7 @@
  *
  * Layout (left → right):
  *   [FlintLogo] | [TickerMarquee (flex:1)] [GearIcon] | [SearchBtn Ctrl+K]
- *   [BellIcon] [FullscreenIcon] [LiveBadge] [ClockIST] [Avatar]
+ *   [BellIcon] [FullscreenIcon] [ModeIndicator] [MarketSessionStatus] [ClockIST] [Avatar]
  *
  * Design:
  *   - Background: rgba(12, 12, 20, 0.85) + backdrop-filter: blur(16px)
@@ -76,23 +76,27 @@ function ISTClock() {
 }
 
 // ---------------------------------------------------------------------------
-// MarketStatus — "Live" badge (green pulse when open, muted when closed)
+// MarketStatus — explicit NSE session state, separate from Live execution mode
 // ---------------------------------------------------------------------------
 
-type MarketStatus = "open" | "pre-market" | "closed" | "weekend";
+type MarketStatus = "open" | "closed" | "unavailable";
 
 interface MarketStatusInfo {
   status: MarketStatus;
   label: string;
 }
 
+const MARKET_TIMINGS_MAX_AGE_MS = 60 * 60_000;
+
 function getNseStatus(timings: MarketTiming[] | undefined): MarketStatusInfo {
+  if (!timings) return { status: "unavailable", label: "Market unavailable" };
+
   const now = new Date();
   const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
   const ist = new Date(istString);
   const day = ist.getDay();
 
-  if (day === 0 || day === 6) return { status: "weekend", label: "Weekend" };
+  if (day === 0 || day === 6) return { status: "closed", label: "Market closed" };
 
   const nowMs = now.getTime();
   const nseTiming = timings?.find(
@@ -101,32 +105,35 @@ function getNseStatus(timings: MarketTiming[] | undefined): MarketStatusInfo {
 
   if (nseTiming) {
     if (nowMs < nseTiming.start_time)
-      return { status: "pre-market", label: "Pre-Market" };
+      return { status: "closed", label: "Market closed" };
     if (nowMs <= nseTiming.end_time)
-      return { status: "open", label: "Live" };
-    return { status: "closed", label: "Closed" };
+      return { status: "open", label: "Market open" };
+    return { status: "closed", label: "Market closed" };
   }
 
-  // Fallback: 9:15–15:30 IST
-  const hour = ist.getHours();
-  const mins = hour * 60 + ist.getMinutes();
-  if (mins < 9 * 60 + 15) return { status: "pre-market", label: "Pre-Market" };
-  if (mins <= 15 * 60 + 30) return { status: "open", label: "Live" };
-  return { status: "closed", label: "Closed" };
+  return { status: "unavailable", label: "Market unavailable" };
 }
 
-function LiveBadge() {
-  const { data: timings } = useTimings();
+function MarketSessionStatus() {
+  const { data: timings, dataUpdatedAt, isError, isLoading } = useTimings();
+  const currentStatus = useCallback(() => {
+    const timingIsTrustworthy =
+      !isError &&
+      !isLoading &&
+      dataUpdatedAt > 0 &&
+      Date.now() - dataUpdatedAt <= MARKET_TIMINGS_MAX_AGE_MS;
+    return getNseStatus(timingIsTrustworthy ? timings : undefined);
+  }, [dataUpdatedAt, isError, isLoading, timings]);
   const [statusInfo, setStatusInfo] = useState<MarketStatusInfo>(() =>
-    getNseStatus(timings),
+    currentStatus(),
   );
 
   useEffect(() => {
-    const update = () => setStatusInfo(getNseStatus(timings));
+    const update = () => setStatusInfo(currentStatus());
     update();
     const id = setInterval(update, 30_000);
     return () => clearInterval(id);
-  }, [timings]);
+  }, [currentStatus]);
 
   const isOpen = statusInfo.status === "open";
 
@@ -138,13 +145,13 @@ function LiveBadge() {
         border: isOpen ? "1px solid var(--color-bullish-border)" : "1px solid var(--glass-l2-border)",
       }}
       aria-label={`Market status: ${statusInfo.label}`}
-      data-testid="live-badge"
+      data-testid="market-session-status"
     >
       <div
         className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           isOpen
             ? "bg-profit animate-[pulse-glow_2s_ease-in-out_infinite]"
-            : statusInfo.status === "pre-market"
+            : statusInfo.status === "unavailable"
               ? "bg-amber-400"
               : "bg-text-muted/50"
         }`}
@@ -154,7 +161,7 @@ function LiveBadge() {
         className={`text-xs font-medium tabular-nums whitespace-nowrap ${
           isOpen
             ? "text-profit"
-            : statusInfo.status === "pre-market"
+            : statusInfo.status === "unavailable"
               ? "text-amber-400"
               : "text-text-muted"
         }`}
@@ -448,8 +455,8 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
         {/* Trading mode switch (Explore / Practice / Live) */}
         <ModeIndicator />
 
-        {/* Live badge */}
-        <LiveBadge />
+        {/* Market session state — separate from the Live execution mode */}
+        <MarketSessionStatus />
 
         {/* IST clock */}
         <ISTClock />
