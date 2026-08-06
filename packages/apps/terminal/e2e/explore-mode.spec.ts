@@ -73,4 +73,14 @@ test.describe('Explore mode', () => {
     const main = page.getByRole('main', { name: /Trading Workspace/i });
     await expect(main).toBeVisible({ timeout: 10_000 });
   });
+
+  test('/trade keeps execution mode, broker connectivity, and market session distinct', async ({ page }) => {
+    await seedExploreDemoSession(page);
+    await page.goto('/trade');
+
+    await expect(page.getByText('EXPLORE', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('No broker connected', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('market-session-status')).toHaveText(/^Market (open|closed|unavailable)$/);
+    await expect(page.getByTestId('market-session-status')).not.toContainText('Live');
+  });
 });

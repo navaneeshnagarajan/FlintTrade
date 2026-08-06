@@ -69,6 +69,17 @@ describe("NoConnectionOverlay", () => {
     expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument();
   });
 
+  it("cannot be dismissed while Live mode remains disconnected", () => {
+    render(<NoConnectionOverlay />);
+    act(() => {
+      vi.advanceTimersByTime(5100);
+    });
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /dismiss/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/continue without live data/i)).not.toBeInTheDocument();
+  });
+
   it.each(["explore", "practice"])(
     "does not block the %s workspace when broker data is unavailable",
     (mode) => {
