@@ -255,4 +255,88 @@ describe("SymbolSearchTab", () => {
     );
     expect(mockUseSymbolSearch).toHaveBeenCalledWith("INFY");
   });
+
+  it("renders an accessible Symbol search unavailable state with check-connection guidance and a Try again button", () => {
+    const retry = vi.fn();
+    const onActiveSymbolChange = vi.fn();
+    mockUseSymbolSearch.mockReturnValue({ results: [], isLoading: false, isError: true, retry });
+
+    render(
+      <SymbolSearchTab
+        query="REL"
+        activeIndex={0}
+        onSelectSymbol={vi.fn()}
+        onActiveIndexChange={vi.fn()}
+        onActiveSymbolChange={onActiveSymbolChange}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/Symbol search unavailable/i);
+    expect(screen.getByText(/check your connection and try again/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Try again/i })).toBeInTheDocument();
+    expect(onActiveSymbolChange).toHaveBeenCalledWith(null);
+  });
+
+  it("clicking Try again calls retry", () => {
+    const retry = vi.fn();
+    mockUseSymbolSearch.mockReturnValue({ results: [], isLoading: false, isError: true, retry });
+
+    render(
+      <SymbolSearchTab
+        query="REL"
+        activeIndex={0}
+        onSelectSymbol={vi.fn()}
+        onActiveIndexChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Try again/i }));
+    expect(retry).toHaveBeenCalled();
+  });
+
+  it("disables retry and announces progress while a retry is running", () => {
+    mockUseSymbolSearch.mockReturnValue({
+      results: [],
+      isLoading: false,
+      isError: true,
+      isRetrying: true,
+      retry: vi.fn(),
+    });
+
+    render(
+      <SymbolSearchTab
+        query="REL"
+        activeIndex={0}
+        onSelectSymbol={vi.fn()}
+        onActiveIndexChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Retrying/i })).toBeDisabled();
+  });
+
+  it("does not render No symbols match in the error state; successful empty responses still keep the existing no-results message", () => {
+    const retry = vi.fn();
+    mockUseSymbolSearch.mockReturnValue({ results: [], isLoading: false, isError: true, retry });
+
+    const { rerender } = render(
+      <SymbolSearchTab
+        query="XYZ"
+        activeIndex={0}
+        onSelectSymbol={vi.fn()}
+        onActiveIndexChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/no symbols match/i)).not.toBeInTheDocument();
+
+    // A successful empty response still uses the normal no-results state.
+    mockUseSymbolSearch.mockReturnValue({ results: [], isLoading: false });
+    rerender(
+      <SymbolSearchTab
+        query="XYZ"
+        activeIndex={0}
+        onSelectSymbol={vi.fn()}
+        onActiveIndexChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/no symbols match/i)).toBeInTheDocument();
+  });
 });
