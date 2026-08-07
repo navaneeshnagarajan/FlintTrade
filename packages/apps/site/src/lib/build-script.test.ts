@@ -13,4 +13,15 @@ describe('site production build script', () => {
 
     expect(pkg.scripts?.build).toContain('--webpack');
   });
+
+  it('declares explicit portable repository-root turbopack.root (three levels above site config)', () => {
+    const configSource = readFileSync(
+      path.resolve(process.cwd(), 'next.config.mjs'),
+      'utf8'
+    );
+    expect(configSource).toContain("turbopack: {");
+    expect(configSource).toContain("root: repoRoot");
+    expect(configSource).toContain("fileURLToPath(import.meta.url)");
+    expect(configSource).toContain("resolve(__dirname, '../../..')");
+  });
 });

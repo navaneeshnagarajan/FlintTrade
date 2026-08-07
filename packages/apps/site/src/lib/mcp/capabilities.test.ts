@@ -86,7 +86,7 @@ describe('docs index generation', () => {
     // inside the complete Electron-release branch.
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Install desktop app');
+    expect(pageSource).toContain('Download desktop app');
     expect(downloadSource).toContain('install.sh | bash');
     expect(downloadSource).toContain('install.ps1 | iex');
     // The desktop guide stays reachable from the homepage, footer, and docs.
@@ -96,6 +96,21 @@ describe('docs index generation', () => {
     expect(desktopDoc?.content).toContain('no desktop installer release is published yet');
     expect(desktopDoc?.content).toContain('inspectable source checkout on first launch');
     expect(desktopDoc?.content).not.toContain('desktop release manifest');
+  });
+
+  it('hero has exactly one primary CTA to demo-app/welcome (new window), no retired sandbox/paper/demo-mode strings, MCP absent from hero', () => {
+    const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    // exactly one primary
+    const primaryMatches = pageSource.match(/className="button primary"/g) || [];
+    expect(primaryMatches.length).toBe(1);
+    expect(pageSource).toContain('href="/demo-app/welcome"');
+    expect(pageSource).toContain('target="_blank"');
+    expect(pageSource).toContain('Start exploring — no install needed');
+    // no retired operating-mode strings in rendered copy
+    expect(pageSource).not.toMatch(/sandbox testing|Sandbox Demo|Demo Mode|paper trading|paper order|demo data/i);
+    // MCP absent from hero-actions (moved to footer/nav)
+    expect(pageSource).not.toContain('Use the docs MCP');
+    expect(pageSource).not.toContain('/mcp');
   });
 });
 
