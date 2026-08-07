@@ -297,7 +297,18 @@ function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) 
 function OrdersWidget(_props: WidgetProps) {
   const accountReadsEnabled = useAccountReadsEnabled();
   const isExplore = useModeStore((s) => s.mode === "explore");
-  const { data: ordersData, refetch, isFetching, isError, error } = useOrders({ enabled: accountReadsEnabled });
+  const {
+    data: ordersData,
+    refetch,
+    isFetching,
+    isError,
+    error,
+    isPending,
+    isLoading,
+  } = useOrders({ enabled: accountReadsEnabled });
+  // Disabled queries stay pending forever in TanStack Query v5. Only show the
+  // initial loader while an enabled first fetch is in flight.
+  const showInitialLoading = accountReadsEnabled && (isPending || isLoading);
   const queryClient = useQueryClient();
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
@@ -557,11 +568,15 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       </div>
 
-      {/* Error banner */}
+      {/* Error banner — retained rows stay visible; empty+error shows banner only */}
       {isError && (
-        <div className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss">
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss"
+        >
           <span className="flex-1">
-            Failed to load orders{error instanceof Error ? `: ${error.message}` : ""}
+            Failed to load orders{rows.length > 0 ? " — displayed orders are frozen" : ""}
+            {error instanceof Error ? `: ${error.message}` : ""}
           </span>
           <Button
             variant="link"
@@ -593,15 +608,19 @@ function OrdersWidget(_props: WidgetProps) {
         </div>
       )}
 
-      {/* Body */}
-      {rows.length === 0 ? (
+      {/* Body — mutually exclusive: loading | empty | table | error-only */}
+      {showInitialLoading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading orders" />
+        </div>
+      ) : rows.length === 0 && !isError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <FileText size={24} className="text-text-disabled" />
           <span className="text-sm">
             {accountReadsEnabled ? "No orders today" : "Connect a broker to load orders"}
           </span>
         </div>
-      ) : (
+      ) : rows.length > 0 ? (
         <div className="flex-1 overflow-auto min-h-0">
           <div className="overflow-x-auto min-w-0">
           <Table>
@@ -651,7 +670,7 @@ function OrdersWidget(_props: WidgetProps) {
           </Table>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

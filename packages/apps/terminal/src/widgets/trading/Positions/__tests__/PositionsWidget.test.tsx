@@ -244,6 +244,34 @@ describe("PositionsWidget", () => {
     expect(screen.getByText("No open positions")).toBeInTheDocument();
   });
 
+  it("shows pending status before first authoritative success (and no empty or error)", () => {
+    mockUsePositions.mockReturnValue(queryResult({ isPending: true, isLoading: true, data: undefined }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByLabelText(/loading positions/i)).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows error/unavailable on failure but never with empty when no prior data", () => {
+    mockUsePositions.mockReturnValue(
+      queryResult({ isError: true, error: new Error("network fail"), data: undefined }),
+    );
+    render(<PositionsWidget {...defaultProps} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/failed to load positions/i);
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText("No open positions")).not.toBeInTheDocument();
+  });
+
+  it("shows empty copy only after a successful empty response", () => {
+    mockUsePositions.mockReturnValue(queryResult({ isPending: false, isError: false, data: [] }));
+    render(<PositionsWidget {...defaultProps} />);
+
+    expect(screen.getByText("No open positions")).toBeInTheDocument();
+  });
+
   it("does not fetch or expose position actions without a broker connection", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));

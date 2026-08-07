@@ -20,7 +20,10 @@ export function PositionsCard() {
   // Demo mode shows simulated positions; the trading-store P&L mirror isn't fed
   // in explore, so derive the header total from the demo positions themselves.
   const positions = isExplore ? getDemoPositions() : query.data;
-  const isLoading = !accountReadsEnabled ? false : query.isLoading;
+  // Disabled queries stay pending forever in TanStack Query v5 — never treat
+  // that as a loading spinner. Only spin while an enabled first fetch runs.
+  const isPending = !accountReadsEnabled ? false : (query.isPending || query.isLoading);
+  const isError = !isExplore && query.isError;
   const openPositions = positions?.filter((p) => p.quantity !== 0) ?? [];
   const totalPnl = isExplore
     ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
@@ -50,17 +53,30 @@ export function PositionsCard() {
           </span>
         </div>
 
-        {isLoading ? (
+        {isError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 text-[10px] text-loss"
+          >
+            <span>
+              Positions unavailable{openPositions.length > 0 ? " — showing last known data" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              disabled={query.isFetching}
+              className="shrink-0 font-medium underline disabled:opacity-50"
+            >
+              {query.isFetching ? "Retrying…" : "Retry positions"}
+            </button>
+          </div>
+        )}
+
+        {isPending ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading positions" />
           </div>
-        ) : openPositions.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-text-muted">
-              {isExplore || accountReadsEnabled ? "No open positions" : "Connect a broker to load positions"}
-            </p>
-          </div>
-        ) : (
+        ) : openPositions.length > 0 ? (
           <div className="flex-1 overflow-y-auto space-y-1" style={{ scrollbarWidth: "none" }}>
             {openPositions.map((pos) => {
               const pnlPositive = pos.pnl >= 0;
@@ -99,7 +115,13 @@ export function PositionsCard() {
               );
             })}
           </div>
-        )}
+        ) : !isError ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-text-muted">
+              {isExplore || accountReadsEnabled ? "No open positions" : "Connect a broker to load positions"}
+            </p>
+          </div>
+        ) : null}
       </div>
     </BentoCard>
   );

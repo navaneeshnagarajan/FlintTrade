@@ -131,6 +131,48 @@ describe("OrdersWidget", () => {
     expect(screen.getByText("No orders today")).toBeInTheDocument();
   });
 
+  it("shows pending status before first authoritative success (and no empty or error)", () => {
+    mockUseOrders.mockReturnValue(queryResult({ isPending: true, isLoading: true, data: undefined }));
+    renderWidget();
+
+    expect(screen.getByLabelText(/loading orders/i)).toBeInTheDocument();
+    expect(screen.queryByText("No orders today")).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed to load orders/i)).not.toBeInTheDocument();
+  });
+
+  it("shows error banner with retry on failure and never coexists with empty", () => {
+    mockUseOrders.mockReturnValue(
+      queryResult({ isError: true, error: new Error("boom"), data: undefined, isPending: false }),
+    );
+    renderWidget();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/failed to load orders/i);
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText("No orders today")).not.toBeInTheDocument();
+  });
+
+  it("keeps retained orders visible and identifies them as frozen after a refetch error", () => {
+    mockUseOrders.mockReturnValue(
+      queryResult({
+        data: [OPEN_ORDER],
+        isError: true,
+        error: new Error("broker offline"),
+      }),
+    );
+    renderWidget();
+
+    expect(screen.getByText("NIFTY24APR24000CE")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/frozen/i);
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("shows empty copy only after successful empty response (not on pending or error)", () => {
+    mockUseOrders.mockReturnValue(queryResult({ isPending: false, isError: false, data: [] }));
+    renderWidget();
+
+    expect(screen.getByText("No orders today")).toBeInTheDocument();
+  });
+
   it("displays order rows with symbol, action, and status", () => {
     mockUseOrders.mockReturnValue(queryResult({ data: [OPEN_ORDER, COMPLETE_ORDER] }));
     renderWidget();

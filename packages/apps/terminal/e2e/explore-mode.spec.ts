@@ -57,6 +57,18 @@ test.describe('Explore mode', () => {
     await expect(tickerBar).toBeVisible({ timeout: 10_000 });
   });
 
+  test('/home shows sample orders and positions without disabled-query spinners', async ({ page }) => {
+    await seedExploreDemoSession(page);
+    await page.goto('/home');
+
+    const orders = page.getByTestId('orders-card');
+    const positions = page.getByTestId('positions-card');
+    await expect(orders.getByText('BANKNIFTY')).toBeVisible({ timeout: 10_000 });
+    await expect(positions.getByText('RELIANCE')).toBeVisible({ timeout: 10_000 });
+    await expect(orders.getByLabel('Loading orders')).toHaveCount(0);
+    await expect(positions.getByLabel('Loading positions')).toHaveCount(0);
+  });
+
   test('TickerBar shows broker-connect prompt when disconnected', async ({ page }) => {
     await seedExploreDemoSession(page);
     await page.goto('/trade');
