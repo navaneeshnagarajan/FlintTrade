@@ -24,6 +24,15 @@ broker  →  OpenAlgo bridge  OR  FlintTrade native adapter  →  FlintTrade cor
 - **Modes:** Explore / Practice / Live are enforced server-side via JWT claims; PIN live-unlock and downgrade paths are wired through the app-auth flow, and Practice order placement is proven through the native sandbox engine.
 - **Desktop:** the Electron source-bootstrap shell is complete and locally verified (macOS packaged ad hoc). No complete installer release is published yet — macOS awaits Apple distribution signing and notarisation secrets; Windows/Linux installers build only in CI.
 
+### Current UX simplification (no new features until this lands)
+
+Simplify what is already built before adding surfaces. Keep the following boundaries honest and load-bearing:
+
+- **Installed app vs public demo:** the packaged/desktop product and any public demo or marketing site are separate. Public copy must not imply a published installer set, Live trading, or funded-broker readiness that the tree does not yet prove.
+- **Home pulse vs Trade execution:** Home is overview/pulse only; Trade owns order entry and execution chrome. Do not merge those jobs into one overloaded surface.
+- **Canonical modes and provenance:** user-facing vocabulary is Explore / Practice / Live (sandbox stays an internal engine name). Every widget that can fall back to sample or delayed data must show honest provenance; silent fakes are defects.
+- **Freeze on novelty:** no new user-facing features until the built UX is simplified under the boundaries above (one broker-connect surface remaining is part of that simplification, not a licence to expand scope).
+
 ## Phase tracker
 
 | Phase | Scope | Status |
@@ -59,7 +68,7 @@ Done: server-side mode upgrades and downgrades; mode-preserving PIN unlock; a wo
 Done highlights:
 
 - Gated basket/split/options-strategy orders; sandbox fill realism; native GTT (forever-order) correctness across Dhan and Upstox with fail-closed cross-broker fields; explicit unknown-outcome recovery for response-lost writes; a hash-chained, verifiable audit log; a native two-way Telegram bot carrying the kill switch; a real searchable trade journal (SQLite + FTS5); honest provenance labels on every widget that can fall back to sample data; clean uninstall plus backend persistence for data that previously lived only in browser storage; CI test-visibility fixes so every terminal test file runs in a shard, with drift guards.
-- A terminal-wide widget consolidation (102 widgets → 69, PR #71) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
+- A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
 Remaining: the consolidation backlog (one broker-connect surface, the remaining duplicate implementations), the final two widget merges, and the Linux-only desktop CI failures.
