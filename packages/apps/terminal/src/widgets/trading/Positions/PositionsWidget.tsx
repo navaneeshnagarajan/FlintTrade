@@ -57,6 +57,7 @@ import {
   Repeat,
   SquareX,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -501,9 +502,21 @@ function PositionsWidget(props: WidgetProps) {
   const accountReadsEnabled = resolveAccountReadsEnabled(appMode, isBrokerConnected);
   const canWritePositions = isBrokerConnected && appMode === "live";
 
-  const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions({
+  const {
+    data: positionsData,
+    dataUpdatedAt,
+    isError,
+    error,
+    refetch,
+    isFetching,
+    isPending,
+    isLoading,
+  } = usePositions({
     enabled: accountReadsEnabled,
   });
+  // Disabled queries stay pending forever in TanStack Query v5. Only show the
+  // initial loader while an enabled first fetch is in flight.
+  const showInitialLoading = accountReadsEnabled && (isPending || isLoading);
 
   const [sorting, setSorting] = useState<SortingState>([]);
   const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
@@ -887,12 +900,19 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       )}
 
-      {/* Body */}
-      {rows.length === 0 ? (
+      {/* Body — mutually exclusive: loading | empty | views | error-only */}
+      {showInitialLoading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading positions" />
+        </div>
+      ) : rows.length === 0 && !isError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <Layers size={24} className="text-text-disabled" />
           <span className="text-sm">{emptyMessage}</span>
         </div>
+      ) : rows.length === 0 ? (
+        // Failed first fetch with no retained rows: banner above is the body.
+        null
       ) : view === "net" ? (
         <NetPositionView
           rows={netRows}

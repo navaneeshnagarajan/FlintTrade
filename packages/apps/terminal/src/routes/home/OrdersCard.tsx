@@ -15,7 +15,10 @@ export function OrdersCard() {
   const accountReadsEnabled = useAccountReadsEnabled();
   const query = useOrders({ enabled: accountReadsEnabled });
   const orders = isExplore ? getDemoOrders() : query.data;
-  const isLoading = !accountReadsEnabled ? false : query.isLoading;
+  // Disabled queries stay pending forever in TanStack Query v5 — never treat
+  // that as a loading spinner. Only spin while an enabled first fetch runs.
+  const isPending = !accountReadsEnabled ? false : (query.isPending || query.isLoading);
+  const isError = !isExplore && query.isError;
   const recentOrders = orders?.slice(0, 3) ?? [];
 
   return (
@@ -29,17 +32,30 @@ export function OrdersCard() {
           </p>
         </div>
 
-        {isLoading ? (
+        {isError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 text-[10px] text-loss"
+          >
+            <span>
+              Orders unavailable{recentOrders.length > 0 ? " — showing last known data" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              disabled={query.isFetching}
+              className="shrink-0 font-medium underline disabled:opacity-50"
+            >
+              {query.isFetching ? "Retrying…" : "Retry orders"}
+            </button>
+          </div>
+        )}
+
+        {isPending ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading orders" />
           </div>
-        ) : recentOrders.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-text-muted">
-              {isExplore || accountReadsEnabled ? "No recent orders" : "Connect a broker to load orders"}
-            </p>
-          </div>
-        ) : (
+        ) : recentOrders.length > 0 ? (
           <div className="flex-1 space-y-2">
             {recentOrders.map((order) => {
               const isBuy = order.action === "BUY";
@@ -90,7 +106,13 @@ export function OrdersCard() {
               );
             })}
           </div>
-        )}
+        ) : !isError ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-text-muted">
+              {isExplore || accountReadsEnabled ? "No recent orders" : "Connect a broker to load orders"}
+            </p>
+          </div>
+        ) : null}
       </div>
     </BentoCard>
   );
