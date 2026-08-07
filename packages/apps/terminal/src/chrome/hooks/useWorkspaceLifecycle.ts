@@ -8,7 +8,7 @@
  * Schema:
  * {
  *   [tabId: string]: {
- *     id: string;         // matches layoutStore tab id
+ *     id: string;         // matches layoutStore tab id  (UNIFIED canonical ID)
  *     name: string;
  *     createdAt: string;  // ISO 8601
  *     updatedAt: string;  // ISO 8601
@@ -23,7 +23,6 @@
 
 import { useCallback } from "react";
 import { z } from "zod";
-import { safeParse } from "@/lib/safeParse";
 import type { WorkspacePreset } from "@/layout/workspacePresets";
 
 // ---------------------------------------------------------------------------
@@ -52,19 +51,81 @@ const workspaceStoreSchema = z.record(z.string(), workspaceMetaSchema) satisfies
 
 const STORAGE_KEY = "flinttrade:workspaces";
 
+export class WorkspaceStorageError extends Error {
+  constructor(message = "Workspace metadata is corrupted and could not be read.") {
+    super(message);
+    this.name = "WorkspaceStorageError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Raw storage helpers (exported for testing)
 // ---------------------------------------------------------------------------
 
 export function readWorkspaceStore(): WorkspaceStore {
-  return safeParse(localStorage.getItem(STORAGE_KEY), workspaceStoreSchema) ?? {};
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === null) return {};
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const result = workspaceStoreSchema.safeParse(parsed);
+    if (result.success) return result.data;
+  } catch {
+    // The common corruption error below gives callers one stable recovery path.
+  }
+  throw new WorkspaceStorageError();
 }
 
 export function writeWorkspaceStore(store: WorkspaceStore): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    // localStorage may be unavailable (private browsing, storage quota)
+  // Surface failures honestly (quota, private mode, etc) instead of swallowing.
+  // Callers (or global error boundary) can then notify the user.
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+}
+
+export function reconcileWorkspaceStore(
+  tabs: ReadonlyArray<{ id: string; name: string }>
+): void {
+  const current = readWorkspaceStore();
+  const currentEntries = Object.entries(current);
+  const canonicalIds = new Set(tabs.map((tab) => tab.id));
+  const claimedLegacyIds = new Set<string>();
+  const reconciled: WorkspaceStore = {};
+
+  for (const tab of tabs) {
+    const canonical = current[tab.id];
+    if (canonical) {
+      reconciled[tab.id] = { ...canonical, id: tab.id, name: tab.name };
+      continue;
+    }
+
+    const candidates = currentEntries.filter(([legacyId, metadata]) =>
+      !canonicalIds.has(legacyId)
+      && !claimedLegacyIds.has(legacyId)
+      && metadata.name === tab.name
+    );
+    if (candidates.length === 1) {
+      const matchingTabs = tabs.filter((candidate) =>
+        current[candidate.id] === undefined && candidate.name === tab.name
+      );
+      if (matchingTabs.length !== 1) continue;
+      const [legacyId, metadata] = candidates[0];
+      claimedLegacyIds.add(legacyId);
+      reconciled[tab.id] = { ...metadata, id: tab.id, name: tab.name };
+    }
+  }
+
+  for (const [legacyId, metadata] of currentEntries) {
+    if (
+      !canonicalIds.has(legacyId)
+      && !claimedLegacyIds.has(legacyId)
+      && tabs.some((tab) => tab.name === metadata.name)
+    ) {
+      reconciled[legacyId] = metadata;
+    }
+  }
+
+  if (JSON.stringify(reconciled) !== JSON.stringify(current)) {
+    writeWorkspaceStore(reconciled);
   }
 }
 
@@ -85,7 +146,7 @@ export function getWorkspaceMeta(tabId: string): WorkspaceMeta | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// generateWorkspaceId — stable collision-resistant id
+// generateWorkspaceId — stable collision-resistant id (canonical for workspaces)
 // ---------------------------------------------------------------------------
 
 function generateWorkspaceId(): string {
@@ -96,33 +157,79 @@ function generateWorkspaceId(): string {
 // Hook
 // ---------------------------------------------------------------------------
 
+type AddWorkspaceTab = (
+  name: string,
+  initialLayout?: Record<string, unknown>,
+  providedId?: string,
+) => void;
+
+export type WorkspaceLifecycleResult =
+  | { ok: true; id: string }
+  | { ok: false; error: string };
+
 interface UseWorkspaceLifecycleReturn {
   /**
    * Clone the current workspace: creates a new layoutStore tab with a
-   * "(Copy)" suffix and persists its metadata.
+   * "(Copy)" suffix, clones its serializedLayout, and persists metadata
+   * using the SAME canonical ID for both metadata and layout tab.
    *
    * @param sourceTabId  The tab id being cloned.
    * @param sourceName   The current name of that tab.
-   * @param addTab       layoutStore.addTab function.
+   * @param addTab       layoutStore.addTab function (now supports layout + id).
+   * @param sourceLayout Optional serialized layout to clone.
    */
   cloneWorkspace: (
     sourceTabId: string,
     sourceName: string,
-    addTab?: (name: string) => void
-  ) => void;
+    addTab: AddWorkspaceTab,
+    removeTab: (id: string) => void,
+    sourceLayout?: Record<string, unknown>
+  ) => WorkspaceLifecycleResult;
 
   /**
    * Create a new workspace tab from a preset template.
    *
    * @param preset     The workspace preset to apply.
    * @param addTab     layoutStore.addTab function.
-   * @param applyPreset  layoutStore.applyPreset function.
+   * @param removeTab  layoutStore.removeTab function used to roll back failed persistence.
    */
   newFromTemplate: (
     preset: WorkspacePreset,
-    addTab: (name: string) => void,
-    applyPreset: (presetId: string) => void
-  ) => void;
+    addTab: AddWorkspaceTab,
+    removeTab: (id: string) => void
+  ) => WorkspaceLifecycleResult;
+
+  renameWorkspace: (
+    id: string,
+    currentName: string,
+    nextName: string,
+    renameTab: (id: string, name: string) => void
+  ) => WorkspaceLifecycleResult;
+
+  deleteWorkspace: (
+    id: string,
+    name: string,
+    layout: Record<string, unknown> | undefined,
+    removeTab: (id: string) => void,
+    addTab: AddWorkspaceTab
+  ) => WorkspaceLifecycleResult;
+}
+
+function persistenceFailure(error: unknown): WorkspaceLifecycleResult {
+  if (error instanceof WorkspaceStorageError) {
+    return { ok: false, error: error.message };
+  }
+  const detail = error instanceof Error ? error.message : "unknown storage error";
+  return { ok: false, error: `Workspace could not be saved: ${detail}` };
+}
+
+function rollbackTab(removeTab: (id: string) => void, id: string): void {
+  try {
+    removeTab(id);
+  } catch {
+    // Zustand updates memory before its persistence adapter writes. A failed
+    // rollback write can therefore still remove the transient in-memory tab.
+  }
 }
 
 export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
@@ -130,22 +237,38 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
     (
       sourceTabId: string,
       sourceName: string,
-      addTab?: (name: string) => void
-    ) => {
+      addTab: AddWorkspaceTab,
+      removeTab: (id: string) => void,
+      sourceLayout?: Record<string, unknown>
+    ): WorkspaceLifecycleResult => {
       const newName = `${sourceName} (Copy)`;
       const newId = generateWorkspaceId();
-      const sourceMeta = getWorkspaceMeta(sourceTabId);
-      const now = new Date().toISOString();
+      let tabMayExist = false;
+      try {
+        const sourceMeta = getWorkspaceMeta(sourceTabId);
+        const now = new Date().toISOString();
 
-      upsertWorkspaceMeta({
-        id: newId,
-        name: newName,
-        createdAt: now,
-        updatedAt: now,
-        sourcePresetId: sourceMeta?.sourcePresetId,
-      });
-
-      if (addTab) addTab(newName);
+        // Create the primary layout first. If supplementary metadata cannot be
+        // persisted, remove the tab again so the two stores cannot diverge.
+        tabMayExist = true;
+        addTab(newName, sourceLayout, newId);
+        try {
+          upsertWorkspaceMeta({
+            id: newId,
+            name: newName,
+            createdAt: now,
+            updatedAt: now,
+            sourcePresetId: sourceMeta?.sourcePresetId,
+          });
+        } catch (error) {
+          rollbackTab(removeTab, newId);
+          return persistenceFailure(error);
+        }
+        return { ok: true, id: newId };
+      } catch (error) {
+        if (tabMayExist) rollbackTab(removeTab, newId);
+        return persistenceFailure(error);
+      }
     },
     []
   );
@@ -153,26 +276,100 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
   const newFromTemplate = useCallback(
     (
       preset: WorkspacePreset,
-      addTab: (name: string) => void,
-      applyPreset: (presetId: string) => void
-    ) => {
+      addTab: AddWorkspaceTab,
+      removeTab: (id: string) => void
+    ): WorkspaceLifecycleResult => {
       const newId = generateWorkspaceId();
       const now = new Date().toISOString();
-
-      upsertWorkspaceMeta({
-        id: newId,
-        name: preset.name,
-        createdAt: now,
-        updatedAt: now,
-        sourcePresetId: preset.id,
-      });
-
-      // Add the tab first, then apply the preset (which clears and rebuilds canvas)
-      addTab(preset.name);
-      applyPreset(preset.id);
+      let tabMayExist = false;
+      try {
+        // Validate existing metadata before mutating the primary layout store.
+        readWorkspaceStore();
+        tabMayExist = true;
+        addTab(
+          preset.name,
+          preset.build() as unknown as Record<string, unknown>,
+          newId,
+        );
+        try {
+          upsertWorkspaceMeta({
+            id: newId,
+            name: preset.name,
+            createdAt: now,
+            updatedAt: now,
+            sourcePresetId: preset.id,
+          });
+        } catch (error) {
+          rollbackTab(removeTab, newId);
+          return persistenceFailure(error);
+        }
+        return { ok: true, id: newId };
+      } catch (error) {
+        if (tabMayExist) rollbackTab(removeTab, newId);
+        return persistenceFailure(error);
+      }
     },
     []
   );
 
-  return { cloneWorkspace, newFromTemplate };
+  const renameWorkspace = useCallback(
+    (
+      id: string,
+      currentName: string,
+      nextName: string,
+      renameTab: (id: string, name: string) => void
+    ): WorkspaceLifecycleResult => {
+      let tabMayBeRenamed = false;
+      try {
+        const metadata = getWorkspaceMeta(id);
+        tabMayBeRenamed = true;
+        renameTab(id, nextName);
+        if (metadata) {
+          upsertWorkspaceMeta({ ...metadata, name: nextName });
+        }
+        return { ok: true, id };
+      } catch (error) {
+        if (tabMayBeRenamed) {
+          try {
+            renameTab(id, currentName);
+          } catch {
+            // Zustand already restored its in-memory name before persistence failed.
+          }
+        }
+        return persistenceFailure(error);
+      }
+    },
+    []
+  );
+
+  const deleteWorkspace = useCallback(
+    (
+      id: string,
+      name: string,
+      layout: Record<string, unknown> | undefined,
+      removeTab: (id: string) => void,
+      addTab: AddWorkspaceTab
+    ): WorkspaceLifecycleResult => {
+      let tabMayBeRemoved = false;
+      try {
+        const metadata = getWorkspaceMeta(id);
+        tabMayBeRemoved = true;
+        removeTab(id);
+        if (metadata) deleteWorkspaceMeta(id);
+        return { ok: true, id };
+      } catch (error) {
+        if (tabMayBeRemoved) {
+          try {
+            addTab(name, layout, id);
+          } catch {
+            // Zustand already restored its in-memory tab before persistence failed.
+          }
+        }
+        return persistenceFailure(error);
+      }
+    },
+    []
+  );
+
+  return { cloneWorkspace, newFromTemplate, renameWorkspace, deleteWorkspace };
 }

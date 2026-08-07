@@ -13,6 +13,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { WorkspaceApi } from "@/layout/flexLayoutAdapter";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -264,6 +265,28 @@ describe("TerminalRoute", () => {
     renderTerminalRoute();
 
     expect(screen.getByText("Trade Workspace")).toBeInTheDocument();
+  });
+
+  it("reports a transient workspace binding persistence failure instead of crashing", async () => {
+    vi.mocked(useLayoutStore.setState).mockImplementationOnce(() => {
+      throw new Error("quota exceeded");
+    });
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: quota exceeded");
+  });
+
+  it("reports a workspace API registration persistence failure instead of crashing", async () => {
+    mockLayoutState.setWorkspaceApi.mockImplementationOnce(() => {
+      throw new Error("storage unavailable");
+    });
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: storage unavailable");
   });
 
   it("registers a workspace api on mount and clears it when the trade route unmounts", async () => {
@@ -682,6 +705,31 @@ describe("TerminalRoute saved-layout restore", () => {
         expect(call[0]).toBe("default");
       }
     }
+    mockLayoutState.activeTabId = "default";
+  });
+
+  it("reports a layout persistence failure during workspace switching instead of crashing", async () => {
+    const { rerender, queryClient } = renderTerminalRoute();
+    await waitFor(() => expect(mockLayoutState.workspaceApi).not.toBeNull());
+    mockLayoutState.saveTabLayout.mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    mockLayoutState.activeTabId = "second";
+    mockLayoutState.getTabLayout.mockImplementation((id: string) =>
+      id === "second"
+        ? (buildPresetJsonById("trading-desk") as unknown as Record<string, unknown>)
+        : null,
+    );
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <TerminalRoute />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent("Workspace layout could not be saved: quota exceeded");
+    expect(JSON.stringify(registeredApi().toJSON())).toContain('"riskdashboard"');
     mockLayoutState.activeTabId = "default";
   });
 });

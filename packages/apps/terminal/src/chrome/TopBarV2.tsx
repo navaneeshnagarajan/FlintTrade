@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useModeStore } from "@/stores/modeStore";
+import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSkillContent } from "@/hooks/useSkillContent";
 import { useTimings } from "@/hooks/useMarketStatus";
@@ -439,6 +440,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
 
         {/* Connected broker account context */}
         <AccountSwitcher />
+        <WorkspaceSwitcher />
 
         {/* Fullscreen toggle */}
         <FullscreenButton />

@@ -52,6 +52,10 @@ vi.mock("../AccountSwitcher", () => ({
   default: () => <div data-testid="account-switcher" />,
 }));
 
+vi.mock("../WorkspaceSwitcher", () => ({
+  default: () => <div data-testid="workspace-switcher" />,
+}));
+
 // TickerMarquee stub — renders a simple labelled region so ticker tests pass
 vi.mock("../TickerMarquee", () => ({
   default: ({ mode }: { mode?: string }) =>
