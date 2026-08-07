@@ -18,7 +18,7 @@
  *    (name, createdAt) and reference back to a tab id.
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Zap, Grid3x3, Star, BarChart3, ShieldAlert, TrendingUp,
   Sigma, Map, Bot, PieChart, Globe, Gauge, Box,
@@ -46,7 +46,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
-import { useWorkspaceLifecycle } from "./hooks/useWorkspaceLifecycle";
+import {
+  reconcileWorkspaceStore,
+  useWorkspaceLifecycle,
+  WorkspaceStorageError,
+} from "./hooks/useWorkspaceLifecycle";
 
 // ---------------------------------------------------------------------------
 // Icon map
@@ -74,11 +78,12 @@ export interface PresetPickerProps {
 interface RenameDialogProps {
   open: boolean;
   currentName: string;
+  error: string | null;
   onConfirm: (name: string) => void;
   onCancel: () => void;
 }
 
-function RenameDialog({ open, currentName, onConfirm, onCancel }: RenameDialogProps) {
+function RenameDialog({ open, currentName, error, onConfirm, onCancel }: RenameDialogProps) {
   const [name, setName] = useState(currentName);
 
   function handleSubmit(e: React.FormEvent) {
@@ -98,6 +103,11 @@ function RenameDialog({ open, currentName, onConfirm, onCancel }: RenameDialogPr
             Enter a new name for this workspace.
           </DialogDescription>
         </DialogHeader>
+        {error && (
+          <p role="alert" className="rounded border border-red-800 bg-red-950/60 px-3 py-2 text-xs text-red-200">
+            {error}
+          </p>
+        )}
         <form onSubmit={handleSubmit}>
           <div className="py-2">
             <Label htmlFor="workspace-name" className="text-xs text-text-muted mb-1 block">
@@ -144,11 +154,12 @@ function RenameDialog({ open, currentName, onConfirm, onCancel }: RenameDialogPr
 interface DeleteDialogProps {
   open: boolean;
   workspaceName: string;
+  error: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function DeleteDialog({ open, workspaceName, onConfirm, onCancel }: DeleteDialogProps) {
+function DeleteDialog({ open, workspaceName, error, onConfirm, onCancel }: DeleteDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent className="sm:max-w-sm bg-surface-card border-border-default">
@@ -161,6 +172,11 @@ function DeleteDialog({ open, workspaceName, onConfirm, onCancel }: DeleteDialog
             This cannot be undone.
           </DialogDescription>
         </DialogHeader>
+        {error && (
+          <p role="alert" className="rounded border border-red-800 bg-red-950/60 px-3 py-2 text-xs text-red-200">
+            {error}
+          </p>
+        )}
         <DialogFooter className="mt-4 gap-2">
           <Button
             variant="ghost"
@@ -195,15 +211,34 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
   const renameTab = useLayoutStore((s) => s.renameTab);
   const removeTab = useLayoutStore((s) => s.removeTab);
   const addTab = useLayoutStore((s) => s.addTab);
+  const getTabLayout = useLayoutStore((s) => s.getTabLayout);
+  const workspaceApi = useLayoutStore((s) => s.workspaceApi);
+  const workspaceApiTabId = useLayoutStore((s) => s.workspaceApiTabId);
 
-  const { cloneWorkspace, newFromTemplate } = useWorkspaceLifecycle();
+  const { cloneWorkspace, newFromTemplate, renameWorkspace, deleteWorkspace } = useWorkspaceLifecycle();
 
   // Sub-dialog state
   const [showRename, setShowRename] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showTemplateClone, setShowTemplateClone] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
+  const workspaceReady = workspaceApi !== null && workspaceApiTabId === activeTabId;
+  const visibleError = workspaceError ?? reconcileError;
+
+  useEffect(() => {
+    try {
+      reconcileWorkspaceStore(tabs);
+      setReconcileError(null);
+    } catch (error) {
+      const message = error instanceof WorkspaceStorageError
+        ? error.message
+        : `Workspace metadata could not be reconciled: ${error instanceof Error ? error.message : "unknown storage error"}`;
+      setReconcileError(message);
+    }
+  }, [tabs]);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -211,42 +246,86 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
 
   const handleSelectPreset = useCallback(
     (presetId: string) => {
+      if (!workspaceReady) {
+        setWorkspaceError("Workspace is still loading. Try again in a moment.");
+        return;
+      }
       applyPreset(presetId);
+      setWorkspaceError(null);
       onClose();
     },
-    [applyPreset, onClose]
+    [workspaceReady, applyPreset, onClose]
   );
 
   const handleRenameConfirm = useCallback(
     (name: string) => {
-      renameTab(activeTabId, name);
+      const result = renameWorkspace(activeTabId, activeTab?.name ?? "Workspace", name, renameTab);
+      if (!result.ok) {
+        setWorkspaceError(result.error);
+        return;
+      }
+      setWorkspaceError(null);
       setShowRename(false);
     },
-    [activeTabId, renameTab]
+    [activeTabId, activeTab?.name, renameTab, renameWorkspace]
   );
 
   const handleDeleteConfirm = useCallback(() => {
-    removeTab(activeTabId);
+    if (!activeTab || tabs.length <= 1) return;
+    const layout = workspaceApi && workspaceApiTabId === activeTabId
+      ? workspaceApi.toJSON() as unknown as Record<string, unknown>
+      : getTabLayout(activeTabId);
+    const result = deleteWorkspace(
+      activeTabId,
+      activeTab.name,
+      layout,
+      removeTab,
+      addTab,
+    );
+    if (!result.ok) {
+      setWorkspaceError(result.error);
+      return;
+    }
+    setWorkspaceError(null);
     setShowDelete(false);
     onClose();
-  }, [activeTabId, removeTab, onClose]);
+  }, [activeTab, tabs.length, activeTabId, workspaceApi, workspaceApiTabId, getTabLayout, deleteWorkspace, removeTab, addTab, onClose]);
 
   const handleCloneCurrent = useCallback(() => {
     if (activeTab) {
-      cloneWorkspace(activeTab.id, activeTab.name);
+      const sourceLayout = workspaceApi && workspaceApiTabId === activeTab.id
+        ? workspaceApi.toJSON() as unknown as Record<string, unknown>
+        : getTabLayout(activeTab.id);
+      const result = cloneWorkspace(
+        activeTab.id,
+        activeTab.name,
+        addTab,
+        removeTab,
+        sourceLayout,
+      );
+      if (!result.ok) {
+        setWorkspaceError(result.error);
+        return;
+      }
+      setWorkspaceError(null);
       onClose();
     }
-  }, [activeTab, cloneWorkspace, onClose]);
+  }, [activeTab, cloneWorkspace, addTab, removeTab, workspaceApi, workspaceApiTabId, getTabLayout, onClose]);
 
   const handleNewFromTemplate = useCallback(
     (presetId: string) => {
       const preset = WORKSPACE_PRESETS.find((p) => p.id === presetId);
       if (!preset) return;
-      newFromTemplate(preset, addTab, applyPreset);
+      const result = newFromTemplate(preset, addTab, removeTab);
+      if (!result.ok) {
+        setWorkspaceError(result.error);
+        return;
+      }
+      setWorkspaceError(null);
       setShowTemplateClone(false);
       onClose();
     },
-    [newFromTemplate, addTab, applyPreset, onClose]
+    [newFromTemplate, addTab, removeTab, onClose]
   );
 
   // ---------------------------------------------------------------------------
@@ -265,6 +344,11 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
               Creates a new named workspace tab using the chosen template layout.
             </DialogDescription>
           </DialogHeader>
+          {visibleError && (
+            <p role="alert" className="mx-4 rounded border border-red-800 bg-red-950/60 px-3 py-2 text-xs text-red-200">
+              {visibleError}
+            </p>
+          )}
           <div className="p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0">
             {WORKSPACE_PRESETS.map((preset) => {
               const Icon: LucideIcon = ICON_MAP[preset.icon] ?? Box;
@@ -338,7 +422,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
                   className="w-52 bg-surface-card border-border-default text-text-primary"
                 >
                   <DropdownMenuItem
-                    onClick={() => setShowTemplateClone(true)}
+                    onClick={() => { setWorkspaceError(null); setShowTemplateClone(true); }}
                     className="text-xs gap-2 cursor-pointer hover:bg-surface-hover"
                   >
                     <Plus size={13} className="text-text-muted" />
@@ -353,7 +437,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-border-default" />
                   <DropdownMenuItem
-                    onClick={() => setShowRename(true)}
+                    onClick={() => { setWorkspaceError(null); setShowRename(true); }}
                     className="text-xs gap-2 cursor-pointer hover:bg-surface-hover"
                   >
                     <Pencil size={13} className="text-text-muted" />
@@ -361,7 +445,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-border-default" />
                   <DropdownMenuItem
-                    onClick={() => setShowDelete(true)}
+                    onClick={() => { setWorkspaceError(null); setShowDelete(true); }}
                     disabled={tabs.length <= 1}
                     className="text-xs gap-2 cursor-pointer text-red-400 hover:text-red-300 hover:bg-red-950 focus:text-red-300 focus:bg-red-950 disabled:opacity-40"
                   >
@@ -373,6 +457,12 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
             </div>
           </DialogHeader>
 
+          {visibleError && (
+            <p role="alert" className="mx-4 rounded border border-red-800 bg-red-950/60 px-3 py-2 text-xs text-red-200">
+              {visibleError}
+            </p>
+          )}
+
           {/* Preset grid */}
           <div className="p-4 grid grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0">
             {WORKSPACE_PRESETS.map((preset) => {
@@ -380,8 +470,9 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
               return (
                 <button
                   key={preset.id}
+                  disabled={!workspaceReady}
                   onClick={() => handleSelectPreset(preset.id)}
-                  className="flex items-start gap-3 p-4 rounded-lg border border-border-default hover:border-accent/50 hover:bg-surface-hover transition-colors text-left group"
+                  className="flex items-start gap-3 p-4 rounded-lg border border-border-default hover:border-accent/50 hover:bg-surface-hover transition-colors text-left group disabled:cursor-wait disabled:opacity-50"
                 >
                   <div className="mt-0.5 shrink-0 p-2 rounded-md bg-surface-hover group-hover:bg-accent/10 transition-colors">
                     <Icon
@@ -408,16 +499,18 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
       <RenameDialog
         open={showRename}
         currentName={activeTab?.name ?? "Workspace"}
+        error={visibleError}
         onConfirm={handleRenameConfirm}
-        onCancel={() => setShowRename(false)}
+        onCancel={() => { setWorkspaceError(null); setShowRename(false); }}
       />
 
       {/* Delete confirmation dialog */}
       <DeleteDialog
         open={showDelete}
         workspaceName={activeTab?.name ?? "Workspace"}
+        error={visibleError}
         onConfirm={handleDeleteConfirm}
-        onCancel={() => setShowDelete(false)}
+        onCancel={() => { setWorkspaceError(null); setShowDelete(false); }}
       />
     </>
   );

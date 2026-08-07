@@ -26,6 +26,14 @@ describe("layoutStore", () => {
     expect(useLayoutStore.getState().activeTabId).toBe(secondId);
   });
 
+  it("does not activate an ID that has no persisted layout tab", () => {
+    const originalId = useLayoutStore.getState().activeTabId;
+
+    useLayoutStore.getState().setActiveTab("ws-missing");
+
+    expect(useLayoutStore.getState().activeTabId).toBe(originalId);
+  });
+
   it("renames a tab", () => {
     const tabId = useLayoutStore.getState().tabs[0].id;
     useLayoutStore.getState().renameTab(tabId, "Renamed");
