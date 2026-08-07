@@ -247,4 +247,3 @@ describe("SHORTCUT_ENTRIES Slice 2 navigation", () => {
     expect(trade).toMatchObject({ label: "Go to Trade", keys: ["Alt", "T"], category: "Navigation" });
   });
 });
-

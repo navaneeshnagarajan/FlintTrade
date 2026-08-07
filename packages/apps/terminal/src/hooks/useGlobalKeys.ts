@@ -7,6 +7,10 @@ interface GlobalKeyHandlers {
   onCommandPalette?: () => void;
   /** Fired when `?` is pressed with no input focused — opens the shortcuts dialog. */
   onShowShortcuts?: () => void;
+  /** Fired when Alt+H is pressed with no input focused — navigate to Home. */
+  onGoHome?: () => void;
+  /** Fired when Alt+T is pressed with no input focused — navigate to Trade. */
+  onGoTrade?: () => void;
 }
 
 /**
@@ -36,6 +40,8 @@ function reportTradingActionFailure(title: string, err: unknown): void {
  *
  * Shortcuts:
  *   Ctrl+K       -- Command palette
+ *   Alt+H        -- Go to Home
+ *   Alt+T        -- Go to Trade
  *   X / Shift+X  -- Exit all positions (confirmation required)
  *   C            -- Cancel all orders (confirmation required)
  *   Esc          -- Close active tool/modal
@@ -46,6 +52,8 @@ export default function useGlobalKeys({
   onEscape,
   onCommandPalette,
   onShowShortcuts,
+  onGoHome,
+  onGoTrade,
 }: GlobalKeyHandlers): void {
   useEffect(() => {
     function handler(e: KeyboardEvent): void {
@@ -71,6 +79,20 @@ export default function useGlobalKeys({
       if (e.key === "Escape") {
         e.preventDefault();
         onEscape?.();
+        return;
+      }
+
+      // Alt+H -- Go to Home (matches KeyboardShortcutsDialog / command palette)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        onGoHome?.();
+        return;
+      }
+
+      // Alt+T -- Go to Trade (matches KeyboardShortcutsDialog / command palette)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        onGoTrade?.();
         return;
       }
 
@@ -127,5 +149,5 @@ export default function useGlobalKeys({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onEscape, onCommandPalette, onShowShortcuts]);
+  }, [onEscape, onCommandPalette, onShowShortcuts, onGoHome, onGoTrade]);
 }
