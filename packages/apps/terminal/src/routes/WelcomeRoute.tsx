@@ -26,6 +26,8 @@ import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { useModeStore } from "@/stores/modeStore";
 import { markDemoSessionActive } from "@/lib/demoSession";
+import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
 
 const WORDMARK = BRAND_WORDMARK;
@@ -372,7 +374,8 @@ export default function WelcomeRoute() {
 
   useEffect(() => {
     if (authStatus === "logged-in") {
-      navigate("/trade", { replace: true });
+      const persona = useSettingsStore.getState().persona;
+      navigate(personaDefaultRoute(persona), { replace: true });
     }
   }, [authStatus, navigate]);
 
@@ -409,7 +412,8 @@ export default function WelcomeRoute() {
   }, [authStatus, flowStep, reducedMotion]);
 
   function handleLoginSuccess() {
-    navigate("/trade", { replace: true });
+    const persona = useSettingsStore.getState().persona;
+    navigate(personaDefaultRoute(persona), { replace: true });
   }
 
   function handleExplore() {
