@@ -1,10 +1,18 @@
 import { createMDX } from 'fumadocs-mdx/next';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 /** @type {import('next').NextConfig} */
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, '../../..');
+
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.0.1'],
   transpilePackages: ['@flinttrade/design-system'],
+  turbopack: {
+    root: repoRoot,
+  },
   images: {
     localPatterns: [
       {

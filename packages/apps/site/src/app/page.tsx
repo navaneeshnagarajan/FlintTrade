@@ -1,5 +1,5 @@
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
-import { ArrowRight, Bot, Cable, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { ArrowRight, Bot, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
