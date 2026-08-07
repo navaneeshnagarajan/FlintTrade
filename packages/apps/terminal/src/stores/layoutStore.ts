@@ -14,15 +14,16 @@ interface LayoutStore {
   tabs: LayoutTab[];
   activeTabId: string;
   workspaceApi: WorkspaceApi | null;
+  workspaceApiTabId: string | null;
   widgetPickerOpen: boolean;
   presetPickerOpen: boolean;
-  addTab: (name?: string) => void;
+  addTab: (name?: string, initialLayout?: Record<string, unknown>, providedId?: string) => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   renameTab: (id: string, name: string) => void;
   saveTabLayout: (id: string, layout: Record<string, unknown>) => void;
   getTabLayout: (id: string) => Record<string, unknown> | undefined;
-  setWorkspaceApi: (api: WorkspaceApi | null) => void;
+  setWorkspaceApi: (api: WorkspaceApi | null, tabId?: string) => void;
   setWidgetPickerOpen: (open: boolean) => void;
   setPresetPickerOpen: (open: boolean) => void;
   applyPreset: (presetId: string) => void;
@@ -38,13 +39,18 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   tabs: [{ id: defaultTabId, name: "Workspace" }],
   activeTabId: defaultTabId,
   workspaceApi: null,
+  workspaceApiTabId: null,
   widgetPickerOpen: false,
   presetPickerOpen: false,
-  addTab: (name) => {
-    const id = generateId();
+  addTab: (name, initialLayout, providedId) => {
+    const id = providedId || generateId();
     const tabName = name || `Layout ${get().tabs.length + 1}`;
+    const newTab: LayoutTab = { id, name: tabName };
+    if (initialLayout) {
+      newTab.serializedLayout = initialLayout;
+    }
     set((state) => ({
-      tabs: [...state.tabs, { id, name: tabName }],
+      tabs: [...state.tabs, newTab],
       activeTabId: id,
     }));
   },
@@ -57,7 +63,11 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
       return { tabs: remaining, activeTabId: newActive };
     });
   },
-  setActiveTab: (id) => set({ activeTabId: id }),
+  setActiveTab: (id) => {
+    if (get().tabs.some((tab) => tab.id === id)) {
+      set({ activeTabId: id });
+    }
+  },
   renameTab: (id, name) => {
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
@@ -73,7 +83,10 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   getTabLayout: (id) => {
     return get().tabs.find((t) => t.id === id)?.serializedLayout;
   },
-  setWorkspaceApi: (api) => set({ workspaceApi: api }),
+  setWorkspaceApi: (api, tabId) => set({
+    workspaceApi: api,
+    workspaceApiTabId: api ? (tabId ?? get().activeTabId) : null,
+  }),
   setWidgetPickerOpen: (open) => set({ widgetPickerOpen: open }),
   setPresetPickerOpen: (open) => set({ presetPickerOpen: open }),
   applyPreset: (presetId) => {

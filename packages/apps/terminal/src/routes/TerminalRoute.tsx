@@ -441,6 +441,7 @@ export default function TerminalRoute() {
   // derived during render, which would remount every widget on every render
   // (the FlexLayout model-recreation trap, upstream #456/#524).
   const [model, setModel] = useState<Model | null>(null);
+  const [layoutPersistenceError, setLayoutPersistenceError] = useState<string | null>(null);
   const modelRef = useRef<Model | null>(null);
   // The workspace tab that OWNS the current model — saves are bound to it,
   // never to whatever tab is active when the debounce fires (audit finding:
@@ -503,6 +504,20 @@ export default function TerminalRoute() {
   // aria-selected, aria-controls and keyboard focus natively — the
   // Dockview-era DOM patch for Issue #46 is obsolete.)
   // ---------------------------------------------------------------------------
+  const reportLayoutPersistenceError = useCallback((error: unknown) => {
+    const detail = error instanceof Error ? error.message : "unknown storage error";
+    setLayoutPersistenceError(`Workspace layout could not be saved: ${detail}`);
+  }, []);
+
+  const persistLayout = useCallback((tabId: string, layout: Record<string, unknown>) => {
+    try {
+      useLayoutStore.getState().saveTabLayout(tabId, layout);
+      setLayoutPersistenceError(null);
+    } catch (error) {
+      reportLayoutPersistenceError(error);
+    }
+  }, [reportLayoutPersistenceError]);
+
   const scheduleLayoutSave = useCallback((current: Model) => {
     // Debounced 500ms to avoid thrashing on rapid panel ops / drag frames.
     // Saves bind to the tab that owned the model when the change happened,
@@ -511,12 +526,12 @@ export default function TerminalRoute() {
     if (!owningTabId) return;
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      useLayoutStore.getState().saveTabLayout(
+      persistLayout(
         owningTabId,
         current.toJson() as unknown as Record<string, unknown>,
       );
     }, 500);
-  }, []);
+  }, [persistLayout]);
 
   // Flush a pending debounced save immediately (model replacement, tab
   // switch, unmount) so changes made within the last 500ms are not lost.
@@ -527,11 +542,11 @@ export default function TerminalRoute() {
     const owningTabId = modelTabIdRef.current;
     const current = modelRef.current;
     if (!owningTabId || !current) return;
-    useLayoutStore.getState().saveTabLayout(
+    persistLayout(
       owningTabId,
       current.toJson() as unknown as Record<string, unknown>,
     );
-  }, []);
+  }, [persistLayout]);
 
   // Dispatch active-widget context for AITutorPill whenever the focused
   // panel changes. AITutorPill subscribes via
@@ -570,9 +585,14 @@ export default function TerminalRoute() {
     modelListenerRef.current = listener;
     modelRef.current = next;
     modelTabIdRef.current = useLayoutStore.getState().activeTabId;
+    try {
+      useLayoutStore.setState({ workspaceApiTabId: modelTabIdRef.current });
+    } catch (error) {
+      reportLayoutPersistenceError(error);
+    }
     setModel(next);
     afterModelMutation(next);
-  }, [afterModelMutation, flushPendingSave]);
+  }, [afterModelMutation, flushPendingSave, reportLayoutPersistenceError]);
 
   // Mount: restore the active workspace tab (or apply the skill default),
   // then hand the workspace api to the layout store for chrome consumers
@@ -611,7 +631,11 @@ export default function TerminalRoute() {
     loadModel(initialModel);
 
     const api = createWorkspaceApi(() => modelRef.current ?? initialModel, loadModel);
-    setWorkspaceApi(api);
+    try {
+      setWorkspaceApi(api, activeTabId);
+    } catch (error) {
+      reportLayoutPersistenceError(error);
+    }
     return () => {
       // Persist any change still inside the 500ms debounce window, then
       // detach the model listener so the unmounted route stops observing.
@@ -622,7 +646,12 @@ export default function TerminalRoute() {
       }
       modelListenerRef.current = null;
       if (useLayoutStore.getState().workspaceApi === api) {
-        setWorkspaceApi(null);
+        try {
+          setWorkspaceApi(null);
+        } catch {
+          // The route is unmounting, so there is no remaining UI in which to
+          // report failure while clearing this transient API reference.
+        }
       }
       modelRef.current = null;
       modelTabIdRef.current = null;
@@ -630,14 +659,12 @@ export default function TerminalRoute() {
     // level intentionally omitted — we only use it for the initial layout
     // decision. Re-running on every skill change would reset the layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadModel, setWorkspaceApi, flushPendingSave]);
+  }, [loadModel, setWorkspaceApi, flushPendingSave, reportLayoutPersistenceError]);
 
   // React to workspace-tab switches (including Delete Workspace, which
   // activates the surviving tab): flush the outgoing tab's pending save,
   // then load the newly active tab's layout. Skipped when the current model
-  // already belongs to the active tab — true right after mount, and after
-  // new-from-template flows where applyPreset already loaded a model bound
-  // to the new tab.
+  // already belongs to the active tab — true immediately after mount.
   const activeWorkspaceTabId = useLayoutStore((s) => s.activeTabId);
   useEffect(() => {
     if (modelTabIdRef.current === null || modelTabIdRef.current === activeWorkspaceTabId) return;
@@ -702,6 +729,15 @@ export default function TerminalRoute() {
     <CinematicLayout mode="focused">
     <div className="relative h-full flex flex-col text-text-primary overflow-hidden select-none">
       <h1 className="sr-only">Trade Workspace</h1>
+      {layoutPersistenceError && (
+        <p
+          role="alert"
+          aria-label="Workspace layout storage error"
+          className="shrink-0 border-b border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200"
+        >
+          {layoutPersistenceError}
+        </p>
+      )}
       {/* Route-level hint banner — dismissible, respects helpPrefs.inlineHints */}
       <RouteBanner
         hintId="trade-shortcuts"

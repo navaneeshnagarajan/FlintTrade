@@ -8,13 +8,16 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import {
   readWorkspaceStore,
+  reconcileWorkspaceStore,
   writeWorkspaceStore,
   upsertWorkspaceMeta,
   deleteWorkspaceMeta,
   getWorkspaceMeta,
+  WorkspaceStorageError,
   useWorkspaceLifecycle,
 } from "../useWorkspaceLifecycle";
 import type { WorkspaceMeta } from "../useWorkspaceLifecycle";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 // ---------------------------------------------------------------------------
 // localStorage mock
@@ -22,11 +25,16 @@ import type { WorkspaceMeta } from "../useWorkspaceLifecycle";
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
+  let writeError: Error | undefined;
   return {
     getItem: (key: string) => store[key] ?? null,
-    setItem: (key: string, value: string) => { store[key] = value; },
+    setItem: (key: string, value: string) => {
+      if (writeError) throw writeError;
+      store[key] = value;
+    },
     removeItem: (key: string) => { delete store[key]; },
-    clear: () => { store = {}; },
+    clear: () => { store = {}; writeError = undefined; },
+    failWritesWith: (error: Error) => { writeError = error; },
   };
 })();
 
@@ -36,6 +44,8 @@ beforeEach(() => {
     writable: true,
   });
   localStorageMock.clear();
+  // Reset layout store for id-unification and clone tests (RED-GREEN for orphan defect)
+  useLayoutStore.setState(useLayoutStore.getInitialState());
 });
 
 afterEach(() => {
@@ -51,14 +61,14 @@ describe("readWorkspaceStore", () => {
     expect(readWorkspaceStore()).toEqual({});
   });
 
-  it("returns empty object for malformed JSON", () => {
+  it("reports malformed JSON instead of silently replacing it", () => {
     localStorageMock.setItem("flinttrade:workspaces", "not-json");
-    expect(readWorkspaceStore()).toEqual({});
+    expect(() => readWorkspaceStore()).toThrow(WorkspaceStorageError);
   });
 
-  it("returns empty object when stored value is an array", () => {
+  it("reports an invalid stored shape instead of silently replacing it", () => {
     localStorageMock.setItem("flinttrade:workspaces", JSON.stringify([]));
-    expect(readWorkspaceStore()).toEqual({});
+    expect(() => readWorkspaceStore()).toThrow(WorkspaceStorageError);
   });
 
   it("returns the stored workspace map", () => {
@@ -67,6 +77,60 @@ describe("readWorkspaceStore", () => {
     };
     writeWorkspaceStore(data);
     expect(readWorkspaceStore()).toEqual(data);
+  });
+});
+
+describe("reconcileWorkspaceStore", () => {
+  it("migrates legacy metadata to the matching canonical layout ID", () => {
+    writeWorkspaceStore({
+      ws_legacy: {
+        id: "ws_legacy",
+        name: "Trading Desk",
+        createdAt: "2026-04-13T00:00:00Z",
+        updatedAt: "2026-04-13T00:00:00Z",
+        sourcePresetId: "trading-desk",
+      },
+      ws_orphan: {
+        id: "ws_orphan",
+        name: "Deleted Workspace",
+        createdAt: "2026-04-13T00:00:00Z",
+        updatedAt: "2026-04-13T00:00:00Z",
+      },
+    });
+
+    reconcileWorkspaceStore([{ id: "LAY-canonical", name: "Trading Desk" }]);
+
+    expect(readWorkspaceStore()).toEqual({
+      "LAY-canonical": expect.objectContaining({
+        id: "LAY-canonical",
+        name: "Trading Desk",
+        sourcePresetId: "trading-desk",
+      }),
+    });
+  });
+
+  it("preserves ambiguous legacy metadata instead of guessing or deleting it", () => {
+    const first = {
+      id: "ws_legacy_one",
+      name: "Trading Desk",
+      createdAt: "2026-04-13T00:00:00Z",
+      updatedAt: "2026-04-13T00:00:00Z",
+    };
+    const second = { ...first, id: "ws_legacy_two" };
+    writeWorkspaceStore({
+      [first.id]: first,
+      [second.id]: second,
+    });
+
+    reconcileWorkspaceStore([
+      { id: "LAY-one", name: "Trading Desk" },
+      { id: "LAY-two", name: "Trading Desk" },
+    ]);
+
+    expect(readWorkspaceStore()).toEqual({
+      [first.id]: first,
+      [second.id]: second,
+    });
   });
 });
 
@@ -182,29 +246,56 @@ describe("getWorkspaceMeta", () => {
 describe("useWorkspaceLifecycle.cloneWorkspace", () => {
   it("calls addTab with the cloned name", () => {
     const addTab = vi.fn();
+    const removeTab = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
 
     act(() => {
-      result.current.cloneWorkspace("tab-1", "My Layout", addTab);
+      result.current.cloneWorkspace("tab-1", "My Layout", addTab, removeTab);
     });
 
-    expect(addTab).toHaveBeenCalledWith("My Layout (Copy)");
+    expect(addTab).toHaveBeenCalledWith("My Layout (Copy)", undefined, expect.stringMatching(/^ws_/));
   });
 
-  it("persists a new metadata entry", () => {
-    const addTab = vi.fn();
+  it("persists a new metadata entry with matching canonical ID (unification)", () => {
+    // Use REAL addTab (not mock) so unification of ws_ id between meta and layout tab can be asserted
     const { result } = renderHook(() => useWorkspaceLifecycle());
+    const realAddTab = useLayoutStore.getState().addTab;
+    const realRemoveTab = useLayoutStore.getState().removeTab;
 
     act(() => {
-      result.current.cloneWorkspace("tab-1", "Scalper Zone", addTab);
+      result.current.cloneWorkspace("tab-1", "Scalper Zone", realAddTab, realRemoveTab);
     });
 
     const store = readWorkspaceStore();
     const entries = Object.values(store);
     expect(entries.length).toBe(1);
     expect(entries[0].name).toBe("Scalper Zone (Copy)");
+
+    const meta = entries[0];
+    const layoutTabs = useLayoutStore.getState().tabs;
+    const matchingTab = layoutTabs.find((tab) => tab.id === meta.id);
+    expect(matchingTab).toBeDefined(); // unified canonical ID
+    expect(matchingTab?.name).toBe("Scalper Zone (Copy)");
+    expect(matchingTab?.serializedLayout).toBeUndefined(); // no layout passed in this test
   });
 
+  it("clones serializedLayout when provided (unified id)", () => {
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+    const realAddTab = useLayoutStore.getState().addTab;
+    const realRemoveTab = useLayoutStore.getState().removeTab;
+    const fakeLayout = { root: { type: "row", children: [{ id: "chart" }] } };
+
+    act(() => {
+      result.current.cloneWorkspace("tab-1", "With Layout", realAddTab, realRemoveTab, fakeLayout);
+    });
+
+    const entries = Object.values(readWorkspaceStore());
+    const meta = entries.find((entry) => entry.name === "With Layout (Copy)");
+    expect(meta).toBeDefined();
+    const layoutTabs = useLayoutStore.getState().tabs;
+    const tab = layoutTabs.find((layoutTab) => layoutTab.id === meta?.id);
+    expect(tab?.serializedLayout).toEqual(fakeLayout);
+  });
   it("preserves sourcePresetId from the source workspace", () => {
     upsertWorkspaceMeta({
       id: "tab-src",
@@ -215,10 +306,11 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     });
 
     const addTab = vi.fn();
+    const removeTab = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
 
     act(() => {
-      result.current.cloneWorkspace("tab-src", "Options Desk", addTab);
+      result.current.cloneWorkspace("tab-src", "Options Desk", addTab, removeTab);
     });
 
     const entries = Object.values(readWorkspaceStore()).filter(
@@ -227,13 +319,41 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(entries[0].sourcePresetId).toBe("options-desk");
   });
 
-  it("works without addTab argument", () => {
+  it("rolls back the layout tab when metadata persistence fails", () => {
+    const addTab = vi.fn();
+    const removeTab = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
-    expect(() => {
-      act(() => {
-        result.current.cloneWorkspace("tab-1", "Layout");
-      });
-    }).not.toThrow();
+    localStorageMock.failWritesWith(new Error("quota exceeded"));
+
+    let outcome: ReturnType<typeof result.current.cloneWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.cloneWorkspace("tab-1", "Layout", addTab, removeTab);
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "Workspace could not be saved: quota exceeded" });
+    expect(addTab).toHaveBeenCalledOnce();
+    const createdId = addTab.mock.calls[0][2];
+    expect(removeTab).toHaveBeenCalledWith(createdId);
+    expect(localStorageMock.getItem("flinttrade:workspaces")).toBeNull();
+  });
+
+  it("does not create a layout tab when workspace metadata is corrupt", () => {
+    localStorageMock.setItem("flinttrade:workspaces", "not-json");
+    const addTab = vi.fn();
+    const removeTab = vi.fn();
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+
+    let outcome: ReturnType<typeof result.current.cloneWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.cloneWorkspace("tab-1", "Layout", addTab, removeTab);
+    });
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: "Workspace metadata is corrupted and could not be read.",
+    });
+    expect(addTab).not.toHaveBeenCalled();
+    expect(removeTab).not.toHaveBeenCalled();
   });
 });
 
@@ -250,42 +370,110 @@ describe("useWorkspaceLifecycle.newFromTemplate", () => {
     build: vi.fn(() => ({ layout: { type: "row" as const, children: [] } })),
   };
 
-  it("calls addTab with the preset name", () => {
+  it("creates the preset layout and metadata with one canonical id", () => {
     const addTab = vi.fn();
-    const applyPreset = vi.fn();
+    const removeTab = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
 
     act(() => {
-      result.current.newFromTemplate(preset, addTab, applyPreset);
+      result.current.newFromTemplate(preset, addTab, removeTab);
     });
 
-    expect(addTab).toHaveBeenCalledWith("Scalper Zone");
-  });
-
-  it("calls applyPreset with the preset id", () => {
-    const addTab = vi.fn();
-    const applyPreset = vi.fn();
-    const { result } = renderHook(() => useWorkspaceLifecycle());
-
-    act(() => {
-      result.current.newFromTemplate(preset, addTab, applyPreset);
+    const canonicalId = addTab.mock.calls[0][2];
+    expect(addTab).toHaveBeenCalledWith("Scalper Zone", preset.build(), canonicalId);
+    expect(readWorkspaceStore()[canonicalId]).toMatchObject({
+      id: canonicalId,
+      name: "Scalper Zone",
+      sourcePresetId: "scalper-zone",
     });
-
-    expect(applyPreset).toHaveBeenCalledWith("scalper-zone");
   });
 
   it("persists metadata with sourcePresetId", () => {
     const addTab = vi.fn();
-    const applyPreset = vi.fn();
+    const removeTab = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
 
     act(() => {
-      result.current.newFromTemplate(preset, addTab, applyPreset);
+      result.current.newFromTemplate(preset, addTab, removeTab);
     });
 
     const entries = Object.values(readWorkspaceStore());
     expect(entries.length).toBe(1);
     expect(entries[0].sourcePresetId).toBe("scalper-zone");
     expect(entries[0].name).toBe("Scalper Zone");
+  });
+
+  it("rolls back the template tab when metadata persistence fails", () => {
+    const addTab = vi.fn();
+    const removeTab = vi.fn();
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+    localStorageMock.failWritesWith(new Error("quota exceeded"));
+
+    let outcome: ReturnType<typeof result.current.newFromTemplate> | undefined;
+    act(() => {
+      outcome = result.current.newFromTemplate(preset, addTab, removeTab);
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "Workspace could not be saved: quota exceeded" });
+    const createdId = addTab.mock.calls[0][2];
+    expect(removeTab).toHaveBeenCalledWith(createdId);
+    expect(localStorageMock.getItem("flinttrade:workspaces")).toBeNull();
+  });
+});
+
+describe("useWorkspaceLifecycle rename and delete", () => {
+  const existing: WorkspaceMeta = {
+    id: "ws-existing",
+    name: "Original",
+    createdAt: "2026-04-13T00:00:00Z",
+    updatedAt: "2026-04-13T00:00:00Z",
+    sourcePresetId: "trading-desk",
+  };
+
+  it("rolls back a rename when metadata persistence fails", () => {
+    writeWorkspaceStore({ [existing.id]: existing });
+    localStorageMock.failWritesWith(new Error("quota exceeded"));
+    const renameTab = vi.fn();
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+
+    let outcome: ReturnType<typeof result.current.renameWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.renameWorkspace(
+        existing.id,
+        existing.name,
+        "Renamed",
+        renameTab,
+      );
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "Workspace could not be saved: quota exceeded" });
+    expect(renameTab.mock.calls).toEqual([
+      [existing.id, "Renamed"],
+      [existing.id, existing.name],
+    ]);
+  });
+
+  it("restores a removed tab when metadata deletion fails", () => {
+    writeWorkspaceStore({ [existing.id]: existing });
+    localStorageMock.failWritesWith(new Error("quota exceeded"));
+    const removeTab = vi.fn();
+    const addTab = vi.fn();
+    const layout = { layout: { type: "row" } };
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+
+    let outcome: ReturnType<typeof result.current.deleteWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.deleteWorkspace(
+        existing.id,
+        existing.name,
+        layout,
+        removeTab,
+        addTab,
+      );
+    });
+
+    expect(outcome).toEqual({ ok: false, error: "Workspace could not be saved: quota exceeded" });
+    expect(removeTab).toHaveBeenCalledWith(existing.id);
+    expect(addTab).toHaveBeenCalledWith(existing.name, layout, existing.id);
   });
 });
