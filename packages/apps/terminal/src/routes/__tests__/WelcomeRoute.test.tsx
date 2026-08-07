@@ -20,6 +20,7 @@ const {
   mockSetSetupRequired,
   mockSetLoggedOut,
   authState,
+  settingsPersona,
 } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSetMode: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockSetSetupRequired: vi.fn(),
   mockSetLoggedOut: vi.fn(),
   authState: { status: "setup-required" as string },
+  settingsPersona: { value: "trader" as string },
 }));
 
 vi.mock("react-router", () => ({
@@ -101,6 +103,18 @@ vi.mock("@/stores/modeStore", () => ({
   }),
 }));
 
+vi.mock("@/stores/settingsStore", () => ({
+  useSettingsStore: Object.assign(
+    vi.fn((selector: (state: Record<string, unknown>) => unknown) =>
+      selector({ persona: settingsPersona.value, name: "Trader" }),
+    ),
+    {
+      getState: () => ({ persona: settingsPersona.value, name: "Trader" }),
+      setState: vi.fn(),
+    },
+  ),
+}));
+
 vi.mock("@/components/brand/Logo", () => ({
   LogoIcon: ({ size }: { size: number }) => (
     <svg data-testid="logo-icon" width={size} height={size} />
@@ -142,6 +156,7 @@ describe("WelcomeRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.status = "setup-required";
+    settingsPersona.value = "trader";
   });
 
   it("renders the welcome heading", () => {
@@ -209,12 +224,40 @@ describe("WelcomeRoute", () => {
     expect(mockSetLoggedOut).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  it("logged-in trader continues to Trade (persona default)", async () => {
+    authState.status = "logged-in";
+    settingsPersona.value = "trader";
+    render(<WelcomeRoute />);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/trade", { replace: true });
+    });
+  });
+
+  it("logged-in beginner continues to Home (persona default)", async () => {
+    authState.status = "logged-in";
+    settingsPersona.value = "beginner";
+    render(<WelcomeRoute />);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/home", { replace: true });
+    });
+  });
+
+  it("logged-in investor continues to Home (persona default)", async () => {
+    authState.status = "logged-in";
+    settingsPersona.value = "investor";
+    render(<WelcomeRoute />);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/home", { replace: true });
+    });
+  });
 });
 
 describe("WelcomeRoute brand parity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.status = "setup-required";
+    settingsPersona.value = "trader";
   });
 
   it("derives the slogan words from the design-system brand copy", () => {
