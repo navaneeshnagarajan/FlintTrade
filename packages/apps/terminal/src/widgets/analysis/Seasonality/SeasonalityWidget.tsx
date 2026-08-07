@@ -347,7 +347,7 @@ function SeasonalityWidget(props: WidgetProps) {
         <p className="text-[10px] text-text-muted">
           {instrument.symbol} · average {view === "monthly" ? "monthly" : "daily"} return by{" "}
           {view === "monthly" ? "calendar month" : view === "weekday" ? "trading weekday" : "day of month"}
-          {showingSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+          {showingSample && <span className="ml-1 text-amber-500">· Sample data</span>}
         </p>
 
         {data === null ? (

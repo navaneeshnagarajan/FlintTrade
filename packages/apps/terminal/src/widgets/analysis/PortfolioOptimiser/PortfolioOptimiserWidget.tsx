@@ -193,7 +193,7 @@ function PortfolioOptimiserWidget() {
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
             aria-label="Practice: weights optimised from sandbox-scoped basket history"
-            title="Practice — read-only weights from the current sandbox data scope."
+            title="Practice — read-only weights from the current Practice data scope."
           >
             Practice
           </span>

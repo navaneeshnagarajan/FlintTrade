@@ -47,7 +47,7 @@ describe("ArbitrageScannerWidget", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Arbitrage Scanner");
     // Both section tables present (exact match avoids the subtitle collision).
     expect(screen.getByText("Cash-future basis")).toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("ArbitrageScannerWidget", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("INFY")).toBeInTheDocument();
     // The empty cross-exchange table shows its honest per-section empty state.
@@ -106,7 +106,7 @@ describe("ArbitrageScannerWidget", () => {
 
     render(<ArbitrageScannerWidget />, { wrapper });
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
   });
 
@@ -123,7 +123,7 @@ describe("ArbitrageScannerWidget", () => {
     render(<ArbitrageScannerWidget />, { wrapper });
 
     expect(screen.getByText(/No arbitrage opportunities found/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 
   it("shows an error state instead of fabricated tables when the scan fails", () => {
@@ -141,6 +141,6 @@ describe("ArbitrageScannerWidget", () => {
     expect(
       screen.queryByText(SAMPLE_ARBITRAGE_SCAN.cash_future[0].underlying),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
   });
 });

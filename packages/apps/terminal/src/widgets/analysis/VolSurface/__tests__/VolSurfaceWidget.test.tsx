@@ -162,6 +162,6 @@ describe("VolSurfaceWidget provenance fails closed", () => {
 
     render(<VolSurfaceWidget />, { wrapper });
 
-    expect(screen.queryByText(/demo data/i)).toBeNull();
+    expect(screen.queryByText(/sample data/i)).toBeNull();
   });
 });

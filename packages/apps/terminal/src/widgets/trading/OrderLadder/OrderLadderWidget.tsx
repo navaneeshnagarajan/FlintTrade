@@ -618,8 +618,8 @@ function OrderLadderWidget(props: Props) {
         </Select>
         {isExplore && (
           <span className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-            aria-label="Showing demo data">
-            Demo data
+            aria-label="Showing sample data">
+            Sample data
           </span>
         )}
         <div className="flex-1" />

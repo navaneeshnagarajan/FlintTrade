@@ -154,18 +154,19 @@ describe("WelcomeRoute", () => {
     render(<WelcomeRoute />);
 
     expect(screen.getByText("Get Started")).toBeInTheDocument();
-    expect(screen.getByLabelText("Explore FlintTrade without creating an account")).toBeInTheDocument();
+    expect(screen.getByLabelText("Try with sample data without creating an account")).toBeInTheDocument();
   });
 
-  it("opens the separate Explore page without entering demo mode", () => {
-    render(<WelcomeRoute />);
+  it("Try with sample data enters Home in Explore mode (not ExploreRoute landing)", () => {
+      render(<WelcomeRoute />);
 
-    fireEvent.click(screen.getByLabelText("Explore FlintTrade without creating an account"));
+      fireEvent.click(screen.getByLabelText("Try with sample data without creating an account"));
 
-    expect(mockNavigate).toHaveBeenCalledWith("/explore");
-    expect(mockSetMode).not.toHaveBeenCalled();
-    expect(mockSetLoggedIn).not.toHaveBeenCalled();
-  });
+      expect(mockSetMode).toHaveBeenCalledWith("explore");
+      expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");
+      expect(mockNavigate).toHaveBeenCalledWith("/home");
+      expect(mockNavigate).not.toHaveBeenCalledWith("/explore");
+    });
 
   it("degrades gracefully when the backend auth probe fails (no infinite 'Checking workspace…')", async () => {
     // Regression: previously the .catch only recovered in DEV, so a production
@@ -232,6 +233,12 @@ describe("WelcomeRoute brand parity", () => {
         ),
       ).toBeInTheDocument();
     }
+  });
+
+  it("describes public testing as simulated, not sandbox", () => {
+    render(<WelcomeRoute />);
+    expect(screen.getByText(/simulated testing/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sandbox testing/i)).not.toBeInTheDocument();
   });
 
   it("derives the step machine schedule from the shared reveal timeline", () => {

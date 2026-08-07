@@ -238,7 +238,7 @@ function FlowsTab() {
           <h3 className="text-sm font-semibold text-text-primary">FII Long/Short</h3>
           <p className="text-[10px] text-text-muted">
             Participant OI · {ratio.trade_date || "—"}
-            {longShortSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {longShortSample && <span className="ml-1 text-amber-500">· Sample data</span>}
           </p>
         </div>
         {isConnected && (
