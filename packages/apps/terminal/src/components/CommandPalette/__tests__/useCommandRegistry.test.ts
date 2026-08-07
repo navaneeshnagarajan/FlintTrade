@@ -102,4 +102,3 @@ describe("useCommandRegistry — Home navigation (Slice 2)", () => {
     window.removeEventListener("flinttrade:navigate", listener);
   });
 });
-
