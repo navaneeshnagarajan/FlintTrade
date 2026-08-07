@@ -208,7 +208,7 @@ export default function HomePage() {
             install commands only after a complete, checksummed Electron asset set is available.
           </p>
           <div className="section-actions">
-            <Link className="button primary" href="/download">
+            <Link className="button secondary" href="/download">
               Check installer status <ArrowRight aria-hidden="true" size={17} />
             </Link>
             <Link className="button secondary" href="/docs/desktop">

@@ -100,17 +100,20 @@ describe('docs index generation', () => {
 
   it('hero has exactly one primary CTA to demo-app/welcome (new window), no retired sandbox/paper/demo-mode strings, MCP absent from hero', () => {
     const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
-    // exactly one primary
-    const primaryMatches = pageSource.match(/className="button primary"/g) || [];
+    // Extract only the hero-actions block for primary CTA and MCP-in-hero assertions
+    const heroMatch = pageSource.match(/<div className="hero-actions">[\s\S]*?<\/div>/);
+    const heroActions = heroMatch ? heroMatch[0] : pageSource;
+    // exactly one primary (scoped to hero)
+    const primaryMatches = heroActions.match(/className="button primary"/g) || [];
     expect(primaryMatches.length).toBe(1);
-    expect(pageSource).toContain('href="/demo-app/welcome"');
-    expect(pageSource).toContain('target="_blank"');
-    expect(pageSource).toContain('Start exploring — no install needed');
-    // no retired operating-mode strings in rendered copy
+    expect(heroActions).toContain('href="/demo-app/welcome"');
+    expect(heroActions).toContain('target="_blank"');
+    expect(heroActions).toContain('Start exploring — no install needed');
+    // no retired operating-mode strings in rendered copy (whole page OK)
     expect(pageSource).not.toMatch(/sandbox testing|Sandbox Demo|Demo Mode|paper trading|paper order|demo data/i);
-    // MCP absent from hero-actions (moved to footer/nav)
-    expect(pageSource).not.toContain('Use the docs MCP');
-    expect(pageSource).not.toContain('/mcp');
+    // MCP absent from hero-actions only
+    expect(heroActions).not.toContain('Use the docs MCP');
+    expect(heroActions).not.toContain('/mcp');
   });
 });
 
