@@ -12,11 +12,31 @@ import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { renderReactRoot } from "./lib/reactRoot";
-import { isPublicDemoBuild } from "./lib/demoSession";
+import { exploreRoutePolicy, isPublicDemoBuild } from "./lib/demoSession";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import "./index.css";
+
+/**
+ * Build-aware `/explore` route contract (see `exploreRoutePolicy` in demoSession):
+ * - Public demo build: render ExploreRoute for marketing/demo URL compatibility.
+ * - Installed build: redirect bare `/explore` to welcome/onboarding. Sample-data
+ *   entry is Welcome "Try with sample data" → Home in Explore mode, not ExploreRoute.
+ */
+function ExplorePathElement() {
+  const policy = exploreRoutePolicy();
+  if (policy.kind === "redirect") {
+    return <Navigate to={policy.to} replace />;
+  }
+  return (
+    <RouteErrorBoundary routeName="Explore">
+      <Suspense fallback={<Loading />}>
+        <ExploreRoute />
+      </Suspense>
+    </RouteErrorBoundary>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Glitchtip error tracking — Sentry SDK compatible (MIT).
@@ -96,7 +116,7 @@ const router = createBrowserRouter([
 
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
-      { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
+      { path: "explore", element: <ExplorePathElement /> },
       /* Setup collects real credentials (account password, PIN, broker API keys),
          so the public demo build sends both routes to Explore instead. */
       { path: "setup", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },

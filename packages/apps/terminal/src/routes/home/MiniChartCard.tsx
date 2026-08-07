@@ -4,10 +4,10 @@
  * The headline price/change read the live NIFTY atom — the simulated demo feed
  * in Explore, the broker WebSocket in Live. With no tick yet they show a dash,
  * never a fabricated number. The sparkline is illustrative SHAPE data only (a
- * real history hook lands in a later wave), so it carries a visible "Demo"
- * badge: no unguarded placeholder price may render on a live surface (the
- * no-mock-data house rule — a card that shows a fake price next to a real order
- * button is a safety bug).
+ * real history hook lands in a later wave), so it carries a visible Sample
+ * provenance badge: no unguarded placeholder price may render on a live surface
+ * (the no-mock-data house rule — a card that shows a fake price next to a real
+ * order button is a safety bug).
  */
 
 import { useState } from "react";
@@ -16,12 +16,13 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { TrendingUp } from "lucide-react";
 import { FlintMiniSparkline } from "@flinttrade/design-system";
 import { niftyAtom } from "@/atoms/marketAtoms";
+import { ProvenanceBadge } from "@/routes/home/DemoBadge";
 
 type Timeframe = "1D" | "1W" | "1M" | "3M";
 const TIMEFRAMES: Timeframe[] = ["1D", "1W", "1M", "3M"];
 
 // Illustrative sparkline SHAPE only — NOT real history and NOT a real price. The
-// headline number never comes from here; the visible "Demo" badge marks it.
+// headline number never comes from here; the visible Sample badge marks it.
 const SAMPLE_SHAPE: Record<Timeframe, number[]> = {
   "1D": [22100, 22150, 22090, 22200, 22180, 22250, 22230, 22300, 22280, 22350, 22320, 22400],
   "1W": [21800, 21950, 22100, 22050, 22200, 22150, 22300],
@@ -70,18 +71,15 @@ export function MiniChartCard() {
 
         {/* Sparkline — illustrative shape, badged so it cannot read as live data */}
         <div className="flex-1 relative">
-          <span
-            className="absolute right-1 top-1 z-10 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide"
-            style={{ background: "var(--color-surface-active)", color: "var(--color-text-muted)" }}
-            data-testid="mini-chart-demo-badge"
+          <ProvenanceBadge
+            label="Sample"
+            testId="mini-chart-demo-badge"
             title="Illustrative shape only — not live price history"
-          >
-            Demo
-          </span>
+          />
           <FlintMiniSparkline
             points={shape}
             positive={positive}
-            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (demo data)`}
+            ariaLabel={`NIFTY 50 ${timeframe} illustrative sparkline (sample data)`}
             className="h-full w-full"
           />
         </div>

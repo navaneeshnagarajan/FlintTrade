@@ -106,7 +106,7 @@ describe("SeasonalityWidget — data honesty", () => {
     renderWidget();
 
     expect(screen.getByText("Sample data")).toBeInTheDocument();
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/· Sample data/)).toBeInTheDocument();
     // Sample monthly tiles render (all 12 months present in the sample set).
     expect(screen.getByText("Jan")).toBeInTheDocument();
     expect(screen.getByText("Dec")).toBeInTheDocument();
@@ -122,7 +122,7 @@ describe("SeasonalityWidget — data honesty", () => {
     expect(screen.getByText("Jul")).toBeInTheDocument();
     expect(screen.getByText("+2.34%")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/· Sample data/)).not.toBeInTheDocument();
     // The live payload has two months only — no sample-set bleed-through.
     expect(screen.queryByText("Jan")).not.toBeInTheDocument();
   });
@@ -146,7 +146,7 @@ describe("SeasonalityWidget — data honesty", () => {
     renderWidget();
 
     expect(await screen.findByText("Sample data")).toBeInTheDocument();
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/· Sample data/)).toBeInTheDocument();
     expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 

@@ -231,7 +231,7 @@ function PivotPointsWidget() {
           <span
             className="text-xxs text-warning border border-warning/30 bg-warning/10 rounded px-1.5 py-0.5"
             role="status"
-            aria-label="Practice pivot inputs from successful sandbox history and quote responses"
+            aria-label="Practice pivot inputs from successful Practice history and quote responses"
           >
             Practice
           </span>

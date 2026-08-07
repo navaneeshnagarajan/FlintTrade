@@ -462,7 +462,7 @@ function GammaDensityWidget(props: WidgetProps) {
           <p className="text-[10px] text-text-muted">
             {subtitle}
             {expiry && !isSample && <span className="ml-1">· {expiry}</span>}
-            {isSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
             {expiryUnavailable && <span className="ml-1 text-amber-500">· No future expiry</span>}
           </p>
         </div>
