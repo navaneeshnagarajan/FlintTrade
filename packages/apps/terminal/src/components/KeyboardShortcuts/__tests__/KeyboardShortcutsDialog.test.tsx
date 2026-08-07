@@ -108,6 +108,8 @@ describe("KeyboardShortcutsDialog", () => {
       expect(
         screen.getByText(/command palette/i),
       ).toBeInTheDocument();
+      expect(screen.getByText("Go to Home")).toBeInTheDocument();
+      expect(screen.getByText("Go to Trade")).toBeInTheDocument();
       // Trading
       expect(
         screen.getByText(/cancel all open orders/i),
@@ -235,3 +237,14 @@ describe("KeyboardShortcutsDialog", () => {
     });
   });
 });
+
+describe("SHORTCUT_ENTRIES Slice 2 navigation", () => {
+  it("documents Go to Home (Alt+H) and Go to Trade (Alt+T)", async () => {
+    const { SHORTCUT_ENTRIES } = await import("../KeyboardShortcutsDialog");
+    const home = SHORTCUT_ENTRIES.find((e) => e.id === "go-home");
+    const trade = SHORTCUT_ENTRIES.find((e) => e.id === "go-trade");
+    expect(home).toMatchObject({ label: "Go to Home", keys: ["Alt", "H"], category: "Navigation" });
+    expect(trade).toMatchObject({ label: "Go to Trade", keys: ["Alt", "T"], category: "Navigation" });
+  });
+});
+

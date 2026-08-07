@@ -74,3 +74,32 @@ describe("useCommandRegistry — skill-tier widget gates", () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe("useCommandRegistry — Home navigation (Slice 2)", () => {
+  it("includes nav:home Go to Home with Alt+H before nav:trade", () => {
+    const { result } = renderHook(() => useCommandRegistry());
+    const home = result.current.commands.find((c) => c.id === "nav:home");
+    const trade = result.current.commands.find((c) => c.id === "nav:trade");
+    expect(home).toBeDefined();
+    expect(home?.title).toBe("Go to Home");
+    expect(home?.shortcut).toBe("Alt+H");
+    expect(home?.category).toBe("navigate");
+    expect(trade).toBeDefined();
+    expect(trade?.shortcut).toBe("Alt+T");
+    const ids = result.current.commands.map((c) => c.id);
+    expect(ids.indexOf("nav:home")).toBeLessThan(ids.indexOf("nav:trade"));
+  });
+
+  it("nav:home dispatches flinttrade:navigate to /home", () => {
+    const { result } = renderHook(() => useCommandRegistry());
+    const home = result.current.commands.find((c) => c.id === "nav:home");
+    const listener = vi.fn();
+    window.addEventListener("flinttrade:navigate", listener);
+    home?.action();
+    expect(listener).toHaveBeenCalledTimes(1);
+    const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path?: string }>;
+    expect(event.detail.path).toBe("/home");
+    window.removeEventListener("flinttrade:navigate", listener);
+  });
+});
+
