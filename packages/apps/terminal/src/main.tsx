@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
+import { getColdStartPath } from "@/lib/personaDefaultRoute";
 import { createBrowserRouter, Navigate } from "react-router";
 // RouterProvider must come from react-router/dom: the root export is the
 // non-DOM variant without ReactDOM.flushSync wiring, so navigate/submit
@@ -99,11 +100,8 @@ function getInitialRoute(): string {
   if (!raw) return "/welcome";
   const envelope = safeParse(raw, settingsEnvelopeSchema);
   const persona = envelope?.state?.persona;
-  if (!persona) return "/welcome";
-  // All personas land on /home; kept as separate branches for future routing
-  if (persona === "investor") return "/home";
-  if (persona === "beginner") return "/home";
-  return "/home";
+  const hasSettingsPersona = !!persona;
+  return getColdStartPath(persona, hasSettingsPersona);
 }
 
 const router = createBrowserRouter([
