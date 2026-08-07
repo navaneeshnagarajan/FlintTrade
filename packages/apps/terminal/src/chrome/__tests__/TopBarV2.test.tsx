@@ -157,7 +157,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
     const link = screen.getByRole("link", { name: /flint home/i });
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "/trade");
+    expect(link).toHaveAttribute("href", "/home");
   });
 
   it("renders the search button with accessible label", () => {
