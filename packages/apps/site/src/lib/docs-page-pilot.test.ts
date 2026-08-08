@@ -63,8 +63,9 @@ describe('docs.page pilot publication guards', () => {
     expect(parsed.$schema).toBe('https://docs.page/schema.json');
     expect(parsed.seo?.noindex).toBe(true);
     expect(parsed.mcp?.enabled).toBe(true);
-    expect(parsed.logo?.light).toBe('/docs/assets/logo.svg');
-    expect(parsed.logo?.dark).toBe('/docs/assets/logo.svg');
+    expect(parsed.logo?.light).toBe('/assets/logo.svg');
+    expect(parsed.logo?.dark).toBe('/assets/logo.svg');
+    expect(existsSync(join(DOCS_DIR, 'assets/logo.svg'))).toBe(true);
     expect(parsed.content?.automaticallyInferNextPrevious).toBe(true);
   });
 
