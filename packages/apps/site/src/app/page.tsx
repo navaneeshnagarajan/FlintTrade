@@ -1,7 +1,10 @@
+'use client';
+
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
 import { ArrowRight, Bot, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useEffect } from 'react';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
 import { SiteFooter } from '@/components/site-footer';
@@ -80,9 +83,37 @@ const desktopInstallOptions = [
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
 const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
-// Graphite Continuity A1: section enter uses CSS + IntersectionObserver (observer added in A2 if needed; current is CSS only with reduced-motion guard)
+// Graphite Continuity A1: real IntersectionObserver for section-enter (fail-open on SSR / reduced-motion)
+function useSectionEnterObserver() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
+
+    const sections = document.querySelectorAll<HTMLElement>('.section-enter');
+    if (!sections.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: '0px 0px -10% 0px' }
+    );
+
+    sections.forEach((section) => observer.observe(section));
+
+    return () => observer.disconnect();
+  }, []);
+}
+
 export default function HomePage() {
   const packages = listPackages().slice(0, 8);
+  useSectionEnterObserver();
 
   return (
     <main className="site-shell">
@@ -129,11 +160,7 @@ export default function HomePage() {
           <p className="hero-disclaimer">
             v0.0.1 is not production ready. Use Explore and Practice modes first; Live mode remains your own risk.
           </p>
-          <div className="hero-feature-grid">
-            {welcomeFeatures.map((item) => (
-              <div key={item}>{item}</div>
-            ))}
-          </div>
+          {/* Reordered: hero-actions before feature-grid for early mobile CTA visibility (compact first viewport on 390x844) */}
           <div className="hero-actions">
             <Link
               className="button primary"
@@ -161,6 +188,11 @@ export default function HomePage() {
             <Link className="button secondary" href="/docs">
               Read the docs <ArrowRight aria-hidden="true" size={17} />
             </Link>
+          </div>
+          <div className="hero-feature-grid">
+            {welcomeFeatures.map((item) => (
+              <div key={item}>{item}</div>
+            ))}
           </div>
         </div>
 
@@ -200,10 +232,10 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Product story band — self-hosted / safety / agent-ready (Graphite Continuity A1) */}
+      {/* Self-hosted trading workspace band — polished user-facing heading (Graphite Continuity A1) */}
       <section className="section section-enter">
         <div className="section-heading">
-          <h2>Product story</h2>
+          <h2>Self-hosted trading workspace</h2>
           <p>
             A self-hosted workflow workspace. React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace. Safety before automation with Explore, Practice, and Live modes.
           </p>
@@ -222,7 +254,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Evaluate → install band — honest desktop/web, release truth (Graphite Continuity A1) */}
+      {/* Evaluate and install band — honest desktop/web, release truth (Graphite Continuity A1) */}
       <section className="section section-enter">
         <div className="section-heading">
           <h2>Evaluate and install</h2>
@@ -259,34 +291,40 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Developer depth band — docs, MCP, package map demoted (Graphite Continuity A1) */}
+      {/* Contributor resources band — demoted with progressive disclosure (Graphite Continuity A1) */}
       <section className="section section-enter">
         <div className="section-heading">
-          <h2>Developer depth</h2>
+          <h2>Contributor resources</h2>
           <p>
-            Docs, MCP, package map at contributor speed. Start with product usage, move into architecture and endpoint contracts, then use the MCP
-            tools to orient local development work. The site exposes docs search, package maps, path explanations, test recommendations, and
-            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
-            stay outside this MCP surface.
+            Polished docs, read-only MCP tools, and package maps for contributors. Start with product usage, then explore architecture at your own pace. Broker credentials, account state, funds, order IDs, and order placement stay outside this surface.
           </p>
-        </div>
-        <div className="mcp-steps">
-          {docsCards.map((item) => (
-            <Link className="mcp-step" href={item.href} key={item.href}>
-              <h3>{item.label}</h3>
-              <p>{item.copy}</p>
+          <div className="section-actions">
+            <Link className="button secondary" href="/docs">
+              Browse docs <ArrowRight aria-hidden="true" size={17} />
             </Link>
-          ))}
+            <Link className="button secondary" href="/mcp">
+              MCP setup <ArrowRight aria-hidden="true" size={17} />
+            </Link>
+          </div>
         </div>
-      </section>
 
-      <section className="section two-column section-enter">
-        <div className="code-panel">
-          <header>
-            <span>Contributor MCP</span>
-            <span>read-only</span>
-          </header>
-          <pre>{`{
+        {/* Progressive disclosure for MCP and package map to keep homepage calm and demoted */}
+        <details className="progressive-disclosure">
+          <summary>MCP tools for contributors (read-only)</summary>
+          <div className="mcp-steps">
+            {docsCards.map((item) => (
+              <Link className="mcp-step" href={item.href} key={item.href}>
+                <h3>{item.label}</h3>
+                <p>{item.copy}</p>
+              </Link>
+            ))}
+          </div>
+          <div className="code-panel">
+            <header>
+              <span>Contributor MCP</span>
+              <span>read-only</span>
+            </header>
+            <pre>{`{
   "mcpServers": {
     "flinttrade-docs": {
       "url": "https://<your-site>/api/mcp"
@@ -298,36 +336,24 @@ export default function HomePage() {
     }
   }
 }`}</pre>
-        </div>
-        <div className="section-heading">
-          <h2>MCP for development, not trading.</h2>
-          <p>
-            The site exposes docs search, package maps, path explanations, test recommendations, and
-            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
-            stay outside this MCP surface.
-          </p>
-          <Link className="button secondary" href="/mcp">
-            MCP setup <ArrowRight aria-hidden="true" size={17} />
-          </Link>
-        </div>
-      </section>
+          </div>
+        </details>
 
-      <section className="section section-enter">
-        <div className="section-heading">
-          <h2>Package map at contributor speed.</h2>
+        <details className="progressive-disclosure">
+          <summary>Package map at contributor speed</summary>
           <p>
             Each package README becomes a docs page and MCP resource, so agent-assisted development starts
-            from the same public source a human contributor reads. Docs, MCP, package map.
+            from the same public source a human contributor reads.
           </p>
-        </div>
-        <div className="package-list">
-          {packages.map((pkg) => (
-            <Link className="package-row" href={pkg.url} key={pkg.name}>
-              <strong>{pkg.name}</strong>
-              <span>{pkg.description}</span>
-            </Link>
-          ))}
-        </div>
+          <div className="package-list">
+            {packages.map((pkg) => (
+              <Link className="package-row" href={pkg.url} key={pkg.name}>
+                <strong>{pkg.name}</strong>
+                <span>{pkg.description}</span>
+              </Link>
+            ))}
+          </div>
+        </details>
       </section>
 
       <SiteFooter />

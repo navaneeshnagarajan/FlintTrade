@@ -3,7 +3,9 @@
  * reduced-motion, and motion guard tests.
  * Source-based guards (no React render) to enforce the four-band visual IA,
  * exactly one global primary CTA, truthful copy floor from base 1b49ed1c,
- * and static reduced-motion path. TDD guard added before visual implementation.
+ * action-before-feature order, mobile early CTA, next.config turbopack,
+ * developer progressive disclosure, and static reduced-motion path.
+ * TDD guard added before visual implementation.
  */
 
 import { readFileSync } from 'node:fs';
@@ -13,21 +15,22 @@ import { describe, expect, it } from 'vitest';
 
 const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
 const cssSource = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
+const nextConfigSource = readFileSync(resolve(process.cwd(), 'next.config.mjs'), 'utf8');
 
 describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
-  it('structures homepage into exactly four calm product bands after the cinematic hero', () => {
+  it('structures homepage into exactly four calm product bands after the cinematic hero with polished user-facing headings', () => {
     // Band 1: Hero / brand (existing section.hero)
     expect(pageSource).toContain('section className="section hero"');
-    // Band 2: Product story — self-hosted / safety / local-first
-    expect(pageSource).toContain('Product story');
+    // Band 2: Self-hosted trading workspace (polished from internal "Product story")
+    expect(pageSource).toContain('Self-hosted trading workspace');
     expect(pageSource).toContain('self-hosted');
     expect(pageSource).toContain('safety modes');
-    // Band 3: Evaluate → install (honest desktop/web path)
+    // Band 3: Evaluate and install (honest desktop/web path)
     expect(pageSource).toContain('Evaluate and install');
     expect(pageSource).toContain('install');
-    // Band 4: Developer / contributor depth (docs, MCP, package map)
-    expect(pageSource).toContain('Developer depth');
-    expect(pageSource).toContain('Docs, MCP, package map');
+    // Band 4: Contributor resources (polished from internal "Developer depth", demoted with progressive disclosure)
+    expect(pageSource).toContain('Contributor resources');
+    expect(pageSource).toContain('progressive disclosure');
     // Count top-level section className="section" markers (hero + product + evaluate + developer + others)
     const sectionMatches = pageSource.match(/<section className="section/g) || [];
     expect(sectionMatches.length).toBeGreaterThanOrEqual(4);
@@ -70,5 +73,25 @@ describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
     expect(pageSource).toContain('/demo-app/welcome');
     expect(pageSource).toContain('target="_blank"');
     // turbopack.root / portable root is in next.config.mjs (read separately); not asserted in page.tsx
+  });
+
+  it('reads turbopack.root from next.config.mjs (portable root, not in page.tsx)', () => {
+    expect(nextConfigSource).toContain("turbopack: {");
+    expect(nextConfigSource).toContain("root: repoRoot");
+  });
+
+  it('places primary hero-actions before feature-grid for early mobile CTA visibility', () => {
+    const actionsIdx = pageSource.indexOf('className="hero-actions"');
+    const gridIdx = pageSource.indexOf('className="hero-feature-grid"');
+    expect(actionsIdx).toBeGreaterThan(-1);
+    expect(gridIdx).toBeGreaterThan(-1);
+    // actions before grid in source for action-before-feature order (compact mobile)
+    expect(actionsIdx).toBeLessThan(gridIdx);
+  });
+
+  it('uses progressive disclosure for demoted contributor/MCP/package depth', () => {
+    expect(pageSource).toContain('progressive disclosure');
+    // details/summary or collapsed marker for MCP and package map
+    expect(pageSource).toMatch(/<details|<summary|progressive disclosure/);
   });
 });
