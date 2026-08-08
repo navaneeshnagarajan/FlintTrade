@@ -80,6 +80,7 @@ const desktopInstallOptions = [
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
 const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
+// Graphite Continuity A1: section enter uses CSS + IntersectionObserver (observer added in A2 if needed; current is CSS only with reduced-motion guard)
 export default function HomePage() {
   const packages = listPackages().slice(0, 8);
 
@@ -199,9 +200,32 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      {/* Product story band — self-hosted / safety / agent-ready (Graphite Continuity A1) */}
+      <section className="section section-enter">
         <div className="section-heading">
-          <h2>Electron shell delivery.</h2>
+          <h2>Product story</h2>
+          <p>
+            A self-hosted workflow workspace. React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace. Safety before automation with Explore, Practice, and Live modes.
+          </p>
+        </div>
+        <div className="feature-grid">
+          {featureCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article className="feature-card" key={card.title}>
+                <Icon aria-hidden="true" />
+                <h3>{card.title}</h3>
+                <p>{card.copy}</p>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Evaluate → install band — honest desktop/web, release truth (Graphite Continuity A1) */}
+      <section className="section section-enter">
+        <div className="section-heading">
+          <h2>Evaluate and install</h2>
           <p>
             Desktop releases use a small Electron shell that verifies pinned tools and builds
             hash-verified, integrity-locked local source on first launch. The download page exposes
@@ -235,34 +259,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      {/* Developer depth band — docs, MCP, package map demoted (Graphite Continuity A1) */}
+      <section className="section section-enter">
         <div className="section-heading">
-          <h2>Built for people who read the source.</h2>
+          <h2>Developer depth</h2>
           <p>
-            The public site stays close to the repository. Root docs, package READMEs, screenshots, and
-            contribution commands are generated into the site rather than rewritten in a second place.
-          </p>
-        </div>
-        <div className="feature-grid">
-          {featureCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <article className="feature-card" key={card.title}>
-                <Icon aria-hidden="true" />
-                <h3>{card.title}</h3>
-                <p>{card.copy}</p>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="section two-column">
-        <div className="section-heading">
-          <h2>Docs, API, and contribution paths in one flow.</h2>
-          <p>
-            Start with product usage, move into architecture and endpoint contracts, then use the MCP
-            tools to orient local development work.
+            Docs, MCP, package map at contributor speed. Start with product usage, move into architecture and endpoint contracts, then use the MCP
+            tools to orient local development work. The site exposes docs search, package maps, path explanations, test recommendations, and
+            contribution prompts. Broker credentials, account state, funds, order IDs, and order placement
+            stay outside this MCP surface.
           </p>
         </div>
         <div className="mcp-steps">
@@ -275,7 +280,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section two-column">
+      <section className="section two-column section-enter">
         <div className="code-panel">
           <header>
             <span>Contributor MCP</span>
@@ -307,12 +312,12 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section">
+      <section className="section section-enter">
         <div className="section-heading">
           <h2>Package map at contributor speed.</h2>
           <p>
             Each package README becomes a docs page and MCP resource, so agent-assisted development starts
-            from the same public source a human contributor reads.
+            from the same public source a human contributor reads. Docs, MCP, package map.
           </p>
         </div>
         <div className="package-list">

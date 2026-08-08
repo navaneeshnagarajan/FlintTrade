@@ -1139,6 +1139,53 @@ kbd {
   .hero-actions {
     opacity: 1;
   }
+
+  /* A1 Graphite Continuity: new section-enter and float rules are static under reduced-motion */
+  .section-enter,
+  .screen-frame.float {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Graphite Continuity A1: quiet below-fold glow, screenshot micro-float, section enter choreography */
+/* All motion covered by prefers-reduced-motion above; no continuous animation below hero */
+.section-enter {
+  opacity: 0;
+  transform: translateY(12px);
+  animation: sectionEnter 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)) forwards;
+}
+
+@keyframes sectionEnter {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Optional screenshot side/float gentle drift — amplitude ≤6px, period ≥8s; not LCP */
+.screen-frame.float {
+  animation: screenshotFloat 8s ease-in-out infinite;
+}
+
+@keyframes screenshotFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* Quiet below-fold: reduce competing glow/shimmer on package and mcp surfaces */
+.package-row,
+.mcp-step,
+.install-card {
+  box-shadow: none;
+  transition: border-color 120ms ease;
+}
+
+.package-row:hover,
+.mcp-step:hover {
+  border-color: var(--site-accent-2);
 }
 
 @media (max-width: 900px) {
