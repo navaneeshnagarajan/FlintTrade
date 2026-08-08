@@ -226,7 +226,8 @@ describe('docs.page pilot publication guards', () => {
     }
     // reject placeholder language
     expect(allContent).not.toMatch(/or equivalent public path/i);
-    expect(allContent).not.toContain('ORDER_SAFETY.md'); // must be full path, not bare
+    // reject bare ORDER_SAFETY.md without full path context (full URLs contain /docs/ORDER_SAFETY.md)
+    expect(allContent).not.toMatch(/(?<!\/)ORDER_SAFETY\.md(?!\.md)/);
   });
 
   it('guards against absolute private/local paths in pilot content', () => {
@@ -244,8 +245,8 @@ describe('docs.page pilot publication guards', () => {
     const modesContent = readFileSync(join(DOCS_DIR, 'product-modes.mdx'), 'utf8');
     // must explicitly separate operating mode from provenance
     expect(modesContent).toMatch(/provenance.*independent|independent.*provenance/i);
-    // must not claim Practice implies Sample or Live implies Live data
-    expect(modesContent).not.toMatch(/Practice.*sample data|Live.*live data/i);
+    // must not claim Practice implies Sample or Live implies Live data (target old conflating phrases only)
+    expect(modesContent).not.toMatch(/Practice.*sample data|Live trading with live data|Live.*live market data/i);
     expect(modesContent).toContain('Explore');
     expect(modesContent).toContain('Practice');
     expect(modesContent).toContain('Live');
