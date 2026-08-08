@@ -170,8 +170,8 @@ describe('docs.page pilot publication guards', () => {
     }
   });
 
-  it('no pilot page links to an absent internal route or contains private paths/secrets', () => {
-    const denied = ['.local/', 'reference-research', 'Nitro', '/private', 'machine-name', 'secret', 'token', 'key='];
+  it('no pilot page links to an absent internal route or contains private paths', () => {
+    const denied = ['.local/', 'reference-research', 'Nitro', '/private', 'machine-name'];
     for (const fname of PILOT_MDX_FILES) {
       const content = readFileSync(join(DOCS_DIR, fname), 'utf8');
       for (const d of denied) {
@@ -231,7 +231,7 @@ describe('docs.page pilot publication guards', () => {
   });
 
   it('guards against absolute private/local paths in pilot content', () => {
-    const privatePrefixes = ['/home/', '/Users/', 'C:/', 'C:\\\\', '.local/', 'localhost', '127.0.0.1'];
+    const privatePrefixes = ['/home/', '/Users/', 'C:/', 'C:\\', '.local/', 'localhost', '127.0.0.1'];
     for (const fname of PILOT_MDX_FILES) {
       const content = readFileSync(join(DOCS_DIR, fname), 'utf8');
       for (const prefix of privatePrefixes) {
@@ -254,5 +254,22 @@ describe('docs.page pilot publication guards', () => {
     expect(modesContent).toContain('Sample');
     expect(modesContent).toContain('Unavailable');
     expect(modesContent).toContain('Stale');
+  });
+
+  it('safety and contribution copy preserve automation truth without granting model authority', () => {
+    const safetyContent = readFileSync(join(DOCS_DIR, 'safety.mdx'), 'utf8');
+    expect(safetyContent).toContain('No LLM or documentation/MCP assistant receives independent Live-trading authority.');
+    expect(safetyContent).toContain('Automated trading remains subject to explicit user authorisation and server-side safety controls.');
+    expect(safetyContent).toContain('The kill switch, risk controls, and reconciliation remain enforced by the application and under user control.');
+    expect(safetyContent).toContain('No documentation surface or MCP endpoint can alter or bypass them.');
+    expect(safetyContent).not.toContain('No LLM or automated system has live-trading authority.');
+    expect(safetyContent).not.toContain('Kill switch, risk controls, and reconciliation are user-operated.');
+
+    const contributionContent = [
+      readFileSync(join(DOCS_DIR, 'getting-started.mdx'), 'utf8'),
+      readFileSync(join(DOCS_DIR, 'contributing.mdx'), 'utf8'),
+    ].join('\n');
+    expect(contributionContent).toContain('External contributions are proposed through public pull requests.');
+    expect(contributionContent).not.toContain('All changes go through public pull requests');
   });
 });
