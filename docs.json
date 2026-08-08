@@ -3,8 +3,8 @@
   "name": "FlintTrade",
   "description": "Beta public documentation for FlintTrade. Beta software; no financial advice; no promise of production readiness. The existing Next.js site remains the primary product, marketing, and install surface.",
   "logo": {
-    "light": "/docs/assets/logo.svg",
-    "dark": "/docs/assets/logo.svg"
+    "light": "/assets/logo.svg",
+    "dark": "/assets/logo.svg"
   },
   "seo": { "noindex": true },
   "mcp": { "enabled": true },
