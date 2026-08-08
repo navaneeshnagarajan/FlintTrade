@@ -33,6 +33,14 @@ Simplify what is already built before adding surfaces. Keep the following bounda
 - **Canonical modes and provenance:** user-facing vocabulary is Explore / Practice / Live (sandbox stays an internal engine name). Every widget that can fall back to sample or delayed data must show honest provenance; silent fakes are defects.
 - **Freeze on novelty:** no new user-facing features until the built UX is simplified under the boundaries above (one broker-connect surface remaining is part of that simplification, not a licence to expand scope).
 
+Current isolated review stack (not yet `main` or production): Slices 1–3 have landed the canonical vocabulary, the Home/Trade ownership split, and the 71-widget taxonomy/provenance contract. This does **not** authorise a blind 71→N reduction; later duplicate removal remains evidence-based and saved-layout compatible.
+
+The next reversible sequence is:
+
+1. a branch-only, `noindex` docs.page pilot containing a small sanitised `docs/**/*.mdx` set (the current hosted service discovers MDX, while FlintTrade's canonical corpus remains Markdown — the pilot must not claim a completed migration);
+2. public-plane-only Hostinger staging prerequisites/configuration, with no production domain, DNS, account/payment, secret, broker or trading mutation;
+3. only then, the site-only **Spark Path** Three.js cinematic pilot under a default-off flag, with Graphite Continuity as the complete fallback, one primary CTA, no terminal/demo WebGL, reduced-motion/no-WebGL/mobile fallbacks, and hard payload/runtime gates.
+
 ## Phase tracker
 
 | Phase | Scope | Status |
@@ -71,7 +79,7 @@ Done highlights:
 - A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: the consolidation backlog (one broker-connect surface, the remaining duplicate implementations), the final two widget merges, and the Linux-only desktop CI failures.
+Remaining: the consolidation backlog (one broker-connect surface and only evidence-backed duplicate implementations), the docs.page/Hostinger/public-site pilot sequence above, and the Linux-only desktop CI failures. The exact widget catalogue stays pinned at 71 unless a separately reviewed compatibility-safe merge proves a real duplicate.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 
