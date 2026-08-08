@@ -6,8 +6,8 @@ const SRC = join(process.cwd(), "src");
 describe("ProvenanceBadge (Slice 3 canonical atom) - RED contract", () => {
   it("ProvenanceBadge.tsx will exist in components/data with exact four-state ProvenanceKind", () => {
     const badgePath = join(SRC, "components", "data", "ProvenanceBadge.tsx");
-    // RED: file does not exist yet on base
-    expect(existsSync(badgePath)).toBe(false);
+    // RED: file does not exist yet on base — this assert proves the missing canonical atom
+    expect(existsSync(badgePath)).toBe(true);
   });
 
   it("four-state ProvenanceKind union is the contract", () => {
