@@ -37,19 +37,14 @@ describe("slice3 provenance source guard (production .tsx only)", () => {
 
   it("Market Overview shared.tsx no longer uses role=\"status\" on static provenance chips", () => {
     const moPath = join(SRC, "widgets", "analysis", "MarketOverview", "shared.tsx");
-    if (existsSync(moPath)) {
-      const src = stripComments(readFileSync(moPath, "utf8"));
-      expect(src).not.toMatch(/role=["']status["']/);
-    } else {
-      expect(true).toBe(true); // file may move in GREEN
-    }
+    const src = stripComments(readFileSync(moPath, "utf8"));
+    expect(src).not.toMatch(/role=["']status["']/);
   });
 
   it("DemoBadge shim preserves internal default home-demo-badge for callers without testId", () => {
     const demoPath = join(SRC, "routes", "home", "DemoBadge.tsx");
-    if (existsSync(demoPath)) {
-      const src = readFileSync(demoPath, "utf8");
-      expect(src).toMatch(/testId = "home-demo-badge"/);
-    }
+    const src = readFileSync(demoPath, "utf8");
+    expect(src).toMatch(/Preserves the internal default testId="home-demo-badge"/);
+    expect(src).toMatch(/effectiveTestId = props.testId \?\? "home-demo-badge"/);
   });
 });

@@ -1,44 +1,23 @@
 /**
  * Shared provenance chrome for the Market Overview widget.
  *
- * Every section that can be either live or sample renders a {@link ProvChip}
+ * Every section that can be either live or sample renders a {@link ProvenanceBadge}
  * driven by a fail-closed check on its own source; sections with no live path
- * at all render {@link SampleBadge} unconditionally. The "one badge that
+ * at all render {@link ProvenanceBadge} unconditionally. The "one badge that
  * lies trains the operator to ignore the one that matters" rule from the
  * source widgets is preserved verbatim.
  */
 
-import { cn } from "@/lib/utils";
+import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
 
-/** Per-section Live/Sample chip (from the retired MarketSummary widget). */
+/** Per-section Live/Sample chip migrated to canonical four-state atom (Slice 3). */
 export function ProvChip({ live }: { live: boolean }) {
-  return (
-    <span
-      role="status"
-      className={cn(
-        "ml-1.5 px-1 py-0.5 text-xxs rounded border align-middle",
-        live
-          ? "text-profit bg-profit/10 border-profit/30"
-          : "text-warning bg-warning/10 border-warning/30",
-      )}
-    >
-      {live ? "Live" : "Sample"}
-    </span>
-  );
+  return <ProvenanceBadge label={live ? "Live" : "Sample"} placement="inline" />;
 }
 
-/** Unconditional sample affordance for surfaces with no live path. */
+/** Unconditional sample affordance migrated to canonical atom (Slice 3). */
 export function SampleBadge({ title }: { title: string }) {
-  return (
-    <span
-      className="px-1.5 py-0.5 text-xxs bg-warning/10 text-warning border border-warning/30 rounded"
-      role="status"
-      aria-label={title}
-      title={title}
-    >
-      Sample data
-    </span>
-  );
+  return <ProvenanceBadge label="Sample" placement="inline" title={title} />;
 }
 
 /** Uppercase section heading used across the tabs. */

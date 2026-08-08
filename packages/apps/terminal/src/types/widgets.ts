@@ -1,9 +1,19 @@
+export type WidgetSurface = "home" | "trade" | "shared";
+export type WidgetAvailability = "sample-only" | "live-only" | "live-or-sample";
+export type ProvenanceKind = "Sample" | "Unavailable" | "Live" | "Stale";
+
 export interface WidgetMeta {
   id: string;
   name: string;
   icon: string;
   category: "Trading" | "Analysis" | "Utility";
   description?: string;
+  /** Slice 3 — mounting ownership */
+  surface: WidgetSurface;
+  /** Slice 3 — static data contract */
+  availability: WidgetAvailability;
+  /** Optional: paired Home card componentId when surface === "shared" */
+  homePairId?: string;
 }
 
 /**
