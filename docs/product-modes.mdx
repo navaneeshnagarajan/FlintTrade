@@ -5,20 +5,20 @@ description: Separate Explore/Practice/Live operating modes from Sample/Unavaila
 
 # Product Modes
 
-FlintTrade distinguishes operating modes from data provenance.
+FlintTrade distinguishes operating modes from data provenance. Provenance is independent of operating mode.
 
 ## Operating Modes
 
-- **Explore**: Read-only discovery and visualisation.
-- **Practice**: Simulated trading with sample data; no real orders or capital at risk.
-- **Live**: Real trading with live market data and user-controlled authority.
+- **Explore**: read-only/discovery operating mode; no order authority.
+- **Practice**: simulated execution; no real broker order or capital movement.
+- **Live**: real broker order authority only after explicit user unlock and server-side safety gates.
 
 ## Provenance Labels
 
 - **Sample**: Synthetic or historical sample data for illustration.
 - **Unavailable**: Data source temporarily unavailable.
 - **Live**: Real-time live data.
-- **Stale**: Data that has not been refreshed within expected freshness window.
+- **Stale**: Data that has not been refreshed within expected freshness window. Stale requires a real freshness clock; this page describes the label, not a fake clock.
 
 ## Surface Ownership
 
@@ -28,3 +28,5 @@ FlintTrade distinguishes operating modes from data provenance.
 **71 widgets** in the current catalogue (historical context of 102→69 consolidation preserved in the repository).
 
 Beta software. No financial advice. No promise of production readiness.
+
+Practice does not imply Sample data. Live mode does not guarantee Live provenance. Provenance remains independent of Explore/Practice/Live.

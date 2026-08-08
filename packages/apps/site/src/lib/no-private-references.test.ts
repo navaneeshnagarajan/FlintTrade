@@ -10,7 +10,7 @@
  *   2. The repo files readme.md, AGENTS.md, changelog.md, disclaimer.md,
  *      PLAN.md (the curated public roadmap since 2026-07-28; the detailed
  *      working plan moved to the maintainer's private workspace) and every
- *      docs/xx*.md on disk.
+ *      docs/*.md and docs/*.mdx on disk.
  *
  * docs/superpowers/plans/ was removed from the repo on 2026-07-28 (archived
  * privately per the plan's own Step B); the directory is skipped in case a
