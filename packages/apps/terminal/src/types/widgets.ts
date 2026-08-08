@@ -1,6 +1,5 @@
 export type WidgetSurface = "home" | "trade" | "shared";
 export type WidgetAvailability = "sample-only" | "live-only" | "live-or-sample";
-export type ProvenanceKind = "Sample" | "Unavailable" | "Live" | "Stale";
 
 export interface WidgetMeta {
   id: string;

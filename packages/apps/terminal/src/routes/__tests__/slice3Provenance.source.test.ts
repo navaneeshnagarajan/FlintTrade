@@ -40,6 +40,21 @@ describe("slice3 provenance source guard (production .tsx only)", () => {
     expect(content).not.toMatch(/export function DemoBadge/);
   });
 
+  it("exactly one export type ProvenanceKind in production src at components/data/ProvenanceBadge.tsx", () => {
+    // Canonical ownership is the shared atom; a second unused union (e.g. types/widgets)
+    // can drift and defeats the single provenance contract.
+    const defs: string[] = [];
+    const re = /export\s+type\s+ProvenanceKind\b/;
+    for (const f of walkProductionTs(SRC)) {
+      const src = stripComments(readFileSync(f, "utf8"));
+      if (re.test(src)) {
+        defs.push(relative(SRC, f).replace(/\\/g, "/"));
+      }
+    }
+    defs.sort();
+    expect(defs).toEqual(["components/data/ProvenanceBadge.tsx"]);
+  });
+
   it("no user-visible canonical Demo / Demo data badge copy under routes/home production", () => {
     const homeDir = join(SRC, "routes", "home");
     const offenders: string[] = [];
