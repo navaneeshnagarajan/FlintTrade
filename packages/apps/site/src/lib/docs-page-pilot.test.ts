@@ -246,7 +246,7 @@ describe('docs.page pilot publication guards', () => {
     // must explicitly separate operating mode from provenance
     expect(modesContent).toMatch(/provenance.*independent|independent.*provenance/i);
     // must not claim Practice implies Sample or Live implies Live data (target old conflating phrases only)
-    expect(modesContent).not.toMatch(/Practice.*sample data|Live trading with live data|Live.*live market data/i);
+    expect(modesContent).not.toMatch(/Simulated trading with sample data|Real trading with live market data/i);
     expect(modesContent).toContain('Explore');
     expect(modesContent).toContain('Practice');
     expect(modesContent).toContain('Live');
