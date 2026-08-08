@@ -89,7 +89,7 @@ function listMarkdownFiles(dir: string): string[] {
     if (entry.isDirectory()) {
       if (SKIPPED_DOC_DIRS.some((skipped) => repoRelative === skipped)) continue;
       results.push(...listMarkdownFiles(fullPath));
-    } else if (entry.name.endsWith('.md')) {
+    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) {
       results.push(fullPath);
     }
   }

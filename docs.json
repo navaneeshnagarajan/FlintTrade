@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.page/schema.json",
+  "name": "FlintTrade",
+  "description": "Beta public documentation for FlintTrade. Beta software; no financial advice; no promise of production readiness. The existing Next.js site remains the primary product, marketing, and install surface.",
+  "logo": {
+    "light": "/docs/assets/logo.svg",
+    "dark": "/docs/assets/logo.svg"
+  },
+  "seo": {
+    "noindex": true
+  },
+  "mcp": {
+    "enabled": true
+  },
+  "content": {
+    "automaticallyInferNextPrevious": true
+  },
+  "sidebar": [
+    { "href": "/", "label": "Home" },
+    { "href": "/getting-started", "label": "Getting Started" },
+    { "href": "/product-modes", "label": "Product Modes" },
+    { "href": "/safety", "label": "Safety" },
+    { "href": "/contributing", "label": "Contributing" }
+  ],
+  "theme": {
+    "primary": "#22C55E"
+  },
+  "github": "https://github.com/flinttrade/flinttrade"
+}
