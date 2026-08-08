@@ -95,8 +95,9 @@ export const HOME_WIDGET_CATALOG: HomeWidgetDefinition[] = [
     name: "Watchlist",
     description: "Tracked indices and instruments for quick scanning.",
     icon: Activity,
-    surface: "home",
+    surface: "shared",
     availability: "live-or-sample",
+    tradePairId: "watchlist",
     domain: "market",
   },
   {
@@ -104,8 +105,9 @@ export const HOME_WIDGET_CATALOG: HomeWidgetDefinition[] = [
     name: "Top Stories",
     description: "Market headlines and source timestamps.",
     icon: Newspaper,
-    surface: "home",
+    surface: "shared",
     availability: "sample-only",
+    tradePairId: "news",
     domain: "market",
   },
   {
@@ -113,8 +115,9 @@ export const HOME_WIDGET_CATALOG: HomeWidgetDefinition[] = [
     name: "Market Breadth",
     description: "Advance, decline, and unchanged market participation.",
     icon: Radar,
-    surface: "home",
+    surface: "shared",
     availability: "live-or-sample",
+    tradePairId: "marketoverview",
     domain: "market",
   },
   {

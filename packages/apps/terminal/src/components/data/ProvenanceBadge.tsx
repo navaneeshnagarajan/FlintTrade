@@ -53,8 +53,3 @@ export function ProvenanceBadge({
     </span>
   );
 }
-
-/** Internal alias — prefer {@link ProvenanceBadge} for new call sites. */
-export function DemoBadge(props: ProvenanceBadgeProps) {
-  return <ProvenanceBadge {...props} />;
-}
