@@ -1150,12 +1150,22 @@ kbd {
   }
 }
 
-/* Graphite Continuity A1: quiet below-fold glow, screenshot micro-float, section enter choreography */
-/* All motion covered by prefers-reduced-motion above; no continuous animation below hero */
+/* Graphite Continuity A1: fail-open observed reveal — baseline visible (no-JS/SSR/reduced-motion), motion gated by controller-added class */
 .section-enter {
+  opacity: 1;
+  transform: none;
+}
+
+/* Motion only enabled when the tiny client controller mounts and adds the class */
+.js-motion-enabled .section-enter {
   opacity: 0;
   transform: translateY(12px);
-  animation: sectionEnter 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)) forwards;
+  transition: opacity 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1)), transform 0.35s var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.js-motion-enabled .section-enter.visible {
+  opacity: 1;
+  transform: none;
 }
 
 @keyframes sectionEnter {
@@ -1283,5 +1293,17 @@ kbd {
 
   .screen-frame.float {
     width: 54%;
+  }
+
+  /* Graphite Continuity A1 mobile: essential hero content immediately useful (no opacity:0 or cinematic delay on small viewports) */
+  .hero-copy h1,
+  .hero-title-char,
+  .hero-slogan span,
+  .hero-copy > p,
+  .hero-actions,
+  .hero-disclaimer {
+    opacity: 1 !important;
+    animation: none !important;
+    transition: none !important;
   }
 }
