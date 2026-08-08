@@ -38,8 +38,9 @@ Current isolated review stack (not yet `main` or production): Slices 1–3 have 
 The next reversible sequence is:
 
 1. a branch-only, `noindex` docs.page pilot containing a small sanitised `docs/**/*.mdx` set (the current hosted service discovers MDX, while FlintTrade's canonical corpus remains Markdown — the pilot must not claim a completed migration);
-2. public-plane-only Hostinger staging prerequisites/configuration, with no production domain, DNS, account/payment, secret, broker or trading mutation;
-3. only then, the site-only **Spark Path** Three.js cinematic pilot under a default-off flag, with Graphite Continuity as the complete fallback, one primary CTA, no terminal/demo WebGL, reduced-motion/no-WebGL/mobile fallbacks, and hard payload/runtime gates.
+2. a site-documentation-only MCP compatibility pilot on the final 2026-07-28 protocol, using the exact SDK-v2 dual-era 2026+2025 path. It remains read-only, stateless and cache-conservative; adds no Apps, Tasks, Sampling, Roots, Logging, auth or trading tools; and must never expose the trading-sensitive internal AI `MCPBridge`;
+3. public-plane-only Hostinger staging prerequisites/configuration, with no production domain, DNS, account/payment, secret, broker or trading mutation;
+4. only then, the site-only **Spark Path** Three.js cinematic pilot under a default-off flag, with Graphite Continuity as the complete fallback, one primary CTA, no terminal/demo WebGL, reduced-motion/no-WebGL/mobile fallbacks, and hard payload/runtime gates.
 
 ## Phase tracker
 
@@ -79,7 +80,7 @@ Done highlights:
 - A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: the consolidation backlog (one broker-connect surface and only evidence-backed duplicate implementations), the docs.page/Hostinger/public-site pilot sequence above, and the Linux-only desktop CI failures. The exact widget catalogue stays pinned at 71 unless a separately reviewed compatibility-safe merge proves a real duplicate.
+Remaining: the consolidation backlog (one broker-connect surface and only evidence-backed duplicate implementations), the docs.page/MCP/Hostinger/public-site pilot sequence above, and the Linux-only desktop CI failures. The exact widget catalogue stays pinned at 71 unless a separately reviewed compatibility-safe merge proves a real duplicate.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 
