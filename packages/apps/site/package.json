@@ -33,6 +33,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/mdx": "^2.0.14",
     "@types/node": "^25.0.0",
