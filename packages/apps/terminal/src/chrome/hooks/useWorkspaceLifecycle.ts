@@ -24,7 +24,7 @@
 import { useCallback } from "react";
 import { z } from "zod";
 import type { WorkspacePreset } from "@/layout/workspacePresets";
-import { WorkspaceStorageError } from "@/stores/layoutStore";
+import { classifySerializedLayout, WorkspaceStorageError } from "@/stores/layoutStore";
 import type { WorkspaceCreationTransaction } from "@/stores/layoutStore";
 
 export { WorkspaceStorageError };
@@ -249,6 +249,18 @@ export function cloneFlexLayoutWithFreshIds(
   const cloned = cloneJsonValue(sourceLayout) as Record<string, unknown>;
   if (sourceLayout.layout !== undefined) cloned.layout = remintNode(sourceLayout.layout);
   if (Array.isArray(sourceLayout.borders)) cloned.borders = sourceLayout.borders.map(remintNode);
+  for (const key of ["subLayouts", "popouts"] as const) {
+    const sourceSubLayouts = sourceLayout[key];
+    if (!sourceSubLayouts || typeof sourceSubLayouts !== "object" || Array.isArray(sourceSubLayouts)) continue;
+    cloned[key] = Object.fromEntries(Object.entries(sourceSubLayouts).map(([id, subLayout]) => {
+      const clonedSubLayout = cloneJsonValue(subLayout) as Record<string, unknown>;
+      if (subLayout && typeof subLayout === "object" && !Array.isArray(subLayout)) {
+        const sourceSubLayout = subLayout as Record<string, unknown>;
+        if (sourceSubLayout.layout !== undefined) clonedSubLayout.layout = remintNode(sourceSubLayout.layout);
+      }
+      return [id, clonedSubLayout];
+    }));
+  }
   return cloned;
 }
 
@@ -367,6 +379,11 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
         // persisted, remove the tab again so the two stores cannot diverge.
         // FlexLayout IDs are authority for panel-scoped state; remint them so
         // source and clone cannot share chart settings, channels or caches.
+        if (sourceLayout !== undefined && classifySerializedLayout(sourceLayout) === "corrupt") {
+          throw new WorkspaceStorageError(
+            `Workspace "${sourceName}" layout is corrupted and has been quarantined.`,
+          );
+        }
         const clonedLayout = sourceLayout === undefined
           ? undefined
           : cloneFlexLayoutWithFreshIds(sourceLayout, newId);

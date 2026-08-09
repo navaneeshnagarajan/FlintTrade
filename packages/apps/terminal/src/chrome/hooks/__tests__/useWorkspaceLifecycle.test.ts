@@ -412,9 +412,30 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
             id: "source-chart",
             component: "chart",
             name: "Chart",
+            subLayoutId: "detail-layout",
             config: { symbol: "NIFTY", grid: false },
           }],
         }],
+      },
+      subLayouts: {
+        "detail-layout": {
+          type: "tab",
+          rect: { x: 10, y: 20, width: 640, height: 480 },
+          layout: {
+            type: "row",
+            id: "source-sub-row",
+            children: [{
+              type: "tabset",
+              id: "source-sub-tabset",
+              children: [{
+                type: "tab",
+                id: "source-sub-tab",
+                component: "orderbook",
+                name: "Order book",
+              }],
+            }],
+          },
+        },
       },
     };
 
@@ -465,6 +486,46 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
       },
     });
   });
+
+  it("rejects a corrupt duplicate-id source before reminting or adding a clone", () => {
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+    const initialCount = useLayoutStore.getState().tabs.length;
+    const corruptLayout = {
+      global: {},
+      borders: [],
+      layout: {
+        type: "row",
+        children: [
+          {
+            type: "tabset",
+            children: [{ type: "tab", id: "duplicate", component: "chart", name: "Chart" }],
+          },
+          {
+            type: "tabset",
+            children: [{ type: "tab", id: "duplicate", component: "orders", name: "Orders" }],
+          },
+        ],
+      },
+    };
+
+    let outcome: ReturnType<typeof result.current.cloneWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.cloneWorkspace(
+        "tab-1",
+        "Corrupt",
+        useLayoutStore.getState().addTab,
+        useLayoutStore.getState().removeTab,
+        corruptLayout,
+        useLayoutStore.getState().commitTabCreation,
+      );
+    });
+
+    expect(outcome).toMatchObject({ ok: false });
+    expect(outcome && !outcome.ok ? outcome.error : "").toMatch(/corrupt|quarantined/i);
+    expect(useLayoutStore.getState().tabs).toHaveLength(initialCount);
+    expect(Object.values(readWorkspaceStore())).toEqual([]);
+  });
+
   it("preserves sourcePresetId from the source workspace", () => {
     upsertWorkspaceMeta({
       id: "tab-src",

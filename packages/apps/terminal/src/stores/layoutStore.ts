@@ -67,19 +67,56 @@ function hasValidOptionalNodeId(node: Record<string, unknown>): boolean {
   return node.id === undefined || (typeof node.id === "string" && node.id.length > 0);
 }
 
+function hasOptionalFieldsOfType(
+  node: Record<string, unknown>,
+  fields: readonly string[],
+  expectedType: "string" | "number" | "boolean",
+): boolean {
+  return fields.every((field) => {
+    const value = node[field];
+    if (value === undefined) return true;
+    if (expectedType === "number") return typeof value === "number" && Number.isFinite(value);
+    return typeof value === expectedType;
+  });
+}
+
+const TAB_BOOLEAN_FIELDS = [
+  "enableClose", "enableDrag", "enablePopout", "enablePopoutFloatIcon",
+  "enablePopoutIcon", "enablePopoutOverlay", "enableRename", "enableRenderOnDemand",
+  "enableScrollbars", "enableWindowReMount", "pinned",
+] as const;
+const TAB_NUMBER_FIELDS = ["borderHeight", "borderWidth", "closeType", "maxHeight", "maxWidth", "minHeight", "minWidth"] as const;
+const TAB_STRING_FIELDS = ["altName", "className", "contentClassName", "helpText", "icon", "subLayoutId", "tabsetClassName"] as const;
+
+const TABSET_BOOLEAN_FIELDS = [
+  "active", "maximized", "autoSelectTab", "enableActiveIcon", "enableClose",
+  "enableCloseButton", "enableDeleteWhenEmpty", "enableDivide", "enableDrag",
+  "enableDrop", "enableMaximize", "enableSingleTabStretch", "enableTabScrollbar",
+  "enableTabStrip", "enableTabWrap",
+] as const;
+const TABSET_NUMBER_FIELDS = ["maxHeight", "maxWidth", "minHeight", "minWidth", "selected", "weight"] as const;
+const TABSET_STRING_FIELDS = ["classNameTabStrip", "name"] as const;
+
 function isFlexLayoutTab(node: unknown): boolean {
   return isRecord(node)
     && node.type === "tab"
     && hasValidOptionalNodeId(node)
     && typeof node.component === "string"
     && node.component.length > 0
-    && typeof node.name === "string";
+    && typeof node.name === "string"
+    && hasOptionalFieldsOfType(node, TAB_BOOLEAN_FIELDS, "boolean")
+    && hasOptionalFieldsOfType(node, TAB_NUMBER_FIELDS, "number")
+    && hasOptionalFieldsOfType(node, TAB_STRING_FIELDS, "string");
 }
 
 function isFlexLayoutTabset(node: unknown): boolean {
   return isRecord(node)
     && node.type === "tabset"
     && hasValidOptionalNodeId(node)
+    && hasOptionalFieldsOfType(node, TABSET_BOOLEAN_FIELDS, "boolean")
+    && hasOptionalFieldsOfType(node, TABSET_NUMBER_FIELDS, "number")
+    && hasOptionalFieldsOfType(node, TABSET_STRING_FIELDS, "string")
+    && (node.tabLocation === undefined || node.tabLocation === "top" || node.tabLocation === "bottom")
     && Array.isArray(node.children)
     && node.children.every(isFlexLayoutTab);
 }
@@ -88,6 +125,7 @@ function isFlexLayoutRow(node: unknown): boolean {
   return isRecord(node)
     && node.type === "row"
     && hasValidOptionalNodeId(node)
+    && hasOptionalFieldsOfType(node, ["weight"], "number")
     && Array.isArray(node.children)
     && node.children.every((child) => isFlexLayoutRow(child) || isFlexLayoutTabset(child));
 }
@@ -96,9 +134,30 @@ function isFlexLayoutBorder(node: unknown): boolean {
   return isRecord(node)
     && node.type === "border"
     && hasValidOptionalNodeId(node)
-    && typeof node.location === "string"
+    && ["top", "bottom", "left", "right"].includes(String(node.location))
+    && hasOptionalFieldsOfType(node, ["autoSelectTabWhenClosed", "autoSelectTabWhenOpen", "enableAutoHide", "enableDrop", "enableTabScrollbar", "show"], "boolean")
+    && hasOptionalFieldsOfType(node, ["maxSize", "minSize", "selected", "size"], "number")
+    && hasOptionalFieldsOfType(node, ["className"], "string")
+    && (node.borderType === undefined || node.borderType === "split" || node.borderType === "overlay")
     && Array.isArray(node.children)
     && node.children.every(isFlexLayoutTab);
+}
+
+function isFlexLayoutSubLayout(value: unknown): boolean {
+  if (!isRecord(value) || !isFlexLayoutRow(value.layout)) return false;
+  if (value.type !== undefined && !["window", "float", "tab"].includes(String(value.type))) return false;
+  if (value.rect !== undefined) {
+    const rect = value.rect;
+    if (!isRecord(rect)) return false;
+    if (!hasOptionalFieldsOfType(rect, ["x", "y", "width", "height"], "number")) return false;
+    if (!["x", "y", "width", "height"].every((field) => rect[field] !== undefined)) return false;
+  }
+  return true;
+}
+
+function hasValidSubLayouts(value: unknown): boolean {
+  return value === undefined
+    || (isRecord(value) && Object.values(value).every(isFlexLayoutSubLayout));
 }
 
 /**
@@ -110,6 +169,8 @@ function hasValidFlexLayoutSchema(layout: Record<string, unknown>): boolean {
   return (layout.global === undefined || isRecord(layout.global))
     && (layout.borders === undefined
       || (Array.isArray(layout.borders) && layout.borders.every(isFlexLayoutBorder)))
+    && hasValidSubLayouts(layout.subLayouts)
+    && hasValidSubLayouts(layout.popouts)
     && isFlexLayoutRow(layout.layout);
 }
 
