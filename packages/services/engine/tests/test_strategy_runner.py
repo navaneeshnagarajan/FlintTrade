@@ -51,6 +51,7 @@ def _functional_bwrap_executable() -> str | None:
             process_limit=1,
         )
         start_gate = _mod._create_strategy_start_gate(work)
+        readiness = _mod._create_bwrap_readiness_file(work)
         strategy = temp_dir / "strategy.py"
         strategy.write_text("pass\n", encoding="utf-8")
         _mod._release_strategy_start_gate(start_gate)
@@ -61,11 +62,13 @@ def _functional_bwrap_executable() -> str | None:
                     sys.executable,
                     str(wrapper),
                     str(start_gate),
+                    str(readiness),
                     str(strategy),
                 ),
                 check=False,
                 close_fds=True,
                 cwd="/",
+                env=_mod._build_bwrap_launcher_env(),
                 shell=False,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
@@ -522,6 +525,69 @@ class TestStartStop:
         return tree
 
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
+    def test_bwrap_launcher_environment_drops_native_loader_controls(self):
+        import flinttrade_engine.strategy_runner as mod
+
+        hostile = {
+            "LD_PRELOAD": "/tmp/hostile.so",
+            "LD_LIBRARY_PATH": "/tmp/hostile-libs",
+            "LD_AUDIT": "/tmp/hostile-audit.so",
+            "BWRAP_SETUID": "1",
+            "FLINTTRADE_PARENT_PID": "77",
+        }
+        with patch.dict(os.environ, hostile, clear=False):
+            launcher_env = mod._build_bwrap_launcher_env()
+
+        assert launcher_env["PATH"] == os.defpath
+        assert set(hostile).isdisjoint(launcher_env)
+
+    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
+    def test_bwrap_startup_requires_positive_ready_marker(self, tmp_path, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        ready_path = tmp_path / "_bwrap_ready"
+        ready_path.write_text("", encoding="utf-8")
+        process = self._make_mock_process(returncode=None)
+        process.poll.return_value = None
+        monkeypatch.setattr(mod, "_BWRAP_STARTUP_TIMEOUT_SECONDS", 0.01)
+
+        with pytest.raises(RuntimeError, match="readiness handshake timed out"):
+            mod._require_bwrap_startup(process, ready_path)
+
+        ready_path.write_text("ready\n", encoding="utf-8")
+        mod._require_bwrap_startup(process, ready_path)
+
+    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
+    def test_bwrap_readiness_timeout_terminates_and_reaps_without_releasing_gate(self, tmp_path, monkeypatch):
+        import flinttrade_engine.strategy_runner as mod
+
+        runner = mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
+        strategy_id = runner.upload("never_ready", SAFE_CODE)
+        process = self._make_mock_process(returncode=None)
+        process.poll.return_value = None
+        process.wait.side_effect = lambda timeout: -15 if timeout == 0 else (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd=["/usr/bin/bwrap"], timeout=timeout)
+        )
+        tree = MagicMock()
+        tree.is_alive.side_effect = [True, False]
+        tree.wait_gone.return_value = True
+        monkeypatch.setattr(mod, "_BWRAP_STARTUP_TIMEOUT_SECONDS", 0.01)
+
+        with (
+            patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
+            patch.object(mod, "_create_process_tree", return_value=tree),
+            patch.object(mod, "_release_strategy_start_gate") as release_gate,
+            patch("subprocess.Popen", return_value=process),
+            pytest.raises(RuntimeError, match="readiness handshake timed out"),
+        ):
+            runner.start(strategy_id)
+
+        release_gate.assert_not_called()
+        tree.terminate.assert_called_once_with()
+        tree.wait_gone.assert_called_once()
+        assert strategy_id not in runner._running
+
+    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
@@ -900,8 +966,9 @@ class TestStartStop:
         command = popen.call_args.args[0]
         assert command[0] == sys.executable
         assert Path(command[1]).name == "_sandbox_wrapper.py"
-        assert Path(command[2]).name == "_start_gate"
-        assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
+        assert Path(command[2]).name == "_bwrap_ready"
+        assert Path(command[3]).name == "_start_gate"
+        assert command[4] == str(runner._strategies_dir / f"{strategy_id}.py")
         assert popen.call_args.kwargs["preexec_fn"] is not None
 
     @pytest.mark.skipif(platform.system() != "Linux", reason="requires Linux bubblewrap selection")
@@ -925,9 +992,12 @@ class TestStartStop:
         with (
             patch.object(mod.shutil, "which", wraps=mod.shutil.which) as which,
             patch.object(mod, "_create_process_tree", return_value=tree),
+            patch.object(mod, "_require_bwrap_startup") as require_ready,
             patch("subprocess.Popen", return_value=process) as popen,
         ):
             runner.start(strategy_id)
+
+        require_ready.assert_called_once()
 
         which.assert_called_once_with("bwrap", path=os.defpath)
         command = popen.call_args.args[0]
@@ -953,8 +1023,12 @@ class TestStartStop:
             pytest.skip("requires the trusted system bubblewrap executable")
         assert bwrap_executable is not None
 
+        owned_temp = tmp_path / "owned-broken-bwrap"
+        owned_temp.mkdir()
         with (
+            patch.object(mod.tempfile, "mkdtemp", return_value=str(owned_temp)),
             patch.object(mod, "_create_process_tree", return_value=tree),
+            patch.object(mod, "_release_strategy_start_gate") as release_gate,
             patch("subprocess.Popen", return_value=process) as popen,
             pytest.raises(RuntimeError, match="Bubblewrap sandbox exited during startup.*127"),
         ):
@@ -967,12 +1041,10 @@ class TestStartStop:
         assert "--unshare-net" in command
         assert popen.call_args.kwargs["shell"] is False
         assert popen.call_args.kwargs["preexec_fn"] is None
-        entry = runner._running[strategy_id]
-        assert entry.tree is tree
-        assert entry.temp_dir is not None
-        assert (entry.temp_dir / "_start_gate").read_text(encoding="utf-8") == ""
-
-        runner.stop(strategy_id)
+        release_gate.assert_not_called()
+        assert strategy_id not in runner._running
+        assert not owned_temp.exists()
+        tree.close.assert_called_once_with()
 
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_linux_bwrap_binds_only_the_runtime_wrapper_and_strategy(self, runner):
@@ -988,15 +1060,19 @@ class TestStartStop:
         with (
             patch.object(mod.platform, "system", return_value="Linux"),
             patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
+            patch.object(mod, "_require_bwrap_startup") as require_ready,
             patch("subprocess.Popen", return_value=mock_proc) as popen,
         ):
             runner.start(strategy_id)
+
+        require_ready.assert_called_once()
 
         command = popen.call_args.args[0]
         separator = command.index("--")
         sandbox_argv = command[separator + 1 :]
         entry = runner._running[strategy_id]
         wrapper = str((entry.temp_dir / "_sandbox_wrapper.py").resolve())
+        readiness = str((entry.temp_dir / "_bwrap_ready").resolve())
         start_gate = str((entry.temp_dir / "_start_gate").resolve())
         strategy = str((runner._strategies_dir / f"{strategy_id}.py").resolve())
 
@@ -1007,15 +1083,20 @@ class TestStartStop:
         assert ["--ro-bind", start_gate, "/run/flinttrade-strategy/_start_gate"] == command[
             command.index(start_gate) - 1 : command.index(start_gate) + 2
         ]
+        assert ["--bind", readiness, "/run/flinttrade-strategy/_bwrap_ready"] == command[
+            command.index(readiness) - 1 : command.index(readiness) + 2
+        ]
         assert ["--ro-bind", strategy, "/run/flinttrade-strategy/strategy.py"] == command[
             command.index(strategy) - 1 : command.index(strategy) + 2
         ]
         assert wrapper not in sandbox_argv
+        assert readiness not in sandbox_argv
         assert start_gate not in sandbox_argv
         assert strategy not in sandbox_argv
         assert sandbox_argv[0].startswith("/run/flinttrade-python/bin/python")
         assert sandbox_argv[1:] == [
             "/run/flinttrade-strategy/_sandbox_wrapper.py",
+            "/run/flinttrade-strategy/_bwrap_ready",
             "/run/flinttrade-strategy/_start_gate",
             "/run/flinttrade-strategy/strategy.py",
         ]
@@ -1040,8 +1121,9 @@ class TestStartStop:
         command = popen.call_args.args[0]
         assert command[0] == sys.executable
         assert Path(command[1]).name == "_sandbox_wrapper.py"
-        assert Path(command[2]).name == "_start_gate"
-        assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
+        assert Path(command[2]).name == "_bwrap_ready"
+        assert Path(command[3]).name == "_start_gate"
+        assert command[4] == str(runner._strategies_dir / f"{strategy_id}.py")
         create_tree.assert_called_once_with(
             process,
             "Windows",
@@ -1110,6 +1192,7 @@ def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path)
     work.mkdir()
     wrapper = mod._create_sandbox_wrapper(work)
     start_gate = mod._create_strategy_start_gate(work)
+    readiness = mod._create_bwrap_readiness_file(work)
     strategy = tmp_path / "strategy.py"
     strategy.write_text("print('sandbox-ok')\n", encoding="utf-8")
     process = subprocess.Popen(  # noqa: S603
@@ -1118,11 +1201,13 @@ def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path)
             sys.executable,
             str(wrapper),
             str(start_gate),
+            str(readiness),
             str(strategy),
         ),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd="/",
+        env=mod._build_bwrap_launcher_env(),
         text=True,
     )
     try:
@@ -1146,10 +1231,11 @@ def test_sandbox_wrapper_blocks_uploaded_code_until_the_parent_releases_it(tmp_p
     work.mkdir()
     wrapper = mod._create_sandbox_wrapper(work)
     start_gate = mod._create_strategy_start_gate(work)
+    readiness = mod._create_bwrap_readiness_file(work)
     strategy = tmp_path / "strategy.py"
     strategy.write_text("print('released')\n", encoding="utf-8")
     process = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(wrapper), str(start_gate), str(strategy)],
+        [sys.executable, str(wrapper), str(readiness), str(start_gate), str(strategy)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

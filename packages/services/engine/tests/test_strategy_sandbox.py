@@ -185,6 +185,7 @@ class TestBwrapCommand:
     def test_command_structure(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
+        readiness = mod._create_bwrap_readiness_file(tmp_path)
         strategy = tmp_path / "strategy.py"
         strategy.write_text("print('ok')\n", encoding="utf-8")
 
@@ -193,6 +194,7 @@ class TestBwrapCommand:
             sys.executable,
             str(wrapper),
             str(start_gate),
+            str(readiness),
             str(strategy),
         )
 
@@ -204,6 +206,7 @@ class TestBwrapCommand:
         assert "--tmpfs" in cmd
         assert str(wrapper.resolve()) in cmd
         assert str(start_gate.resolve()) in cmd
+        assert str(readiness.resolve()) in cmd
         assert str(strategy.resolve()) in cmd
 
     @pytest.mark.skipif(
@@ -213,6 +216,7 @@ class TestBwrapCommand:
     def test_command_ends_with_sandbox_paths_only(self, tmp_path):
         wrapper = mod._create_sandbox_wrapper(tmp_path)
         start_gate = mod._create_strategy_start_gate(tmp_path)
+        readiness = mod._create_bwrap_readiness_file(tmp_path)
         strategy = tmp_path / "strategy.py"
         strategy.write_text("print('ok')\n", encoding="utf-8")
 
@@ -221,12 +225,13 @@ class TestBwrapCommand:
             sys.executable,
             str(wrapper),
             str(start_gate),
+            str(readiness),
             str(strategy),
         )
 
-        assert cmd[-4].startswith("/run/flinttrade-python/bin/python")
-        assert cmd[-3:] == [
+        assert cmd[-4:] == [
             "/run/flinttrade-strategy/_sandbox_wrapper.py",
+            "/run/flinttrade-strategy/_bwrap_ready",
             "/run/flinttrade-strategy/_start_gate",
             "/run/flinttrade-strategy/strategy.py",
         ]
@@ -475,14 +480,11 @@ class TestFallback:
         """When bwrap is available on Linux, command starts with bwrap."""
         runner, strategy_id = uploaded
         mock_proc = _make_mock_process()
-        mock_proc.wait.side_effect = subprocess.TimeoutExpired(
-            cmd=["/usr/bin/bwrap"],
-            timeout=mod._BWRAP_STARTUP_TIMEOUT_SECONDS,
-        )
 
         with (
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
             patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
+            patch.object(mod, "_require_bwrap_startup") as require_startup,
             patch("platform.system", return_value="Linux"),
         ):
             runner.start(strategy_id)
@@ -490,8 +492,8 @@ class TestFallback:
         cmd = mock_popen.call_args[0][0]
         assert cmd[0] == "/usr/bin/bwrap"
         assert mock_popen.call_args.kwargs["preexec_fn"] is None
+        require_startup.assert_called_once()
 
-        mock_proc.wait.side_effect = None
         runner.stop(strategy_id)
 
     def test_start_on_windows_skips_bwrap(self, uploaded):
@@ -546,8 +548,10 @@ class TestFallback:
         cmd = mock_popen.call_args[0][0]
         # Second arg should be the wrapper script path
         assert "_sandbox_wrapper.py" in cmd[1]
-        # Third arg is the parent-owned start gate; fourth is the strategy.
-        assert "_start_gate" in cmd[2]
-        assert strategy_id in cmd[3]
+        # Third arg is child-to-parent readiness, fourth is the parent-owned
+        # start gate, and fifth is the uploaded strategy.
+        assert "_bwrap_ready" in cmd[2]
+        assert "_start_gate" in cmd[3]
+        assert strategy_id in cmd[4]
 
         runner.stop(strategy_id)
