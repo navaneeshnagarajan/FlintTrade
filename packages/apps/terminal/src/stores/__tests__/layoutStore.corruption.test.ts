@@ -50,6 +50,17 @@ describe("layoutStore corrupt top-level persistence", () => {
         children: [{ type: "tabset", selected: "not-a-number", children: [] }],
       },
     },
+    {
+      global: {},
+      borders: [],
+      layout: { type: "row", children: [] },
+      subLayouts: {
+        current: { layout: { type: "row", children: [] } },
+      },
+      popouts: {
+        deprecated: { layout: { type: "row", children: [] } },
+      },
+    },
   ])("quarantines a parser-permissive malformed FlexLayout root: %j", async (malformedLayout) => {
     const raw = `${JSON.stringify({
       state: {

@@ -526,6 +526,47 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(Object.values(readWorkspaceStore())).toEqual([]);
   });
 
+  it("rejects ambiguous subLayouts plus popouts before reminting an ignored duplicate", () => {
+    const addTab = vi.fn();
+    const removeTab = vi.fn();
+    const commitTabCreation = vi.fn();
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+    const ambiguousLayout = {
+      global: {},
+      borders: [],
+      layout: { type: "row", id: "source-row", children: [] },
+      subLayouts: {
+        current: {
+          layout: { type: "row", id: "current-row", children: [] },
+        },
+      },
+      popouts: {
+        deprecated: {
+          layout: { type: "row", id: "source-row", children: [] },
+        },
+      },
+    };
+
+    let outcome: ReturnType<typeof result.current.cloneWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.cloneWorkspace(
+        "tab-1",
+        "Ambiguous",
+        addTab,
+        removeTab,
+        ambiguousLayout,
+        commitTabCreation,
+      );
+    });
+
+    expect(outcome).toMatchObject({ ok: false });
+    expect(outcome && !outcome.ok ? outcome.error : "").toMatch(/corrupt|quarantined/i);
+    expect(addTab).not.toHaveBeenCalled();
+    expect(removeTab).not.toHaveBeenCalled();
+    expect(commitTabCreation).not.toHaveBeenCalled();
+    expect(Object.values(readWorkspaceStore())).toEqual([]);
+  });
+
   it("preserves sourcePresetId from the source workspace", () => {
     upsertWorkspaceMeta({
       id: "tab-src",

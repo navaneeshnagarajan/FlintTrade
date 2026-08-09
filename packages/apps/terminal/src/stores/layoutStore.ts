@@ -166,6 +166,10 @@ function hasValidSubLayouts(value: unknown): boolean {
  * generated empty model can never autosave over truncated evidence.
  */
 function hasValidFlexLayoutSchema(layout: Record<string, unknown>): boolean {
+  // FlexLayout parses `subLayouts || popouts`; accepting both would leave one
+  // structurally present but semantically ignored, including its node IDs.
+  if (layout.subLayouts !== undefined && layout.popouts !== undefined) return false;
+
   return (layout.global === undefined || isRecord(layout.global))
     && (layout.borders === undefined
       || (Array.isArray(layout.borders) && layout.borders.every(isFlexLayoutBorder)))
