@@ -82,7 +82,7 @@ Done highlights:
 - A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: the consolidation backlog (one broker-connect surface and only evidence-backed duplicate implementations), the Hostinger/public-site continuation of the accepted pilot sequence above, and the Linux-only desktop CI failures. The exact widget catalogue stays pinned at 71 unless a separately reviewed compatibility-safe merge proves a real duplicate.
+Remaining: repair the current cross-platform nightly CI failures without weakening native security semantics, complete the reviewed Hostinger/public-site continuation, and continue only evidence-backed duplicate consolidation. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded by the accepted 71-widget taxonomy and must not be reopened without new evidence.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 
