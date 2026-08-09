@@ -80,6 +80,7 @@ def _mock_complete_process_tree(monkeypatch):
     import flinttrade_engine.strategy_runner as runner_module
 
     monkeypatch.setattr(runner_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(runner_module, "_find_bwrap_executable", lambda: None)
 
     def create_tree(process, _system, **_limits):
         tree = MagicMock()

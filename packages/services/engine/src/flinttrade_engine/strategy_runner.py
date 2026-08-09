@@ -750,12 +750,37 @@ def _require_platform_enforcement(system: str, *, process_limit: int) -> None:
         raise RuntimeError("POSIX uploaded strategies support exactly one process per tree")
 
 
-def _is_bwrap_available() -> bool:
-    """Check if bubblewrap (bwrap) is installed on the system."""
-    return shutil.which("bwrap") is not None
+_BWRAP_STARTUP_TIMEOUT_SECONDS = 0.1
+
+
+def _find_bwrap_executable() -> str | None:
+    """Resolve bubblewrap from the fixed system path, never inherited PATH."""
+    executable = shutil.which("bwrap", path=os.defpath)
+    if executable is None:
+        trusted_candidates = (Path(directory) / "bwrap" for directory in os.defpath.split(os.pathsep) if directory)
+        if any(os.path.lexists(candidate) for candidate in trusted_candidates):
+            raise RuntimeError("Installed bubblewrap executable is not runnable")
+        return None
+    try:
+        resolved = Path(executable).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("Installed bubblewrap executable is unavailable") from exc
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise RuntimeError("Installed bubblewrap executable is not runnable")
+    return str(resolved)
+
+
+def _require_bwrap_startup(process: subprocess.Popen[Any]) -> None:
+    """Fail when the exact spawned bubblewrap exits during namespace setup."""
+    try:
+        return_code = process.wait(timeout=_BWRAP_STARTUP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return
+    raise RuntimeError(f"Bubblewrap sandbox exited during startup (exit code {return_code})")
 
 
 def _build_bwrap_command(
+    bwrap_executable: str,
     python_exe: str,
     script_path: str,
     start_gate_path: str,
@@ -764,6 +789,7 @@ def _build_bwrap_command(
     """Build a bubblewrap sandbox command for running one strategy.
 
     Args:
+        bwrap_executable: Absolute path to the selected system bubblewrap.
         python_exe: Path to the Python interpreter.
         script_path: Path to the wrapper script to execute.
         start_gate_path: Path to the parent-owned start gate.
@@ -797,7 +823,7 @@ def _build_bwrap_command(
     sandbox_runtime = Path("/run/flinttrade-python")
     sandbox_work = Path("/run/flinttrade-strategy")
     command = [
-        "bwrap",
+        bwrap_executable,
         "--dir",
         "/run",
         "--ro-bind",
@@ -1221,13 +1247,17 @@ class UserStrategyRunner:
 
         log_file = open(log_path, "a", encoding="utf-8")  # noqa: WPS515
         process: subprocess.Popen[Any] | None = None
+        tree: Any | None = None
 
         try:
             # Build command — bwrap on Linux when available, plain subprocess otherwise
-            use_bwrap = system == "Linux" and _is_bwrap_available()
+            bwrap_executable = _find_bwrap_executable() if system == "Linux" else None
+            use_bwrap = bwrap_executable is not None
             child_arg = str(wrapper_path)
             if use_bwrap:
+                assert bwrap_executable is not None
                 cmd: list[str] = _build_bwrap_command(
+                    bwrap_executable,
                     child_executable,
                     child_arg,
                     str(start_gate_path),
@@ -1263,6 +1293,7 @@ class UserStrategyRunner:
                 env=child_env,
                 close_fds=True,
                 preexec_fn=preexec_fn,
+                shell=False,
                 **platform_spawn,
             )
             tree = _create_process_tree(
@@ -1271,6 +1302,8 @@ class UserStrategyRunner:
                 memory_limit_bytes=self._memory_limit_bytes,
                 process_limit=self._max_processes_per_strategy,
             )
+            if use_bwrap:
+                _require_bwrap_startup(process)
         except _WindowsJobCreationRollbackError as exc:
             assert process is not None  # Popen completed before Job creation
             self._running[strategy_id] = _RunningStrategy(
@@ -1297,7 +1330,7 @@ class UserStrategyRunner:
                     strategy_id=strategy_id,
                     name=name,
                     process=process,
-                    tree=_PendingPosixProcessGroup(process),
+                    tree=tree if tree is not None else _PendingPosixProcessGroup(process),
                     started_at=datetime.now(UTC),
                     log_path=log_path,
                     memory_limit_mb=self._memory_limit_mb,

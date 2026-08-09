@@ -2,16 +2,16 @@
 
 Ordinary subprocess execution is mocked. AST validation and file I/O use real
 temporary directories, and a Linux-only integration test executes the exact
-bubblewrap namespace when that runtime is installed.
+bubblewrap namespace when a bounded test-only capability check proves it usable.
 """
 
 from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -26,16 +26,69 @@ NO_POSIX_RESOURCE_REASON = (
 )
 
 
+_BWRAP_TEST_TIMEOUT_SECONDS = 5.0
+
+
+def _functional_bwrap_executable() -> str | None:
+    """Return the exact system bwrap only after a bounded real namespace run."""
+    if platform.system() != "Linux":
+        return None
+    import flinttrade_engine.strategy_runner as _mod
+
+    try:
+        bwrap_executable = _mod._find_bwrap_executable()
+    except RuntimeError:
+        return None
+    if bwrap_executable is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix="flinttrade_bwrap_test_") as raw_temp_dir:
+        temp_dir = Path(raw_temp_dir)
+        work = temp_dir / "work"
+        work.mkdir()
+        wrapper = _mod._create_sandbox_wrapper(
+            work,
+            memory_limit_bytes=256 * 1024 * 1024,
+            process_limit=1,
+        )
+        start_gate = _mod._create_strategy_start_gate(work)
+        strategy = temp_dir / "strategy.py"
+        strategy.write_text("pass\n", encoding="utf-8")
+        _mod._release_strategy_start_gate(start_gate)
+        try:
+            completed = subprocess.run(  # noqa: S603 - exact trusted production command, no shell
+                _mod._build_bwrap_command(
+                    bwrap_executable,
+                    sys.executable,
+                    str(wrapper),
+                    str(start_gate),
+                    str(strategy),
+                ),
+                check=False,
+                close_fds=True,
+                cwd="/",
+                shell=False,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                start_new_session=True,
+                timeout=_BWRAP_TEST_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+    return bwrap_executable if completed.returncode == 0 else None
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def runner(tmp_path):
+def runner(tmp_path, monkeypatch):
     """UserStrategyRunner backed by a temporary directory."""
     import flinttrade_engine.strategy_runner as _mod
 
+    monkeypatch.setattr(_mod, "_find_bwrap_executable", lambda: None)
     return _mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
 
 
@@ -494,9 +547,10 @@ class TestStartStop:
                 runner.start(strategy_id)
 
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
-    def test_concurrent_tree_limit_fails_before_spawning_another_process(self, tmp_path):
+    def test_concurrent_tree_limit_fails_before_spawning_another_process(self, tmp_path, monkeypatch):
         import flinttrade_engine.strategy_runner as mod
 
+        monkeypatch.setattr(mod, "_find_bwrap_executable", lambda: None)
         runner = mod.UserStrategyRunner(
             strategies_dir=tmp_path / "strategies",
             max_concurrent_strategies=1,
@@ -838,7 +892,7 @@ class TestStartStop:
         with (
             patch.object(mod.sys, "frozen", True, create=True),
             patch.object(mod.platform, "system", return_value="Linux"),
-            patch.object(mod, "_is_bwrap_available", return_value=False),
+            patch.object(mod, "_find_bwrap_executable", return_value=None),
             patch("subprocess.Popen", return_value=mock_proc) as popen,
         ):
             runner.start(strategy_id)
@@ -850,16 +904,90 @@ class TestStartStop:
         assert command[3] == str(runner._strategies_dir / f"{strategy_id}.py")
         assert popen.call_args.kwargs["preexec_fn"] is not None
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="requires Linux bubblewrap selection")
+    def test_linux_bwrap_uses_resolved_system_executable_without_shell(self, tmp_path):
+        import flinttrade_engine.strategy_runner as mod
+
+        runner = mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
+        strategy_id = runner.upload("resolved_bwrap", SAFE_CODE)
+        process = self._make_mock_process()
+        tree = MagicMock()
+        tree.is_alive.return_value = False
+        bwrap_executable = mod._find_bwrap_executable()
+        if bwrap_executable is None:
+            pytest.skip("requires the trusted system bubblewrap executable")
+        assert bwrap_executable is not None
+        process.wait.side_effect = subprocess.TimeoutExpired(
+            cmd=[bwrap_executable],
+            timeout=mod._BWRAP_STARTUP_TIMEOUT_SECONDS,
+        )
+
+        with (
+            patch.object(mod.shutil, "which", wraps=mod.shutil.which) as which,
+            patch.object(mod, "_create_process_tree", return_value=tree),
+            patch("subprocess.Popen", return_value=process) as popen,
+        ):
+            runner.start(strategy_id)
+
+        which.assert_called_once_with("bwrap", path=os.defpath)
+        command = popen.call_args.args[0]
+        assert command[0] == bwrap_executable
+        assert popen.call_args.kwargs["shell"] is False
+
+        process.wait.side_effect = None
+        process.wait.return_value = 0
+        runner.stop(strategy_id)
+
+    @pytest.mark.skipif(platform.system() != "Linux", reason="requires Linux bubblewrap selection")
+    def test_installed_broken_bwrap_fails_without_host_python_fallback(self, tmp_path):
+        import flinttrade_engine.strategy_runner as mod
+
+        runner = mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
+        strategy_id = runner.upload("broken_bwrap", SAFE_CODE)
+        process = self._make_mock_process(returncode=127)
+        process.wait.return_value = 127
+        tree = MagicMock()
+        tree.is_alive.return_value = False
+        bwrap_executable = mod._find_bwrap_executable()
+        if bwrap_executable is None:
+            pytest.skip("requires the trusted system bubblewrap executable")
+        assert bwrap_executable is not None
+
+        with (
+            patch.object(mod, "_create_process_tree", return_value=tree),
+            patch("subprocess.Popen", return_value=process) as popen,
+            pytest.raises(RuntimeError, match="Bubblewrap sandbox exited during startup.*127"),
+        ):
+            runner.start(strategy_id)
+
+        popen.assert_called_once()
+        command = popen.call_args.args[0]
+        assert command[0] == bwrap_executable
+        assert command[0] != sys.executable
+        assert "--unshare-net" in command
+        assert popen.call_args.kwargs["shell"] is False
+        assert popen.call_args.kwargs["preexec_fn"] is None
+        entry = runner._running[strategy_id]
+        assert entry.tree is tree
+        assert entry.temp_dir is not None
+        assert (entry.temp_dir / "_start_gate").read_text(encoding="utf-8") == ""
+
+        runner.stop(strategy_id)
+
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_linux_bwrap_binds_only_the_runtime_wrapper_and_strategy(self, runner):
         import flinttrade_engine.strategy_runner as mod
 
         strategy_id = runner.upload("bwrap_source", SAFE_CODE)
         mock_proc = self._make_mock_process()
+        mock_proc.wait.side_effect = subprocess.TimeoutExpired(
+            cmd=["/usr/bin/bwrap"],
+            timeout=mod._BWRAP_STARTUP_TIMEOUT_SECONDS,
+        )
 
         with (
             patch.object(mod.platform, "system", return_value="Linux"),
-            patch.object(mod, "_is_bwrap_available", return_value=True),
+            patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
             patch("subprocess.Popen", return_value=mock_proc) as popen,
         ):
             runner.start(strategy_id)
@@ -872,7 +1000,7 @@ class TestStartStop:
         start_gate = str((entry.temp_dir / "_start_gate").resolve())
         strategy = str((runner._strategies_dir / f"{strategy_id}.py").resolve())
 
-        assert command[0] == "bwrap"
+        assert command[0] == "/usr/bin/bwrap"
         assert ["--ro-bind", wrapper, "/run/flinttrade-strategy/_sandbox_wrapper.py"] == command[
             command.index(wrapper) - 1 : command.index(wrapper) + 2
         ]
@@ -970,12 +1098,13 @@ class TestStartStop:
         second_tree.terminate.assert_called_once_with()
 
 
-@pytest.mark.skipif(
-    platform.system() != "Linux" or shutil.which("bwrap") is None,
-    reason="requires a Linux bubblewrap runtime",
-)
 def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path) -> None:
     import flinttrade_engine.strategy_runner as mod
+
+    bwrap_executable = _functional_bwrap_executable()
+    if bwrap_executable is None:
+        pytest.skip("requires a proven functional Linux bubblewrap namespace")
+    assert bwrap_executable is not None
 
     work = tmp_path / "work"
     work.mkdir()
@@ -985,6 +1114,7 @@ def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path)
     strategy.write_text("print('sandbox-ok')\n", encoding="utf-8")
     process = subprocess.Popen(  # noqa: S603
         mod._build_bwrap_command(
+            bwrap_executable,
             sys.executable,
             str(wrapper),
             str(start_gate),
