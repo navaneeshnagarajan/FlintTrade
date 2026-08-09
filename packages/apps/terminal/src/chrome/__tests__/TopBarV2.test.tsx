@@ -5,7 +5,7 @@
  * Verifies: logo, search button, absence of AI pill, live badge, ticker area.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter, useLocation } from "react-router";
@@ -107,6 +107,7 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 
 vi.mock("@/hooks/useMarketStatus", () => ({
   useTimings: vi.fn(() => mockTimingsQuery),
+  MARKET_TIMINGS_MAX_AGE_MS: 5_000,
 }));
 
 vi.mock("@/services/api", () => ({
@@ -138,6 +139,11 @@ function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
   );
 }
 
+function setOpenMarketTestTime() {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-10T04:30:00.000Z")); // Monday, 10:00 IST
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -150,6 +156,10 @@ describe("TopBarV2", () => {
     mockTimingsQuery.dataUpdatedAt = 0;
     mockTimingsQuery.isError = false;
     mockTimingsQuery.isLoading = false;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders without crashing", () => {
@@ -218,45 +228,36 @@ describe("TopBarV2", () => {
   });
 
   it("names a trustworthy in-session result Market open rather than Live", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-10T04:00:00.000Z"));
-      const now = Date.now();
-      mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
-      mockTimingsQuery.dataUpdatedAt = now;
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
 
-      const { unmount } = renderTopBarV2();
+    const { unmount } = renderTopBarV2();
 
-      expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
-      expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
-      unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+    unmount();
   });
 
   it("names a trustworthy weekday out-of-session result Market closed", () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-08-10T04:00:00.000Z"));
-      const now = Date.now();
-      mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
-      mockTimingsQuery.dataUpdatedAt = now;
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
 
-      const { unmount } = renderTopBarV2();
+    const { unmount } = renderTopBarV2();
 
-      expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
-      expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
-      unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+    unmount();
   });
 
-  it("does not present stale timing data as an authoritative open market", () => {
+  it("uses the shared timing truth TTL rather than a drifting local limit", () => {
+    setOpenMarketTestTime();
     const now = Date.now();
     mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
-    mockTimingsQuery.dataUpdatedAt = now - 2 * 60 * 60_000;
+    mockTimingsQuery.dataUpdatedAt = now - 5_001;
 
     renderTopBarV2();
 
@@ -265,6 +266,7 @@ describe("TopBarV2", () => {
   });
 
   it("reports market timing refresh failures instead of retaining an authoritative state", () => {
+    setOpenMarketTestTime();
     const now = Date.now();
     mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
     mockTimingsQuery.dataUpdatedAt = now;

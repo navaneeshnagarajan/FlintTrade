@@ -31,7 +31,10 @@ import { useModeStore } from "@/stores/modeStore";
 import WorkspaceSwitcher from "@/chrome/WorkspaceSwitcher";
 import { useDirectBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useSkillContent } from "@/hooks/useSkillContent";
-import { useTimings } from "@/hooks/useMarketStatus";
+import {
+  MARKET_TIMINGS_MAX_AGE_MS,
+  useTimings,
+} from "@/hooks/useMarketStatus";
 import { ping } from "@/services/api";
 import type { MarketTiming } from "@/types/api";
 import type { ToolId } from "@/types/widgets";
@@ -86,8 +89,6 @@ interface MarketStatusInfo {
   status: MarketStatus;
   label: string;
 }
-
-const MARKET_TIMINGS_MAX_AGE_MS = 60 * 60_000;
 
 function getNseStatus(timings: MarketTiming[] | undefined): MarketStatusInfo {
   if (!timings) return { status: "unavailable", label: "Market unavailable" };
