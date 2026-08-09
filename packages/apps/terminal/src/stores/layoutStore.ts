@@ -166,10 +166,6 @@ function hasValidSubLayouts(value: unknown): boolean {
  * generated empty model can never autosave over truncated evidence.
  */
 function hasValidFlexLayoutSchema(layout: Record<string, unknown>): boolean {
-  // FlexLayout parses `subLayouts || popouts`; accepting both would leave one
-  // structurally present but semantically ignored, including its node IDs.
-  if (layout.subLayouts !== undefined && layout.popouts !== undefined) return false;
-
   return (layout.global === undefined || isRecord(layout.global))
     && (layout.borders === undefined
       || (Array.isArray(layout.borders) && layout.borders.every(isFlexLayoutBorder)))
@@ -191,6 +187,10 @@ export function classifySerializedLayout(
   ) {
     return "setup";
   }
+
+  // FlexLayout parses `subLayouts || popouts`; reject their coexistence before
+  // any legacy-format early return can hide semantically ignored node IDs.
+  if (layout.subLayouts !== undefined && layout.popouts !== undefined) return "corrupt";
 
   if (isRecord(layout.grid) && isRecord(layout.panels)) return "dockview";
 

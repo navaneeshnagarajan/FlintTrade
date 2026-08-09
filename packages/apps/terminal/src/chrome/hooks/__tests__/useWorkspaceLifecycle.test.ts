@@ -526,12 +526,14 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(Object.values(readWorkspaceStore())).toEqual([]);
   });
 
-  it("rejects ambiguous subLayouts plus popouts before reminting an ignored duplicate", () => {
+  it("rejects ambiguous aliases before legacy Dockview classification and reminting", () => {
     const addTab = vi.fn();
     const removeTab = vi.fn();
     const commitTabCreation = vi.fn();
     const { result } = renderHook(() => useWorkspaceLifecycle());
     const ambiguousLayout = {
+      grid: { legacy: true },
+      panels: { legacy: {} },
       global: {},
       borders: [],
       layout: { type: "row", id: "source-row", children: [] },
