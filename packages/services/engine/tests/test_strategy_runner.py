@@ -212,7 +212,11 @@ class TestWindowsJobProcessTree:
         kernel32.QueryInformationJobObject.side_effect = self._active_process_query(mod, [2, 1, 0])
         tree = mod._WindowsJobProcessTree(MagicMock(spec=subprocess.Popen), 42, kernel32)
 
-        assert tree.wait_gone(0.1) is True
+        with (
+            patch.object(mod.time, "monotonic", return_value=0.0),
+            patch.object(mod.time, "sleep"),
+        ):
+            assert tree.wait_gone(0.1) is True
         assert kernel32.QueryInformationJobObject.call_count == 3
         kernel32.WaitForSingleObject.assert_not_called()
 
