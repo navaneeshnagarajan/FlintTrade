@@ -5299,12 +5299,14 @@ def create_flask_app(
                 ), 404
 
             # If the exact file exists under dist/, serve it (favicon, assets/*).
+            # Root SPA index case-insensitive via relative path parts + casefold only;
+            # never treat nested foo/INDEX.HTML as root index. Linux-independent.
             if path:
                 resolved = _resolve_frontend_dist_file(path)
-                if resolved is not None and resolved.name.lower() == resolved_dist_index.name.lower():
-                    return _serve_index_with_nonce()
                 if resolved is not None:
                     relative = resolved.relative_to(resolved_dist_path)
+                    if len(relative.parts) == 1 and relative.name.casefold() == resolved_dist_index.name.casefold():
+                        return _serve_index_with_nonce()
                     return send_from_directory(str(_dist_path), relative.as_posix())
 
             # Static build paths are never client-side routes. Returning the

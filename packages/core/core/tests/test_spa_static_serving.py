@@ -288,3 +288,38 @@ def test_rate_limited_request_log_uses_the_current_request_id(
     assert accepted.status_code == 200
     assert limited.status_code == 429
     assert observed == [(200, "accepted-request"), (429, "limited-request")]
+
+@pytest.mark.unit
+def test_nested_docs_index_html_exact_sentinel_stays_nested(
+    built_frontend_app: Flask,
+) -> None:
+    """nested `docs/index.html` exact sentinel must stay nested (never treated as root SPA)."""
+    dist = Path(built_frontend_app.config["_DIST_PATH"])
+    docs = dist / "docs"
+    docs.mkdir()
+    sentinel = "NESTED_DOCS_INDEX_SENTINEL_EXACT"
+    (docs / "index.html").write_text(
+        f"<!doctype html><p>{sentinel}</p>", encoding="utf-8"
+    )
+
+    response = built_frontend_app.test_client().get("/docs/index.html")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert sentinel in body
+    assert "flintTradeLoaded" not in body  # not the root SPA content
+
+
+@pytest.mark.unit
+def test_direct_root_index_html_case_insensitive_serves_spa_with_nonce(
+    built_frontend_app: Flask,
+) -> None:
+    """direct root `/INDEX.HTML` must serve root SPA with nonce under case-insensitive resolution."""
+    response = built_frontend_app.test_client().get("/INDEX.HTML")
+    body = response.get_data(as_text=True)
+    csp = response.headers.get("Content-Security-Policy", "")
+
+    assert response.status_code == 200
+    assert 'src="/assets/app.js"' in body  # root SPA index served (case-insensitive matched to root)
+    # nonce present in html or header
+    assert 'nonce="' in body or "nonce-" in csp
