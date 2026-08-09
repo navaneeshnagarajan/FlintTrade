@@ -25,6 +25,8 @@ import { useCallback } from "react";
 import { z } from "zod";
 import { safeParse } from "@/lib/safeParse";
 import type { WorkspacePreset } from "@/layout/workspacePresets";
+import { classifySerializedLayout } from "@/stores/layoutStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 
 // ---------------------------------------------------------------------------
 // Storage schema
@@ -98,18 +100,17 @@ function generateWorkspaceId(): string {
 
 interface UseWorkspaceLifecycleReturn {
   /**
-   * Clone the current workspace: creates a new layoutStore tab with a
-   * "(Copy)" suffix and persists its metadata.
+   * Clone the current workspace: validates persisted SOT first, rejects corrupt,
+   * then creates a new layoutStore tab with a "(Copy)" suffix and persists its metadata.
    *
-   * @param sourceTabId  The tab id being cloned.
-   * @param sourceName   The current name of that tab.
-   * @param addTab       layoutStore.addTab function.
+   * Must read persisted layout from layoutStore, classify, and fail-closed on corrupt
+   * before any metadata write or addTab.
    */
   cloneWorkspace: (
     sourceTabId: string,
     sourceName: string,
     addTab?: (name: string) => void
-  ) => void;
+  ) => { ok: boolean; error?: string };
 
   /**
    * Create a new workspace tab from a preset template.
@@ -131,7 +132,31 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
       sourceTabId: string,
       sourceName: string,
       addTab?: (name: string) => void
-    ) => {
+    ): { ok: boolean; error?: string } => {
+      // 1. Resolve sourceTabId (already param)
+      // 2. Read persisted layout from store (SOT)
+      const persisted = useLayoutStore.getState().getTabLayout(sourceTabId);
+      // 3. Classify
+      const kind = classifySerializedLayout(persisted);
+
+      if (kind === "corrupt") {
+        return {
+          ok: false,
+          error: `Workspace "${sourceName}" layout is corrupted and has been quarantined.`,
+        };
+      }
+
+      // For empty persisted, the live fallback is not yet supported in minimal store (no workspaceApiTabId)
+      // Use persisted only for now per plan step 6 restriction
+      const finalKind = classifySerializedLayout(persisted);
+      if (finalKind === "corrupt") {
+        return {
+          ok: false,
+          error: `Workspace "${sourceName}" layout is corrupted and has been quarantined.`,
+        };
+      }
+
+      // Only then proceed with mutation
       const newName = `${sourceName} (Copy)`;
       const newId = generateWorkspaceId();
       const sourceMeta = getWorkspaceMeta(sourceTabId);
@@ -146,6 +171,8 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
       });
 
       if (addTab) addTab(newName);
+
+      return { ok: true };
     },
     []
   );
