@@ -1349,6 +1349,23 @@ html.ft-scroll-world-on .hero-feature-grid > div {
   transform: none !important;
 }
 
+/*
+ * A post-activation renderer failure removes ft-scroll-world-on. Keep the
+ * semantic hero on the settled paint layer while the decorative Canvas2D
+ * fallback resumes; otherwise the original delayed intro restarts at opacity 0.
+ */
+html.ft-scroll-world-fallback .hero-title-char,
+html.ft-scroll-world-fallback .hero-slogan > span,
+html.ft-scroll-world-fallback .hero-copy > p:not(.hero-disclaimer):not(.sr-only),
+html.ft-scroll-world-fallback .hero-copy p.hero-disclaimer,
+html.ft-scroll-world-fallback .hero-actions,
+html.ft-scroll-world-fallback .hero-feature-grid > div {
+  animation: none !important;
+  opacity: 1 !important;
+  filter: none !important;
+  transform: none !important;
+}
+
 html.ft-scroll-world-fallback .site-scroll-world-host,
 html.no-webgl .site-scroll-world-host {
   display: none;

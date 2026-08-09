@@ -199,6 +199,19 @@ describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
     expect(readySignal).toBeGreaterThan(firstSuccessfulRender);
   });
 
+  it('keeps every semantic hero child stable after an activated WebGL renderer falls back', () => {
+    const fallbackHeroRule = cssSource.match(
+      /html\.ft-scroll-world-fallback \.hero-title-char,\s*html\.ft-scroll-world-fallback \.hero-slogan > span,\s*html\.ft-scroll-world-fallback \.hero-copy > p:not\(\.hero-disclaimer\):not\(\.sr-only\),\s*html\.ft-scroll-world-fallback \.hero-copy p\.hero-disclaimer,\s*html\.ft-scroll-world-fallback \.hero-actions,\s*html\.ft-scroll-world-fallback \.hero-feature-grid > div\s*\{([^}]*)\}/,
+    );
+
+    expect(fallbackHeroRule).not.toBeNull();
+    const declarations = fallbackHeroRule?.[1] ?? '';
+    expect(declarations).toMatch(/animation:\s*none\s*!important/);
+    expect(declarations).toMatch(/opacity:\s*1\s*!important/);
+    expect(declarations).toMatch(/filter:\s*none\s*!important/);
+    expect(declarations).toMatch(/transform:\s*none\s*!important/);
+  });
+
   it('keeps the pilot isolated behind a default-off, client-only dynamic boundary', () => {
     expect(pageSource).toContain("import SiteScrollWorld from '@/components/site-scroll-world'");
     expect(pageSource).toContain('<SiteScrollWorld />');
