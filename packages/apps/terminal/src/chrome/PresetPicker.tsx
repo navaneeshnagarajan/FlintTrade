@@ -85,6 +85,9 @@ interface RenameDialogProps {
 
 function RenameDialog({ open, currentName, error, onConfirm, onCancel }: RenameDialogProps) {
   const [name, setName] = useState(currentName);
+  useEffect(() => {
+    setName(currentName);
+  }, [currentName]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
