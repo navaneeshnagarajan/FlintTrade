@@ -212,7 +212,7 @@ export default function HomePage() {
             A self-hosted workflow workspace. React, FlexLayout, Python services, Rust tick processing, the OpenAlgo-compatible bridge, and evidence-gated native broker contracts in one inspectable workspace. Safety before automation with Explore, Practice, and Live modes.
           </p>
         </div>
-        <div className="feature-grid">
+        <div className="feature-grid" data-scroll-chapter="2">
           {featureCards.map((card) => {
             const Icon = card.icon;
             return (
@@ -327,7 +327,9 @@ export default function HomePage() {
         </details>
       </section>
 
-      <SiteFooter />
+      <div data-scroll-chapter="5">
+        <SiteFooter />
+      </div>
     </main>
   );
 }

@@ -22,6 +22,14 @@ const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf
 const cssSource = readFileSync(resolve(process.cwd(), 'src/app/globals.css'), 'utf8');
 const nextConfigSource = readFileSync(resolve(process.cwd(), 'next.config.mjs'), 'utf8');
 const controllerSource = readFileSync(resolve(process.cwd(), 'src/components/section-enter-controller.tsx'), 'utf8');
+const wrapperSource = readFileSync(resolve(process.cwd(), 'src/components/site-scroll-world.tsx'), 'utf8');
+const webglSource = readFileSync(resolve(process.cwd(), 'src/components/site-scroll-world-webgl.tsx'), 'utf8');
+const capabilitySource = readFileSync(resolve(process.cwd(), 'src/lib/site-scroll-world-capability.ts'), 'utf8');
+const chapterSource = readFileSync(resolve(process.cwd(), 'src/lib/site-scroll-world-chapters.ts'), 'utf8');
+const sitePackage = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+};
 
 describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
   it('structures homepage into exactly four calm product bands after the cinematic hero with polished user-facing headings', () => {
@@ -167,39 +175,71 @@ describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
     // Ensure the rules appear after the selector list in the mobile block (not arbitrary range or escaped regex)
   });
 
-  it('primary hero action remains before feature grid and controller is mounted without moving static content to client', () => {
-    const actionsIdx = pageSource.indexOf('className=\"hero-actions\\\"');
-    const gridIdx = pageSource.indexOf('className=\"hero-feature-grid\\\"');
-    expect(actionsIdx).toBeGreaterThan(-1);
-    expect(gridIdx).toBeGreaterThan(-1);
-    expect(actionsIdx).toBeLessThan(gridIdx);
-    // page stays server; controller is the only client addition
+  it('switches every animated semantic hero child to a stable paint layer only after the first WebGL frame', () => {
+    const activeHeroRule = cssSource.match(
+      /html\.ft-scroll-world-on \.hero-title-char,\s*html\.ft-scroll-world-on \.hero-slogan > span,\s*html\.ft-scroll-world-on \.hero-copy > p:not\(\.hero-disclaimer\):not\(\.sr-only\),\s*html\.ft-scroll-world-on \.hero-copy p\.hero-disclaimer,\s*html\.ft-scroll-world-on \.hero-actions,\s*html\.ft-scroll-world-on \.hero-feature-grid > div\s*\{([^}]*)\}/,
+    );
+
+    expect(activeHeroRule).not.toBeNull();
+    const declarations = activeHeroRule?.[1] ?? '';
+    expect(declarations).toMatch(/animation:\s*none\s*!important/);
+    expect(declarations).toMatch(/opacity:\s*1\s*!important/);
+    expect(declarations).toMatch(/filter:\s*none\s*!important/);
+    expect(declarations).toMatch(/transform:\s*none\s*!important/);
+
+    // The default-off/fallback page retains the accepted Graphite intro timeline.
+    expect(cssSource).toMatch(/\.hero-title-char\s*\{[^}]*opacity:\s*0;[^}]*animation:\s*siteTypeChar/);
+    expect(cssSource).toMatch(/\.hero-actions\s*\{[^}]*opacity:\s*0;[^}]*animation:\s*siteRiseInBlur/);
+
+    // Runtime promotion is unique and happens only after a successful Three render.
+    expect(wrapperSource.match(/classList\.add\('ft-scroll-world-on'\)/g)).toHaveLength(1);
+    const firstSuccessfulRender = webglSource.indexOf('renderer.render(scene, camera)');
+    const readySignal = webglSource.indexOf('onReady();', firstSuccessfulRender);
+    expect(firstSuccessfulRender).toBeGreaterThan(-1);
+    expect(readySignal).toBeGreaterThan(firstSuccessfulRender);
   });
 
-  // TDD tests added first for scroll-world pilot (default-off, progressive, reduced-motion, WebGL failure, route scope, semantic CTA)
-  it('enforces default-off: SiteScrollWorld wrapper only mounts when env flag on (no three in page source, pilot isolated)', () => {
-    // Current page must not contain three or SiteScrollWorld yet (RED until enrichment)
-    expect(pageSource).not.toContain('three');
-    expect(pageSource).not.toContain('SiteScrollWorld');
-    expect(pageSource).not.toContain('site-scroll-world');
-    // Guard against leakage into server component
+  it('keeps the pilot isolated behind a default-off, client-only dynamic boundary', () => {
+    expect(pageSource).toContain("import SiteScrollWorld from '@/components/site-scroll-world'");
+    expect(pageSource).toContain('<SiteScrollWorld />');
+    expect(pageSource).not.toContain("from 'three'");
+    expect(pageSource).not.toContain('@react-three');
+    expect(wrapperSource).toContain("'use client'");
+    expect(wrapperSource).toContain("import('./site-scroll-world-webgl')");
+    expect(wrapperSource).toContain('ssr: false');
+    expect(capabilitySource).toContain("NEXT_PUBLIC_FLINTTRADE_SITE_SCROLL_WORLD === '1'");
+    expect(webglSource).toContain("from 'three'");
+    expect(sitePackage.dependencies.three).toBe('0.185.1');
+    expect(sitePackage.devDependencies['@types/three']).toBe('0.185.1');
   });
 
-  it('preserves semantic CTA continuity and exactly one primary CTA after enrichment', () => {
-    const primaryMatches = pageSource.match(/className=\"button primary\\\"/g) || [];
-    expect(primaryMatches.length).toBe(1);
+  it('preserves semantic CTA continuity and keeps the WebGL surface decorative', () => {
+    const primaryMatches = pageSource.match(/className="button primary"/g) || [];
+    expect(primaryMatches).toHaveLength(1);
     expect(pageSource).toContain('Start exploring — no install needed');
-    expect(pageSource).toContain('/demo-app/welcome');
-    // WebGL canvas must be aria-hidden, pointer-events none, behind DOM
+    expect(pageSource).toContain('href="/demo-app/welcome"');
+    expect(pageSource).toContain('target="_blank"');
+    expect(webglSource).toContain('aria-hidden="true"');
+    expect(webglSource).toContain('role="presentation"');
+    expect(cssSource).toMatch(/\.site-scroll-world-canvas\s*\{[^}]*pointer-events:\s*none/);
   });
 
-  it('requires data-scroll-chapter anchors on product bands for scroll conductor (enrich not replace)', () => {
-    // Will fail until page sections are annotated
-    expect(pageSource).toMatch(/data-scroll-chapter=\\\"[0-5]\\\"/);
+  it('binds each Spark Path chapter 0 through 5 exactly once without replacing the existing bands', () => {
+    const chapterIds = [...pageSource.matchAll(/data-scroll-chapter="([0-5])"/g)].map((match) => Number(match[1]));
+    expect(chapterIds).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(chapterSource).toContain("id: 0");
+    expect(chapterSource).toContain("id: 5");
+    expect(pageSource).toContain('Self-hosted trading workspace');
+    expect(pageSource).toContain('Evaluate and install');
+    expect(pageSource).toContain('Contributor resources');
   });
 
-  it('no-private/no-trading safety: site scroll-world never references broker, order, live trading, or private paths', () => {
-    expect(pageSource).not.toMatch(/broker|order|Live mode|place_order|OpenAlgoClient/i);
-    // Extended from no-private-references.test.ts
+  it('uses procedural/local scene data only and contains no network, trading, broker, terminal or demo integration', () => {
+    const pilotSource = [wrapperSource, webglSource, capabilitySource, chapterSource].join('\n');
+    expect(pilotSource).not.toMatch(/https?:\/\//);
+    expect(pilotSource).not.toMatch(/TextureLoader|CubeTextureLoader|FontLoader|fetch\(|XMLHttpRequest|WebSocket/);
+    expect(pilotSource).not.toMatch(/OpenAlgoClient|place_order|placeOrder|BrokerRouter|gate_order/);
+    expect(pilotSource).not.toMatch(/packages\/apps\/terminal|demo-app/);
+    expect(pilotSource).not.toContain('@react-three');
   });
 });
