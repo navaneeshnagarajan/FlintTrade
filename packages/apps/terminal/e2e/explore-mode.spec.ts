@@ -1,13 +1,10 @@
 /**
- * explore-mode.spec.ts — Explore mode with hardcoded sample data.
+ * explore-mode.spec.ts — installed-app Explore execution-mode journeys.
  *
- * Verifies:
- *   - /explore loads and shows the "Explore Mode" banner (sample-data disclaimer)
- *   - The six module cards are all rendered
- *   - The TickerBar (Market indices region) is present on app routes
- *   - Navigating into /trade renders the Dockview workspace shell
- *
- * No broker connection is needed — all data is hardcoded in ExploreRoute.tsx.
+ * The hosted `/demo-app/` build owns the standalone Explore preview. The
+ * installed root build must redirect bare `/explore` to safe onboarding while
+ * still supporting a deliberately seeded, local Explore demo session on app
+ * routes. No broker connection is needed.
  */
 
 import { test, expect } from '@playwright/test';
@@ -22,31 +19,10 @@ test.describe('Explore mode', () => {
     });
   });
 
-  test('/explore shows sample-data disclaimer banner', async ({ page }) => {
+  test('installed /explore redirects to safe onboarding', async ({ page }) => {
     await page.goto('/explore');
-    // ExploreRoute renders: <strong>Explore Mode</strong> — All data shown is sample only.
-    const banner = page.locator('text=Explore Mode').first();
-    await expect(banner).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('/explore shows all six module cards', async ({ page }) => {
-    await page.goto('/explore');
-    // Each ModuleCard has an aria-label "Explore <Title> module"
-    const modules = ['Trade', 'Invest', 'Learn', 'Strategy Lab', 'Automate', 'AI'];
-    for (const name of modules) {
-      await expect(
-        page.getByRole('button', { name: new RegExp(`Explore ${name}`, 'i') }),
-      ).toBeVisible({ timeout: 10_000 });
-    }
-  });
-
-  test('/explore renders stats section', async ({ page }) => {
-    await page.goto('/explore');
-    // The stats row contains "Brokers supported", "Modules", "Strategies", "Indicators"
-    await expect(page.getByText('Brokers supported', { exact: false })).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(page.getByText('Modules', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page).toHaveURL(/\/welcome$/);
+    await expect(page.getByRole('main', { name: /welcome/i })).toBeVisible({ timeout: 10_000 });
   });
 
   test('TickerBar region is present on /trade', async ({ page }) => {
