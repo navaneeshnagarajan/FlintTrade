@@ -67,7 +67,7 @@ def _functional_bwrap_executable() -> str | None:
                 ),
                 check=False,
                 close_fds=True,
-                cwd="/",
+                cwd=str(work),
                 env=_mod._build_bwrap_launcher_env(),
                 shell=False,
                 stderr=subprocess.DEVNULL,
@@ -556,6 +556,18 @@ class TestStartStop:
 
         ready_path.write_text("ready\n", encoding="utf-8")
         mod._require_bwrap_startup(process, ready_path)
+
+    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
+    def test_bwrap_ready_marker_cannot_mask_an_exited_launcher(self, tmp_path):
+        import flinttrade_engine.strategy_runner as mod
+
+        ready_path = tmp_path / "_bwrap_ready"
+        ready_path.write_bytes(mod._BWRAP_READY_STATE.encode("ascii"))
+        process = self._make_mock_process(returncode=127)
+        process.poll.return_value = 127
+
+        with pytest.raises(RuntimeError, match="Bubblewrap sandbox exited during startup.*127"):
+            mod._require_bwrap_startup(process, ready_path)
 
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_bwrap_readiness_timeout_terminates_and_reaps_without_releasing_gate(self, tmp_path, monkeypatch):
@@ -1062,11 +1074,18 @@ class TestStartStop:
         if bwrap_executable is None:
             pytest.skip("requires the trusted system bubblewrap executable")
         assert bwrap_executable is not None
+        original_create = mod._create_bwrap_readiness_file
+
+        def create_ready_marker(work_dir: Path) -> Path:
+            marker = original_create(work_dir)
+            marker.write_bytes(mod._BWRAP_READY_STATE.encode("ascii"))
+            return marker
 
         owned_temp = tmp_path / "owned-broken-bwrap"
         owned_temp.mkdir()
         with (
             patch.object(mod.tempfile, "mkdtemp", return_value=str(owned_temp)),
+            patch.object(mod, "_create_bwrap_readiness_file", side_effect=create_ready_marker),
             patch.object(mod, "_create_process_tree", return_value=tree),
             patch.object(mod, "_release_strategy_start_gate") as release_gate,
             patch("subprocess.Popen", return_value=process) as popen,
@@ -1244,14 +1263,19 @@ def test_bwrap_namespace_executes_the_bound_wrapper_and_strategy(tmp_path: Path)
             str(readiness),
             str(strategy),
         ),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        cwd="/",
+        cwd=str(work),
         env=mod._build_bwrap_launcher_env(),
+        close_fds=True,
+        shell=False,
+        start_new_session=True,
         text=True,
     )
     try:
-        threading.Event().wait(0.1)
+        mod._require_bwrap_startup(process, readiness)
+        assert readiness.read_bytes() == mod._BWRAP_READY_STATE.encode("ascii")
         assert process.poll() is None
         mod._release_strategy_start_gate(start_gate)
         stdout, stderr = process.communicate(timeout=15)
