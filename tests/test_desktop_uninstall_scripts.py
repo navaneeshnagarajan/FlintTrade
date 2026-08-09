@@ -456,17 +456,17 @@ def test_direct_appimage_process_requires_exact_appimage_environment_identity(tm
     paths = _linux_footprint(tmp_path)
     mounted_executable = tmp_path / ".mount_FlintTrade" / "FlintTrade"
     mounted_executable.parent.mkdir()
-    shutil.copyfile("/bin/sleep", mounted_executable)
+    shutil.copyfile("/usr/bin/python3", mounted_executable)
     mounted_executable.chmod(0o755)
     unrelated = tmp_path / "unrelated" / "FlintTrade"
     unrelated.parent.mkdir()
-    shutil.copyfile("/bin/sleep", unrelated)
+    shutil.copyfile("/usr/bin/python3", unrelated)
     unrelated.chmod(0o755)
     shell_process = subprocess.Popen(
-        [str(mounted_executable), "30"],
+        [str(mounted_executable), "-c", "import time; time.sleep(30)"],
         env={**os.environ, "APPIMAGE": str(paths["appimage"].resolve())},
     )
-    unrelated_process = subprocess.Popen([str(unrelated), "30"])
+    unrelated_process = subprocess.Popen([str(unrelated), "-c", "import time; time.sleep(30)"])
     try:
         result = _run(tmp_path, os_name="Linux")
 

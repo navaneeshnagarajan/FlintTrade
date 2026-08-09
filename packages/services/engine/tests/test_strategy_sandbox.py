@@ -490,6 +490,8 @@ class TestFallback:
         with (
             patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
             patch.object(mod, "_build_preexec_fn", return_value=sentinel),
+            patch.object(mod, "_is_bwrap_available", return_value=False),
+            patch("platform.system", return_value="Linux"),
         ):
             runner.start(strategy_id)
 
