@@ -77,17 +77,25 @@ export interface PresetPickerProps {
 
 interface RenameDialogProps {
   open: boolean;
+  workspaceId: string;
   currentName: string;
   error: string | null;
   onConfirm: (name: string) => void;
   onCancel: () => void;
 }
 
-function RenameDialog({ open, currentName, error, onConfirm, onCancel }: RenameDialogProps) {
+function RenameDialog({
+  open,
+  workspaceId,
+  currentName,
+  error,
+  onConfirm,
+  onCancel,
+}: RenameDialogProps) {
   const [name, setName] = useState(currentName);
   useEffect(() => {
     setName(currentName);
-  }, [currentName]);
+  }, [open, workspaceId, currentName]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -210,10 +218,12 @@ function DeleteDialog({ open, workspaceName, error, onConfirm, onCancel }: Delet
 export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
   const applyPreset = useLayoutStore((s) => s.applyPreset);
   const activeTabId = useLayoutStore((s) => s.activeTabId);
+  const layoutStorageError = useLayoutStore((s) => s.layoutStorageError);
   const tabs = useLayoutStore((s) => s.tabs);
   const renameTab = useLayoutStore((s) => s.renameTab);
   const removeTab = useLayoutStore((s) => s.removeTab);
   const addTab = useLayoutStore((s) => s.addTab);
+  const commitTabCreation = useLayoutStore((s) => s.commitTabCreation);
   const getTabLayout = useLayoutStore((s) => s.getTabLayout);
   const workspaceApi = useLayoutStore((s) => s.workspaceApi);
   const workspaceApiTabId = useLayoutStore((s) => s.workspaceApiTabId);
@@ -228,12 +238,19 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
   const [reconcileError, setReconcileError] = useState<string | null>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const workspaceReady = workspaceApi !== null && workspaceApiTabId === activeTabId;
-  const visibleError = workspaceError ?? reconcileError;
+  const workspaceReady = layoutStorageError === null
+    && workspaceApi !== null
+    && workspaceApiTabId === activeTabId;
+  const visibleError = workspaceError ?? layoutStorageError?.message ?? reconcileError;
 
   useEffect(() => {
+    if (layoutStorageError) {
+      setReconcileError(layoutStorageError.message);
+      return;
+    }
     try {
-      reconcileWorkspaceStore(tabs);
+      const { metadataLessTabIds } = reconcileWorkspaceStore(tabs);
+      for (const tabId of metadataLessTabIds) removeTab(tabId);
       setReconcileError(null);
     } catch (error) {
       const message = error instanceof WorkspaceStorageError
@@ -241,7 +258,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
         : `Workspace metadata could not be reconciled: ${error instanceof Error ? error.message : "unknown storage error"}`;
       setReconcileError(message);
     }
-  }, [tabs]);
+  }, [tabs, layoutStorageError, removeTab]);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -305,6 +322,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
         addTab,
         removeTab,
         sourceLayout,
+        commitTabCreation,
       );
       if (!result.ok) {
         setWorkspaceError(result.error);
@@ -313,13 +331,13 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
       setWorkspaceError(null);
       onClose();
     }
-  }, [activeTab, cloneWorkspace, addTab, removeTab, workspaceApi, workspaceApiTabId, getTabLayout, onClose]);
+  }, [activeTab, cloneWorkspace, addTab, removeTab, workspaceApi, workspaceApiTabId, getTabLayout, commitTabCreation, onClose]);
 
   const handleNewFromTemplate = useCallback(
     (presetId: string) => {
       const preset = WORKSPACE_PRESETS.find((p) => p.id === presetId);
       if (!preset) return;
-      const result = newFromTemplate(preset, addTab, removeTab);
+      const result = newFromTemplate(preset, addTab, removeTab, commitTabCreation);
       if (!result.ok) {
         setWorkspaceError(result.error);
         return;
@@ -328,7 +346,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
       setShowTemplateClone(false);
       onClose();
     },
-    [newFromTemplate, addTab, removeTab, onClose]
+    [newFromTemplate, addTab, removeTab, commitTabCreation, onClose]
   );
 
   // ---------------------------------------------------------------------------
@@ -501,6 +519,7 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
       {/* Rename dialog */}
       <RenameDialog
         open={showRename}
+        workspaceId={activeTabId}
         currentName={activeTab?.name ?? "Workspace"}
         error={visibleError}
         onConfirm={handleRenameConfirm}

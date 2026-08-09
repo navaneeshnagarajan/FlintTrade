@@ -26,15 +26,24 @@ import { useLayoutStore } from "@/stores/layoutStore";
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
   let writeError: Error | undefined;
+  let writeInterceptor: ((key: string, value: string) => void) | undefined;
   return {
     getItem: (key: string) => store[key] ?? null,
     setItem: (key: string, value: string) => {
+      writeInterceptor?.(key, value);
       if (writeError) throw writeError;
       store[key] = value;
     },
     removeItem: (key: string) => { delete store[key]; },
-    clear: () => { store = {}; writeError = undefined; },
+    clear: () => {
+      store = {};
+      writeError = undefined;
+      writeInterceptor = undefined;
+    },
     failWritesWith: (error: Error) => { writeError = error; },
+    interceptWritesWith: (interceptor: (key: string, value: string) => void) => {
+      writeInterceptor = interceptor;
+    },
   };
 })();
 
@@ -106,6 +115,92 @@ describe("reconcileWorkspaceStore", () => {
         name: "Trading Desk",
         sourcePresetId: "trading-desk",
       }),
+    });
+  });
+
+  it("identifies metadata-less ws_ tabs for durable reload cleanup", () => {
+    writeWorkspaceStore({});
+    const reloadedTabs = [
+      { id: "LAY-default", name: "Workspace" },
+      {
+        id: "ws-ghost",
+        name: "Uncommitted Copy",
+        creationTransaction: { id: "txn_ws-ghost", state: "pending" as const },
+      },
+    ];
+    useLayoutStore.setState({ tabs: reloadedTabs, activeTabId: "ws-ghost" });
+
+    const reconciliation = reconcileWorkspaceStore(reloadedTabs);
+    for (const tabId of reconciliation.metadataLessTabIds) {
+      useLayoutStore.getState().removeTab(tabId);
+    }
+
+    expect(reconciliation.metadataLessTabIds).toEqual(["ws-ghost"]);
+    expect(useLayoutStore.getState().tabs).toEqual([reloadedTabs[0]]);
+    expect(useLayoutStore.getState().activeTabId).toBe("LAY-default");
+    const durable = JSON.parse(localStorageMock.getItem("flinttrade:layouts")!) as {
+      state: { tabs: Array<{ id: string }> };
+    };
+    expect(durable.state.tabs.some((tab) => tab.id === "ws-ghost")).toBe(false);
+    expect(localStorageMock.getItem("flinttrade:workspaces")).toBe("{}");
+  });
+
+  it("never blesses a pending creation ghost with same-name legacy metadata", () => {
+    const legacy = {
+      id: "ws_legacy",
+      name: "Uncommitted Copy",
+      createdAt: "2026-04-13T00:00:00Z",
+      updatedAt: "2026-04-13T00:00:00Z",
+    };
+    writeWorkspaceStore({ [legacy.id]: legacy });
+    const reloadedTabs = [
+      { id: "LAY-default", name: "Workspace" },
+      {
+        id: "ws_ghost",
+        name: "Uncommitted Copy",
+        creationTransaction: { id: "txn_ghost", state: "pending" as const },
+      },
+    ];
+    useLayoutStore.setState({ tabs: reloadedTabs, activeTabId: "ws_ghost" });
+
+    const reconciliation = reconcileWorkspaceStore(reloadedTabs);
+    for (const tabId of reconciliation.metadataLessTabIds) {
+      useLayoutStore.getState().removeTab(tabId);
+    }
+
+    expect(reconciliation.metadataLessTabIds).toEqual(["ws_ghost"]);
+    expect(readWorkspaceStore()).toEqual({ [legacy.id]: legacy });
+    expect(useLayoutStore.getState().tabs.map((tab) => tab.id)).toEqual(["LAY-default"]);
+    const durable = JSON.parse(localStorageMock.getItem("flinttrade:layouts")!) as {
+      state: { tabs: Array<{ id: string }> };
+    };
+    expect(durable.state.tabs.some((tab) => tab.id === "ws_ghost")).toBe(false);
+  });
+
+  it("preserves an unmarked healthy ws_ layout instead of guessing it is a transaction ghost", () => {
+    writeWorkspaceStore({});
+    const tabs = [{ id: "ws_healthy", name: "Healthy Legacy Layout" }];
+
+    const reconciliation = reconcileWorkspaceStore(tabs);
+
+    expect(reconciliation.metadataLessTabIds).toEqual([]);
+  });
+
+  it("rebuilds canonical metadata for a committed creation identity", () => {
+    writeWorkspaceStore({});
+    const tabs = [{
+      id: "ws_committed",
+      name: "Committed Desk",
+      creationTransaction: { id: "txn_ws_committed", state: "committed" as const },
+    }];
+
+    const reconciliation = reconcileWorkspaceStore(tabs);
+
+    expect(reconciliation.metadataLessTabIds).toEqual([]);
+    expect(readWorkspaceStore()["ws_committed"]).toMatchObject({
+      id: "ws_committed",
+      name: "Committed Desk",
+      creationTransactionId: "txn_ws_committed",
     });
   });
 
@@ -253,7 +348,13 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
       result.current.cloneWorkspace("tab-1", "My Layout", addTab, removeTab);
     });
 
-    expect(addTab).toHaveBeenCalledWith("My Layout (Copy)", undefined, expect.stringMatching(/^ws_/));
+    const canonicalId = addTab.mock.calls[0][2];
+    expect(addTab).toHaveBeenCalledWith(
+      "My Layout (Copy)",
+      undefined,
+      canonicalId,
+      { id: `txn_${canonicalId}`, state: "pending" },
+    );
   });
 
   it("persists a new metadata entry with matching canonical ID (unification)", () => {
@@ -261,9 +362,17 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     const { result } = renderHook(() => useWorkspaceLifecycle());
     const realAddTab = useLayoutStore.getState().addTab;
     const realRemoveTab = useLayoutStore.getState().removeTab;
+    const realCommitTabCreation = useLayoutStore.getState().commitTabCreation;
 
     act(() => {
-      result.current.cloneWorkspace("tab-1", "Scalper Zone", realAddTab, realRemoveTab);
+      result.current.cloneWorkspace(
+        "tab-1",
+        "Scalper Zone",
+        realAddTab,
+        realRemoveTab,
+        undefined,
+        realCommitTabCreation,
+      );
     });
 
     const store = readWorkspaceStore();
@@ -277,16 +386,33 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(matchingTab).toBeDefined(); // unified canonical ID
     expect(matchingTab?.name).toBe("Scalper Zone (Copy)");
     expect(matchingTab?.serializedLayout).toBeUndefined(); // no layout passed in this test
+    expect(matchingTab?.creationTransaction).toEqual({
+      id: meta.creationTransactionId,
+      state: "committed",
+    });
+    expect(meta.creationTransactionId).toMatch(/^txn_ws_/);
   });
 
   it("clones serializedLayout when provided (unified id)", () => {
     const { result } = renderHook(() => useWorkspaceLifecycle());
     const realAddTab = useLayoutStore.getState().addTab;
     const realRemoveTab = useLayoutStore.getState().removeTab;
-    const fakeLayout = { root: { type: "row", children: [{ id: "chart" }] } };
+    const realCommitTabCreation = useLayoutStore.getState().commitTabCreation;
+    const fakeLayout = {
+      global: {},
+      borders: [],
+      layout: { type: "row", children: [] },
+    };
 
     act(() => {
-      result.current.cloneWorkspace("tab-1", "With Layout", realAddTab, realRemoveTab, fakeLayout);
+      result.current.cloneWorkspace(
+        "tab-1",
+        "With Layout",
+        realAddTab,
+        realRemoveTab,
+        fakeLayout,
+        realCommitTabCreation,
+      );
     });
 
     const entries = Object.values(readWorkspaceStore());
@@ -337,6 +463,56 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(localStorageMock.getItem("flinttrade:workspaces")).toBeNull();
   });
 
+  it("reports an explicit durable failure when metadata and rollback persistence both fail", () => {
+    const { result } = renderHook(() => useWorkspaceLifecycle());
+    const realAddTab = useLayoutStore.getState().addTab;
+    const realRemoveTab = useLayoutStore.getState().removeTab;
+    let layoutWrites = 0;
+    localStorageMock.interceptWritesWith((key) => {
+      if (key === "flinttrade:workspaces") {
+        throw new Error("metadata unavailable");
+      }
+      if (key === "flinttrade:layouts" && ++layoutWrites === 2) {
+        throw new Error("rollback unavailable");
+      }
+    });
+
+    let outcome: ReturnType<typeof result.current.cloneWorkspace> | undefined;
+    act(() => {
+      outcome = result.current.cloneWorkspace(
+        "tab-1",
+        "Layout",
+        realAddTab,
+        realRemoveTab,
+      );
+    });
+
+    expect(outcome).toMatchObject({ ok: false });
+    expect(outcome && !outcome.ok ? outcome.error : "").toContain("metadata unavailable");
+    expect(outcome && !outcome.ok ? outcome.error : "").toContain(
+      "durable rollback failed: rollback unavailable",
+    );
+    const persisted = JSON.parse(localStorageMock.getItem("flinttrade:layouts")!) as {
+      state: {
+        tabs: Array<{
+          id: string;
+          name: string;
+          creationTransaction?: { id: string; state: string };
+        }>;
+      };
+    };
+    const persistedGhost = persisted.state.tabs.find((tab) => tab.name === "Layout (Copy)");
+    expect(persistedGhost).toMatchObject({
+      creationTransaction: {
+        id: expect.stringMatching(/^txn_/),
+        state: "pending",
+      },
+    });
+    expect(useLayoutStore.getState().tabs.some((tab) => tab.name === "Layout (Copy)"))
+      .toBe(false);
+    expect(localStorageMock.getItem("flinttrade:workspaces")).toBeNull();
+  });
+
   it("does not create a layout tab when workspace metadata is corrupt", () => {
     localStorageMock.setItem("flinttrade:workspaces", "not-json");
     const addTab = vi.fn();
@@ -380,11 +556,17 @@ describe("useWorkspaceLifecycle.newFromTemplate", () => {
     });
 
     const canonicalId = addTab.mock.calls[0][2];
-    expect(addTab).toHaveBeenCalledWith("Scalper Zone", preset.build(), canonicalId);
+    expect(addTab).toHaveBeenCalledWith(
+      "Scalper Zone",
+      preset.build(),
+      canonicalId,
+      { id: `txn_${canonicalId}`, state: "pending" },
+    );
     expect(readWorkspaceStore()[canonicalId]).toMatchObject({
       id: canonicalId,
       name: "Scalper Zone",
       sourcePresetId: "scalper-zone",
+      creationTransactionId: `txn_${canonicalId}`,
     });
   });
 

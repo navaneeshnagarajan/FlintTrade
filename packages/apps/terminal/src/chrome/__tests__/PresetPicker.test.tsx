@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 
@@ -15,18 +15,27 @@ import { WORKSPACE_PRESETS } from "@/layout/workspacePresets";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockCloneWorkspace, mockNewFromTemplate } = vi.hoisted(() => ({
+const {
+  mockCloneWorkspace,
+  mockNewFromTemplate,
+  mockRenameWorkspace,
+  mockReconcileWorkspaceStore,
+} = vi.hoisted(() => ({
   mockCloneWorkspace: vi.fn(),
   mockNewFromTemplate: vi.fn(),
+  mockRenameWorkspace: vi.fn(),
+  mockReconcileWorkspaceStore: vi.fn(),
 }));
 
 const mockLayoutState = {
   applyPreset: vi.fn(),
   activeTabId: "tab-1",
+  layoutStorageError: null as Error | null,
   tabs: [{ id: "tab-1", name: "Workspace" }],
   renameTab: vi.fn(),
   removeTab: vi.fn(),
   addTab: vi.fn(),
+  commitTabCreation: vi.fn(),
   getTabLayout: vi.fn(),
   workspaceApi: { toJSON: vi.fn(() => ({ source: "live-previous-tab" })) },
   workspaceApiTabId: "ws-previous",
@@ -39,11 +48,11 @@ vi.mock("@/stores/layoutStore", () => ({
 
 vi.mock("../hooks/useWorkspaceLifecycle", () => ({
   WorkspaceStorageError: class WorkspaceStorageError extends Error {},
-  reconcileWorkspaceStore: vi.fn(),
+  reconcileWorkspaceStore: mockReconcileWorkspaceStore,
   useWorkspaceLifecycle: () => ({
     cloneWorkspace: mockCloneWorkspace,
     newFromTemplate: mockNewFromTemplate,
-    renameWorkspace: vi.fn(() => ({ ok: true, id: "tab-1" })),
+    renameWorkspace: mockRenameWorkspace,
     deleteWorkspace: vi.fn(() => ({ ok: true, id: "tab-1" })),
   }),
 }));
@@ -61,14 +70,45 @@ import PresetPicker from "../PresetPicker";
 describe("PresetPicker", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLayoutState.activeTabId = "tab-1";
+    mockLayoutState.layoutStorageError = null;
+    mockLayoutState.tabs = [{ id: "tab-1", name: "Workspace" }];
+    mockLayoutState.workspaceApiTabId = "ws-previous";
     mockCloneWorkspace.mockReturnValue({ ok: true, id: "ws-copy" });
     mockNewFromTemplate.mockReturnValue({ ok: true, id: "ws-template" });
+    mockRenameWorkspace.mockReturnValue({ ok: true, id: "tab-2" });
+    mockReconcileWorkspaceStore.mockReturnValue({ metadataLessTabIds: [] });
     mockLayoutState.getTabLayout.mockReturnValue({ source: "stored-active-tab" });
   });
 
   it("renders the dialog title when open", () => {
     render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
     expect(screen.getByText("Choose a Workspace Template")).toBeInTheDocument();
+  });
+
+  it("surfaces corrupt layout storage and skips metadata reconciliation", () => {
+    mockLayoutState.layoutStorageError = new Error(
+      "Workspace layout storage is corrupted and could not be read.",
+    );
+
+    render(<PresetPicker isOpen={true} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Workspace layout storage is corrupted and could not be read.",
+    );
+    expect(mockReconcileWorkspaceStore).not.toHaveBeenCalled();
+  });
+
+  it("removes metadata-less transaction ghosts during reload reconciliation", async () => {
+    mockLayoutState.tabs = [
+      { id: "tab-1", name: "Workspace" },
+      { id: "ws_ghost", name: "Uncommitted Copy" },
+    ];
+    mockReconcileWorkspaceStore.mockReturnValue({ metadataLessTabIds: ["ws_ghost"] });
+
+    render(<PresetPicker isOpen={false} onClose={vi.fn()} />);
+
+    await waitFor(() => expect(mockLayoutState.removeTab).toHaveBeenCalledWith("ws_ghost"));
   });
 
   it("renders a card for every registered preset (no preset is hidden)", () => {
@@ -95,6 +135,68 @@ describe("PresetPicker", () => {
   it("does not render when closed", () => {
     render(<PresetPicker isOpen={false} onClose={vi.fn()} />);
     expect(screen.queryByText("Choose a Workspace Template")).not.toBeInTheDocument();
+  });
+
+  it("refreshes an open Rename dialog when the active workspace changes", async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<PresetPicker isOpen={true} onClose={onClose} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace actions" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: 'Rename "Workspace"' }));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Workspace");
+
+    mockLayoutState.activeTabId = "tab-2";
+    mockLayoutState.tabs = [
+      { id: "tab-1", name: "Workspace" },
+      { id: "tab-2", name: "Trading Desk (Copy)" },
+    ];
+    rerender(<PresetPicker isOpen={true} onClose={onClose} />);
+
+    const input = screen.getByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(input).toHaveValue("Trading Desk (Copy)"));
+    fireEvent.change(input, { target: { value: "Intended Desk" } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(mockRenameWorkspace).toHaveBeenCalledWith(
+      "tab-2",
+      "Trading Desk (Copy)",
+      "Intended Desk",
+      mockLayoutState.renameTab,
+    );
+  });
+
+  it("drops a cancelled rename draft when switching to a same-name workspace", async () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<PresetPicker isOpen={true} onClose={onClose} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace actions" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: 'Rename "Workspace"' }));
+    const firstInput = screen.getByRole("textbox", { name: "Name" });
+    fireEvent.change(firstInput, { target: { value: "Unsaved draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    mockLayoutState.activeTabId = "tab-2";
+    mockLayoutState.tabs = [
+      { id: "tab-1", name: "Workspace" },
+      { id: "tab-2", name: "Workspace" },
+    ];
+    rerender(<PresetPicker isOpen={true} onClose={onClose} />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace actions" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: 'Rename "Workspace"' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Workspace")
+    );
   });
 
   it("keeps the dialog open and reports a clone persistence failure", () => {
@@ -131,6 +233,7 @@ describe("PresetPicker", () => {
       mockLayoutState.addTab,
       mockLayoutState.removeTab,
       { source: "stored-active-tab" },
+      mockLayoutState.commitTabCreation,
     );
   });
 

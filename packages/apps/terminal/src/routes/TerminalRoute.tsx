@@ -17,7 +17,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useLayoutStore } from "@/stores/layoutStore";
+import { classifySerializedLayout, useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -253,16 +253,6 @@ function getDefaultPresetId(level: "beginner" | "intermediate" | "advanced"): st
   return "beginner-core"; // resolved by buildPresetJsonById like any other id
 }
 
-/**
- * True when a persisted layout blob is a FlexLayout model document. Layouts
- * saved by the Dockview-era terminal have `grid`/`panels` roots instead —
- * those are not restorable after the migration, so the caller falls back to
- * the skill-appropriate default preset rather than an empty canvas.
- */
-function isFlexLayoutDocument(layout: Record<string, unknown>): boolean {
-  return typeof layout.layout === "object" && layout.layout !== null;
-}
-
 // Full-page tools available from the TOOLS dropdown on /trade.
 // backtest-lab → /lab, strategy-builder → /lab, flow-builder → /automate
 // are full routes now and are no longer overlaid on the /trade canvas.
@@ -453,6 +443,7 @@ export default function TerminalRoute() {
   // is mounted (audit finding: adds were silently unpersisted).
   const modelListenerRef = useRef<(() => void) | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const quarantinedTabIdsRef = useRef(new Set<string>());
   const lastActiveWidgetRef = useRef<string | null>(null);
 
   // ---------------------------------------------------------------------------
@@ -509,7 +500,15 @@ export default function TerminalRoute() {
     setLayoutPersistenceError(`Workspace layout could not be saved: ${detail}`);
   }, []);
 
+  const quarantineLayout = useCallback((tabId: string) => {
+    quarantinedTabIdsRef.current.add(tabId);
+    setLayoutPersistenceError(
+      `Workspace "${tabId}" layout is corrupted and has been quarantined.`,
+    );
+  }, []);
+
   const persistLayout = useCallback((tabId: string, layout: Record<string, unknown>) => {
+    if (quarantinedTabIdsRef.current.has(tabId)) return;
     try {
       useLayoutStore.getState().saveTabLayout(tabId, layout);
       setLayoutPersistenceError(null);
@@ -606,8 +605,9 @@ export default function TerminalRoute() {
       buildPresetJsonById(getDefaultPresetId(level)) ?? buildPresetJsonById("market-watch");
 
     let initialModel: Model;
-    const pendingPreset = savedLayout
-      ? (savedLayout as Record<string, unknown>).__pendingPreset
+    const savedKind = classifySerializedLayout(savedLayout ?? undefined);
+    const pendingPreset = savedKind === "setup"
+      ? savedLayout?.__pendingPreset
       : undefined;
     if (typeof pendingPreset === "string") {
       // The setup wizard left a preset request instead of a real layout.
@@ -618,13 +618,19 @@ export default function TerminalRoute() {
         activeTabId,
         initialModel.toJson() as unknown as Record<string, unknown>,
       );
-    } else if (savedLayout && isFlexLayoutDocument(savedLayout)) {
-      // Restore the persisted layout; corrupt documents fall back to the
-      // skill-appropriate default preset.
-      initialModel = tryCreateWorkspaceModel(savedLayout) ?? createWorkspaceModel(defaultJson());
+    } else if (savedKind === "flexlayout" && savedLayout) {
+      // Classification already parsed the document; keep the fallback guard
+      // in case a future FlexLayout version changes between these calls.
+      initialModel = tryCreateWorkspaceModel(savedLayout)
+        ?? createWorkspaceModel(defaultJson());
+    } else if (savedKind === "corrupt") {
+      // Keep the unreadable document untouched. The fallback model remains
+      // usable in memory, but every save for this tab is quarantined.
+      quarantineLayout(activeTabId);
+      initialModel = createWorkspaceModel(defaultJson());
     } else {
-      // No layout saved yet — or a pre-migration Dockview document, which is
-      // not restorable — apply the skill-appropriate default preset.
+      // No layout saved yet — or a documented pre-migration Dockview document,
+      // which is not restorable — apply the skill-appropriate default preset.
       // Beginner: 5 core widgets; Intermediate: Market Watch; Advanced: Scalper Zone.
       initialModel = createWorkspaceModel(defaultJson());
     }
@@ -659,7 +665,7 @@ export default function TerminalRoute() {
     // level intentionally omitted — we only use it for the initial layout
     // decision. Re-running on every skill change would reset the layout.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadModel, setWorkspaceApi, flushPendingSave, reportLayoutPersistenceError]);
+  }, [loadModel, setWorkspaceApi, flushPendingSave, reportLayoutPersistenceError, quarantineLayout]);
 
   // React to workspace-tab switches (including Delete Workspace, which
   // activates the surviving tab): flush the outgoing tab's pending save,
@@ -669,11 +675,23 @@ export default function TerminalRoute() {
   useEffect(() => {
     if (modelTabIdRef.current === null || modelTabIdRef.current === activeWorkspaceTabId) return;
     const saved = useLayoutStore.getState().getTabLayout(activeWorkspaceTabId);
-    const restored =
-      saved && isFlexLayoutDocument(saved) ? tryCreateWorkspaceModel(saved) : null;
-    // A tab with no (or unreadable) saved layout starts as a blank canvas.
-    loadModel(restored ?? createWorkspaceModel(emptyWorkspaceJson()));
-  }, [activeWorkspaceTabId, loadModel]);
+    const savedKind = classifySerializedLayout(saved ?? undefined);
+    if (savedKind === "corrupt") {
+      quarantineLayout(activeWorkspaceTabId);
+      return;
+    }
+    if (savedKind === "flexlayout" && saved) {
+      const restored = tryCreateWorkspaceModel(saved);
+      if (!restored) {
+        quarantineLayout(activeWorkspaceTabId);
+        return;
+      }
+      loadModel(restored);
+      return;
+    }
+    // A tab with no saved layout, or a legacy Dockview document, starts blank.
+    loadModel(createWorkspaceModel(emptyWorkspaceJson()));
+  }, [activeWorkspaceTabId, loadModel, quarantineLayout]);
 
   // Listen for the custom event dispatched by DailyWelcome's "Open Trade Review" link,
   // and also by TopBar's ToolsDropdown (which replaced the old inline ToolsDropdown).

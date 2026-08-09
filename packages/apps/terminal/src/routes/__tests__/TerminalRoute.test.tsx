@@ -104,14 +104,18 @@ vi.mock("@/routes/trade/TradeBottomPanel", () => ({
 }));
 
 // Stores
-vi.mock("@/stores/layoutStore", () => ({
-  useLayoutStore: Object.assign(
-    vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
-      selector(mockLayoutState),
+vi.mock("@/stores/layoutStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/layoutStore")>();
+  return {
+    ...actual,
+    useLayoutStore: Object.assign(
+      vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+        selector(mockLayoutState),
+      ),
+      { getState: () => mockLayoutState, setState: vi.fn() },
     ),
-    { getState: () => mockLayoutState, setState: vi.fn() },
-  ),
-}));
+  };
+});
 
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
@@ -609,6 +613,32 @@ describe("TerminalRoute saved-layout restore", () => {
   function registeredApi(): WorkspaceApi {
     return mockLayoutState.workspaceApi as unknown as WorkspaceApi;
   }
+
+  it("surfaces and quarantines an invalid FlexLayout document without overwriting it", async () => {
+    const corruptLayout = { global: {}, borders: [], layout: null };
+    mockLayoutState.getTabLayout.mockReturnValue(corruptLayout);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(corruptLayout);
+  });
+
+  it("quarantines a non-empty FlexLayout document whose root was truncated away", async () => {
+    const missingRoot = { global: {}, borders: [] };
+    mockLayoutState.getTabLayout.mockReturnValue(missingRoot);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(missingRoot);
+  });
 
   it("restores a persisted FlexLayout document instead of the default preset", async () => {
     // trading-desk: indexstrip + positions + riskdashboard + orders

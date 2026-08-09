@@ -24,6 +24,10 @@
 import { useCallback } from "react";
 import { z } from "zod";
 import type { WorkspacePreset } from "@/layout/workspacePresets";
+import { WorkspaceStorageError } from "@/stores/layoutStore";
+import type { WorkspaceCreationTransaction } from "@/stores/layoutStore";
+
+export { WorkspaceStorageError };
 
 // ---------------------------------------------------------------------------
 // Storage schema
@@ -35,6 +39,7 @@ export interface WorkspaceMeta {
   createdAt: string;
   updatedAt: string;
   sourcePresetId?: string;
+  creationTransactionId?: string;
 }
 
 type WorkspaceStore = Record<string, WorkspaceMeta>;
@@ -45,18 +50,12 @@ const workspaceMetaSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   sourcePresetId: z.string().optional(),
+  creationTransactionId: z.string().optional(),
 }) satisfies z.ZodType<WorkspaceMeta>;
 
 const workspaceStoreSchema = z.record(z.string(), workspaceMetaSchema) satisfies z.ZodType<WorkspaceStore>;
 
 const STORAGE_KEY = "flinttrade:workspaces";
-
-export class WorkspaceStorageError extends Error {
-  constructor(message = "Workspace metadata is corrupted and could not be read.") {
-    super(message);
-    this.name = "WorkspaceStorageError";
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Raw storage helpers (exported for testing)
@@ -73,7 +72,9 @@ export function readWorkspaceStore(): WorkspaceStore {
   } catch {
     // The common corruption error below gives callers one stable recovery path.
   }
-  throw new WorkspaceStorageError();
+  throw new WorkspaceStorageError(
+    "Workspace metadata is corrupted and could not be read.",
+  );
 }
 
 export function writeWorkspaceStore(store: WorkspaceStore): void {
@@ -82,9 +83,22 @@ export function writeWorkspaceStore(store: WorkspaceStore): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
 }
 
+export interface WorkspaceReconciliation {
+  metadataLessTabIds: string[];
+}
+
+interface ReconciliationTab {
+  id: string;
+  name: string;
+  creationTransaction?: {
+    id: string;
+    state: "pending" | "committed";
+  };
+}
+
 export function reconcileWorkspaceStore(
-  tabs: ReadonlyArray<{ id: string; name: string }>
-): void {
+  tabs: ReadonlyArray<ReconciliationTab>
+): WorkspaceReconciliation {
   const current = readWorkspaceStore();
   const currentEntries = Object.entries(current);
   const canonicalIds = new Set(tabs.map((tab) => tab.id));
@@ -93,6 +107,40 @@ export function reconcileWorkspaceStore(
 
   for (const tab of tabs) {
     const canonical = current[tab.id];
+    const transaction = tab.creationTransaction;
+
+    // Only an explicit pending creation marker is safe to treat as a rollback
+    // ghost. Legacy/unmarked `ws_` IDs may be healthy and must never be deleted
+    // by a naming heuristic.
+    if (transaction?.state === "pending") continue;
+
+    if (transaction?.state === "committed") {
+      if (
+        canonical?.creationTransactionId !== undefined
+        && canonical.creationTransactionId !== transaction.id
+      ) {
+        throw new WorkspaceStorageError(
+          `Workspace "${tab.name}" transaction metadata does not match its committed layout.`,
+        );
+      }
+      const now = new Date().toISOString();
+      reconciled[tab.id] = canonical
+        ? {
+            ...canonical,
+            id: tab.id,
+            name: tab.name,
+            creationTransactionId: transaction.id,
+          }
+        : {
+            id: tab.id,
+            name: tab.name,
+            createdAt: now,
+            updatedAt: now,
+            creationTransactionId: transaction.id,
+          };
+      continue;
+    }
+
     if (canonical) {
       reconciled[tab.id] = { ...canonical, id: tab.id, name: tab.name };
       continue;
@@ -127,6 +175,15 @@ export function reconcileWorkspaceStore(
   if (JSON.stringify(reconciled) !== JSON.stringify(current)) {
     writeWorkspaceStore(reconciled);
   }
+
+  return {
+    metadataLessTabIds: tabs
+      .filter((tab) =>
+        tab.creationTransaction?.state === "pending"
+        && reconciled[tab.id] === undefined
+      )
+      .map((tab) => tab.id),
+  };
 }
 
 export function upsertWorkspaceMeta(meta: WorkspaceMeta): void {
@@ -153,6 +210,10 @@ function generateWorkspaceId(): string {
   return `ws_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function creationTransaction(id: string): WorkspaceCreationTransaction {
+  return { id: `txn_${id}`, state: "pending" };
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -161,6 +222,7 @@ type AddWorkspaceTab = (
   name: string,
   initialLayout?: Record<string, unknown>,
   providedId?: string,
+  creationTransaction?: WorkspaceCreationTransaction,
 ) => void;
 
 export type WorkspaceLifecycleResult =
@@ -183,7 +245,8 @@ interface UseWorkspaceLifecycleReturn {
     sourceName: string,
     addTab: AddWorkspaceTab,
     removeTab: (id: string) => void,
-    sourceLayout?: Record<string, unknown>
+    sourceLayout?: Record<string, unknown>,
+    commitTabCreation?: (id: string, transactionId: string) => void,
   ) => WorkspaceLifecycleResult;
 
   /**
@@ -196,7 +259,8 @@ interface UseWorkspaceLifecycleReturn {
   newFromTemplate: (
     preset: WorkspacePreset,
     addTab: AddWorkspaceTab,
-    removeTab: (id: string) => void
+    removeTab: (id: string) => void,
+    commitTabCreation?: (id: string, transactionId: string) => void,
   ) => WorkspaceLifecycleResult;
 
   renameWorkspace: (
@@ -215,20 +279,31 @@ interface UseWorkspaceLifecycleReturn {
   ) => WorkspaceLifecycleResult;
 }
 
-function persistenceFailure(error: unknown): WorkspaceLifecycleResult {
-  if (error instanceof WorkspaceStorageError) {
-    return { ok: false, error: error.message };
-  }
-  const detail = error instanceof Error ? error.message : "unknown storage error";
-  return { ok: false, error: `Workspace could not be saved: ${detail}` };
+function persistenceFailure(
+  error: unknown,
+  rollbackError?: unknown,
+): WorkspaceLifecycleResult {
+  const base = error instanceof WorkspaceStorageError
+    ? error.message
+    : `Workspace could not be saved: ${error instanceof Error ? error.message : "unknown storage error"}`;
+  if (rollbackError === undefined) return { ok: false, error: base };
+  const rollbackDetail = rollbackError instanceof Error
+    ? rollbackError.message
+    : "unknown storage error";
+  return {
+    ok: false,
+    error: `${base}; durable rollback failed: ${rollbackDetail}`,
+  };
 }
 
-function rollbackTab(removeTab: (id: string) => void, id: string): void {
+function rollbackTab(removeTab: (id: string) => void, id: string): unknown | undefined {
   try {
     removeTab(id);
-  } catch {
-    // Zustand updates memory before its persistence adapter writes. A failed
-    // rollback write can therefore still remove the transient in-memory tab.
+    return undefined;
+  } catch (error) {
+    // Zustand updates memory before its persistence adapter writes, but the
+    // durable snapshot may still contain the temporary tab.
+    return error;
   }
 }
 
@@ -239,10 +314,12 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
       sourceName: string,
       addTab: AddWorkspaceTab,
       removeTab: (id: string) => void,
-      sourceLayout?: Record<string, unknown>
+      sourceLayout?: Record<string, unknown>,
+      commitTabCreation?: (id: string, transactionId: string) => void,
     ): WorkspaceLifecycleResult => {
       const newName = `${sourceName} (Copy)`;
       const newId = generateWorkspaceId();
+      const transaction = creationTransaction(newId);
       let tabMayExist = false;
       try {
         const sourceMeta = getWorkspaceMeta(sourceTabId);
@@ -251,7 +328,7 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
         // Create the primary layout first. If supplementary metadata cannot be
         // persisted, remove the tab again so the two stores cannot diverge.
         tabMayExist = true;
-        addTab(newName, sourceLayout, newId);
+        addTab(newName, sourceLayout, newId, transaction);
         try {
           upsertWorkspaceMeta({
             id: newId,
@@ -259,15 +336,16 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
             createdAt: now,
             updatedAt: now,
             sourcePresetId: sourceMeta?.sourcePresetId,
+            creationTransactionId: transaction.id,
           });
+          commitTabCreation?.(newId, transaction.id);
         } catch (error) {
-          rollbackTab(removeTab, newId);
-          return persistenceFailure(error);
+          return persistenceFailure(error, rollbackTab(removeTab, newId));
         }
         return { ok: true, id: newId };
       } catch (error) {
-        if (tabMayExist) rollbackTab(removeTab, newId);
-        return persistenceFailure(error);
+        const rollbackError = tabMayExist ? rollbackTab(removeTab, newId) : undefined;
+        return persistenceFailure(error, rollbackError);
       }
     },
     []
@@ -277,9 +355,11 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
     (
       preset: WorkspacePreset,
       addTab: AddWorkspaceTab,
-      removeTab: (id: string) => void
+      removeTab: (id: string) => void,
+      commitTabCreation?: (id: string, transactionId: string) => void,
     ): WorkspaceLifecycleResult => {
       const newId = generateWorkspaceId();
+      const transaction = creationTransaction(newId);
       const now = new Date().toISOString();
       let tabMayExist = false;
       try {
@@ -290,6 +370,7 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
           preset.name,
           preset.build() as unknown as Record<string, unknown>,
           newId,
+          transaction,
         );
         try {
           upsertWorkspaceMeta({
@@ -298,15 +379,16 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
             createdAt: now,
             updatedAt: now,
             sourcePresetId: preset.id,
+            creationTransactionId: transaction.id,
           });
+          commitTabCreation?.(newId, transaction.id);
         } catch (error) {
-          rollbackTab(removeTab, newId);
-          return persistenceFailure(error);
+          return persistenceFailure(error, rollbackTab(removeTab, newId));
         }
         return { ok: true, id: newId };
       } catch (error) {
-        if (tabMayExist) rollbackTab(removeTab, newId);
-        return persistenceFailure(error);
+        const rollbackError = tabMayExist ? rollbackTab(removeTab, newId) : undefined;
+        return persistenceFailure(error, rollbackError);
       }
     },
     []
