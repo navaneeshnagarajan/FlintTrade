@@ -627,6 +627,19 @@ describe("TerminalRoute saved-layout restore", () => {
     expect(mockLayoutState.getTabLayout("default")).toBe(corruptLayout);
   });
 
+  it("quarantines a FlexLayout root that Model.fromJson permissively normalises", async () => {
+    const malformedRoot = { layout: {} };
+    mockLayoutState.getTabLayout.mockReturnValue(malformedRoot);
+
+    renderTerminalRoute();
+
+    expect(await screen.findByRole("alert", { name: "Workspace layout storage error" }))
+      .toHaveTextContent(/layout is corrupted and has been quarantined/i);
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    expect(mockLayoutState.saveTabLayout).not.toHaveBeenCalled();
+    expect(mockLayoutState.getTabLayout("default")).toBe(malformedRoot);
+  });
+
   it("quarantines a non-empty FlexLayout document whose root was truncated away", async () => {
     const missingRoot = { global: {}, borders: [] };
     mockLayoutState.getTabLayout.mockReturnValue(missingRoot);

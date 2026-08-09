@@ -214,6 +214,44 @@ function creationTransaction(id: string): WorkspaceCreationTransaction {
   return { id: `txn_${id}`, state: "pending" };
 }
 
+function cloneJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneJsonValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [key, cloneJsonValue(entry)]),
+  );
+}
+
+/**
+ * Clone a FlexLayout document while giving every layout node a new identity.
+ * Panel-scoped settings, FDC3 membership and caches use node IDs as keys, so a
+ * verbatim layout clone would couple the source and copy. Config values remain
+ * unchanged; only row/tabset/tab/border identities are reminted.
+ */
+export function cloneFlexLayoutWithFreshIds(
+  sourceLayout: Record<string, unknown>,
+  workspaceId: string,
+): Record<string, unknown> {
+  let sequence = 0;
+  const remintNode = (value: unknown): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return cloneJsonValue(value);
+    const source = value as Record<string, unknown>;
+    const clone = cloneJsonValue(source) as Record<string, unknown>;
+    if (["row", "tabset", "tab", "border"].includes(String(source.type))) {
+      sequence += 1;
+      clone.id = `clone-${workspaceId}-${sequence}`;
+    }
+    if (Array.isArray(source.children)) clone.children = source.children.map(remintNode);
+    return clone;
+  };
+
+  const cloned = cloneJsonValue(sourceLayout) as Record<string, unknown>;
+  if (sourceLayout.layout !== undefined) cloned.layout = remintNode(sourceLayout.layout);
+  if (Array.isArray(sourceLayout.borders)) cloned.borders = sourceLayout.borders.map(remintNode);
+  return cloned;
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -327,8 +365,13 @@ export function useWorkspaceLifecycle(): UseWorkspaceLifecycleReturn {
 
         // Create the primary layout first. If supplementary metadata cannot be
         // persisted, remove the tab again so the two stores cannot diverge.
+        // FlexLayout IDs are authority for panel-scoped state; remint them so
+        // source and clone cannot share chart settings, channels or caches.
+        const clonedLayout = sourceLayout === undefined
+          ? undefined
+          : cloneFlexLayoutWithFreshIds(sourceLayout, newId);
         tabMayExist = true;
-        addTab(newName, sourceLayout, newId, transaction);
+        addTab(newName, clonedLayout, newId, transaction);
         try {
           upsertWorkspaceMeta({
             id: newId,

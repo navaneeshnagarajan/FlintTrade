@@ -393,7 +393,7 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     expect(meta.creationTransactionId).toMatch(/^txn_ws_/);
   });
 
-  it("clones serializedLayout when provided (unified id)", () => {
+  it("clones layout structure while reminting every FlexLayout node id", () => {
     const { result } = renderHook(() => useWorkspaceLifecycle());
     const realAddTab = useLayoutStore.getState().addTab;
     const realRemoveTab = useLayoutStore.getState().removeTab;
@@ -401,7 +401,21 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     const fakeLayout = {
       global: {},
       borders: [],
-      layout: { type: "row", children: [] },
+      layout: {
+        type: "row",
+        id: "source-row",
+        children: [{
+          type: "tabset",
+          id: "source-tabset",
+          children: [{
+            type: "tab",
+            id: "source-chart",
+            component: "chart",
+            name: "Chart",
+            config: { symbol: "NIFTY", grid: false },
+          }],
+        }],
+      },
     };
 
     act(() => {
@@ -419,8 +433,37 @@ describe("useWorkspaceLifecycle.cloneWorkspace", () => {
     const meta = entries.find((entry) => entry.name === "With Layout (Copy)");
     expect(meta).toBeDefined();
     const layoutTabs = useLayoutStore.getState().tabs;
-    const tab = layoutTabs.find((layoutTab) => layoutTab.id === meta?.id);
-    expect(tab?.serializedLayout).toEqual(fakeLayout);
+    const clonedLayout = layoutTabs.find((layoutTab) => layoutTab.id === meta?.id)?.serializedLayout;
+    expect(clonedLayout).toBeDefined();
+    expect(clonedLayout).not.toBe(fakeLayout);
+
+    const collectIds = (value: unknown, ids = new Set<string>()): Set<string> => {
+      if (Array.isArray(value)) {
+        for (const item of value) collectIds(item, ids);
+      } else if (value !== null && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        if (typeof record.id === "string") ids.add(record.id);
+        for (const item of Object.values(record)) collectIds(item, ids);
+      }
+      return ids;
+    };
+    const sourceIds = collectIds(fakeLayout);
+    const cloneIds = collectIds(clonedLayout);
+    expect([...cloneIds].filter((id) => sourceIds.has(id))).toEqual([]);
+    expect(clonedLayout).toMatchObject({
+      layout: {
+        type: "row",
+        children: [{
+          type: "tabset",
+          children: [{
+            type: "tab",
+            component: "chart",
+            name: "Chart",
+            config: { symbol: "NIFTY", grid: false },
+          }],
+        }],
+      },
+    });
   });
   it("preserves sourcePresetId from the source workspace", () => {
     upsertWorkspaceMeta({

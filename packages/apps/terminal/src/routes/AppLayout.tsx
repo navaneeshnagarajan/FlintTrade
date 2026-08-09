@@ -21,7 +21,7 @@ import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useLayoutStore } from "@/stores/layoutStore";
+import { useLayoutStore, WorkspaceStorageError } from "@/stores/layoutStore";
 import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
@@ -245,7 +245,13 @@ export default function AppLayout() {
   const executeTradeWorkspaceAction = useCallback((pending: PendingTradeEvent) => {
     if (pending.name === "flinttrade:apply-layout") {
       const presetId = getPresetId(pending.detail);
-      if (presetId) useLayoutStore.getState().applyPreset(presetId);
+      if (presetId) {
+        try {
+          useLayoutStore.getState().applyPreset(presetId);
+        } catch (error) {
+          if (!(error instanceof WorkspaceStorageError)) throw error;
+        }
+      }
       return;
     }
 
@@ -258,7 +264,11 @@ export default function AppLayout() {
     }
 
     if (pending.name === "flinttrade:reset-layout") {
-      useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
+      try {
+        useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
+      } catch (error) {
+        if (!(error instanceof WorkspaceStorageError)) throw error;
+      }
       return;
     }
 

@@ -63,6 +63,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export type SerializedLayoutKind = "empty" | "setup" | "dockview" | "flexlayout" | "corrupt";
 
+function hasValidOptionalNodeId(node: Record<string, unknown>): boolean {
+  return node.id === undefined || (typeof node.id === "string" && node.id.length > 0);
+}
+
+function isFlexLayoutTab(node: unknown): boolean {
+  return isRecord(node)
+    && node.type === "tab"
+    && hasValidOptionalNodeId(node)
+    && typeof node.component === "string"
+    && node.component.length > 0
+    && typeof node.name === "string";
+}
+
+function isFlexLayoutTabset(node: unknown): boolean {
+  return isRecord(node)
+    && node.type === "tabset"
+    && hasValidOptionalNodeId(node)
+    && Array.isArray(node.children)
+    && node.children.every(isFlexLayoutTab);
+}
+
+function isFlexLayoutRow(node: unknown): boolean {
+  return isRecord(node)
+    && node.type === "row"
+    && hasValidOptionalNodeId(node)
+    && Array.isArray(node.children)
+    && node.children.every((child) => isFlexLayoutRow(child) || isFlexLayoutTabset(child));
+}
+
+function isFlexLayoutBorder(node: unknown): boolean {
+  return isRecord(node)
+    && node.type === "border"
+    && hasValidOptionalNodeId(node)
+    && typeof node.location === "string"
+    && Array.isArray(node.children)
+    && node.children.every(isFlexLayoutTab);
+}
+
+/**
+ * FlexLayout's parser deliberately normalises malformed documents. Define the
+ * persisted contract positively before handing data to Model.fromJson so a
+ * generated empty model can never autosave over truncated evidence.
+ */
+function hasValidFlexLayoutSchema(layout: Record<string, unknown>): boolean {
+  return (layout.global === undefined || isRecord(layout.global))
+    && (layout.borders === undefined
+      || (Array.isArray(layout.borders) && layout.borders.every(isFlexLayoutBorder)))
+    && isFlexLayoutRow(layout.layout);
+}
+
 export function classifySerializedLayout(
   layout: Record<string, unknown> | undefined,
 ): SerializedLayoutKind {
@@ -79,6 +129,7 @@ export function classifySerializedLayout(
 
   if (isRecord(layout.grid) && isRecord(layout.panels)) return "dockview";
 
+  if (!hasValidFlexLayoutSchema(layout)) return "corrupt";
   try {
     Model.fromJson(layout as unknown as IJsonModel);
     return "flexlayout";
@@ -145,6 +196,10 @@ function hasQuarantinedTab(value: StorageValue<PersistedLayoutState>): boolean {
   );
 }
 
+function tabsContainQuarantinedLayout(tabs: LayoutTab[]): boolean {
+  return tabs.some((tab) => classifySerializedLayout(tab.serializedLayout) === "corrupt");
+}
+
 function inspectInitialLayoutStorage(): InitialLayoutStorageInspection {
   if (typeof window === "undefined") return { error: null, quarantined: false };
   let raw: string | null;
@@ -172,15 +227,59 @@ function inspectInitialLayoutStorage(): InitialLayoutStorageInspection {
 const initialLayoutStorage = inspectInitialLayoutStorage();
 let layoutStorageError = initialLayoutStorage.error;
 let layoutStorageQuarantined = initialLayoutStorage.quarantined;
+let lastPersistedLayoutCanonical: string | null = null;
+let quarantinedLayoutEvidenceRaw: string | null = null;
+
+function canonicalizePersistedLayoutValue(value: StorageValue<PersistedLayoutState>): string {
+  return JSON.stringify({
+    state: {
+      tabs: value.state.tabs,
+      activeTabId: value.state.activeTabId,
+    },
+    ...(value.version === undefined ? {} : { version: value.version }),
+  });
+}
+
+function quarantineEvidenceKey(raw: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < raw.length; index += 1) {
+    hash ^= raw.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${LAYOUT_STORAGE_KEY}:quarantine:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function preserveQuarantineEvidence(): void {
+  if (!quarantinedLayoutEvidenceRaw) return;
+  const key = quarantineEvidenceKey(quarantinedLayoutEvidenceRaw);
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing === quarantinedLayoutEvidenceRaw) return;
+    if (existing !== null) {
+      throw new WorkspaceStorageError("Workspace quarantine evidence key collision detected.");
+    }
+    window.localStorage.setItem(key, quarantinedLayoutEvidenceRaw);
+  } catch (error) {
+    if (error instanceof WorkspaceStorageError) throw error;
+    const detail = error instanceof Error ? error.message : "unknown storage error";
+    throw new WorkspaceStorageError(`Workspace quarantine evidence could not be saved: ${detail}`);
+  }
+}
 
 const layoutStorage: PersistStorage<PersistedLayoutState> = {
   getItem: (name) => {
     if (layoutStorageError) return null;
     const raw = window.localStorage.getItem(name);
-    if (raw === null) return null;
+    if (raw === null) {
+      lastPersistedLayoutCanonical = null;
+      quarantinedLayoutEvidenceRaw = null;
+      return null;
+    }
     try {
       const value = parsePersistedLayoutValue(raw);
       layoutStorageQuarantined = hasQuarantinedTab(value);
+      quarantinedLayoutEvidenceRaw = layoutStorageQuarantined ? raw : null;
+      lastPersistedLayoutCanonical = canonicalizePersistedLayoutValue(value);
       return value;
     } catch (error) {
       layoutStorageError = error instanceof WorkspaceStorageError
@@ -190,24 +289,29 @@ const layoutStorage: PersistStorage<PersistedLayoutState> = {
     }
   },
   setItem: (name, value) => {
-    // A corrupt snapshot is evidence, not an empty store. Keep the exact bytes
-    // until an explicit recovery flow exists; transient UI state may still move.
-    if (layoutStorageError || layoutStorageQuarantined) return;
-    window.localStorage.setItem(name, JSON.stringify(value));
+    // A malformed top-level envelope is opaque evidence and must remain byte-for-byte.
+    // Per-tab quarantine is different: healthy siblings may persist while the corrupt
+    // serializedLayout value is carried through unchanged.
+    if (layoutStorageError) return;
+    const canonical = canonicalizePersistedLayoutValue(value);
+    if (canonical === lastPersistedLayoutCanonical) return;
+    if (layoutStorageQuarantined) preserveQuarantineEvidence();
+    window.localStorage.setItem(name, canonical);
+    lastPersistedLayoutCanonical = canonical;
+    layoutStorageQuarantined = hasQuarantinedTab(value);
   },
   removeItem: (name) => {
-    if (layoutStorageError || layoutStorageQuarantined) return;
+    if (layoutStorageError) return;
     window.localStorage.removeItem(name);
+    lastPersistedLayoutCanonical = null;
+    layoutStorageQuarantined = false;
+    quarantinedLayoutEvidenceRaw = null;
   },
 };
 
 function assertLayoutStorageHealthy(state: LayoutStore): void {
   if (state.layoutStorageError) throw state.layoutStorageError;
-  if (state.layoutStorageQuarantined) {
-    throw new WorkspaceStorageError(
-      "Workspace layout storage contains a quarantined document and is read-only until recovery.",
-    );
-  }
+  if (state.layoutStorageQuarantined) preserveQuarantineEvidence();
 }
 
 function getCorruptTabLayoutError(tab: LayoutTab): WorkspaceStorageError | null {
@@ -281,7 +385,11 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
       if (remaining.length === 0) return state;
       const newActive =
         state.activeTabId === id ? remaining[0].id : state.activeTabId;
-      return { tabs: remaining, activeTabId: newActive };
+      return {
+        tabs: remaining,
+        activeTabId: newActive,
+        layoutStorageQuarantined: tabsContainQuarantinedLayout(remaining),
+      };
     });
   },
   setActiveTab: (id) => {
@@ -294,6 +402,8 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   },
   renameTab: (id, name) => {
     assertLayoutStorageHealthy(get());
+    const existing = get().tabs.find((tab) => tab.id === id);
+    if (existing) assertTabLayoutReadable(existing);
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
     }));
@@ -302,6 +412,11 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
     assertLayoutStorageHealthy(get());
     const existing = get().tabs.find((tab) => tab.id === id);
     if (existing) assertTabLayoutReadable(existing);
+    if (classifySerializedLayout(layout) === "corrupt") {
+      throw new WorkspaceStorageError(
+        `Workspace "${existing?.name ?? id}" rejected a corrupted layout update.`,
+      );
+    }
     set((state) => ({
       tabs: state.tabs.map((t) =>
         t.id === id ? { ...t, serializedLayout: layout } : t
@@ -319,6 +434,8 @@ const storeImpl: StateCreator<LayoutStore, [["zustand/persist", unknown]]> = (se
   setPresetPickerOpen: (open) => set({ presetPickerOpen: open }),
   applyPreset: (presetId) => {
     assertLayoutStorageHealthy(get());
+    const activeTab = get().tabs.find((tab) => tab.id === get().activeTabId);
+    if (activeTab) assertTabLayoutReadable(activeTab);
     const api = get().workspaceApi;
     if (!api) return;
     applyPresetImpl(api, presetId);

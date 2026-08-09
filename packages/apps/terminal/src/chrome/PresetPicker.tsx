@@ -270,7 +270,14 @@ export default function PresetPicker({ isOpen, onClose }: PresetPickerProps) {
         setWorkspaceError("Workspace is still loading. Try again in a moment.");
         return;
       }
-      applyPreset(presetId);
+      try {
+        applyPreset(presetId);
+      } catch (error) {
+        setWorkspaceError(
+          error instanceof Error ? error.message : "Workspace template could not be applied.",
+        );
+        return;
+      }
       setWorkspaceError(null);
       onClose();
     },

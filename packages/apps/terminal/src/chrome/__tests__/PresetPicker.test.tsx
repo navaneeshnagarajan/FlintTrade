@@ -245,4 +245,18 @@ describe("PresetPicker", () => {
     expect(presetButton).toBeDisabled();
     expect(mockLayoutState.applyPreset).not.toHaveBeenCalled();
   });
+
+  it("keeps the picker open and surfaces a per-tab quarantine error", () => {
+    const onClose = vi.fn();
+    mockLayoutState.workspaceApiTabId = "tab-1";
+    mockLayoutState.applyPreset.mockImplementationOnce(() => {
+      throw new Error('Workspace "Corrupt" layout is corrupted and has been quarantined.');
+    });
+
+    render(<PresetPicker isOpen={true} onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Market Watch / }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/has been quarantined/i);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
