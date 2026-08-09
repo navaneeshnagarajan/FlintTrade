@@ -482,7 +482,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: Run fail-closed Playwright infrastructure self-tests (Chromium-only, deterministic, no backend/broker/network)
-        run: pnpm --dir packages/apps/terminal exec playwright test e2e/infra-self-tests.spec.ts --project=chromium --reporter=github
+      - name: Type-check Playwright infrastructure
+        run: pnpm --dir packages/apps/terminal run e2e:infra:typecheck
+      - name: Lint Playwright infrastructure
+        run: pnpm --dir packages/apps/terminal run e2e:infra:lint
+      - name: Install the lockfile-pinned Playwright Chromium build
+        run: pnpm --dir packages/apps/terminal exec playwright install --with-deps chromium
+      - name: Run network-independent fail-closed self-tests (Chromium-only)
+        run: pnpm --dir packages/apps/terminal exec playwright test e2e/infra-self-tests.spec.ts --config=playwright.infra.config.ts --project=chromium --reporter=github --workers=1 --retries=0
         env:
           CI: true
