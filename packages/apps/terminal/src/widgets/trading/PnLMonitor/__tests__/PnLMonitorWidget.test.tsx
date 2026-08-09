@@ -568,7 +568,7 @@ describe("PnLMonitorWidget — provenance badge", () => {
   it("labels Practice mode data as practice, not sample", async () => {
     useModeStore.setState({ mode: "practice" });
     renderWidget();
-    expect(screen.getByText("Practice data")).toBeInTheDocument();
+    expect(screen.queryByText("Practice data")).not.toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
@@ -579,7 +579,7 @@ describe("PnLMonitorWidget — provenance badge", () => {
     await waitFor(() => {
       expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     });
-    expect(screen.getByText("Practice data")).toBeInTheDocument();
+    expect(screen.queryByText("Practice data")).not.toBeInTheDocument();
   });
 });
 

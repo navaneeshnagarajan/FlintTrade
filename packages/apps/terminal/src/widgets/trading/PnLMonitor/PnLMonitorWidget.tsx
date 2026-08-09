@@ -117,7 +117,6 @@ function PnLMonitorWidget(props: WidgetProps) {
   const [view, setView] = useState<PnLMonitorView>(() => resolvePnLMonitorView(panelParams?.view));
 
   const mode = useModeStore((s) => s.mode);
-  const isConnected = useBrokerConnected();
   const accountReadsEnabled = useAccountReadsEnabled();
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
   const isExplore = mode === "explore";
@@ -131,7 +130,7 @@ function PnLMonitorWidget(props: WidgetProps) {
   // Effective data selection per contract — Explore uses deterministic local sample pack.
   const samplePositions = SAMPLE_POSITION_BOOK;
   const sampleFunds = getDemoFunds();
-  const sampleTrades: any[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
+  const sampleTrades: unknown[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
 
   const positions = isExplore ? samplePositions : positionsQuery.data;
   const funds = isExplore ? sampleFunds : fundsQuery.data;
@@ -165,6 +164,25 @@ function PnLMonitorWidget(props: WidgetProps) {
           positionsQuery.error instanceof Error
             ? positionsQuery.error.message
             : "Fetch failed",
+      }));
+      return;
+    }
+    if (!accountReadsEnabled && !isExplore) {
+      // Disconnected Live: honest empty state, no sample, no loading loop, no numeric claim
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: null,
+        netPnL: 0,
+        realisedPnL: 0,
+        unrealisedPnL: 0,
+        peakPnL: 0,
+        peakTime: "--:--",
+        minPnL: 0,
+        minTime: "--:--",
+        maxDrawdown: 0,
+        byStrategy: [],
+        series: [],
       }));
       return;
     }
@@ -247,6 +265,13 @@ function PnLMonitorWidget(props: WidgetProps) {
     positionsQuery.error,
     positionsQuery.data,
     tradebookQuery.data,
+    mode,
+    accountReadsEnabled,
+    positions,
+    funds,
+    trades,
+    loading,
+    dataReady,
   ]);
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.
@@ -412,19 +437,20 @@ function PnLMonitorWidget(props: WidgetProps) {
             series={state.series}
             loading={state.loading}
             riskLimits={riskLimits}
+            accountReadsEnabled={accountReadsEnabled}
           />
         </TabsContent>
 
         <TabsContent value="summary" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
           <SummaryView
-            positions={positionsQuery.data ?? []}
-            funds={fundsQuery.data}
+            positions={positions ?? []}
+            funds={funds}
             netPnL={state.netPnL}
           />
         </TabsContent>
 
         <TabsContent value="drawdown" className="flex-1 flex flex-col m-0 min-h-0 overflow-hidden">
-          <DrawdownView trades={tradebookQuery.data ?? []} />
+          <DrawdownView trades={trades} />
         </TabsContent>
       </Tabs>
     </div>

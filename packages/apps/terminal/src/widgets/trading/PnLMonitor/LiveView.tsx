@@ -86,6 +86,7 @@ export interface LiveViewProps {
   series: MtmPoint[];
   loading: boolean;
   riskLimits: { mtmTarget: number; mtmStoploss: number };
+  accountReadsEnabled?: boolean;
 }
 
 export function LiveView({
@@ -101,6 +102,7 @@ export function LiveView({
   series,
   loading,
   riskLimits,
+  accountReadsEnabled = true,
 }: LiveViewProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -363,6 +365,13 @@ export function LiveView({
       {loading && series.length === 0 && (
         <div className="shrink-0 flex items-center justify-center py-1 text-text-muted text-xs">
           Loading positions…
+        </div>
+      )}
+
+      {/* Disconnected Live: explicit Broker-required body (no Sample, no numeric claim, no spinner) */}
+      {!accountReadsEnabled && (
+        <div className="shrink-0 flex items-center justify-center py-1 text-text-muted text-xs" role="status">
+          Broker required — connect a broker to load live P&amp;L
         </div>
       )}
 

@@ -16,6 +16,7 @@ import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useModeStore } from "@/stores/modeStore";
 
 const chartMocks = vi.hoisted(() => {
   const areaSeriesOptions: unknown[] = [];
@@ -239,6 +240,7 @@ describe("PnLMonitorWidget — chart and feed behaviour", () => {
   it("gates shared caches and shows Broker required (no Sample) when disconnected in Live", () => {
     // Per truthful provenance contract: disconnected Live (no sample pack bound) must not
     // fabricate Sample data or call prohibited account APIs. Shows honest Broker required.
+    useModeStore.setState({ mode: "live" });
     mockUseBrokerConnected.mockReturnValue(false);
     mockUseAccountReadsEnabled.mockReturnValue(false);
     mockUsePositions.mockReturnValue({ data: undefined });
