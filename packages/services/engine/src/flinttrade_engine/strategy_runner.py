@@ -796,10 +796,10 @@ def _require_bwrap_startup(process: subprocess.Popen[Any], readiness_path: Path)
     deadline = time.monotonic() + _BWRAP_STARTUP_TIMEOUT_SECONDS
     while True:
         try:
-            readiness = readiness_path.read_text(encoding="utf-8")
+            readiness = readiness_path.read_bytes()
         except OSError as exc:
             raise _BubblewrapStartupError("Bubblewrap readiness file became unavailable") from exc
-        if readiness == _BWRAP_READY_STATE:
+        if readiness == _BWRAP_READY_STATE.encode("ascii"):
             return
         if readiness:
             raise _BubblewrapStartupError("Bubblewrap readiness handshake was invalid")

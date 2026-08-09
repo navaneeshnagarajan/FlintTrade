@@ -588,6 +588,46 @@ class TestStartStop:
         assert strategy_id not in runner._running
 
     @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
+    def test_non_utf8_bwrap_readiness_terminates_and_reaps_without_releasing_gate(
+        self,
+        tmp_path,
+    ):
+        import flinttrade_engine.strategy_runner as mod
+
+        runner = mod.UserStrategyRunner(strategies_dir=tmp_path / "strategies")
+        strategy_id = runner.upload("non_utf8_ready", SAFE_CODE)
+        process = self._make_mock_process(returncode=None)
+        process.poll.return_value = None
+        process.wait.side_effect = lambda timeout: -15 if timeout == 0 else (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd=["/usr/bin/bwrap"], timeout=timeout)
+        )
+        tree = MagicMock()
+        tree.is_alive.side_effect = [True, False]
+        tree.wait_gone.return_value = True
+        original_create = mod._create_bwrap_readiness_file
+
+        def create_non_utf8_marker(work_dir: Path) -> Path:
+            marker = original_create(work_dir)
+            marker.write_bytes(b"\xff")
+            return marker
+
+        with (
+            patch.object(mod, "_find_bwrap_executable", return_value="/usr/bin/bwrap"),
+            patch.object(mod, "_create_bwrap_readiness_file", side_effect=create_non_utf8_marker),
+            patch.object(mod, "_create_process_tree", return_value=tree),
+            patch.object(mod, "_release_strategy_start_gate") as release_gate,
+            patch("subprocess.Popen", return_value=process) as popen,
+            pytest.raises(RuntimeError, match="readiness handshake was invalid"),
+        ):
+            runner.start(strategy_id)
+
+        assert popen.call_count == 1
+        release_gate.assert_not_called()
+        tree.terminate.assert_called_once_with()
+        tree.wait_gone.assert_called_once()
+        assert strategy_id not in runner._running
+
+    @pytest.mark.skipif(not POSIX_RESOURCE_LIMITS, reason=NO_POSIX_RESOURCE_REASON)
     def test_start_strategy(self, runner):
         strategy_id = runner.upload("test_strat", SAFE_CODE)
         mock_proc = self._make_mock_process()
