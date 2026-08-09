@@ -214,25 +214,39 @@ describe("TopBarV2", () => {
   });
 
   it("names a trustworthy in-session result Market open rather than Live", () => {
-    const now = Date.now();
-    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
-    mockTimingsQuery.dataUpdatedAt = now;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-10T04:00:00.000Z"));
+      const now = Date.now();
+      mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+      mockTimingsQuery.dataUpdatedAt = now;
 
-    renderTopBarV2();
+      const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+      expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+      expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("names a trustworthy out-of-session result Market closed", () => {
-    const now = Date.now();
-    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
-    mockTimingsQuery.dataUpdatedAt = now;
+  it("names a trustworthy weekday out-of-session result Market closed", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-10T04:00:00.000Z"));
+      const now = Date.now();
+      mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
+      mockTimingsQuery.dataUpdatedAt = now;
 
-    renderTopBarV2();
+      const { unmount } = renderTopBarV2();
 
-    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
-    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+      expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+      expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not present stale timing data as an authoritative open market", () => {
