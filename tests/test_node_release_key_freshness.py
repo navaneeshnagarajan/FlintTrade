@@ -467,22 +467,3 @@ def test_a_revoked_mirrored_key_fails(
     captured = capsys.readouterr()
     assert code == 1, captured.out
     assert "REVOKED" in captured.err
-
-
-@pytest.mark.unit
-@pytest.mark.unit
-def test_gpg_module_scoped_yield_fixture_cleans_temp_dirs_real_suite_before_after_leak_assertion():
-    """Verify the GPG module-scoped yield fixture cleans temp dirs; use real suite plus before/after leak assertion, not theater."""
-    import tempfile
-    from pathlib import Path
-    prefix = "node-release-key-"
-    tmpdir = Path(tempfile.gettempdir())
-    before = 0
-    if tmpdir.exists():
-        before = sum(1 for p in tmpdir.iterdir() if p.is_dir() and p.name.startswith(prefix))
-    # Real suite already exercised the module-scoped fixture during this pytest run
-    after = 0
-    if tmpdir.exists():
-        after = sum(1 for p in tmpdir.iterdir() if p.is_dir() and p.name.startswith(prefix))
-    assert after <= before, f"GPG temp dir leak detected: before={before} after={after}"
-
