@@ -85,4 +85,14 @@ describe("ModeSelectRoute", () => {
     // missing/expired session).
     expect(screen.getByText(/no token/i)).toBeInTheDocument();
   });
+
+  it("marks a valid requested mode as selected without submitting it", () => {
+    const onSelect = vi.fn();
+
+    render(<ModeSelectRoute initialMode="practice" onSelect={onSelect} />);
+
+    expect(screen.getByRole("radio", { name: /Practice/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Explore/i })).toHaveAttribute("aria-checked", "false");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });

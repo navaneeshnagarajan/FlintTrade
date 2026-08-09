@@ -175,8 +175,8 @@ describe("ExploreRoute", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /get started/i }));
 
-    expect(mockNavigate).toHaveBeenCalledWith("/setup-account");
-    expect(screen.getByRole("link", { name: /connect gateway/i })).toHaveAttribute("href", "/setup-account");
+    expect(mockNavigate).toHaveBeenCalledWith("/setup");
+    expect(screen.getByRole("link", { name: /connect gateway/i })).toHaveAttribute("href", "/setup");
   });
 
   it("shows all six module preview cards", () => {

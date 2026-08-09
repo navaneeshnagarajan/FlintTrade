@@ -19,6 +19,8 @@ import { unlockWithPin } from "@/lib/modeAuth";
 
 interface ModeSelectRouteProps {
   onSelect: (mode: AppMode, liveSessionToken?: string) => void;
+  /** Valid canonical deep links may preselect a mode, but never submit it. */
+  initialMode?: AppMode;
 }
 
 interface ModeCardConfig {
@@ -82,8 +84,8 @@ const MODE_CARDS: ModeCardConfig[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-export default function ModeSelectRoute({ onSelect }: ModeSelectRouteProps) {
-  const [selected, setSelected] = useState<AppMode>("explore");
+export default function ModeSelectRoute({ onSelect, initialMode = "explore" }: ModeSelectRouteProps) {
+  const [selected, setSelected] = useState<AppMode>(initialMode);
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [isVerifyingPin, setIsVerifyingPin] = useState(false);

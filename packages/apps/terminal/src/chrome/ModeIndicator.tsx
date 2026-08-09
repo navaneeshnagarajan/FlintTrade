@@ -111,7 +111,7 @@ export default function ModeIndicator() {
   const handleExploreClick = useCallback(async () => {
     if (token === "demo-user") {
       window.dispatchEvent(
-        new CustomEvent("flinttrade:navigate", { detail: { path: "/setup-account" } }),
+        new CustomEvent("flinttrade:navigate", { detail: { path: "/setup" } }),
       );
       return;
     }

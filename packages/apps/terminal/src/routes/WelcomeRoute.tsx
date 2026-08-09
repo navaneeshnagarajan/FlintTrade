@@ -387,7 +387,7 @@ export default function WelcomeRoute() {
       if (!raw) return;
       const saved = JSON.parse(raw) as { accountCreated?: boolean; currentStep?: number };
       if (saved?.accountCreated && typeof saved.currentStep === "number" && saved.currentStep < 6) {
-        navigate("/setup-account", { replace: true });
+        navigate("/setup", { replace: true });
       }
     } catch {
       // Ignore corrupt progress and continue to sign-in.
@@ -664,7 +664,7 @@ export default function WelcomeRoute() {
                 {showSetupActions ? (
                   <>
                     <ShimmerButton
-                      onClick={() => navigate("/setup-account")}
+                      onClick={() => navigate("/setup")}
                       shimmerColor="#22c55e"
                       className="px-10 py-3.5 text-base font-semibold bg-profit/10 border-profit/45 text-profit hover:shadow-[0_0_34px_rgba(34,197,94,0.36)]"
                     >

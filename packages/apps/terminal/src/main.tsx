@@ -14,6 +14,11 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { renderReactRoot } from "./lib/reactRoot";
 import { exploreRoutePolicy, isPublicDemoBuild } from "./lib/demoSession";
+import {
+  CANONICAL_SETUP_PATH,
+  LEGACY_SETUP_ACCOUNT_PATH,
+  SetupAccountAlias,
+} from "./routes/setupRouting";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
@@ -60,8 +65,7 @@ if (glitchtipDsn) {
 
 const HomeRoute = lazy(() => import("./routes/HomeRoute"));
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
-const SetupRoute = lazy(() => import("./routes/SetupRoute"));
-const SetupAccountRoute = lazy(() => import("./routes/SetupAccountRoute"));
+const CanonicalSetupRoute = lazy(() => import("./routes/CanonicalSetupRoute"));
 const InvestRoute = lazy(() => import("./routes/InvestRoute"));
 const LearnRoute = lazy(() => import("./routes/LearnRoute"));
 const WelcomeRoute = lazy(() => import("./routes/WelcomeRoute"));
@@ -115,10 +119,11 @@ const router = createBrowserRouter([
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
       { path: "explore", element: <ExplorePathElement /> },
-      /* Setup collects real credentials (account password, PIN, broker API keys),
-         so the public demo build sends both routes to Explore instead. */
-      { path: "setup", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
-      { path: "setup-account", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
+      /* Canonical setup owns account creation and onboarding. The historical
+         /setup-account URL remains an explicit compatibility alias. Public demo
+         builds send both paths to Explore before any setup UI can mount. */
+      { path: CANONICAL_SETUP_PATH.slice(1), element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><CanonicalSetupRoute /></Suspense></RouteErrorBoundary> },
+      { path: LEGACY_SETUP_ACCOUNT_PATH.slice(1), element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <SetupAccountAlias /> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {
