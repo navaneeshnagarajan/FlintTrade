@@ -27,6 +27,7 @@ import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
+import { appendAISymbolContext } from "@/lib/aiSymbolContext";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -44,7 +45,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/admin": "Admin Panel",
 };
 
-type NavigationEventDetail = string | { path?: unknown; context?: { symbol?: string; exchange?: string; source?: string } };
+type NavigationEventDetail = string | { path?: unknown; context?: unknown };
 type TradeForwardEventName =
   | "flinttrade:addWidget"
   | "flinttrade:open-tool"
@@ -60,17 +61,7 @@ interface PendingTradeEvent {
 function getNavigationPath(detail: NavigationEventDetail): string | null {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && typeof detail.path === "string") {
-    const base = detail.path;
-    if (detail.context && typeof detail.context === "object") {
-      const ctx = detail.context as { symbol?: string; exchange?: string; source?: string };
-      const params = new URLSearchParams();
-      if (ctx.symbol) params.set("symbol", ctx.symbol);
-      if (ctx.exchange) params.set("exchange", ctx.exchange);
-      if (ctx.source) params.set("source", ctx.source);
-      const qs = params.toString();
-      return qs ? `${base}?${qs}` : base;
-    }
-    return base;
+    return appendAISymbolContext(detail.path, detail.context);
   }
   return null;
 }

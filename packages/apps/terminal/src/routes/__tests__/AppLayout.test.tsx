@@ -342,18 +342,36 @@ describe("AppLayout", () => {
     expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\\\"']t[\\\"']/);
   });
 
-  // Journey-ready test seam for symbol context propagation (CommandPalette ai -> router query -> AIRoute)
-  it("carries exact symbol+exchange+source context from validated CommandPalette symbol ai selection into /ai router query (real seam, no duplicate store)", () => {
+  it("normalises and safely merges validated palette context into an existing /ai query", () => {
     renderApp();
     act(() => {
       window.dispatchEvent(
         new CustomEvent("flinttrade:navigate", {
-          detail: { path: "/ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "palette" } },
+          detail: {
+            path: "/ai?chat=saved%2Fchat#advisor",
+            context: { symbol: " nifty-26mar-fut ", exchange: "nfo", source: "palette" },
+          },
         }),
       );
     });
+
     expect(mockNavigate).toHaveBeenCalledWith(
-      "/ai?symbol=RELIANCE&exchange=NSE&source=palette",
+      "/ai?chat=saved%2Fchat&symbol=NIFTY-26MAR-FUT&exchange=NFO&source=palette#advisor",
     );
+  });
+
+  it.each([
+    ["another route", { path: "/lab?view=ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "palette" } }],
+    ["partial context", { path: "/ai?chat=one", context: { symbol: "RELIANCE", exchange: "NSE" } }],
+    ["invalid symbol", { path: "/ai", context: { symbol: "RELIANCE<script>", exchange: "NSE", source: "palette" } }],
+    ["unknown exchange", { path: "/ai", context: { symbol: "RELIANCE", exchange: "FAKE", source: "palette" } }],
+    ["untrusted source", { path: "/ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "url" } }],
+  ])("does not append symbol context for %s", (_case, detail) => {
+    renderApp();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("flinttrade:navigate", { detail }));
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith(detail.path);
   });
 });

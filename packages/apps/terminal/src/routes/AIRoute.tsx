@@ -58,6 +58,10 @@ import { getSignalIdentity } from "@/services/ftApi.ai";
 import { motionConfig, EASE_ENTER, DURATION } from "@/lib/motion";
 import { AdvisorStatusResponseSchema } from "@/lib/schemas/ftApi";
 import type { AdvisorStatusData } from "@/lib/schemas/ftApi";
+import {
+  parseAISymbolContext,
+  type AISymbolContext,
+} from "@/lib/aiSymbolContext";
 
 // ---------------------------------------------------------------------------
 // Section registry
@@ -107,10 +111,10 @@ const OVERLAY_SECTIONS = new Set<SectionId>([
 // Section: Chat — full height, no chrome
 // ---------------------------------------------------------------------------
 
-function ChatSection() {
+function ChatSection({ analysisContext }: { analysisContext?: AISymbolContext }) {
   return (
     <div className="h-full" data-tour-target="ai-chat">
-      <AIAdvisorWidget />
+      <AIAdvisorWidget analysisContext={analysisContext} />
     </div>
   );
 }
@@ -1011,10 +1015,10 @@ export default function AIRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("ai", "daysActive"); }, []);
 
   const [searchParams] = useSearchParams();
-  const symbolContext = searchParams.get("symbol");
-  const exchangeContext = searchParams.get("exchange");
-  const sourceContext = searchParams.get("source");
-  // Context from CommandPalette via real router query seam (truthful, no invent on reload/back; invalid cleared do not propagate)
+  const analysisContext = useMemo(
+    () => parseAISymbolContext(searchParams),
+    [searchParams],
+  );
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
   const [shareState, setShareState] = useState<ShareState>("idle");
   const level = useSkillLevel("ai");
@@ -1111,9 +1115,9 @@ export default function AIRoute() {
               <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
                 AI Center
               </h1>
-              {symbolContext && exchangeContext && (
+              {analysisContext && (
                 <div className="mt-1 text-[10px] text-accent/80 font-mono" data-testid="ai-symbol-context">
-                  {symbolContext} ({exchangeContext}){sourceContext ? ` • ${sourceContext}` : ""}
+                  {analysisContext.symbol} ({analysisContext.exchange}) • {analysisContext.source}
                 </div>
               )}
               <p className="text-xxs text-text-muted mt-0.5">
@@ -1163,7 +1167,7 @@ export default function AIRoute() {
       <div className="flex-1 relative overflow-hidden">
         {/* Chat is always rendered underneath (full height) */}
         <div className="absolute inset-0">
-          <ChatSection />
+          <ChatSection analysisContext={analysisContext ?? undefined} />
         </div>
 
         {/* Overlay panels slide in from right over the chat */}

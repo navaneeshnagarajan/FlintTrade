@@ -24,16 +24,60 @@ vi.mock("@/stores/settingsStore", () => ({
     }),
 }));
 
-// Mock aiConversationStore
+// Mock aiConversationStore with the same callable/getState/setState surface used
+// by the widget so request-body tests cross the real compose/send path.
+const conversationStoreMock = vi.hoisted(() => {
+  const state: {
+    messages: Array<Record<string, unknown>>;
+    isStreaming: boolean;
+    currentRoute: string;
+    conversationId: string | null;
+  } = {
+    messages: [],
+    isStreaming: false,
+    currentRoute: "/ai",
+    conversationId: null,
+  };
+  let nextId = 0;
+  const addMessage = vi.fn((role: string, content: string) => {
+    state.messages.push({
+      id: `mock-${++nextId}`,
+      role,
+      content,
+      timestamp: 1,
+      route: state.currentRoute,
+    });
+  });
+  const setStreaming = vi.fn((value: boolean) => { state.isStreaming = value; });
+  const clearMessages = vi.fn(() => { state.messages = []; });
+  const snapshot = () => ({ ...state, addMessage, setStreaming, clearMessages });
+  const useStore = Object.assign(
+    vi.fn((selector: (value: ReturnType<typeof snapshot>) => unknown) => selector(snapshot())),
+    {
+      getState: snapshot,
+      setState: vi.fn((update: Record<string, unknown> | ((value: ReturnType<typeof snapshot>) => Record<string, unknown>)) => {
+        const next = typeof update === "function" ? update(snapshot()) : update;
+        Object.assign(state, next);
+      }),
+    },
+  );
+  const reset = () => {
+    state.messages = [];
+    state.isStreaming = false;
+    state.currentRoute = "/ai";
+    state.conversationId = null;
+    nextId = 0;
+    addMessage.mockClear();
+    setStreaming.mockClear();
+    clearMessages.mockClear();
+    useStore.mockClear();
+    useStore.setState.mockClear();
+  };
+  return { useStore, reset };
+});
+
 vi.mock("@/stores/aiConversationStore", () => ({
-  useAIConversationStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({
-      messages: [],
-      isStreaming: false,
-      addMessage: vi.fn(),
-      setStreaming: vi.fn(),
-      clearMessages: vi.fn(),
-    }),
+  useAIConversationStore: conversationStoreMock.useStore,
 }));
 
 // Mock advisorApi
@@ -84,6 +128,7 @@ function Providers({ children }: { children: ReactNode }) {
 describe("AIAdvisorWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    conversationStoreMock.reset();
     mockLlmProvider.mockReturnValue("");
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No backend"));
   });
@@ -109,6 +154,80 @@ describe("AIAdvisorWidget", () => {
   it("has a send button", () => {
     render(<AIAdvisorWidget />, { wrapper: Providers });
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument();
+  });
+
+  it("does not auto-submit and sends exact analysis context in the SSE request body", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/api/v1/advisor/stream")) {
+        return new Response('data: {"token":"Done"}\n\ndata: {"done":true}\n\n', { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { configured: true, provider: "openai", model: "test" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const analysisContext = { symbol: "RELIANCE", exchange: "NSE", source: "palette" } as const;
+
+    render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "Analyse this instrument" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    });
+    const [, init] = fetchMock.mock.calls.find(([, request]) => request?.method === "POST")!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      messages: [{ role: "user", content: "Analyse this instrument" }],
+      context: analysisContext,
+    });
+  });
+
+  it("sends the same exact analysis context in streaming and non-streaming fallback bodies", async () => {
+    mockLlmProvider.mockReturnValue("openai");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (init?.method !== "POST") {
+        return new Response(JSON.stringify({ status: "error" }), { status: 200 });
+      }
+      if (url.endsWith("/api/v1/advisor/stream")) {
+        return new Response(null, { status: 404 });
+      }
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { response: "Fallback answer" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const analysisContext = { symbol: "NIFTY-26MAR-FUT", exchange: "NFO", source: "palette" } as const;
+
+    render(<AIAdvisorWidget analysisContext={analysisContext} />, { wrapper: Providers });
+    fireEvent.change(screen.getByPlaceholderText("Ask the AI advisor..."), {
+      target: { value: "What changed?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
+    });
+    const postBodies = fetchMock.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(postBodies[0]).toEqual({
+      messages: [{ role: "user", content: "What changed?" }],
+      context: analysisContext,
+    });
+    expect(postBodies[1]).toEqual({
+      messages: [{ role: "user", content: "What changed?" }],
+      message: "What changed?",
+      context: analysisContext,
+    });
   });
 });
 
