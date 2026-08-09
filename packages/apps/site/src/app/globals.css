@@ -1301,3 +1301,36 @@ kbd {
     transition: none !important;
   }
 }
+
+/* Spark Path / SiteScrollWorld pilot — enrich Graphite Continuity (default-off, graceful fallback) */
+.site-cinematic-backdrop {
+  position: relative;
+  overflow: hidden;
+}
+.site-scroll-world-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* Dim baseline Canvas2D when WebGL pilot is active */
+html.ft-scroll-world-on .site-cinematic-backdrop canvas:not(.site-scroll-world-canvas) {
+  opacity: 0.12;
+  transition: opacity 380ms ease;
+}
+
+/* Fallback / disabled state */
+html.ft-scroll-world-fallback .site-scroll-world-host,
+html.no-webgl .site-scroll-world-host {
+  display: none;
+}
+
+/* Accessibility + reduced-motion gate already enforced in JS; CSS safety net */
+@media (prefers-reduced-motion: reduce) {
+  .site-scroll-world-canvas {
+    display: none !important;
+  }
+}

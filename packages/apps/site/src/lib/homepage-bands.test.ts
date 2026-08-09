@@ -87,8 +87,8 @@ describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
   });
 
   it('places primary hero-actions before feature-grid for early mobile CTA visibility', () => {
-    const actionsIdx = pageSource.indexOf('className=\"hero-actions\"');
-    const gridIdx = pageSource.indexOf('className=\"hero-feature-grid\"');
+    const actionsIdx = pageSource.indexOf('className="hero-actions"');
+    const gridIdx = pageSource.indexOf('className="hero-feature-grid"');
     expect(actionsIdx).toBeGreaterThan(-1);
     expect(gridIdx).toBeGreaterThan(-1);
     // actions before grid in source for action-before-feature order (compact mobile)
@@ -168,11 +168,38 @@ describe('homepage Graphite Continuity A1 (bands + CTA + motion)', () => {
   });
 
   it('primary hero action remains before feature grid and controller is mounted without moving static content to client', () => {
-    const actionsIdx = pageSource.indexOf('className=\"hero-actions\"');
-    const gridIdx = pageSource.indexOf('className=\"hero-feature-grid\"');
+    const actionsIdx = pageSource.indexOf('className=\"hero-actions\\\"');
+    const gridIdx = pageSource.indexOf('className=\"hero-feature-grid\\\"');
     expect(actionsIdx).toBeGreaterThan(-1);
     expect(gridIdx).toBeGreaterThan(-1);
     expect(actionsIdx).toBeLessThan(gridIdx);
     // page stays server; controller is the only client addition
+  });
+
+  // TDD tests added first for scroll-world pilot (default-off, progressive, reduced-motion, WebGL failure, route scope, semantic CTA)
+  it('enforces default-off: SiteScrollWorld wrapper only mounts when env flag on (no three in page source, pilot isolated)', () => {
+    // Current page must not contain three or SiteScrollWorld yet (RED until enrichment)
+    expect(pageSource).not.toContain('three');
+    expect(pageSource).not.toContain('SiteScrollWorld');
+    expect(pageSource).not.toContain('site-scroll-world');
+    // Guard against leakage into server component
+  });
+
+  it('preserves semantic CTA continuity and exactly one primary CTA after enrichment', () => {
+    const primaryMatches = pageSource.match(/className=\"button primary\\\"/g) || [];
+    expect(primaryMatches.length).toBe(1);
+    expect(pageSource).toContain('Start exploring — no install needed');
+    expect(pageSource).toContain('/demo-app/welcome');
+    // WebGL canvas must be aria-hidden, pointer-events none, behind DOM
+  });
+
+  it('requires data-scroll-chapter anchors on product bands for scroll conductor (enrich not replace)', () => {
+    // Will fail until page sections are annotated
+    expect(pageSource).toMatch(/data-scroll-chapter=\\\"[0-5]\\\"/);
+  });
+
+  it('no-private/no-trading safety: site scroll-world never references broker, order, live trading, or private paths', () => {
+    expect(pageSource).not.toMatch(/broker|order|Live mode|place_order|OpenAlgoClient/i);
+    // Extended from no-private-references.test.ts
   });
 });

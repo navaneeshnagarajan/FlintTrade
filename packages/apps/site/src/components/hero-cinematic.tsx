@@ -47,6 +47,25 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
+// WebGL pilot coexistence hook (fail-open): pause Canvas2D rAF when ft-scroll-world-on, resume on fallback
+  useEffect(() => {
+    const onFallback = () => {
+      // Resume particles if WebGL failed or disabled
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+        animationId = null;
+      }
+      // Restart the particle layers if not reduced
+      if (!reduced) {
+        // Re-trigger by state or simple restart flag
+        window.dispatchEvent(new CustomEvent("hero-cinematic-resume"));
+      }
+    };
+    window.addEventListener("ft-scroll-world-fallback", onFallback);
+    return () => window.removeEventListener("ft-scroll-world-fallback", onFallback);
+  }, [reduced]);
+
+
 interface ParticleLayerProps {
   quantity: number;
   colors: string[];

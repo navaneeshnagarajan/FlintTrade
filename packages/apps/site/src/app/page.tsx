@@ -9,6 +9,7 @@ import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
 import { flinttradeAsset } from '@/lib/site-assets';
 import SectionEnterController from '@/components/section-enter-controller';
+import SiteScrollWorld from '@/components/site-scroll-world';
 
 const featureCards = [
   {
@@ -88,11 +89,12 @@ export default function HomePage() {
     <main className="site-shell">
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
+        <SiteScrollWorld />
       </div>
       <SiteHeader />
       <SectionEnterController />
 
-      <section className="section hero">
+      <section className="section hero" data-scroll-chapter="0">
         <div className="hero-copy">
           <div className="hero-logo-stage" aria-hidden="true">
             <span className="site-hero-fireball" />
@@ -203,7 +205,7 @@ export default function HomePage() {
       </section>
 
       {/* Self-hosted trading workspace band — polished user-facing heading (Graphite Continuity A1) */}
-      <section className="section section-enter">
+      <section className="section section-enter" data-scroll-chapter="1">
         <div className="section-heading">
           <h2>Self-hosted trading workspace</h2>
           <p>
@@ -225,7 +227,7 @@ export default function HomePage() {
       </section>
 
       {/* Evaluate and install band — honest desktop/web, release truth (Graphite Continuity A1) */}
-      <section className="section section-enter">
+      <section className="section section-enter" data-scroll-chapter="3">
         <div className="section-heading">
           <h2>Evaluate and install</h2>
           <p>
@@ -262,7 +264,7 @@ export default function HomePage() {
       </section>
 
       {/* Contributor resources band — demoted with progressive disclosure (Graphite Continuity A1) */}
-      <section className="section section-enter">
+      <section className="section section-enter" data-scroll-chapter="4">
         <div className="section-heading">
           <h2>Contributor resources</h2>
           <p>

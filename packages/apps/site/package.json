@@ -30,7 +30,8 @@
     "next-themes": "^0.4.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
