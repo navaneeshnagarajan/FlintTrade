@@ -151,9 +151,10 @@ export async function post<T>(endpoint: string, body: object = {}, signal?: Abor
   return parseResponse<T>(resp, endpoint);
 }
 
-export async function get<T>(endpoint: string): Promise<T> {
+export async function get<T>(endpoint: string, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${getBase()}/api/v1/${endpoint}`, {
     headers: buildHeaders(false),
+    ...(signal ? { signal } : {}),
   });
   if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);
@@ -186,9 +187,10 @@ export async function postV1<T>(endpoint: string, body: object = {}): Promise<T>
  * headers and ``{status, data}`` unwrapping; ``getBase()`` resolves in both dev
  * (``/ft-api/v1/...`` → stripped to ``/v1/...``) and prod (``/v1/...``).
  */
-export async function getV1<T>(endpoint: string): Promise<T> {
+export async function getV1<T>(endpoint: string, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${getBase()}/v1/${endpoint}`, {
     headers: buildHeaders(false),
+    ...(signal ? { signal } : {}),
   });
   if (!resp.ok) await throwHttpError(resp, endpoint);
   return parseResponse<T>(resp, endpoint);

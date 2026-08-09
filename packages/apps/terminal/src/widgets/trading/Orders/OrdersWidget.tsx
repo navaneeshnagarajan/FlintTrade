@@ -3,9 +3,8 @@
 // Uses TanStack Table v8 + shadcn Table + shadcn Badge for status.
 // Open orders carry per-order Cancel and Modify actions wired to the REAL
 // broker order id through the existing gated cancel/modify routes.
-import { useMemo, useState, useEffect, useCallback, memo } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef, memo } from "react";
 import { RefreshCw, FileText, X, Pencil, Loader2 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,10 +26,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useOrders } from "@/hooks/useOrders";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
-import { useModeStore } from "@/stores/modeStore";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+  resolveAccountQueryUi,
+  runGuardedAccountRefetch,
+  runWithMatchingAccountAuthority,
+} from "@/lib/accountQueryState";
 import { cancelOrder, modifyOrder } from "@/services/api";
-import { queryKeys } from "@/services/queryKeys";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import type { ModifyOrderParams } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
@@ -63,6 +68,11 @@ interface OrderRow {
   strategy: string;
   orderStatus: string;
   isOpen: boolean;
+}
+
+interface OrderActionIntent {
+  row: OrderRow;
+  identity: AccountAuthorityIdentity;
 }
 
 const VALID_ORDER_TYPES = new Set(["MARKET", "LIMIT", "SL", "SL-M"]);
@@ -117,11 +127,12 @@ function canModify(row: OrderRow): boolean {
 interface CancelConfirmProps {
   row: OrderRow;
   pending: boolean;
+  canSubmit: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }
 
-function CancelConfirmOverlay({ row, pending, onConfirm, onClose }: CancelConfirmProps) {
+function CancelConfirmOverlay({ row, pending, canSubmit, onConfirm, onClose }: CancelConfirmProps) {
   return (
     <div
       role="dialog"
@@ -135,12 +146,17 @@ function CancelConfirmOverlay({ row, pending, onConfirm, onClose }: CancelConfir
           {row.action} {row.quantity} {row.symbol} ({row.orderType}) · ID{" "}
           <span className="font-mono">{row.orderId}</span>
         </p>
+        {!canSubmit && (
+          <p role="alert" className="text-xs text-warning mb-3">
+            Order data is unavailable or frozen. Close this confirmation and reconnect before retrying.
+          </p>
+        )}
         <div className="flex gap-2">
           <Button
             type="button"
             size="sm"
             onClick={onConfirm}
-            disabled={pending}
+            disabled={pending || !canSubmit}
             className="flex-1 h-8 text-sm font-semibold bg-loss hover:bg-loss/85 text-white"
           >
             {pending ? <Loader2 size={12} className="animate-spin" /> : null}
@@ -167,11 +183,12 @@ function CancelConfirmOverlay({ row, pending, onConfirm, onClose }: CancelConfir
 interface ModifyOverlayProps {
   row: OrderRow;
   pending: boolean;
+  canSubmit: boolean;
   onSubmit: (qty: number, price: number, triggerPrice: number) => void;
   onClose: () => void;
 }
 
-function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) {
+function ModifyOverlay({ row, pending, canSubmit, onSubmit, onClose }: ModifyOverlayProps) {
   const [qty, setQty] = useState(String(row.quantityNum > 0 ? row.quantityNum : 1));
   const [price, setPrice] = useState(row.priceNum > 0 ? String(row.priceNum) : "");
   const [trigger, setTrigger] = useState(row.triggerPriceNum > 0 ? String(row.triggerPriceNum) : "");
@@ -181,6 +198,7 @@ function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) 
   const triggerRequired = row.orderType === "SL" || row.orderType === "SL-M";
 
   function handleSubmit(): void {
+    if (!canSubmit) return;
     const qtyNum = parseInt(qty, 10);
     const priceNum = parseFloat(price) || 0;
     const triggerNum = parseFloat(trigger) || 0;
@@ -265,12 +283,17 @@ function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) 
             {error}
           </p>
         )}
+        {!canSubmit && (
+          <p role="alert" className="text-xs text-warning mb-2">
+            Order data is unavailable or frozen. Close this confirmation and reconnect before retrying.
+          </p>
+        )}
         <div className="flex gap-2">
           <Button
             type="button"
             size="sm"
             onClick={handleSubmit}
-            disabled={pending}
+            disabled={pending || !canSubmit}
             className="flex-1 h-8 text-sm font-semibold bg-accent hover:bg-accent/85 text-white"
           >
             {pending ? <Loader2 size={12} className="animate-spin" /> : null}
@@ -295,26 +318,23 @@ function ModifyOverlay({ row, pending, onSubmit, onClose }: ModifyOverlayProps) 
 // ─── Main widget ─────────────────────────────────────────────────────────────
 
 function OrdersWidget(_props: WidgetProps) {
-  const accountReadsEnabled = useAccountReadsEnabled();
-  const isExplore = useModeStore((s) => s.mode === "explore");
+  const accountReadContext = useAccountReadContext();
+  const { identity: currentIdentity, enabled: accountReadsEnabled } = accountReadContext;
+  const isExplore = currentIdentity.mode === "explore";
   const {
     data: ordersData,
     refetch,
     isFetching,
     isError,
     error,
-    isPending,
     isLoading,
-  } = useOrders({ enabled: accountReadsEnabled });
-  // Disabled queries stay pending forever in TanStack Query v5. Only show the
-  // initial loader while an enabled first fetch is in flight.
-  const showInitialLoading = accountReadsEnabled && (isPending || isLoading);
-  const queryClient = useQueryClient();
+    fetchStatus,
+  } = useOrders({ enabled: accountReadsEnabled, context: accountReadContext });
   const [sorting, setSorting] = useState<SortingState>([]);
   const track = useTrackBehavior();
 
-  const [cancelTarget, setCancelTarget] = useState<OrderRow | null>(null);
-  const [modifyTarget, setModifyTarget] = useState<OrderRow | null>(null);
+  const [cancelIntent, setCancelIntent] = useState<OrderActionIntent | null>(null);
+  const [modifyIntent, setModifyIntent] = useState<OrderActionIntent | null>(null);
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -342,70 +362,152 @@ function OrdersWidget(_props: WidgetProps) {
     });
   }, [ordersData]);
 
+  const queryUi = resolveAccountQueryUi({
+    accountReadsEnabled,
+    fetchStatus,
+    hasData: rows.length > 0,
+    isError,
+    isExplore,
+    isLoading,
+  });
+  const canManageOrders = queryUi.canRefetch && !isError;
+  const actionGateRef = useRef(canManageOrders);
+  const currentIdentityRef = useRef(currentIdentity);
+  const refetchBoundaryRef = useRef({
+    canRefetch: queryUi.canRefetch,
+    identity: currentIdentity,
+    refetch,
+  });
+  actionGateRef.current = canManageOrders;
+  currentIdentityRef.current = currentIdentity;
+  refetchBoundaryRef.current = {
+    canRefetch: queryUi.canRefetch,
+    identity: currentIdentity,
+    refetch,
+  };
+
+  const cancelCanSubmit = canManageOrders
+    && cancelIntent !== null
+    && accountAuthorityMatches(cancelIntent.identity, currentIdentity);
+  const modifyCanSubmit = canManageOrders
+    && modifyIntent !== null
+    && accountAuthorityMatches(modifyIntent.identity, currentIdentity);
+
+  useEffect(() => {
+    if (cancelIntent && !accountAuthorityMatches(cancelIntent.identity, currentIdentity)) {
+      setCancelIntent(null);
+    }
+    if (modifyIntent && !accountAuthorityMatches(modifyIntent.identity, currentIdentity)) {
+      setModifyIntent(null);
+    }
+  }, [cancelIntent, currentIdentity, modifyIntent]);
+
   useEffect(() => {
     if (rows.length > 0) track("trade", "ordersPlaced");
   }, [rows.length, track]);
 
-  const refreshOrders = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all });
-  }, [queryClient]);
+  const refreshOrders = useCallback((expectedIdentity: AccountAuthorityIdentity) => {
+    runWithMatchingAccountAuthority(
+      expectedIdentity,
+      () => refetchBoundaryRef.current.identity,
+      () => runGuardedAccountRefetch(
+        refetchBoundaryRef.current.canRefetch,
+        refetchBoundaryRef.current.refetch,
+      ),
+    );
+  }, []);
 
   const handleCancelConfirm = useCallback(async () => {
-    // Fail closed — never send a cancel without the real broker order id.
-    if (!cancelTarget || cancelTarget.orderId == null) return;
+    const intent = cancelIntent;
+    // Fail closed — compare the immutable open-time identity at the final click.
+    if (!actionGateRef.current || !intent || intent.row.orderId == null) return;
+    const mutationIdentity = runWithMatchingAccountAuthority(
+      intent.identity,
+      () => currentIdentityRef.current,
+      () => captureAccountAuthority(currentIdentityRef.current),
+    );
+    if (!mutationIdentity) return;
+
+    const row = intent.row;
     setActionPending(true);
     setActionError(null);
     try {
-      await cancelOrder(cancelTarget.orderId, cancelTarget.strategy);
-      emitNotification({
-        category: "order",
-        title: `Order cancelled: ${cancelTarget.action} ${cancelTarget.symbol}`,
-        body: `Order ID ${cancelTarget.orderId}`,
-      });
-      setCancelTarget(null);
-      refreshOrders();
+      await cancelOrder(row.orderId!, row.strategy);
+      if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
+        emitNotification({
+          category: "order",
+          title: `Order cancelled: ${row.action} ${row.symbol}`,
+          body: `Order ID ${row.orderId}`,
+          accountScopeKey: mutationIdentity.scopeKey,
+          skipAccountRefresh: true,
+        });
+        setCancelIntent(null);
+        refreshOrders(mutationIdentity);
+      }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Cancel failed");
-      setCancelTarget(null);
+      if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
+        setActionError(err instanceof Error ? err.message : "Cancel failed");
+        setCancelIntent(null);
+      }
     } finally {
       setActionPending(false);
     }
-  }, [cancelTarget, refreshOrders]);
+  }, [cancelIntent, refreshOrders]);
 
   const handleModifySubmit = useCallback(
     async (qty: number, price: number, triggerPrice: number) => {
-      if (!modifyTarget || modifyTarget.orderId == null || !canModify(modifyTarget)) return;
+      const intent = modifyIntent;
+      if (
+        !actionGateRef.current
+        || !intent
+        || intent.row.orderId == null
+        || !canModify(intent.row)
+      ) return;
+      const mutationIdentity = runWithMatchingAccountAuthority(
+        intent.identity,
+        () => currentIdentityRef.current,
+        () => captureAccountAuthority(currentIdentityRef.current),
+      );
+      if (!mutationIdentity) return;
+
+      const row = intent.row;
       setActionPending(true);
       setActionError(null);
       const params: ModifyOrderParams = {
-        orderId: modifyTarget.orderId,
-        symbol: modifyTarget.symbol,
-        exchange: modifyTarget.exchange,
-        action: modifyTarget.action as "BUY" | "SELL",
+        orderId: row.orderId!,
+        symbol: row.symbol,
+        exchange: row.exchange,
+        action: row.action as "BUY" | "SELL",
         quantity: qty,
-        orderType: modifyTarget.orderType as "MARKET" | "LIMIT" | "SL" | "SL-M",
-        product: modifyTarget.product as "MIS" | "CNC" | "NRML",
+        orderType: row.orderType as "MARKET" | "LIMIT" | "SL" | "SL-M",
+        product: row.product as "MIS" | "CNC" | "NRML",
         price,
         triggerPrice,
-        strategy: modifyTarget.strategy,
+        strategy: row.strategy,
       };
       try {
         await modifyOrder(params);
-        emitNotification({
-          category: "order",
-          title: `Order modified: ${params.action} ${qty} ${params.symbol}`,
-          body: `Order ID ${params.orderId}`,
-        });
-        setModifyTarget(null);
-        refreshOrders();
+        if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
+          emitNotification({
+            category: "order",
+            title: `Order modified: ${params.action} ${qty} ${params.symbol}`,
+            body: `Order ID ${params.orderId}`,
+            accountScopeKey: mutationIdentity.scopeKey,
+            skipAccountRefresh: true,
+          });
+          setModifyIntent(null);
+          refreshOrders(mutationIdentity);
+        }
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : "Modify failed");
-        setModifyTarget(null);
+        if (accountAuthorityMatches(mutationIdentity, currentIdentityRef.current)) {
+          setActionError(err instanceof Error ? err.message : "Modify failed");
+          setModifyIntent(null);
+        }
       } finally {
         setActionPending(false);
       }
     },
-    [modifyTarget, refreshOrders],
+    [modifyIntent, refreshOrders],
   );
 
   const columns = useMemo<ColumnDef<OrderRow>[]>(
@@ -464,8 +566,10 @@ function OrdersWidget(_props: WidgetProps) {
           const r = row.original;
           if (!r.isOpen) return null;
           const idMissing = r.orderId == null;
-          const disabledReason = isExplore
-            ? "Connect a broker to manage orders"
+          const disabledReason = !canManageOrders
+            ? isExplore
+              ? "Connect a broker to manage orders"
+              : "Order data is unavailable or frozen"
             : idMissing
               ? "Broker did not return an order id"
               : undefined;
@@ -475,8 +579,15 @@ function OrdersWidget(_props: WidgetProps) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => { setActionError(null); setModifyTarget(r); }}
-                disabled={isExplore || actionPending || !canModify(r)}
+                onClick={() => {
+                  if (!canManageOrders) return;
+                  setActionError(null);
+                  setModifyIntent({
+                    row: r,
+                    identity: captureAccountAuthority(currentIdentity),
+                  });
+                }}
+                disabled={!canManageOrders || actionPending || !canModify(r)}
                 title={
                   disabledReason ??
                   (!canModify(r) ? "Order details incomplete — modify from your broker app" : `Modify order ${r.orderId}`)
@@ -490,8 +601,15 @@ function OrdersWidget(_props: WidgetProps) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                onClick={() => { setActionError(null); setCancelTarget(r); }}
-                disabled={isExplore || actionPending || idMissing}
+                onClick={() => {
+                  if (!canManageOrders) return;
+                  setActionError(null);
+                  setCancelIntent({
+                    row: r,
+                    identity: captureAccountAuthority(currentIdentity),
+                  });
+                }}
+                disabled={!canManageOrders || actionPending || idMissing}
                 title={disabledReason ?? `Cancel order ${r.orderId}`}
                 aria-label={`Cancel order ${r.orderId ?? r.symbol}`}
                 className="h-auto w-auto p-0.5 text-text-muted hover:text-loss disabled:opacity-40"
@@ -503,7 +621,7 @@ function OrdersWidget(_props: WidgetProps) {
         },
       },
     ],
-    [isExplore, actionPending],
+    [canManageOrders, isExplore, actionPending, currentIdentity],
   );
 
   const table = useReactTable({
@@ -518,22 +636,24 @@ function OrdersWidget(_props: WidgetProps) {
   return (
     <div className="relative h-full flex flex-col overflow-hidden text-xs bg-surface-base">
       {/* Cancel confirmation */}
-      {cancelTarget && (
+      {cancelIntent && (
         <CancelConfirmOverlay
-          row={cancelTarget}
+          row={cancelIntent.row}
           pending={actionPending}
+          canSubmit={cancelCanSubmit}
           onConfirm={() => void handleCancelConfirm()}
-          onClose={() => setCancelTarget(null)}
+          onClose={() => setCancelIntent(null)}
         />
       )}
 
       {/* Modify dialog */}
-      {modifyTarget && (
+      {modifyIntent && (
         <ModifyOverlay
-          row={modifyTarget}
+          row={modifyIntent.row}
           pending={actionPending}
+          canSubmit={modifyCanSubmit}
           onSubmit={(qty, price, trigger) => void handleModifySubmit(qty, price, trigger)}
-          onClose={() => setModifyTarget(null)}
+          onClose={() => setModifyIntent(null)}
         />
       )}
 
@@ -552,12 +672,12 @@ function OrdersWidget(_props: WidgetProps) {
               Broker required
             </span>
           )}
-          {accountReadsEnabled && (
+          {queryUi.canRefetch && (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => void refetch()}
+              onClick={() => runGuardedAccountRefetch(queryUi.canRefetch, refetch)}
               disabled={isFetching}
               className="h-auto w-auto p-0 text-text-muted hover:text-text-primary disabled:opacity-40"
               aria-label="Refresh orders"
@@ -575,18 +695,30 @@ function OrdersWidget(_props: WidgetProps) {
           className="flex items-center gap-2 px-3 py-2 mx-3 mt-2 bg-loss/10 border border-loss/20 rounded-md text-sm text-loss"
         >
           <span className="flex-1">
-            Failed to load orders{rows.length > 0 ? " — displayed orders are frozen" : ""}
+            Failed to load orders
+            {queryUi.isFrozen ? " — displayed orders are frozen" : ""}
             {error instanceof Error ? `: ${error.message}` : ""}
           </span>
           <Button
             variant="link"
             size="sm"
-            onClick={() => void refetch()}
-            disabled={isFetching}
+            onClick={() => runGuardedAccountRefetch(queryUi.canRefetch, refetch)}
+            disabled={!queryUi.canRefetch || isFetching}
             className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
             {isFetching ? "Retrying…" : "Retry"}
           </Button>
+        </div>
+      )}
+
+      {queryUi.isFrozen && !isError && (
+        <div
+          role="status"
+          className="px-3 py-1.5 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-xs text-warning"
+        >
+          {queryUi.isPaused
+            ? "Offline — displayed orders are frozen"
+            : "Broker disconnected — displayed orders are frozen"}
         </div>
       )}
 
@@ -609,7 +741,7 @@ function OrdersWidget(_props: WidgetProps) {
       )}
 
       {/* Body — mutually exclusive: loading | empty | table | error-only */}
-      {showInitialLoading ? (
+      {queryUi.showInitialLoading ? (
         <div className="flex-1 flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading orders" />
         </div>
@@ -617,7 +749,11 @@ function OrdersWidget(_props: WidgetProps) {
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <FileText size={24} className="text-text-disabled" />
           <span className="text-sm">
-            {accountReadsEnabled ? "No orders today" : "Connect a broker to load orders"}
+            {queryUi.isPaused
+              ? "Orders unavailable while offline"
+              : accountReadsEnabled
+                ? "No orders today"
+                : "Connect a broker to load orders"}
           </span>
         </div>
       ) : rows.length > 0 ? (

@@ -1,124 +1,268 @@
 /**
- * Real TanStack Query regressions for the Orders and Positions home cards.
- *
- * Query hooks are deliberately not mocked: these tests exercise the v5
- * disabled-query and retained-data refetch-error states seen in production.
+ * Real-store and real-TanStack regressions for the Orders/Positions home cards.
+ * Only account transports are mocked; mode, broker, connection, provenance,
+ * account-read gating, hooks, and query keys are production implementations.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { onlineManager } from "@tanstack/react-query";
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { queryKeys } from "@/services/queryKeys";
+import {
+  PRIMARY_NATIVE_ACCOUNT,
+  PRIMARY_SCOPE,
+  SECONDARY_NATIVE_ACCOUNT,
+  currentDataScope,
+  currentQueryResult,
+  forceExactRefetch,
+  renderAccountSurface,
+  resetAccountRuntime,
+  setAccountRuntime,
+  setNativeAccountStatus,
+} from "@/test-utils/accountQueryHarness";
 
 const mockGetOrderbook = vi.hoisted(() => vi.fn());
 const mockGetPositionbook = vi.hoisted(() => vi.fn());
-const brokerState = vi.hoisted(() => ({ connected: false }));
+const mockListBrokerAccounts = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/api", () => ({
   getOrderbook: mockGetOrderbook,
   getPositionbook: mockGetPositionbook,
 }));
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => brokerState.connected,
-}));
-vi.mock("@/hooks/useDataScope", () => ({
-  useDataScope: () => "test:account",
-}));
-vi.mock("@/stores/tradingStore", () => ({
-  useTradingStore: (selector: (state: { totalPnl: number }) => unknown) => selector({ totalPnl: 500 }),
+vi.mock("@/services/brokerAccountsApi", () => ({
+  listBrokerAccounts: mockListBrokerAccounts,
 }));
 
-import { useModeStore } from "@/stores/modeStore";
+import { useBrokerStore } from "@/stores/brokerStore";
+import { useTradingStore } from "@/stores/tradingStore";
 import { OrdersCard } from "../OrdersCard";
 import { PositionsCard } from "../PositionsCard";
 
-function renderWithQueryClient(ui: React.ReactNode) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-  });
-  const view = render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
-  );
-  return { client, ...view };
-}
+const ORDERS_KEY = queryKeys.orders.list(PRIMARY_SCOPE);
+const POSITIONS_KEY = queryKeys.positions.list(PRIMARY_SCOPE);
+const SECONDARY_ORDERS_KEY = queryKeys.orders.list("live:native:upstox:B2");
+const SECONDARY_POSITIONS_KEY = queryKeys.positions.list("live:native:upstox:B2");
 
-describe("account query card states", () => {
+const ORDER = {
+  orderId: "ORDER-1",
+  symbol: "NIFTY",
+  exchange: "NFO",
+  action: "BUY" as const,
+  quantity: 50,
+  price: 100,
+  orderType: "LIMIT",
+  status: "COMPLETE",
+  product: "MIS",
+  strategy: "Flint",
+  timestamp: "2026-08-09T09:15:00Z",
+};
+
+const POSITION = {
+  symbol: "RELIANCE",
+  exchange: "NSE",
+  product: "MIS",
+  quantity: 10,
+  averagePrice: 100,
+  ltp: 105,
+  pnl: 50,
+  pnlPercent: 5,
+};
+
+describe("account query card states with production stores and provenance", () => {
   beforeEach(() => {
-    brokerState.connected = false;
     mockGetOrderbook.mockReset();
     mockGetPositionbook.mockReset();
-    useModeStore.setState({ mode: "live" });
+    mockListBrokerAccounts.mockReset();
+    mockListBrokerAccounts.mockImplementation(async () => useBrokerStore.getState().accounts);
+    setAccountRuntime();
+    useTradingStore.setState({ totalPnl: 500 });
+    onlineManager.setOnline(true);
   });
 
   afterEach(() => {
-    useModeStore.setState({ mode: "live" });
+    cleanup();
+    onlineManager.setOnline(true);
+    resetAccountRuntime();
+    useTradingStore.setState({ totalPnl: 0 });
   });
 
-  it("shows the disconnected Orders state instead of loading for a disabled uncached query", () => {
-    renderWithQueryClient(<OrdersCard />);
+  it("OrdersCard observes the primary account key while disconnected with no cache", () => {
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+    const { client } = renderAccountSurface(() => <OrdersCard />);
 
+    expect(currentDataScope()).toBe(PRIMARY_SCOPE);
+    expect(client.getQueryCache().find({ queryKey: ORDERS_KEY, exact: true })).toBeDefined();
+    expect(currentQueryResult(client, ORDERS_KEY, false)).toMatchObject({
+      status: "pending",
+      fetchStatus: "idle",
+      isPending: true,
+      isLoading: false,
+    });
     expect(screen.getByText("Connect a broker to load orders")).toBeInTheDocument();
     expect(screen.queryByLabelText("Loading orders")).not.toBeInTheDocument();
     expect(mockGetOrderbook).not.toHaveBeenCalled();
   });
 
-  it("shows the disconnected Positions state instead of loading for a disabled uncached query", () => {
-    renderWithQueryClient(<PositionsCard />);
+  it("PositionsCard observes the primary account key while disconnected with no cache", () => {
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+    const { client } = renderAccountSurface(() => <PositionsCard />);
 
+    expect(currentDataScope()).toBe(PRIMARY_SCOPE);
+    expect(client.getQueryCache().find({ queryKey: POSITIONS_KEY, exact: true })).toBeDefined();
+    expect(currentQueryResult(client, POSITIONS_KEY, false)).toMatchObject({
+      status: "pending",
+      fetchStatus: "idle",
+      isPending: true,
+      isLoading: false,
+    });
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
     expect(screen.queryByLabelText("Loading positions")).not.toBeInTheDocument();
     expect(mockGetPositionbook).not.toHaveBeenCalled();
   });
 
-  it("keeps last-known orders visible and exposes an accessible retry after a refetch error", async () => {
-    brokerState.connected = true;
-    mockGetOrderbook
-      .mockResolvedValueOnce([{
-        orderId: "ORDER-1",
-        symbol: "NIFTY",
-        action: "BUY",
-        quantity: 50,
-        price: 100,
-        status: "COMPLETE",
-      }])
-      .mockRejectedValueOnce(new Error("broker offline"));
-    const { client } = renderWithQueryClient(<OrdersCard />);
-    expect(await screen.findByText("NIFTY")).toBeInTheDocument();
+  it("OrdersCard reports an enabled paused query as offline", () => {
+    onlineManager.setOnline(false);
+    const { client } = renderAccountSurface(() => <OrdersCard />);
 
-    await act(async () => {
-      await client.refetchQueries({ queryKey: ["orders"] });
+    expect(currentQueryResult(client, ORDERS_KEY, true)).toMatchObject({
+      status: "pending",
+      fetchStatus: "paused",
+      isPending: true,
+      isLoading: false,
+      isFetching: false,
     });
-
-    expect(screen.getByText("NIFTY")).toBeInTheDocument();
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/orders unavailable/i);
-    expect(alert).toHaveTextContent(/last known/i);
-    expect(screen.getByRole("button", { name: /retry orders/i })).toBeEnabled();
-    await waitFor(() => expect(mockGetOrderbook).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Orders unavailable while offline")).toBeInTheDocument();
+    expect(screen.queryByText(/connect a broker/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading orders")).not.toBeInTheDocument();
+    expect(mockGetOrderbook).not.toHaveBeenCalled();
   });
 
-  it("keeps last-known positions visible and exposes an accessible retry after a refetch error", async () => {
-    brokerState.connected = true;
-    mockGetPositionbook
-      .mockResolvedValueOnce([{
-        symbol: "RELIANCE",
-        exchange: "NSE",
-        quantity: 10,
-        pnl: 500,
-        pnlPercent: 5,
-      }])
-      .mockRejectedValueOnce(new Error("broker offline"));
-    const { client } = renderWithQueryClient(<PositionsCard />);
-    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+  it("PositionsCard reports an enabled paused query as offline", () => {
+    onlineManager.setOnline(false);
+    const { client } = renderAccountSurface(() => <PositionsCard />);
 
-    await act(async () => {
-      await client.refetchQueries({ queryKey: ["positions"] });
+    expect(currentQueryResult(client, POSITIONS_KEY, true)).toMatchObject({
+      status: "pending",
+      fetchStatus: "paused",
+      isPending: true,
+      isLoading: false,
+      isFetching: false,
     });
+    expect(screen.getByText("Positions unavailable while offline")).toBeInTheDocument();
+    expect(screen.queryByText(/connect a broker/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Loading positions")).not.toBeInTheDocument();
+    expect(mockGetPositionbook).not.toHaveBeenCalled();
+  });
 
+  it("OrdersCard retains only the primary cache when that account disconnects while another stays connected", async () => {
+    setAccountRuntime({ accounts: [PRIMARY_NATIVE_ACCOUNT, SECONDARY_NATIVE_ACCOUNT] });
+    mockGetOrderbook.mockResolvedValueOnce([ORDER]);
+    const { client } = renderAccountSurface(() => <OrdersCard />);
+    expect(await screen.findByText("NIFTY")).toBeInTheDocument();
+    expect(client.getQueryData(ORDERS_KEY)).toEqual([ORDER]);
+
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+
+    await waitFor(() => {
+      expect(currentDataScope()).toBe(PRIMARY_SCOPE);
+      expect(currentQueryResult(client, ORDERS_KEY, false)).toMatchObject({
+        status: "success",
+        fetchStatus: "idle",
+        data: [ORDER],
+      });
+    });
+    expect(client.getQueryCache().find({ queryKey: SECONDARY_ORDERS_KEY, exact: true })).toBeUndefined();
+    expect(screen.getByText("NIFTY")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Broker disconnected — displayed orders are frozen",
+    );
+    expect(mockGetOrderbook).toHaveBeenCalledTimes(1);
+  });
+
+  it("PositionsCard retains only the primary cache when that account disconnects while another stays connected", async () => {
+    setAccountRuntime({ accounts: [PRIMARY_NATIVE_ACCOUNT, SECONDARY_NATIVE_ACCOUNT] });
+    mockGetPositionbook.mockResolvedValueOnce([POSITION]);
+    const { client } = renderAccountSurface(() => <PositionsCard />);
+    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+    expect(client.getQueryData(POSITIONS_KEY)).toEqual([POSITION]);
+
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+
+    await waitFor(() => {
+      expect(currentDataScope()).toBe(PRIMARY_SCOPE);
+      expect(currentQueryResult(client, POSITIONS_KEY, false)).toMatchObject({
+        status: "success",
+        fetchStatus: "idle",
+        data: [POSITION],
+      });
+    });
+    expect(client.getQueryCache().find({ queryKey: SECONDARY_POSITIONS_KEY, exact: true })).toBeUndefined();
     expect(screen.getByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Broker disconnected — displayed positions are frozen",
+    );
+    expect(mockGetPositionbook).toHaveBeenCalledTimes(1);
+  });
+
+  it("OrdersCard guards retry after a retained error is disconnected", async () => {
+    mockGetOrderbook
+      .mockResolvedValueOnce([ORDER])
+      .mockRejectedValueOnce(new Error("broker offline"));
+    const { client } = renderAccountSurface(() => <OrdersCard />);
+    expect(await screen.findByText("NIFTY")).toBeInTheDocument();
+    await forceExactRefetch(client, ORDERS_KEY);
+
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+
+    expect(currentQueryResult(client, ORDERS_KEY, false)).toMatchObject({
+      status: "error",
+      fetchStatus: "idle",
+      data: [ORDER],
+    });
+    const retry = screen.getByRole<HTMLButtonElement>("button", { name: "Retry orders" });
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(mockGetOrderbook).toHaveBeenCalledTimes(2);
+  });
+
+  it("PositionsCard guards retry after a retained error is disconnected", async () => {
+    mockGetPositionbook
+      .mockResolvedValueOnce([POSITION])
+      .mockRejectedValueOnce(new Error("broker offline"));
+    const { client } = renderAccountSurface(() => <PositionsCard />);
+    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+    await forceExactRefetch(client, POSITIONS_KEY);
+
+    setNativeAccountStatus(PRIMARY_NATIVE_ACCOUNT, "disconnected");
+
+    expect(currentQueryResult(client, POSITIONS_KEY, false)).toMatchObject({
+      status: "error",
+      fetchStatus: "idle",
+      data: [POSITION],
+    });
+    const retry = screen.getByRole<HTMLButtonElement>("button", { name: "Retry positions" });
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(mockGetPositionbook).toHaveBeenCalledTimes(2);
+  });
+
+  it("PositionsCard initial no-data error never claims figures are frozen", async () => {
+    mockGetPositionbook.mockRejectedValueOnce(new Error("initial failure"));
+    const { client } = renderAccountSurface(() => <PositionsCard />);
+
     const alert = await screen.findByRole("alert");
+    expect(currentQueryResult(client, POSITIONS_KEY, true)).toMatchObject({
+      status: "error",
+      fetchStatus: "idle",
+      data: undefined,
+    });
     expect(alert).toHaveTextContent(/positions unavailable/i);
-    expect(alert).toHaveTextContent(/last known/i);
-    expect(screen.getByRole("button", { name: /retry positions/i })).toBeEnabled();
-    await waitFor(() => expect(mockGetPositionbook).toHaveBeenCalledTimes(2));
+    expect(alert).not.toHaveTextContent(/frozen/i);
+    expect(screen.getByRole("button", { name: "Retry positions" })).toBeEnabled();
   });
 });

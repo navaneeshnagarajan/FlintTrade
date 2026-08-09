@@ -44,6 +44,20 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => _isConnected,
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => ({
+    identity: {
+      mode: "live",
+      scopeKey: "live:openalgo:default",
+      brokerType: "openalgo",
+      accountId: "default",
+    },
+    enabled: _isConnected,
+    host: "",
+    apiKey: "",
+  }),
+}));
+
 vi.mock("@/services/api", () => ({
   getPositionbook: () => Promise.resolve(_positions),
 }));

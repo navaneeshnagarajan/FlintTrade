@@ -30,6 +30,31 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseBrokerConnected(),
+  useAccountReadContext: () => ({
+    identity: {
+      mode: mockMode.value,
+      scopeKey:
+        mockMode.value === "explore"
+          ? "explore:mock:default"
+          : mockMode.value === "practice"
+            ? "practice:sandbox:default"
+            : "live:openalgo:test",
+      brokerType:
+        mockMode.value === "explore"
+          ? "mock"
+          : mockMode.value === "practice"
+            ? "sandbox"
+            : "openalgo",
+      accountId: "default",
+    },
+    enabled: mockUseBrokerConnected(),
+    host: "",
+    apiKey: "",
+  }),
+}));
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
@@ -213,7 +238,7 @@ describe("OrdersWidget", () => {
     mockUseBrokerConnected.mockReturnValue(false);
     renderWidget();
 
-    expect(mockUseOrders).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUseOrders).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load orders")).toBeInTheDocument();
     expect(screen.queryByLabelText("Refresh orders")).not.toBeInTheDocument();

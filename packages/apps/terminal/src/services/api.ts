@@ -44,6 +44,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
   assertNativeWriteTargetReadyOrThrow,
   pickNativeBrokerOrderTarget,
@@ -1620,26 +1621,31 @@ function normalisePracticeTrade(value: unknown): Trade | undefined {
   };
 }
 
-async function getPracticeOrders(): Promise<Order[]> {
-  const payload = await getFtV1<{ orders?: unknown[] }>("sandbox/orders");
+async function getPracticeOrders(signal?: AbortSignal): Promise<Order[]> {
+  const payload = await getFtV1<{ orders?: unknown[] }>("sandbox/orders", signal);
   return (payload.orders ?? []).map(normalisePracticeOrder).filter((order): order is Order => order !== undefined);
 }
 
-async function getPracticeTrades(): Promise<Trade[]> {
-  const payload = await getFtV1<{ trades?: unknown[] }>("sandbox/trades");
+async function getPracticeTrades(signal?: AbortSignal): Promise<Trade[]> {
+  const payload = await getFtV1<{ trades?: unknown[] }>("sandbox/trades", signal);
   return (payload.trades ?? [])
     .map(normalisePracticeTrade)
     .filter((trade): trade is Trade => trade !== undefined);
 }
 
 /** Read account data from the same sandbox that executes Practice orders. */
-async function readPracticeAccountData<T>(endpoint: string, extra: object = {}): Promise<T | undefined> {
-  if (useModeStore.getState().mode !== "practice") return undefined;
+async function readPracticeAccountData<T>(
+  endpoint: string,
+  extra: object = {},
+  mode = useModeStore.getState().mode,
+  signal?: AbortSignal,
+): Promise<T | undefined> {
+  if (mode !== "practice") return undefined;
   const kind = NATIVE_READ_ENDPOINTS[endpoint];
   if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) return undefined;
 
   if (endpoint === "funds" || endpoint === "limits") {
-    const payload = await getFtV1<{ capital?: unknown }>("sandbox/capital");
+    const payload = await getFtV1<{ capital?: unknown }>("sandbox/capital", signal);
     const capital = isRecord(payload.capital) ? payload.capital : {};
     const funds = normaliseFundsShape({
       availableCash: capital.available,
@@ -1649,17 +1655,17 @@ async function readPracticeAccountData<T>(endpoint: string, extra: object = {}):
     return (endpoint === "funds" ? funds : capital) as T;
   }
   if (endpoint === "positionbook") {
-    const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions");
+    const payload = await getFtV1<{ positions?: unknown[] }>("sandbox/positions", signal);
     const positions = (payload.positions ?? [])
       .map(normalisePracticePosition)
       .filter((position): position is Position => position !== undefined);
     return { positions } as T;
   }
   if (endpoint === "orderbook") {
-    return { orders: await getPracticeOrders() } as T;
+    return { orders: await getPracticeOrders(signal) } as T;
   }
   if (endpoint === "tradebook") {
-    return { trades: await getPracticeTrades() } as T;
+    return { trades: await getPracticeTrades(signal) } as T;
   }
   if (endpoint === "holdings") {
     return { holdings: [] } as T;
@@ -1667,11 +1673,108 @@ async function readPracticeAccountData<T>(endpoint: string, extra: object = {}):
   if (endpoint === "orderstatus") {
     const params = extra as Record<string, unknown>;
     const orderId = stringParam(params.order_id ?? params.orderId ?? params.orderid);
-    const order = (await getPracticeOrders()).find((candidate) => candidate.orderId === orderId);
+    const order = (await getPracticeOrders(signal)).find((candidate) => candidate.orderId === orderId);
     return { status: order?.status ?? "not found" } as T;
   }
 
   throw new Error(`${endpoint} is not available from the Practice sandbox.`);
+}
+
+function expectedNativeScope(brokerType: string, accountId: string): string {
+  return ["live", "native", brokerType, accountId].map(encodeURIComponent).join(":");
+}
+
+async function postOpenAlgoSnapshot<T>(
+  endpoint: string,
+  extra: object,
+  context: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<T> {
+  const base = import.meta.env.DEV ? "" : context.host;
+  let response: Response;
+  try {
+    response = await fetch(`${base}/api/v1/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apikey: context.apiKey, ...extra }),
+      ...(signal ? { signal } : {}),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error("Connection failed. Check OpenAlgo is running.");
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string; error?: string } | null;
+    const serverMessage = body?.message ?? body?.error ?? null;
+    if (response.status === 401) throw new Error("API key invalid. Check Settings → Connection.");
+    if (response.status === 500) {
+      throw new Error(serverMessage ?? "OpenAlgo server error. Try again in a few seconds.");
+    }
+    throw new Error(serverMessage ?? `Server error (${response.status})`);
+  }
+  const json = await response.json();
+  if (json.status === "error") throw new Error(json.message || `API ${endpoint} error`);
+  return (json.data ?? json) as T;
+}
+
+/**
+ * Read an account endpoint from the immutable source encoded by its query key.
+ * This path never re-selects an account from mutable stores after an await.
+ */
+async function readAccountSnapshot<T>(
+  endpoint: string,
+  extra: object,
+  context: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!context.enabled) throw new Error(`Account reads are unavailable for ${endpoint}.`);
+  if (!generalLimiter.tryConsume()) {
+    throw new Error(`Rate limit exceeded for ${endpoint} (general: 50/s)`);
+  }
+
+  const { identity } = context;
+  if (identity.mode === "practice") {
+    if (
+      identity.scopeKey !== "practice:sandbox:default"
+      || identity.brokerType !== "sandbox"
+      || identity.accountId !== "default"
+    ) {
+      throw new Error(`Account identity mismatch for ${endpoint}.`);
+    }
+    const value = await readPracticeAccountData<T>(endpoint, extra, "practice", signal);
+    if (value !== undefined) return value;
+    throw new Error(`${endpoint} is not available from the Practice sandbox.`);
+  }
+
+  if (identity.mode !== "live") {
+    throw new Error(`${endpoint} is not available in ${identity.mode} mode.`);
+  }
+  if (identity.brokerType === "openalgo") {
+    if (!context.apiKey.trim() || !identity.scopeKey.startsWith("live:openalgo:")) {
+      throw new Error(`Account identity mismatch for ${endpoint}.`);
+    }
+    return postOpenAlgoSnapshot<T>(endpoint, extra, context, signal);
+  }
+  if (
+    context.apiKey.trim()
+    || identity.brokerType === "unconfigured"
+    || identity.scopeKey !== expectedNativeScope(identity.brokerType, identity.accountId)
+  ) {
+    throw new Error(`Account identity mismatch for ${endpoint}.`);
+  }
+
+  const kind = NATIVE_READ_ENDPOINTS[endpoint];
+  if (!kind || !NATIVE_ACCOUNT_SCOPED_KINDS.has(kind)) {
+    throw new Error(`${endpoint} is not an account-scoped read.`);
+  }
+  const value = await readNativeAccount<unknown>(
+    identity.brokerType,
+    identity.accountId,
+    kind,
+    buildNativeReadParams(endpoint, extra),
+    signal,
+  );
+  return normaliseNativeRead(endpoint, value) as T;
 }
 
 function getExplorePostFallback<T>(endpoint: string, extra: object): T | undefined {
@@ -2484,7 +2587,11 @@ export const getOIProfile = (symbol: string, exchange: string, expiry_date?: str
     .then(normaliseOIProfileEntries);
 
 // --- Account ---
-export const getFunds = async () => normaliseFundsShape(await post<unknown>("funds"));
+export const getFunds = async (context?: AccountReadContext, signal?: AbortSignal) => normaliseFundsShape(
+  context
+    ? await readAccountSnapshot<unknown>("funds", {}, context, signal)
+    : await post<unknown>("funds"),
+);
 export const getMargin = (symbol: string, exchange: string, qty: number, product: string, action: string) =>
   post<MarginData>("margin", { symbol, exchange, qty, product, action });
 export const getOrderHistory = (orderId: string) =>
@@ -2496,8 +2603,13 @@ export const getOrderTrades = (orderId: string) =>
 // post() unwraps json.data, so we receive { orders: [...], statistics: {...} }.
 // We extract the nested array and fall back to the raw value for brokers that
 // return a plain array (future-proofing / broker inconsistency).
-export const getOrderbook = async (): Promise<Order[]> => {
-  const raw = await post<Order[] | { orders?: Order[] }>("orderbook");
+export const getOrderbook = async (
+  context?: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<Order[]> => {
+  const raw = context
+    ? await readAccountSnapshot<Order[] | { orders?: Order[] }>("orderbook", {}, context, signal)
+    : await post<Order[] | { orders?: Order[] }>("orderbook");
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.orders) ? raw.orders : [];
 };
@@ -2508,8 +2620,13 @@ export const getTradebook = async (): Promise<Trade[]> => {
   return Array.isArray(raw.trades) ? raw.trades : [];
 };
 
-export const getPositionbook = async (): Promise<Position[]> => {
-  const raw = await post<Position[] | { positions?: Position[] }>("positionbook");
+export const getPositionbook = async (
+  context?: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<Position[]> => {
+  const raw = context
+    ? await readAccountSnapshot<Position[] | { positions?: Position[] }>("positionbook", {}, context, signal)
+    : await post<Position[] | { positions?: Position[] }>("positionbook");
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.positions) ? raw.positions : [];
 };

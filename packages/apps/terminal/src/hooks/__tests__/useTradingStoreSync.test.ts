@@ -37,6 +37,11 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () =>
+    currentMode === "practice" || (currentMode === "live" && mockUseBrokerConnected()),
+}));
+
 vi.mock("@/stores/modeStore", () => ({
   useModeStore: (selector: (state: { mode: typeof currentMode }) => unknown) => selector({ mode: currentMode }),
 }));

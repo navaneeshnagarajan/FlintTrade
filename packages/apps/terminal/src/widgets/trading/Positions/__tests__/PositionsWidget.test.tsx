@@ -66,6 +66,51 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => mockUseBrokerConnected(),
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => mockUseBrokerConnected(),
+  useAccountReadContext: () => {
+    const mode = mockModeState.mode;
+    const account = mockBrokerState.accounts.find((candidate) =>
+      mockBrokerAccountMatch(candidate, mockBrokerState.activeAccountId),
+    ) ?? mockBrokerState.accounts[0];
+    const identity = mode === "explore"
+      ? {
+          mode,
+          scopeKey: "explore:mock:default",
+          brokerType: "mock",
+          accountId: "default",
+        }
+      : mode === "practice"
+        ? {
+            mode,
+            scopeKey: "practice:sandbox:default",
+            brokerType: "sandbox",
+            accountId: "default",
+          }
+        : account
+          ? {
+              mode,
+              scopeKey: ["live", "native", account.broker, account.account_id]
+                .map(encodeURIComponent)
+                .join(":"),
+              brokerType: account.broker,
+              accountId: account.account_id,
+            }
+          : {
+              mode,
+              scopeKey: "live:openalgo:test",
+              brokerType: "openalgo",
+              accountId: "default",
+            };
+    return {
+      identity,
+      enabled: mockUseBrokerConnected(),
+      host: "",
+      apiKey: "",
+    };
+  },
+}));
+
 vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
@@ -277,7 +322,7 @@ describe("PositionsWidget", () => {
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: /broker account/i })).not.toBeInTheDocument();
@@ -289,7 +334,7 @@ describe("PositionsWidget", () => {
     mockUsePositions.mockReturnValue(queryResult({ data: [] }));
     render(<PositionsWidget {...viewProps("heat")} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.getByText("Broker required")).toBeInTheDocument();
     expect(screen.getByText("Connect a broker to load positions")).toBeInTheDocument();
   });
@@ -328,7 +373,7 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: true });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.getByText("Read-only")).toBeInTheDocument();
     // Provenance is labelled separately from capability: sandbox book, no writes.
     expect(screen.getByText("Practice")).toBeInTheDocument();
@@ -465,7 +510,7 @@ describe("PositionsWidget", () => {
 
   // ── Interaction tests ────────────────────────────────────────────────────
 
-  it("shows error banner and Retry button when data fetch fails", () => {
+  it("shows an unfrozen error banner and Retry button when the initial fetch has no data", () => {
     mockUsePositions.mockReturnValue(
       queryResult({
         data: undefined,
@@ -477,9 +522,9 @@ describe("PositionsWidget", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/failed to load positions/i);
-    // The banner says the figures are frozen — a silently stale P&L is worse
-    // than a loud error.
-    expect(alert.textContent).toMatch(/frozen/i);
+    // No prior row or successful update exists, so nothing can truthfully be
+    // described as frozen.
+    expect(alert.textContent).not.toMatch(/frozen/i);
     expect(alert.textContent).toContain("Network timeout");
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
@@ -576,7 +621,7 @@ describe("PositionsWidget", () => {
     );
     render(<PositionsWidget {...defaultProps} />);
 
-    expect(mockUsePositions).toHaveBeenCalledWith({ enabled: false });
+    expect(mockUsePositions).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("Sample")).toBeInTheDocument();

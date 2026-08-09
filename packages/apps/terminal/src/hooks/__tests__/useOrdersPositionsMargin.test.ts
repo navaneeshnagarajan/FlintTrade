@@ -42,6 +42,21 @@ vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => dataScopeState.value,
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => true,
+  useAccountReadContext: () => ({
+    identity: {
+      mode: "live",
+      scopeKey: dataScopeState.value,
+      brokerType: "openalgo",
+      accountId: "default",
+    },
+    enabled: true,
+    host: "",
+    apiKey: "",
+  }),
+}));
+
 // isMarketHours drives refetchInterval and the session-union helper.
 // Controllable per test; defaults to "everything closed" for determinism.
 const mockIsMarketHours = vi.fn<(exchange?: string) => boolean>(() => false);

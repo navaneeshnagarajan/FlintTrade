@@ -45,6 +45,21 @@ vi.mock("@/services/api", () => ({
     mockGetSyntheticFuture(symbol, exchange, expiry),
 }));
 
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => true,
+  useAccountReadContext: () => ({
+    identity: {
+      mode: "live",
+      scopeKey: "live:openalgo:test",
+      brokerType: "openalgo",
+      accountId: "default",
+    },
+    enabled: true,
+    host: "",
+    apiKey: "",
+  }),
+}));
+
 // Mock market hours (default: market closed so refetchInterval doesn't interfere)
 vi.mock("@/lib/market", () => ({
   isMarketHours: () => false,

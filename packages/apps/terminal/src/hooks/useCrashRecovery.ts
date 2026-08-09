@@ -23,9 +23,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getPositionbook } from "@/services/api";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import { queryKeys } from "@/services/queryKeys";
-import { useDataScope } from "@/hooks/useDataScope";
+import type { Position } from "@/types/api";
 
 const SESSION_FLAG_KEY = "flinttrade:session_active";
 
@@ -46,15 +46,15 @@ export function useCrashRecovery(): CrashRecoveryState {
   const [didCrash, setDidCrash] = useState<boolean>(false);
   const [dismissed, setDismissed] = useState<boolean>(false);
 
-  const isConnected = useBrokerConnected();
-  const dataScope = useDataScope();
+  const accountReadContext = useAccountReadContext();
 
-  // Fetch positions only when a crash was detected and broker is connected.
-  const shouldFetchPositions = didCrash && !dismissed && isConnected;
+  // Fetch positions only when a crash was detected and this exact account
+  // source is currently readable. Key, enablement, and transport stay bound.
+  const shouldFetchPositions = didCrash && !dismissed && accountReadContext.enabled;
 
-  const positionsQuery = useQuery({
-    queryKey: queryKeys.positions.list(dataScope),
-    queryFn: getPositionbook,
+  const positionsQuery = useQuery<Position[]>({
+    queryKey: queryKeys.positions.list(accountReadContext.identity.scopeKey),
+    queryFn: ({ signal }) => getPositionbook(accountReadContext, signal),
     enabled: shouldFetchPositions,
     // Single fetch is sufficient — no polling needed for this diagnostic
     staleTime: Infinity,
