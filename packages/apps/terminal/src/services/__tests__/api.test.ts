@@ -2412,6 +2412,51 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(headers["Content-Type"]).toBe("application/json");
   });
 
+  it("placeOrder with a Practice authority pin keeps sandbox mode even if the store flips after the gate", async () => {
+    mockModeState.mode = "practice";
+    fetchSpy.mockImplementation(async (_url, init) => {
+      // Flip after the transport has already chosen the pinned mode.
+      mockModeState.mode = "live";
+      const headers = init?.headers as Record<string, string>;
+      expect(headers["X-FlintTrade-Mode"]).toBe("practice");
+      return jsonResponse({ status: "success", data: { orderId: "PRAC-PIN" } });
+    });
+
+    await placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "BUY",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+      },
+      { mode: "practice" },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const headers = (fetchSpy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers["X-FlintTrade-Mode"]).toBe("practice");
+  });
+
+  it("placeOrder with a Practice authority pin rejects when the store already left Practice", async () => {
+    mockModeState.mode = "live";
+    await expect(
+      placeOrder(
+        {
+          symbol: "RELIANCE",
+          exchange: "NSE",
+          action: "BUY",
+          quantity: 1,
+          product: "MIS",
+          orderType: "MARKET",
+        },
+        { mode: "practice" },
+      ),
+    ).rejects.toThrow(/mode changed from practice to live/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("postOrder normalises terminal order body fields before sending", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({ status: "success", data: { orderId: "ORD-1" } }),
@@ -2975,7 +3020,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(rows).toStrictEqual([{ trigger_id: "GTT-1", symbol: "RELIANCE" }]);
   });
 
-  it("keeps practice native placeOrder on the default safety proxy path", async () => {
+  it("keeps Practice placeOrder on the safety proxy and never targets a native broker API", async () => {
     mockConnectionState.apiKey = "";
     mockModeState.mode = "practice";
     mockBrokerState.accounts = [
@@ -2999,7 +3044,9 @@ describe("OpenAlgo API client (api.ts)", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/v1/orders/place");
     expect(url).not.toContain("/api/v1/orders/upstox/place");
+    expect(new Headers(init.headers).get("X-FlintTrade-Mode")).toBe("practice");
     const body = JSON.parse(init.body as string);
+    expect(body).not.toHaveProperty("broker");
     expect(body).not.toHaveProperty("account_id");
   });
 

@@ -1818,14 +1818,36 @@ export class OrderApiError extends Error {
  *  because they fabricated `X-API-Key` and `Authorization` in the test
  *  client.
  */
-async function postOrder<T>(ftEndpoint: string, body: object = {}): Promise<T> {
+type OrderAuthorityPin = {
+  /**
+   * Immutable mode captured at the irreversible UI boundary (e.g. Practice
+   * review confirm). Must still match the live mode store when the request
+   * begins; the pin is also what headers/routing use so a later store flip
+   * cannot retarget a Practice payload onto Live/native.
+   */
+  mode: "practice" | "live";
+};
+
+async function postOrder<T>(
+  ftEndpoint: string,
+  body: object = {},
+  authority?: OrderAuthorityPin,
+): Promise<T> {
   // Apply the order rate limit (10/s) — identical to OpenAlgo direct calls
   if (!orderLimiter.tryConsume()) {
     throw new Error(`Rate limit exceeded for ${ftEndpoint} (order: 10/s)`);
   }
 
   // Read the current operating mode and auth state to assemble headers.
-  const mode = useModeStore.getState().mode;
+  const currentMode = useModeStore.getState().mode;
+  if (authority?.mode && authority.mode !== currentMode) {
+    throw new Error(
+      `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+    );
+  }
+  // Prefer the pinned authority mode so in-flight Practice confirms keep the
+  // sandbox header/routing even if the store flips after the equality check.
+  const mode = authority?.mode ?? currentMode;
   const apiKey = useConnectionStore.getState().apiKey;
   const jwt = useAuthStore.getState().token;
 
@@ -2019,8 +2041,10 @@ async function get<T>(endpoint: string): Promise<T> {
 // `orderStatus` is a read-only query. Native-only workspaces route it through
 // the live native account; OpenAlgo-key workspaces keep the OpenAlgo direct
 // path for bridge parity.
-export const placeOrder = (params: PlaceOrderParams) =>
-  postOrder<{ orderId: string }>("place", params);
+export const placeOrder = (
+  params: PlaceOrderParams,
+  authority?: OrderAuthorityPin,
+) => postOrder<{ orderId: string }>("place", params, authority);
 export const placeSmartOrder = (params: PlaceOrderParams & { position_size: number }) =>
   postOrder<{ orderId: string }>("place-smart", params);
 export const cancelAllOrders = () =>
