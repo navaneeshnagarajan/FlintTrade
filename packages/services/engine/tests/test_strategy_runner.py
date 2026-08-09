@@ -176,6 +176,7 @@ class TestUpload:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Objects are Windows-only")
 class TestWindowsJobProcessTree:
     @staticmethod
     def _active_process_query(module, counts: list[int]):

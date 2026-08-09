@@ -27,6 +27,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from types import ModuleType, TracebackType
@@ -167,7 +168,7 @@ def signer(module: ModuleType, tmp_path_factory: pytest.TempPathFactory) -> _Sig
     Returns:
         The generated key material.
     """
-    workspace = tmp_path_factory.mktemp("node-release-key")
+    workspace = pathlib.Path(tempfile.mkdtemp(prefix="node-release-key-", dir="/tmp"))
     home = workspace / "signer"
     fingerprint = _generate(module, home, "Test Release Manager <manager@example.invalid>")
     mirrored = _export(module, home, fingerprint, workspace / "mirrored.asc")

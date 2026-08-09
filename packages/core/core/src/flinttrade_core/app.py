@@ -5301,7 +5301,7 @@ def create_flask_app(
             # If the exact file exists under dist/, serve it (favicon, assets/*).
             if path:
                 resolved = _resolve_frontend_dist_file(path)
-                if resolved == resolved_dist_index:
+                if resolved is not None and resolved.name.lower() == resolved_dist_index.name.lower():
                     return _serve_index_with_nonce()
                 if resolved is not None:
                     relative = resolved.relative_to(resolved_dist_path)
