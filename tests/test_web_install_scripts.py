@@ -36,7 +36,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import sys
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -674,7 +673,7 @@ def test_windows_web_installer_requires_the_same_source_identity_proof() -> None
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_elevated_execution_before_source_acquisition(
     tmp_path: Path,
 ) -> None:
@@ -715,7 +714,7 @@ def test_windows_web_installer_refuses_elevated_execution_before_source_acquisit
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_allows_help_when_elevated(tmp_path: Path) -> None:
     """Help remains usable because it exits before any PATH-resolved command can run."""
     profile = tmp_path / "profile"
@@ -747,7 +746,7 @@ def test_windows_web_installer_allows_help_when_elevated(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_elevated_dry_run_before_path_probes(tmp_path: Path) -> None:
     """Dry-run must not execute user-writable PATH commands with an elevated token."""
     profile = tmp_path / "profile"
@@ -791,7 +790,7 @@ def test_windows_web_installer_refuses_elevated_dry_run_before_path_probes(tmp_p
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_receipt_directory_hardening_is_idempotent(tmp_path: Path) -> None:
     """A reinstall must reapply and verify the owner-only DACL without a privilege warning."""
     target = tmp_path / "receipt-state"
@@ -843,7 +842,7 @@ Write-Output "ACL_OK"
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_receipt_hardening_failure_stops_the_installer(tmp_path: Path) -> None:
     """A receipt must never be published after its owner-only DACL cannot be established."""
     target = tmp_path / "not-a-directory"
@@ -873,7 +872,7 @@ Write-Output "UNSAFE_CONTINUATION"
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_to_rewrite_an_existing_permissive_receipt(tmp_path: Path) -> None:
     """Hardening after reading cannot make previously writable receipt contents trustworthy."""
     receipt_dir = tmp_path / "receipt-state"
@@ -935,7 +934,7 @@ Write-Output "UNSAFE_RECEIPT_REWRITTEN"
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_publishes_a_private_receipt_idempotently(tmp_path: Path) -> None:
     """A fresh receipt and a reinstall both finish with the exact trusted ACL."""
     receipt_dir = tmp_path / "receipt-state"
@@ -988,7 +987,7 @@ Write-Output "PRIVATE_RECEIPT_OK"
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_rejects_a_permissive_receipt_before_reading_it(tmp_path: Path) -> None:
     """An Everyone-writable receipt must not authorise managed-source replacement."""
     receipt_dir = tmp_path / "receipt-state"
@@ -1050,7 +1049,7 @@ Write-Output "UNSAFE_RECEIPT_REJECTED"
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_accepts_a_legacy_inherited_owner_only_receipt(tmp_path: Path) -> None:
     """A safe receipt inherited from the protected directory remains upgradeable."""
     receipt_dir = tmp_path / "receipt-state"
@@ -1117,7 +1116,7 @@ def test_windows_web_installer_preflights_receipt_storage_before_source_changes(
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_a_src_without_identity(tmp_path: Path) -> None:
     """The Windows installer refuses an unproven -SrcDir before deleting anything."""
     src = _generic_mixed_project(tmp_path / "someone-elses-project")
@@ -1144,7 +1143,7 @@ def test_windows_web_installer_refuses_a_src_without_identity(tmp_path: Path) ->
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(sys.platform != "win32" or WINDOWS_POWERSHELL is None, reason="win32-only (ACL hardening)")
+@pytest.mark.skipif(WINDOWS_POWERSHELL is None, reason="powershell.exe is not available on this runner")
 def test_windows_web_installer_refuses_a_marker_only_tree_it_cannot_update(tmp_path: Path) -> None:
     """The .ps1 mirrors the split: markers alone never authorise a recursive delete."""
     src = _marker_only_clone(tmp_path / "unpacked-copy")
