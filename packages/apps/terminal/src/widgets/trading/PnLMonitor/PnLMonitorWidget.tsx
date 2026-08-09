@@ -49,6 +49,8 @@ import { useTradebook } from "@/hooks/useTradebook";
 import { positionMtm, realisedBySymbol } from "@/lib/pnl";
 import { useModeStore } from "@/stores/modeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { SAMPLE_POSITION_BOOK } from "@/widgets/trading/Positions/sampleBook";
+import { getDemoFunds } from "@/hooks/useModeData";
 import type { Position } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { DrawdownView } from "./DrawdownView";
@@ -118,22 +120,32 @@ function PnLMonitorWidget(props: WidgetProps) {
   const isConnected = useBrokerConnected();
   const accountReadsEnabled = useAccountReadsEnabled();
   const riskLimits = useSettingsStore(useShallow((s) => s.riskLimits));
+  const isExplore = mode === "explore";
 
-  // Shared caches — the same positions/tradebook/funds entries every other
-  // widget consumes, on the shared refetch cadence. Invalidating the shared
-  // keys (e.g. after an order) updates this widget too.
-  // Deliberately ungated: this widget renders an Explore preview from the
-  // API's labelled mock data behind a "Sample data" badge, the same policy
-  // Dashboard uses. Gating it to accountReadsEnabled would remove that
-  // preview, so the enablement asymmetry with Positions/Holdings is intended
-  // rather than an oversight. (A previous attempt to gate the retired
-  // IntradayPnL broke its whole suite and was reverted — do not re-gate.)
-  const positionsQuery = usePositions();
-  const tradebookQuery = useTradebook();
-  // Funds feed the Summary view's margin/balance cards. (The retired MTM
-  // Monitor subscribed to funds and discarded the payload; the merge finally
-  // consumes it.)
-  const fundsQuery = useFunds();
+  // Gated account-scoped reads per truthful provenance contract.
+  // Explore uses deterministic local sample pack (no network, no prohibited API calls).
+  const positionsQuery = usePositions({ enabled: accountReadsEnabled });
+  const fundsQuery = useFunds({ enabled: accountReadsEnabled });
+  const tradebookQuery = useTradebook({ enabled: accountReadsEnabled });
+
+  // Effective data selection per contract — Explore uses deterministic local sample pack.
+  const samplePositions = SAMPLE_POSITION_BOOK;
+  const sampleFunds = getDemoFunds();
+  const sampleTrades: any[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
+
+  const positions = isExplore ? samplePositions : positionsQuery.data;
+  const funds = isExplore ? sampleFunds : fundsQuery.data;
+  const trades = isExplore ? sampleTrades : (tradebookQuery.data ?? []);
+
+  const dataReady =
+    isExplore ||
+    (accountReadsEnabled && positions !== undefined) ||
+    (!accountReadsEnabled && !isExplore);
+
+  const loading =
+    isExplore ? false
+    : !accountReadsEnabled ? false
+    : Boolean(positionsQuery.isLoading || positionsQuery.isPending);
 
   // Stable refs to avoid closing over stale state in the update effect
   const peakRef = useRef<number>(0);
@@ -145,7 +157,7 @@ function PnLMonitorWidget(props: WidgetProps) {
   const [state, setState] = useState<MonitorState>(INITIAL_STATE);
 
   useEffect(() => {
-    if (positionsQuery.isError) {
+    if (positionsQuery.isError && !isExplore) {
       setState((prev) => ({
         ...prev,
         loading: false,
@@ -156,8 +168,8 @@ function PnLMonitorWidget(props: WidgetProps) {
       }));
       return;
     }
-    const positions: Position[] | undefined = positionsQuery.data;
-    if (!positions) return;
+    // For Explore sample, positions is always the bound pack (no early return, no loading)
+    if (!isExplore && !positions) return;
 
     // Booked realised P&L per symbol from today's tradebook (partial + full
     // closes). If the tradebook is unavailable the map is empty and realised
@@ -259,11 +271,16 @@ function PnLMonitorWidget(props: WidgetProps) {
     });
   }, [props.api]);
 
-  // Honest disclosure — in Explore (or Live without a broker) the P&L is
-  // computed from labelled SAMPLE data; in Practice it is the local sandbox.
+  // Truthful provenance derived from active data path (not mode alone).
+  const provenanceKind =
+    mode === "practice" && accountReadsEnabled ? "practice"
+    : isExplore ? "sample"
+    : mode === "live" && !accountReadsEnabled ? "unavailable"
+    : null;
+
   const provenance =
-    mode === "practice" ? "Practice data"
-    : mode === "explore" || !isConnected ? "Sample data"
+    provenanceKind === "practice" ? "Practice data"
+    : provenanceKind === "sample" ? "Sample data"
     : null;
 
   // Target / SL status badge (from the retired MTM Monitor), on the corrected

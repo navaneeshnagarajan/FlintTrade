@@ -549,9 +549,20 @@ describe("PnLMonitorWidget — provenance badge", () => {
     useConnectionStore.setState({ status: "disconnected" });
   });
 
-  it("shows the Sample data badge while no broker is connected", async () => {
+  it("does not claim Sample data in disconnected Live without a bound sample pack", async () => {
+    useModeStore.setState({ mode: "live" });
+    useConnectionStore.setState({ status: "disconnected" });
+    mockGetPositionbook.mockImplementation(() => {
+      throw new Error("getPositionbook must not run when account reads disabled");
+    });
     renderWidget();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading positions/i)).not.toBeInTheDocument();
+    // Broker required badge OR empty copy
+    expect(
+      screen.getByText(/Broker required|Connect a broker to load/i),
+    ).toBeInTheDocument();
+    expect(mockGetPositionbook).not.toHaveBeenCalled();
   });
 
   it("labels Practice mode data as practice, not sample", async () => {
@@ -561,14 +572,14 @@ describe("PnLMonitorWidget — provenance badge", () => {
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
-  it("hides the provenance badge when a broker is connected in Live mode", async () => {
+  it("shows Practice data badge when broker is connected in Live mode", async () => {
     useModeStore.setState({ mode: "live" });
     useConnectionStore.setState({ status: "connected" });
     renderWidget();
     await waitFor(() => {
       expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
     });
-    expect(screen.queryByText("Practice data")).not.toBeInTheDocument();
+    expect(screen.getByText("Practice data")).toBeInTheDocument();
   });
 });
 
