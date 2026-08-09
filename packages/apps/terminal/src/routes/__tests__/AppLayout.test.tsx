@@ -332,13 +332,28 @@ describe("AppLayout", () => {
     expect(mountMatches).toHaveLength(1);
     expect(layout).toMatch(/onGoHome\s*:/);
     expect(layout).toMatch(/onGoTrade\s*:/);
-    expect(layout).toMatch(/navigate\(\s*[\"']\/home[\"']\s*\)/);
-    expect(layout).toMatch(/navigate\(\s*[\"']\/trade[\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\\\"']\/home[\\\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\\\"']\/trade[\\\"']\s*\)/);
 
     // Real handlers exist in the hook (not dialog-only advertising).
     expect(hook).toMatch(/onGoHome/);
     expect(hook).toMatch(/onGoTrade/);
-    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\"']h[\"']/);
-    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\"']t[\"']/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\\\"']h[\\\"']/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\\\"']t[\\\"']/);
+  });
+
+  // Journey-ready test seam for symbol context propagation (CommandPalette ai -> router query -> AIRoute)
+  it("carries exact symbol+exchange+source context from validated CommandPalette symbol ai selection into /ai router query (real seam, no duplicate store)", () => {
+    renderApp();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("flinttrade:navigate", {
+          detail: { path: "/ai", context: { symbol: "RELIANCE", exchange: "NSE", source: "palette" } },
+        }),
+      );
+    });
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/ai?symbol=RELIANCE&exchange=NSE&source=palette",
+    );
   });
 });

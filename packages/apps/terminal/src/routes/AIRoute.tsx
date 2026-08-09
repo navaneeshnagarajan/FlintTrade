@@ -1011,6 +1011,10 @@ export default function AIRoute() {
   useEffect(() => { useSkillStore.getState().trackAction("ai", "daysActive"); }, []);
 
   const [searchParams] = useSearchParams();
+  const symbolContext = searchParams.get("symbol");
+  const exchangeContext = searchParams.get("exchange");
+  const sourceContext = searchParams.get("source");
+  // Context from CommandPalette via real router query seam (truthful, no invent on reload/back; invalid cleared do not propagate)
   const [activeSection, setActiveSection] = useState<SectionId>("chat");
   const [shareState, setShareState] = useState<ShareState>("idle");
   const level = useSkillLevel("ai");
@@ -1107,6 +1111,11 @@ export default function AIRoute() {
               <h1 className="font-heading font-bold text-sm text-text-primary leading-none">
                 AI Center
               </h1>
+              {symbolContext && exchangeContext && (
+                <div className="mt-1 text-[10px] text-accent/80 font-mono" data-testid="ai-symbol-context">
+                  {symbolContext} ({exchangeContext}){sourceContext ? ` • ${sourceContext}` : ""}
+                </div>
+              )}
               <p className="text-xxs text-text-muted mt-0.5">
                 {level === "beginner"
                   ? "Ask me anything about markets, stocks, or how to trade"

@@ -44,7 +44,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/admin": "Admin Panel",
 };
 
-type NavigationEventDetail = string | { path?: unknown };
+type NavigationEventDetail = string | { path?: unknown; context?: { symbol?: string; exchange?: string; source?: string } };
 type TradeForwardEventName =
   | "flinttrade:addWidget"
   | "flinttrade:open-tool"
@@ -60,7 +60,17 @@ interface PendingTradeEvent {
 function getNavigationPath(detail: NavigationEventDetail): string | null {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && typeof detail.path === "string") {
-    return detail.path;
+    const base = detail.path;
+    if (detail.context && typeof detail.context === "object") {
+      const ctx = detail.context as { symbol?: string; exchange?: string; source?: string };
+      const params = new URLSearchParams();
+      if (ctx.symbol) params.set("symbol", ctx.symbol);
+      if (ctx.exchange) params.set("exchange", ctx.exchange);
+      if (ctx.source) params.set("source", ctx.source);
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    }
+    return base;
   }
   return null;
 }
