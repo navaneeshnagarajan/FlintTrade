@@ -111,8 +111,8 @@ def test_user_guide_documents_indstocks_dashboard_reset_cycle() -> None:
     assert stale_indstocks_phrase not in guide
 
 
-def test_public_site_labels_demo_as_sandbox_not_live() -> None:
-    """The hosted demo is sample/sandbox-oriented and should not be labelled live."""
+def test_public_site_labels_demo_as_exploration_not_live() -> None:
+    """The hosted demo is a no-install exploration and should not be labelled live."""
     site_sources = [
         ROOT / "packages/apps/site/src/app/page.tsx",
         ROOT / "packages/apps/site/src/app/demo/page.tsx",
@@ -124,7 +124,9 @@ def test_public_site_labels_demo_as_sandbox_not_live() -> None:
 
     assert live_demo_title not in combined
     assert live_demo_phrase not in combined
-    assert "Sandbox Demo" in combined
+    assert "Sandbox Demo" not in combined
+    assert "Explore demo" in combined
+    assert "Start exploring — no install needed" in combined
 
 
 def test_public_descriptions_preserve_trading_software_identity() -> None:
