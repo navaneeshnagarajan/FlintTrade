@@ -254,11 +254,7 @@ export function createWindowsSourceFilesystemBoundary(
         "Windows source filesystem process containment could not be proven.",
       );
     }
-    // Native Windows: the job supervisor uses stderr for its proof protocol (FLINTTRADE_JOB_SUPERVISOR lines).
-    // Strip those before the unexpected-output check so only real helper stderr (or truncation) fails.
-    // Keeps security: any non-protocol stderr from the helper still triggers.
-    const effectiveStderr = result.stderr.replace(/^FLINTTRADE_JOB_SUPERVISOR.*$/gm, "").trim();
-    if (result.stdoutTruncated || result.stderrTruncated || effectiveStderr !== "") {
+    if (result.stdoutTruncated || result.stderrTruncated || result.stderr !== "") {
       throw new Error("Windows source filesystem helper returned truncated or unexpected output.");
     }
     const response = parseResponse(result.stdout);

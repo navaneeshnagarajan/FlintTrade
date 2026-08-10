@@ -269,6 +269,16 @@ describe("Windows source filesystem command boundary", () => {
     }));
   });
 
+  it("rejects a supervisor-prefixed diagnostic left after containment proof parsing", async () => {
+    const test = fixture(vi.fn(async () => result({
+      stderr: "FLINTTRADE_JOB_SUPERVISOR diagnostic: helper warning\n",
+    })));
+
+    await expect(test.boundary.inspectDirectory(`${PARENT}\\FlintTrade`)).rejects.toThrow(
+      /truncated or unexpected output/i,
+    );
+  });
+
   it.each([
     ["uncontained", { contained: false }],
     ["truncated", { stdoutTruncated: true }],
