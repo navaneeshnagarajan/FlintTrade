@@ -17,6 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const siteDir = join(here, '..');
 const terminalDir = join(siteDir, '..', 'terminal');
 const outDir = join(siteDir, 'public', 'demo-app');
+const viteJs = join(terminalDir, 'node_modules', 'vite', 'bin', 'vite.js');
 
 if (process.env.FLINTTRADE_SKIP_DEMO === '1') {
   console.log('[generate-demo] FLINTTRADE_SKIP_DEMO=1 — skipping terminal demo build.');
@@ -29,7 +30,7 @@ if (!existsSync(join(terminalDir, 'package.json'))) {
   process.exit(1);
 }
 
-if (!existsSync(join(terminalDir, 'node_modules', '.bin', 'vite'))) {
+if (!existsSync(viteJs)) {
   console.error(
     '[generate-demo] vite not installed in packages/apps/terminal — run a workspace ' +
       'install with devDependencies (NODE_ENV=production installs skip them).',
@@ -37,17 +38,15 @@ if (!existsSync(join(terminalDir, 'node_modules', '.bin', 'vite'))) {
   process.exit(1);
 }
 
-// Strip VITE_* vars so deployment-only secrets/DSNs are never baked into
-// the public demo bundle.
+// Strip inherited VITE_* values, then select the terminal config's fail-closed
+// public-demo mode (`envDir: false`) so Vite cannot load terminal .env* files.
 const buildEnv = Object.fromEntries(
   Object.entries(process.env).filter(([key]) => !key.startsWith('VITE_')),
 );
+buildEnv.FLINTTRADE_PUBLIC_DEMO_BUILD = '1';
 
 console.log('[generate-demo] building terminal (vite build --base=/demo-app/)…');
-execFileSync(join(terminalDir, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite'), [
-  'build',
-  '--base=/demo-app/',
-], {
+execFileSync(process.execPath, [viteJs, 'build', '--base=/demo-app/'], {
   cwd: terminalDir,
   stdio: 'inherit',
   env: buildEnv,

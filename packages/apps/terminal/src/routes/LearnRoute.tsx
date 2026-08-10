@@ -82,7 +82,7 @@ const TABS: TabDef[] = [
   { id: "basics",     label: "Market Basics",    icon: BookOpen,     progress: 33 },
   { id: "glossary",   label: "Glossary",          icon: GraduationCap, progress: 0  },
   { id: "strategies", label: "Strategy Library",  icon: BarChart3,    progress: 16 },
-  { id: "paper",      label: "Paper Trading",     icon: TrendingUp,   progress: 0  },
+  { id: "paper",      label: "Practice Trading",  icon: TrendingUp,   progress: 0  },
   { id: "resources",  label: "Resource Hub",      icon: PlayCircle,   progress: 0  },
 ];
 
@@ -162,7 +162,7 @@ const STRATEGIES: StrategyCard[] = [
   {
     name: "EMA Crossover",    category: "Trend",          difficulty: "Beginner",
     description: "Study fast/slow EMA crossover behaviour",
-    detail: "Commonly used pairs include 9/21 EMA and 50/200 EMA. Review crossover timing, sideways-market false signals, and timeframe sensitivity in sandbox analysis.",
+    detail: "Commonly used pairs include 9/21 EMA and 50/200 EMA. Review crossover timing, sideways-market false signals, and timeframe sensitivity in Practice analysis.",
   },
   {
     name: "RSI Reversal",     category: "Momentum",       difficulty: "Beginner",
@@ -177,17 +177,17 @@ const STRATEGIES: StrategyCard[] = [
   {
     name: "Bollinger Squeeze",category: "Volatility",     difficulty: "Intermediate",
     description: "Study volatility compression before expansion",
-    detail: "Look for BB width at multi-month lows, then inspect how later expansion behaves in historical replay. Compare RSI, MACD, and ATR diagnostics before treating it as a sandbox hypothesis.",
+    detail: "Look for BB width at multi-month lows, then inspect how later expansion behaves in historical replay. Compare RSI, MACD, and ATR diagnostics before treating it as a Practice hypothesis.",
   },
   {
     name: "MACD Signal",      category: "Momentum",       difficulty: "Intermediate",
     description: "Understand how MACD line and signal-line crossovers are interpreted",
-    detail: "Settings: 12/26/9 EMA. Crossovers, zero-line position, and histogram divergence are examples of momentum diagnostics. Use them for study and sandbox review, not as standalone instructions.",
+    detail: "Settings: 12/26/9 EMA. Crossovers, zero-line position, and histogram divergence are examples of momentum diagnostics. Use them for study and Practice review, not as standalone instructions.",
   },
   {
     name: "Straddle Selling", category: "Options",        difficulty: "Advanced",
     description: "Study ATM CE + PE short-premium payoff shape and risk",
-    detail: "This concept shows how theta decay and range-bound assumptions affect a short-premium payoff. Review margin, hedging, and gap-risk behaviour in sandbox only; unhedged short options can carry open-ended loss.",
+    detail: "This concept shows how theta decay and range-bound assumptions affect a short-premium payoff. Review margin, hedging, and gap-risk behaviour in Practice only; unhedged short options can carry open-ended loss.",
   },
   {
     name: "Iron Condor",      category: "Options",        difficulty: "Advanced",
@@ -197,7 +197,7 @@ const STRATEGIES: StrategyCard[] = [
   {
     name: "VWAP Revert",      category: "Mean Reversion", difficulty: "Intermediate",
     description: "Study VWAP deviation as a mean-reversion diagnostic",
-    detail: "Use intraday VWAP reset examples to compare price deviation, liquidity, and reversion assumptions in replay or sandbox mode. The lesson is a diagnostic pattern, not an entry rule.",
+    detail: "Use intraday VWAP reset examples to compare price deviation, liquidity, and reversion assumptions in replay or Practice mode. The lesson is a diagnostic pattern, not an entry rule.",
   },
   {
     name: "OBV Divergence",   category: "Volume",         difficulty: "Intermediate",
@@ -207,7 +207,7 @@ const STRATEGIES: StrategyCard[] = [
   {
     name: "ATR Breakout",     category: "Volatility",     difficulty: "Beginner",
     description: "Study moves that exceed an ATR-based volatility band",
-    detail: "Calculate ATR(14) on historical data and compare price moves against volatility bands. This helps explain breakout tests, trail assumptions, and false-break behaviour in sandbox analysis.",
+    detail: "Calculate ATR(14) on historical data and compare price moves against volatility bands. This helps explain breakout tests, trail assumptions, and false-break behaviour in Practice analysis.",
   },
   {
     name: "Donchian Channel", category: "Trend",          difficulty: "Beginner",
@@ -537,7 +537,7 @@ function PaperTradingTab() {
     <div className="space-y-6 animate-fade-in">
       <GlassCard className="rounded-lg p-6">
         <h3 className="font-heading font-semibold text-lg text-text-primary mb-3">
-          What is Paper Trading?
+          What is Practice Trading?
         </h3>
         <p className="text-sm text-text-secondary leading-relaxed mb-4">
           Practice trading lets you trade with virtual money. You execute the same strategies,
@@ -549,10 +549,10 @@ function PaperTradingTab() {
         </h4>
         <ol className="space-y-2 text-sm text-text-secondary list-decimal list-inside">
           <li>
-            Set up OpenAlgo with your broker&apos;s <strong>Sandbox mode</strong>{" "}
+            Set up OpenAlgo with your broker&apos;s <strong>Practice mode</strong>{" "}
             (Dhan Sandbox provides ₹10L virtual capital)
           </li>
-          <li>Connect FlintTrade to the sandbox instance</li>
+          <li>Connect FlintTrade to the Practice instance</li>
           <li>Trade normally — all orders execute against virtual funds</li>
           <li>Review your P&L Dashboard to analyse performance</li>
           <li>When confident, switch to your real broker credentials</li>
@@ -821,7 +821,7 @@ export default function LearnRoute() {
               <p className="text-xxs text-text-muted">
                 {level === "beginner"
                   ? "Learn market basics one lesson at a time"
-                  : "Market concepts, sandbox workflows, and project resources"}
+                  : "Market concepts, Practice workflows, and project resources"}
               </p>
             </div>
           </div>

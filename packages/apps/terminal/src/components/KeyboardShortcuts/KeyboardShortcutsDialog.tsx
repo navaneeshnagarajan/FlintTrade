@@ -67,6 +67,18 @@ export const SHORTCUT_ENTRIES: ShortcutEntry[] = [
     keys: ["Esc"],
     category: "Navigation",
   },
+  {
+    id: "go-home",
+    label: "Go to Home",
+    keys: ["Alt", "H"],
+    category: "Navigation",
+  },
+  {
+    id: "go-trade",
+    label: "Go to Trade",
+    keys: ["Alt", "T"],
+    category: "Navigation",
+  },
 
   // Trading
   {

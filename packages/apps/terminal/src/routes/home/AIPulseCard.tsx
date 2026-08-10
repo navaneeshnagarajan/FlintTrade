@@ -13,7 +13,7 @@ export function AIPulseCard() {
 
   return (
     <BentoCard size="default" label="AI Pulse (example)" data-testid="ai-pulse-card">
-      <DemoBadge testId="ai-pulse-demo-badge" label="Example" title="Illustrative example — not a live AI reading. Open the AI tab for real insights." />
+      <DemoBadge testId="ai-pulse-demo-badge" label="Sample" title="Illustrative example — not a live AI reading. Open the AI tab for real insights." />
       <div className="p-4 h-full flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Sparkles size={13} className="text-accent" aria-hidden="true" />

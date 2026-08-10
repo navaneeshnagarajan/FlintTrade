@@ -33,8 +33,8 @@ Follow Conventional Commits, as used in history: `feat(terminal): add sector rot
 
 ## Agentic Workflow
 
-- **Pipeline:** build agents (Codex or claude) → claude ultracode multi-agent review panels → maintainer. After any build/commit wave, run a full multi-agent audit before declaring done — fix everything found, then re-audit.
-- **Full arsenal:** for substantial work use the ultracode `Workflow` tool (fan-out → adversarial verify → synthesise), relevant skills, specialised agents, and MCP (a library-docs MCP for APIs, the browser-preview toolset for UI). Don't fall back to bare read/edit when a specialised tool fits.
+- **Pipeline:** Grok 4.5 plan → Grok 4.3 build → Linux Sol review. **Claude / Anthropic inactive** outside any active route (do not delete security/history notes that merely mention Claude as past tooling if needed; current pipeline must not direct work to Claude). After any build/commit wave, run independent review before declaring done — fix everything found, then re-review.
+- **Hermes Kanban on every host:** durable coding and multi-machine work goes through Hermes Kanban (isolated worktree, model pin, card ID, evidence comments). Coordinate via A2A when needed; do not invent a parallel task board.
 - **Gated execution is load-bearing:** any new order path must mint a `SafetyContext` through `gate_order` → `BrokerRouter`. Never add a path that reaches a broker adapter or `OpenAlgoClient.place_order` ungated.
 - **Spec-first:** design work lives in `.local/specs/<area>/` with a `DESIGN_LOG.md`; `PLAN.md` is the curated public roadmap (the detailed working plan lives at `.local/agent-context/PLAN.md`); `changelog.md` is for **shipped** code only (no in-flight design entries).
 - **Verification:** Python is verified locally (any OS) against the `.venv` (`uv run` / `.venv` python). Cross-platform (macOS/Windows) and the terminal (TS) are validated by **CI + the contributor pool** — never assume a single machine validates a language or OS. Never push without explicit maintainer permission; never `--no-verify`.
@@ -79,17 +79,20 @@ commands until all four installers and `SHA256SUMS.txt` exist together. Local
 macOS output is ad-hoc sealed with no Team ID; Apple distribution
 signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
-Count pins remain 102 widgets, 35 brokers and 18 packages. `PLAN.md` is the
+Count pins remain 71 widgets, 35 brokers and 18 packages. `PLAN.md` is the
 curated public roadmap; the detailed working plan of record lives at
 `.local/agent-context/PLAN.md` — resume from its phase tracker, verify branch/PR
 state live, and never push without explicit maintainer permission.
 
 **Next-work queue (in order):**
-1. **Phase 2 stabilisation remainder** — G40 broker-connect merge, infra script duplicates, GTT order UI, post_market_analysis cron handler, dead admin-route dispositions (G31/G32/U18 shipped).
-2. **Phase 4 learning loop** — AI1–AI3 + the full-day Practice run; spec first in `.local/specs/`.
-3. **Phase 5 publication/signing** — publish only after native CI evidence and the complete release set; add Apple signing/notarisation secrets when the maintainer is ready, and never describe an ad-hoc seal as distribution signing.
-4. **Bracket follow-ups** — OCO monitoring (one leg fills → cancel sibling) is refused at placement today, not silently accepted; a proper engine-side monitor is the next step. `BrokerRouter`/`_resolve_target` private-config coupling in `bracket_routes.py` mirrors core order routes — refactor both together or neither.
-5. **Human-gated (do not attempt autonomously):** Groww session approval, Kotak Neo live probe, funded order smoke, W6 spec, B3 order-capable MCP decision.
+1. **Truth-fix plans/templates** — keep `AGENTS.md`, `PLAN.md`, and agent-context templates honest against git-tracked tests and catalogues (no stale pins or obsolete workflow jargon).
+2. **Canonical Explore / Practice / Live + installed vs public-demo boundary** — user-facing copy uses those three modes; sandbox stays an internal engine name; do not blur the installed app with the public demo/site.
+3. **Home / Trade IA** — Home is pulse/overview; Trade is execution. Do not dump order entry into Home or market pulse into Trade.
+4. **Widget / provenance consolidation** — finish duplicate-surface merges and honest provenance labels; no silent sample/fallback data.
+5. **docs.page public-doc pilot** — pilot public docs without over-claiming installer publication or Live capability.
+6. **Reversible Hostinger non-prod staging** — stage site/IA work off production before any visual revamp; keep cutover reversible.
+7. **Production cutover only after accepted IA/site work** — no production cutover, installer publication, or visual revamp until IA/site work is accepted.
+8. **Human-gated (do not attempt autonomously):** live/funded broker actions — Groww session approval, Kotak Neo live probe, funded order smoke, and any other live or funded broker write.
 
 **Non-negotiables (verify before claiming done):**
 - Every reachable live order mints a `SafetyContext` via `gate_order`/`gate_broker_write` → `BrokerRouter`; `gateway/tests/test_no_legacy_order_path.py` is the guard — run it after touching anything order-adjacent.

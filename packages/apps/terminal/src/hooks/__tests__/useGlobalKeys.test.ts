@@ -88,6 +88,65 @@ describe("useGlobalKeys", () => {
     expect(onCommandPalette).toHaveBeenCalledOnce();
   });
 
+  it("calls onGoHome when Alt+H is pressed", () => {
+    const onGoHome = vi.fn();
+    renderHook(() => useGlobalKeys({ onGoHome }));
+
+    fireKey("h", { altKey: true });
+
+    expect(onGoHome).toHaveBeenCalledOnce();
+  });
+
+  it("calls onGoTrade when Alt+T is pressed", () => {
+    const onGoTrade = vi.fn();
+    renderHook(() => useGlobalKeys({ onGoTrade }));
+
+    fireKey("t", { altKey: true });
+
+    expect(onGoTrade).toHaveBeenCalledOnce();
+  });
+
+  it("handles uppercase Alt+H and Alt+T keyboard events", () => {
+    const onGoHome = vi.fn();
+    const onGoTrade = vi.fn();
+    renderHook(() => useGlobalKeys({ onGoHome, onGoTrade }));
+
+    fireKey("H", { altKey: true });
+    fireKey("T", { altKey: true });
+
+    expect(onGoHome).toHaveBeenCalledOnce();
+    expect(onGoTrade).toHaveBeenCalledOnce();
+  });
+
+  it("does not fire Alt+H / Alt+T navigation when INPUT is focused", () => {
+    const onGoHome = vi.fn();
+    const onGoTrade = vi.fn();
+    Object.defineProperty(document, "activeElement", {
+      value: { tagName: "INPUT" },
+      writable: true,
+      configurable: true,
+    });
+
+    renderHook(() => useGlobalKeys({ onGoHome, onGoTrade }));
+    fireKey("h", { altKey: true });
+    fireKey("t", { altKey: true });
+
+    expect(onGoHome).not.toHaveBeenCalled();
+    expect(onGoTrade).not.toHaveBeenCalled();
+  });
+
+  it("does not treat plain H/T (no Alt) as Home/Trade navigation", () => {
+    const onGoHome = vi.fn();
+    const onGoTrade = vi.fn();
+    renderHook(() => useGlobalKeys({ onGoHome, onGoTrade }));
+
+    fireKey("h");
+    fireKey("t");
+
+    expect(onGoHome).not.toHaveBeenCalled();
+    expect(onGoTrade).not.toHaveBeenCalled();
+  });
+
   it("handles uppercase Ctrl+K keyboard events", () => {
     const onCommandPalette = vi.fn();
     renderHook(() => useGlobalKeys({ onCommandPalette }));

@@ -83,7 +83,7 @@ const BASE = "/ft-api/v1/sandbox";
 
 async function fetchSandboxStatus(): Promise<SandboxStatus> {
   const resp = await fetch(`${BASE}/status`, { headers: buildHeaders(false) });
-  if (!resp.ok) throw new Error("Failed to fetch sandbox status.");
+  if (!resp.ok) throw new Error("Failed to fetch Practice status.");
   const raw: unknown = await resp.json();
   const result = SandboxStatusSchema.safeParse(raw);
   if (!result.success) {
@@ -129,12 +129,12 @@ async function resetSandbox(): Promise<void> {
     method: "POST",
     headers: buildHeaders(false),
   });
-  if (!resp.ok) throw new Error("Failed to reset sandbox data.");
+  if (!resp.ok) throw new Error("Failed to reset Practice data.");
 }
 
 async function exportSandboxData(): Promise<ExportData> {
   const resp = await fetch(`${BASE}/export`, { headers: buildHeaders(false) });
-  if (!resp.ok) throw new Error("Failed to export sandbox data.");
+  if (!resp.ok) throw new Error("Failed to export Practice data.");
   // Backend returns { status, data: "<json string>" } — parse the inner payload.
   const json = await resp.json() as { data: string };
   return JSON.parse(json.data) as ExportData;
@@ -148,7 +148,7 @@ async function importSandboxData(file: File): Promise<void> {
     // Backend expects { data: "<json string from /export>" }, not raw text.
     body: JSON.stringify({ data: text }),
   });
-  if (!resp.ok) throw new Error("Failed to import sandbox data.");
+  if (!resp.ok) throw new Error("Failed to import Practice data.");
 }
 
 interface PlacedOrder {
@@ -178,7 +178,7 @@ async function placeSandboxOrder(input: PlaceOrderInput): Promise<PlacedOrder> {
   // backend returns with HTTP 400 but a populated data.order — surface it rather
   // than throwing a generic error. Only a malformed request lacks data.order.
   if (json?.data?.order) return json.data.order;
-  throw new Error(json?.message ?? "Failed to place paper order.");
+  throw new Error(json?.message ?? "Failed to place Practice order.");
 }
 
 // ---------------------------------------------------------------------------
@@ -600,8 +600,8 @@ export default function SandboxControls() {
       <div className="border-t border-border-default" />
 
       {/* Place Practice order against virtual capital (no broker). */}
-      <form onSubmit={orderForm.handleSubmit(onPlaceOrder)} className="space-y-3" aria-label="Place paper order">
-        <p className="text-xs font-medium text-text-secondary">Place Paper Order</p>
+      <form onSubmit={orderForm.handleSubmit(onPlaceOrder)} className="space-y-3" aria-label="Place Practice Order">
+        <p className="text-xs font-medium text-text-secondary">Place Practice Order</p>
 
         <div className="flex items-center gap-2">
           <Controller
@@ -747,7 +747,7 @@ export default function SandboxControls() {
             accept=".json"
             onChange={handleFileChange}
             className="sr-only"
-            aria-label="Import sandbox data from JSON file"
+            aria-label="Import Practice data from JSON file"
           />
 
           {/* Reset — with AlertDialog confirmation */}
@@ -765,9 +765,9 @@ export default function SandboxControls() {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Reset all sandbox data?</AlertDialogTitle>
+                <AlertDialogTitle>Reset all Practice data?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will permanently delete all sandbox trades, positions, and orders,
+                  This will permanently delete all Practice trades, positions, and orders,
                   and restore your virtual capital to its initial amount.
                   This cannot be undone. Consider exporting your data first.
                 </AlertDialogDescription>
@@ -793,7 +793,7 @@ export default function SandboxControls() {
           <p className="text-xs text-profit mt-1" role="status">Data imported successfully.</p>
         )}
         {resetMutation.isSuccess && (
-          <p className="text-xs text-profit mt-1" role="status">Sandbox data has been reset.</p>
+          <p className="text-xs text-profit mt-1" role="status">Practice data has been reset.</p>
         )}
         {exportMutation.isError && (
           <p className="text-xs text-loss mt-1" role="alert">{(exportMutation.error as Error).message}</p>

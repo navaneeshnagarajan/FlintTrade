@@ -24,6 +24,26 @@ broker  →  OpenAlgo bridge  OR  FlintTrade native adapter  →  FlintTrade cor
 - **Modes:** Explore / Practice / Live are enforced server-side via JWT claims; PIN live-unlock and downgrade paths are wired through the app-auth flow, and Practice order placement is proven through the native sandbox engine.
 - **Desktop:** the Electron source-bootstrap shell is complete and locally verified (macOS packaged ad hoc). No complete installer release is published yet — macOS awaits Apple distribution signing and notarisation secrets; Windows/Linux installers build only in CI.
 
+### Current UX simplification (no new features until this lands)
+
+Simplify what is already built before adding surfaces. Keep the following boundaries honest and load-bearing:
+
+- **Installed app vs public demo:** the packaged/desktop product and any public demo or marketing site are separate. Public copy must not imply a published installer set, Live trading, or funded-broker readiness that the tree does not yet prove.
+- **Home pulse vs Trade execution:** Home is overview/pulse only; Trade owns order entry and execution chrome. Do not merge those jobs into one overloaded surface.
+- **Canonical modes and provenance:** user-facing vocabulary is Explore / Practice / Live (sandbox stays an internal engine name). Every widget that can fall back to sample or delayed data must show honest provenance; silent fakes are defects.
+- **Freeze on novelty:** no new user-facing features until the built UX is simplified under the boundaries above (one broker-connect surface remaining is part of that simplification, not a licence to expand scope).
+
+Current isolated review stack (not yet `main` or production): Slices 1–3 have landed the canonical vocabulary, the Home/Trade ownership split, and the 71-widget taxonomy/provenance contract. This does **not** authorise a blind 71→N reduction; later duplicate removal remains evidence-based and saved-layout compatible.
+
+The reversible sequence and current gate are:
+
+1. a branch-only, `noindex` docs.page pilot containing a small sanitised `docs/**/*.mdx` set (the current hosted service discovers MDX, while FlintTrade's canonical corpus remains Markdown — the pilot must not claim a completed migration);
+2. a site-documentation-only MCP compatibility pilot on the final 2026-07-28 protocol, using the exact SDK-v2 dual-era 2026+2025 path. It remains read-only, stateless and cache-conservative; adds no Apps, Tasks, Sampling, Roots, Logging, auth or trading tools; and must never expose the trading-sensitive internal AI `MCPBridge`;
+3. public-plane-only Hostinger staging prerequisites/configuration, with no production domain, DNS, account/payment, secret, broker or trading mutation;
+4. only then, the site-only **Spark Path** Three.js cinematic pilot under a default-off flag, with Graphite Continuity as the complete fallback, one primary CTA, no terminal/demo WebGL, reduced-motion/no-WebGL/mobile fallbacks, and hard payload/runtime gates.
+
+Items 1–2 are accepted only on the isolated preview/integration line: the curated docs.page pilot landed at `f73118f8`, and FlintTrade's own site-docs MCP dual-era implementation landed at `3319065b` after an honest protocol RED→GREEN reconstruction. The hosted docs.page service itself still negotiates the legacy 2025 era; no 2026 compatibility is claimed for that third-party endpoint. Neither slice is on `main` or deployed. Item 3 is now the next gate, but any Hostinger account, credential, secret or deployment action requires separate explicit authorisation before execution.
+
 ## Phase tracker
 
 | Phase | Scope | Status |
@@ -59,10 +79,10 @@ Done: server-side mode upgrades and downgrades; mode-preserving PIN unlock; a wo
 Done highlights:
 
 - Gated basket/split/options-strategy orders; sandbox fill realism; native GTT (forever-order) correctness across Dhan and Upstox with fail-closed cross-broker fields; explicit unknown-outcome recovery for response-lost writes; a hash-chained, verifiable audit log; a native two-way Telegram bot carrying the kill switch; a real searchable trade journal (SQLite + FTS5); honest provenance labels on every widget that can fall back to sample data; clean uninstall plus backend persistence for data that previously lived only in browser storage; CI test-visibility fixes so every terminal test file runs in a shard, with drift guards.
-- A terminal-wide widget consolidation (102 widgets → 69, PR #71) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
+- A terminal-wide widget consolidation (102 widgets → 69 via PR #71; current catalogue pin 71 after follow-on merges) that merged duplicate surfaces onto shared kernels (options maths, position sizing, order guards, strategy templates) and closed real order-path defects the duplicated surfaces had hidden; verified by adversarial review passes that were themselves re-checked by a fresh-context reviewer.
 - Webhooks were narrowed by maintainer ruling (2026-07-26) to the generic HMAC-signed custom rail; the TradingView/ChartInk/GoCharting parsers and the n8n/WhatsApp bridges were removed.
 
-Remaining: the consolidation backlog (one broker-connect surface, the remaining duplicate implementations), the final two widget merges, and the Linux-only desktop CI failures.
+Remaining: repair the current cross-platform nightly CI failures without weakening native security semantics, complete the reviewed Hostinger/public-site continuation, and continue only evidence-backed duplicate consolidation. The older broker-connect, GTT UI, `post_market_analysis`, dead-admin-route, installer-duplication and “final two widget” rows are shipped or superseded by the accepted 71-widget taxonomy and must not be reopened without new evidence.
 
 **Exit:** nothing user-visible crashes or silently fakes; the feature matrix has no broken rows and every partial or stub row is finished, visibly degraded, or explicitly deferred; full local verification green; multi-agent audit + re-audit clean.
 

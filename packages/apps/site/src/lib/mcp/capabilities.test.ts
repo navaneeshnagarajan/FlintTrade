@@ -36,7 +36,6 @@ describe('docs index generation', () => {
     expect(architectureDoc?.content).toContain('createFlintPlotlyTheme');
     expect(architectureDoc?.content).toContain('createFlintChartDrawingRenderPlan');
     expect(architectureDoc?.content).toContain('createFlintChartDrawingRenderPlanDiff');
-    expect(architectureDoc?.content).toContain('createFlintChartIndicatorSeriesRenderPlan');
     expect(architectureDoc?.content).toContain('createFlintChartIndicatorSeriesRenderPlanDiff');
     expect(architectureDoc?.content).toContain('createFlintChartOIProfileBarData');
     expect(architectureDoc?.content).toContain('runtime adapter');
@@ -86,7 +85,7 @@ describe('docs index generation', () => {
     // inside the complete Electron-release branch.
     expect(headerSource).toContain("href: '/download'");
     expect(pageSource).toContain('href="/download"');
-    expect(pageSource).toContain('Install desktop app');
+    expect(pageSource).toContain('Download desktop app');
     expect(downloadSource).toContain('install.sh | bash');
     expect(downloadSource).toContain('install.ps1 | iex');
     // The desktop guide stays reachable from the homepage, footer, and docs.
@@ -96,6 +95,24 @@ describe('docs index generation', () => {
     expect(desktopDoc?.content).toContain('no desktop installer release is published yet');
     expect(desktopDoc?.content).toContain('inspectable source checkout on first launch');
     expect(desktopDoc?.content).not.toContain('desktop release manifest');
+  });
+
+  it('hero has exactly one primary CTA to demo-app/welcome (new window), no retired sandbox/paper/demo-mode strings, MCP absent from hero', () => {
+    const pageSource = readFileSync(resolve(process.cwd(), 'src/app/page.tsx'), 'utf8');
+    // Extract only the hero-actions block for href/target/MCP assertions
+    const heroMatch = pageSource.match(/<div className="hero-actions">[\s\S]*?<\/div>/);
+    const heroActions = heroMatch ? heroMatch[0] : pageSource;
+    // exactly one primary on the FULL page (global hierarchy guard)
+    const primaryMatches = pageSource.match(/className="button primary"/g) || [];
+    expect(primaryMatches.length).toBe(1);
+    expect(heroActions).toContain('href="/demo-app/welcome"');
+    expect(heroActions).toContain('target="_blank"');
+    expect(heroActions).toContain('Start exploring — no install needed');
+    // no retired operating-mode strings in rendered copy (whole page OK)
+    expect(pageSource).not.toMatch(/sandbox testing|Sandbox Demo|Demo Mode|paper trading|paper order|demo data/i);
+    // MCP absent from hero-actions only
+    expect(heroActions).not.toContain('Use the docs MCP');
+    expect(heroActions).not.toContain('/mcp');
   });
 });
 

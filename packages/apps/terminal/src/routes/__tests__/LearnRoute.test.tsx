@@ -64,7 +64,7 @@ describe("LearnRoute", () => {
     expect(screen.getByText("Market Basics")).toBeInTheDocument();
     expect(screen.getByText("Glossary")).toBeInTheDocument();
     expect(screen.getByText("Strategy Library")).toBeInTheDocument();
-    expect(screen.getByText("Paper Trading")).toBeInTheDocument();
+    expect(screen.getByText("Practice Trading")).toBeInTheDocument();
     expect(screen.getByText("Resource Hub")).toBeInTheDocument();
   });
 

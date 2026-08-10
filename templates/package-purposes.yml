@@ -1,7 +1,7 @@
 # One-line purpose + key entry points per FlintTrade package.
 # Drives generation of packages/<pkg>/README.md via scripts/generate-package-readmes.py.
 apps/desktop:
-  language: TypeScript + Electron 40
+  language: TypeScript + Electron 43.2.0
   purpose: "Sandboxed Electron shell — verifies tools, builds managed local source, supervises its guardian, and provides close-to-tray lifecycle plus four-installer delivery."
   entry_points:
     - "electron/main.ts — singleton, bootstrap, guardian, windows, lifecycle, and updates"
@@ -81,7 +81,7 @@ integrations/gateway:
     - "src/flinttrade_gateway/ws_bridge.py — broker WebSocket fan-in to FlintTrade clients"
 integrations/webhooks:
   language: Python
-  purpose: "TradingView webhooks, ChartInk integration, custom webhooks, flow builder, alerter, n8n bridge, and WhatsApp bridge."
+  purpose: "HMAC-validated custom webhook intake rail for generic inbound alerts and flows."
   entry_points:
     - "src/flinttrade_webhooks/webhook_receiver.py — HMAC-validated webhook intake"
 services/ai:
