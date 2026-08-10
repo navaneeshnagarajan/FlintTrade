@@ -8,7 +8,7 @@
  * Placed between the connection status indicator and market status badge in TopBar.
  */
 
-import { useCallback } from "react";
+import { useCallback, useId } from "react";
 import { Check, ChevronDown, User } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
@@ -61,6 +61,7 @@ function statusLabel(status: AccountStatus): string {
 
 export default function AccountSwitcher() {
   const queryClient = useQueryClient();
+  const disconnectedDescriptionId = `${useId()}-disconnected-account`;
 
   const { accounts, activeAccountId, setActiveAccount } = useBrokerStore(
     useShallow((s) => ({
@@ -71,6 +72,10 @@ export default function AccountSwitcher() {
   );
 
   const activeAccount = accounts.find((a) => isBrokerAccountMatch(a, activeAccountId));
+  const isActiveDisconnected =
+    activeAccount?.status === "disconnected" ||
+    activeAccount?.status === "error" ||
+    activeAccount?.status === "token_expired";
 
   const handleSwitch = useCallback(
     (account: BrokerAccount) => {
@@ -82,8 +87,17 @@ export default function AccountSwitcher() {
     [activeAccountId, setActiveAccount, queryClient],
   );
 
-  // Hide switcher entirely when there are no accounts
-  if (accounts.length === 0) return null;
+  if (accounts.length === 0) {
+    return (
+      <span
+        className="flex h-7 items-center gap-1 px-2 text-xs text-text-muted"
+        aria-label="Broker connectivity: No broker connected"
+      >
+        <User size={12} aria-hidden="true" />
+        No broker connected
+      </span>
+    );
+  }
 
   const label = activeAccount
     ? `${activeAccount.broker.toUpperCase()} · ${activeAccount.label}`
@@ -95,6 +109,7 @@ export default function AccountSwitcher() {
         <button
           className="flex items-center gap-1 h-7 px-2 rounded text-xs text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
           aria-label={`Active account: ${label}. Click to switch account.`}
+          aria-describedby={isActiveDisconnected ? disconnectedDescriptionId : undefined}
         >
           <User size={12} className="text-text-muted" aria-hidden="true" />
           <span className="max-w-24 truncate font-medium">{label}</span>
@@ -107,6 +122,15 @@ export default function AccountSwitcher() {
           <ChevronDown size={10} className="text-text-muted" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
+      {isActiveDisconnected && (
+        <span
+          id={disconnectedDescriptionId}
+          className="sr-only"
+          role="status"
+        >
+          Disconnected account. Reconnect this account before trading.
+        </span>
+      )}
 
       <DropdownMenuContent align="end" className="w-56">
         <div className="px-2 py-1.5">

@@ -193,6 +193,7 @@ export function useCommandRegistry() {
 
     // ----- Navigate commands -----
     const navEntries: Array<{ id: string; label: string; path: string; shortcut?: string }> = [
+      { id: "nav:home",    label: "Go to Home",    path: "/home",    shortcut: "Alt+H" },
       { id: "nav:trade",    label: "Go to Trade",    path: "/trade",    shortcut: "Alt+T" },
       { id: "nav:invest",   label: "Go to Invest",   path: "/invest",   shortcut: "Alt+I" },
       { id: "nav:learn",    label: "Go to Learn",    path: "/learn",    shortcut: "Alt+L" },

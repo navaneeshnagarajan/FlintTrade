@@ -5,15 +5,21 @@
  * Verifies: logo, search button, absence of AI pill, live badge, ticker area.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { MemoryRouter, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { mockSetConnectionStatus, mockDirectBrokerConnected } = vi.hoisted(() => ({
+const { mockSetConnectionStatus, mockDirectBrokerConnected, mockTimingsQuery } = vi.hoisted(() => ({
   mockSetConnectionStatus: vi.fn(),
   mockDirectBrokerConnected: { value: false },
+  mockTimingsQuery: {
+    data: undefined as Array<{ exchange: string; start_time: number; end_time: number }> | undefined,
+    dataUpdatedAt: 0,
+    isError: false,
+    isLoading: false,
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -50,6 +56,10 @@ vi.mock("@/components/NotificationCentre/NotificationCentre", () => ({
 
 vi.mock("../AccountSwitcher", () => ({
   default: () => <div data-testid="account-switcher" />,
+}));
+
+vi.mock("../WorkspaceSwitcher", () => ({
+  default: () => <div data-testid="workspace-switcher" />,
 }));
 
 // TickerMarquee stub — renders a simple labelled region so ticker tests pass
@@ -96,7 +106,8 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
 }));
 
 vi.mock("@/hooks/useMarketStatus", () => ({
-  useTimings: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useTimings: vi.fn(() => mockTimingsQuery),
+  MARKET_TIMINGS_MAX_AGE_MS: 5_000,
 }));
 
 vi.mock("@/services/api", () => ({
@@ -128,6 +139,11 @@ function renderTopBarV2(tickerMode?: "off" | "pinned" | "scroll" | "marquee") {
   );
 }
 
+function setOpenMarketTestTime() {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-08-10T04:30:00.000Z")); // Monday, 10:00 IST
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -136,6 +152,14 @@ describe("TopBarV2", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDirectBrokerConnected.value = false;
+    mockTimingsQuery.data = undefined;
+    mockTimingsQuery.dataUpdatedAt = 0;
+    mockTimingsQuery.isError = false;
+    mockTimingsQuery.isLoading = false;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders without crashing", () => {
@@ -157,7 +181,7 @@ describe("TopBarV2", () => {
     renderTopBarV2();
     const link = screen.getByRole("link", { name: /flint home/i });
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "/trade");
+    expect(link).toHaveAttribute("href", "/home");
   });
 
   it("renders the search button with accessible label", () => {
@@ -197,12 +221,64 @@ describe("TopBarV2", () => {
     expect(screen.queryByText(/ai assistant/i)).not.toBeInTheDocument();
   });
 
-  it("renders the live market badge", () => {
+  it("reports the market session as unavailable until timing data is trustworthy", () => {
     renderTopBarV2();
-    expect(screen.getByTestId("live-badge")).toBeInTheDocument();
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
   });
 
-  it("live badge has accessible market status label", () => {
+  it("names a trustworthy in-session result Market open rather than Live", () => {
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+
+    const { unmount } = renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market open");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+    unmount();
+  });
+
+  it("names a trustworthy weekday out-of-session result Market closed", () => {
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 120_000, end_time: now - 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+
+    const { unmount } = renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market closed");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Live");
+    unmount();
+  });
+
+  it("uses the shared timing truth TTL rather than a drifting local limit", () => {
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now - 5_001;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("reports market timing refresh failures instead of retaining an authoritative state", () => {
+    setOpenMarketTestTime();
+    const now = Date.now();
+    mockTimingsQuery.data = [{ exchange: "NSE", start_time: now - 60_000, end_time: now + 60_000 }];
+    mockTimingsQuery.dataUpdatedAt = now;
+    mockTimingsQuery.isError = true;
+
+    renderTopBarV2();
+
+    expect(screen.getByTestId("market-session-status")).toHaveTextContent("Market unavailable");
+    expect(screen.getByTestId("market-session-status")).not.toHaveTextContent("Market open");
+  });
+
+  it("market session status has an accessible label", () => {
     renderTopBarV2();
     expect(screen.getByLabelText(/market status/i)).toBeInTheDocument();
   });

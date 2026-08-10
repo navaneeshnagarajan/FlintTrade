@@ -38,6 +38,7 @@ import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { tickAtomFamily, vixAtom } from "@/atoms/marketAtoms";
 import { tickKeyFor } from "@/lib/market";
 import { cn } from "@/lib/utils";
+import { useModeStore } from "@/stores/modeStore";
 import { ProvChip, SectionHeading } from "../shared";
 import { SAMPLE_GLOBAL_INDICES } from "../sampleData";
 
@@ -247,15 +248,18 @@ export function vixBandFor(value: number): VixBand {
  */
 function VixRegimeSection() {
   const tick = useAtomValue(vixAtom);
+  const mode = useModeStore((s) => s.mode);
   const ltp = tick?.ltp ?? 0;
   const hasTick = Boolean(tick) && ltp > 0;
+  // Explore mode injects sample ticks — never claim Live against sample data.
+  const vixLive = mode !== "explore" && hasTick;
   const prevClose = tick?.prevClose ?? tick?.close ?? 0;
   const band = hasTick ? vixBandFor(ltp) : null;
   const change = hasTick && prevClose > 0 ? ltp - prevClose : null;
 
   return (
     <section aria-labelledby="mo-vix-regime">
-      <SectionHeading id="mo-vix-regime">Volatility Regime<ProvChip live={hasTick} /></SectionHeading>
+      <SectionHeading id="mo-vix-regime">Volatility Regime<ProvChip live={vixLive} /></SectionHeading>
       <div className="rounded border border-border-default bg-surface-card p-2">
         {band ? (
           <div className="flex items-baseline gap-2 flex-wrap">
@@ -370,13 +374,13 @@ function IndicesTab() {
     { India: [], US: [], Europe: [], Asia: [] },
   );
 
-  // A tick for the lead index is the evidence that the strip is live. Each
-  // card still renders its own "awaiting tick" state, so a partially-
-  // populated strip never claims data it does not have.
+  // A tick for the lead index is the evidence that the strip is live — except
+  // in Explore mode, where sample-injected ticks must still badge as Sample.
+  const mode = useModeStore((s) => s.mode);
   const niftyTick = useAtomValue(
     tickAtomFamily(tickKeyFor(LIVE_INDICES[0].symbol, LIVE_INDICES[0].exchange)),
   );
-  const indicesLive = (niftyTick?.ltp ?? 0) > 0;
+  const indicesLive = mode !== "explore" && (niftyTick?.ltp ?? 0) > 0;
 
   return (
     <div className="h-full flex flex-col bg-surface-base overflow-hidden">

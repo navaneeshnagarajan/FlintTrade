@@ -62,8 +62,15 @@ vi.mock("@/components/layout/PublicRouteShell", () => ({
 // Stub the mode picker: the wizard's contract is its `onSelect(mode)` callback.
 vi.mock("@/routes/ModeSelectRoute", () => ({
   __esModule: true,
-  default: ({ onSelect }: { onSelect: (mode: AppMode, token?: string) => void }) => (
+  default: ({
+    onSelect,
+    initialMode,
+  }: {
+    onSelect: (mode: AppMode, token?: string) => void;
+    initialMode?: AppMode;
+  }) => (
     <div>
+      <output aria-label="Initial setup mode">{initialMode ?? "explore"}</output>
       <button onClick={() => onSelect("explore")}>pick-explore</button>
       <button onClick={() => onSelect("practice")}>pick-practice</button>
       <button onClick={() => onSelect("live", "live-token")}>pick-live</button>
@@ -129,6 +136,29 @@ describe("SetupAccountRoute — mode completion (Phase 1 G1, setup half)", () =>
     seedModeStepProgress();
     useModeStore.getState().setMode("explore");
     useAuthStore.getState().setLoggedIn("setup-explore-token", "nav", "");
+  });
+
+  it("restores a valid canonical mode deep link on the current mode step", () => {
+    render(<SetupAccountRoute requestedStep={6} requestedMode="practice" />);
+
+    expect(screen.getByLabelText("Initial setup mode")).toHaveTextContent("practice");
+  });
+
+  it("restores a valid completed-step deep link without skipping unfinished steps", () => {
+    render(<SetupAccountRoute requestedStep={3} />);
+
+    expect(screen.getByRole("tablist", { name: "Connection mode" })).toBeInTheDocument();
+    expect(screen.queryByText("pick-practice")).not.toBeInTheDocument();
+  });
+
+  it("does not let a deep link skip account creation", () => {
+    localStorage.clear();
+    useAuthStore.getState().setSetupRequired();
+
+    render(<SetupAccountRoute requestedStep={6} requestedMode="live" />);
+
+    expect(screen.getByLabelText("Choose a username")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Initial setup mode")).not.toBeInTheDocument();
   });
 
   it("upgrades the JWT to practice via the mode-transition endpoint before finishing", async () => {

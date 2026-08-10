@@ -10,7 +10,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigate } from "react-router";
 
 const aiSessionMocks = vi.hoisted(() => ({
   importAiSession: vi.fn(),
@@ -113,7 +113,14 @@ vi.mock("@/stores/skillStore", () => ({
 }));
 
 vi.mock("@/widgets/utility/AIAdvisor/AIAdvisorWidget", () => ({
-  default: () => <div data-testid="ai-advisor-widget">AI Advisor</div>,
+  default: ({ analysisContext }: { analysisContext?: unknown }) => (
+    <div
+      data-testid="ai-advisor-widget"
+      data-analysis-context={JSON.stringify(analysisContext ?? null)}
+    >
+      AI Advisor
+    </div>
+  ),
 }));
 
 vi.mock("@/routes/ai/AISuggestionsPanel", () => ({
@@ -172,6 +179,28 @@ function renderAI(initialEntry = "/ai") {
   );
 }
 
+function HistoryControls() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(-1)}>Back in history</button>
+      <button type="button" onClick={() => navigate("/ai")}>Clear symbol context</button>
+    </>
+  );
+}
+
+function renderAIHistory(initialEntries: string[], initialIndex: number) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+      <QueryClientProvider client={qc}>
+        <HistoryControls />
+        <AIRoute />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
 function storeMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: "m1",
@@ -202,6 +231,58 @@ describe("AIRoute", () => {
     renderAI();
 
     expect(screen.getByText("AI Center")).toBeInTheDocument();
+  });
+
+  it("restores one normalised validated symbol context from a direct reload URL and passes it to chat", () => {
+    renderAI("/ai?symbol=%20reliance%20&exchange=nse&source=palette");
+
+    expect(screen.getByTestId("ai-symbol-context")).toHaveTextContent(
+      "RELIANCE (NSE) • palette",
+    );
+    expect(screen.getByTestId("ai-advisor-widget")).toHaveAttribute(
+      "data-analysis-context",
+      JSON.stringify({ symbol: "RELIANCE", exchange: "NSE", source: "palette" }),
+    );
+  });
+
+  it.each([
+    ["a partial triplet", "/ai?symbol=RELIANCE&exchange=NSE"],
+    ["an invalid symbol", "/ai?symbol=BAD%3CSCRIPT%3E&exchange=NSE&source=palette"],
+    ["an overlong symbol", `/ai?symbol=${"A".repeat(33)}&exchange=NSE&source=palette`],
+    ["an unknown exchange", "/ai?symbol=RELIANCE&exchange=FAKE&source=palette"],
+    ["a non-exact source", "/ai?symbol=RELIANCE&exchange=NSE&source=Palette"],
+    ["ambiguous duplicate fields", "/ai?symbol=RELIANCE&symbol=TCS&exchange=NSE&source=palette"],
+  ])("renders and uses no analysis context for %s", (_case, entry) => {
+    renderAI(entry);
+
+    expect(screen.queryByTestId("ai-symbol-context")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ai-advisor-widget")).toHaveAttribute(
+      "data-analysis-context",
+      "null",
+    );
+  });
+
+  it("restores context on Back and clears it when the symbol query is cleared", async () => {
+    const user = userEvent.setup();
+    renderAIHistory([
+      "/ai?symbol=RELIANCE&exchange=NSE&source=palette",
+      "/ai?chat=saved",
+    ], 1);
+
+    expect(screen.queryByTestId("ai-symbol-context")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back in history" }));
+    expect(await screen.findByTestId("ai-symbol-context")).toHaveTextContent(
+      "RELIANCE (NSE) • palette",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Clear symbol context" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("ai-symbol-context")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("ai-advisor-widget")).toHaveAttribute(
+      "data-analysis-context",
+      "null",
+    );
   });
 
   it("owns the signal stream at route scope before the Signals overlay opens", () => {

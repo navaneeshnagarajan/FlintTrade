@@ -12,7 +12,7 @@
  * fetch / timing.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -28,11 +28,21 @@ vi.mock("@/services/api", () => ({
   getFunds: () => mockGetFunds(),
 }));
 
+// Account discovery itself is covered by the broker-account suites. Keep this
+// hook test network-free while driving the real account/read stores below.
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
+}));
+
 // ---------------------------------------------------------------------------
 // Hook import — after mocks so the hook resolves the mocked module.
 // ---------------------------------------------------------------------------
 
 import { useFunds } from "../useFunds";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,6 +74,11 @@ function makeFunds(overrides: Partial<Funds> = {}): Funds {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setAccountRuntime();
+});
+
+afterEach(() => {
+  resetAccountRuntime();
 });
 
 // ---------------------------------------------------------------------------

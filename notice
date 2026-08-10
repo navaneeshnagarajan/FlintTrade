@@ -87,3 +87,6 @@ with FlintTrade builds):
 - TanStack Query (MIT) — Tanner Linsley
 - Zustand (MIT) — pmndrs
 - Jotai (MIT) — pmndrs
+- Three.js r185 (MIT) — Copyright © 2010-2026 three.js authors
+  The complete licence is bundled at
+  `packages/apps/site/public/licenses/three-LICENSE`.

@@ -172,13 +172,6 @@ export function NoConnectionOverlay() {
           </Button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowOverlay(false)}
-          className="text-xs text-text-muted hover:text-text-secondary transition-colors mt-1"
-        >
-          Dismiss — continue without live data
-        </button>
       </div>
     </div>
   );

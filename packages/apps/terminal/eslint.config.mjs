@@ -165,4 +165,30 @@ export default [
       "local/no-ts-suppression": "error",
     },
   },
+  {
+    // Playwright infrastructure is outside src/, but carries the same two
+    // TypeScript safety rules. Hooks rules are irrelevant to non-React E2E code.
+    files: ["e2e/**/*.ts", "playwright.config.ts", "playwright.infra.config.ts"],
+    plugins: { local: localRules },
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          babelrc: false,
+          configFile: false,
+          presets: ["@babel/preset-typescript"],
+        },
+      },
+      ecmaVersion: 2022,
+      sourceType: "module",
+    },
+    linterOptions: {
+      reportUnusedDisableDirectives: "error",
+    },
+    rules: {
+      "local/no-explicit-any": "error",
+      "local/no-ts-suppression": "error",
+    },
+  },
 ];

@@ -112,7 +112,7 @@ test("Historical Chain captures and renders the latest snapshot in a narrow pane
   await widget.getByLabel("Expiry to capture").fill("2026-03-26");
   await widget.getByRole("button", { name: "Capture" }).click();
 
-  await expect(widget.getByRole("status")).toContainText("Captured 2 rows for 2026-03-26");
+  await expect(widget.getByRole("status").filter({ hasText: "Captured 2 rows for 2026-03-26" })).toBeVisible();
   await expect(widget.getByRole("cell", { name: "24000" })).toBeVisible();
   expect(captureBody).toEqual({ exchange: "NFO" });
 });

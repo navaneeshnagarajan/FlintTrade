@@ -150,7 +150,8 @@ GET endpoints unless marked otherwise. Powered by `packages/services/screener/`.
 ### Gateway (`/ft-api/v1/broker/*`)
 
 POST endpoints. Powered by `packages/integrations/gateway/`. Used by the
-`/setup-account` wizard and by the connection-status indicator.
+canonical `/setup` wizard (`/setup-account` is a compatibility alias) and by
+the connection-status indicator.
 
 | Endpoint | Purpose |
 |---|---|

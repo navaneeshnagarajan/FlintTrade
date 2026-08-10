@@ -27,6 +27,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import os
+import tempfile
 import urllib.error
 import urllib.request
 from types import ModuleType, TracebackType
@@ -167,52 +169,58 @@ def signer(module: ModuleType, tmp_path_factory: pytest.TempPathFactory) -> _Sig
     Returns:
         The generated key material.
     """
-    workspace = tmp_path_factory.mktemp("node-release-key")
-    home = workspace / "signer"
-    fingerprint = _generate(module, home, "Test Release Manager <manager@example.invalid>")
-    mirrored = _export(module, home, fingerprint, workspace / "mirrored.asc")
+    if os.name == "posix" and pathlib.Path("/tmp").exists():
+        base_dir = "/tmp"
+    else:
+        base_dir = tempfile.gettempdir()
+    with tempfile.TemporaryDirectory(prefix="node-release-key-", dir=base_dir) as tmp:
+        workspace = pathlib.Path(tmp)
+        home = workspace / "signer"
+        fingerprint = _generate(module, home, "Test Release Manager <manager@example.invalid>")
+        mirrored = _export(module, home, fingerprint, workspace / "mirrored.asc")
 
-    shasums = workspace / "node-v22.23.2-SHASUMS256.txt"
-    shasums.write_bytes(b"0" * 64 + b"  node-v22.23.2.tar.gz\n")
-    signature = workspace / "node-v22.23.2-SHASUMS256.txt.sig"
-    _gpg(module, home, "--output", str(signature), "--detach-sign", str(shasums))
+        shasums = workspace / "node-v22.23.2-SHASUMS256.txt"
+        shasums.write_bytes(b"0" * 64 + b"  node-v22.23.2.tar.gz\n")
+        signature = workspace / "node-v22.23.2-SHASUMS256.txt.sig"
+        _gpg(module, home, "--output", str(signature), "--detach-sign", str(shasums))
 
-    # A revocation certificate is written at generation time with a colon
-    # inserted before the armour, precisely so it cannot be imported by
-    # accident. Removing it is what a signer does to publish the revocation.
-    certificate = (home / "openpgp-revocs.d" / f"{fingerprint}.rev").read_text(encoding="utf-8")
-    published = workspace / "revocation.asc"
-    published.write_text(
-        "\n".join(line.removeprefix(":") for line in certificate.splitlines()),
-        encoding="utf-8",
-    )
-    revoked_home = workspace / "revoked"
-    revoked_home.mkdir(mode=0o700)
-    _gpg(module, revoked_home, "--import", str(workspace / "mirrored.asc"))
-    _gpg(module, revoked_home, "--import", str(published))
-    revoked = _export(module, revoked_home, fingerprint, workspace / "revoked.asc")
+        # A revocation certificate is written at generation time with a colon
+        # inserted before the armour, precisely so it cannot be imported by
+        # accident. Removing it is what a signer does to publish the revocation.
+        certificate = (home / "openpgp-revocs.d" / f"{fingerprint}.rev").read_text(encoding="utf-8")
+        published = workspace / "revocation.asc"
+        published.write_text(
+            "\n".join(line.removeprefix(":") for line in certificate.splitlines()),
+            encoding="utf-8",
+        )
+        revoked_home = workspace / "revoked"
+        revoked_home.mkdir(mode=0o700)
+        _gpg(module, revoked_home, "--import", str(workspace / "mirrored.asc"))
+        _gpg(module, revoked_home, "--import", str(published))
+        revoked = _export(module, revoked_home, fingerprint, workspace / "revoked.asc")
 
-    # Renewal and shortening both republish the primary key with a fresh
-    # self-signature, which is how a release manager moves an expiry.
-    _gpg(module, home, "--quick-set-expire", fingerprint, "4y")
-    renewed = _export(module, home, fingerprint, workspace / "renewed.asc")
-    _gpg(module, home, "--quick-set-expire", fingerprint, "10d")
-    shortened = _export(module, home, fingerprint, workspace / "shortened.asc")
+        # Renewal and shortening both republish the primary key with a fresh
+        # self-signature, which is how a release manager moves an expiry.
+        _gpg(module, home, "--quick-set-expire", fingerprint, "4y")
+        renewed = _export(module, home, fingerprint, workspace / "renewed.asc")
+        _gpg(module, home, "--quick-set-expire", fingerprint, "10d")
+        shortened = _export(module, home, fingerprint, workspace / "shortened.asc")
 
-    other_home = workspace / "stranger"
-    other_fingerprint = _generate(module, other_home, "Somebody Else <else@example.invalid>")
-    stranger = _export(module, other_home, other_fingerprint, workspace / "stranger.asc")
+        other_home = workspace / "stranger"
+        other_fingerprint = _generate(module, other_home, "Somebody Else <else@example.invalid>")
+        stranger = _export(module, other_home, other_fingerprint, workspace / "stranger.asc")
 
-    return _Signer(
-        fingerprint=fingerprint,
-        mirrored=mirrored,
-        revoked=revoked,
-        renewed=renewed,
-        shortened=shortened,
-        stranger=stranger,
-        shasums=shasums.read_bytes(),
-        signature=signature.read_bytes(),
-    )
+        yield _Signer(
+            fingerprint=fingerprint,
+            mirrored=mirrored,
+            revoked=revoked,
+            renewed=renewed,
+            shortened=shortened,
+            stranger=stranger,
+            shasums=shasums.read_bytes(),
+            signature=signature.read_bytes(),
+        )
+    # Guaranteed cleanup after the yield (TemporaryDirectory context exits here)
 
 
 def _pin(signer: _Signer, tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:

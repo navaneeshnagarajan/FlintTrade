@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import { useConnectionStore } from "@/stores/connectionStore";
 import {
   brokerAccountKey,
@@ -13,6 +15,14 @@ export interface DataScopeInput {
   apiKey: string;
   accounts: BrokerAccount[];
   activeAccountId: string | null;
+}
+
+/** Immutable authority identity shared by query keys, transports, and actions. */
+export interface AccountAuthorityIdentity {
+  readonly mode: AppMode;
+  readonly scopeKey: string;
+  readonly brokerType: string;
+  readonly accountId: string;
 }
 
 /** Build an opaque deterministic identifier without retaining raw connection values. */
@@ -33,43 +43,98 @@ export function connectionScopeFingerprint(host: string, apiKey: string): string
 }
 
 /**
- * Return the provenance key used by account queries and persisted market data.
- *
- * Explore and Practice are deliberately account-independent. Live OpenAlgo
- * reads are selected whenever an OpenAlgo key exists; otherwise native reads
- * follow the selected composite account, then the primary connected account.
+ * Resolve the native account whose identity owns account-query provenance.
+ * Connection status is deliberately not part of identity: disconnecting must
+ * disable reads without moving the observer onto another account's cache key.
  */
-export function resolveDataScope({
+export function resolveNativeDataAccount(
+  accounts: BrokerAccount[],
+  activeAccountId: string | null,
+): BrokerAccount | undefined {
+  if (activeAccountId) {
+    const active = findBrokerAccountMatch(accounts, activeAccountId);
+    return active?.source === "native" ? active : undefined;
+  }
+
+  const nativeAccounts = accounts.filter((account) => account.source === "native");
+  const primary = nativeAccounts.find((account) => account.is_primary);
+  if (primary) return primary;
+  return nativeAccounts.length === 1 ? nativeAccounts[0] : undefined;
+}
+
+/** Resolve the exact immutable identity represented by an account-query key. */
+export function resolveAccountAuthorityIdentity({
   mode,
   host,
   apiKey,
   accounts,
   activeAccountId,
-}: DataScopeInput): string {
-  if (mode === "explore") return "explore:mock";
-  if (mode === "practice") return "practice:sandbox:default";
-  if (apiKey.trim()) return `live:openalgo:${connectionScopeFingerprint(host, apiKey)}`;
-
-  const active = findBrokerAccountMatch(accounts, activeAccountId);
-  if (active?.source === "native") {
-    return `live:${brokerAccountKey(active)}`;
+}: DataScopeInput): AccountAuthorityIdentity {
+  if (mode === "explore") {
+    return Object.freeze({
+      mode,
+      scopeKey: "explore:mock",
+      brokerType: "mock",
+      accountId: "default",
+    });
+  }
+  if (mode === "practice") {
+    return Object.freeze({
+      mode,
+      scopeKey: "practice:sandbox:default",
+      brokerType: "sandbox",
+      accountId: "default",
+    });
+  }
+  if (apiKey.trim()) {
+    return Object.freeze({
+      mode,
+      scopeKey: `live:openalgo:${connectionScopeFingerprint(host, apiKey)}`,
+      brokerType: "openalgo",
+      accountId: "default",
+    });
   }
 
-  const fallback = accounts.find((account) => (
-    account.source === "native" && account.status === "connected" && account.is_primary
-  )) ?? accounts.find((account) => (
-    account.source === "native" && account.status === "connected"
-  ));
-  return fallback ? `live:${brokerAccountKey(fallback)}` : "live:unconfigured";
+  const nativeAccount = resolveNativeDataAccount(accounts, activeAccountId);
+  if (nativeAccount) {
+    return Object.freeze({
+      mode,
+      scopeKey: `live:${brokerAccountKey(nativeAccount)}`,
+      brokerType: nativeAccount.broker,
+      accountId: nativeAccount.account_id,
+    });
+  }
+  return Object.freeze({
+    mode,
+    scopeKey: "live:unconfigured",
+    brokerType: "unconfigured",
+    accountId: "none",
+  });
 }
 
-/** Reactive provenance key for TanStack queries and local chart caches. */
-export function useDataScope(): string {
+/**
+ * Return the provenance key used by account queries and persisted market data.
+ * Connection status never changes this identity.
+ */
+export function resolveDataScope(input: DataScopeInput): string {
+  return resolveAccountAuthorityIdentity(input).scopeKey;
+}
+
+/** Reactive immutable authority identity for account queries and actions. */
+export function useAccountAuthorityIdentity(): AccountAuthorityIdentity {
   const mode = useModeStore((state) => state.mode);
   const host = useConnectionStore((state) => state.host);
   const apiKey = useConnectionStore((state) => state.apiKey);
   const accounts = useBrokerStore((state) => state.accounts);
   const activeAccountId = useBrokerStore((state) => state.activeAccountId);
 
-  return resolveDataScope({ mode, host, apiKey, accounts, activeAccountId });
+  return useMemo(
+    () => resolveAccountAuthorityIdentity({ mode, host, apiKey, accounts, activeAccountId }),
+    [mode, host, apiKey, accounts, activeAccountId],
+  );
+}
+
+/** Reactive provenance key for TanStack queries and local chart caches. */
+export function useDataScope(): string {
+  return useAccountAuthorityIdentity().scopeKey;
 }

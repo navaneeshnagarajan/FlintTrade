@@ -181,7 +181,7 @@ function ArbitrageScannerWidget() {
           <p className="text-[10px] text-text-muted">
             Cash-future basis &amp; cross-exchange
             {response !== undefined && ` · funding ${(response.scan.risk_free_rate * 100).toFixed(1)}%`}
-            {isSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
           </p>
         </div>
         {isConnected && (

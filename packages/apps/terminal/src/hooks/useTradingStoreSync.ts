@@ -2,9 +2,7 @@ import { useEffect } from "react";
 
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
-import { useModeStore } from "@/stores/modeStore";
+import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { useTradingStore } from "@/stores/tradingStore";
 
 /**
@@ -22,21 +20,20 @@ import { useTradingStore } from "@/stores/tradingStore";
  * forbids.
  */
 export function useTradingStoreSync(sessionEnabled = true): void {
-  const isBrokerConnected = useBrokerConnected();
-  const mode = useModeStore((state) => state.mode);
-  const accountReadsEnabled = sessionEnabled && resolveAccountReadsEnabled(mode, isBrokerConnected);
+  const scopedAccountReadsEnabled = useAccountReadsEnabled();
+  const accountReadsEnabled = sessionEnabled && scopedAccountReadsEnabled;
   const funds = useFunds({ enabled: accountReadsEnabled });
   const positions = usePositions({ enabled: accountReadsEnabled });
 
   useEffect(() => {
-    if (sessionEnabled && funds.data) {
+    if (accountReadsEnabled && funds.data) {
       useTradingStore.getState().updateFromFunds(funds.data);
     }
-  }, [funds.data, sessionEnabled]);
+  }, [accountReadsEnabled, funds.data]);
 
   useEffect(() => {
-    if (sessionEnabled && positions.data) {
+    if (accountReadsEnabled && positions.data) {
       useTradingStore.getState().updateFromPositions(positions.data);
     }
-  }, [positions.data, sessionEnabled]);
+  }, [accountReadsEnabled, positions.data]);
 }

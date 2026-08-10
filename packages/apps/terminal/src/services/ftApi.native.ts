@@ -213,9 +213,11 @@ export async function readNativeAccount<T>(
   accountId: string,
   kind: NativeReadKind,
   params?: NativeReadParams,
+  signal?: AbortSignal,
 ): Promise<T> {
   return get<T>(
     `native/accounts/${encodeURIComponent(adapterId)}/${encodeURIComponent(accountId)}/${kind}${serialiseNativeReadParams(params)}`,
+    signal,
   );
 }
 

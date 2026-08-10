@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
@@ -31,8 +31,10 @@ vi.mock("@/hooks/useBrokerCapabilities", () => ({
 const mockMode = vi.hoisted(() => ({ current: "practice" }));
 
 vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (s: { mode: string }) => unknown) =>
-    selector({ mode: mockMode.current }),
+  useModeStore: Object.assign(
+    (selector: (s: { mode: string }) => unknown) => selector({ mode: mockMode.current }),
+    { getState: () => ({ mode: mockMode.current }) },
+  ),
 }));
 
 vi.mock("@/lib/market", async (importOriginal) => ({
@@ -66,6 +68,12 @@ const mockGetSymbol = vi.mocked(getSymbol);
 
 const defaultProps = makeWidgetPanelProps();
 
+async function reviewAndConfirmPractice(buttonName: RegExp = /practice (buy|sell)/i): Promise<void> {
+  fireEvent.click(screen.getByRole("button", { name: buttonName }));
+  const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
+  fireEvent.click(confirm);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -73,6 +81,18 @@ const defaultProps = makeWidgetPanelProps();
 describe("OrderPadWidget", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockMode.current = "practice";
+    mockPlaceOrder.mockReset();
+    mockPlaceOrder.mockResolvedValue({ orderId: "TEST001" });
+    mockGetSymbol.mockReset();
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY",
+      name: "Nifty 50",
+      exchange: "NSE",
+      instrumenttype: "INDEX",
+      lotsize: 1,
+      tick_size: 0.05,
+    });
     // Default: no LTP available
     vi.spyOn(jotai, "useAtomValue").mockReturnValue(null);
   });
@@ -242,10 +262,10 @@ describe("OrderPadWidget", () => {
     vi.mocked(placeOrder).mockResolvedValue({ orderId: "TEST001" });
 
     render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
 
-    // Submit the form — default values are valid (NIFTY, qty=1, MARKET)
-    const submitBtn = screen.getByRole("button", { name: /practice buy/i });
-    fireEvent.click(submitBtn);
+    // Practice requires an explicit review before the existing placement path.
+    await reviewAndConfirmPractice(/practice buy/i);
 
     // Toast appears with order ID
     await screen.findByRole("alert");
@@ -260,7 +280,8 @@ describe("OrderPadWidget", () => {
     window.addEventListener("flinttrade:notify", listener);
 
     render(<OrderPadWidget {...defaultProps} />);
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
     await screen.findByRole("alert");
 
     expect(listener).toHaveBeenCalled();
@@ -277,11 +298,13 @@ describe("OrderPadWidget", () => {
     vi.mocked(placeOrder).mockResolvedValue({ orderId: "TEST001" });
 
     render(<OrderPadWidget {...defaultProps} />);
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByText("Lot: 1");
+    await reviewAndConfirmPractice(/practice buy/i);
     await screen.findByRole("alert");
 
     expect(placeOrder).toHaveBeenCalledWith(
       expect.objectContaining({ orderType: "MARKET", price: 250.5 }),
+      { mode: "practice" },
     );
   });
 });
@@ -412,11 +435,12 @@ describe("OrderPadWidget F&O lot-size validation", () => {
 
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "150" } });
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await reviewAndConfirmPractice(/practice buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ symbol: "NIFTY28MAR2422000CE", exchange: "NFO", quantity: 150 }),
+      { mode: "practice" },
     );
   });
 
@@ -425,11 +449,12 @@ describe("OrderPadWidget F&O lot-size validation", () => {
     mockGetSymbol.mockRejectedValue(new Error("lookup unavailable"));
     render(<OrderPadWidget {...defaultProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await reviewAndConfirmPractice(/practice buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ exchange: "NSE", quantity: 1 }),
+      { mode: "practice" },
     );
   });
 });
@@ -477,25 +502,225 @@ describe("OrderPadWidget shared pre-trade guards", () => {
 
   it("sends the disclosed quantity the operator typed", async () => {
     render(<OrderPadWidget {...defaultProps} />);
+    await screen.findByText("Lot: 1");
 
     const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
     fireEvent.change(qtyInput, { target: { value: "100" } });
     const discInput = document.getElementById("orderpad-disc-qty") as HTMLInputElement;
     fireEvent.change(discInput, { target: { value: "25" } });
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await reviewAndConfirmPractice(/practice buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder).toHaveBeenCalledWith(
       expect.objectContaining({ quantity: 100, disclosedQuantity: 25 }),
+      { mode: "practice" },
     );
   });
 
   it("omits the disclosed quantity when the operator leaves it blank", async () => {
     render(<OrderPadWidget {...defaultProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await reviewAndConfirmPractice(/practice buy/i);
 
     await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
     expect(mockPlaceOrder.mock.calls[0][0]).not.toHaveProperty("disclosedQuantity");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Practice-only order review/confirm stage
+// Distinct stage, not a generic dialog. Explicit instrument/side/type/qty/price/exposure.
+// Simulated/no-broker copy. Edits/back invalidate. Final confirm revalidates mode+intent.
+// Covers mode switch while open, double submit, stale intent (no native call), accessible labels.
+// ---------------------------------------------------------------------------
+describe("OrderPadWidget Practice review/confirm stage", () => {
+  beforeEach(() => {
+    mockPlaceOrder.mockReset();
+    mockPlaceOrder.mockResolvedValue({ orderId: "PRAC001" });
+    mockGetSymbol.mockReset();
+    mockGetSymbol.mockResolvedValue({
+      symbol: "NIFTY",
+      name: "Nifty",
+      exchange: "NSE",
+      instrumenttype: "EQ",
+      lotsize: 1,
+      tick_size: 0.05,
+    });
+    mockMode.current = "practice";
+  });
+
+  it("renders distinct Practice review stage with exact details and simulated/no-broker copy before any placement", async () => {
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 250.5 });
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const review = await screen.findByRole("dialog", { name: /review practice order/i });
+    const reviewQueries = within(review);
+    expect(reviewQueries.getByText("NIFTY · NSE")).toBeInTheDocument();
+    expect(reviewQueries.getByText("BUY")).toBeInTheDocument();
+    expect(reviewQueries.getByText("MARKET")).toBeInTheDocument();
+    expect(reviewQueries.getByText("1")).toBeInTheDocument();
+    expect(reviewQueries.getByText("₹250.50 (estimated fill)")).toBeInTheDocument();
+    expect(reviewQueries.getByText("₹250.50")).toBeInTheDocument();
+    expect(reviewQueries.getByText(/simulation only/i)).toBeInTheDocument();
+    expect(reviewQueries.getByText(/no broker or native trading api is contacted/i)).toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("submits the exact reviewed snapshot only after final confirmation", async () => {
+    vi.spyOn(jotai, "useAtomValue").mockReturnValue({ ltp: 250.5 });
+    render(<OrderPadWidget {...defaultProps} />);
+
+    await reviewAndConfirmPractice(/practice buy/i);
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      {
+        symbol: "NIFTY",
+        exchange: "NSE",
+        action: "BUY",
+        product: "MIS",
+        orderType: "MARKET",
+        quantity: 1,
+        price: 250.5,
+        triggerPrice: 0,
+        strategy: "FlintOrderPad",
+      },
+      { mode: "practice" },
+    );
+  });
+
+  it("Back invalidates the review and a later edit requires a fresh review", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await vi.waitFor(() => expect((document.getElementById("orderpad-qty") as HTMLInputElement).value).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("dialog", { name: /review practice order/i });
+    fireEvent.click(screen.getByRole("button", { name: "Back to edit" }));
+
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    const qtyInput = document.getElementById("orderpad-qty") as HTMLInputElement;
+    fireEvent.change(qtyInput, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+
+    const freshReview = await screen.findByRole("dialog", { name: /review practice order/i });
+    expect(within(freshReview).getByText("3")).toBeInTheDocument();
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("invalidates an open review as soon as the form intent is edited", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    await vi.waitFor(() => expect((document.getElementById("orderpad-qty") as HTMLInputElement).value).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("dialog", { name: /review practice order/i });
+    fireEvent.change(document.getElementById("orderpad-qty") as HTMLInputElement, { target: { value: "2" } });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/order details changed/i);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("invalidates an open review when the selected mode switches away from Practice", async () => {
+    const props = makeWidgetPanelProps();
+    const view = render(<OrderPadWidget {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("dialog", { name: /review practice order/i });
+
+    mockMode.current = "live";
+    view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/mode changed/i);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("re-queries mode at final confirm and blocks a switch React has not rendered yet", async () => {
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
+
+    mockMode.current = "live";
+    fireEvent.click(confirm);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/mode changed/i);
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("pins Practice authority into placeOrder so a mid-flight mode flip cannot retarget Live", async () => {
+    let resolveOrder!: (value: { orderId: string }) => void;
+    mockPlaceOrder.mockImplementation(() => new Promise((resolve) => {
+      resolveOrder = resolve;
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
+
+    fireEvent.click(confirm);
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(mockPlaceOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: "NIFTY", action: "BUY" }),
+      { mode: "practice" },
+    );
+
+    mockMode.current = "live";
+    await act(async () => {
+      resolveOrder({ orderId: "PRAC-PIN" });
+      await Promise.resolve();
+    });
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not leave a Practice review payload available for a later Live retry", async () => {
+    const props = makeWidgetPanelProps();
+    const view = render(<OrderPadWidget {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    await screen.findByRole("dialog", { name: /review practice order/i });
+
+    mockMode.current = "live";
+    view.rerender(<OrderPadWidget {...props} params={{ channel: "blue" }} />);
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+    });
+
+    // No placement occurred from the invalidated Practice review, and Live
+    // must not inherit a Practice lastParams payload for toast retry.
+    expect(mockPlaceOrder).not.toHaveBeenCalled();
+  });
+
+  it("blocks double confirmation while the sandbox request is in flight", async () => {
+    let resolveOrder!: (value: { orderId: string }) => void;
+    mockPlaceOrder.mockImplementation(() => new Promise((resolve) => {
+      resolveOrder = resolve;
+    }));
+    render(<OrderPadWidget {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /practice buy/i }));
+    const confirm = await screen.findByRole("button", { name: /confirm simulated practice order/i });
+
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(mockPlaceOrder).toHaveBeenCalledTimes(1);
+    expect(confirm).toBeDisabled();
+    await act(async () => {
+      resolveOrder({ orderId: "PRAC001" });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
+  });
+
+  it("leaves the existing Live placement behaviour untouched and never opens Practice review", async () => {
+    mockMode.current = "live";
+    render(<OrderPadWidget {...defaultProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /place buy order/i }));
+
+    await vi.waitFor(() => expect(mockPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog", { name: /review practice order/i })).not.toBeInTheDocument();
   });
 });

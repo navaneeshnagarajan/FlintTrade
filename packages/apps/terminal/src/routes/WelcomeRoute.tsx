@@ -24,6 +24,10 @@ import { cn } from "@/lib/utils";
 import LoginRoute from "@/routes/LoginRoute";
 import { buildHeaders, getBase } from "@/services/ftApi.helpers";
 import { useAuthStore } from "@/stores/authStore";
+import { useModeStore } from "@/stores/modeStore";
+import { markDemoSessionActive } from "@/lib/demoSession";
+import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useThemeStore } from "@/stores/themeStore";
 
 const WORDMARK = BRAND_WORDMARK;
@@ -370,7 +374,8 @@ export default function WelcomeRoute() {
 
   useEffect(() => {
     if (authStatus === "logged-in") {
-      navigate("/trade", { replace: true });
+      const persona = useSettingsStore.getState().persona;
+      navigate(personaDefaultRoute(persona), { replace: true });
     }
   }, [authStatus, navigate]);
 
@@ -382,7 +387,7 @@ export default function WelcomeRoute() {
       if (!raw) return;
       const saved = JSON.parse(raw) as { accountCreated?: boolean; currentStep?: number };
       if (saved?.accountCreated && typeof saved.currentStep === "number" && saved.currentStep < 6) {
-        navigate("/setup-account", { replace: true });
+        navigate("/setup", { replace: true });
       }
     } catch {
       // Ignore corrupt progress and continue to sign-in.
@@ -407,11 +412,18 @@ export default function WelcomeRoute() {
   }, [authStatus, flowStep, reducedMotion]);
 
   function handleLoginSuccess() {
-    navigate("/trade", { replace: true });
+    const persona = useSettingsStore.getState().persona;
+    navigate(personaDefaultRoute(persona), { replace: true });
   }
 
   function handleExplore() {
-    navigate("/explore");
+    // Installed app "Try with sample data" enters normal Home/persona workspace directly in Explore mode.
+    // /explore route is retained only for public demo build/URL compatibility (build-aware route contract in main.tsx).
+    // British English: "Try with sample data".
+    useModeStore.getState().setMode("explore");
+    markDemoSessionActive();
+    useAuthStore.getState().setLoggedIn("demo-user", "Explorer", "");
+    navigate("/home");
   }
 
   if (authStatus === "logged-out" && flowStep === "greeting") {
@@ -618,7 +630,7 @@ export default function WelcomeRoute() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.26, ease: silkyEase, delay: 0.04 }}
                 >
-                  Open-source self-hosted trading software for local research, sandbox
+                  Open-source self-hosted trading software for local research, simulated
                   testing, manual orders, automation, and AI-assisted workflows. One
                   native app for macOS, Windows, and Linux.
                 </motion.p>
@@ -652,7 +664,7 @@ export default function WelcomeRoute() {
                 {showSetupActions ? (
                   <>
                     <ShimmerButton
-                      onClick={() => navigate("/setup-account")}
+                      onClick={() => navigate("/setup")}
                       shimmerColor="#22c55e"
                       className="px-10 py-3.5 text-base font-semibold bg-profit/10 border-profit/45 text-profit hover:shadow-[0_0_34px_rgba(34,197,94,0.36)]"
                     >
@@ -662,9 +674,9 @@ export default function WelcomeRoute() {
                       type="button"
                       onClick={handleExplore}
                       className="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      aria-label="Explore FlintTrade without creating an account"
+                      aria-label="Try with sample data without creating an account"
                     >
-                      Explore FlintTrade →
+                      Try with sample data →
                     </button>
                   </>
                 ) : (

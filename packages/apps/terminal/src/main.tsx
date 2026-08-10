@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import { z } from "zod";
 import { safeParse } from "./lib/safeParse";
+import { getColdStartPath } from "@/lib/personaDefaultRoute";
 import { createBrowserRouter, Navigate } from "react-router";
 // RouterProvider must come from react-router/dom: the root export is the
 // non-DOM variant without ReactDOM.flushSync wiring, so navigate/submit
@@ -12,11 +13,36 @@ import { QueryProvider } from "./providers/QueryProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { renderReactRoot } from "./lib/reactRoot";
-import { isPublicDemoBuild } from "./lib/demoSession";
+import { exploreRoutePolicy, isPublicDemoBuild } from "./lib/demoSession";
+import {
+  CANONICAL_SETUP_PATH,
+  LEGACY_SETUP_ACCOUNT_PATH,
+  SetupAccountAlias,
+} from "./routes/setupRouting";
 import RootLayout from "./routes/RootLayout";
 import AppLayout from "./routes/AppLayout";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import "./index.css";
+
+/**
+ * Build-aware `/explore` route contract (see `exploreRoutePolicy` in demoSession):
+ * - Public demo build: render ExploreRoute for marketing/demo URL compatibility.
+ * - Installed build: redirect bare `/explore` to welcome/onboarding. Sample-data
+ *   entry is Welcome "Try with sample data" → Home in Explore mode, not ExploreRoute.
+ */
+function ExplorePathElement() {
+  const policy = exploreRoutePolicy();
+  if (policy.kind === "redirect") {
+    return <Navigate to={policy.to} replace />;
+  }
+  return (
+    <RouteErrorBoundary routeName="Explore">
+      <Suspense fallback={<Loading />}>
+        <ExploreRoute />
+      </Suspense>
+    </RouteErrorBoundary>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Glitchtip error tracking — Sentry SDK compatible (MIT).
@@ -39,8 +65,7 @@ if (glitchtipDsn) {
 
 const HomeRoute = lazy(() => import("./routes/HomeRoute"));
 const TerminalRoute = lazy(() => import("./routes/TerminalRoute"));
-const SetupRoute = lazy(() => import("./routes/SetupRoute"));
-const SetupAccountRoute = lazy(() => import("./routes/SetupAccountRoute"));
+const CanonicalSetupRoute = lazy(() => import("./routes/CanonicalSetupRoute"));
 const InvestRoute = lazy(() => import("./routes/InvestRoute"));
 const LearnRoute = lazy(() => import("./routes/LearnRoute"));
 const WelcomeRoute = lazy(() => import("./routes/WelcomeRoute"));
@@ -79,11 +104,8 @@ function getInitialRoute(): string {
   if (!raw) return "/welcome";
   const envelope = safeParse(raw, settingsEnvelopeSchema);
   const persona = envelope?.state?.persona;
-  if (!persona) return "/welcome";
-  // All personas land on /home; kept as separate branches for future routing
-  if (persona === "investor") return "/home";
-  if (persona === "beginner") return "/home";
-  return "/home";
+  const hasSettingsPersona = !!persona;
+  return getColdStartPath(persona, hasSettingsPersona);
 }
 
 const router = createBrowserRouter([
@@ -96,11 +118,12 @@ const router = createBrowserRouter([
 
       /* Flow routes -- no chrome (TopBar/TickerBar) */
       { path: "welcome", element: <RouteErrorBoundary routeName="Welcome"><Suspense fallback={<Loading />}><WelcomeRoute /></Suspense></RouteErrorBoundary> },
-      { path: "explore", element: <RouteErrorBoundary routeName="Explore"><Suspense fallback={<Loading />}><ExploreRoute /></Suspense></RouteErrorBoundary> },
-      /* Setup collects real credentials (account password, PIN, broker API keys),
-         so the public demo build sends both routes to Explore instead. */
-      { path: "setup", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><SetupRoute /></Suspense></RouteErrorBoundary> },
-      { path: "setup-account", element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="SetupAccount"><Suspense fallback={<Loading />}><SetupAccountRoute /></Suspense></RouteErrorBoundary> },
+      { path: "explore", element: <ExplorePathElement /> },
+      /* Canonical setup owns account creation and onboarding. The historical
+         /setup-account URL remains an explicit compatibility alias. Public demo
+         builds send both paths to Explore before any setup UI can mount. */
+      { path: CANONICAL_SETUP_PATH.slice(1), element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <RouteErrorBoundary routeName="Setup"><Suspense fallback={<Loading />}><CanonicalSetupRoute /></Suspense></RouteErrorBoundary> },
+      { path: LEGACY_SETUP_ACCOUNT_PATH.slice(1), element: isPublicDemoBuild() ? <Navigate to="/explore" replace /> : <SetupAccountAlias /> },
 
       /* App routes -- shared AppLayout chrome (TopBar + TickerBar) */
       {

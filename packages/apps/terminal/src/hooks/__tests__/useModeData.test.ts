@@ -7,40 +7,16 @@
  *   3. Switching mode changes the data source
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 
-// ---------------------------------------------------------------------------
-// Mock modeStore — start in explore mode, allow switching
-// ---------------------------------------------------------------------------
-
-let currentMode: "explore" | "practice" | "live" = "explore";
-let brokerConnected = true;
-const modeListeners = new Set<() => void>();
-
-vi.mock("@/stores/modeStore", () => ({
-  useModeStore: (selector: (s: { mode: string }) => unknown) => {
-    // Mimic Zustand selector subscription — re-render on mode change
-    const [, setState] = React.useState(0);
-    React.useEffect(() => {
-      const cb = () => setState((n) => n + 1);
-      modeListeners.add(cb);
-      return () => { modeListeners.delete(cb); };
-    }, []);
-    return selector({ mode: currentMode });
-  },
+// Broker account discovery is tested separately. Keep this suite network-free
+// while exercising the real mode, connection, broker, and account-read stores.
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
 }));
-
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => brokerConnected,
-}));
-
-function setTestMode(mode: "explore" | "practice" | "live") {
-  currentMode = mode;
-  modeListeners.forEach((cb) => cb());
-}
 
 // ---------------------------------------------------------------------------
 // Mock API service — prevent real network calls
@@ -96,6 +72,10 @@ vi.mock("@/services/mockDataEngine", () => {
 // ---------------------------------------------------------------------------
 
 import { useModeData } from "../useModeData";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 
 // ---------------------------------------------------------------------------
 // Wrapper
@@ -115,10 +95,12 @@ function createWrapper() {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  currentMode = "explore";
-  brokerConnected = true;
-  modeListeners.clear();
   vi.clearAllMocks();
+  setAccountRuntime({ mode: "explore" });
+});
+
+afterEach(() => {
+  resetAccountRuntime();
 });
 
 // ---------------------------------------------------------------------------
@@ -200,7 +182,7 @@ describe("useModeData — explore mode", () => {
 
 describe("useModeData — live mode", () => {
   beforeEach(() => {
-    currentMode = "live";
+    setAccountRuntime({ mode: "live" });
   });
 
   it("returns API positions data", async () => {
@@ -232,7 +214,7 @@ describe("useModeData — live mode", () => {
   });
 
   it("does not fetch account data when live mode has no broker connection", () => {
-    brokerConnected = false;
+    setAccountRuntime({ accounts: [], mode: "live" });
 
     const { result } = renderHook(() => useModeData("orders"), {
       wrapper: createWrapper(),
@@ -245,8 +227,7 @@ describe("useModeData — live mode", () => {
 
 describe("useModeData — practice mode", () => {
   it("reads the backend sandbox without requiring a live broker connection", async () => {
-    currentMode = "practice";
-    brokerConnected = false;
+    setAccountRuntime({ accounts: [], mode: "practice" });
 
     const { result } = renderHook(() => useModeData("positions"), {
       wrapper: createWrapper(),
@@ -270,10 +251,8 @@ describe("useModeData — mode switching", () => {
     const explorePosns = result.current.data as Array<{ pnl: number }>;
     expect(explorePosns[0].pnl).toBe(999); // mock engine value
 
-    // Switch to live
-    act(() => {
-      setTestMode("live");
-    });
+    // Switch to live through the same real account stores used by production.
+    setAccountRuntime({ mode: "live" });
 
     // Wait for API data to arrive — waitFor retries until the assertion passes
     await waitFor(() => {
@@ -285,7 +264,7 @@ describe("useModeData — mode switching", () => {
   });
 
   it("switches from live to explore data source", async () => {
-    currentMode = "live";
+    setAccountRuntime({ mode: "live" });
 
     const { result } = renderHook(() => useModeData("funds"), {
       wrapper: createWrapper(),
@@ -297,10 +276,8 @@ describe("useModeData — mode switching", () => {
       return funds?.available_balance === 50000;
     });
 
-    // Switch to explore
-    act(() => {
-      setTestMode("explore");
-    });
+    // Switch to explore through the real mode/account store snapshot.
+    setAccountRuntime({ mode: "explore" });
 
     await waitFor(() => {
       const funds = result.current.data as { availableCash: number };

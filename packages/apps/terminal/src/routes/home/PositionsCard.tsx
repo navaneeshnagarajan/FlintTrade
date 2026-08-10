@@ -6,6 +6,10 @@ import { BentoCard } from "@/components/bento/BentoCard";
 import { usePositions } from "@/hooks/usePositions";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoPositions } from "@/hooks/useModeData";
+import {
+  resolveAccountQueryUi,
+  runGuardedAccountRefetch,
+} from "@/lib/accountQueryState";
 import { useModeStore } from "@/stores/modeStore";
 import { useTradingStore } from "@/stores/tradingStore";
 import { DemoBadge } from "./DemoBadge";
@@ -20,12 +24,24 @@ export function PositionsCard() {
   // Demo mode shows simulated positions; the trading-store P&L mirror isn't fed
   // in explore, so derive the header total from the demo positions themselves.
   const positions = isExplore ? getDemoPositions() : query.data;
-  const isLoading = !accountReadsEnabled ? false : query.isLoading;
+  const isError = !isExplore && query.isError;
   const openPositions = positions?.filter((p) => p.quantity !== 0) ?? [];
+  const queryUi = resolveAccountQueryUi({
+    accountReadsEnabled,
+    fetchStatus: query.fetchStatus,
+    hasData: openPositions.length > 0,
+    isError,
+    isExplore,
+    isLoading: query.isLoading,
+  });
   const totalPnl = isExplore
     ? openPositions.reduce((sum, p) => sum + p.pnl, 0)
     : storePnl;
   const totalPnlPositive = totalPnl >= 0;
+  const showPnl =
+    isExplore ||
+    openPositions.length > 0 ||
+    (accountReadsEnabled && !queryUi.isPaused && query.isSuccess);
 
   return (
     <BentoCard size="tall" label="Open Positions" data-testid="positions-card">
@@ -39,28 +55,57 @@ export function PositionsCard() {
           </p>
           <span
             className="font-mono text-sm font-semibold"
-            style={{ color: totalPnlPositive ? "var(--color-bullish-text)" : "var(--color-bearish-text)" }}
+            style={{
+              color: showPnl
+                ? totalPnlPositive
+                  ? "var(--color-bullish-text)"
+                  : "var(--color-bearish-text)"
+                : "var(--color-text-muted)",
+            }}
           >
-            {totalPnlPositive ? "+" : ""}
-            {totalPnl.toLocaleString("en-IN", {
-              style: "currency",
-              currency: "INR",
-              maximumFractionDigits: 0,
-            })}
+            {showPnl
+              ? `${totalPnlPositive ? "+" : ""}${totalPnl.toLocaleString("en-IN", {
+                  style: "currency",
+                  currency: "INR",
+                  maximumFractionDigits: 0,
+                })}`
+              : "—"}
           </span>
         </div>
 
-        {isLoading ? (
+        {isError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 text-[10px] text-loss"
+          >
+            <span>
+              Positions unavailable
+              {queryUi.isFrozen ? " — displayed positions are frozen" : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => runGuardedAccountRefetch(queryUi.canRefetch, query.refetch)}
+              disabled={!queryUi.canRefetch || query.isFetching}
+              className="shrink-0 font-medium underline disabled:opacity-50"
+            >
+              {query.isFetching ? "Retrying…" : "Retry positions"}
+            </button>
+          </div>
+        )}
+
+        {queryUi.isFrozen && !isError && (
+          <p role="status" className="text-[10px] text-warning">
+            {queryUi.isPaused
+              ? "Offline — displayed positions are frozen"
+              : "Broker disconnected — displayed positions are frozen"}
+          </p>
+        )}
+
+        {queryUi.showInitialLoading ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading positions" />
           </div>
-        ) : openPositions.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-xs text-text-muted">
-              {isExplore || accountReadsEnabled ? "No open positions" : "Connect a broker to load positions"}
-            </p>
-          </div>
-        ) : (
+        ) : openPositions.length > 0 ? (
           <div className="flex-1 overflow-y-auto space-y-1" style={{ scrollbarWidth: "none" }}>
             {openPositions.map((pos) => {
               const pnlPositive = pos.pnl >= 0;
@@ -99,7 +144,19 @@ export function PositionsCard() {
               );
             })}
           </div>
-        )}
+        ) : !isError ? (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-text-muted">
+              {isExplore
+                ? "No open positions"
+                : queryUi.isPaused
+                  ? "Positions unavailable while offline"
+                  : accountReadsEnabled
+                    ? "No open positions"
+                    : "Connect a broker to load positions"}
+            </p>
+          </div>
+        ) : null}
       </div>
     </BentoCard>
   );

@@ -21,12 +21,13 @@ import ChangelogViewer from "@/components/Changelog/ChangelogViewer";
 import { useModeStore } from "@/stores/modeStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useLayoutStore } from "@/stores/layoutStore";
+import { useLayoutStore, WorkspaceStorageError } from "@/stores/layoutStore";
 import { DEFAULT_PRESET_ID } from "@/layout/workspacePresets";
 import useGlobalKeys from "@/hooks/useGlobalKeys";
 import KeyboardShortcutsDialog from "@/components/KeyboardShortcuts/KeyboardShortcutsDialog";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
+import { appendAISymbolContext } from "@/lib/aiSymbolContext";
 
 const SMALL_SCREEN_DISMISSED_KEY = "flinttrade:smallScreenDismissed";
 const SMALL_SCREEN_BREAKPOINT = 768;
@@ -44,7 +45,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/admin": "Admin Panel",
 };
 
-type NavigationEventDetail = string | { path?: unknown };
+type NavigationEventDetail = string | { path?: unknown; context?: unknown };
 type TradeForwardEventName =
   | "flinttrade:addWidget"
   | "flinttrade:open-tool"
@@ -60,7 +61,7 @@ interface PendingTradeEvent {
 function getNavigationPath(detail: NavigationEventDetail): string | null {
   if (typeof detail === "string") return detail;
   if (detail && typeof detail === "object" && typeof detail.path === "string") {
-    return detail.path;
+    return appendAISymbolContext(detail.path, detail.context);
   }
   return null;
 }
@@ -244,7 +245,13 @@ export default function AppLayout() {
   const executeTradeWorkspaceAction = useCallback((pending: PendingTradeEvent) => {
     if (pending.name === "flinttrade:apply-layout") {
       const presetId = getPresetId(pending.detail);
-      if (presetId) useLayoutStore.getState().applyPreset(presetId);
+      if (presetId) {
+        try {
+          useLayoutStore.getState().applyPreset(presetId);
+        } catch (error) {
+          if (!(error instanceof WorkspaceStorageError)) throw error;
+        }
+      }
       return;
     }
 
@@ -257,7 +264,11 @@ export default function AppLayout() {
     }
 
     if (pending.name === "flinttrade:reset-layout") {
-      useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
+      try {
+        useLayoutStore.getState().applyPreset(DEFAULT_PRESET_ID);
+      } catch (error) {
+        if (!(error instanceof WorkspaceStorageError)) throw error;
+      }
       return;
     }
 
@@ -381,12 +392,22 @@ export default function AppLayout() {
   // Escape is forwarded on the event bus so route-local overlays (e.g. the
   // /trade tool/picker overlays in TerminalRoute) can close themselves
   // without mounting the hook a second time.
+  // Alt+H / Alt+T navigation is wired here only — do not add a second mount.
+  const handleGoHome = useCallback(() => {
+    navigate("/home");
+  }, [navigate]);
+  const handleGoTrade = useCallback(() => {
+    navigate("/trade");
+  }, [navigate]);
+
   useGlobalKeys({
     onEscape: useCallback(() => {
       window.dispatchEvent(new CustomEvent("flinttrade:escape"));
     }, []),
     onCommandPalette: handleToggleCommandPalette,
     onShowShortcuts: handleShowShortcuts,
+    onGoHome: handleGoHome,
+    onGoTrade: handleGoTrade,
   });
 
   useEffect(() => {

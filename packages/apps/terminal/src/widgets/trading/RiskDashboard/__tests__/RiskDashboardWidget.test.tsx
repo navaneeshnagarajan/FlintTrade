@@ -14,7 +14,7 @@
  * a sample that cannot promise a metric the live path is unable to produce.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
@@ -23,9 +23,8 @@ import type { ReactElement } from "react";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const scopeState = vi.hoisted(() => ({ value: "explore:mock" }));
-vi.mock("@/hooks/useDataScope", () => ({
-  useDataScope: () => scopeState.value,
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -69,6 +68,10 @@ import RiskWidget, {
 } from "../RiskDashboardWidget";
 
 import type { TrafficLight } from "../RiskDashboardWidget";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 
 const mockPositions = getPositionbook as ReturnType<typeof vi.fn>;
 const mockFunds = getFunds as ReturnType<typeof vi.fn>;
@@ -96,7 +99,7 @@ function renderWidget(ui: ReactElement = <RiskWidget />) {
 
 /** Render with a live scope and the given book/funds already resolving. */
 function renderLive(positions: Position[] = POS, funds: Funds = FUNDS) {
-  scopeState.value = "live:openalgo:default";
+  setAccountRuntime({ mode: "live" });
   mockPositions.mockResolvedValue(positions);
   mockFunds.mockResolvedValue(funds);
   return renderWidget();
@@ -111,11 +114,15 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  scopeState.value = "explore:mock";
+  setAccountRuntime({ accounts: [], mode: "explore" });
   mockPositions.mockReset();
   mockPositions.mockResolvedValue([]);
   mockFunds.mockReset();
   mockFunds.mockResolvedValue({ availableCash: 0, usedMargin: 0, totalBalance: 0 });
+});
+
+afterEach(() => {
+  resetAccountRuntime();
 });
 
 // ---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ describe("Risk widget", () => {
   });
 
   it("reads and labels the Practice sandbox without a live broker", async () => {
-    scopeState.value = "practice:sandbox:default";
+    setAccountRuntime({ accounts: [], mode: "practice" });
     renderWidget();
 
     expect(await screen.findByText("Practice")).toBeTruthy();
@@ -348,7 +355,7 @@ describe("Risk widget (connected)", () => {
   });
 
   it("gates live risk account data when no broker is configured", () => {
-    scopeState.value = "live:unconfigured";
+    setAccountRuntime({ accounts: [], mode: "live" });
     renderWidget();
 
     expect(mockPositions).not.toHaveBeenCalled();

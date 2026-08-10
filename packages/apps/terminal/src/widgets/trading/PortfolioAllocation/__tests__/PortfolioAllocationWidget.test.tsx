@@ -4,7 +4,7 @@
  * Tests: render, view toggle, donut SVG, legend, sample data.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
@@ -21,12 +21,8 @@ vi.mock("@/hooks/useTrackBehavior", () => ({
   useTrackBehavior: () => vi.fn(),
 }));
 
-const state = vi.hoisted(() => ({ connected: false, scope: "explore:mock" }));
-vi.mock("@/hooks/useBrokerConnected", () => ({
-  useBrokerConnected: () => state.connected,
-}));
-vi.mock("@/hooks/useDataScope", () => ({
-  useDataScope: () => state.scope,
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
 }));
 
 const mockGetPositionbook = vi.hoisted(() => vi.fn());
@@ -37,6 +33,10 @@ vi.mock("@/services/api", () => ({
 }));
 
 import PortfolioAllocationWidget from "../PortfolioAllocationWidget";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -44,12 +44,15 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 beforeEach(() => {
-  state.connected = false;
-  state.scope = "explore:mock";
+  setAccountRuntime({ accounts: [], mode: "explore" });
   mockGetPositionbook.mockReset();
   mockGetHoldings.mockReset();
   mockGetPositionbook.mockResolvedValue([]);
   mockGetHoldings.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  resetAccountRuntime();
 });
 
 describe("PortfolioAllocationWidget", () => {
@@ -110,8 +113,7 @@ describe("PortfolioAllocationWidget", () => {
   });
 
   it("shows an honest empty state for a connected portfolio with no allocation", async () => {
-    state.connected = true;
-    state.scope = "live:openalgo:default";
+    setAccountRuntime({ mode: "live" });
 
     render(<PortfolioAllocationWidget />, { wrapper });
 
@@ -127,7 +129,7 @@ describe("PortfolioAllocationWidget", () => {
   });
 
   it("reads and labels the Practice sandbox without a live broker", async () => {
-    state.scope = "practice:sandbox:default";
+    setAccountRuntime({ accounts: [], mode: "practice" });
     mockGetPositionbook.mockResolvedValue([
       { symbol: "SBIN", exchange: "NSE", product: "MIS", quantity: 2, averagePrice: 800, ltp: 810, pnl: 20 },
     ]);

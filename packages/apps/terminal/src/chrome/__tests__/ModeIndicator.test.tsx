@@ -101,7 +101,7 @@ describe("ModeIndicator", () => {
       expect(useModeStore.getState().mode).toBe("explore");
       expect(listener).toHaveBeenCalledTimes(1);
       const event = listener.mock.calls[0]?.[0] as CustomEvent<{ path?: string }>;
-      expect(event.detail.path).toBe("/setup-account");
+      expect(event.detail.path).toBe("/setup");
       window.removeEventListener("flinttrade:navigate", listener);
     });
 

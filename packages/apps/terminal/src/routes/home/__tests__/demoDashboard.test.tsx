@@ -18,7 +18,11 @@ vi.mock("@/hooks/useOrders", () => ({ useOrders: () => ({ data: undefined, isLoa
 vi.mock("@/hooks/useFunds", () => ({ useFunds: () => ({ data: undefined }) }));
 vi.mock("@/hooks/useHoldings", () => ({ useHoldings: () => ({ data: undefined }) }));
 let brokerConnected = true;
+let accountMode: "explore" | "live" = "live";
 vi.mock("@/hooks/useBrokerConnected", () => ({ useBrokerConnected: () => brokerConnected }));
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadsEnabled: () => accountMode === "live" && brokerConnected,
+}));
 vi.mock("@/stores/tradingStore", () => ({
   useTradingStore: (sel: (s: { totalPnl: number }) => unknown) => sel({ totalPnl: 0 }),
 }));
@@ -33,6 +37,7 @@ import { PortfolioCard } from "../PortfolioCard";
 import { WelcomeCard } from "../WelcomeCard";
 
 function setMode(mode: "explore" | "live") {
+  accountMode = mode;
   useModeStore.setState({ mode });
 }
 

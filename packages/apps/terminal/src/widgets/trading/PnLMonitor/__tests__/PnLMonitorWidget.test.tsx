@@ -32,6 +32,12 @@ vi.mock("@/services/ftApi.native", () => ({
   listNativeAccounts: vi.fn().mockResolvedValue([]),
 }));
 
+// Account discovery is covered separately. Seed the real account stores in
+// each source-specific test and suppress only the unrelated hydration call.
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
+}));
+
 vi.mock("@/lib/market", () => ({
   isMarketHours: () => true,
 }));
@@ -98,8 +104,10 @@ vi.mock("@/lib/lightweightChartRuntime", () => ({
 // ---------------------------------------------------------------------------
 
 import { getPositionbook, getTradebook } from "@/services/api";
-import { useModeStore } from "@/stores/modeStore";
-import { useConnectionStore } from "@/stores/connectionStore";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 import PnLMonitorWidget from "../PnLMonitorWidget";
 
 const mockGetPositionbook = getPositionbook as ReturnType<typeof vi.fn>;
@@ -151,11 +159,11 @@ describe("PnLMonitorWidget", () => {
     mockGetPositionbook.mockResolvedValue([]);
     mockGetTradebook.mockResolvedValue([]);
     chartMocks.reset();
+    setAccountRuntime({ mode: "live" });
   });
 
   afterEach(() => {
-    useModeStore.setState({ mode: "explore" });
-    useConnectionStore.setState({ status: "disconnected" });
+    resetAccountRuntime();
   });
 
   it("renders without crashing", async () => {
@@ -410,6 +418,11 @@ describe("PnLMonitorWidget — Summary view", () => {
     mockGetPositionbook.mockResolvedValue([]);
     mockGetTradebook.mockResolvedValue([]);
     chartMocks.reset();
+    setAccountRuntime({ mode: "live" });
+  });
+
+  afterEach(() => {
+    resetAccountRuntime();
   });
 
   it("renders the summary breakdown through shared core donut and ranked bar primitives", async () => {
@@ -480,6 +493,11 @@ describe("PnLMonitorWidget — Drawdown view", () => {
     mockGetPositionbook.mockResolvedValue([]);
     mockGetTradebook.mockResolvedValue([]);
     chartMocks.reset();
+    setAccountRuntime({ mode: "live" });
+  });
+
+  afterEach(() => {
+    resetAccountRuntime();
   });
 
   it("renders drawdown charts through the shared Flint area runtime", async () => {
@@ -542,11 +560,11 @@ describe("PnLMonitorWidget — provenance badge", () => {
     mockGetPositionbook.mockResolvedValue([]);
     mockGetTradebook.mockResolvedValue([]);
     chartMocks.reset();
+    setAccountRuntime({ accounts: [], mode: "explore" });
   });
 
   afterEach(() => {
-    useModeStore.setState({ mode: "explore" });
-    useConnectionStore.setState({ status: "disconnected" });
+    resetAccountRuntime();
   });
 
   it("shows the Sample data badge while no broker is connected", async () => {
@@ -555,15 +573,14 @@ describe("PnLMonitorWidget — provenance badge", () => {
   });
 
   it("labels Practice mode data as practice, not sample", async () => {
-    useModeStore.setState({ mode: "practice" });
+    setAccountRuntime({ accounts: [], mode: "practice" });
     renderWidget();
     expect(screen.getByText("Practice data")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
   it("hides the provenance badge when a broker is connected in Live mode", async () => {
-    useModeStore.setState({ mode: "live" });
-    useConnectionStore.setState({ status: "connected" });
+    setAccountRuntime({ mode: "live" });
     renderWidget();
     await waitFor(() => {
       expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
@@ -573,6 +590,14 @@ describe("PnLMonitorWidget — provenance badge", () => {
 });
 
 describe("PnLMonitor — drawdown on a never-positive curve", () => {
+  beforeEach(() => {
+    setAccountRuntime({ mode: "live" });
+  });
+
+  afterEach(() => {
+    resetAccountRuntime();
+  });
+
   // The retired MTM Monitor's `peak > 0` guard reported a flat 0 for a book
   // that fell straight from flat into loss, and rendered it in PROFIT GREEN.
   // Percent-of-peak is genuinely undefined there, so the view reports rupees.

@@ -35,6 +35,7 @@ import { placeOrder } from "@/services/api";
 import { checkOrderEntryMode, checkPriceForOrderType, type GuardedOrderType } from "@/lib/orderGuards";
 import { useModeStore } from "@/stores/modeStore";
 import type { PlaceOrderParams } from "@/types/api";
+import type { AISymbolContext } from "@/lib/aiSymbolContext";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -316,6 +317,18 @@ async function fetchAdvisorStatus(): Promise<void> {
   }
 }
 
+function advisorRequestContext(
+  analysisContext?: AISymbolContext,
+): AISymbolContext | "" {
+  return analysisContext
+    ? {
+        symbol: analysisContext.symbol,
+        exchange: analysisContext.exchange,
+        source: analysisContext.source,
+      }
+    : "";
+}
+
 /**
  * POST full conversation to the streaming endpoint (SSE).
  * Calls onToken for each chunk. Returns full assembled text.
@@ -326,6 +339,7 @@ async function streamAdvisorMessage(
   onToken: (token: string, fullText: string) => void,
   signal?: AbortSignal,
   sessionId?: string,
+  analysisContext?: AISymbolContext,
 ): Promise<string> {
   const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor/stream`, {
@@ -333,7 +347,11 @@ async function streamAdvisorMessage(
     headers: { "Content-Type": "application/json" },
     // session_id enables server-side session capture (AI2 recall); omitted
     // for demo sessions so fabricated chats never persist.
-    body: JSON.stringify({ messages, ...(sessionId ? { session_id: sessionId } : {}) }),
+    body: JSON.stringify({
+      messages,
+      context: advisorRequestContext(analysisContext),
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }),
     signal,
   });
 
@@ -388,6 +406,7 @@ async function postAdvisorMessage(
   messages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
   sessionId?: string,
+  analysisContext?: AISymbolContext,
 ): Promise<string> {
   const base = getAdvisorBase();
   const resp = await fetch(`${base}/api/v1/advisor`, {
@@ -397,7 +416,7 @@ async function postAdvisorMessage(
       messages,
       // Legacy single-message field for backwards compat
       message: messages[messages.length - 1]?.content ?? "",
-      context: "",
+      context: advisorRequestContext(analysisContext),
       ...(sessionId ? { session_id: sessionId } : {}),
     }),
     signal,
@@ -569,9 +588,10 @@ function MessageBubble({ message, onApprove, onReject }: MessageBubbleProps) {
 
 interface AIAdvisorWidgetProps {
   node?: unknown;
+  analysisContext?: AISymbolContext;
 }
 
-function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
+function AIAdvisorWidget({ node: _node, analysisContext }: AIAdvisorWidgetProps) {
   // ---------------------------------------------------------------------------
   // Shared conversation store (synced with AITutorPill)
   // ---------------------------------------------------------------------------
@@ -732,6 +752,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         },
         controller.signal,
         captureSessionId,
+        analysisContext,
       );
 
       // Detect tool calls in the final reply and store in local meta
@@ -761,7 +782,12 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
         setStreaming(false);
 
         try {
-          replyContent = await postAdvisorMessage(conversationPayload, controller.signal, captureSessionId);
+          replyContent = await postAdvisorMessage(
+            conversationPayload,
+            controller.signal,
+            captureSessionId,
+            analysisContext,
+          );
         } catch (fallbackErr: unknown) {
           const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
           replyContent = `Error: ${fallbackMsg}`;
@@ -804,7 +830,7 @@ function AIAdvisorWidget({ node: _node }: AIAdvisorWidgetProps) {
       abortRef.current = null;
       inputRef.current?.focus();
     }
-  }, [draft, sending, addMessage, setStreaming]);
+  }, [draft, sending, addMessage, setStreaming, analysisContext]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {

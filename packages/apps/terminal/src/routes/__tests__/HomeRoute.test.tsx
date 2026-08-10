@@ -131,6 +131,12 @@ vi.mock("@/hooks/useBrokerConnected", () => ({
   useBrokerConnected: () => true,
 }));
 
+// Broker account discovery is covered separately. This suite seeds the real
+// account stores and only suppresses the unrelated hydration request.
+vi.mock("@/hooks/useBrokerAccounts", () => ({
+  useBrokerAccounts: () => ({ data: [] }),
+}));
+
 // ---------------------------------------------------------------------------
 // Mock Jotai atoms
 // ---------------------------------------------------------------------------
@@ -151,7 +157,7 @@ vi.mock("@/atoms/marketAtoms", async (importOriginal) =>
 // ---------------------------------------------------------------------------
 import HomeRoute from "../HomeRoute";
 import { DEFAULT_CARDS, useBentoStore } from "@/stores/bentoStore";
-import { useModeStore } from "@/stores/modeStore";
+import { setAccountRuntime } from "@/test-utils/accountQueryHarness";
 
 function createDataTransfer() {
   const data = new Map<string, string>();
@@ -168,7 +174,7 @@ beforeEach(() => {
   // These tests assert against the mocked REST hook fixtures; the dashboard
   // cards now branch on mode (explore => demo data), so pin to a non-explore
   // mode so the fixtures flow. Demo-mode behaviour is covered separately.
-  useModeStore.setState({ mode: "live" });
+  setAccountRuntime({ mode: "live" });
   useBentoStore.setState({
     cards: DEFAULT_CARDS.map((card) => ({ ...card })),
     presets: [],

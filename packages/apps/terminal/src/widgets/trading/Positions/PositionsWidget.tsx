@@ -48,7 +48,7 @@
  * the figures are frozen and when.
  */
 
-import { useMemo, useState, useCallback, useEffect, memo } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef, memo } from "react";
 import {
   Clock,
   Layers,
@@ -57,6 +57,7 @@ import {
   Repeat,
   SquareX,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,10 +83,16 @@ import { post } from "@/services/ftApi.helpers";
 import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
 import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
-import { useModeStore } from "@/stores/modeStore";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
-import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
+import {
+  accountAuthorityMatches,
+  captureAccountAuthority,
+  resolveAccountQueryUi,
+  runGuardedAccountRefetch,
+  runWithMatchingAccountAuthority,
+} from "@/lib/accountQueryState";
 import { isMarketHours } from "@/lib/market";
 import { totalPositionMtm } from "@/lib/pnl";
 import { cn } from "@/lib/utils";
@@ -159,6 +166,36 @@ interface PositionsPanelParams {
 /** Position products supported by the convert and square-off verbs. */
 const PRODUCTS = ["MIS", "CNC", "NRML"] as const;
 
+interface PositionActionIntent {
+  position: PositionRow;
+  identity: AccountAuthorityIdentity;
+}
+
+interface BrokerPositionActionIntent extends PositionActionIntent {
+  target: Required<BrokerTarget>;
+}
+
+interface ExitAllActionIntent {
+  identity: AccountAuthorityIdentity;
+  target: Required<BrokerTarget>;
+}
+
+function captureBrokerTarget(target: Required<BrokerTarget>): Required<BrokerTarget> {
+  return Object.freeze({ broker: target.broker, account_id: target.account_id });
+}
+
+function authorityForBrokerTarget(
+  readIdentity: AccountAuthorityIdentity,
+  target: Required<BrokerTarget>,
+): AccountAuthorityIdentity {
+  return captureAccountAuthority({
+    mode: readIdentity.mode,
+    scopeKey: readIdentity.scopeKey,
+    brokerType: target.broker,
+    accountId: target.account_id,
+  });
+}
+
 /**
  * Staleness threshold relative to the poll cadence (5s market / 60s off-hours).
  * A frozen P&L figure without a warning is worse than an error banner.
@@ -174,16 +211,36 @@ function staleThresholdMs(): number {
 interface ConvertPositionDialogProps {
   position: PositionRow;
   target: Required<BrokerTarget>;
+  openingIdentity: AccountAuthorityIdentity;
+  canSubmit: boolean;
+  isActionAllowed: () => boolean;
+  getCurrentIdentity: () => AccountAuthorityIdentity;
   onClose: () => void;
-  onConverted: () => void;
+  onConverted: (mutationIdentity: AccountAuthorityIdentity) => void;
 }
 
-function ConvertPositionDialog({ position, target, onClose, onConverted }: ConvertPositionDialogProps) {
+function ConvertPositionDialog({
+  position,
+  target,
+  openingIdentity,
+  canSubmit,
+  isActionAllowed,
+  getCurrentIdentity,
+  onClose,
+  onConverted,
+}: ConvertPositionDialogProps) {
   const [toProduct, setToProduct] = useState<string>(position.product === "MIS" ? "CNC" : "MIS");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleConvert = useCallback(async () => {
+    if (!isActionAllowed()) return;
+    const mutationIdentity = runWithMatchingAccountAuthority(
+      openingIdentity,
+      getCurrentIdentity,
+      () => captureAccountAuthority(getCurrentIdentity()),
+    );
+    if (!mutationIdentity) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
@@ -206,12 +263,16 @@ function ConvertPositionDialog({ position, target, onClose, onConverted }: Conve
           new_product: toProduct,
         },
       });
+      if (
+        !isActionAllowed()
+        || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
+      ) return;
       emitNotification({
         category: "system",
         title: "Position conversion submitted",
         body: `${position.symbol}: ${position.product || "current product"} → ${toProduct}.`,
       });
-      onConverted();
+      onConverted(mutationIdentity);
       onClose();
     } catch (err) {
       // Surface mode-guard 403s and broker rejections honestly — the backend
@@ -220,7 +281,16 @@ function ConvertPositionDialog({ position, target, onClose, onConverted }: Conve
     } finally {
       setIsSubmitting(false);
     }
-  }, [position, target, toProduct, onClose, onConverted]);
+  }, [
+    position,
+    target,
+    toProduct,
+    openingIdentity,
+    isActionAllowed,
+    getCurrentIdentity,
+    onClose,
+    onConverted,
+  ]);
 
   return (
     <Dialog
@@ -259,13 +329,18 @@ function ConvertPositionDialog({ position, target, onClose, onConverted }: Conve
             {errorMsg}
           </p>
         )}
+        {!canSubmit && (
+          <p className="text-xs text-warning" role="alert">
+            Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button
             onClick={() => void handleConvert()}
-            disabled={isSubmitting || !toProduct}
+            disabled={isSubmitting || !toProduct || !canSubmit}
             aria-label={`Convert ${position.symbol} to ${toProduct}`}
           >
             {isSubmitting ? "Converting…" : "Convert"}
@@ -282,11 +357,23 @@ function ConvertPositionDialog({ position, target, onClose, onConverted }: Conve
 
 interface SquareOffDialogProps {
   position: PositionRow;
+  openingIdentity: AccountAuthorityIdentity;
+  canSubmit: boolean;
+  isActionAllowed: () => boolean;
+  getCurrentIdentity: () => AccountAuthorityIdentity;
   onClose: () => void;
-  onSquaredOff: () => void;
+  onSquaredOff: (mutationIdentity: AccountAuthorityIdentity) => void;
 }
 
-function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogProps) {
+function SquareOffDialog({
+  position,
+  openingIdentity,
+  canSubmit,
+  isActionAllowed,
+  getCurrentIdentity,
+  onClose,
+  onSquaredOff,
+}: SquareOffDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -299,7 +386,13 @@ function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogPro
     : null;
 
   const handleSquareOff = useCallback(async () => {
-    if (!product) return;
+    if (!product || !isActionAllowed()) return;
+    const mutationIdentity = runWithMatchingAccountAuthority(
+      openingIdentity,
+      getCurrentIdentity,
+      () => captureAccountAuthority(getCurrentIdentity()),
+    );
+    if (!mutationIdentity) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
@@ -316,12 +409,16 @@ function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogPro
         triggerPrice: 0,
         strategy: "FlintPositions",
       });
+      if (
+        !isActionAllowed()
+        || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
+      ) return;
       emitNotification({
         category: "order",
         title: "Square-off submitted",
         body: `${exitAction} ${exitQty} ${position.symbol} at market.`,
       });
-      onSquaredOff();
+      onSquaredOff(mutationIdentity);
       onClose();
     } catch (err) {
       // Surface mode-guard 403s and broker rejections honestly — the backend
@@ -330,7 +427,17 @@ function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogPro
     } finally {
       setIsSubmitting(false);
     }
-  }, [position, product, exitAction, exitQty, onClose, onSquaredOff]);
+  }, [
+    position,
+    product,
+    exitAction,
+    exitQty,
+    openingIdentity,
+    isActionAllowed,
+    getCurrentIdentity,
+    onClose,
+    onSquaredOff,
+  ]);
 
   return (
     <Dialog
@@ -362,13 +469,18 @@ function SquareOffDialog({ position, onClose, onSquaredOff }: SquareOffDialogPro
             {errorMsg}
           </p>
         )}
+        {!canSubmit && (
+          <p className="text-xs text-warning" role="alert">
+            Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button
             onClick={() => void handleSquareOff()}
-            disabled={isSubmitting || !product}
+            disabled={isSubmitting || !product || !canSubmit}
             aria-label={`Confirm square off ${position.symbol}`}
             className="bg-loss hover:bg-loss/90 text-white"
           >
@@ -388,11 +500,25 @@ interface ExitAllDialogProps {
   open: boolean;
   positionCount: number;
   target: Required<BrokerTarget>;
+  openingIdentity: AccountAuthorityIdentity;
+  canSubmit: boolean;
+  isActionAllowed: () => boolean;
+  getCurrentIdentity: () => AccountAuthorityIdentity;
   onOpenChange: (open: boolean) => void;
-  onExited: () => void;
+  onExited: (mutationIdentity: AccountAuthorityIdentity) => void;
 }
 
-function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: ExitAllDialogProps) {
+function ExitAllDialog({
+  open,
+  positionCount,
+  target,
+  openingIdentity,
+  canSubmit,
+  isActionAllowed,
+  getCurrentIdentity,
+  onOpenChange,
+  onExited,
+}: ExitAllDialogProps) {
   const [confirmText, setConfirmText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -410,7 +536,13 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
   );
 
   const handleExitAll = useCallback(async () => {
-    if (!confirmed) return;
+    if (!confirmed || !isActionAllowed()) return;
+    const mutationIdentity = runWithMatchingAccountAuthority(
+      openingIdentity,
+      getCurrentIdentity,
+      () => captureAccountAuthority(getCurrentIdentity()),
+    );
+    if (!mutationIdentity) return;
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
@@ -419,12 +551,16 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
         broker: target.broker,
         account_id: target.account_id,
       });
+      if (
+        !isActionAllowed()
+        || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
+      ) return;
       emitNotification({
         category: "system",
         title: "Exit-all submitted",
         body: "Every open position is being squared off at market.",
       });
-      onExited();
+      onExited(mutationIdentity);
       close(false);
     } catch (err) {
       // Mode-guard 403s ("live mode only", PIN unlock) and broker errors are
@@ -433,7 +569,15 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
     } finally {
       setIsSubmitting(false);
     }
-  }, [confirmed, target, onExited, close]);
+  }, [
+    confirmed,
+    target,
+    openingIdentity,
+    isActionAllowed,
+    getCurrentIdentity,
+    onExited,
+    close,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -461,13 +605,18 @@ function ExitAllDialog({ open, positionCount, target, onOpenChange, onExited }: 
             {errorMsg}
           </p>
         )}
+        {!canSubmit && (
+          <p className="text-xs text-warning" role="alert">
+            Position data is unavailable or frozen. Close this dialog and reconnect before retrying.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => close(false)} disabled={isSubmitting}>
             Cancel
           </Button>
           <Button
             onClick={() => void handleExitAll()}
-            disabled={!confirmed || isSubmitting}
+            disabled={!confirmed || isSubmitting || !canSubmit}
             aria-label="Confirm exit all positions"
             className="bg-loss hover:bg-loss/90 text-white"
           >
@@ -489,26 +638,29 @@ function PositionsWidget(props: WidgetProps) {
   const [groupMode, setGroupMode] = useState<GroupMode>(() => resolveGroupMode(panelParams?.group));
 
   const track = useTrackBehavior();
-  const appMode = useModeStore((s) => s.mode);
+  const accountReadContext = useAccountReadContext();
+  const { identity: readIdentity, enabled: accountReadsEnabled } = accountReadContext;
+  const appMode = readIdentity.mode;
   const isExplore = appMode === "explore";
-  const isBrokerConnected = useBrokerConnected();
-  // ONE enablement predicate for the merged widget: the host's
-  // `resolveAccountReadsEnabled` (Practice reads the sandbox; Live reads a
-  // connected broker; Explore reads neither and shows the labelled sample).
-  // Two of the three merged widgets already used it; the third derived an
-  // equivalent predicate from `useDataScope`, which is the query key's
-  // concern, not the widget's.
-  const accountReadsEnabled = resolveAccountReadsEnabled(appMode, isBrokerConnected);
-  const canWritePositions = isBrokerConnected && appMode === "live";
-
-  const { data: positionsData, dataUpdatedAt, isError, error, refetch, isFetching } = usePositions({
+  const {
+    data: positionsData,
+    dataUpdatedAt,
+    isError,
+    error,
+    refetch,
+    isFetching,
+    isLoading,
+    isSuccess,
+    fetchStatus,
+  } = usePositions({
     enabled: accountReadsEnabled,
+    context: accountReadContext,
   });
 
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [convertTarget, setConvertTarget] = useState<PositionRow | null>(null);
-  const [squareOffTarget, setSquareOffTarget] = useState<PositionRow | null>(null);
-  const [exitAllOpen, setExitAllOpen] = useState(false);
+  const [convertIntent, setConvertIntent] = useState<BrokerPositionActionIntent | null>(null);
+  const [squareOffIntent, setSquareOffIntent] = useState<PositionActionIntent | null>(null);
+  const [exitAllIntent, setExitAllIntent] = useState<ExitAllActionIntent | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   // Broker/account target for the gated convert + exit-all verbs. The OpenAlgo
   // bridge implements NEITHER verb (it would 501), so the operator picks a
@@ -525,12 +677,89 @@ function PositionsWidget(props: WidgetProps) {
     () => normalisePositions(isExplore ? SAMPLE_POSITION_BOOK : positionsData),
     [isExplore, positionsData],
   );
+  const queryUi = resolveAccountQueryUi({
+    accountReadsEnabled,
+    fetchStatus,
+    hasData: rows.length > 0,
+    isError,
+    isExplore,
+    isLoading,
+  });
+  const canWritePositions = appMode === "live" && queryUi.canRefetch && !isError;
+  const brokerActionIdentity = useMemo(
+    () => authorityForBrokerTarget(readIdentity, brokerTarget),
+    [brokerTarget, readIdentity],
+  );
+  const actionGateRef = useRef(canWritePositions);
+  const readIdentityRef = useRef(readIdentity);
+  const brokerActionIdentityRef = useRef(brokerActionIdentity);
+  const refetchBoundaryRef = useRef({
+    canRefetch: queryUi.canRefetch,
+    identity: readIdentity,
+    refetch,
+  });
+  actionGateRef.current = canWritePositions;
+  readIdentityRef.current = readIdentity;
+  brokerActionIdentityRef.current = brokerActionIdentity;
+  refetchBoundaryRef.current = {
+    canRefetch: queryUi.canRefetch,
+    identity: readIdentity,
+    refetch,
+  };
+
+  const isActionAllowed = useCallback(() => actionGateRef.current, []);
+  const getCurrentReadIdentity = useCallback(() => readIdentityRef.current, []);
+  const getCurrentBrokerActionIdentity = useCallback(
+    () => brokerActionIdentityRef.current,
+    [],
+  );
+
+  const convertCanSubmit = canWritePositions
+    && convertIntent !== null
+    && accountAuthorityMatches(convertIntent.identity, brokerActionIdentity);
+  const squareOffCanSubmit = canWritePositions
+    && squareOffIntent !== null
+    && accountAuthorityMatches(squareOffIntent.identity, readIdentity);
+  const exitAllCanSubmit = canWritePositions
+    && exitAllIntent !== null
+    && accountAuthorityMatches(exitAllIntent.identity, brokerActionIdentity);
+
+  useEffect(() => {
+    if (convertIntent && !accountAuthorityMatches(convertIntent.identity, brokerActionIdentity)) {
+      setConvertIntent(null);
+    }
+    if (squareOffIntent && !accountAuthorityMatches(squareOffIntent.identity, readIdentity)) {
+      setSquareOffIntent(null);
+    }
+    if (exitAllIntent && !accountAuthorityMatches(exitAllIntent.identity, brokerActionIdentity)) {
+      setExitAllIntent(null);
+    }
+  }, [brokerActionIdentity, convertIntent, exitAllIntent, readIdentity, squareOffIntent]);
+
+  const refreshPositions = useCallback((
+    expectedIdentity: AccountAuthorityIdentity,
+    getCurrentIdentity: () => AccountAuthorityIdentity,
+  ) => {
+    const boundary = refetchBoundaryRef.current;
+    if (
+      !actionGateRef.current
+      || boundary.identity.mode !== expectedIdentity.mode
+      || boundary.identity.scopeKey !== expectedIdentity.scopeKey
+    ) return;
+    runWithMatchingAccountAuthority(
+      expectedIdentity,
+      getCurrentIdentity,
+      () => runGuardedAccountRefetch(boundary.canRefetch, boundary.refetch),
+    );
+  }, []);
 
   const netRows = useMemo(() => netPositions(rows), [rows]);
   const heatRows = useMemo(() => rows.filter((row) => row.exposure > 0), [rows]);
 
   /** Whole-book mark-to-market — the one P&L figure, shown in every view. */
   const totalPnl = useMemo(() => totalPositionMtm(rows), [rows]);
+  const showPnl =
+    isExplore || rows.length > 0 || (accountReadsEnabled && !queryUi.isPaused && isSuccess);
   const netExposure = useMemo(
     () => netRows.reduce((sum, row) => sum + row.exposure, 0),
     [netRows],
@@ -550,7 +779,8 @@ function PositionsWidget(props: WidgetProps) {
     return () => clearInterval(timer);
   }, []);
 
-  const hasUpdate = accountReadsEnabled && dataUpdatedAt > 0;
+  const hasSuccessfulUpdate = dataUpdatedAt > 0;
+  const hasUpdate = accountReadsEnabled && !queryUi.isFrozen && hasSuccessfulUpdate;
   const isStale = hasUpdate && nowMs - dataUpdatedAt > staleThresholdMs();
 
   // ---- Actions ------------------------------------------------------------
@@ -698,7 +928,10 @@ function PositionsWidget(props: WidgetProps) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setSquareOffTarget(row.original)}
+                onClick={() => setSquareOffIntent({
+                  position: row.original,
+                  identity: captureAccountAuthority(readIdentity),
+                })}
                 aria-label={`Square off ${row.original.symbol}`}
                 title={`Square off ${row.original.symbol} at market`}
                 className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
@@ -709,7 +942,14 @@ function PositionsWidget(props: WidgetProps) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setConvertTarget(row.original)}
+              onClick={() => {
+                const target = captureBrokerTarget(brokerTarget);
+                setConvertIntent({
+                  position: row.original,
+                  target,
+                  identity: authorityForBrokerTarget(readIdentity, target),
+                });
+              }}
               aria-label={`Convert ${row.original.symbol}`}
               title={`Convert ${row.original.symbol} to another product`}
               className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
@@ -722,7 +962,7 @@ function PositionsWidget(props: WidgetProps) {
         ),
       },
     ],
-    [canWritePositions],
+    [brokerTarget, canWritePositions, readIdentity],
   );
 
   const table = useReactTable({
@@ -734,9 +974,19 @@ function PositionsWidget(props: WidgetProps) {
     getSortedRowModel: getSortedRowModel(),
   });
 
-  const emptyMessage = accountReadsEnabled || isExplore
+  const emptyMessage = isExplore
     ? "No open positions"
-    : "Connect a broker to load positions";
+    : queryUi.isPaused
+      ? "Positions unavailable while offline"
+      : accountReadsEnabled
+        ? "No open positions"
+        : "Connect a broker to load positions";
+  const emptyHint =
+    queryUi.canRefetch || isExplore
+      ? "Open positions will appear here"
+      : queryUi.isPaused
+        ? "Reconnect to the internet to resume account reads"
+        : "Live positions require a broker session";
 
   return (
     <div className="h-full flex flex-col overflow-hidden text-xs bg-surface-base" data-tour-target="positions">
@@ -776,8 +1026,12 @@ function PositionsWidget(props: WidgetProps) {
           {canWritePositions && rows.length > 0 && (
             <BrokerTargetSelect value={brokerTarget} onChange={setBrokerTarget} />
           )}
-          <span className={`font-mono tabular-nums font-medium ${totalPnl >= 0 ? "text-profit" : "text-loss"}`}>
-            P&L: {fmtPnl(totalPnl)}
+          <span
+            className={`font-mono tabular-nums font-medium ${
+              showPnl ? (totalPnl >= 0 ? "text-profit" : "text-loss") : "text-text-muted"
+            }`}
+          >
+            P&L: {showPnl ? fmtPnl(totalPnl) : "—"}
           </span>
           {hasUpdate && (
             <span
@@ -833,7 +1087,7 @@ function PositionsWidget(props: WidgetProps) {
               </SelectContent>
             </Select>
           )}
-          {accountReadsEnabled && rows.length > 0 && (
+          {queryUi.canRefetch && !queryUi.isFrozen && rows.length > 0 && (
             <button
               type="button"
               onClick={() => void handleExport()}
@@ -849,7 +1103,13 @@ function PositionsWidget(props: WidgetProps) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setExitAllOpen(true)}
+              onClick={() => {
+                const target = captureBrokerTarget(brokerTarget);
+                setExitAllIntent({
+                  target,
+                  identity: authorityForBrokerTarget(readIdentity, target),
+                });
+              }}
               aria-label="Exit all positions"
               title="Square off every open position at market"
               className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
@@ -860,9 +1120,8 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       </div>
 
-      {/* Position-feed failure banner — the views keep the last good data, so
-          say so instead of silently freezing the P&L. Explore never reads the
-          feed, so it never shows this. */}
+      {/* Position-feed failure banner — retained rows remain visible and are
+          explicitly frozen. Initial no-data failures never claim figures froze. */}
       {isError && !isExplore && (
         <div
           role="alert"
@@ -870,15 +1129,19 @@ function PositionsWidget(props: WidgetProps) {
         >
           <AlertTriangle size={12} className="shrink-0" aria-hidden="true" />
           <span className="flex-1">
-            Failed to load positions — figures are frozen
-            {hasUpdate ? ` at ${fmtUpdatedAt(dataUpdatedAt)}` : ""}
+            Failed to load positions
+            {queryUi.isFrozen
+              ? ` — displayed positions are frozen${
+                  hasSuccessfulUpdate ? ` at ${fmtUpdatedAt(dataUpdatedAt)}` : ""
+                }`
+              : ""}
             {error instanceof Error && error.message ? `: ${error.message}` : "."}
           </span>
           <Button
             variant="link"
             size="sm"
-            onClick={() => void refetch()}
-            disabled={isFetching}
+            onClick={() => runGuardedAccountRefetch(queryUi.canRefetch, refetch)}
+            disabled={!queryUi.canRefetch || isFetching}
             title="Retry the position fetch"
             className="shrink-0 h-auto p-0 text-xs font-medium text-loss hover:text-loss/80 disabled:opacity-50"
           >
@@ -887,12 +1150,30 @@ function PositionsWidget(props: WidgetProps) {
         </div>
       )}
 
-      {/* Body */}
-      {rows.length === 0 ? (
+      {queryUi.isFrozen && !isError && (
+        <div
+          role="status"
+          className="px-3 py-1.5 mx-3 mt-2 bg-warning/10 border border-warning/20 rounded-md text-xs text-warning shrink-0"
+        >
+          {queryUi.isPaused
+            ? "Offline — displayed positions are frozen"
+            : "Broker disconnected — displayed positions are frozen"}
+        </div>
+      )}
+
+      {/* Body — mutually exclusive: loading | empty | views | error-only */}
+      {queryUi.showInitialLoading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={16} className="animate-spin text-text-muted" aria-label="Loading positions" />
+        </div>
+      ) : rows.length === 0 && !isError ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted">
           <Layers size={24} className="text-text-disabled" />
           <span className="text-sm">{emptyMessage}</span>
         </div>
+      ) : rows.length === 0 ? (
+        // Failed first fetch with no retained rows: banner above is the body.
+        null
       ) : view === "net" ? (
         <NetPositionView
           rows={netRows}
@@ -905,11 +1186,7 @@ function PositionsWidget(props: WidgetProps) {
           rows={heatRows}
           groupMode={groupMode}
           emptyMessage={emptyMessage}
-          emptyHint={
-            accountReadsEnabled || isExplore
-              ? "Open positions will appear here"
-              : "Live positions require a broker session"
-          }
+          emptyHint={emptyHint}
           onOpenChart={handleOpenChart}
         />
       ) : (
@@ -1001,34 +1278,50 @@ function PositionsWidget(props: WidgetProps) {
       )}
 
       {/* Convert-position dialog — keyed so state resets per position */}
-      {convertTarget && (
+      {convertIntent && (
         <ConvertPositionDialog
-          key={`${convertTarget.symbol}-${convertTarget.exchange}-${convertTarget.product}`}
-          position={convertTarget}
-          target={brokerTarget}
-          onClose={() => setConvertTarget(null)}
-          onConverted={() => void refetch()}
+          key={`${convertIntent.position.symbol}-${convertIntent.position.exchange}-${convertIntent.position.product}`}
+          position={convertIntent.position}
+          target={convertIntent.target}
+          openingIdentity={convertIntent.identity}
+          canSubmit={convertCanSubmit}
+          isActionAllowed={isActionAllowed}
+          getCurrentIdentity={getCurrentBrokerActionIdentity}
+          onClose={() => setConvertIntent(null)}
+          onConverted={(identity) => refreshPositions(identity, getCurrentBrokerActionIdentity)}
         />
       )}
 
       {/* Per-position square-off confirmation — keyed so state resets per position */}
-      {squareOffTarget && (
+      {squareOffIntent && (
         <SquareOffDialog
-          key={`${squareOffTarget.symbol}-${squareOffTarget.exchange}-${squareOffTarget.product}-${squareOffTarget.quantity}`}
-          position={squareOffTarget}
-          onClose={() => setSquareOffTarget(null)}
-          onSquaredOff={() => void refetch()}
+          key={`${squareOffIntent.position.symbol}-${squareOffIntent.position.exchange}-${squareOffIntent.position.product}-${squareOffIntent.position.quantity}`}
+          position={squareOffIntent.position}
+          openingIdentity={squareOffIntent.identity}
+          canSubmit={squareOffCanSubmit}
+          isActionAllowed={isActionAllowed}
+          getCurrentIdentity={getCurrentReadIdentity}
+          onClose={() => setSquareOffIntent(null)}
+          onSquaredOff={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
         />
       )}
 
       {/* Exit-all typed-confirmation dialog */}
-      <ExitAllDialog
-        open={exitAllOpen}
-        positionCount={rows.length}
-        target={brokerTarget}
-        onOpenChange={setExitAllOpen}
-        onExited={() => void refetch()}
-      />
+      {exitAllIntent && (
+        <ExitAllDialog
+          open
+          positionCount={rows.length}
+          target={exitAllIntent.target}
+          openingIdentity={exitAllIntent.identity}
+          canSubmit={exitAllCanSubmit}
+          isActionAllowed={isActionAllowed}
+          getCurrentIdentity={getCurrentBrokerActionIdentity}
+          onOpenChange={(open) => {
+            if (!open) setExitAllIntent(null);
+          }}
+          onExited={(identity) => refreshPositions(identity, getCurrentBrokerActionIdentity)}
+        />
+      )}
     </div>
   );
 }

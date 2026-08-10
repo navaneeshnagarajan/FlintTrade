@@ -353,7 +353,7 @@ function TimeSalesWidget(props: WidgetProps) {
               them. Keep it visible in both views. */}
           <p className="text-[10px] text-text-muted">
             {instrument.symbol} · prints inferred from quote ticks (tick rule)
-            {isSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
           </p>
         </div>
         <div className="flex items-center gap-1 flex-none">
