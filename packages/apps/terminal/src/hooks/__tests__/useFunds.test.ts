@@ -16,16 +16,33 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 import type { Funds } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Mocks — declared BEFORE the hook import so vi.mock hoisting applies.
 // ---------------------------------------------------------------------------
 
-const mockGetFunds = vi.fn<() => Promise<Funds>>();
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
+
+const mockGetFunds = vi.fn<(
+  context: AccountReadContext,
+  signal?: AbortSignal,
+) => Promise<Funds>>();
 
 vi.mock("@/services/api", () => ({
-  getFunds: () => mockGetFunds(),
+  getFunds: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetFunds(context, signal),
+}));
+
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => accountReadState.current,
 }));
 
 // ---------------------------------------------------------------------------
@@ -63,6 +80,7 @@ function makeFunds(overrides: Partial<Funds> = {}): Funds {
 }
 
 beforeEach(() => {
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
   vi.clearAllMocks();
 });
 
@@ -71,18 +89,32 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("useFunds — URL is called", () => {
-  it("calls getFunds exactly once on mount", async () => {
+  it("calls getFunds once with the selected native account authority", async () => {
     mockGetFunds.mockResolvedValue(makeFunds());
 
     renderHook(() => useFunds(), { wrapper: createWrapper() });
 
     await waitFor(() => expect(mockGetFunds).toHaveBeenCalledTimes(1));
+    expect(mockGetFunds).toHaveBeenCalledWith(
+      CONNECTED_NATIVE_READ_CONTEXT,
+      expect.any(AbortSignal),
+    );
   });
 
   it("does not call getFunds when disabled", () => {
     mockGetFunds.mockResolvedValue(makeFunds());
 
     const { result } = renderHook(() => useFunds({ enabled: false }), { wrapper: createWrapper() });
+
+    expect(mockGetFunds).not.toHaveBeenCalled();
+    expect(result.current.fetchStatus).toBe("idle");
+  });
+
+  it("stays idle when Live has no selected account authority", () => {
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
+    mockGetFunds.mockResolvedValue(makeFunds());
+
+    const { result } = renderHook(() => useFunds(), { wrapper: createWrapper() });
 
     expect(mockGetFunds).not.toHaveBeenCalled();
     expect(result.current.fetchStatus).toBe("idle");

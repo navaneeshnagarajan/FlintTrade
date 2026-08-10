@@ -136,16 +136,6 @@ function PnLMonitorWidget(props: WidgetProps) {
   // Drawdown is empty in Explore until a deterministic sample trade pack exists.
   const trades = isExplore ? EMPTY_TRADES : (tradebookQuery.data ?? EMPTY_TRADES);
 
-  const dataReady =
-    isExplore ||
-    (accountReadsEnabled && positions !== undefined) ||
-    (!accountReadsEnabled && !isExplore);
-
-  const loading =
-    isExplore ? false
-    : !accountReadsEnabled ? false
-    : Boolean(positionsQuery.isLoading || positionsQuery.isPending);
-
   // Stable refs to avoid closing over stale state in the update effect
   const peakRef = useRef<number>(0);
   const peakTimeRef = useRef<string>("--:--");
@@ -266,14 +256,9 @@ function PnLMonitorWidget(props: WidgetProps) {
     positionsQuery.error,
     positionsQuery.data,
     tradebookQuery.data,
-    mode,
     isExplore,
     accountReadsEnabled,
     positions,
-    funds,
-    trades,
-    loading,
-    dataReady,
   ]);
 
   // Ticks every 10s so the last-updated chip can flag staleness between polls.

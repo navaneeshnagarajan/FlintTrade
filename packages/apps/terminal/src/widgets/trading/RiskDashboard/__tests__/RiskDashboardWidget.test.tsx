@@ -18,14 +18,27 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  EXPLORE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 const scopeState = vi.hoisted(() => ({ value: "explore:mock" }));
+const accountReadState = vi.hoisted(() => ({
+  current: undefined as AccountReadContext | undefined,
+}));
 vi.mock("@/hooks/useDataScope", () => ({
   useDataScope: () => scopeState.value,
+}));
+vi.mock("@/hooks/useAccountReadsEnabled", () => ({
+  useAccountReadContext: () => accountReadState.current,
 }));
 
 vi.mock("@/hooks/useTrackBehavior", () => ({
@@ -96,7 +109,8 @@ function renderWidget(ui: ReactElement = <RiskWidget />) {
 
 /** Render with a live scope and the given book/funds already resolving. */
 function renderLive(positions: Position[] = POS, funds: Funds = FUNDS) {
-  scopeState.value = "live:openalgo:default";
+  scopeState.value = CONNECTED_NATIVE_READ_CONTEXT.identity.scopeKey;
+  accountReadState.current = CONNECTED_NATIVE_READ_CONTEXT;
   mockPositions.mockResolvedValue(positions);
   mockFunds.mockResolvedValue(funds);
   return renderWidget();
@@ -112,6 +126,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   scopeState.value = "explore:mock";
+  accountReadState.current = EXPLORE_READ_CONTEXT;
   mockPositions.mockReset();
   mockPositions.mockResolvedValue([]);
   mockFunds.mockReset();
@@ -141,6 +156,7 @@ describe("Risk widget", () => {
 
   it("reads and labels the Practice sandbox without a live broker", async () => {
     scopeState.value = "practice:sandbox:default";
+    accountReadState.current = PRACTICE_READ_CONTEXT;
     renderWidget();
 
     expect(await screen.findByText("Practice")).toBeTruthy();
@@ -349,6 +365,7 @@ describe("Risk widget (connected)", () => {
 
   it("gates live risk account data when no broker is configured", () => {
     scopeState.value = "live:unconfigured";
+    accountReadState.current = UNCONFIGURED_LIVE_READ_CONTEXT;
     renderWidget();
 
     expect(mockPositions).not.toHaveBeenCalled();

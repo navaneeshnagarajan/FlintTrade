@@ -220,6 +220,10 @@ describe("PositionsWidget production query/account state", () => {
   });
 
   it("closes or disables an open Convert intent when Live changes to Practice", async () => {
+    setAccountRuntime({
+      accounts: [PRIMARY_NATIVE_ACCOUNT],
+      activeAccountId: brokerAccountKey(PRIMARY_NATIVE_ACCOUNT),
+    });
     mockGetPositionbook.mockResolvedValue([POSITION]);
     renderWidget();
     await screen.findByText("RELIANCE");

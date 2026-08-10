@@ -16,6 +16,10 @@ import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
+import {
+  resetAccountRuntime,
+  setAccountRuntime,
+} from "@/test-utils/accountQueryHarness";
 import { makeWidgetPanelProps } from "@/test-utils/widgetPanelProps";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +34,10 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/services/ftApi.native", () => ({
   listNativeAccounts: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/services/brokerAccountsApi", () => ({
+  listBrokerAccounts: vi.fn(async (previous: unknown[] = []) => previous),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -98,8 +106,6 @@ vi.mock("@/lib/lightweightChartRuntime", () => ({
 // ---------------------------------------------------------------------------
 
 import { getPositionbook, getTradebook } from "@/services/api";
-import { useModeStore } from "@/stores/modeStore";
-import { useConnectionStore } from "@/stores/connectionStore";
 import PnLMonitorWidget from "../PnLMonitorWidget";
 
 const mockGetPositionbook = getPositionbook as ReturnType<typeof vi.fn>;
@@ -139,6 +145,14 @@ function renderWidget() {
 // Tests
 // ---------------------------------------------------------------------------
 
+beforeEach(() => {
+  setAccountRuntime();
+});
+
+afterEach(() => {
+  resetAccountRuntime();
+});
+
 describe("PnLMonitorWidget", () => {
   beforeEach(() => {
     // No fake timers: the widget does not own a poll loop — data flows
@@ -151,11 +165,6 @@ describe("PnLMonitorWidget", () => {
     mockGetPositionbook.mockResolvedValue([]);
     mockGetTradebook.mockResolvedValue([]);
     chartMocks.reset();
-  });
-
-  afterEach(() => {
-    useModeStore.setState({ mode: "explore" });
-    useConnectionStore.setState({ status: "disconnected" });
   });
 
   it("renders without crashing", async () => {
@@ -250,9 +259,7 @@ describe("PnLMonitorWidget", () => {
   });
 
   it("shows error indicator when API fails", async () => {
-    // In Explore (no account reads) the failure surfaces as the quiet header
-    // dot — the loud banner + retry appears only when account reads are live
-    // (covered in PnLMonitorChart.test.tsx).
+    // The quiet health dot remains present alongside the Live failure banner.
     mockGetPositionbook.mockRejectedValue(new Error("Network error"));
     renderWidget();
     // The error state lands after the query's retry cycle — wait for the
@@ -544,14 +551,8 @@ describe("PnLMonitorWidget — provenance badge", () => {
     chartMocks.reset();
   });
 
-  afterEach(() => {
-    useModeStore.setState({ mode: "explore" });
-    useConnectionStore.setState({ status: "disconnected" });
-  });
-
   it("does not claim Sample data in disconnected Live without a bound sample pack", async () => {
-    useModeStore.setState({ mode: "live" });
-    useConnectionStore.setState({ status: "disconnected" });
+    setAccountRuntime({ accounts: [], mode: "live" });
     mockGetPositionbook.mockImplementation(() => {
       throw new Error("getPositionbook must not run when account reads disabled");
     });
@@ -566,15 +567,14 @@ describe("PnLMonitorWidget — provenance badge", () => {
   });
 
   it("labels Practice mode data as practice, not sample", async () => {
-    useModeStore.setState({ mode: "practice" });
+    setAccountRuntime({ mode: "practice" });
     renderWidget();
-    expect(screen.queryByText("Practice data")).not.toBeInTheDocument();
+    expect(screen.getByText("Practice data")).toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 
-  it("shows Practice data badge when broker is connected in Live mode", async () => {
-    useModeStore.setState({ mode: "live" });
-    useConnectionStore.setState({ status: "connected" });
+  it("does not label connected Live data as Practice or Sample", async () => {
+    setAccountRuntime();
     renderWidget();
     await waitFor(() => {
       expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
