@@ -1,0 +1,188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Phase4 Practice Proof v2 Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "git",
+    "rejected_inputs",
+    "derived_from_rejected_input",
+    "claims",
+    "isolation",
+    "calendar",
+    "timing",
+    "proofs",
+    "stores",
+    "limits",
+    "verdict"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "git": {
+      "type": "object",
+      "required": ["baseline", "candidate_sha", "dirty_before", "dirty_after"],
+      "properties": {
+        "baseline": { "type": "string", "const": "dec2393c980bf63b1138f70461df9aafa66baa88" },
+        "candidate_sha": { "type": "string" },
+        "dirty_before": { "type": "boolean", "const": false },
+        "dirty_after": { "type": "boolean", "const": false }
+      }
+    },
+    "rejected_inputs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "const": ["5db97390"]
+    },
+    "derived_from_rejected_input": {
+      "type": "boolean",
+      "const": false
+    },
+    "claims": {
+      "type": "object",
+      "required": ["http_practice_route", "gated_router_sandbox"],
+      "properties": {
+        "http_practice_route": {
+          "type": "object",
+          "required": ["status", "real_components", "does_not_claim"],
+          "properties": {
+            "status": { "enum": ["PASS", "FAIL"] },
+            "real_components": { "type": "array", "items": { "type": "string" }, "const": ["orders_bp", "RateLimiter", "SandboxEngine"] },
+            "does_not_claim": { "type": "array", "items": { "type": "string" }, "const": ["SafetySystem", "gate_order", "BrokerRouter"] }
+          }
+        },
+        "gated_router_sandbox": {
+          "type": "object",
+          "required": ["status", "real_components", "synthetic_component", "does_not_claim"],
+          "properties": {
+            "status": { "enum": ["PASS", "FAIL"] },
+            "real_components": { "type": "array", "items": { "type": "string" }, "const": ["SafetySystem", "gate_order", "SafetyGate", "BrokerRouter", "OrderLifecycleLedger", "BrokerRateLimiter", "SandboxEngine"] },
+            "synthetic_component": { "type": "string", "const": "PracticeProofSandboxAdapter" },
+            "does_not_claim": { "type": "array", "items": { "type": "string" }, "const": ["production broker adapter", "funded execution"] }
+          }
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": [
+        "env_allowlist_exact",
+        "user_namespace_changed",
+        "network_namespace_changed",
+        "socket_guard_attempts",
+        "credential_key_names",
+        "registered_adapters",
+        "openalgo_constructed",
+        "native_adapter_constructed",
+        "listeners_opened",
+        "mode",
+        "testing"
+      ],
+      "properties": {
+        "env_allowlist_exact": { "type": "boolean", "const": true },
+        "user_namespace_changed": { "type": "boolean", "const": true },
+        "network_namespace_changed": { "type": "boolean", "const": true },
+        "socket_guard_attempts": { "type": "integer", "const": 0 },
+        "credential_key_names": { "type": "array", "items": { "type": "string" }, "const": [] },
+        "registered_adapters": { "type": "array", "items": { "type": "string" }, "const": ["practice-proof-sandbox"] },
+        "openalgo_constructed": { "type": "integer", "const": 0 },
+        "native_adapter_constructed": { "type": "integer", "const": 0 },
+        "listeners_opened": { "type": "integer", "const": 0 },
+        "mode": { "type": "string", "const": "practice" },
+        "testing": { "type": "boolean", "const": false }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "required": ["claim", "source_path", "source_sha256", "session_date", "open_ist", "close_ist"],
+      "properties": {
+        "claim": { "enum": ["offline-calendar-backed", "weekday-practice-window"] },
+        "source_path": { "type": ["string", "null"] },
+        "source_sha256": { "type": ["string", "null"] },
+        "session_date": { "type": "string" },
+        "open_ist": { "type": "string", "const": "09:15:00" },
+        "close_ist": { "type": "string", "const": "15:30:00" }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": [
+        "required_monotonic_seconds",
+        "observed_monotonic_seconds",
+        "heartbeat_slots_expected",
+        "heartbeat_slots_observed",
+        "max_heartbeat_gap_seconds"
+      ],
+      "properties": {
+        "required_monotonic_seconds": { "type": "integer", "const": 22500 },
+        "observed_monotonic_seconds": { "type": "integer", "minimum": 22500, "maximum": 22510 },
+        "heartbeat_slots_expected": { "type": "integer", "const": 376 },
+        "heartbeat_slots_observed": { "type": "integer", "const": 376 },
+        "max_heartbeat_gap_seconds": { "type": "number", "maximum": 65 }
+      }
+    },
+    "proofs": {
+      "type": "object",
+      "required": ["http", "gateway", "unknown", "l5"],
+      "properties": {
+        "http": {
+          "type": "object",
+          "required": ["offered", "accepted", "rate_limited", "sandbox_orders"],
+          "properties": {
+            "offered": { "type": "integer", "const": 21 },
+            "accepted": { "type": "integer", "const": 10 },
+            "rate_limited": { "type": "integer", "const": 11 },
+            "sandbox_orders": { "type": "integer", "const": 10 }
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "required": ["offered", "sleep_calls", "adapter_calls"],
+          "properties": {
+            "offered": { "type": "integer", "const": 3 },
+            "sleep_calls": { "type": "array", "items": { "type": "number" }, "const": [0.5] },
+            "adapter_calls": { "type": "integer", "const": 3 }
+          }
+        },
+        "unknown": {
+          "type": "object",
+          "required": ["unknown", "router_reopens", "committed", "duplicates"],
+          "properties": {
+            "unknown": { "type": "integer", "const": 1 },
+            "router_reopens": { "type": "integer", "const": 2 },
+            "committed": { "type": "integer", "const": 1 },
+            "duplicates": { "type": "integer", "const": 0 }
+          }
+        },
+        "l5": {
+          "type": "object",
+          "required": ["active_at_end", "blocked_fresh", "blocked_preminted", "reset", "live_flatten_calls"],
+          "properties": {
+            "active_at_end": { "type": "boolean", "const": true },
+            "blocked_fresh": { "type": "integer", "const": 3 },
+            "blocked_preminted": { "type": "integer", "const": 1 },
+            "reset": { "type": "boolean", "const": false },
+            "live_flatten_calls": { "type": "integer", "const": 0 }
+          }
+        }
+      }
+    },
+    "stores": {
+      "type": "object"
+    },
+    "limits": {
+      "type": "object"
+    },
+    "verdict": {
+      "enum": ["PASS", "FAIL"]
+    }
+  },
+  "additionalProperties": false
+}
