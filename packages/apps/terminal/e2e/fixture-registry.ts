@@ -408,9 +408,11 @@ type JourneyOptions = {
 };
 
 /**
- * Journey specs import `test` and `expect` from this module, not directly from
- * Playwright. `syntheticApi` is automatic: teardown always asserts request
- * usage and client errors, then removes routes and clears registry state.
+ * Selected fail-closed product journey specs import `test` and `expect` from
+ * this module, not directly from Playwright. `syntheticApi` is automatic:
+ * teardown always asserts request usage and client errors, then removes routes
+ * and clears registry state. Product specs that still import Playwright
+ * directly are not protected by this registry.
  */
 export const test = baseTest.extend<JourneyFixtures & JourneyOptions>({
   benignConsoleErrors: [[], { option: true }],

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixture-registry";
 import { seedExploreDemoSession } from "./helpers";
 
 interface PersistedWorkspaceState {
@@ -17,23 +17,50 @@ interface PersistedLayoutState {
   state: PersistedWorkspaceState["layouts"];
 }
 
-test("creates, clones, switches, and restores two canonical workspaces", async ({ page }) => {
+test("creates, clones, switches, and restores two canonical workspaces", async ({
+  page,
+  syntheticApi,
+}) => {
   await seedExploreDemoSession(page);
-  await page.route("**/v1/accounts", async (route) => {
-    await route.fulfill({ json: { accounts: [] } });
+  syntheticApi.register({
+    name: "list gateway accounts during workspace changes",
+    method: "GET",
+    path: "/ft-api/v1/accounts",
+    expectedCalls: 2,
+    handler: (request) => {
+      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
+      expect(request.postData()).toBeNull();
+      return { json: { accounts: [] } };
+    },
   });
-  await page.route("**/api/v1/native/accounts", async (route) => {
-    await route.fulfill({ json: { accounts: [] } });
+  syntheticApi.register({
+    name: "list native accounts during workspace changes",
+    method: "GET",
+    path: "/ft-api/api/v1/native/accounts",
+    expectedCalls: 3,
+    handler: (request) => {
+      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
+      expect(request.postData()).toBeNull();
+      return { json: { accounts: [] } };
+    },
   });
-  await page.route("**/api/v1/broker/capabilities", async (route) => {
-    await route.fulfill({
-      json: {
-        broker_name: "Explore",
-        broker_type: "multi",
-        supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
-        features: {},
-      },
-    });
+  syntheticApi.register({
+    name: "read Explore broker capabilities",
+    method: "GET",
+    path: "/ft-api/api/v1/broker/capabilities",
+    expectedCalls: 1,
+    handler: (request) => {
+      expect(request.headers()["authorization"]).toBe("Bearer demo-user");
+      expect(request.postData()).toBeNull();
+      return {
+        json: {
+          broker_name: "Explore",
+          broker_type: "multi",
+          supported_exchanges: ["NSE", "BSE", "NFO", "BFO", "MCX"],
+          features: {},
+        },
+      };
+    },
   });
   await page.goto("/trade");
 

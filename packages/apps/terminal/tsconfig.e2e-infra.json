@@ -19,6 +19,8 @@
     "playwright.config.ts",
     "playwright.infra.config.ts",
     "e2e/fixture-registry.ts",
-    "e2e/infra-self-tests.spec.ts"
+    "e2e/infra-self-tests.spec.ts",
+    "e2e/workspace-lifecycle.spec.ts",
+    "e2e/order-pad-practice.spec.ts"
   ]
 }

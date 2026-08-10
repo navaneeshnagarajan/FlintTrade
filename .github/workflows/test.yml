@@ -492,3 +492,7 @@ jobs:
         run: pnpm --dir packages/apps/terminal exec playwright test e2e/infra-self-tests.spec.ts --config=playwright.infra.config.ts --project=chromium --reporter=github --workers=1 --retries=0
         env:
           CI: true
+      - name: Run selected fail-closed product journeys (Chromium-only)
+        run: pnpm --dir packages/apps/terminal exec playwright test e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts --config=playwright.config.ts --project=chromium --reporter=github --workers=1 --retries=0
+        env:
+          CI: true

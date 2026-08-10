@@ -22,7 +22,7 @@
     "e2e": "playwright test",
     "e2e:infra": "playwright test --config=playwright.infra.config.ts --project=chromium --workers=1 --retries=0",
     "e2e:infra:typecheck": "tsc --project tsconfig.e2e-infra.json --noEmit",
-    "e2e:infra:lint": "eslint e2e/fixture-registry.ts e2e/infra-self-tests.spec.ts playwright.config.ts playwright.infra.config.ts --max-warnings=0",
+    "e2e:infra:lint": "eslint e2e/fixture-registry.ts e2e/infra-self-tests.spec.ts e2e/workspace-lifecycle.spec.ts e2e/order-pad-practice.spec.ts playwright.config.ts playwright.infra.config.ts --max-warnings=0",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
     "analyze": "ANALYZE=true npm run build"
