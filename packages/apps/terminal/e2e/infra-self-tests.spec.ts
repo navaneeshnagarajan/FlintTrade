@@ -119,6 +119,47 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     await expect(disposal).rejects.toThrow(/handler error.*late handler evidence/is);
   });
 
+  baseTest("dispose aborts and records a second request while an owned handler drains", async ({
+    page,
+  }) => {
+    const registry = await createSyntheticFixtureRegistry(page, {
+      name: "request during automatic teardown",
+      frontendOrigin: FRONTEND_ORIGIN,
+      closePageOnDispose: true,
+    });
+    let markHandlerEntered: (() => void) | undefined;
+    const handlerEntered = new Promise<void>((resolve) => {
+      markHandlerEntered = resolve;
+    });
+    let releaseHandler: (() => void) | undefined;
+    const handlerGate = new Promise<void>((resolve) => {
+      releaseHandler = resolve;
+    });
+    registry.register({
+      name: "slow successful handler",
+      method: "GET",
+      path: "/api/slow-success",
+      handler: async () => {
+        markHandlerEntered?.();
+        await handlerGate;
+        return { json: { drained: true } };
+      },
+    });
+
+    const firstRequest = fetchJson(page, "GET", "/api/slow-success");
+    await handlerEntered;
+    const disposal = registry.dispose();
+    const secondRequest = fetchJson(page, "GET", "/api/slow-success");
+
+    await expect(secondRequest).rejects.toThrow();
+    releaseHandler?.();
+    await expect(firstRequest).resolves.toEqual({ drained: true });
+    await expect(disposal).rejects.toThrow(
+      /request during teardown.*GET \/api\/slow-success/is,
+    );
+    expect(page.isClosed()).toBe(true);
+  });
+
   baseTest("records method mismatch evidence", async ({ page }) => {
     const registry = await createRegistry(page, "method mismatch");
     registry.register({

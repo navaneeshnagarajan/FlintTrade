@@ -31,6 +31,7 @@ export interface SyntheticFixtureRegistryOptions {
   name: string;
   frontendOrigin?: string;
   benignConsoleErrors?: readonly BenignConsoleError[];
+  closePageOnDispose?: boolean;
 }
 
 export interface BenignConsoleError {
@@ -66,6 +67,7 @@ interface CapturedFailure {
     | "page crash"
     | "pageerror"
     | "path mismatch"
+    | "request during teardown"
     | "unexpected request"
     | "unhandled rejection";
   evidence: string;
@@ -131,11 +133,25 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
   private readonly page: Page;
   private readonly frontendOrigin: string;
   private readonly benignConsoleErrors: RegisteredBenignConsoleError[];
+  private readonly closePageOnDispose: boolean;
   private readonly handlers = new Map<string, RegisteredHandler>();
   private readonly failures: CapturedFailure[] = [];
+  private readonly inFlightRouteHandlers = new Set<Promise<void>>();
+  private disposalPromise: Promise<void> | undefined;
+  private disposing = false;
   private disposed = false;
 
-  private readonly routeHandler = async (route: Route, request: Request): Promise<void> => {
+  private readonly routeHandler = (route: Route, request: Request): Promise<void> => {
+    const operation = this.handleRoute(route, request);
+    this.inFlightRouteHandlers.add(operation);
+    void operation.then(
+      () => this.inFlightRouteHandlers.delete(operation),
+      () => this.inFlightRouteHandlers.delete(operation),
+    );
+    return operation;
+  };
+
+  private async handleRoute(route: Route, request: Request): Promise<void> {
     if (this.isFrontendResource(request)) {
       await route.continue();
       return;
@@ -144,11 +160,20 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     const method = request.method().toUpperCase();
     const path = requestPath(request);
     const key = methodAndPath(method, path);
+    if (this.disposing) {
+      this.failures.push({
+        kind: "request during teardown",
+        evidence: `request during teardown: received ${key}; aborted by the installed boundary`,
+      });
+      await this.abortRoute(route);
+      return;
+    }
+
     const registered = this.handlers.get(key);
 
     if (!registered) {
       this.captureRequestMismatch(method, path);
-      await route.abort("failed");
+      await this.abortRoute(route);
       return;
     }
 
@@ -160,7 +185,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
           `handler overuse: "${registered.name}" ${key}; ` +
           `expected ${registered.expectedCalls} call(s), observed ${registered.calls}`,
       });
-      await route.abort("failed");
+      await this.abortRoute(route);
       return;
     }
 
@@ -173,9 +198,9 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
         kind: "handler error",
         evidence: `handler error: "${registered.name}" ${key}: ${message}`,
       });
-      await route.abort("failed");
+      await this.abortRoute(route);
     }
-  };
+  }
 
   private readonly pageErrorHandler = (error: Error): void => {
     this.failures.push({ kind: "pageerror", evidence: `pageerror: ${error.message}` });
@@ -231,6 +256,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     this.page = page;
     this.name = trimmedName;
     this.frontendOrigin = new URL(options.frontendOrigin ?? DEFAULT_FRONTEND_ORIGIN).origin;
+    this.closePageOnDispose = options.closePageOnDispose ?? false;
     this.benignConsoleErrors = (options.benignConsoleErrors ?? []).map((allowance) => {
       const expectedCalls = allowance.expectedCalls ?? 1;
       if (!allowance.text || !Number.isInteger(expectedCalls) || expectedCalls < 1) {
@@ -305,17 +331,30 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
   }
 
-  async dispose(): Promise<void> {
-    if (this.disposed) {
-      return;
-    }
+  dispose(): Promise<void> {
+    this.disposalPromise ??= this.disposeOnce();
+    return this.disposalPromise;
+  }
+
+  private async disposeOnce(): Promise<void> {
+    this.disposing = true;
+
+    // Keep the boundary installed while owned handlers drain. Requests that
+    // arrive in this interval are still intercepted, recorded, and aborted.
+    await this.waitForInFlightRouteHandlers();
 
     if (!this.page.isClosed()) {
-      // This automatic fixture owns the page's fail-closed routing boundary.
-      // Wait for every route handler before snapshotting failures so a late
-      // handler rejection cannot escape teardown and then be erased below.
-      await this.page.unrouteAll({ behavior: "wait" });
+      if (this.closePageOnDispose) {
+        // The automatic journey fixture owns its managed page. Close it while
+        // the route remains installed so nothing can escape to Vite's proxy.
+        await this.page.close({ runBeforeUnload: false });
+      } else {
+        // Explicit registries remain reusable on the same page after disposal.
+        await this.page.unroute(ROUTE_PATTERN, this.routeHandler);
+      }
     }
+    await this.waitForInFlightRouteHandlers();
+
     const assertionError = this.buildAssertionError();
     this.disposed = true;
 
@@ -333,8 +372,24 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     }
   }
 
+  private async waitForInFlightRouteHandlers(): Promise<void> {
+    while (this.inFlightRouteHandlers.size > 0) {
+      await Promise.allSettled([...this.inFlightRouteHandlers]);
+    }
+  }
+
+  private async abortRoute(route: Route): Promise<void> {
+    try {
+      await route.abort("failed");
+    } catch (error: unknown) {
+      if (!this.page.isClosed()) {
+        throw error;
+      }
+    }
+  }
+
   private assertActive(): void {
-    if (this.disposed) {
+    if (this.disposed || this.disposing) {
       throw new Error(`[fail-closed registry "${this.name}"] registry is disposed`);
     }
   }
@@ -462,9 +517,9 @@ type JourneyOptions = {
 /**
  * Selected fail-closed product journey specs import `test` and `expect` from
  * this module, not directly from Playwright. `syntheticApi` is automatic:
- * teardown always asserts request usage and client errors, then removes routes
- * and clears registry state. Product specs that still import Playwright
- * directly are not protected by this registry.
+ * teardown always asserts request usage and client errors, and closes the
+ * managed page while the boundary is still installed. Product specs that still
+ * import Playwright directly are not protected by this registry.
  */
 export const test = baseTest.extend<JourneyFixtures & JourneyOptions>({
   benignConsoleErrors: [[], { option: true }],
@@ -477,6 +532,7 @@ export const test = baseTest.extend<JourneyFixtures & JourneyOptions>({
         name: testInfo.titlePath.join(" > "),
         frontendOrigin,
         benignConsoleErrors,
+        closePageOnDispose: true,
       });
 
       try {
