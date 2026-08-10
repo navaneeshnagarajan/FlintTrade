@@ -102,8 +102,6 @@ export default [
         // esbuild/SWC - so the parser is configured inline instead.
         requireConfigFile: false,
         babelOptions: {
-          babelrc: false,
-          configFile: false,
           // preset-typescript enables the TSX syntax plugins for .tsx files and
           // the plain TS ones for .ts, keyed off the filename.
           presets: ["@babel/preset-typescript"],
