@@ -1,12 +1,10 @@
-'use client';
-
 import { BRAND_SLOGAN_SENTENCE, BRAND_SLOGAN_WORDS, BRAND_WORDMARK, LogoIcon } from '@flinttrade/design-system/brand';
 import { ArrowRight, Bot, Download, ExternalLink, ShieldCheck, TerminalSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect } from 'react';
 
 import { HeroCinematic } from '@/components/hero-cinematic';
+import { SectionEnterController } from '@/components/section-enter-controller';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { listPackages } from '@/lib/mcp/capabilities';
@@ -83,40 +81,12 @@ const desktopInstallOptions = [
 // Eight debris particles; offsets/delays are nth-child CSS in globals.css.
 const impactDebris = Array.from({ length: 8 }, (_, i) => i);
 
-// Graphite Continuity A1: real IntersectionObserver for section-enter (fail-open on SSR / reduced-motion)
-function useSectionEnterObserver() {
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduceMotion) return;
-
-    const sections = document.querySelectorAll<HTMLElement>('.section-enter');
-    if (!sections.length) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.15, rootMargin: '0px 0px -10% 0px' }
-    );
-
-    sections.forEach((section) => observer.observe(section));
-
-    return () => observer.disconnect();
-  }, []);
-}
-
 export default function HomePage() {
   const packages = listPackages().slice(0, 8);
-  useSectionEnterObserver();
 
   return (
     <main className="site-shell">
+      <SectionEnterController />
       <div className="site-cinematic-backdrop" aria-hidden="true">
         <HeroCinematic />
       </div>
