@@ -257,8 +257,12 @@ class FakeFileSystem implements SourcePromotionFileSystem {
     const key = `${source}->${destination}`
     const failures = this.renameFailures.get(key)
     if (failures?.length) {
-      const error = new Error(`simulated ${failures[0]}`) as NodeJS.ErrnoException
-      error.code = failures.shift()
+      const failure = failures.shift()
+      if (failure === undefined) {
+        throw new Error(`missing simulated rename failure for ${key}`)
+      }
+      const error = new Error(`simulated ${failure}`) as NodeJS.ErrnoException
+      error.code = failure
       throw error
     }
 
