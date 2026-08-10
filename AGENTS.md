@@ -74,8 +74,10 @@ verification and a clean cross-platform icon re-review. Evidence is under
 `.local/specs/desktop-electron/evidence/icon-followup-20260729/`; the older Task
 8 bundle remains historical evidence for the installed-app acceptance.
 
-No Electron installer release is published. The site still withholds install
-commands until all four installers and `SHA256SUMS.txt` exist together. Local
+No Electron installer release is published. The site exposes the distinct
+source-built web-app install path, but withholds Electron-shell installer
+commands and downloads until all four installers and `SHA256SUMS.txt` exist
+together. Local
 macOS output is ad-hoc sealed with no Team ID; Apple distribution
 signing/notarisation, Windows/Linux native runtime evidence and the accepted
 RF3 Windows job-supervisor digest pin remain maintainer/native-runner work.
