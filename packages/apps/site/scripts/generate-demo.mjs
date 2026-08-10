@@ -44,7 +44,8 @@ const buildEnv = Object.fromEntries(
 );
 
 console.log('[generate-demo] building terminal (vite build --base=/demo-app/)…');
-execFileSync(join(terminalDir, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite'), [
+execFileSync(process.execPath, [
+  join(terminalDir, 'node_modules', 'vite', 'bin', 'vite.js'),
   'build',
   '--base=/demo-app/',
 ], {

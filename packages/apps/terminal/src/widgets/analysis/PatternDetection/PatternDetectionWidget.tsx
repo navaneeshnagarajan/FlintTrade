@@ -97,7 +97,7 @@ function PatternDetectionWidget() {
           </h3>
           <p className="text-[10px] text-text-muted">
             {scan.bar_count} daily bars · {scan.matches.length} patterns
-            {isSample && <span className="ml-1 text-amber-500">· Demo data</span>}
+            {isSample && <span className="ml-1 text-amber-500">· Sample data</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -9,6 +9,7 @@ import type { Persona, ExperienceLevel } from "./PersonaStep";
 import { getPresetName, mapWizardPreset } from "./ReviewStep";
 import type { RiskFormValues } from "./RiskStep";
 import type { TradingDefaultsFormValues } from "./TradingStep";
+import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 
 export interface SetupChoices {
   persona: Persona;
@@ -22,9 +23,7 @@ export interface SetupChoices {
 }
 
 export function personaRoute(persona: Persona): string {
-  if (persona === "investor") return "/invest";
-  if (persona === "beginner") return "/learn";
-  return "/trade";
+  return personaDefaultRoute(persona);
 }
 
 export function defaultExperienceForPersona(persona: Persona): ExperienceLevel {

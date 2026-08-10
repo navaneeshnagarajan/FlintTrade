@@ -104,10 +104,11 @@ async function fillOrder() {
 }
 
 describe("SandboxControls", () => {
-  it("renders the Virtual Capital and Place Paper Order sections", () => {
+  it("renders the Virtual Capital and Place Practice Order sections", () => {
     renderWithProviders();
     expect(screen.getByText("Virtual Capital")).toBeInTheDocument();
-    expect(screen.getByText("Place Paper Order")).toBeInTheDocument();
+    expect(screen.getByText("Place Practice Order")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Place Practice Order/i)).toBeInTheDocument();
     expect(screen.getByText("Practice Policy")).toBeInTheDocument();
     expect(screen.getByText("Adjust Capital")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export data/i })).toBeInTheDocument();
@@ -127,7 +128,7 @@ describe("SandboxControls", () => {
     }
   });
 
-  it("places a paper order against virtual capital and shows it filled", async () => {
+  it("places a Practice order against virtual capital and shows it filled", async () => {
     renderWithProviders();
     await fillOrder();
 

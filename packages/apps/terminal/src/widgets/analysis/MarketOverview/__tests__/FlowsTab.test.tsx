@@ -76,7 +76,7 @@ describe("FlowsTab — FII long/short", () => {
     render(<FlowsTab />, { wrapper });
 
     // Demo affordance is visible and the teaser wraps the content.
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "FII Long/Short");
     // All four segments render.
     for (const seg of SAMPLE_FII_LONG_SHORT.segments) {
@@ -98,7 +98,7 @@ describe("FlowsTab — FII long/short", () => {
 
     render(<FlowsTab />, { wrapper });
 
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("Strongly Long")).toBeInTheDocument();
   });
@@ -114,7 +114,7 @@ describe("FlowsTab — FII long/short", () => {
 
     render(<FlowsTab />, { wrapper });
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
   });
 });
 

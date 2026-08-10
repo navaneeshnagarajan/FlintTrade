@@ -10,7 +10,7 @@
  *   2. The repo files readme.md, AGENTS.md, changelog.md, disclaimer.md,
  *      PLAN.md (the curated public roadmap since 2026-07-28; the detailed
  *      working plan moved to the maintainer's private workspace) and every
- *      docs/xx*.md on disk.
+ *      docs/*.md and docs/*.mdx on disk.
  *
  * docs/superpowers/plans/ was removed from the repo on 2026-07-28 (archived
  * privately per the plan's own Step B); the directory is skipped in case a
@@ -27,7 +27,18 @@ import { docsIndex } from './mcp/data';
 const REPO_ROOT = resolve(process.cwd(), '..', '..', '..');
 
 /** Substrings that must never appear on any public surface. */
-const DENIED_SUBSTRINGS = ['.local/', 'reference-research', 'Nitro'] as const;
+const DENIED_SUBSTRINGS = [
+  '.local/',
+  'reference-research',
+  'Nitro',
+  // source contract additions for Hostinger staging prep privacy + hosting truth + reproducibility
+  'C:/Users/USER',
+  'WINDOWS_HOST',
+  '/c/Users/navan',
+  'PYTHONPATH=C:',
+  'manually upload `.next/static/` + root HTML/JS',
+  'Recommended for Hostinger static hosting trial',
+] as const;
 
 /**
  * Documented public conventions that legitimately mention gitignored
@@ -89,7 +100,7 @@ function listMarkdownFiles(dir: string): string[] {
     if (entry.isDirectory()) {
       if (SKIPPED_DOC_DIRS.some((skipped) => repoRelative === skipped)) continue;
       results.push(...listMarkdownFiles(fullPath));
-    } else if (entry.name.endsWith('.md')) {
+    } else if (entry.name.endsWith('.md') || entry.name.endsWith('.mdx')) {
       results.push(fullPath);
     }
   }

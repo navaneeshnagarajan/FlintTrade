@@ -294,12 +294,12 @@ function PnLMonitorWidget(props: WidgetProps) {
               role="status"
               aria-label={
                 provenance === "Practice data"
-                  ? "Showing practice-account data from the local sandbox"
+                  ? "Showing practice-account data from your Practice account"
                   : "Showing sample positions; not connected to a live broker"
               }
               title={
                 provenance === "Practice data"
-                  ? "Practice mode — P&L is computed from your local sandbox account."
+                  ? "Practice mode — P&L is computed from your Practice account."
                   : "Not connected — P&L is computed from sample positions, not your real account."
               }
             >
