@@ -118,7 +118,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
 }) => {
   // Freeze application timers before mounting the product route. Terminal polls
   // safety state and accounts; wall-clock refetches must not change exact counts.
-  await page.clock.install({ time: new Date("2026-08-11T00:00:00.000Z") });
+  const controlledTime = new Date("2026-08-11T00:00:00.000Z");
+  await page.clock.install({ time: controlledTime });
+  await page.clock.pauseAt(controlledTime);
   await seedOrderPadWorkspace(page);
   syntheticApi.register({
     name: "list gateway accounts for the Practice workspace",
@@ -134,7 +136,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
     name: "list native accounts for Practice market-data resolution",
     method: "GET",
     path: "/ft-api/api/v1/native/accounts",
-    expectedCalls: 6,
+    expectedCalls: 5,
     handler: (request) => {
       expectAuthenticatedGet(request);
       return { json: { accounts: [] } };
@@ -295,11 +297,18 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   await installMismatchedPracticeAuthority(page);
 
   await expect(page).toHaveURL(/\/trade$/);
+  const limitOrderType = page.getByRole("radio", { name: "LIMIT" });
+  // Lazy widget imports can schedule immediate work after their network module
+  // resolves. Advance in bounded increments, never reaching the first poll.
+  for (let advanced = 0; advanced < 4_000 && !(await limitOrderType.isVisible()); advanced += 100) {
+    await page.clock.runFor(100);
+  }
   await expect(page.getByText("Order Pad", { exact: true }).first()).toBeVisible();
+  await expect(limitOrderType).toBeVisible();
   await expect.poll(
     () => syntheticApi.callCount("GET", "/ft-api/api/v1/native/accounts"),
-  ).toBe(6);
-  await page.getByRole("radio", { name: "LIMIT" }).click();
+  ).toBe(5);
+  await limitOrderType.click();
   await page.getByRole("spinbutton", { name: "Price", exact: true }).fill("123.45");
   await page.getByRole("button", { name: "Practice Buy" }).click();
 

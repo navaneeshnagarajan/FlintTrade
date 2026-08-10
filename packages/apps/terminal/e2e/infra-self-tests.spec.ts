@@ -295,6 +295,46 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
       /console error.*known benign browser message - unexpected suffix/is,
     );
   });
+
+  baseTest("does not allow matching console text from a different URL", async ({ page }) => {
+    const registry = await createRegistry(page, "source-scoped benign console allowlist", [
+      { text: "source-sensitive browser message", url: `${FRONTEND_ORIGIN}/expected.js` },
+    ]);
+    const consoleError = page.waitForEvent(
+      "console",
+      (message) => message.type() === "error" && message.text() === "source-sensitive browser message",
+    );
+
+    await page.evaluate(() => console.error("source-sensitive browser message"));
+    await consoleError;
+
+    await expect(registry.dispose()).rejects.toThrow(
+      /console error.*source-sensitive browser message.*<no source URL>/is,
+    );
+  });
+
+  baseTest("rejects an unused console error allowance", async ({ page }) => {
+    const registry = await createRegistry(page, "unused benign console allowance", [
+      { text: "required browser message", url: "" },
+    ]);
+
+    await expect(registry.dispose()).rejects.toThrow(
+      /unused console error allowance.*required browser message.*expected 1.*observed 0/is,
+    );
+  });
+
+  baseTest("rejects console error allowance overuse", async ({ page }) => {
+    const registry = await createRegistry(page, "overused benign console allowance", [
+      { text: "single browser message", url: "", expectedCalls: 1 },
+    ]);
+
+    await page.evaluate(() => console.error("single browser message"));
+    await page.evaluate(() => console.error("single browser message"));
+
+    await expect(registry.dispose()).rejects.toThrow(
+      /console error allowance overuse.*single browser message.*expected 1.*observed 2/is,
+    );
+  });
 });
 
 journeyTest("the shared journey fixture disposes automatically after exact expected usage", async ({
