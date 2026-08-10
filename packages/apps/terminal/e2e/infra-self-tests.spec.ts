@@ -4,6 +4,7 @@ import {
   createSyntheticFixtureRegistry,
   expect as journeyExpect,
   test as journeyTest,
+  type BenignConsoleError,
   type HttpMethod,
   type SyntheticFixtureRegistry,
 } from "./fixture-registry";
@@ -13,7 +14,7 @@ const FRONTEND_ORIGIN = "https://synthetic.flinttrade.invalid";
 async function createRegistry(
   page: Page,
   name: string,
-  benignConsoleErrors: readonly string[] = [],
+  benignConsoleErrors: readonly BenignConsoleError[] = [],
 ): Promise<SyntheticFixtureRegistry> {
   return createSyntheticFixtureRegistry(page, {
     name,
@@ -86,6 +87,36 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
     await expect(registry.dispose()).rejects.toThrow(
       /unused handler.*must be called.*GET \/api\/required.*expected 1.*observed 0/is,
     );
+  });
+
+  baseTest("dispose waits for an in-flight handler failure", async ({ page }) => {
+    const registry = await createRegistry(page, "in-flight handler failure");
+    let markHandlerEntered: (() => void) | undefined;
+    const handlerEntered = new Promise<void>((resolve) => {
+      markHandlerEntered = resolve;
+    });
+    let releaseHandler: (() => void) | undefined;
+    const handlerGate = new Promise<void>((resolve) => {
+      releaseHandler = resolve;
+    });
+    registry.register({
+      name: "slow failing handler",
+      method: "GET",
+      path: "/api/slow-failure",
+      handler: async () => {
+        markHandlerEntered?.();
+        await handlerGate;
+        throw new Error("late handler evidence");
+      },
+    });
+
+    const request = fetchJson(page, "GET", "/api/slow-failure");
+    await handlerEntered;
+    const disposal = registry.dispose();
+    releaseHandler?.();
+
+    await expect(request).rejects.toThrow();
+    await expect(disposal).rejects.toThrow(/handler error.*late handler evidence/is);
   });
 
   baseTest("records method mismatch evidence", async ({ page }) => {
@@ -236,7 +267,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
 
   baseTest("allows only an exact explicitly benign console error", async ({ page }) => {
     const registry = await createRegistry(page, "benign console allowlist", [
-      "known benign browser message",
+      { text: "known benign browser message", url: "" },
     ]);
     const benignConsoleError = page.waitForEvent(
       "console",
@@ -251,7 +282,7 @@ baseTest.describe("fail-closed synthetic fixture registry", () => {
 
   baseTest("does not treat an allowlist substring as benign", async ({ page }) => {
     const registry = await createRegistry(page, "strict benign console allowlist", [
-      "known benign browser message",
+      { text: "known benign browser message", url: "" },
     ]);
     const consoleError = page.waitForEvent("console", (message) =>
       message.text().includes("unexpected suffix"),

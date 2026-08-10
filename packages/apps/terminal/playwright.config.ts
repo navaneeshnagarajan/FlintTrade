@@ -11,6 +11,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
+  forbidOnly: Boolean(process.env['CI']),
   // Each test gets a fresh context (no shared cookies / localStorage)
   fullyParallel: true,
   retries: process.env['CI'] ? 1 : 0,

@@ -8,6 +8,9 @@ const LIVE_AUTHORITY_PAYLOAD = {
   live_mode_unlocked: true,
   exp: 4_102_444_800,
 };
+// This deterministic browser token proves the UI/transport authority mismatch.
+// Production signature verification and no-dispatch behaviour remain covered by
+// the signed-token Python regression; this journey deliberately has no backend.
 const LIVE_AUTHORITY_TOKEN = [
   Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(LIVE_AUTHORITY_PAYLOAD)).toString("base64url"),
@@ -18,7 +21,11 @@ test.use({
   // Chromium logs an exact resource error for the deliberate backend-equivalent
   // 403. The UI error is asserted below; every other console error stays fatal.
   benignConsoleErrors: [
-    "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+    {
+      text: "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+      url: "http://localhost:5173/ft-api/api/v1/orders/place",
+      expectedCalls: 1,
+    },
   ],
 });
 
@@ -109,6 +116,9 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
   page,
   syntheticApi,
 }) => {
+  // Freeze application timers before mounting the product route. Terminal polls
+  // safety state and accounts; wall-clock refetches must not change exact counts.
+  await page.clock.install({ time: new Date("2026-08-11T00:00:00.000Z") });
   await seedOrderPadWorkspace(page);
   syntheticApi.register({
     name: "list gateway accounts for the Practice workspace",
@@ -250,6 +260,7 @@ test("a Practice Order Pad confirmation fails closed against Live JWT authority"
       const authorization = request.headers()["authorization"];
       expect(authorization).toBe(`Bearer ${LIVE_AUTHORITY_TOKEN}`);
       expect(request.headers()["x-flinttrade-mode"]).toBe("practice");
+      expect(request.headers()["x-api-key"]).toBeUndefined();
       expect(request.headers()["content-type"]).toBe("application/json");
 
       const presentedToken = authorization?.replace(/^Bearer /, "") ?? "";

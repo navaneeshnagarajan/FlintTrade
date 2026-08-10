@@ -30,7 +30,13 @@ export interface SyntheticHandlerRegistration {
 export interface SyntheticFixtureRegistryOptions {
   name: string;
   frontendOrigin?: string;
-  benignConsoleErrors?: readonly string[];
+  benignConsoleErrors?: readonly BenignConsoleError[];
+}
+
+export interface BenignConsoleError {
+  text: string;
+  url: string;
+  expectedCalls?: number;
 }
 
 export interface SyntheticFixtureRegistry {
@@ -42,6 +48,11 @@ export interface SyntheticFixtureRegistry {
 }
 
 interface RegisteredHandler extends SyntheticHandlerRegistration {
+  expectedCalls: number;
+  calls: number;
+}
+
+interface RegisteredBenignConsoleError extends BenignConsoleError {
   expectedCalls: number;
   calls: number;
 }
@@ -119,7 +130,7 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
 
   private readonly page: Page;
   private readonly frontendOrigin: string;
-  private readonly benignConsoleErrors: ReadonlySet<string>;
+  private readonly benignConsoleErrors: RegisteredBenignConsoleError[];
   private readonly handlers = new Map<string, RegisteredHandler>();
   private readonly failures: CapturedFailure[] = [];
   private disposed = false;
@@ -188,9 +199,27 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       return;
     }
 
-    if (!this.benignConsoleErrors.has(text)) {
-      this.failures.push({ kind: "console error", evidence: `console error: ${text}` });
+    const url = message.location().url;
+    const allowance = this.benignConsoleErrors.find(
+      (candidate) => candidate.text === text && candidate.url === url,
+    );
+    if (allowance) {
+      allowance.calls += 1;
+      if (allowance.calls > allowance.expectedCalls) {
+        this.failures.push({
+          kind: "console error",
+          evidence:
+            `console error allowance overuse: ${text} at ${url || "<no source URL>"}; ` +
+            `expected ${allowance.expectedCalls} occurrence(s), observed ${allowance.calls}`,
+        });
+      }
+      return;
     }
+
+    this.failures.push({
+      kind: "console error",
+      evidence: `console error: ${text} at ${url || "<no source URL>"}`,
+    });
   };
 
   constructor(page: Page, options: SyntheticFixtureRegistryOptions) {
@@ -202,7 +231,16 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     this.page = page;
     this.name = trimmedName;
     this.frontendOrigin = new URL(options.frontendOrigin ?? DEFAULT_FRONTEND_ORIGIN).origin;
-    this.benignConsoleErrors = new Set(options.benignConsoleErrors ?? []);
+    this.benignConsoleErrors = (options.benignConsoleErrors ?? []).map((allowance) => {
+      const expectedCalls = allowance.expectedCalls ?? 1;
+      if (!allowance.text || !Number.isInteger(expectedCalls) || expectedCalls < 1) {
+        throw new Error(
+          `[fail-closed registry "${this.name}"] benign console errors require non-empty text ` +
+            "and a positive integer expectedCalls",
+        );
+      }
+      return { ...allowance, expectedCalls, calls: 0 };
+    });
   }
 
   async install(): Promise<void> {
@@ -272,6 +310,12 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
       return;
     }
 
+    if (!this.page.isClosed()) {
+      // This automatic fixture owns the page's fail-closed routing boundary.
+      // Wait for every route handler before snapshotting failures so a late
+      // handler rejection cannot escape teardown and then be erased below.
+      await this.page.unrouteAll({ behavior: "wait" });
+    }
     const assertionError = this.buildAssertionError();
     this.disposed = true;
 
@@ -279,7 +323,6 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
     this.page.off("crash", this.pageCrashHandler);
     this.page.off("console", this.consoleHandler);
     if (!this.page.isClosed()) {
-      await this.page.unroute(ROUTE_PATTERN, this.routeHandler);
       await this.page.evaluate(removeUnhandledRejectionCapture).catch(() => undefined);
     }
     this.handlers.clear();
@@ -304,6 +347,15 @@ class FailClosedSyntheticFixtureRegistry implements SyntheticFixtureRegistry {
           `unused handler or usage mismatch: "${handler.name}" ` +
             `${methodAndPath(handler.method, handler.path)}; ` +
             `expected ${handler.expectedCalls} call(s), observed ${handler.calls}`,
+        );
+      }
+    }
+    for (const allowance of this.benignConsoleErrors) {
+      if (allowance.calls !== allowance.expectedCalls) {
+        evidence.push(
+          `unused console error allowance or usage mismatch: ${allowance.text} at ` +
+            `${allowance.url || "<no source URL>"}; expected ${allowance.expectedCalls} ` +
+            `occurrence(s), observed ${allowance.calls}`,
         );
       }
     }
@@ -404,7 +456,7 @@ type JourneyFixtures = {
 };
 
 type JourneyOptions = {
-  benignConsoleErrors: readonly string[];
+  benignConsoleErrors: readonly BenignConsoleError[];
 };
 
 /**
