@@ -1,0 +1,144 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Phase4PracticeProofEvidence",
+  "type": "object",
+  "required": [
+    "schema_version", "run_id", "git", "rejected_inputs", "derived_from_rejected_input",
+    "claims", "isolation", "calendar", "timing", "proofs", "stores", "limits", "verdict"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "run_id": {"type": "string", "minLength": 1},
+    "git": {
+      "type": "object",
+      "required": ["baseline", "candidate_sha", "dirty_before", "dirty_after"],
+      "properties": {
+        "baseline": {"const": "dec2393c980bf63b1138f70461df9aafa66baa88"},
+        "candidate_sha": {"type": "string"},
+        "dirty_before": {"const": false},
+        "dirty_after": {"const": false}
+      }
+    },
+    "rejected_inputs": {"type": "array", "items": {"type": "string"}, "const": ["5db97390"]},
+    "derived_from_rejected_input": {"const": false},
+    "claims": {
+      "type": "object",
+      "required": ["http_practice_route", "gated_router_sandbox"],
+      "properties": {
+        "http_practice_route": {
+          "type": "object",
+          "required": ["status", "real_components", "does_not_claim"],
+          "properties": {
+            "status": {"enum": ["PASS", "FAIL"]},
+            "real_components": {"const": ["orders_bp", "RateLimiter", "SandboxEngine"]},
+            "does_not_claim": {"const": ["SafetySystem", "gate_order", "BrokerRouter"]}
+          }
+        },
+        "gated_router_sandbox": {
+          "type": "object",
+          "required": ["status", "real_components", "synthetic_component", "does_not_claim"],
+          "properties": {
+            "status": {"enum": ["PASS", "FAIL"]},
+            "real_components": {"const": ["SafetySystem", "gate_order", "SafetyGate", "BrokerRouter", "OrderLifecycleLedger", "BrokerRateLimiter", "SandboxEngine"]},
+            "synthetic_component": {"const": "PracticeProofSandboxAdapter"},
+            "does_not_claim": {"const": ["production broker adapter", "funded execution"]}
+          }
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": [
+        "env_allowlist_exact", "user_namespace_changed", "network_namespace_changed",
+        "socket_guard_attempts", "credential_key_names", "registered_adapters",
+        "openalgo_constructed", "native_adapter_constructed", "listeners_opened",
+        "mode", "testing"
+      ],
+      "properties": {
+        "env_allowlist_exact": {"const": true},
+        "user_namespace_changed": {"const": true},
+        "network_namespace_changed": {"const": true},
+        "socket_guard_attempts": {"const": 0},
+        "credential_key_names": {"const": []},
+        "registered_adapters": {"const": ["practice-proof-sandbox"]},
+        "openalgo_constructed": {"const": 0},
+        "native_adapter_constructed": {"const": 0},
+        "listeners_opened": {"const": 0},
+        "mode": {"const": "practice"},
+        "testing": {"const": false}
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "required": ["claim", "source_path", "source_sha256", "session_date", "open_ist", "close_ist"],
+      "properties": {
+        "claim": {"enum": ["offline-calendar-backed", "weekday-practice-window"]},
+        "source_path": {"type": ["string", "null"]},
+        "source_sha256": {"type": ["string", "null"]},
+        "session_date": {"type": "string"},
+        "open_ist": {"const": "09:15:00"},
+        "close_ist": {"const": "15:30:00"}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "required": ["required_monotonic_seconds", "observed_monotonic_seconds", "heartbeat_slots_expected", "heartbeat_slots_observed", "max_heartbeat_gap_seconds"],
+      "properties": {
+        "required_monotonic_seconds": {"const": 22500},
+        "observed_monotonic_seconds": {"type": "number", "minimum": 22500, "maximum": 22510},
+        "heartbeat_slots_expected": {"const": 376},
+        "heartbeat_slots_observed": {"type": "integer", "minimum": 376, "maximum": 376},
+        "max_heartbeat_gap_seconds": {"type": "number", "maximum": 65}
+      }
+    },
+    "proofs": {
+      "type": "object",
+      "required": ["http", "gateway", "unknown", "l5"],
+      "properties": {
+        "http": {
+          "type": "object",
+          "required": ["offered", "accepted", "rate_limited", "sandbox_orders"],
+          "properties": {
+            "offered": {"const": 21},
+            "accepted": {"const": 10},
+            "rate_limited": {"const": 11},
+            "sandbox_orders": {"const": 10}
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "required": ["offered", "sleep_calls", "adapter_calls"],
+          "properties": {
+            "offered": {"const": 3},
+            "sleep_calls": {"const": [0.5]},
+            "adapter_calls": {"const": 3}
+          }
+        },
+        "unknown": {
+          "type": "object",
+          "required": ["unknown", "router_reopens", "committed", "duplicates"],
+          "properties": {
+            "unknown": {"const": 1},
+            "router_reopens": {"const": 2},
+            "committed": {"const": 1},
+            "duplicates": {"const": 0}
+          }
+        },
+        "l5": {
+          "type": "object",
+          "required": ["active_at_end", "blocked_fresh", "blocked_preminted", "reset", "live_flatten_calls"],
+          "properties": {
+            "active_at_end": {"const": true},
+            "blocked_fresh": {"const": 3},
+            "blocked_preminted": {"const": 1},
+            "reset": {"const": false},
+            "live_flatten_calls": {"const": 0}
+          }
+        }
+      }
+    },
+    "stores": {"type": "object"},
+    "limits": {"type": "object"},
+    "verdict": {"enum": ["PASS", "FAIL"]}
+  }
+}
