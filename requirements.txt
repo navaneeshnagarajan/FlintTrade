@@ -6,7 +6,7 @@ python-dotenv>=1.0
 websockets>=17.0.1
 duckdb>=1.5.5
 flask>=3.0
-ruff>=0.15.22
+ruff>=0.16.1
 pytest>=9.1.1
 pytest-asyncio>=0.23.0
 # Parallel test execution (CI uses `-n auto`); harmless locally
@@ -21,7 +21,7 @@ qrcode[svg]>=8.2
 argon2-cffi>=23.1.0
 PyJWT>=2.8.0
 apscheduler>=3.11.3
-jugaad-data>=0.31.0
+jugaad-data>=0.35.2
 Pillow>=12.1.1
 cryptography>=50.0.0
 chromadb>=0.5
