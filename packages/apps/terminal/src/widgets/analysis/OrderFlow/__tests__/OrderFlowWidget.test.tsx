@@ -617,11 +617,15 @@ describe("OrderFlowWidget", () => {
 
     const status = screen.getByTestId("order-flow-menu-status");
     const legend = screen.getByTestId("order-flow-compact-legend");
-    expect(screen.getByTestId("order-flow-compact-menu")).toHaveStyle({
-      maxHeight: "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
-      maxWidth: "calc(100vw - 1rem)",
-      width: "12rem",
-    });
+    const menu = screen.getByTestId("order-flow-compact-menu");
+    // Read the authored declarations directly. jsdom 30 resolves `rem` units
+    // in computed styles and cannot compute Radix's runtime custom property,
+    // while the browser still receives these exact inline constraints.
+    expect(menu.style.maxHeight).toBe(
+      "min(var(--radix-dropdown-menu-content-available-height), calc(100dvh - 1rem))",
+    );
+    expect(menu.style.maxWidth).toBe("calc(100vw - 1rem)");
+    expect(menu.style.width).toBe("12rem");
     expect(status).toHaveAccessibleName(`Status: Error. ${errorMessage}`);
 
     await user.keyboard("{End}");
