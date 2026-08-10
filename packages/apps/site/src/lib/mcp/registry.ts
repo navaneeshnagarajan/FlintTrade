@@ -26,6 +26,14 @@ function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function decodeUriComponentSafely(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Register the exact public FlintTrade docs MCP catalogue on an SDK-v2 server.
  * Order is load-bearing for listTools / listPrompts / static resource prefixes.
@@ -202,7 +210,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
     new ResourceTemplate('flinttrade://packages/{name}', {
       list: async () => ({
         resources: listPackages().map((pkg) => ({
-          uri: `flinttrade://packages/${pkg.name}`,
+          uri: `flinttrade://packages/${encodeURIComponent(pkg.name)}`,
           name: pkg.name,
           title: pkg.title,
           description: pkg.description,
@@ -216,12 +224,13 @@ export function registerFlintDocsMcp(server: McpServer): void {
       mimeType: 'text/markdown',
     },
     async (uri, variables) => {
-      const pkg = listPackages().find((entry) => entry.name === String(variables.name));
+      const packageName = decodeUriComponentSafely(String(variables.name));
+      const pkg = listPackages().find((entry) => entry.name === packageName);
       return {
         contents: [{
           uri: uri.href,
           mimeType: 'text/markdown',
-          text: pkg ? `# ${pkg.title}\n\nSource: ${pkg.sourcePath}\n\n${pkg.content}` : `No package found for ${String(variables.name)}.`,
+          text: pkg ? `# ${pkg.title}\n\nSource: ${pkg.sourcePath}\n\n${pkg.content}` : `No package found for ${packageName ?? String(variables.name)}.`,
         }],
       };
     },

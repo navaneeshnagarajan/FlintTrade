@@ -144,6 +144,19 @@ async function assertExactPublicCatalogue(client: Client): Promise<void> {
   expect(prompts.prompts.map((p) => p.name)).toEqual([...EXPECTED_PROMPT_NAMES]);
 }
 
+async function assertListedSlashNamedPackageIsReadable(client: Client): Promise<void> {
+  const resources = await client.listResources();
+  const packageResource = resources.resources.find((resource) => resource.name === 'apps/site');
+  expect(packageResource).toBeDefined();
+  if (!packageResource) throw new Error('The apps/site package resource was not listed.');
+
+  expect(packageResource.uri).toBe('flinttrade://packages/apps%2Fsite');
+  const read = await client.readResource({ uri: packageResource.uri });
+  expect(read.contents.length).toBeGreaterThan(0);
+  const firstContent = read.contents[0] as { text?: string };
+  expect(firstContent.text).toContain('Source: packages/apps/site/README.md');
+}
+
 describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
   it('1. Modern HTTP: versionNegotiation pinned 2026-07-28 connects as era=modern, lists exact tools/resources/prompts, and calls one read-only tool', async () => {
     const fetchFn = createTestHandler();
@@ -159,6 +172,7 @@ describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
     expect(clientEra(client)).toBe('modern');
 
     await assertExactPublicCatalogue(client);
+    await assertListedSlashNamedPackageIsReadable(client);
 
     const result = await client.callTool({ name: 'search_docs', arguments: { query: 'gateway' } });
     assertToolTextResult(result);
@@ -334,6 +348,7 @@ describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
     await client.connect(transport);
 
     await assertExactPublicCatalogue(client);
+    await assertListedSlashNamedPackageIsReadable(client);
 
     const read = await client.readResource({ uri: 'flinttrade://docs/index' });
     expect(read.contents.length).toBeGreaterThan(0);
