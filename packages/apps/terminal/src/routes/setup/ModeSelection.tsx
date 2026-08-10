@@ -4,6 +4,8 @@
 
 import { Zap, BookOpen, Settings2 } from "lucide-react";
 import { useNavigate } from "react-router";
+import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
+import { useSettingsStore } from "@/stores/settingsStore";
 import PublicRouteShell from "@/components/layout/PublicRouteShell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -100,7 +102,10 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
           <Button
             variant="ghost"
             className="text-sm text-text-muted hover:text-text-primary"
-            onClick={() => navigate("/trade")}
+            onClick={() => {
+              const persona = useSettingsStore.getState().persona;
+              navigate(personaDefaultRoute(persona));
+            }}
           >
             Skip setup - use defaults
           </Button>

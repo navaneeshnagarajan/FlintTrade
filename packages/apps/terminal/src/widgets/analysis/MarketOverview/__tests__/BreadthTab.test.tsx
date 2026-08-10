@@ -248,8 +248,8 @@ describe("BreadthTab", () => {
     expect(screen.getAllByText("NSE 500").length).toBeGreaterThan(0);
     expect(screen.getAllByText("BSE 500").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Nifty 50").length).toBeGreaterThan(0);
-    const badge = screen.getByText("Sample data");
-    expect(badge.getAttribute("title")).toMatch(/no live per-index breadth source/i);
+    const badge = screen.getByTitle(/no live per-index breadth source/i);
+    expect(badge.textContent).toBe("Sample");
   });
 
   // -------------------------------------------------------------------------

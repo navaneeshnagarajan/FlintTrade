@@ -43,7 +43,7 @@ describe("ContributionTab", () => {
 
     render(<ContributionTab />, { wrapper });
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Index Contribution");
     // Top constituent from the sample is shown.
     expect(screen.getByText(SAMPLE_INDEX_CONTRIBUTION.constituents[0].symbol)).toBeInTheDocument();
@@ -75,7 +75,7 @@ describe("ContributionTab", () => {
 
     render(<ContributionTab />, { wrapper });
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
   });
 
@@ -104,7 +104,7 @@ describe("ContributionTab", () => {
 
     render(<ContributionTab />, { wrapper });
 
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("BANKNIFTY")).toBeInTheDocument();
   });

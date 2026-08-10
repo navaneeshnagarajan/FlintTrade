@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { X, AlertTriangle } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { personaDefaultRoute } from "@/lib/personaDefaultRoute";
 import { useTradingStore } from "@/stores/tradingStore";
 import { useHolidays } from "@/hooks/useMarketStatus";
 import type { Holiday } from "@/types/api";
@@ -158,7 +159,14 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
     navigate("/lab");
   }
 
-  /** Navigate to the trade route (Terminal). */
+  /** Navigate to persona default workspace (generic session start). */
+  function goToDefaultWorkspace() {
+    onDismiss();
+    const persona = useSettingsStore.getState().persona;
+    navigate(personaDefaultRoute(persona));
+  }
+
+  /** Navigate to the trade route (Terminal). Explicit Trade CTAs only. */
   function goToTrade() {
     onDismiss();
     navigate("/trade");
@@ -263,7 +271,14 @@ export default function DailyWelcome({ onDismiss }: DailyWelcomeProps) {
                 ? goToLab
                 : ctx.suggestion === "Open Trade Review?"
                   ? openTradeJournal
-                  : undefined
+                  : ctx.suggestion === "Review overnight global indices"
+                    ? goToDefaultWorkspace
+                    : ctx.suggestion === "Explore learning modules"
+                      ? () => {
+                          onDismiss();
+                          navigate("/learn");
+                        }
+                      : undefined
             }
           >
             {ctx.suggestion}

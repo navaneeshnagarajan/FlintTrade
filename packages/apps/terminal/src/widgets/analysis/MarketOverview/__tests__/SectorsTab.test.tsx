@@ -202,7 +202,7 @@ describe("SectorsTab bars view", () => {
     renderTab(<SectorsTab initialView="bars" />);
 
     expect(mockGetSectorRotation).not.toHaveBeenCalled();
-    const badge = screen.getByText("Sample data");
+    const badge = screen.getByText("Sample");
     expect(badge.getAttribute("title")).toMatch(/no live sector rotation data/i);
     // The one sample sector table renders (12 Nifty sectoral indices).
     for (const name of ["IT", "Pharma", "FMCG", "Realty", "PSU Bank"]) {
@@ -217,7 +217,7 @@ describe("SectorsTab bars view", () => {
     mockGetSectorRotation.mockResolvedValue({ ...LIVE_ROTATION, is_sample_data: true });
     renderTab(<SectorsTab initialView="bars" />);
     // The badge stays and the fabricated backend rows never claim freshness.
-    expect(await screen.findByText("Sample data")).toBeTruthy();
+    expect(await screen.findByText("Sample")).toBeTruthy();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 
@@ -225,7 +225,7 @@ describe("SectorsTab bars view", () => {
     const { is_sample_data: _dropped, ...unflagged } = LIVE_ROTATION;
     mockGetSectorRotation.mockResolvedValue(unflagged);
     renderTab(<SectorsTab initialView="bars" />);
-    expect(await screen.findByText("Sample data")).toBeTruthy();
+    expect(await screen.findByText("Sample")).toBeTruthy();
   });
 
   it("drops the badge and shows live rows + timestamp on an explicit is_sample_data: false", async () => {
@@ -234,7 +234,7 @@ describe("SectorsTab bars view", () => {
     // Live rows replace the sample table entirely: the live payload has no
     // Media row, so the sample's Media bar must vanish.
     expect(await screen.findByText(/Updated: 2026-07-26 15:30 IST/)).toBeTruthy();
-    expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.queryByText("Sample")).toBeNull();
     expect(screen.getByText("IT")).toBeTruthy();
     expect(screen.getByText("Auto")).toBeTruthy();
     expect(screen.queryByText("Media")).toBeNull();
@@ -314,7 +314,7 @@ describe("SectorsTab heatmap view", () => {
     renderTab(<SectorsTab initialView="heatmap" />);
 
     expect(mockGetSectorRotation).not.toHaveBeenCalled();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    expect(screen.getByText("Sample")).toBeInTheDocument();
     expect(screen.queryByText(/Updated:/)).toBeNull();
   });
 
@@ -322,7 +322,7 @@ describe("SectorsTab heatmap view", () => {
     const { is_sample_data: _dropped, ...unflagged } = LIVE_ROTATION;
     mockGetSectorRotation.mockResolvedValue(unflagged);
     renderTab(<SectorsTab initialView="heatmap" />);
-    expect(await screen.findByText("Sample data")).toBeTruthy();
+    expect(await screen.findByText("Sample")).toBeTruthy();
   });
 
   it("states that tile size is market cap so colour is not read as the whole story", () => {

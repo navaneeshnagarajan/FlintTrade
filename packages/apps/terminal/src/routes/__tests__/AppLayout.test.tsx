@@ -129,10 +129,13 @@ vi.mock("@/stores/authStore", () => ({
 // ---------------------------------------------------------------------------
 
 import AppLayout from "../AppLayout";
+import useGlobalKeys from "@/hooks/useGlobalKeys";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appLayoutSource = () =>
   readFileSync(resolve(testDir, "../AppLayout.tsx"), "utf8");
+const useGlobalKeysSource = () =>
+  readFileSync(resolve(testDir, "../../hooks/useGlobalKeys.ts"), "utf8");
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -294,5 +297,48 @@ describe("AppLayout", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/learn", {
       state: { selectedDocPath: "USER_GUIDE.md" },
     });
+  });
+
+  it("wires onGoHome / onGoTrade into the single useGlobalKeys mount", () => {
+    renderApp();
+
+    expect(useGlobalKeys).toHaveBeenCalled();
+    const calls = vi.mocked(useGlobalKeys).mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    const handlers = calls[0]?.[0] as {
+      onGoHome?: () => void;
+      onGoTrade?: () => void;
+    };
+    expect(typeof handlers.onGoHome).toBe("function");
+    expect(typeof handlers.onGoTrade).toBe("function");
+
+    act(() => {
+      handlers.onGoHome?.();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/home");
+
+    act(() => {
+      handlers.onGoTrade?.();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith("/trade");
+  });
+
+  it("source-guard: AppLayout is the sole useGlobalKeys mount and handles Alt+H/T", () => {
+    const layout = appLayoutSource();
+    const hook = useGlobalKeysSource();
+
+    // Exactly one hook call site in AppLayout (single mount).
+    const mountMatches = layout.match(/useGlobalKeys\s*\(/g) ?? [];
+    expect(mountMatches).toHaveLength(1);
+    expect(layout).toMatch(/onGoHome\s*:/);
+    expect(layout).toMatch(/onGoTrade\s*:/);
+    expect(layout).toMatch(/navigate\(\s*[\"']\/home[\"']\s*\)/);
+    expect(layout).toMatch(/navigate\(\s*[\"']\/trade[\"']\s*\)/);
+
+    // Real handlers exist in the hook (not dialog-only advertising).
+    expect(hook).toMatch(/onGoHome/);
+    expect(hook).toMatch(/onGoTrade/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\"']h[\"']/);
+    expect(hook).toMatch(/e\.altKey[\s\S]{0,80}[\"']t[\"']/);
   });
 });

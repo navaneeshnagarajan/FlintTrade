@@ -725,7 +725,7 @@ describe("OrderLadderWidget explore sample book", () => {
 
     expect(screen.getByText("Explore · sample")).toBeTruthy();
     expect(mockDepthQuery).toHaveBeenCalledWith("NIFTY", "NSE", false);
-    expect(screen.getByLabelText("Showing demo data")).toBeTruthy();
+    expect(screen.getByLabelText("Showing sample data")).toBeTruthy();
   });
 
   it("keys the sample book onto the demo ladder rows", () => {

@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 export const metadata: Metadata = {
-  title: 'Sandbox Demo',
+  title: 'Explore demo',
   description:
     'Open the FlintTrade terminal demo as a full-page app experience.',
 };

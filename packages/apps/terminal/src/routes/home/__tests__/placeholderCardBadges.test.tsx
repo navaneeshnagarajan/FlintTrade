@@ -48,14 +48,19 @@ beforeEach(() => {
   mockConnected.mockReturnValue(false);
 });
 
-describe("home placeholder cards carry a Demo/Sample affordance", () => {
-  it.each(CARDS)("$name renders a placeholder badge with an explanatory title (disconnected)", ({ node, badgeTestId }) => {
-    renderCard(node);
-    const badge = screen.getByTestId(badgeTestId);
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute("role", "status");
-    expect(badge.getAttribute("title")).toBeTruthy();
-  });
+describe("home placeholder cards carry canonical static Sample/Unavailable/Live/Stale labels (no noisy aria-live)", () => {
+  it.each(CARDS)("$name renders a static provenance badge (no role=status / aria-live)", ({ node, badgeTestId }) => {
+      renderCard(node);
+      const badge = screen.getByTestId(badgeTestId);
+      expect(badge).toBeInTheDocument();
+      expect(badge.getAttribute("title")).toBeTruthy();
+      // Static provenance: never status/live-region (no noisy announcements).
+      expect(badge).not.toHaveAttribute("role", "status");
+      expect(badge).not.toHaveAttribute("aria-live");
+      // No user-visible Demo default — canonical Sample/Unavailable/Live/Stale only.
+      expect(badge.textContent?.trim()).not.toMatch(/^demo$/i);
+      expect(["Sample", "Unavailable", "Live", "Stale"]).toContain(badge.textContent?.trim());
+    });
 
   it("BreadthCard (disconnected) labels its fabricated numbers Sample, not live NSE data", () => {
     renderCard(<BreadthCard />);

@@ -9,6 +9,7 @@ import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
 import { getDemoFunds, getDemoHoldings } from "@/hooks/useModeData";
 import { useModeStore } from "@/stores/modeStore";
 import { DemoBadge } from "./DemoBadge";
+import { ProvenanceBadge } from "@/components/data/ProvenanceBadge";
 
 interface AllocationSlice {
   label: string;
@@ -60,9 +61,12 @@ export function PortfolioCard() {
           </p>
         </div>
 
-        {/* Allocation bar */}
+        {/* Allocation bar — always illustrative; honest Sample badge inline (Slice 3) */}
         <div>
-          <p className="text-[10px] text-text-muted mb-1.5">Allocation</p>
+          <p className="text-[10px] text-text-muted mb-1.5 flex items-center gap-1.5">
+            Allocation
+            <ProvenanceBadge label="Sample" placement="inline" />
+          </p>
           <div
             className="flex h-2 rounded-full overflow-hidden"
             role="img"
