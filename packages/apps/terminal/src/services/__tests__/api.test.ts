@@ -111,6 +111,7 @@ import {
   sendTelegram,
   ping,
   searchSymbol,
+  getHoldings,
   getPositionbook,
   getTradebook,
   getQuoteDetails,
@@ -124,6 +125,11 @@ import {
   orderLimiter,
   generalLimiter,
 } from "@/services/rateLimiter";
+import {
+  CONNECTED_NATIVE_READ_CONTEXT,
+  PRACTICE_READ_CONTEXT,
+  UNCONFIGURED_LIVE_READ_CONTEXT,
+} from "@/test-utils/accountReadFixtures";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -295,6 +301,55 @@ describe("OpenAlgo API client (api.ts)", () => {
       "/api/v1/native/accounts/upstox/SHARED/positions",
     );
   });
+
+  it.each([
+    {
+      name: "holdings",
+      read: getHoldings,
+      response: [{ symbol: "RELIANCE", exchange: "NSE", quantity: 2 }],
+      path: "/api/v1/native/accounts/dhan/A1/holdings",
+    },
+    {
+      name: "tradebook",
+      read: getTradebook,
+      response: [{ tradeId: "T-1", orderId: "O-1", symbol: "SBIN", exchange: "NSE" }],
+      path: "/api/v1/native/accounts/dhan/A1/trades",
+    },
+  ])(
+    "routes $name through the exact immutable native account context",
+    async ({ read, response, path }) => {
+      mockConnectionState.apiKey = "mutable-openalgo-key";
+      mockBrokerState.accounts = [
+        { account_id: "B2", broker: "upstox", source: "native", status: "connected" },
+      ];
+      mockBrokerState.activeAccountId = "native:upstox:B2";
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ status: "success", data: response }));
+      const controller = new AbortController();
+
+      await expect(read(CONNECTED_NATIVE_READ_CONTEXT, controller.signal)).resolves.toEqual(response);
+
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain(path);
+      expect(url).not.toContain("upstox/B2");
+      expect(init.signal).toBe(controller.signal);
+    },
+  );
+
+  it.each([
+    ["holdings", getHoldings],
+    ["tradebook", getTradebook],
+  ])(
+    "rejects %s before transport when immutable Live authority is unavailable",
+    async (_name, read) => {
+      fetchSpy.mockResolvedValue(jsonResponse({ status: "success", data: [] }));
+
+      await expect(read(UNCONFIGURED_LIVE_READ_CONTEXT)).rejects.toThrow(
+        "Account reads are unavailable",
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("fails closed instead of serving another account's data when the active native session lapses", async () => {
     // Wave-2 audit finding: silently falling back to the primary account would
@@ -2242,9 +2297,19 @@ describe("OpenAlgo API client (api.ts)", () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain("/v1/sandbox/positions");
   });
 
-  it("reads Practice trades from the canonical fill ledger", async () => {
-    mockConnectionState.apiKey = "configured-live-key";
-    mockModeState.mode = "practice";
+  it("reads Practice holdings from sandbox authority without touching a Live broker", async () => {
+    mockConnectionState.apiKey = "";
+    mockConnectionState.status = "disconnected";
+    mockModeState.mode = "live";
+
+    await expect(getHoldings(PRACTICE_READ_CONTEXT)).resolves.toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("reads Practice trades from the canonical fill ledger authority", async () => {
+    mockConnectionState.apiKey = "";
+    mockConnectionState.status = "disconnected";
+    mockModeState.mode = "live";
     fetchSpy.mockResolvedValueOnce(jsonResponse({
       status: "success",
       data: {
@@ -2261,7 +2326,7 @@ describe("OpenAlgo API client (api.ts)", () => {
       },
     }));
 
-    await expect(getTradebook()).resolves.toEqual([{
+    await expect(getTradebook(PRACTICE_READ_CONTEXT)).resolves.toEqual([{
       tradeId: "TR-1",
       orderId: "SB-1",
       symbol: "INFY",

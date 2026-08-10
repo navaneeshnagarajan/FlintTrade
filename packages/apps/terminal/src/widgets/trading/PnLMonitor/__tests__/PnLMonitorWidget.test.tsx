@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom";
 import {
+  PRIMARY_NATIVE_ACCOUNT,
   resetAccountRuntime,
   setAccountRuntime,
 } from "@/test-utils/accountQueryHarness";
@@ -32,12 +33,8 @@ vi.mock("@/services/api", () => ({
   getFunds: vi.fn().mockResolvedValue({ availableCash: 250_000, usedMargin: 48_500, totalBalance: 298_500 }),
 }));
 
-vi.mock("@/services/ftApi.native", () => ({
-  listNativeAccounts: vi.fn().mockResolvedValue([]),
-}));
-
 vi.mock("@/services/brokerAccountsApi", () => ({
-  listBrokerAccounts: vi.fn(async (previous: unknown[] = []) => previous),
+  listBrokerAccounts: vi.fn(),
 }));
 
 vi.mock("@/lib/market", () => ({
@@ -105,11 +102,14 @@ vi.mock("@/lib/lightweightChartRuntime", () => ({
 // Import component and mock references
 // ---------------------------------------------------------------------------
 
-import { getPositionbook, getTradebook } from "@/services/api";
+import { getFunds, getPositionbook, getTradebook } from "@/services/api";
+import { listBrokerAccounts } from "@/services/brokerAccountsApi";
 import PnLMonitorWidget from "../PnLMonitorWidget";
 
 const mockGetPositionbook = getPositionbook as ReturnType<typeof vi.fn>;
 const mockGetTradebook = getTradebook as ReturnType<typeof vi.fn>;
+const mockGetFunds = getFunds as ReturnType<typeof vi.fn>;
+const mockListBrokerAccounts = listBrokerAccounts as ReturnType<typeof vi.fn>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,6 +147,14 @@ function renderWidget() {
 
 beforeEach(() => {
   setAccountRuntime();
+  mockGetFunds.mockReset();
+  mockGetFunds.mockResolvedValue({
+    availableCash: 250_000,
+    usedMargin: 48_500,
+    totalBalance: 298_500,
+  });
+  mockListBrokerAccounts.mockReset();
+  mockListBrokerAccounts.mockResolvedValue([PRIMARY_NATIVE_ACCOUNT]);
 });
 
 afterEach(() => {
@@ -553,6 +561,7 @@ describe("PnLMonitorWidget — provenance badge", () => {
 
   it("does not claim Sample data in disconnected Live without a bound sample pack", async () => {
     setAccountRuntime({ accounts: [], mode: "live" });
+    mockListBrokerAccounts.mockResolvedValue([]);
     mockGetPositionbook.mockImplementation(() => {
       throw new Error("getPositionbook must not run when account reads disabled");
     });
@@ -564,6 +573,8 @@ describe("PnLMonitorWidget — provenance badge", () => {
       screen.getByText(/Broker required|Connect a broker to load/i),
     ).toBeInTheDocument();
     expect(mockGetPositionbook).not.toHaveBeenCalled();
+    expect(mockGetTradebook).not.toHaveBeenCalled();
+    expect(mockGetFunds).not.toHaveBeenCalled();
   });
 
   it("labels Practice mode data as practice, not sample", async () => {

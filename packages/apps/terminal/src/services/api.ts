@@ -2670,8 +2670,16 @@ export const getOrderbook = async (
   return Array.isArray(raw.orders) ? raw.orders : [];
 };
 
-export const getTradebook = async (): Promise<Trade[]> => {
-  const raw = await post<Trade[] | { trades?: Trade[] }>("tradebook");
+export const getTradebook = async (
+  context: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<Trade[]> => {
+  const raw = await readAccountSnapshot<Trade[] | { trades?: Trade[] }>(
+    "tradebook",
+    {},
+    context,
+    signal,
+  );
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.trades) ? raw.trades : [];
 };
@@ -2687,8 +2695,16 @@ export const getPositionbook = async (
   return Array.isArray(raw.positions) ? raw.positions : [];
 };
 
-export const getHoldings = async (): Promise<Holding[]> => {
-  const raw = await post<Holding[] | { holdings?: Holding[] }>("holdings");
+export const getHoldings = async (
+  context: AccountReadContext,
+  signal?: AbortSignal,
+): Promise<Holding[]> => {
+  const raw = await readAccountSnapshot<Holding[] | { holdings?: Holding[] }>(
+    "holdings",
+    {},
+    context,
+    signal,
+  );
   if (Array.isArray(raw)) return raw;
   return Array.isArray(raw.holdings) ? raw.holdings : [];
 };

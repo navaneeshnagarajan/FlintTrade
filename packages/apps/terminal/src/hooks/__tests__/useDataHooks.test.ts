@@ -17,6 +17,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
+import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
+
+const mockAccountReadContext = vi.hoisted(() => Object.freeze({
+  identity: Object.freeze({
+    mode: "live" as const,
+    scopeKey: "live:native:dhan:A1",
+    brokerType: "dhan",
+    accountId: "A1",
+  }),
+  enabled: true,
+  host: "",
+  apiKey: "",
+}));
 
 // ---------------------------------------------------------------------------
 // Mock api service
@@ -33,10 +46,12 @@ const mockGetSyntheticFuture = vi.fn();
 
 vi.mock("@/services/api", () => ({
   getFunds: () => mockGetFunds(),
-  getHoldings: () => mockGetHoldings(),
+  getHoldings: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetHoldings(context, signal),
   getOrderbook: () => mockGetOrderbook(),
   getPositionbook: () => mockGetPositionbook(),
-  getTradebook: () => mockGetTradebook(),
+  getTradebook: (context: AccountReadContext, signal?: AbortSignal) =>
+    mockGetTradebook(context, signal),
   getOptionChain: (symbol: string, exchange: string, expiry?: string) =>
     mockGetOptionChain(symbol, exchange, expiry),
   getMargin: (symbol: string, exchange: string, qty: number, product: string, action: string) =>
@@ -47,17 +62,7 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/hooks/useAccountReadsEnabled", () => ({
   useAccountReadsEnabled: () => true,
-  useAccountReadContext: () => ({
-    identity: {
-      mode: "live",
-      scopeKey: "live:openalgo:test",
-      brokerType: "openalgo",
-      accountId: "default",
-    },
-    enabled: true,
-    host: "",
-    apiKey: "",
-  }),
+  useAccountReadContext: () => mockAccountReadContext,
 }));
 
 // Mock market hours (default: market closed so refetchInterval doesn't interfere)
@@ -167,6 +172,10 @@ describe("useHoldings", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data![0].symbol).toBe("RELIANCE");
+    expect(mockGetHoldings).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure (retry disabled)", async () => {
@@ -254,6 +263,10 @@ describe("useTradebook", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
+    expect(mockGetTradebook).toHaveBeenCalledWith(
+      mockAccountReadContext,
+      expect.any(AbortSignal),
+    );
   });
 
   it("returns error state on failure", async () => {

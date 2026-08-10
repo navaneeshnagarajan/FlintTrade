@@ -21,8 +21,10 @@ import { useOrders } from "@/hooks/useOrders";
 import { useHoldings } from "@/hooks/useHoldings";
 import { useFunds } from "@/hooks/useFunds";
 import { useTradebook } from "@/hooks/useTradebook";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
-import { resolveAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
+import {
+  useAccountReadContext,
+  type AccountReadContext,
+} from "@/hooks/useAccountReadsEnabled";
 import type { AppMode } from "@/stores/modeStore";
 import type { Position, Order, Holding, Funds } from "@/types/api";
 
@@ -171,12 +173,16 @@ function useExploreModeData<T>(key: ModeDataKey): ModeDataResult<T> {
  * call all hook wrappers every render. Only the selected key is enabled, and
  * explore mode disables the API branch entirely.
  */
-function useApiModeData<T>(key: ModeDataKey, enabled: boolean): ModeDataResult<T> {
-  const positions = usePositions({ enabled: enabled && key === "positions" });
-  const orders = useOrders({ enabled: enabled && key === "orders" });
-  const holdings = useHoldings({ enabled: enabled && key === "holdings" });
-  const funds = useFunds({ enabled: enabled && key === "funds" });
-  const tradebook = useTradebook({ enabled: enabled && key === "tradebook" });
+function useApiModeData<T>(
+  key: ModeDataKey,
+  enabled: boolean,
+  context: AccountReadContext,
+): ModeDataResult<T> {
+  const positions = usePositions({ enabled: enabled && key === "positions", context });
+  const orders = useOrders({ enabled: enabled && key === "orders", context });
+  const holdings = useHoldings({ enabled: enabled && key === "holdings", context });
+  const funds = useFunds({ enabled: enabled && key === "funds", context });
+  const tradebook = useTradebook({ enabled: enabled && key === "tradebook", context });
 
   // Pick the result for the requested key
   const selected = useMemo(() => {
@@ -227,14 +233,17 @@ function useApiModeData<T>(key: ModeDataKey, enabled: boolean): ModeDataResult<T
  */
 export function useModeData<T = unknown>(key: ModeDataKey): ModeDataResult<T> {
   const mode: AppMode = useModeStore((s) => s.mode);
-  const isBrokerConnected = useBrokerConnected();
+  const accountReadContext = useAccountReadContext();
 
   // We must call both branches unconditionally (rules of hooks).
   // The unused API branch is disabled, so explore mode remains broker-free.
   const exploreResult = useExploreModeData<T>(key);
   const apiResult = useApiModeData<T>(
     key,
-    resolveAccountReadsEnabled(mode, isBrokerConnected),
+    mode !== "explore"
+      && accountReadContext.identity.mode === mode
+      && accountReadContext.enabled,
+    accountReadContext,
   );
 
   return mode === "explore" ? exploreResult : apiResult;
