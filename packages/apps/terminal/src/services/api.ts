@@ -46,6 +46,10 @@ import { findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import { buildCompactOptionSymbol } from "@/lib/optionSymbols";
 import type { AccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import {
+  resolveAccountAuthorityIdentity,
+  type AccountAuthorityIdentity,
+} from "@/hooks/useDataScope";
+import {
   assertNativeWriteTargetReadyOrThrow,
   pickNativeBrokerOrderTarget,
   pickNativeWriteTarget,
@@ -1921,7 +1925,7 @@ export class OrderApiError extends Error {
  *  because they fabricated `X-API-Key` and `Authorization` in the test
  *  client.
  */
-type OrderAuthorityPin = {
+type ModeOrderAuthorityPin = {
   /**
    * Immutable mode captured at the irreversible UI boundary (e.g. Practice
    * review confirm). Must still match the live mode store when the request
@@ -1930,6 +1934,50 @@ type OrderAuthorityPin = {
    */
   mode: "practice" | "live";
 };
+
+type ExactOrderAuthorityPin = AccountAuthorityIdentity;
+
+type OrderAuthorityPin = ModeOrderAuthorityPin | ExactOrderAuthorityPin;
+
+function isExactOrderAuthorityPin(
+  authority: OrderAuthorityPin | undefined,
+): authority is ExactOrderAuthorityPin {
+  return authority !== undefined
+    && "scopeKey" in authority
+    && "brokerType" in authority
+    && "accountId" in authority;
+}
+
+function exactOrderAuthorityMatchesCurrent(
+  authority: ExactOrderAuthorityPin,
+  currentMode: "explore" | "practice" | "live",
+): boolean {
+  const { host, apiKey, openAlgoHydrated, status } = useConnectionStore.getState();
+  const { accounts, activeAccountId } = useBrokerStore.getState();
+  if (authority.mode === "live" && !openAlgoHydrated) return false;
+
+  const current = resolveAccountAuthorityIdentity({
+    mode: currentMode,
+    host,
+    apiKey,
+    accounts,
+    activeAccountId,
+  });
+  if (
+    authority.mode !== current.mode
+    || authority.scopeKey !== current.scopeKey
+    || authority.brokerType !== current.brokerType
+    || authority.accountId !== current.accountId
+  ) return false;
+
+  if (authority.mode !== "live") return true;
+  if (authority.brokerType === "openalgo") {
+    return apiKey.trim().length > 0 && status === "connected";
+  }
+  const nativeTarget = pickNativeWriteTarget(currentMode, apiKey);
+  return nativeTarget?.broker === authority.brokerType
+    && nativeTarget.accountId === authority.accountId;
+}
 
 async function postOrder<T>(
   ftEndpoint: string,
@@ -1946,6 +1994,11 @@ async function postOrder<T>(
   if (authority?.mode && authority.mode !== currentMode) {
     throw new Error(
       `Order blocked: mode changed from ${authority.mode} to ${currentMode} before submission.`,
+    );
+  }
+  if (isExactOrderAuthorityPin(authority) && !exactOrderAuthorityMatchesCurrent(authority, currentMode)) {
+    throw new Error(
+      "Order blocked: the displayed account authority no longer matches the current source, scope, account, or connection.",
     );
   }
   // Prefer the pinned authority mode so in-flight Practice confirms keep the
@@ -1967,7 +2020,10 @@ async function postOrder<T>(
   // window before the first account poll), reject rather than let the order fall
   // through to the bare path and be silently retargeted to brokers.execution.default.
   assertNativeWriteTargetReadyOrThrow(mode, apiKey);
-  const nativeTarget = pickNativeWriteTarget(mode, apiKey);
+  const pinnedTarget = isExactOrderAuthorityPin(authority) && authority.mode === "live"
+    ? { broker: authority.brokerType, accountId: authority.accountId }
+    : undefined;
+  const nativeTarget = pinnedTarget ?? pickNativeWriteTarget(mode, apiKey);
   const isNativeRoutedEndpoint = nativeTarget !== undefined && NATIVE_ROUTED_ORDER_ENDPOINTS.has(ftEndpoint);
   const orderPath = isNativeRoutedEndpoint
     ? `${encodeURIComponent(nativeTarget.broker)}/${ftEndpoint}`

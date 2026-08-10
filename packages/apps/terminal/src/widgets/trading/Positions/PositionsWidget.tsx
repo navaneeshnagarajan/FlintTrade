@@ -82,10 +82,10 @@ import { downloadExcel } from "@/services/ftApi.data";
 import { post } from "@/services/ftApi.helpers";
 import { placeOrder } from "@/services/api";
 import { emitNotification } from "@/components/NotificationCentre/useNotificationFeed";
-import { BrokerTargetSelect, useBrokerOrderTarget } from "@/widgets/orders/OrdersManagerShared";
 import { useTrackBehavior } from "@/hooks/useTrackBehavior";
 import { useAccountReadContext } from "@/hooks/useAccountReadsEnabled";
 import type { AccountAuthorityIdentity } from "@/hooks/useDataScope";
+import { brokerAccountKey, findBrokerAccountMatch, useBrokerStore } from "@/stores/brokerStore";
 import {
   accountAuthorityMatches,
   captureAccountAuthority,
@@ -96,7 +96,6 @@ import {
 import { isMarketHours } from "@/lib/market";
 import { totalPositionMtm } from "@/lib/pnl";
 import { cn } from "@/lib/utils";
-import type { BrokerTarget } from "@/lib/brokerOrdersApi";
 import {
   type ColumnDef,
   flexRender,
@@ -171,29 +170,8 @@ interface PositionActionIntent {
   identity: AccountAuthorityIdentity;
 }
 
-interface BrokerPositionActionIntent extends PositionActionIntent {
-  target: Required<BrokerTarget>;
-}
-
 interface ExitAllActionIntent {
   identity: AccountAuthorityIdentity;
-  target: Required<BrokerTarget>;
-}
-
-function captureBrokerTarget(target: Required<BrokerTarget>): Required<BrokerTarget> {
-  return Object.freeze({ broker: target.broker, account_id: target.account_id });
-}
-
-function authorityForBrokerTarget(
-  readIdentity: AccountAuthorityIdentity,
-  target: Required<BrokerTarget>,
-): AccountAuthorityIdentity {
-  return captureAccountAuthority({
-    mode: readIdentity.mode,
-    scopeKey: readIdentity.scopeKey,
-    brokerType: target.broker,
-    accountId: target.account_id,
-  });
 }
 
 /**
@@ -210,7 +188,6 @@ function staleThresholdMs(): number {
 
 interface ConvertPositionDialogProps {
   position: PositionRow;
-  target: Required<BrokerTarget>;
   openingIdentity: AccountAuthorityIdentity;
   canSubmit: boolean;
   isActionAllowed: () => boolean;
@@ -221,7 +198,6 @@ interface ConvertPositionDialogProps {
 
 function ConvertPositionDialog({
   position,
-  target,
   openingIdentity,
   canSubmit,
   isActionAllowed,
@@ -248,8 +224,8 @@ function ConvertPositionDialog({
       // verb; the field superset covers each adapter's expected names
       // (from/to_product, old/new_product, position_type, transaction_type).
       await post("positions/convert", {
-        broker: target.broker,
-        account_id: target.account_id,
+        broker: mutationIdentity.brokerType,
+        account_id: mutationIdentity.accountId,
         req: {
           symbol: position.symbol,
           exchange: position.exchange,
@@ -283,7 +259,6 @@ function ConvertPositionDialog({
     }
   }, [
     position,
-    target,
     toProduct,
     openingIdentity,
     isActionAllowed,
@@ -408,7 +383,7 @@ function SquareOffDialog({
         price: 0,
         triggerPrice: 0,
         strategy: "FlintPositions",
-      });
+      }, mutationIdentity);
       if (
         !isActionAllowed()
         || !accountAuthorityMatches(mutationIdentity, getCurrentIdentity())
@@ -499,7 +474,6 @@ function SquareOffDialog({
 interface ExitAllDialogProps {
   open: boolean;
   positionCount: number;
-  target: Required<BrokerTarget>;
   openingIdentity: AccountAuthorityIdentity;
   canSubmit: boolean;
   isActionAllowed: () => boolean;
@@ -511,7 +485,6 @@ interface ExitAllDialogProps {
 function ExitAllDialog({
   open,
   positionCount,
-  target,
   openingIdentity,
   canSubmit,
   isActionAllowed,
@@ -548,8 +521,8 @@ function ExitAllDialog({
     try {
       await post("positions/exit-all", {
         confirm: true,
-        broker: target.broker,
-        account_id: target.account_id,
+        broker: mutationIdentity.brokerType,
+        account_id: mutationIdentity.accountId,
       });
       if (
         !isActionAllowed()
@@ -571,7 +544,6 @@ function ExitAllDialog({
     }
   }, [
     confirmed,
-    target,
     openingIdentity,
     isActionAllowed,
     getCurrentIdentity,
@@ -658,14 +630,12 @@ function PositionsWidget(props: WidgetProps) {
   });
 
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [convertIntent, setConvertIntent] = useState<BrokerPositionActionIntent | null>(null);
+  const [convertIntent, setConvertIntent] = useState<PositionActionIntent | null>(null);
   const [squareOffIntent, setSquareOffIntent] = useState<PositionActionIntent | null>(null);
   const [exitAllIntent, setExitAllIntent] = useState<ExitAllActionIntent | null>(null);
   const [isExporting, setIsExporting] = useState(false);
-  // Broker/account target for the gated convert + exit-all verbs. The OpenAlgo
-  // bridge implements NEITHER verb (it would 501), so the operator picks a
-  // native account (Dhan/Upstox/…) here, mirroring the orders widgets.
-  const [brokerTarget, setBrokerTarget] = useBrokerOrderTarget(appMode);
+  const brokerAccounts = useBrokerStore((state) => state.accounts);
+  const activeAccountId = useBrokerStore((state) => state.activeAccountId);
 
   useEffect(() => {
     track("trade", `positions:view:${view}`);
@@ -685,56 +655,79 @@ function PositionsWidget(props: WidgetProps) {
     isExplore,
     isLoading,
   });
-  const canWritePositions = appMode === "live" && queryUi.canRefetch && !isError;
-  const brokerActionIdentity = useMemo(
-    () => authorityForBrokerTarget(readIdentity, brokerTarget),
-    [brokerTarget, readIdentity],
+  const activeAccount = useMemo(
+    () => findBrokerAccountMatch(brokerAccounts, activeAccountId),
+    [activeAccountId, brokerAccounts],
   );
-  const actionGateRef = useRef(canWritePositions);
+  const exactActiveNativeBook = activeAccount?.source === "native"
+    && activeAccount.status === "connected"
+    && activeAccount.read_only !== true
+    && readIdentity.brokerType === activeAccount.broker
+    && readIdentity.accountId === activeAccount.account_id
+    && readIdentity.scopeKey === `live:${brokerAccountKey(activeAccount)}`;
+  const exactOpenAlgoBook = readIdentity.brokerType === "openalgo"
+    && readIdentity.accountId === "default";
+  const canMutateBook = appMode === "live" && queryUi.canRefetch && !isError;
+  const canSquareOff = canMutateBook && (exactActiveNativeBook || exactOpenAlgoBook);
+  const canUseNativePositionVerbs = canMutateBook && exactActiveNativeBook;
+  const nativeActionGateRef = useRef(canUseNativePositionVerbs);
+  const squareOffActionGateRef = useRef(canSquareOff);
   const readIdentityRef = useRef(readIdentity);
-  const brokerActionIdentityRef = useRef(brokerActionIdentity);
   const refetchBoundaryRef = useRef({
     canRefetch: queryUi.canRefetch,
     identity: readIdentity,
     refetch,
   });
-  actionGateRef.current = canWritePositions;
+  nativeActionGateRef.current = canUseNativePositionVerbs;
+  squareOffActionGateRef.current = canSquareOff;
   readIdentityRef.current = readIdentity;
-  brokerActionIdentityRef.current = brokerActionIdentity;
   refetchBoundaryRef.current = {
     canRefetch: queryUi.canRefetch,
     identity: readIdentity,
     refetch,
   };
 
-  const isActionAllowed = useCallback(() => actionGateRef.current, []);
+  const isNativeActionAllowed = useCallback(() => nativeActionGateRef.current, []);
+  const isSquareOffAllowed = useCallback(() => squareOffActionGateRef.current, []);
   const getCurrentReadIdentity = useCallback(() => readIdentityRef.current, []);
-  const getCurrentBrokerActionIdentity = useCallback(
-    () => brokerActionIdentityRef.current,
-    [],
-  );
 
-  const convertCanSubmit = canWritePositions
+  const convertCanSubmit = canUseNativePositionVerbs
     && convertIntent !== null
-    && accountAuthorityMatches(convertIntent.identity, brokerActionIdentity);
-  const squareOffCanSubmit = canWritePositions
+    && accountAuthorityMatches(convertIntent.identity, readIdentity);
+  const squareOffCanSubmit = canSquareOff
     && squareOffIntent !== null
     && accountAuthorityMatches(squareOffIntent.identity, readIdentity);
-  const exitAllCanSubmit = canWritePositions
+  const exitAllCanSubmit = canUseNativePositionVerbs
     && exitAllIntent !== null
-    && accountAuthorityMatches(exitAllIntent.identity, brokerActionIdentity);
+    && accountAuthorityMatches(exitAllIntent.identity, readIdentity);
 
   useEffect(() => {
-    if (convertIntent && !accountAuthorityMatches(convertIntent.identity, brokerActionIdentity)) {
+    if (convertIntent && (
+      !canUseNativePositionVerbs
+      || !accountAuthorityMatches(convertIntent.identity, readIdentity)
+    )) {
       setConvertIntent(null);
     }
-    if (squareOffIntent && !accountAuthorityMatches(squareOffIntent.identity, readIdentity)) {
+    if (squareOffIntent && (
+      !canSquareOff
+      || !accountAuthorityMatches(squareOffIntent.identity, readIdentity)
+    )) {
       setSquareOffIntent(null);
     }
-    if (exitAllIntent && !accountAuthorityMatches(exitAllIntent.identity, brokerActionIdentity)) {
+    if (exitAllIntent && (
+      !canUseNativePositionVerbs
+      || !accountAuthorityMatches(exitAllIntent.identity, readIdentity)
+    )) {
       setExitAllIntent(null);
     }
-  }, [brokerActionIdentity, convertIntent, exitAllIntent, readIdentity, squareOffIntent]);
+  }, [
+    canSquareOff,
+    canUseNativePositionVerbs,
+    convertIntent,
+    exitAllIntent,
+    readIdentity,
+    squareOffIntent,
+  ]);
 
   const refreshPositions = useCallback((
     expectedIdentity: AccountAuthorityIdentity,
@@ -742,8 +735,7 @@ function PositionsWidget(props: WidgetProps) {
   ) => {
     const boundary = refetchBoundaryRef.current;
     if (
-      !actionGateRef.current
-      || boundary.identity.mode !== expectedIdentity.mode
+      boundary.identity.mode !== expectedIdentity.mode
       || boundary.identity.scopeKey !== expectedIdentity.scopeKey
     ) return;
     runWithMatchingAccountAuthority(
@@ -922,9 +914,9 @@ function PositionsWidget(props: WidgetProps) {
         id: "actions",
         header: "",
         enableSorting: false,
-        cell: ({ row }) => canWritePositions ? (
+        cell: ({ row }) => (canSquareOff || canUseNativePositionVerbs) ? (
           <span className="inline-flex items-center gap-0.5">
-            {row.original.quantity !== 0 && (
+            {canSquareOff && row.original.quantity !== 0 && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -939,30 +931,28 @@ function PositionsWidget(props: WidgetProps) {
                 <SquareX size={10} aria-hidden="true" /> Square off
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                const target = captureBrokerTarget(brokerTarget);
-                setConvertIntent({
+            {canUseNativePositionVerbs && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setConvertIntent({
                   position: row.original,
-                  target,
-                  identity: authorityForBrokerTarget(readIdentity, target),
-                });
-              }}
-              aria-label={`Convert ${row.original.symbol}`}
-              title={`Convert ${row.original.symbol} to another product`}
-              className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
-            >
-              <Repeat size={10} aria-hidden="true" /> Convert
-            </Button>
+                  identity: captureAccountAuthority(readIdentity),
+                })}
+                aria-label={`Convert ${row.original.symbol}`}
+                title={`Convert ${row.original.symbol} to another product`}
+                className="h-5 px-1.5 text-xxs gap-1 text-text-muted hover:text-text-primary"
+              >
+                <Repeat size={10} aria-hidden="true" /> Convert
+              </Button>
+            )}
           </span>
         ) : (
           <span className="text-xxs text-text-muted">Live only</span>
         ),
       },
     ],
-    [brokerTarget, canWritePositions, readIdentity],
+    [canSquareOff, canUseNativePositionVerbs, readIdentity],
   );
 
   const table = useReactTable({
@@ -1020,11 +1010,6 @@ function PositionsWidget(props: WidgetProps) {
             >
               Read-only
             </span>
-          )}
-          {/* Convert + Exit-all are gated native-broker verbs; pick the target
-              account here (the OpenAlgo bridge implements neither). */}
-          {canWritePositions && rows.length > 0 && (
-            <BrokerTargetSelect value={brokerTarget} onChange={setBrokerTarget} />
           )}
           <span
             className={`font-mono tabular-nums font-medium ${
@@ -1099,17 +1084,13 @@ function PositionsWidget(props: WidgetProps) {
               <FileDown size={12} className={isExporting ? "animate-pulse" : ""} />
             </button>
           )}
-          {canWritePositions && rows.length > 0 && (
+          {canUseNativePositionVerbs && rows.length > 0 && (
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => {
-                const target = captureBrokerTarget(brokerTarget);
-                setExitAllIntent({
-                  target,
-                  identity: authorityForBrokerTarget(readIdentity, target),
-                });
-              }}
+              onClick={() => setExitAllIntent({
+                identity: captureAccountAuthority(readIdentity),
+              })}
               aria-label="Exit all positions"
               title="Square off every open position at market"
               className="h-5 px-1.5 text-xxs gap-1 text-loss hover:bg-loss/10 hover:text-loss"
@@ -1282,13 +1263,12 @@ function PositionsWidget(props: WidgetProps) {
         <ConvertPositionDialog
           key={`${convertIntent.position.symbol}-${convertIntent.position.exchange}-${convertIntent.position.product}`}
           position={convertIntent.position}
-          target={convertIntent.target}
           openingIdentity={convertIntent.identity}
           canSubmit={convertCanSubmit}
-          isActionAllowed={isActionAllowed}
-          getCurrentIdentity={getCurrentBrokerActionIdentity}
+          isActionAllowed={isNativeActionAllowed}
+          getCurrentIdentity={getCurrentReadIdentity}
           onClose={() => setConvertIntent(null)}
-          onConverted={(identity) => refreshPositions(identity, getCurrentBrokerActionIdentity)}
+          onConverted={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
         />
       )}
 
@@ -1299,7 +1279,7 @@ function PositionsWidget(props: WidgetProps) {
           position={squareOffIntent.position}
           openingIdentity={squareOffIntent.identity}
           canSubmit={squareOffCanSubmit}
-          isActionAllowed={isActionAllowed}
+          isActionAllowed={isSquareOffAllowed}
           getCurrentIdentity={getCurrentReadIdentity}
           onClose={() => setSquareOffIntent(null)}
           onSquaredOff={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
@@ -1311,15 +1291,14 @@ function PositionsWidget(props: WidgetProps) {
         <ExitAllDialog
           open
           positionCount={rows.length}
-          target={exitAllIntent.target}
           openingIdentity={exitAllIntent.identity}
           canSubmit={exitAllCanSubmit}
-          isActionAllowed={isActionAllowed}
-          getCurrentIdentity={getCurrentBrokerActionIdentity}
+          isActionAllowed={isNativeActionAllowed}
+          getCurrentIdentity={getCurrentReadIdentity}
           onOpenChange={(open) => {
             if (!open) setExitAllIntent(null);
           }}
-          onExited={(identity) => refreshPositions(identity, getCurrentBrokerActionIdentity)}
+          onExited={(identity) => refreshPositions(identity, getCurrentReadIdentity)}
         />
       )}
     </div>

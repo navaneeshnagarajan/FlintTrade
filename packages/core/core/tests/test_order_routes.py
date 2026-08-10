@@ -252,6 +252,46 @@ class TestExploreModeBlocked:
 class TestMissingOrInvalidMode:
     """Requests without a valid JWT mode claim must be rejected."""
 
+    def test_live_jwt_with_practice_header_rejected_before_dispatch(self, client):
+        """A contradictory legacy mode header narrows authority; it cannot retarget it."""
+        with patch(
+            "flinttrade_core.order_routes._dispatch_live_order",
+            return_value=({"status": "unexpected-dispatch"}, 200),
+        ) as dispatcher:
+            resp = client.post(
+                "/api/v1/orders/place",
+                json=_SAMPLE_ORDER_BODY,
+                headers=_auth_headers(
+                    mode="live",
+                    include_live_token=True,
+                    **{"X-FlintTrade-Mode": "practice"},
+                ),
+            )
+
+        assert resp.status_code == 403
+        assert "mode" in resp.get_json()["message"].lower()
+        dispatcher.assert_not_called()
+
+    def test_routed_live_jwt_with_practice_header_rejected_before_dispatch(self, client):
+        """Selector-bound order routes enforce the same narrowing assertion."""
+        with patch(
+            "flinttrade_core.order_routes._dispatch_live_order",
+            return_value=({"status": "unexpected-dispatch"}, 200),
+        ) as dispatcher:
+            resp = client.post(
+                "/api/v1/orders/dhan/place",
+                json={**_SAMPLE_ORDER_BODY, "account_id": "ACCOUNT-A"},
+                headers=_auth_headers(
+                    mode="live",
+                    include_live_token=True,
+                    **{"X-FlintTrade-Mode": "practice"},
+                ),
+            )
+
+        assert resp.status_code == 403
+        assert "mode" in resp.get_json()["message"].lower()
+        dispatcher.assert_not_called()
+
     @pytest.mark.parametrize("endpoint", _ORDER_ENDPOINTS)
     def test_missing_jwt_returns_401(self, client, endpoint):
         """No ``Authorization`` header → 401 (no mode claim to extract)."""

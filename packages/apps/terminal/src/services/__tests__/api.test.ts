@@ -4,6 +4,7 @@ const mockConnectionState = vi.hoisted(() => ({
   host: "http://localhost:5000",
   apiKey: "test-key-123",
   openAlgoHydrated: true,
+  status: "connected",
 }));
 
 const mockModeState = vi.hoisted(() => ({
@@ -149,6 +150,7 @@ describe("OpenAlgo API client (api.ts)", () => {
     vi.mocked(generalLimiter.tryConsume).mockReturnValue(true);
     mockConnectionState.apiKey = "test-key-123";
     mockConnectionState.openAlgoHydrated = true;
+    mockConnectionState.status = "connected";
     mockModeState.mode = "live";
     mockBrokerState.accounts = [];
     mockBrokerState.activeAccountId = null;
@@ -2455,6 +2457,105 @@ describe("OpenAlgo API client (api.ts)", () => {
       ),
     ).rejects.toThrow(/mode changed from practice to live/i);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact account-A authority pin after the active account changes to B", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      { account_id: "ACCOUNT-A", broker: "dhan", source: "native", status: "connected" },
+      { account_id: "ACCOUNT-B", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-B";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "WRONG-ACCOUNT" } }),
+    );
+
+    await expect(placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "SELL",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+      },
+      {
+        mode: "live",
+        scopeKey: "live:native:dhan:ACCOUNT-A",
+        brokerType: "dhan",
+        accountId: "ACCOUNT-A",
+      },
+    )).rejects.toThrow(/authority|account|scope/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("routes an exact OpenAlgo square-off pin to literal openalgo/default", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "OA-SQUARE-OFF" } }),
+    );
+
+    await placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "SELL",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+        strategy: "FlintPositions",
+      },
+      {
+        mode: "live",
+        scopeKey: "live:openalgo:7d290c41e91d8f71",
+        brokerType: "openalgo",
+        accountId: "default",
+      },
+    );
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/openalgo/place");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      broker: "openalgo",
+      account_id: "default",
+      symbol: "RELIANCE",
+    });
+  });
+
+  it("routes an exact native square-off pin to the literal displayed account", async () => {
+    mockConnectionState.apiKey = "";
+    mockBrokerState.accounts = [
+      { account_id: "ACCOUNT-A", broker: "upstox", source: "native", status: "connected" },
+    ];
+    mockBrokerState.activeAccountId = "native:upstox:ACCOUNT-A";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ status: "success", data: { orderId: "UP-SQUARE-OFF" } }),
+    );
+
+    await placeOrder(
+      {
+        symbol: "RELIANCE",
+        exchange: "NSE",
+        action: "SELL",
+        quantity: 1,
+        product: "MIS",
+        orderType: "MARKET",
+        strategy: "FlintPositions",
+      },
+      {
+        mode: "live",
+        scopeKey: "live:native:upstox:ACCOUNT-A",
+        brokerType: "upstox",
+        accountId: "ACCOUNT-A",
+      },
+    );
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/orders/upstox/place");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      broker: "upstox",
+      account_id: "ACCOUNT-A",
+      symbol: "RELIANCE",
+    });
   });
 
   it("postOrder normalises terminal order body fields before sending", async () => {

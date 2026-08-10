@@ -1552,14 +1552,19 @@ def _dispatch_order(ft_action: str) -> tuple[Any, int]:
     # Read mode from the JWT claim — never trust the client-supplied header.
     mode = _get_mode_from_jwt()
 
-    # Log if the client-supplied header disagrees with the JWT claim (debugging aid).
+    # A supplied client mode can only narrow the signed JWT authority. Reject a
+    # mismatch before decoding the body or reaching sandbox/gated dispatch.
     header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
     if header_mode and mode and header_mode != mode:
         logger.warning(
             "Order request to /%s — X-FlintTrade-Mode header ('%s') disagrees with "
-            "JWT mode claim ('%s'); using JWT claim",
+            "JWT mode claim ('%s'); rejected",
             ft_action, header_mode, mode,
         )
+        return jsonify({
+            "status": "error",
+            "message": "X-FlintTrade-Mode does not match the authenticated mode",
+        }), 403
 
     if not mode:
         logger.warning(
@@ -1961,7 +1966,21 @@ def _decode_routed_live_payload() -> tuple[dict[str, Any] | None, tuple[Any, int
             "message": "Authentication required — provide a valid JWT",
         }), 401)
 
-    if payload.get("mode") != _MODE_LIVE:
+    jwt_mode = str(payload.get("mode") or "").strip().lower()
+    header_mode = (request.headers.get("X-FlintTrade-Mode") or "").strip().lower()
+    if header_mode and header_mode != jwt_mode:
+        logger.warning(
+            "Routed order request — X-FlintTrade-Mode header ('%s') disagrees "
+            "with JWT mode claim ('%s'); rejected",
+            header_mode,
+            jwt_mode,
+        )
+        return None, (jsonify({
+            "status": "error",
+            "message": "X-FlintTrade-Mode does not match the authenticated mode",
+        }), 403)
+
+    if jwt_mode != _MODE_LIVE:
         return None, (jsonify({
             "status": "error",
             "message": (
