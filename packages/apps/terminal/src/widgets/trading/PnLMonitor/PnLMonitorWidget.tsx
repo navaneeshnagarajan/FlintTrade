@@ -42,7 +42,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAccountReadsEnabled } from "@/hooks/useAccountReadsEnabled";
-import { useBrokerConnected } from "@/hooks/useBrokerConnected";
 import { useFunds } from "@/hooks/useFunds";
 import { usePositions } from "@/hooks/usePositions";
 import { useTradebook } from "@/hooks/useTradebook";
@@ -51,7 +50,7 @@ import { useModeStore } from "@/stores/modeStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SAMPLE_POSITION_BOOK } from "@/widgets/trading/Positions/sampleBook";
 import { getDemoFunds } from "@/hooks/useModeData";
-import type { Position } from "@/types/api";
+import type { Trade } from "@/types/api";
 import type { WidgetProps } from "@/types/widgets";
 import { DrawdownView } from "./DrawdownView";
 import { LiveView } from "./LiveView";
@@ -130,7 +129,7 @@ function PnLMonitorWidget(props: WidgetProps) {
   // Effective data selection per contract — Explore uses deterministic local sample pack.
   const samplePositions = SAMPLE_POSITION_BOOK;
   const sampleFunds = getDemoFunds();
-  const sampleTrades: unknown[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
+  const sampleTrades: Trade[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
 
   const positions = isExplore ? samplePositions : positionsQuery.data;
   const funds = isExplore ? sampleFunds : fundsQuery.data;
@@ -188,6 +187,7 @@ function PnLMonitorWidget(props: WidgetProps) {
     }
     // For Explore sample, positions is always the bound pack (no early return, no loading)
     if (!isExplore && !positions) return;
+    const effectivePositions = positions ?? [];
 
     // Booked realised P&L per symbol from today's tradebook (partial + full
     // closes). If the tradebook is unavailable the map is empty and realised
@@ -196,7 +196,7 @@ function PnLMonitorWidget(props: WidgetProps) {
 
     let realisedPnL = 0;
     let unrealisedPnL = 0;
-    for (const pos of positions) {
+    for (const pos of effectivePositions) {
       if (quantityOf(pos) === 0) {
         // Fully closed: the broker/computed pnl is the accurate realised,
         // including a position carried over from a prior day (which the
@@ -229,7 +229,7 @@ function PnLMonitorWidget(props: WidgetProps) {
       drawdownRef.current = dd;
     }
 
-    const byStrategy = buildStrategyPnL(positions);
+    const byStrategy = buildStrategyPnL(effectivePositions);
     const point: MtmPoint = { time: nowSec as UTCTimestamp, value: netPnL };
 
     setState((prev) => {
