@@ -132,7 +132,7 @@ same two targets. Generated packages live under
 
 ## Source development
 
-Requires Python `>=3.12`, Node.js `>=22.22.0`, `uv`, pnpm 10.34.5, Git, and
+Requires Python `>=3.12`, Node.js `>=22.22.2`, `uv`, pnpm 10.34.5, Git, and
 optionally Rust for `core/ticks`. Those floors come from `[requirements]` in
 `flint.toml`, which is the single source of truth for them.
 

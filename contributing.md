@@ -26,7 +26,7 @@ platform. Pick whatever you already run.
 | Tool | Version | How we manage it |
 |---|---|---|
 | **Python** | `>=3.12` (we develop against 3.14) | [`uv`](https://docs.astral.sh/uv/) — one fast installer for the interpreter and all Python deps. |
-| **Node.js** | `>=22.22.0` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
+| **Node.js** | `>=22.22.2` (we develop against 24) | [`pnpm`](https://pnpm.io/) — the repo pins the package manager. |
 | **Rust** | stable (latest) | [`rustup`](https://rustup.rs/) — only needed to build the `core/ticks` PyO3 tick engine. |
 
 Those floors are not maintained here. `[requirements]` in

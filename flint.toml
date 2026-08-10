@@ -48,10 +48,10 @@ site_url = "https://flinttrade.vercel.app"
 # Every packages/*/*/pyproject.toml declares this floor (14 of them).
 python_requires = ">=3.12"
 python_target = "3.14"
-# react-router@8 declares engines.node ">=22.22.0" and is the binding constraint;
-# nothing else in the tree needs more. Node 22 is in maintenance, so the target
-# runs ahead of the floor rather than dragging it up.
-node_requires = ">=22.22.0"
+# jsdom 30 declares Node 22 support from 22.22.2 and is the binding constraint
+# for the checked-in terminal test environment. Node 22 is in maintenance, so
+# the target runs ahead of the floor rather than dragging it up.
+node_requires = ">=22.22.2"
 node_target = "24"
 # Derived, not chosen: the floor is whichever release provides Python >= 3.12.
 # Ubuntu 24.04 LTS ships 3.12; 22.04 ships 3.10 and cannot meet the floor with

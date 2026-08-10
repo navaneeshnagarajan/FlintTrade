@@ -106,6 +106,7 @@ const INITIAL_STATE: MonitorState = {
 
 /** Full session at the 5s market-hours cadence, with headroom. */
 const MAX_SERIES_POINTS = 6000;
+const EMPTY_TRADES: Trade[] = [];
 
 // ---------------------------------------------------------------------------
 // Main widget
@@ -129,11 +130,11 @@ function PnLMonitorWidget(props: WidgetProps) {
   // Effective data selection per contract — Explore uses deterministic local sample pack.
   const samplePositions = SAMPLE_POSITION_BOOK;
   const sampleFunds = getDemoFunds();
-  const sampleTrades: Trade[] = []; // Drawdown empty in Explore (or thin getDemoTrades if added)
 
   const positions = isExplore ? samplePositions : positionsQuery.data;
   const funds = isExplore ? sampleFunds : fundsQuery.data;
-  const trades = isExplore ? sampleTrades : (tradebookQuery.data ?? []);
+  // Drawdown is empty in Explore until a deterministic sample trade pack exists.
+  const trades = isExplore ? EMPTY_TRADES : (tradebookQuery.data ?? EMPTY_TRADES);
 
   const dataReady =
     isExplore ||
@@ -266,6 +267,7 @@ function PnLMonitorWidget(props: WidgetProps) {
     positionsQuery.data,
     tradebookQuery.data,
     mode,
+    isExplore,
     accountReadsEnabled,
     positions,
     funds,

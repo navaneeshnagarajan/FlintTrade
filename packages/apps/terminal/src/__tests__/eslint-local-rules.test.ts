@@ -29,7 +29,11 @@ const CONFIG = {
     parser: babelParser,
     parserOptions: {
       requireConfigFile: false,
-      babelOptions: { presets: ["@babel/preset-typescript"] },
+      babelOptions: {
+        babelrc: false,
+        configFile: false,
+        parserOpts: { plugins: ["typescript"] },
+      },
       ecmaFeatures: { jsx: true },
     },
     ecmaVersion: 2022,
