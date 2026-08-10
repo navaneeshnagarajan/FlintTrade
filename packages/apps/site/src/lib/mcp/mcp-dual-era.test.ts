@@ -206,6 +206,7 @@ describe('MCP 2026 dual-era protocol matrix (target-state RED/GREEN)', () => {
     expect(clientEra(client)).toBe('legacy');
 
     await assertExactPublicCatalogue(client);
+    await assertListedSlashNamedPackageIsReadable(client);
 
     const result = await client.callTool({ name: 'list_packages', arguments: {} });
     assertToolTextResult(result);
