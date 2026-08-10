@@ -1,6 +1,8 @@
-import { ResourceTemplate, type McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
+import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
 
+import { APP_VERSION } from '../version';
 import {
   DOCS_MCP_PROMPT_NAMES,
   DOCS_MCP_TOOL_NAMES,
@@ -24,18 +26,23 @@ function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/**
+ * Register the exact public FlintTrade docs MCP catalogue on an SDK-v2 server.
+ * Order is load-bearing for listTools / listPrompts / static resource prefixes.
+ */
 export function registerFlintDocsMcp(server: McpServer): void {
   assertDocsMcpSafety();
 
+  // Tools (exact order)
   server.registerTool(
     'search_docs',
     {
       title: 'Search FlintTrade docs',
       description: 'Search FlintTrade documentation and package README content for contribution and development context.',
-      inputSchema: {
+      inputSchema: z.object({
         query: z.string().min(1),
         area: z.string().optional(),
-      },
+      }),
     },
     async ({ query, area }) => textResult(jsonText(searchDocs(query, area))),
   );
@@ -45,9 +52,9 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Read a FlintTrade doc',
       description: 'Return one generated documentation entry by slug.',
-      inputSchema: {
+      inputSchema: z.object({
         slug: z.string().min(1),
-      },
+      }),
     },
     async ({ slug }) => {
       const doc = getDoc(slug);
@@ -71,9 +78,9 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Explain a FlintTrade repo path',
       description: 'Explain which subsystem owns a repository path and where to start reading.',
-      inputSchema: {
+      inputSchema: z.object({
         path: z.string().min(1),
-      },
+      }),
     },
     async ({ path }) => textResult(explainRepoPath(path)),
   );
@@ -83,9 +90,9 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Recommend tests for changed paths',
       description: 'Suggest focused validation commands based on changed FlintTrade paths.',
-      inputSchema: {
+      inputSchema: z.object({
         changed_paths: z.array(z.string()).min(1),
-      },
+      }),
     },
     async ({ changed_paths }) => textResult(jsonText(recommendTests(changed_paths))),
   );
@@ -95,13 +102,14 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Make a contribution plan',
       description: 'Draft a concise contribution plan from FlintTrade docs for a stated development goal.',
-      inputSchema: {
+      inputSchema: z.object({
         goal: z.string().min(1),
-      },
+      }),
     },
     async ({ goal }) => textResult(makeContributionPlan(goal)),
   );
 
+  // Static resources (exact first four; templates append generated docs/packages)
   server.registerResource(
     'docs-index',
     'flinttrade://docs/index',
@@ -157,6 +165,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
     }),
   );
 
+  // Resource templates (exact)
   server.registerResource(
     'doc',
     new ResourceTemplate('flinttrade://docs/{slug}', {
@@ -218,12 +227,13 @@ export function registerFlintDocsMcp(server: McpServer): void {
     },
   );
 
+  // Prompts (exact order)
   server.registerPrompt(
     'plan_contribution',
     {
       title: 'Plan a FlintTrade contribution',
       description: 'Create a repo-grounded contribution plan from a goal.',
-      argsSchema: { goal: z.string().min(1) },
+      argsSchema: z.object({ goal: z.string().min(1) }),
     },
     ({ goal }) => ({
       messages: [{
@@ -238,7 +248,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Add a terminal widget',
       description: 'Guide an agent through adding a React terminal widget.',
-      argsSchema: { widget_name: z.string().min(1) },
+      argsSchema: z.object({ widget_name: z.string().min(1) }),
     },
     ({ widget_name }) => ({
       messages: [{
@@ -260,7 +270,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Add a Python feature',
       description: 'Guide an agent through adding a scoped Python package feature.',
-      argsSchema: { package_name: z.string().min(1), goal: z.string().min(1) },
+      argsSchema: z.object({ package_name: z.string().min(1), goal: z.string().min(1) }),
     },
     ({ package_name, goal }) => ({
       messages: [{
@@ -282,7 +292,7 @@ export function registerFlintDocsMcp(server: McpServer): void {
     {
       title: 'Update docs for a change',
       description: 'Guide an agent through keeping docs in sync with a repo change.',
-      argsSchema: { changed_paths: z.array(z.string()).min(1) },
+      argsSchema: z.object({ changed_paths: z.array(z.string()).min(1) }),
     },
     ({ changed_paths }) => ({
       messages: [{
@@ -302,4 +312,73 @@ export function registerFlintDocsMcp(server: McpServer): void {
 
   void DOCS_MCP_TOOL_NAMES;
   void DOCS_MCP_PROMPT_NAMES;
+}
+
+export type FlintDocsMcpServerOptions = {
+  /** Server name reported during initialize / discover. */
+  name?: string;
+  /** Server version; defaults to APP_VERSION from ../version. */
+  version?: string;
+};
+
+/**
+ * Fresh SDK-v2 McpServer with the public docs catalogue registered.
+ * Used by stdio, HTTP factory, and tests. Dual-era: same factory serves
+ * modern (`server/discover`) and legacy (`initialize`) openings.
+ *
+ * Cache posture: rely on SDK-v2 fixed defaults (ttlMs=0, cacheScope=private)
+ * — no cacheHints configuration in this compatibility slice.
+ */
+export function createFlintDocsMcpServer(options: FlintDocsMcpServerOptions = {}): McpServer {
+  const server = new McpServer({
+    name: options.name ?? 'flinttrade-docs',
+    version: options.version ?? APP_VERSION,
+  });
+  registerFlintDocsMcp(server);
+  return server;
+}
+
+/**
+ * Web-standard callable request handler for the docs MCP.
+ *
+ * mcp-handler@2.1 returns `(request: Request) => Promise<Response>`.
+ * This wrapper also accepts the WHATWG `fetch(input, init)` shape so
+ * StreamableHTTPClientTransport can pass it as `fetch` without 500s.
+ * It is intentionally a function (callable), not an object with `.fetch`.
+ *
+ * Errors from the underlying handler are not swallowed — they reject the
+ * returned promise so connect/call failures propagate to the client.
+ */
+export type FlintDocsMcpHttpHandler = {
+  (input: Request): Promise<Response>;
+  (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+};
+
+export function createFlintDocsMcpHttpHandler(
+  options: FlintDocsMcpServerOptions = {},
+): FlintDocsMcpHttpHandler {
+  const serverInfo = {
+    name: options.name ?? 'flinttrade-docs',
+    version: options.version ?? APP_VERSION,
+  };
+
+  const mcpHandler = createMcpHandler(
+    (server) => {
+      registerFlintDocsMcp(server);
+    },
+    { serverInfo },
+  );
+
+  const handler = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    try {
+      return await mcpHandler(request);
+    } catch (error) {
+      // Propagate connection/handler failures; never convert to empty success.
+      if (error instanceof Error) throw error;
+      throw new Error(`Docs MCP HTTP handler failed: ${String(error)}`);
+    }
+  };
+
+  return handler as FlintDocsMcpHttpHandler;
 }

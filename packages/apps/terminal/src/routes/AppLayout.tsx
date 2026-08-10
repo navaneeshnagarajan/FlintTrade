@@ -381,12 +381,22 @@ export default function AppLayout() {
   // Escape is forwarded on the event bus so route-local overlays (e.g. the
   // /trade tool/picker overlays in TerminalRoute) can close themselves
   // without mounting the hook a second time.
+  // Alt+H / Alt+T navigation is wired here only — do not add a second mount.
+  const handleGoHome = useCallback(() => {
+    navigate("/home");
+  }, [navigate]);
+  const handleGoTrade = useCallback(() => {
+    navigate("/trade");
+  }, [navigate]);
+
   useGlobalKeys({
     onEscape: useCallback(() => {
       window.dispatchEvent(new CustomEvent("flinttrade:escape"));
     }, []),
     onCommandPalette: handleToggleCommandPalette,
     onShowShortcuts: handleShowShortcuts,
+    onGoHome: handleGoHome,
+    onGoTrade: handleGoTrade,
   });
 
   useEffect(() => {

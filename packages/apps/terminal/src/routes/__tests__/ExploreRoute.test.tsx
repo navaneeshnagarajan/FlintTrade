@@ -2,7 +2,7 @@
  * ExploreRoute.test.tsx
  *
  * Smoke tests for the /explore demo preview page.
- * Mocks framer-motion, stores, Magic UI, Aceternity UI, and DemoChoice.
+ * Mocks framer-motion, stores, Magic UI, and Aceternity UI.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -121,12 +121,6 @@ vi.mock("@/components/aceternity/card-hover-effect", () => ({
   ),
 }));
 
-vi.mock("@/components/demo/DemoChoice", () => ({
-  default: () => null,
-  hasMadeDemoChoice: () => false,
-  resetDemoChoice: vi.fn(),
-}));
-
 // ---------------------------------------------------------------------------
 // Import after mocks
 // ---------------------------------------------------------------------------
@@ -151,21 +145,24 @@ describe("ExploreRoute", () => {
     localStorage.clear();
   });
 
-  it("renders the explore page immediately without the demo choice interstitial", () => {
+  it("renders the explore page immediately without a demo-choice interstitial", () => {
     renderExplore();
 
     const main = screen.getByRole("main", { name: /explore mode/i });
     expect(main).toBeInTheDocument();
     expect(main).toHaveClass("h-screen", "overflow-y-auto", "overflow-x-hidden");
     expect(screen.getByText("Explore FlintTrade")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /demo mode/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^enter explore$/i }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/demo mode/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/demo workspace/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sample workspace/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/how would you like to explore flinttrade/i)).not.toBeInTheDocument();
   });
 
-  it("starts the separate demo workspace from the Demo Mode button", () => {
+  it("enters Explore mode workspace from the Enter Explore button", () => {
     renderExplore();
 
-    fireEvent.click(screen.getByRole("button", { name: /demo mode/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^enter explore$/i })[0]);
 
     expect(mockSetMode).toHaveBeenCalledWith("explore");
     expect(mockSetLoggedIn).toHaveBeenCalledWith("demo-user", "Explorer", "");

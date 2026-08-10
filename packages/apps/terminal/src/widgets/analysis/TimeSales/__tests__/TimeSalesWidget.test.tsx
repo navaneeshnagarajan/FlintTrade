@@ -70,7 +70,7 @@ describe("TimeSalesWidget — tape", () => {
   it("renders the sample tape with demo affordance when disconnected", () => {
     render(<TimeSalesWidget {...defaultProps} />);
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toHaveAttribute("data-feature", "Tape & Microstructure");
     // Sample prints render (unique first-row time from the sample tape).
     expect(screen.getByText(SAMPLE_TAPE[0].time)).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe("TimeSalesWidget — tape", () => {
 
     render(<TimeSalesWidget {...defaultProps} />);
 
-    expect(screen.queryByText(/Demo data/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sample data/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("feature-teaser")).not.toBeInTheDocument();
     expect(screen.getByText("11:00:02")).toBeInTheDocument();
     expect(screen.getByText("500")).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("TimeSalesWidget — microstructure statistics", () => {
     // but it must still be impossible to read demo statistics as live ones.
     render(<TimeSalesWidget {...statsViewProps} />);
 
-    expect(screen.getByText(/Demo data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sample data/i)).toBeInTheDocument();
     expect(screen.getByTestId("feature-teaser")).toBeInTheDocument();
     // Sample statistics are the sample tape's own: 20 prints, 10 buys, 9 sells.
     expect(screen.getByText("50% up / 45% down")).toBeInTheDocument();

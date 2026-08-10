@@ -6,7 +6,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 
 const navItems = [
   { href: '/download', label: 'Download' },
-  { href: '/demo-app/welcome', label: 'Sandbox Demo', newWindow: true },
+  { href: '/demo-app/welcome', label: 'Explore demo', newWindow: true },
   { href: '/docs', label: 'Docs' },
   { href: '/api-reference', label: 'API' },
   { href: '/mcp', label: 'MCP' },

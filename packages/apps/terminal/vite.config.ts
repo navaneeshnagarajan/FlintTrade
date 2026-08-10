@@ -20,8 +20,13 @@ function readFlintTradeVersion(): string {
 }
 
 const flintTradeVersion = readFlintTradeVersion();
+const publicDemoBuild = process.env.FLINTTRADE_PUBLIC_DEMO_BUILD === "1";
 
 export default defineConfig({
+  // The site demo is public output. Disabling dotenv loading in that build is
+  // fail-closed: neither .env.production nor any other terminal .env* file can
+  // populate import.meta.env. The launcher also strips inherited VITE_* values.
+  envDir: publicDemoBuild ? false : undefined,
   define: {
     "import.meta.env.VITE_FLINTTRADE_VERSION": JSON.stringify(flintTradeVersion),
   },

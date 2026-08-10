@@ -3,6 +3,9 @@ const MODE_STORAGE_KEY = "flinttrade:mode";
 const ACTIVE_VALUE = "active";
 const PUBLIC_DEMO_BASE = "/demo-app/";
 
+/** Installed builds send bare `/explore` here (safe onboarding), never ExploreRoute. */
+export const INSTALLED_EXPLORE_REDIRECT = "/welcome";
+
 /**
  * Report whether this bundle is the public, hosted demo build.
  *
@@ -17,6 +20,25 @@ const PUBLIC_DEMO_BASE = "/demo-app/";
  */
 export function isPublicDemoBuild(): boolean {
   return import.meta.env.BASE_URL === PUBLIC_DEMO_BASE;
+}
+
+/**
+ * Build-aware `/explore` route contract (Slice 1).
+ *
+ * - **Public demo build** (`BASE_URL=/demo-app/`): `/explore` may render the
+ *   ExploreRoute landing (marketing/demo URL compatibility).
+ * - **Installed build**: direct `/explore` must **not** render ExploreRoute;
+ *   redirect to {@link INSTALLED_EXPLORE_REDIRECT}. Sample-data entry is the
+ *   Welcome "Try with sample data" CTA → normal Home in Explore mode.
+ *
+ * This is the executable contract main.tsx must honour — a comment alone is
+ * not sufficient.
+ */
+export function exploreRoutePolicy():
+  | { kind: "render-explore" }
+  | { kind: "redirect"; to: typeof INSTALLED_EXPLORE_REDIRECT } {
+  if (isPublicDemoBuild()) return { kind: "render-explore" };
+  return { kind: "redirect", to: INSTALLED_EXPLORE_REDIRECT };
 }
 
 function safeLocalStorage(): Storage | null {

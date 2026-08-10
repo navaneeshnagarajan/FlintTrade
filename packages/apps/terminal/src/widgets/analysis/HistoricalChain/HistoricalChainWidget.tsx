@@ -211,10 +211,10 @@ function HistoricalChainWidget() {
           <span
             className="inline-flex items-center rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
             role="status"
-            aria-label="Showing demo data, not a real archived chain"
-            title="Demo data — the backend flagged this payload as fabricated sample values."
+            aria-label="Showing sample data, not a real archived chain"
+            title="Sample data — the backend flagged this payload as fabricated sample values."
           >
-            Demo data
+            Sample data
           </span>
         )}
         <div className="flex-1" />

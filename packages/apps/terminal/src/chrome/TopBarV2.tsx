@@ -370,7 +370,7 @@ export default function TopBarV2({ tickerMode: tickerModeProp }: TopBarV2Props) 
     >
       {/* ── GROUP 1: Logo ─────────────────────────────────────────────────── */}
       <Link
-        to="/trade"
+        to="/home"
         aria-label="Flint home"
         className="flex items-center gap-1.5 shrink-0 mr-2"
         data-testid="logo-link"
